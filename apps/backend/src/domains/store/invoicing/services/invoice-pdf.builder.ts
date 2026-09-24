@@ -16,8 +16,17 @@ export interface InvoicePdfData {
   company_logo_buffer?: Buffer;
   /** Commercial name when it differs from the legal one. */
   company_trade_name?: string;
-  /** Tax regime label, mandatory on the graphic representation. */
-  company_tax_regime?: string;
+  /**
+   * Renglón de calidades fiscales del num. 12 (art. 11 Res. DIAN 000165/2023),
+   * ya etiquetado por `resolveFiscalQualitiesLine`. `undefined` cuando el
+   * emisor no ostenta ninguna: en ese caso el renglón NO se imprime.
+   *
+   * Sustituye a `company_tax_regime`, que imprimía «Régimen: Responsable de
+   * IVA» — una leyenda sin base legal desde la derogatoria del art. 506 E.T.
+   * (Ley 1943/2018 art. 122, Ley 2010/2019 art. 160) y ausente del XML, contra
+   * el anexo FEV 1.9 §5.8.
+   */
+  company_fiscal_qualities?: string;
   /** DIAN tax responsibility codes (O-13, O-47, …). */
   company_tax_responsibilities?: string[];
 
@@ -683,8 +692,18 @@ export class InvoicePdfBuilder {
   }
 
   /**
-   * Regime and DIAN tax responsibilities. Mandatory content of the graphic
-   * representation, so it is drawn identically in every format.
+   * Calidades fiscales (num. 12) y códigos de responsabilidad del RUT.
+   *
+   * Ambos renglones son CONDICIONALES: el num. 12 se imprime «cuando
+   * corresponda», así que un emisor sin ninguna de las cuatro calidades no
+   * lleva ninguna línea — y el método retorna sin pintar nada.
+   *
+   * `Responsabilidades:` SE CONSERVA. Imprimir los códigos crudos del RUT no lo
+   * exige ninguna norma, pero tampoco lo prohíbe ninguna, y satisface el anexo
+   * FEV 1.9 §5.8 (todo lo impreso debe estar en el XML): esos mismos códigos
+   * viajan en `cac:TaxScheme/cbc:TaxLevelCode`. Son además la fuente auditable
+   * de la que se deriva el renglón de calidades, así que un revisor puede
+   * confrontar una línea con la otra en el mismo papel.
    */
   private static drawIssuerFiscalLines(
     doc: PDFKit.PDFDocument,
@@ -694,8 +713,8 @@ export class InvoicePdfBuilder {
     options: PDFKit.Mixins.TextOptions,
   ): void {
     const fiscal_parts: string[] = [];
-    if (data.company_tax_regime) {
-      fiscal_parts.push(`Regimen: ${data.company_tax_regime}`);
+    if (data.company_fiscal_qualities) {
+      fiscal_parts.push(data.company_fiscal_qualities);
     }
     if (data.company_tax_responsibilities?.length) {
       fiscal_parts.push(

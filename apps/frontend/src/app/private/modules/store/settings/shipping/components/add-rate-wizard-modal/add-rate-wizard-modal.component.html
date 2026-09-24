@@ -22,7 +22,13 @@
   <!-- Step 1: Seleccionar Zona -->
   @if (current_step() === 0) {
     <div class="wizard-content">
-      <p class="wizard-hint">Selecciona una zona existente o crea una nueva</p>
+      <p class="wizard-hint">
+        @if (is_edit_mode()) {
+          La zona de una tarifa existente no se cambia. Puedes editar su cobertura.
+        } @else {
+          Selecciona una zona existente o crea una nueva
+        }
+      </p>
 
       @if (is_loading_zones()) {
         <div class="flex items-center justify-center gap-2 py-8 text-sm text-secondary">
@@ -31,12 +37,17 @@
         </div>
       }
 
-      @for (zone of zones_list(); track zone.id) {
-        <button
-          type="button"
+      @for (zone of visible_zones(); track zone.id) {
+        <div
+          role="button"
+          tabindex="0"
           class="zone-card"
           [class.zone-card--selected]="selected_zone_id() === zone.id"
-          (click)="selectZone(zone.id)"
+          [class.zone-card--fixed]="is_edit_mode()"
+          [attr.aria-pressed]="selected_zone_id() === zone.id"
+          (click)="!is_edit_mode() && selectZone(zone.id)"
+          (keydown.enter)="!is_edit_mode() && selectZone(zone.id)"
+          (keydown.space)="$event.preventDefault(); !is_edit_mode() && selectZone(zone.id)"
         >
           <app-icon
             name="map-pin"
@@ -46,7 +57,28 @@
           <div class="zone-card__info">
             <span class="zone-card__name">{{ zone.name }}</span>
             <span class="zone-card__detail">{{ formatCountries(zone.countries) }}</span>
+            @if ((zone._count?.shipping_rates ?? 0) > 1 || zone.source_type === 'system_copy') {
+              <span class="zone-card__meta">
+                @if ((zone._count?.shipping_rates ?? 0) > 1) {
+                  <span>Usada por {{ zone._count?.shipping_rates }} tarifas</span>
+                }
+                @if (zone.source_type === 'system_copy') {
+                  <span>Copia del sistema</span>
+                }
+              </span>
+            }
           </div>
+          <button
+            type="button"
+            class="zone-card__edit"
+            [attr.aria-label]="'Editar zona ' + zone.name"
+            title="Editar zona"
+            (click)="openZoneEdit(zone, $event)"
+            (keydown.enter)="$event.stopPropagation()"
+            (keydown.space)="$event.stopPropagation()"
+          >
+            <app-icon name="pencil" [size]="16" />
+          </button>
           <div
             class="zone-card__check"
             [class.zone-card__check--active]="selected_zone_id() === zone.id"
@@ -55,14 +87,20 @@
               <app-icon name="check" [size]="14" class="text-white" />
             }
           </div>
-        </button>
+        </div>
+      }
+
+      @if (is_edit_mode() && !fixed_zone() && !is_loading_zones()) {
+        <p class="wizard-hint">No se encontró la zona de esta tarifa.</p>
       }
 
       <!-- Crear zona nueva -->
-      <button type="button" class="zone-card zone-card--create" (click)="show_zone_creation.set(true)">
-        <app-icon name="plus-circle" [size]="18" class="text-primary" />
-        <span class="text-primary font-medium text-sm">Crear zona nueva</span>
-      </button>
+      @if (!is_edit_mode()) {
+        <button type="button" class="zone-card zone-card--create" (click)="show_zone_creation.set(true)">
+          <app-icon name="plus-circle" [size]="18" class="text-primary" />
+          <span class="text-primary font-medium text-sm">Crear zona nueva</span>
+        </button>
+      }
     </div>
   }
 
@@ -130,6 +168,56 @@
           />
         </div>
 
+        @if (!is_free_type()) {
+          <section class="tax-section" aria-labelledby="shipping-tax-title">
+            <div class="tax-section__header">
+              <app-icon name="receipt" [size]="16" class="text-primary" />
+              <h4 id="shipping-tax-title" class="tax-section__title">Impuesto del envío (opcional)</h4>
+            </div>
+            <p class="tax-section__hint">
+              El precio que configuras es lo que paga el cliente. Si eliges un impuesto, va incluido en ese precio.
+            </p>
+
+            <app-selector
+              formControlName="tax_category_id"
+              [options]="tax_selector_options()"
+              [helpText]="is_loading_tax_options() ? 'Cargando impuestos…' : ''"
+              size="md"
+            />
+
+            @if (tax_options_error()) {
+              <div class="tax-note tax-note--warning" role="alert">
+                <app-icon name="alert-triangle" [size]="14" />
+                <span>{{ tax_options_error() }}</span>
+              </div>
+            }
+
+            @if (tax_suggestion()) {
+              <div class="tax-note tax-note--info">
+                <app-icon name="lightbulb" [size]="14" />
+                <span>{{ tax_suggestion() }}</span>
+              </div>
+            }
+
+            @for (warning of tax_warnings(); track $index) {
+              <div class="tax-note tax-note--warning" role="alert">
+                <app-icon name="alert-triangle" [size]="14" />
+                <span>{{ warning }}</span>
+              </div>
+            }
+
+            @if (tax_preview(); as preview) {
+              <div class="tax-preview">
+                <app-icon name="percent" [size]="14" class="text-primary" />
+                <span>
+                  De <strong>{{ preview.cost | currency }}</strong>,
+                  <strong>{{ preview.tax | currency: 2 }}</strong> son {{ preview.label }}.
+                </span>
+              </div>
+            }
+          </section>
+        }
+
         <div class="strategy-summary">
           <app-icon name="info" [size]="16" class="text-primary" />
           <p class="strategy-summary__text" [innerHTML]="strategySummary"></p>
@@ -166,7 +254,15 @@
 
 </app-modal>
 
-<!-- Sub-modal zona (FUERA del modal principal, evitar anidamiento) -->
+<!-- Sub-modales de zona (FUERA del modal principal, evitar anidamiento) -->
 @if (show_zone_creation()) {
   <app-zone-modal mode="create" (close)="show_zone_creation.set(false)" (saved)="onZoneCreated()" />
+}
+@if (editing_zone()) {
+  <app-zone-modal
+    mode="edit"
+    [zone]="editing_zone()!"
+    (close)="editing_zone.set(null)"
+    (saved)="onZoneEdited()"
+  />
 }

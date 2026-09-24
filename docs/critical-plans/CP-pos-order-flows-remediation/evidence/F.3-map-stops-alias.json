@@ -1,0 +1,1 @@
+{"success":true,"message":"Paradas del mapa obtenidas","data":{"origin":null,"stops":[{"stopId":129,"sequence":1,"status":"pending","customerName":"Portería torre B","addressText":"Cra 7 # 1-3, Bogotá","lat":4.6486,"lng":-74.0628,"geocoded":false}],"delivered":[],"unlocated":[]}}

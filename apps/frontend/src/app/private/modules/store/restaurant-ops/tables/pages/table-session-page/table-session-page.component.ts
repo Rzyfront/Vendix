@@ -11,7 +11,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { interval } from 'rxjs';
+import { forkJoin, interval } from 'rxjs';
 import {
   CardComponent,
   StickyHeaderComponent,
@@ -27,7 +27,10 @@ import {
   DialogService,
   DropdownComponent,
   ModalComponent,
+  ItemCancellationModalComponent,
+  cancellationTypeForDestination,
 } from '../../../../../../../shared/components/index';
+import type { ItemCancellationSubmit } from '../../../../../../../shared/components/index';
 import {
   TimelineStep,
   TimelineVariant,
@@ -42,8 +45,11 @@ import {
   KitchenTicketItemRefStatus,
   PaymentPendingView,
   TransferResult,
+  SplitResult,
+  TableOrderReassignmentEvidence,
 } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
+import { AdminTablesSseService } from '../../services/admin-tables-sse.service';
 import {
   KitchenTicketsService,
   KdsSseService,
@@ -63,6 +69,7 @@ import {
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { AddItemsModalComponent } from '../../components/add-items-modal/add-items-modal.component';
+import { SplitAccountsPanelComponent } from '../../components/split-accounts-panel/split-accounts-panel.component';
 import { SplitOrderModalComponent } from '../../components/split-order-modal/split-order-modal.component';
 import {
   TablePaymentModalComponent,
@@ -75,7 +82,7 @@ import { TransferTableModalComponent } from '../../components/transfer-table-mod
 
 /** One entry of the `Opciones` overflow menu (desktop dropdown + mobile action sheet). */
 interface SecondaryAction {
-  id: 'pay' | 'split' | 'transfer' | 'customer' | 'table-status' | 'history' | 'close';
+  id: 'pay' | 'split' | 'transfer' | 'reassign' | 'customer' | 'table-status' | 'history' | 'close';
   label: string;
   icon: string;
   disabled?: boolean;
@@ -115,9 +122,11 @@ interface SecondaryAction {
     SpinnerComponent,
     DropdownComponent,
     ModalComponent,
+    ItemCancellationModalComponent,
     CurrencyPipe,
     AddItemsModalComponent,
     SplitOrderModalComponent,
+    SplitAccountsPanelComponent,
     TablePaymentModalComponent,
     AssignCustomerModalComponent,
     KitchenConfirmModalComponent,
@@ -131,6 +140,7 @@ export class TableSessionPageComponent implements OnInit {
   private readonly tablesService = inject(TablesService);
   private readonly kitchenService = inject(KitchenTicketsService);
   private readonly kdsSse = inject(KdsSseService);
+  private readonly adminTablesSse = inject(AdminTablesSseService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
   // C.7 (§5.3) — par del .html: la nota informativa necesita el gate fiscal.
   private readonly authFacade = inject(AuthFacade);
@@ -141,21 +151,28 @@ export class TableSessionPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly session = signal<TableSession | null>(null);
+  readonly waiterName = computed(() => {
+    const waiter = this.session()?.table?.waiter;
+    return waiter ? `${waiter.first_name} ${waiter.last_name}`.trim() : null;
+  });
+  private readonly paidFromSseSessionId = signal<number | null>(null);
   readonly isLoading = signal(false);
   readonly selectedItemIds = signal<Set<number>>(new Set());
   readonly isAddItemsOpen = signal(false);
   readonly isSplitOpen = signal(false);
+  readonly hasFinancialSplit = signal(false);
+  /** Null until the order detail proves the closed check has no financial blockers. */
+  readonly reassignmentEvidence = signal<TableOrderReassignmentEvidence | null>(null);
+  readonly reassignmentFloorLoaded = signal(false);
+  readonly splitRefreshKey = signal(0);
   readonly isPayOpen = signal(false);
   readonly isAssignCustomerOpen = signal(false);
   readonly isAddingItems = signal(false);
   readonly isFiring = signal(false);
   readonly firingItemId = signal<number | null>(null);
-  readonly deliveringTicketId = signal<number | null>(null);
   /**
-   * QUI-652 — spinner del item que se está entregando por el seam de mesa
-   * (sin pasar por cocina, o preparado dine-in). Separado de
-   * `deliveringTicketId` porque la entrega se dirige a la línea de pedido:
-   * reutilizar esa señal dejaría el botón sin spinner o marcaría otra fila.
+   * QUI-652 — spinner de la línea que se está entregando por el seam de mesa.
+   * La entrega se dirige al item, no al ticket compartido con otros platos.
    */
   readonly deliveringItemId = signal<number | null>(null);
   /**
@@ -175,6 +192,26 @@ export class TableSessionPageComponent implements OnInit {
   readonly isAssigningCustomer = signal(false);
   /** Order-item id currently being removed (drives the per-row spinner). */
   readonly removingItemId = signal<number | null>(null);
+  /** Order-item id whose note is currently being updated. */
+  readonly updatingNoteItemId = signal<number | null>(null);
+  /**
+   * D.4 — objetivo del modal compartido "Destino del plato" (solo preparados;
+   * el resto conserva el flujo confirm+prompt). `null` = modal cerrado.
+   */
+  readonly cancellationTarget = signal<TableSessionOrderItem | null>(null);
+  /** Error de red del último submit; se muestra dentro del modal sin cerrarlo. */
+  readonly cancellationError = signal<string | null>(null);
+  readonly cancellationModalOpen = computed(() => this.cancellationTarget() !== null);
+  readonly cancellationPreparedFired = computed(
+    () => this.cancellationTarget()?.inventory_consumed_at_fire === true,
+  );
+  /**
+   * D.4 — mesa NO pasa preview: el GET de sesión no trae `order_item_taxes`
+   * por línea ni `tip_*` de la orden, así que el espejo no puede correr
+   * exacto y el modal muestra la nota de total actual. Mismo componente,
+   * sin inventar el impuesto de la línea.
+   */
+  readonly mesaCancellationPreview = signal<null>(null);
 
   /**
    * Clock tick (ms), refreshed every 60s. Drives `elapsedSinceOpen` and
@@ -190,6 +227,7 @@ export class TableSessionPageComponent implements OnInit {
   readonly statusModalShowsHistory = signal(false);
   /** Transfer modal (cambiar de mesa / swap de cuentas). */
   readonly isTransferOpen = signal(false);
+  readonly tableMoveMode = signal<'transfer' | 'reassign'>('transfer');
   /** Mobile-only: collapses the account detail below the totals row. */
   readonly summaryExpanded = signal(false);
 
@@ -348,7 +386,30 @@ export class TableSessionPageComponent implements OnInit {
    * (canónico), pero el frontend de mesa y el floor-map pintan el badge
    * "Pagada" sin esperar al cierre explícito.
    */
-  readonly isPaid = computed(() => !!this.session()?.paid_at);
+  readonly isPaid = computed(() => {
+    const session = this.session();
+    return !!session?.paid_at || (session != null && this.paidFromSseSessionId() === session.id);
+  });
+
+  /** Conservative UI gate; the backend re-reads all evidence under lock. */
+  readonly canReassignClosedOrder = computed(() => {
+    const session = this.session();
+    const evidence = this.reassignmentEvidence();
+    if (!session?.closed_at || !session.order || !session.table || this.isPaid() || this.hasFinancialSplit()) return false;
+    if (!evidence || evidence.id !== session.order_id || !this.reassignmentFloorLoaded()) return false;
+    if (this.tablesService.floorTables().some((table) =>
+      table.active_session?.order_id === session.order_id)) return false;
+    // add-items on a table session accepts only draft orders. Other backend-
+    // eligible states are intentionally hidden until that flow supports them.
+    if (session.order.state !== 'draft' || evidence.state !== 'draft') return false;
+    if (evidence.active_financial_split_id != null || Number(evidence.total_paid) !== 0) return false;
+    if (!Array.isArray(evidence.payments) || !Array.isArray(evidence.invoices)) return false;
+    // The orders detail returns only its latest invoice. Any invoice row is
+    // treated as uncertain and hidden here; the backend remains authoritative.
+    if (evidence.invoices.length > 0) return false;
+    return !evidence.payments.some((payment) =>
+      ['succeeded', 'captured', 'partially_refunded', 'refunded'].includes(payment.state));
+  });
 
   /** Reads `restaurant.enable_table_checkout` (loose JSON slice). */
   readonly checkoutEnabled = computed(
@@ -525,10 +586,14 @@ export class TableSessionPageComponent implements OnInit {
    * Advanced actions grouped in the `Opciones` dropdown menu — a single source
    * of truth consumed by BOTH the desktop `app-dropdown` (projected into
    * the sticky header's `[actions-extra]` slot) and the mobile action
-   * sheet (`app-modal`). Empty once the session is closed.
+   * sheet (`app-modal`). A closed, eligible check keeps only reassignment.
    */
   readonly secondaryActions = computed<SecondaryAction[]>(() => {
-    if (this.isClosed()) return [];
+    if (this.isClosed()) {
+      return this.canReassignClosedOrder()
+        ? [{ id: 'reassign', label: 'Volver a asignar mesa', icon: 'arrow-right-left' }]
+        : [];
+    }
     const actions: SecondaryAction[] = [];
 
     if (this.checkoutEnabled()) {
@@ -545,7 +610,7 @@ export class TableSessionPageComponent implements OnInit {
         id: 'split',
         label: 'Dividir cuenta',
         icon: 'split',
-        disabled: this.items().length < 2,
+        disabled: this.items().length === 0,
       },
       {
         id: 'transfer',
@@ -581,6 +646,19 @@ export class TableSessionPageComponent implements OnInit {
       if (!orderId) return;
       untracked(() => this.mergeTicketsForOrder(orderId, tickets));
     });
+
+    // The staff event carries the session identity, not its persisted paid_at.
+    // Keep an optimistic flag while a silent detail read fetches the exact value.
+    effect(() => {
+      const event = this.adminTablesSse.lastEvent();
+      if (event?.type !== 'session_paid') return;
+      const sessionId = Number(this.route.snapshot.paramMap.get('id'));
+      if (event.data.table_session_id !== sessionId) return;
+      untracked(() => {
+        this.paidFromSseSessionId.set(sessionId);
+        this.loadSession(sessionId, { silent: true });
+      });
+    });
   }
 
   ngOnInit(): void {
@@ -592,6 +670,8 @@ export class TableSessionPageComponent implements OnInit {
     }
     // Warm up the KDS SSE stream so badges update live. Idempotent.
     this.kdsSse.connect();
+    this.adminTablesSse.connect();
+    this.destroyRef.onDestroy(() => this.adminTablesSse.disconnect());
     this.loadSession(id);
     this.loadPendingPayments(id);
   }
@@ -617,6 +697,11 @@ export class TableSessionPageComponent implements OnInit {
         next: (s) => {
           this.session.set(s);
           this.seedKitchenStateFromOrder(s);
+          if (s.closed_at) this.loadReassignmentEvidence(s.order_id);
+          else {
+            this.reassignmentEvidence.set(null);
+            this.reassignmentFloorLoaded.set(false);
+          }
           if (!opts.silent) this.isLoading.set(false);
         },
         error: (err: unknown) => {
@@ -624,6 +709,29 @@ export class TableSessionPageComponent implements OnInit {
           this.toastService.error(
             typeof err === 'string' ? err : 'Error al cargar la sesión',
           );
+        },
+      });
+  }
+
+  private loadReassignmentEvidence(orderId: number): void {
+    this.reassignmentEvidence.set(null);
+    this.reassignmentFloorLoaded.set(false);
+    forkJoin({
+      evidence: this.tablesService.getOrderReassignmentEvidence(orderId),
+      floor: this.tablesService.getFloorMap(),
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: ({ evidence }) => {
+          if (this.session()?.order_id === orderId) {
+            this.reassignmentEvidence.set(evidence);
+            this.reassignmentFloorLoaded.set(true);
+          }
+        },
+        error: () => {
+          if (this.session()?.order_id === orderId) {
+            this.toastService.error('No se pudo verificar esta orden para reasignarla. Recarga la página.');
+          }
         },
       });
   }
@@ -683,10 +791,11 @@ export class TableSessionPageComponent implements OnInit {
     });
   }
 
-  /** Live kitchen status for an item (SSE map first, then findOne fallback). */
+  /** The order delivery fact outranks a stale KDS/SSE ready projection. */
   kitchenStatusFor(
     item: TableSessionOrderItem,
   ): KitchenTicketItemRefStatus | null {
+    if (item.delivered_at != null) return 'delivered';
     return (
       this.liveKitchenState().get(item.id) ??
       this.deriveStaticKitchenStatus(item)
@@ -711,7 +820,7 @@ export class TableSessionPageComponent implements OnInit {
    * (terminal or in-progress kitchen states the backend rejects with 409).
    */
   canRemoveItem(item: TableSessionOrderItem): boolean {
-    if (this.isClosed()) return false;
+    if (this.isClosed() || this.hasFinancialSplit()) return false;
     // Paso 6 plan 1060 — espejo del bloqueo en mesa: un ítem entregado
     // (`delivered_at`, hecho de servicio) ya no se puede cancelar. Solo
     // presentación: el enforcement real lo pone el backend (paso 1).
@@ -769,27 +878,13 @@ export class TableSessionPageComponent implements OnInit {
   }
 
   /**
-   * Can the item be marked delivered? (fired, ready — or the takeaway
-   * in_preparation shortcut —, not yet terminal).
-   *
-   * Restaurant Suite — Fase K audit jun-2026: the previous `canDeliver`
-   * returned `true` for ANY non-terminal state, including `pending`. That
-   * let the operator click "Marcar entregado" on a dish the kitchen had
-   * never even acknowledged as cooked; the backend rejected with
-   * `KITCHEN_TICKET_INVALID_STATE` but the UX was confusing (generic
-   * devMessage, no live state pill explaining why the button was shown).
-   *
-   * The new rules:
-   *   - `ready`            → true  (primary path: kitchen said "listo")
-   *   - `in_preparation`   → true ONLY for takeaway (atajo vigente del
-   *     endpoint de cocina; el dine-in espera a `ready`)
-   *   - `pending`          → false (must go through KDS board first)
-   *   - `delivered`/`cancelled` → false (terminal)
-   *   - `null`             → false (never fired)
+   * El seam de orden admite preparados solo en `ready`, sean para llevar o
+   * para mesa. Los items sin cocina se pueden entregar directamente; los ya
+   * entregados o cancelados no ofrecen de nuevo la acción.
    */
   canDeliver(item: TableSessionOrderItem): boolean {
     // QUI-652 — la entrega es un hecho de SERVICIO y ya está registrada.
-    if (this.isDelivered(item)) return false;
+    if (this.isDelivered(item) || item.cancelled_at != null) return false;
 
     // Lo que no se cocina se entrega directo desde la fila: no pasa por cocina,
     // así que no hay estado de cocina que esperar. Antes esto devolvía false
@@ -797,14 +892,7 @@ export class TableSessionPageComponent implements OnInit {
     // cerveza en botella se quedaba sin ningún estado de entrega alcanzable.
     if (!this.needsKitchen(item)) return true;
 
-    const status = this.kitchenStatusFor(item);
-    if (status == null) return false;
-    if (status === 'cancelled') return false;
-    if (status === 'ready') return true;
-    // Atajo vigente del endpoint de cocina: un takeaway en `in_preparation`
-    // se puede entregar directo; el dine-in espera a `ready` porque el seam
-    // de mesa lo exige para preparados.
-    return item.is_takeaway === true && status === 'in_preparation';
+    return this.kitchenStatusFor(item) === 'ready';
   }
 
   /**
@@ -863,19 +951,6 @@ export class TableSessionPageComponent implements OnInit {
       default:
         return 'Aún no se ha enviado a cocina.';
     }
-  }
-
-  /** The kitchen_ticket_id to act on for an item (most recent non-terminal). */
-  private ticketIdFor(item: TableSessionOrderItem): number | null {
-    const rows = item.kitchen_ticket_items ?? [];
-    if (rows.length === 0) return null;
-    const active = rows.find(
-      (r) =>
-        r.status === 'in_preparation' ||
-        r.status === 'ready' ||
-        r.status === 'pending',
-    );
-    return (active ?? rows[0]).kitchen_ticket_id;
   }
 
   // ── Selection helpers (batch fire mode) ────────────────────────────────
@@ -941,6 +1016,10 @@ export class TableSessionPageComponent implements OnInit {
   // ── Add items ──────────────────────────────────────────────────────────
 
   openAddItems(): void {
+    if (this.hasFinancialSplit()) {
+      this.toastService.warning('La cuenta está dividida. Los importes están fijados; registra consumos nuevos en otra cuenta.');
+      return;
+    }
     if (this.isClosed()) {
       this.toastService.error('La mesa está cerrada');
       return;
@@ -949,6 +1028,7 @@ export class TableSessionPageComponent implements OnInit {
   }
 
   onAddItems(items: TableSessionAddItem[]): void {
+    if (this.hasFinancialSplit()) return;
     const id = this.session()?.id;
     if (!id) return;
     this.isAddingItems.set(true);
@@ -996,11 +1076,20 @@ export class TableSessionPageComponent implements OnInit {
    * UX: el motivo se pide con `DialogService.prompt` (PromptModalComponent
    * del design system) tras un `confirm` previo. Distinto copy entre
    * `firedPending` (merma) y resto (exclusión del total).
+   *
+   * D.4: los preparados (`item_type === 'prepared'`) NO pasan por aquí —
+   * usan el modal compartido "Destino del plato" (motivo + destino) vía
+   * `openItemCancellationModal`. Este flujo confirm+prompt queda solo para
+   * ítems que nunca pasan por cocina.
    */
   onRemoveItem(item: TableSessionOrderItem): void {
     const sessionId = this.session()?.id;
     if (!sessionId || this.isClosed()) return;
     if (!this.canRemoveItem(item)) return;
+    if (this.isPrepared(item)) {
+      this.openItemCancellationModal(item);
+      return;
+    }
     const firedPending =
       this.isItemFired(item) && this.kitchenStatusFor(item) === 'pending';
     this.dialogService
@@ -1069,6 +1158,109 @@ export class TableSessionPageComponent implements OnInit {
       });
   }
 
+  /**
+   * Abre un prompt modal para agregar o editar la nota de preparación del plato.
+   * Si el texto se vacía, la nota se limpia (`null`).
+   */
+  openEditItemNote(item: TableSessionOrderItem): void {
+    const sessionId = this.session()?.id;
+    if (!sessionId || this.isClosed() || item.cancelled_at) return;
+
+    this.dialogService
+      .prompt({
+        title: item.notes ? 'Editar nota del plato' : 'Agregar nota al plato',
+        message: `Especificación o indicación para "${item.product_name}":`,
+        defaultValue: item.notes ?? '',
+        placeholder: 'Ej: Sin cebolla, término medio, etc.',
+        confirmText: 'Guardar',
+        cancelText: 'Cancelar',
+      })
+      .then((newNote) => {
+        if (newNote === undefined) return;
+        const trimmed = newNote.trim();
+        if (trimmed === (item.notes ?? '').trim()) return;
+
+        this.updatingNoteItemId.set(item.id);
+        this.tablesService
+          .updateItemNotes(sessionId, item.id, trimmed || null)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: (s) => {
+              this.updatingNoteItemId.set(null);
+              this.session.set(s);
+              this.seedKitchenStateFromOrder(s);
+              this.toastService.success(
+                trimmed ? 'Nota actualizada' : 'Nota eliminada',
+              );
+            },
+            error: (err: unknown) => {
+              this.updatingNoteItemId.set(null);
+              this.toastService.error(
+                typeof err === 'string' ? err : 'Error al actualizar la nota',
+              );
+            },
+          });
+      });
+  }
+
+  /**
+   * D.4 — abre el modal compartido "Destino del plato" para un preparado de
+   * la cuenta. El destino elegido viaja como `cancellation_type` canónico
+   * (`after_fire_waste` / `after_fire_reused`); sin disparo a cocina se omite
+   * y el backend resuelve `before_fire` por `inventory_consumed_at_fire`.
+   */
+  openItemCancellationModal(item: TableSessionOrderItem): void {
+    if (!this.session()?.id || this.cancellationTarget()) return;
+    this.cancellationError.set(null);
+    this.cancellationTarget.set(item);
+  }
+
+  closeItemCancellationModal(): void {
+    if (this.removingItemId() !== null) return;
+    this.cancellationTarget.set(null);
+    this.cancellationError.set(null);
+  }
+
+  /** D.4 — submit del modal compartido: motivo + destino → seam de mesa. */
+  onCancellationConfirmed(result: ItemCancellationSubmit): void {
+    const item = this.cancellationTarget();
+    const sessionId = this.session()?.id;
+    if (!item || !sessionId || this.removingItemId() !== null) return;
+    const reason = result.reason.trim();
+    if (reason.length < 3 || reason.length > 500) {
+      this.cancellationError.set('El motivo debe tener entre 3 y 500 caracteres.');
+      return;
+    }
+    const preparedFired = item.inventory_consumed_at_fire === true;
+    const cancellation_type = cancellationTypeForDestination(result.destination, preparedFired);
+    this.removingItemId.set(item.id);
+    this.cancellationError.set(null);
+    this.tablesService
+      .cancelOrderItem(
+        sessionId,
+        item.id,
+        cancellation_type ? { reason, cancellation_type } : { reason },
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (s) => {
+          this.removingItemId.set(null);
+          this.cancellationTarget.set(null);
+          this.session.set(s);
+          this.seedKitchenStateFromOrder(s);
+          this.toastService.success(
+            preparedFired ? 'Plato cancelado como merma' : 'Plato cancelado de la cuenta',
+          );
+        },
+        error: (err: unknown) => {
+          this.removingItemId.set(null);
+          this.cancellationError.set(
+            typeof err === 'string' ? err : 'Error al cancelar el plato',
+          );
+        },
+      });
+  }
+
   // ── Split bill ─────────────────────────────────────────────────────────
 
   openSplit(): void {
@@ -1076,78 +1268,26 @@ export class TableSessionPageComponent implements OnInit {
       this.toastService.error('La mesa está cerrada');
       return;
     }
-    if (this.items().length < 2) {
-      this.toastService.error('Necesitas al menos 2 items para dividir');
+    if (this.items().length === 0) {
+      this.toastService.error('Agrega al menos un ítem antes de dividir');
       return;
     }
     this.isSplitOpen.set(true);
   }
 
-  onSplitByItems(dto: { item_groups: { order_item_ids: number[] }[] }): void {
-    const orderId = this.session()?.order_id;
-    if (!orderId) return;
-    this.isSplitting.set(true);
-    this.tablesService
-      .splitByItems(orderId, dto)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          this.isSplitting.set(false);
-          this.isSplitOpen.set(false);
-          this.toastService.success(
-            `Cuenta dividida en ${result.sub_orders.length} sub-órdenes`,
-          );
-          this.surfaceSplitFire(result);
-          this.router.navigate(['/admin/restaurant-ops/tables']);
-        },
-        error: (err: unknown) => {
-          this.isSplitting.set(false);
-          this.toastService.error(
-            typeof err === 'string' ? err : 'Error al dividir la cuenta',
-          );
-        },
-      });
+  onFinancialSplitLoaded(result: SplitResult | null): void {
+    this.hasFinancialSplit.set(!!result?.split_group_id);
   }
 
-  onSplitByAmount(dto: {
-    mode: 'equal' | 'custom';
-    n_splits: number;
-    amounts?: number[];
-  }): void {
-    const orderId = this.session()?.order_id;
-    if (!orderId) return;
-    this.isSplitting.set(true);
-    this.tablesService
-      .splitByAmount(orderId, dto)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          this.isSplitting.set(false);
-          this.isSplitOpen.set(false);
-          this.toastService.success(
-            `Cuenta dividida en ${result.sub_orders.length} sub-órdenes`,
-          );
-          this.surfaceSplitFire(result);
-          this.router.navigate(['/admin/restaurant-ops/tables']);
-        },
-        error: (err: unknown) => {
-          this.isSplitting.set(false);
-          this.toastService.error(
-            typeof err === 'string' ? err : 'Error al dividir la cuenta',
-          );
-        },
-      });
+  onFinancialSplitChanged(result: SplitResult | null): void {
+    this.onFinancialSplitLoaded(result);
+    const id = this.session()?.id;
+    if (id) this.loadSession(id, { silent: true });
   }
 
-  /** Surface backend auto-fire result from a split (Plan KDS fire-flows F4). */
-  private surfaceSplitFire(result: unknown): void {
-    const fire = (result as { kitchen_fire?: { fired_count?: number; kitchen_ticket_id?: number } })
-      ?.kitchen_fire;
-    if (fire && Number(fire.fired_count) > 0) {
-      this.toastService.success(
-        `${fire.fired_count} plato(s) enviados a cocina (ticket #${fire.kitchen_ticket_id})`,
-      );
-    }
+  onSplitCompleted(result: SplitResult): void {
+    this.onFinancialSplitChanged(result);
+    this.splitRefreshKey.update((value) => value + 1);
   }
 
   // ── Fire to kitchen ────────────────────────────────────────────────────
@@ -1274,79 +1414,25 @@ export class TableSessionPageComponent implements OnInit {
   // ── Mark delivered ─────────────────────────────────────────────────────
 
   /**
-   * Restaurant Suite — Fase K audit jun-2026:
-   *  - The success toast ONLY fires when the response payload actually
-   *    confirms the new state (`status === 'delivered'` or `ready`). If the
-   *    backend silently no-ops or returns an unexpected shape, the
-   *    optimistic merge still runs but the toast is suppressed — the
-   *    operator won't be told "success" when the kitchen wasn't updated.
-   *  - The error path uses `parseApiError` so SPECIFIC error codes
-   *    (`KITCHEN_TICKET_NOT_READY`, `KITCHEN_TICKET_ALREADY_DELIVERED`,
-   *    `KITCHEN_TICKET_ALREADY_CANCELLED`) map to actionable Spanish
-   *    messages instead of the generic "Transición de estado no permitida".
+   * La entrega desde la mesa siempre se dirige a una línea de pedido, incluso
+   * si el plato es para llevar. El seam de mesa sincroniza su estado de cocina
+   * sin entregar por accidente las demás líneas del mismo ticket. El endpoint
+   * de entrega de cocina queda reservado al tablero KDS.
    */
   markDelivered(item: TableSessionOrderItem): void {
-    // Dos caminos, una sola verdad (`order_items.delivered_at`). Solo el
-    // preparado para llevar avanza su ticket de cocina — ese endpoint es
-    // takeaway-only y rechaza dine-in con KITCHEN_TICKET_NOT_TAKEAWAY (422).
-    // El dine-in, pase o no por cocina, se entrega por el seam de mesa, que
-    // exige `ready` para preparados y sincroniza el ticket solo.
-    if (!(item.is_takeaway === true && this.needsKitchen(item))) {
-      this.deliverTableSessionItem(item);
-      return;
-    }
-
-    const ticketId = this.ticketIdFor(item);
-    if (ticketId == null) {
-      this.toastService.error('Este plato no tiene un ticket de cocina');
-      return;
-    }
-    this.deliveringTicketId.set(ticketId);
-    this.kitchenService
-      .markDelivered(ticketId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (ticket) => {
-          this.deliveringTicketId.set(null);
-          // Only merge + toast when the backend CONFIRMS the new state.
-          // Defensive against silent no-ops: a successful HTTP 200 with a
-          // stale `status` (e.g. the SSE reconciler already advanced it to
-          // `delivered` moments ago) is treated as success but the toast
-          // still fires to confirm the operator's intent.
-          const confirmed =
-            ticket?.status === 'delivered' || ticket?.status === 'ready';
-          if (confirmed) {
-            this.liveKitchenState.update((prev) => {
-              const next = new Map(prev);
-              next.set(item.id, ticket.status);
-              return next;
-            });
-            this.toastService.success('Plato marcado como entregado');
-          }
-          // Refetch by SESSION id. The route /store/table-sessions/:id expects
-          // the session row id, not the order row id (H2 fix).
-          const sessionId = this.session()?.id;
-          if (sessionId) this.loadSession(sessionId, { silent: true });
-        },
-        error: (err: unknown) => {
-          this.deliveringTicketId.set(null);
-          this.onKitchenMutationError(err);
-        },
-      });
+    this.deliverTableSessionItem(item);
   }
 
   /**
    * Entrega por el seam de mesa (`PATCH .../items/:id/deliver`): escribe el
    * hecho de servicio contra la línea de pedido y sincroniza el ticket.
    *
-   * Cubre dos casos: (QUI-652) el item que NO pasa por cocina (una cerveza,
-   * un agua, algo de nevera — no hay ticket que avanzar) y el preparado
-   * dine-in en `ready` (el endpoint de cocina es takeaway-only y lo
-   * rechazaría con 422).
+   * Cubre items sin cocina y preparados en `ready`, tanto dine-in como
+   * takeaway. El endpoint de cocina es takeaway-only y actúa por ticket;
+   * el mesero siempre entrega una sola línea por clic.
    *
-   * Usa `deliveringItemId` en vez de `deliveringTicketId` porque la entrega
-   * se dirige a la línea de pedido, y reutilizar la señal del ticket dejaría
-   * el botón sin spinner o marcaría el equivocado.
+   * Usa `deliveringItemId` porque el spinner debe seguir la línea seleccionada,
+   * no el ticket compartido.
    */
   private deliverTableSessionItem(item: TableSessionOrderItem): void {
     const sessionId = this.session()?.id;
@@ -1382,13 +1468,9 @@ export class TableSessionPageComponent implements OnInit {
    *   - Plain string error       → shown as-is (network/auth path).
    *   - Anything else             → generic fallback.
    *
-   * The user-reported bug (toast says success when backend rejected) is
-   * covered by:
-   *   1. `markDelivered` only shows the success toast when the response
-   *      payload's `status === 'delivered'` (this method is never called
-   *      on success), and
-   *   2. `canDeliver` hides the button for `pending` items so the operator
-   *      can't trigger a guaranteed-rejected call in the first place.
+   * The success toast belongs only to the HTTP success callback in
+   * `deliverTableSessionItem`; rejected writes arrive here. `canDeliver`
+   * also hides the action for pending kitchen items.
    */
   private onKitchenMutationError(err: unknown): void {
     if (typeof err === 'string') {
@@ -1437,7 +1519,15 @@ export class TableSessionPageComponent implements OnInit {
         this.openSplit();
         return;
       case 'transfer':
+        if (this.isClosed()) return;
+        this.tableMoveMode.set('transfer');
         this.isTransferOpen.set(true);
+        return;
+      case 'reassign':
+        if (this.canReassignClosedOrder()) {
+          this.tableMoveMode.set('reassign');
+          this.isTransferOpen.set(true);
+        }
         return;
       case 'customer':
         this.openAssignCustomer();
@@ -1490,6 +1580,20 @@ export class TableSessionPageComponent implements OnInit {
     this.isTransferOpen.set(false);
   }
 
+  onReassignmentConfirmed(newSession: TableSession): void {
+    this.isTransferOpen.set(false);
+    this.reassignmentEvidence.set(null);
+    this.reassignmentFloorLoaded.set(false);
+    this.session.set(newSession);
+    this.seedKitchenStateFromOrder(newSession);
+    this.toastService.success('Orden devuelta a una mesa con una sesión nueva');
+    this.loadSession(newSession.id, { silent: true });
+    void this.kdsSse.refreshSnapshot().catch(() => {
+      this.toastService.error('La mesa se reasignó, pero no se pudo refrescar cocina. Actualiza el tablero KDS.');
+    });
+    void this.router.navigate(['/admin/restaurant-ops/tables/session', newSession.id]);
+  }
+
   // ── Assign / change customer ───────────────────────────────────────────
 
   openAssignCustomer(): void {
@@ -1531,6 +1635,10 @@ export class TableSessionPageComponent implements OnInit {
   // ── Checkout (cobro) ───────────────────────────────────────────────────
 
   openPay(): void {
+    if (this.hasFinancialSplit()) {
+      this.isSplitOpen.set(true);
+      return;
+    }
     if (this.isClosed()) {
       this.toastService.error('La mesa ya está cerrada');
       return;
@@ -1543,6 +1651,7 @@ export class TableSessionPageComponent implements OnInit {
   }
 
   onPay(payload: TablePaymentSubmit): void {
+    if (this.hasFinancialSplit()) { this.isSplitOpen.set(true); return; }
     const sessionId = this.session()?.id;
     if (!sessionId || this.isClosed()) return;
     this.isPaying.set(true);
@@ -1687,6 +1796,7 @@ export class TableSessionPageComponent implements OnInit {
               this.isClosing.set(false);
               this.session.set(s);
               this.seedKitchenStateFromOrder(s);
+              this.loadReassignmentEvidence(s.order_id);
               this.toastService.success('Mesa cerrada correctamente');
             },
             error: (err: unknown) => {

@@ -30,7 +30,10 @@ import {
   VAT_PERIODICITIES,
   VatPeriodicity,
 } from '../constants/fiscal-responsibilities.catalog';
-import { isVatResponsible } from '@common/helpers/vat-responsibility.helper';
+import {
+  isIncResponsible,
+  isVatResponsible,
+} from '@common/helpers/vat-responsibility.helper';
 
 /** Meses en los que vence cada periodicidad de IVA (art. 600 ET). */
 const VAT_BIMONTHLY_MONTHS = [2, 4, 6, 8, 10, 12];
@@ -447,16 +450,26 @@ export class FiscalObligationService {
       // agregado de todas formas. Caso previsto pero no validado contra
       // datos reales — registrar como observación post-deploy.
       const fiscalData = await this.fiscalDataForContext(context);
-      if (isVatResponsible(fiscalData)) {
-        // O-48 (o régimen equivalente) habilita IVA — filtrado por
-        // periodicidad declarada — e INC.
+      // QUI-INC — IVA e INC son responsabilidades INDEPENDIENTES, y colgar las
+      // dos del mismo predicado costaba la declaración de INC. Un restaurante
+      // del art. 426 E.T. (servicio EXCLUIDO de IVA) recauda INC y NO es
+      // responsable de IVA: al corregir el predicado de IVA —que antes lo daba
+      // por responsable vía el `tax_regime='COMUN'` derogado— habría dejado de
+      // generarse `inc_return`, la obligación que ese comercio SÍ tiene.
+      // Cada eje se pregunta por su propio código de la casilla 53: O-48 para
+      // IVA, O-33 para INC.
+      if (isIncResponsible(fiscalData)) {
         types.add('inc_return');
-        if (this.vatReturnAppliesForPeriod(fiscalData, period)) {
-          types.add('vat_return');
-        }
       }
-      // Si NO es responsable (O-49 explícito, o SIMPLIFICADO sin O-48) no
-      // se generan vat_return ni inc_return.
+      if (
+        isVatResponsible(fiscalData) &&
+        this.vatReturnAppliesForPeriod(fiscalData, period)
+      ) {
+        types.add('vat_return');
+      }
+      // Si NO es responsable de IVA (O-49/O-50 explícito, o lista declarada sin
+      // O-48) no se genera `vat_return`; si no declara O-33, no hay
+      // `inc_return`. Ninguno de los dos arrastra al otro.
     }
 
     if (

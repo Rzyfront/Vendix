@@ -26,6 +26,8 @@ interface FiscalAuditEventParams {
   metadata?: Record<string, unknown>;
 }
 
+const POS_UNCOVERED_SALE_EVENT_TYPE = 'pos_sale_without_fiscal_document';
+
 @Injectable()
 export class FiscalAuditService {
   constructor(private readonly prisma: GlobalPrismaService) {}
@@ -63,24 +65,41 @@ export class FiscalAuditService {
   async list(
     contexts: FiscalOperationsContext[],
     query: FiscalHistoryQueryDto,
+    storeScope?: { store_id: number },
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
+    if (contexts.length === 0) return { data: [], total: 0, page, limit };
     const where: Prisma.fiscal_operation_eventsWhereInput = {
-      ...this.whereForContexts(contexts),
-      ...(query.event_type ? { event_type: query.event_type } : {}),
-      ...(query.resource_type ? { resource_type: query.resource_type } : {}),
-      ...(query.resource_id ? { resource_id: query.resource_id } : {}),
-      ...(query.obligation_id ? { obligation_id: query.obligation_id } : {}),
-      ...(query.declaration_id ? { declaration_id: query.declaration_id } : {}),
-      ...(query.close_session_id
-        ? { close_session_id: query.close_session_id }
-        : {}),
-      ...(query.evidence_id ? { evidence_id: query.evidence_id } : {}),
-      ...(query.store_id ? { store_id: query.store_id } : {}),
-      ...(query.accounting_entity_id
-        ? { accounting_entity_id: query.accounting_entity_id }
-        : {}),
+      AND: [
+        this.whereForContexts(contexts),
+        {
+          ...(query.event_type ? { event_type: query.event_type } : {}),
+          ...(query.resource_type ? { resource_type: query.resource_type } : {}),
+          ...(query.resource_id ? { resource_id: query.resource_id } : {}),
+          ...(query.obligation_id ? { obligation_id: query.obligation_id } : {}),
+          ...(query.declaration_id ? { declaration_id: query.declaration_id } : {}),
+          ...(query.close_session_id
+            ? { close_session_id: query.close_session_id }
+            : {}),
+          ...(query.evidence_id ? { evidence_id: query.evidence_id } : {}),
+          ...(!storeScope && query.store_id ? { store_id: query.store_id } : {}),
+          ...(query.accounting_entity_id
+            ? { accounting_entity_id: query.accounting_entity_id }
+            : {}),
+        },
+        // Store history keeps shared-entity events (NULL) but never sibling
+        // store events. POS uncovered-sale events are always store-owned.
+        ...(storeScope
+          ? [
+              query.event_type === POS_UNCOVERED_SALE_EVENT_TYPE
+                ? { store_id: storeScope.store_id }
+                : {
+                    OR: [{ store_id: storeScope.store_id }, { store_id: null }],
+                  },
+            ]
+          : []),
+      ],
     };
 
     const [data, total] = await Promise.all([
@@ -164,6 +183,9 @@ export class FiscalAuditService {
       return {
         organization_id: contexts[0].organization_id,
         accounting_entity_id: contexts[0].accounting_entity_id,
+        ...(contexts[0].store_id !== null
+          ? { store_id: contexts[0].store_id }
+          : {}),
       };
     }
 

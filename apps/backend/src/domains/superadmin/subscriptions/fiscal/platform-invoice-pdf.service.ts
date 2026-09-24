@@ -28,14 +28,12 @@ import {
   resolveTenantFiscalIdentity,
   tryResolveTenantFiscalIdentity,
 } from '@common/helpers/fiscal-identity.helper';
-
-const TAX_REGIME_LABELS: Record<string, string> = {
-  COMUN: 'Responsable de IVA',
-  SIMPLIFICADO: 'No responsable de IVA',
-  SIMPLE: 'Regimen Simple de Tributacion (RST)',
-  GRAN_CONTRIBUYENTE: 'Gran contribuyente',
-  NO_RESPONSABLE: 'No responsable de IVA',
-};
+// CUARTA copia de la misma etiqueta, encontrada al compilar: la factura de la
+// plataforma imprimía «Regimen: Responsable de IVA» con el mismo literal
+// derogado (art. 506 E.T., derogado por la Ley 1943/2018 art. 122 y la Ley
+// 2010/2019 art. 160). Consume ahora la derivación única del num. 12 del art. 11
+// de la Res. DIAN 000165/2023 en vez de una tabla propia.
+import { resolveFiscalQualitiesLine } from '../../../store/print-formats/services/fiscal-issuer-identity';
 
 const PLATFORM_PDF_KEY_PREFIX = 'platform/invoices';
 
@@ -298,7 +296,7 @@ export class PlatformInvoicePdfService {
       company_email: issuer.email,
       company_logo_buffer: logo_buffer,
       company_trade_name: issuer.trade_name,
-      company_tax_regime: issuer.tax_regime,
+      company_fiscal_qualities: issuer.fiscal_qualities,
       company_tax_responsibilities: issuer.tax_responsibilities,
       format,
       resolution_number: resolution?.resolution_number,
@@ -456,8 +454,9 @@ export class PlatformInvoicePdfService {
       phone: identity.phone,
       email: identity.email || org?.email || undefined,
       logo_url: org?.logo_url || undefined,
-      tax_regime:
-        TAX_REGIME_LABELS[(identity.tax_regime || '').toUpperCase()] || identity.tax_regime || undefined,
+      fiscal_qualities: resolveFiscalQualitiesLine(
+        identity.tax_responsibilities,
+      ),
       tax_responsibilities: identity.tax_responsibilities,
     };
   }
@@ -737,7 +736,7 @@ export class PlatformInvoicePdfService {
       company_email: issuer.email,
       company_logo_buffer: logo_buffer,
       company_trade_name: issuer.trade_name,
-      company_tax_regime: issuer.tax_regime,
+      company_fiscal_qualities: issuer.fiscal_qualities,
       company_tax_responsibilities: issuer.tax_responsibilities,
       format,
       resolution_number: resolution?.resolution_number,
@@ -836,7 +835,7 @@ export class PlatformInvoicePdfService {
       company_email: issuer.email,
       company_logo_buffer: logo_buffer,
       company_trade_name: issuer.trade_name,
-      company_tax_regime: issuer.tax_regime,
+      company_fiscal_qualities: issuer.fiscal_qualities,
       company_tax_responsibilities: issuer.tax_responsibilities,
       format,
       resolution_number: '00000000000',

@@ -151,8 +151,19 @@ export class NotificationsController {
     const user_id = context?.user_id;
     if (!store_id) throw new ForbiddenException('Store context required');
 
-    // Per-store subject (broadcast) — feeds the bell badge for everyone.
-    const storeSubject = this.sse_service.getOrCreate(store_id);
+    const isStaff =
+      context?.app_type === 'STORE_ADMIN' ||
+      context?.app_type === 'ORG_ADMIN' ||
+      context?.app_type === 'VENDIX_ADMIN';
+
+    // QUI-854 — el subject por tienda es compartido (broadcasts). Un cliente
+    // (STORE_ECOMMERCE/CUSTOMER) NO debe suscribirse a broadcasts de la tienda:
+    // solo recibe sus propias notificaciones dirigidas vía subject por usuario.
+    // El subject por usuario se preserva para flujos legítimos del comensal
+    // (booking reschedule, avisos de reserva), nunca broadcasts operativos.
+    const storeSubject = isStaff
+      ? this.sse_service.getOrCreate(store_id)
+      : null;
     // Per-user subject (targeted) — feeds `booking_check_in` notifications
     // like "your turn now" that should ONLY reach the assigned provider.
     const userSubject =
@@ -160,18 +171,30 @@ export class NotificationsController {
         ? this.sse_service.getOrCreateForUser(store_id, user_id)
         : null;
 
+    if (isStaff && user_id == null) {
+      throw new ForbiddenException('Staff context required for store stream');
+    }
+    if (!isStaff && !userSubject) {
+      throw new ForbiddenException('User context required');
+    }
+
     req.on('close', () => {
-      this.sse_service.unsubscribe(store_id);
+      if (isStaff) {
+        this.sse_service.unsubscribe(store_id);
+      }
       if (user_id != null) {
         this.sse_service.unsubscribeUser(store_id, user_id);
       }
     });
 
     // Merge both streams so a single EventSource delivers both store-wide and
-    // user-targeted events to the same client.
-    const merged = userSubject
-      ? merge(storeSubject, userSubject)
-      : storeSubject;
+    // user-targeted events to the same staff client. Los clients solo reciben
+    // su subject dirigido.
+    const merged = !isStaff
+      ? userSubject!
+      : userSubject
+        ? merge(storeSubject!, userSubject)
+        : storeSubject!;
 
     // El subject por tienda es compartido: otros dominios (p.ej. el acceso
     // ambiental de gym) multiplexan sus eventos en él. El bell solo debe

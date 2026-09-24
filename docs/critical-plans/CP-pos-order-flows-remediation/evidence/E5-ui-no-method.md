@@ -1,0 +1,5 @@
+# E.5 POS Enviar a domicilio sin método: bloqueo visible
+
+Playwright real contra `https://vendix.com/admin/pos` (tienda QA local #10), producto 302, cliente existente Maria Ulloa con dirección guardada. Se interceptó **solo** `GET /api/shipping/methods` con respuesta 200 `data:[]` para simular una tienda sin métodos activos, sin alterar DB ni settings. En Envío, el POS mostró «Selecciona un método de envío antes de guardar o cobrar esta entrega a domicilio», «No hay métodos de envío configurados» y CTA a configuración. **Guardar borrador deshabilitado**; no hubo POST/PUT/PATCH al carril payments (`E5-ui-no-method.png`). El backend negativo real sin método ya está en los artefactos `E5-*` de API.
+
+Con los métodos seed normales, el wizard preselecciona el primer método activo al entrar, por lo que no hacer clic manualmente NO equivale a «sin método». Una exploración previa creó el borrador QA #1137 con método #3 y dirección #489; se canceló auditadamente con `flow/cancel` 200. No se dejó una venta con envío sin método ni un cambio temporal de configuración.

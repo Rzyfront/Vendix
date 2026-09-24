@@ -1,0 +1,5 @@
+{
+  "success": null,
+  "message": "A user-provided reason is required to return a delivered order to processing",
+  "error_code": "ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001"
+}

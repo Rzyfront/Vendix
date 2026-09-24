@@ -62,3 +62,14 @@ export function normalizeInvoiceTaxRateNumber(
   if (!Number.isFinite(raw)) return 0;
   return normalizeInvoiceTaxRate(raw, tax_type).toNumber();
 }
+
+/** Order fractions become invoice percentages, except ICA/reteICA stored per mille. */
+export function orderTaxFractionToInvoiceRate(
+  fraction: number,
+  tax_type: string | null | undefined,
+): number {
+  const normalized = (tax_type ?? '').trim().toLowerCase();
+  const factor =
+    normalized === 'ica' || normalized === 'reteica' ? 1000 : 100;
+  return Math.round(fraction * factor * 100) / 100;
+}

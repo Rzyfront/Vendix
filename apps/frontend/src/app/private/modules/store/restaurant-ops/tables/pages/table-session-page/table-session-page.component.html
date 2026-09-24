@@ -5,7 +5,8 @@
       'Sesión #' +
       (session()?.id ?? '') +
       ' — ' +
-      (isClosed() ? 'Cerrada' : 'Cuenta abierta')
+      (isClosed() ? 'Cerrada' : 'Cuenta abierta') +
+      (waiterName() ? ' — Mesero: ' + waiterName() : '')
     "
     icon="receipt"
     variant="glass"
@@ -52,6 +53,13 @@
         <p>Cargando sesión…</p>
       </div>
     } @else if (session()) {
+      @if (session()?.order_id; as sourceId) {
+        <app-split-accounts-panel
+          [sourceOrderId]="sourceId" [items]="items()" [allowCreate]="false"
+          [refreshKey]="splitRefreshKey()" (loaded)="onFinancialSplitLoaded($event)"
+          (changed)="onFinancialSplitChanged($event)"
+        />
+      }
       <div class="grid gap-3 lg:gap-5 lg:grid-cols-12">
         <!-- ── Resumen (Sidebar) ────────────────────────────────────── -->
         <div class="lg:col-span-4 summary-column">
@@ -96,10 +104,15 @@
                       → el mesero aún no la liberó).
                     - Pendiente (aún sin pagar).
                 -->
-                @if (isClosed()) {
+                @if (isClosed() && isPaid()) {
                   <app-badge variant="success" size="sm">
                     <app-icon name="circle-check" [size]="12"></app-icon>
                     Pagada / Cerrada
+                  </app-badge>
+                } @else if (isClosed()) {
+                  <app-badge variant="warning" size="sm">
+                    <app-icon name="clock" [size]="12"></app-icon>
+                    Cerrada · pago pendiente
                   </app-badge>
                 } @else if (isPaid()) {
                   <app-badge variant="info" size="sm">
@@ -430,8 +443,10 @@
                             >
                               <app-icon name="ban" [size]="11"></app-icon>
                               Cancelado
-                              @if (item.cancellation_type === 'after_fire_waste') {
+                              @if (item.cancellation_type === 'after_fire_waste' || item.cancellation_type === 'delivered_waste') {
                                 · merma
+                              } @else if (item.cancellation_type === 'after_fire_reused' || item.cancellation_type === 'delivered_restock') {
+                                · reuso
                               }
                             </span>
                           }
@@ -462,10 +477,37 @@
                           </p>
                         }
                         @if (item.notes) {
-                          <p class="item-comanda-note">
+                          <div
+                            class="item-comanda-note"
+                            [class.is-updating]="updatingNoteItemId() === item.id"
+                          >
                             <app-icon name="message-square" [size]="11"></app-icon>
-                            {{ item.notes }}
-                          </p>
+                            <span class="item-comanda-note__text">{{ item.notes }}</span>
+                            @if (!isClosed() && !item.cancelled_at) {
+                              <button
+                                type="button"
+                                class="item-note-edit-btn"
+                                [disabled]="updatingNoteItemId() === item.id"
+                                (click)="openEditItemNote(item); $event.stopPropagation()"
+                                title="Editar nota del plato"
+                                aria-label="Editar nota del plato"
+                              >
+                                <app-icon name="pencil" [size]="10"></app-icon>
+                              </button>
+                            }
+                          </div>
+                        } @else if (!isClosed() && !item.cancelled_at) {
+                          <button
+                            type="button"
+                            class="item-note-add-btn"
+                            [disabled]="updatingNoteItemId() === item.id"
+                            (click)="openEditItemNote(item); $event.stopPropagation()"
+                            title="Agregar nota al plato"
+                            aria-label="Agregar nota al plato"
+                          >
+                            <app-icon name="plus" [size]="10"></app-icon>
+                            <span>Nota</span>
+                          </button>
                         }
                         <!-- El unitario sólo aporta cuando hay más de una
                              unidad: con cantidad 1 repite literalmente el
@@ -554,12 +596,7 @@
                               variant="success"
                               size="sm"
                               customClasses="!h-11"
-                              [loading]="
-                                deliveringItemId() === item.id ||
-                                (deliveringTicketId() != null &&
-                                  needsKitchen(item) &&
-                                  kitchenStatusFor(item) !== 'delivered')
-                              "
+                              [loading]="deliveringItemId() === item.id"
                               [attr.title]="deliverHint(item)"
                               (clicked)="markDelivered(item)"
                             >
@@ -615,7 +652,7 @@
     }
   </div>
 
-  <!-- Mobile sticky-cta: [···] [Agregar items] [Cobrar] -->
+  <!-- Mobile sticky-cta: open check actions or closed-check reassignment. -->
   @if (session() && !isClosed()) {
     <div class="session-cta">
       <app-button
@@ -658,6 +695,19 @@
         </app-button>
       }
     </div>
+  } @else if (canReassignClosedOrder()) {
+    <div class="session-cta">
+      <app-button
+        variant="primary"
+        size="md"
+        customClasses="!h-11"
+        [fullWidth]="true"
+        (clicked)="onSecondaryAction('reassign')"
+      >
+        <app-icon slot="icon" name="arrow-right-left" [size]="15"></app-icon>
+        Volver a asignar mesa
+      </app-button>
+    </div>
   }
 
   <!-- Mobile action sheet: same secondaryActions() as the desktop menu -->
@@ -692,21 +742,21 @@
   />
 
   <app-split-order-modal
-    [isOpen]="isSplitOpen()"
-    [loading]="isSplitting()"
+    [(isOpen)]="isSplitOpen"
+    [orderId]="session()?.order_id ?? null"
     [items]="items()"
-    [orderTotal]="orderTotal()"
-    (isOpenChange)="isSplitOpen.set($event)"
-    (splitByItems)="onSplitByItems($event)"
-    (splitByAmount)="onSplitByAmount($event)"
+    (splitCompleted)="onSplitCompleted($event)"
   />
 
   <app-transfer-table-modal
     [isOpen]="isTransferOpen()"
     [table]="transferSourceTable()"
     [tables]="[]"
+    [mode]="tableMoveMode()"
+    [orderId]="session()?.order_id ?? null"
     (isOpenChange)="isTransferOpen.set($event)"
     (confirmed)="onTransferConfirmed($event)"
+    (reassigned)="onReassignmentConfirmed($event)"
   />
 
   @if (checkoutEnabled()) {
@@ -755,5 +805,19 @@
     [isSubmitting]="isFiring()"
     (confirmed)="onKitchenConfirmed($event)"
     (cancelled)="onKitchenCancelled()"
+  />
+
+  <!-- D.4 — modal compartido "Destino del plato" (mismo componente que detalle de orden). -->
+  <app-item-cancellation-modal
+    [isOpen]="cancellationModalOpen()"
+    (isOpenChange)="!$event && closeItemCancellationModal()"
+    [itemName]="cancellationTarget()?.product_name || ''"
+    [showDestination]="cancellationPreparedFired()"
+    [canReuse]="cancellationPreparedFired()"
+    [inFlight]="removingItemId() !== null"
+    [serverError]="cancellationError()"
+    [currentTotal]="orderTotal()"
+    [preview]="mesaCancellationPreview()"
+    (confirmed)="onCancellationConfirmed($event)"
   />
 </div>

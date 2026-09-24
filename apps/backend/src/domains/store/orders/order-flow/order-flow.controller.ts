@@ -41,6 +41,7 @@ import { VendixHttpException } from '@common/errors';
 import { ErrorCodes } from '@common/errors/error-codes';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { isOrderFullyPaid } from '../../payments/services/payment-validator.service';
 import {
   CancelOrderItemDto,
   CancelDeliveredOrderItemDto,
@@ -142,6 +143,16 @@ export class OrderFlowController {
     const payEnabled = isDraft || !!payAction?.enabled;
 
     if (!payEnabled) {
+      // The action gate runs before payOrder's locked validator. After a
+      // successful payment, `processing`/`shipped` may no longer advertise
+      // `pay`; return the specific fully-paid code rather than masking it
+      // behind the generic unavailable-action error. The service still owns
+      // the atomic check for concurrent requests that pass this preflight.
+      if (['created', 'shipped', 'processing'].includes(orderRow.state)) {
+        if (isOrderFullyPaid(orderRow)) {
+          throw new VendixHttpException(ErrorCodes.ORD_PAY_ALREADY_PAID_001);
+        }
+      }
       // Mirror the canonical error shape so the cashier sees the same code
       // the editor / order-detail pages already handle, AND the timeline is
       // left clean of `payment.attempt` rows for terminal states.
@@ -516,6 +527,8 @@ export class OrderFlowController {
    * cierra a mano como `completed` (la plata ya se movió por otro canal,
    * p.ej. transferencia bancaria) o `failed` (el processor devolvió
    * algo que no levantó error pero la operación no se completó).
+   * `completed` exige referencia de egreso y canal real; `failed` conserva
+   * el contrato anterior de solo motivo de resolución.
    *
    * Permisos: misma política que `cancel-payment` y `forgive-installment`
    * (reuso `store:orders:order_flow:create` + `@Roles('owner', 'admin')`).
@@ -542,6 +555,8 @@ export class OrderFlowController {
       dto.target_state,
       dto.resolution_notes,
       userId,
+      dto.payout_reference,
+      dto.payout_channel,
     );
     return this.responseService.success(
       refund,

@@ -11,6 +11,7 @@ export class CommissionCalculatorService {
    */
   async calculateForPayment(params: {
     payment_id: number;
+    financial_account_id?: number;
     amount: number;
     payment_method: string;
     store_id: number;
@@ -19,10 +20,24 @@ export class CommissionCalculatorService {
     commission_amount: number;
     detail: any;
   } | null> {
+    if (params.financial_account_id) {
+      return this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(6006, ${params.payment_id})`;
+        const existing = await tx.commission_calculations.findFirst({
+          where: { store_id: params.store_id, source_type: 'payment', source_id: params.payment_id },
+        });
+        if (existing) return { rule_id: existing.commission_rule_id, commission_amount: Number(existing.commission_amount), detail: existing.calculation_detail };
+        return this.calculateWithClient(params, tx);
+      });
+    }
+    return this.calculateWithClient(params, this.prisma);
+  }
+
+  private async calculateWithClient(params: { payment_id: number; amount: number; payment_method: string; store_id: number }, client: Pick<StorePrismaService, 'commission_rules' | 'commission_calculations'>) {
     const now = new Date();
 
     // 1. Get active rules ordered by priority
-    const rules = await this.prisma.commission_rules.findMany({
+    const rules = await client.commission_rules.findMany({
       where: {
         is_active: true,
         OR: [
@@ -41,7 +56,7 @@ export class CommissionCalculatorService {
         const commission_amount = this.calculate(rule, params.amount);
 
         // 3. Save calculation
-        await this.prisma.commission_calculations.create({
+        await client.commission_calculations.create({
           data: {
             store_id: params.store_id,
             commission_rule_id: rule.id,

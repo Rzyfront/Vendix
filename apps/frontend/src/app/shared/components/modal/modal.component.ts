@@ -26,6 +26,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
     @if (isOpen()) {
         <div
           [class]="wrapperClasses()"
+          data-vendix-modal-wrapper
           (click)="onWrapperClick($event)"
         >
         <!-- Backdrop overlay: bg-only, sin backdrop-filter.
@@ -150,6 +151,13 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
   `,
 })
 export class ModalComponent {
+  private static readonly browserOpenModals = new Set<ModalComponent>();
+
+  private static syncBodyScrollLock(): void {
+    document.body.style.overflow = ModalComponent.browserOpenModals.size > 0
+      ? 'hidden'
+      : '';
+  }
   private isBrowser: boolean;
   private destroyRef = inject(DestroyRef);
 
@@ -292,6 +300,14 @@ export class ModalComponent {
 
   private previousIsOpen = false;
 
+  /** The shared z-index is the same for sibling modals; later DOM wins. */
+  private isTopmostOpenModal(): boolean {
+    const wrapper = this.modalContainer()?.nativeElement.parentElement;
+    if (!wrapper) return false;
+    const openWrappers = document.querySelectorAll('[data-vendix-modal-wrapper]');
+    return openWrappers[openWrappers.length - 1] === wrapper;
+  }
+
   constructor(@Inject(PLATFORM_ID) platformId: object) {
     this.isBrowser = isPlatformBrowser(platformId);
 
@@ -326,17 +342,30 @@ export class ModalComponent {
             this.previouslyFocusedElement.focus();
           }
           this.previouslyFocusedElement = undefined;
+          // Un diálogo hijo puede cerrarse mientras el padre sigue abierto.
+          // Tras desprender el DOM hijo, devolver el foco al modal visible.
+          if (this.isBrowser && this.dialog()) {
+            requestAnimationFrame(() => {
+              const wrappers = document.querySelectorAll<HTMLElement>('[data-vendix-modal-wrapper]');
+              const top = wrappers[wrappers.length - 1];
+              if (!top || top.contains(document.activeElement)) return;
+              const first = this.getFocusableElements(top)[0];
+              first?.focus();
+            });
+          }
         }
         this.previousIsOpen = open;
       }
       if (this.isBrowser) {
-        document.body.style.overflow = open ? 'hidden' : '';
+        if (open) ModalComponent.browserOpenModals.add(this);
+        else ModalComponent.browserOpenModals.delete(this);
+        ModalComponent.syncBodyScrollLock();
       }
     });
 
     if (this.isBrowser && this.closeOnEscape()) {
       this.escapeListener = (event: KeyboardEvent) => {
-        if (event.key === 'Escape' && this.isOpen()) {
+        if (event.key === 'Escape' && this.isOpen() && this.isTopmostOpenModal()) {
           this.close();
         }
       };
@@ -345,7 +374,7 @@ export class ModalComponent {
 
     if (this.isBrowser) {
       this.keydownListener = (event: KeyboardEvent) => {
-        if (!this.isOpen() || !this.dialog()) return;
+        if (!this.isOpen() || !this.dialog() || !this.isTopmostOpenModal()) return;
         if (event.key !== 'Tab') return;
         const container = this.modalContainer();
         if (!container) return;
@@ -392,14 +421,9 @@ export class ModalComponent {
         if (this.keydownListener) {
           document.removeEventListener('keydown', this.keydownListener);
         }
-        // Always clear body scroll-lock on destroy, even when isOpen() is
-        // already false. Without this, a @defer/@if that removes the modal
-        // synchronously (e.g. parent flips its signal to false in response
-        // to (closed)) can race the effect's overflow-reset: the effect
-        // never runs because the component is gone, and the cleanup's
-        // `if (this.isOpen())` short-circuits to false — leaving
-        // `body.style.overflow = 'hidden'` pegado y la página sin scroll.
-        document.body.style.overflow = '';
+        // Destroy may race the effect that removes this instance from the Set.
+        ModalComponent.browserOpenModals.delete(this);
+        ModalComponent.syncBodyScrollLock();
       }
     });
   }
@@ -414,7 +438,11 @@ export class ModalComponent {
       '[tabindex]:not([tabindex="-1"])',
     ].join(',');
     return Array.from(root.querySelectorAll<HTMLElement>(selector)).filter(
-      (el) => !el.hasAttribute('disabled') && el.tabIndex !== -1
+      (el) =>
+        !el.hasAttribute('disabled') &&
+        el.tabIndex !== -1 &&
+        el.getClientRects().length > 0 &&
+        getComputedStyle(el).visibility !== 'hidden',
     );
   }
 

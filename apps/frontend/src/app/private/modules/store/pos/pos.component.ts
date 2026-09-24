@@ -42,7 +42,6 @@ import {
   ToastService,
   SpinnerComponent,
   CardComponent,
-  BadgeComponent,
   DialogService,
 } from '../../../../shared/components';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
@@ -56,7 +55,13 @@ import {
   CartState,
   CartItem,
 } from './services/pos-cart.service';
-import { AddCustomItemRequest, CartSummary } from './models/cart.model';
+import {
+  AddCustomItemRequest,
+  CartSummary,
+  deliveryTypeToEntregaChoice,
+} from './models/cart.model';
+import { PosSplitBillModalComponent } from './components/pos-split-bill-modal.component';
+import type { SplitSourceItem } from '../restaurant-ops/tables/interfaces';
 import { PosCustomItemModalComponent } from './components/pos-custom-item-modal/pos-custom-item-modal.component';
 import { resolveSaleQuantity } from './utils/line-units.util';
 import { environment } from '../../../../../environments/environment';
@@ -75,7 +80,10 @@ import {
   PosProductVariant,
 } from './services/pos-product.service';
 import { PosCustomerModalComponent } from './components/pos-customer-modal.component';
-import { PosCheckoutShellComponent } from './components/pos-checkout-shell/pos-checkout-shell.component';
+import {
+  PosCheckoutShellComponent,
+  type EntregaChoice,
+} from './components/pos-checkout-shell/pos-checkout-shell.component';
 import { PosOrderConfirmationComponent } from './components/pos-order-confirmation.component';
 import { PosCartComponent } from './cart/pos-cart.component';
 import { PosMobileFooterComponent } from './components/pos-mobile-footer.component';
@@ -111,19 +119,16 @@ import {
   CashRegisterSession,
 } from './services/pos-cash-register.service';
 import { PosQueueService } from './services/pos-queue.service';
-import { PosSessionStatusBarComponent } from './components/pos-session-status-bar.component';
 import { PosSessionOpenModalComponent } from './components/pos-session-open-modal.component';
 import { PosSessionCloseModalComponent } from './components/pos-session-close-modal.component';
 import { PosCashMovementModalComponent } from './components/pos-cash-movement-modal.component';
 import { PosSessionDetailModalComponent } from './components/pos-session-detail-modal.component';
-import { PosScheduleIndicatorComponent } from './components/pos-schedule-indicator.component';
 import { PosScheduleModalComponent } from './components/pos-schedule-modal.component';
 import { PosHeaderDropdownComponent } from './components/pos-header-dropdown.component';
 import { BookingSchedulerModalComponent } from '../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
 import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.component';
 import {
   PosRestaurantIntegrationService,
-  CounterOrderLine,
   PosFireItemNote,
 } from './services/pos-restaurant-integration.service';
 import { TaxesService } from '../products/services/taxes.service';
@@ -145,6 +150,19 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
   totalItems: 0,
 };
 
+export function resolvePosPaymentCustomerName(
+  order: { customer_alias?: string | null; customer_name?: string | null } | null | undefined,
+  selectedCustomer: Pick<PosCustomer, 'first_name' | 'last_name'> | null | undefined,
+  isAnonymousSale: boolean,
+): string {
+  // The persisted alias identifies a quick sale even when the payment event
+  // carries the anonymous flag; it must reach both confirmation and receipt.
+  if (order?.customer_alias) return order.customer_alias;
+  if (isAnonymousSale) return 'Consumidor Final';
+  return order?.customer_name ||
+    (selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : '');
+}
+
 @Component({
   selector: 'app-pos',
   standalone: true,
@@ -154,6 +172,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     ButtonComponent,
     IconComponent,
     PosCustomItemModalComponent,
+    PosSplitBillModalComponent,
     SpinnerComponent,
     CardComponent,
     PosProductSelectionComponent,
@@ -161,15 +180,12 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     PosCheckoutShellComponent,
     PosOrderConfirmationComponent,
     PosCartComponent,
-    BadgeComponent,
     PosMobileFooterComponent,
     PosCartModalComponent,
-    PosSessionStatusBarComponent,
     PosSessionOpenModalComponent,
     PosSessionCloseModalComponent,
     PosCashMovementModalComponent,
     PosSessionDetailModalComponent,
-    PosScheduleIndicatorComponent,
     PosScheduleModalComponent,
     PosHeaderDropdownComponent,
     LayawayConfigModalComponent,
@@ -178,7 +194,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     OrderPaymentModalComponent,
   ],
   template: `
-    <div class="flex flex-col overflow-hidden pos-container">
+    <div class="flex flex-col overflow-hidden pos-container border-t border-border">
       <!--
         A/B TEST (2026-06): bloque de stats del POS (app-pos-stats) ocultado como
         prueba A/B. Antes mostraba las stats en desktop fuera de los modos
@@ -192,283 +208,236 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       -->
 
 
-      <!-- Main POS Interface -->
+      @if (isRestaurantMode() && splitSourceOrderId()) {
+        <div class="flex-none flex items-center justify-between gap-2 p-2 bg-surface border-b border-border">
+          <span class="text-sm text-text-secondary">Orden guardada · cuentas independientes</span>
+          <app-button variant="outline" size="sm" (clicked)="showSplitAccounts.set(true)">Dividir / cobrar cuentas</app-button>
+        </div>
+      }
+      <app-pos-split-bill-modal [(isOpen)]="showSplitAccounts" [sourceOrderId]="splitSourceOrderId()" [items]="splitSourceItems()" />
+
+      <!-- Main POS Interface: Two flush columns directly at root (Stitch favorite design) -->
       <div
-        class="flex-1 flex flex-col bg-surface rounded-card shadow-card border border-border min-h-0 overflow-hidden"
+        class="flex-1 flex flex-col lg:flex-row bg-slate-50 min-h-0 overflow-hidden w-full h-full relative"
       >
-        <!-- Header -->
-        <div
-          class="flex-none px-4 lg:px-6 py-2 lg:py-2.5 border-b border-border pos-header relative z-30"
-        >
-          <div class="flex justify-between items-center" style="gap: 0.75rem;">
-            <!-- Left: Logo + Title -->
-            <div class="flex items-center" style="gap: 0.5rem;">
+        @if (isOutOfHours() && !canBypassSchedule()) {
+          <!-- Out of hours overlay -->
+          <div
+            class="absolute inset-0 z-40 bg-surface/90 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <app-card
+              class="max-w-md w-full shadow-xl border-border"
+              [padding]="true"
+            >
               <div
-                class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-primary/10 flex items-center justify-center"
+                class="flex flex-col items-center text-center py-6 px-4 gap-4"
               >
-                <app-icon
-                  name="shopping-bag"
-                  [size]="isMobile() ? 20 : 24"
-                  class="text-primary"
-                ></app-icon>
-              </div>
-              <div class="flex flex-col leading-none" style="gap: 0;">
-                <h1
-                  class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center mb-0"
-                  style="gap: 0.5rem;"
+                <div
+                  class="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center text-destructive mb-2"
                 >
-                  @if (isQuotationMode()) {
-                    <span>Modo Cotización</span>
-                  } @else if (isLayawayMode()) {
-                    <span>Modo Plan Separé</span>
-                  } @else if (isEditMode()) {
-                    <span>Editando Orden #{{ editingOrderNumber() }}</span>
-                  } @else {
-                    <span class="hidden sm:inline">Vendix</span> POS
-                  }
-                </h1>
-                <span class="hidden sm:block leading-none">
-                  @if (isQuotationMode()) {
-                    <app-badge variant="primary" size="xs"
-                      >Crear cotización</app-badge
-                    >
-                  } @else if (isLayawayMode()) {
-                    <app-badge variant="warning" size="xs"
-                      >Crear plan separé</app-badge
-                    >
-                  } @else if (isEditMode()) {
-                    <app-badge variant="warning" size="xs"
-                      >Modificar items de la orden</app-badge
-                    >
-                  } @else {
-                    <app-badge variant="success" size="xs"
-                      >Punto de venta</app-badge
-                    >
-                  }
-                </span>
-              </div>
-            </div>
+                  <app-icon name="clock" [size]="40"></app-icon>
+                </div>
+                <h2 class="text-2xl font-bold text-text-primary">
+                  POS Fuera de Horario
+                </h2>
+                <p class="text-text-secondary text-sm leading-relaxed">
+                  {{
+                    outOfHoursMessage() ||
+                      'El punto de venta está fuera del horario de atención configurado. No se podrán realizar ventas hasta dentro del horario establecido.'
+                  }}
+                </p>
 
-            <!-- Right: Customer + Schedule + Cash Register -->
-            <div class="flex items-center gap-2 xl:gap-3">
-              <!-- Mobile/Tablet/Small desktop: Compact dropdown -->
-              <div class="flex xl:hidden">
-                <app-pos-header-dropdown
-                  [customer]="selectedCustomer()"
-                  [scheduleEnabled]="enableScheduleValidation()"
-                  [isWithinHours]="!isActuallyOutOfHours()"
-                  [isDayClosed]="isTodayClosed"
-                  [todayHours]="todaySchedule"
-                  [cashSession]="activeSession()"
-                  [showCashOpenButton]="cashRegisterEnabled()"
-                  (customerClicked)="onOpenCustomerModal()"
-                  (clearCustomer)="onClearCustomer()"
-                  (scheduleClicked)="showScheduleModal.set(true)"
-                  (cashOpenClicked)="showSessionOpenModal.set(true)"
-                  (cashCloseClicked)="showSessionCloseModal.set(true)"
-                  (cashMovementClicked)="showCashMovementModal.set(true)"
-                  (cashDetailClicked)="showSessionDetailModal.set(true)"
-                ></app-pos-header-dropdown>
-              </div>
-
-              <!-- Desktop: Full expanded view -->
-              <div class="hidden xl:flex items-center gap-2 xl:gap-3">
-                <!-- Customer Badge -->
-                @if (selectedCustomer()) {
+                @if (nextOpenTime()) {
                   <div
-                    class="group flex items-center gap-2 px-2.5 py-1.5 bg-gradient-to-r from-primary-light/50 to-primary-light/30 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
-                    (click)="onOpenCustomerModal()"
+                    class="bg-primary/5 border border-primary/20 rounded-xl p-4 w-full mt-2 flex flex-col items-center"
                   >
-                    <div
-                      class="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
+                    <span
+                      class="text-xs text-text-secondary font-medium uppercase tracking-wider mb-1"
+                      >Próxima apertura</span
                     >
-                      <app-icon name="user" [size]="14"></app-icon>
-                    </div>
-                    <div class="flex flex-col min-w-0">
-                      <span
-                        class="font-semibold text-text-primary text-sm leading-none truncate"
-                        [title]="selectedCustomer()?.name"
-                        >{{ selectedCustomer()?.name }}</span
-                      >
-                      <span
-                        class="text-xs text-text-secondary leading-none truncate mt-0.5"
-                        [title]="selectedCustomer()?.email"
-                        >{{ selectedCustomer()?.email }}</span
-                      >
-                    </div>
-                    <div
-                      class="w-5 h-5 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
-                      (click)="$event.stopPropagation(); onClearCustomer()"
-                    >
-                      <app-icon
-                        name="x"
-                        [size]="12"
-                        class="text-text-secondary group-hover:text-destructive transition-colors"
-                      ></app-icon>
-                    </div>
+                    <span class="text-lg font-bold text-primary">{{
+                      nextOpenTime()
+                    }}</span>
                   </div>
                 }
 
-                <!-- Schedule Indicator -->
-                @if (enableScheduleValidation()) {
-                  <app-pos-schedule-indicator
-                    [isWithinHours]="!isActuallyOutOfHours()"
-                    [todayHours]="todaySchedule"
-                    [isDayClosed]="isTodayClosed"
-                    [enabled]="enableScheduleValidation()"
-                    (clicked)="showScheduleModal.set(true)"
-                  ></app-pos-schedule-indicator>
-                }
-
-                @if (cashRegisterEnabled()) {
-                  <app-pos-session-status-bar
-                    [session]="activeSession()"
-                    [showOpenButton]="true"
-                    (openClicked)="showSessionOpenModal.set(true)"
-                    (closeClicked)="showSessionCloseModal.set(true)"
-                    (movementClicked)="showCashMovementModal.set(true)"
-                    (detailClicked)="showSessionDetailModal.set(true)"
-                  ></app-pos-session-status-bar>
-                }
+                <div
+                  class="flex flex-col w-full gap-3 mt-6 pt-6 border-t border-border"
+                >
+                  <p class="text-xs text-text-secondary mb-1">
+                    ¿Necesitas modificar los horarios?
+                  </p>
+                  <app-button
+                    variant="primary"
+                    class="w-full"
+                    (clicked)="goToSettings()"
+                  >
+                    <app-icon
+                      name="settings"
+                      [size]="18"
+                      slot="icon"
+                    ></app-icon>
+                    Configuración de POS y Horarios
+                  </app-button>
+                  <app-button
+                    variant="outline"
+                    class="w-full"
+                    (clicked)="goToDashboard()"
+                  >
+                    Volver al Dashboard
+                  </app-button>
+                </div>
               </div>
-            </div>
-          </div>
-        </div>
-
-        @if (activeSession()?.register?.location) {
-          <div
-            class="flex-none px-4 lg:px-6 py-1 bg-blue-50 border-b border-blue-100 text-xs text-blue-600"
-          >
-            Descontando de: {{ activeSession()!.register!.location!.name }}
+            </app-card>
           </div>
         }
 
-        <!-- Main Content Grid -->
-        <div
-          class="flex-1 flex flex-col p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content relative"
-        >
-          @if (isOutOfHours() && !canBypassSchedule()) {
-            <!-- Out of hours overlay -->
-            <div
-              class="absolute inset-0 z-40 bg-surface/90 backdrop-blur-sm flex items-center justify-center p-4"
-            >
-              <app-card
-                class="max-w-md w-full shadow-xl border-border"
-                [padding]="true"
-              >
-                <div
-                  class="flex flex-col items-center text-center py-6 px-4 gap-4"
-                >
-                  <div
-                    class="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center text-destructive mb-2"
-                  >
-                    <app-icon name="clock" [size]="40"></app-icon>
-                  </div>
-                  <h2 class="text-2xl font-bold text-text-primary">
-                    POS Fuera de Horario
+        <!-- DESKTOP LEFT COLUMN: Catalog Area (Stitch CenterCatalog) -->
+        <div class="hidden lg:flex flex-1 min-h-0 min-w-0 overflow-hidden h-full flex-col bg-slate-50">
+          <!-- Catalog Header (Stitch CenterCatalog) -->
+          <div class="bg-white border-b border-slate-200/80 shrink-0 shadow-2xs py-2.5 px-4">
+            <div class="flex items-center justify-between gap-4 flex-nowrap py-0.5">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0 shadow-2xs">
+                  <app-icon name="shopping-bag" [size]="20"></app-icon>
+                </div>
+                <div class="flex items-center gap-3 min-w-0">
+                  <h2 class="text-lg font-bold text-slate-800 leading-none truncate">
+                    @if (isQuotationMode()) {
+                      Cotización
+                    } @else if (isLayawayMode()) {
+                      Separado
+                    } @else {
+                      Punto de Venta
+                    }
                   </h2>
-                  <p class="text-text-secondary text-sm leading-relaxed">
-                    {{
-                      outOfHoursMessage() ||
-                        'El punto de venta está fuera del horario de atención configurado. No se podrán realizar ventas hasta dentro del horario establecido.'
-                    }}
-                  </p>
-
-                  @if (nextOpenTime()) {
+                  @if (activeSession()) {
+                    <span class="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0 flex items-center gap-1.5">
+                      <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>Turno Activo
+                    </span>
+                  } @else {
+                    <span class="bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0 flex items-center gap-1.5">
+                      <span class="w-2 h-2 rounded-full bg-amber-500"></span>Sin turno
+                    </span>
+                  }
+                  @if (cashierName()) {
                     <div
-                      class="bg-primary/5 border border-primary/20 rounded-xl p-4 w-full mt-2 flex flex-col items-center"
+                      class="hidden md:flex items-center gap-2 ml-1 pl-3 border-l border-slate-200 text-xs text-slate-600 truncate"
+                      [title]="cashierFullTitle()"
                     >
-                      <span
-                        class="text-xs text-text-secondary font-medium uppercase tracking-wider mb-1"
-                        >Próxima apertura</span
-                      >
-                      <span class="text-lg font-bold text-primary">{{
-                        nextOpenTime()
-                      }}</span>
+                      <div class="w-5 h-5 rounded-full bg-primary/10 text-primary font-bold text-[10px] flex items-center justify-center shrink-0 border border-primary/20">
+                        {{ cashierInitials() }}
+                      </div>
+                      <span class="font-medium text-slate-500">Cajero:</span>
+                      <span class="font-semibold text-slate-800 truncate max-w-[140px]">{{ cashierName() }}</span>
+                      <span class="text-slate-400 font-normal">({{ cashierRoleLabel() }})</span>
                     </div>
                   }
-
-                  <div
-                    class="flex flex-col w-full gap-3 mt-6 pt-6 border-t border-border"
-                  >
-                    <p class="text-xs text-text-secondary mb-1">
-                      ¿Necesitas modificar los horarios?
-                    </p>
-                    <app-button
-                      variant="primary"
-                      class="w-full"
-                      (clicked)="goToSettings()"
-                    >
-                      <app-icon
-                        name="settings"
-                        [size]="18"
-                        slot="icon"
-                      ></app-icon>
-                      Configuración de POS y Horarios
-                    </app-button>
-                    <app-button
-                      variant="outline"
-                      class="w-full"
-                      (clicked)="goToDashboard()"
-                    >
-                      Volver al Dashboard
-                    </app-button>
-                  </div>
                 </div>
-              </app-card>
-            </div>
-          }
-
-          <!-- Desktop: Flex layout with sidebar cart -->
-          <div class="hidden lg:flex gap-6 flex-1 min-h-0 overflow-hidden">
-            <!-- Products Area (Left Side - 2/3) -->
-            <div class="flex-[2] min-h-0 min-w-0 overflow-hidden">
-              <app-pos-product-selection
-                class="h-full block"
-                [refreshTrigger]="productRefreshCounter()"
-                [selectedCustomer]="selectedCustomer()"
-                [queueEnabled]="queueEnabled()"
-                [queueCount]="queueCount()"
-                (productSelected)="onProductSelected($event)"
-                (productAddedToCart)="onProductAddedToCart($event)"
-                (bookingRequired)="onBookingRequired($event)"
-                (openCustomerModal)="onOpenCustomerModal()"
-                (openQueueModal)="onOpenQueueModal()"
-              ></app-pos-product-selection>
-            </div>
-
-            <!-- Cart Area (Right Side - 1/3) -->
-            <div class="flex-1 min-h-0 min-w-0 overflow-hidden">
-              <app-pos-cart
-                class="h-full block"
-                [isEditMode]="isEditMode()"
-                [isQuotationMode]="isQuotationMode()"
-                [isLayawayMode]="isLayawayMode()"
-                [readyToPayOrder]="readyToPayOrder()"
-                [isCharging]="isCharging()"
-                (create)="onOpenCreateModal()"
-                (saveDraft)="onSaveDraft()"
-                (shipping)="onShipping()"
-                (checkout)="onCheckout()"
-                (charge)="onCharge()"
-                (quote)="onQuote()"
-                (layaway)="onLayaway()"
-                (customerSelected)="onCustomerSelected($event)"
-                (bookingsChanged)="onBookingsChanged($event)"
-                ></app-pos-cart>
+              </div>
             </div>
           </div>
 
-          <!-- Mobile: Full width products only -->
-          <div class="lg:hidden flex-1 min-h-0 pb-20">
+          <app-pos-product-selection
+            class="flex-1 min-h-0 block"
+            [refreshTrigger]="productRefreshCounter()"
+            [selectedCustomer]="selectedCustomer()"
+            [queueEnabled]="queueEnabled()"
+            [queueCount]="queueCount()"
+            [canCreateCustomItems]="canCreateCustomItems()"
+            (productSelected)="onProductSelected($event)"
+            (productAddedToCart)="onProductAddedToCart($event)"
+            (bookingRequired)="onBookingRequired($event)"
+            (openCustomerModal)="onOpenCustomerModal()"
+            (openQueueModal)="onOpenQueueModal()"
+            (openCustomItemModal)="openCustomItemModal()"
+          ></app-pos-product-selection>
+        </div>
+
+        <!-- DESKTOP RIGHT COLUMN: Cart Area (Starts 100% at the top of the outlet! Stitch RightTicketCart) -->
+        <div class="hidden lg:block w-96 xl:w-[410px] flex-none min-h-0 h-full overflow-hidden">
+          <app-pos-cart
+            class="h-full block"
+            [isEditMode]="isEditMode()"
+            [isQuotationMode]="isQuotationMode()"
+            [isLayawayMode]="isLayawayMode()"
+            [readyToPayOrder]="readyToPayOrder()"
+            [isCharging]="isCharging()"
+            [cashRegisterEnabled]="cashRegisterEnabled()"
+            (cashOpenClicked)="showSessionOpenModal.set(true)"
+            (cashCloseClicked)="showSessionCloseModal.set(true)"
+            (cashMovementClicked)="showCashMovementModal.set(true)"
+            (detailClicked)="showSessionDetailModal.set(true)"
+            (create)="onOpenCreateModal()"
+            (saveDraft)="onSaveDraft()"
+            (checkout)="onCheckout()"
+            (charge)="onCharge()"
+            (quote)="onQuote()"
+            (layaway)="onLayaway()"
+            (customerSelected)="onCustomerSelected($event)"
+            (bookingsChanged)="onBookingsChanged($event)"
+            (openCustomerModal)="onOpenCustomerModal()"
+            (clearCustomer)="onClearCustomer()"
+          ></app-pos-cart>
+        </div>
+
+        <!-- Mobile Layout: Sub-barra + Products + Bottom drawer trigger -->
+        <div class="lg:hidden flex-1 flex flex-col min-h-0 pb-20 w-full h-full">
+          <!-- Sub-barra Sucursal / POS y Estado de Caja / Turno Activo -->
+          <div class="flex-none px-3.5 py-2 bg-white flex items-center justify-between border-b border-slate-200/80 relative z-30 shrink-0 shadow-2xs">
+            <div class="flex items-center gap-2 min-w-0">
+              <div class="w-7 h-7 rounded-lg bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shadow-2xs shrink-0">
+                <app-icon name="store" [size]="15"></app-icon>
+              </div>
+              <div class="flex flex-col min-w-0">
+                <span class="text-xs font-black text-slate-900 leading-none tracking-tight">
+                  @if (isQuotationMode()) {
+                    Cotización
+                  } @else if (isLayawayMode()) {
+                    Separado
+                  } @else if (isEditMode()) {
+                    Editando #{{ editingOrderNumber() }}
+                  } @else {
+                    POS
+                  }
+                </span>
+                <span class="text-[10px] text-slate-400 font-medium leading-tight mt-0.5 truncate max-w-[170px]">
+                  Cajero: {{ cashierName() || 'Cajero' }} · {{ activeSession()?.register?.name || 'Caja Principal' }}
+                </span>
+              </div>
+            </div>
+            <div class="relative z-40 shrink-0">
+              <app-pos-header-dropdown
+                [customer]="selectedCustomer()"
+                [scheduleEnabled]="enableScheduleValidation()"
+                [isWithinHours]="!isActuallyOutOfHours()"
+                [isDayClosed]="isTodayClosed"
+                [todayHours]="todaySchedule"
+                [cashSession]="activeSession()"
+                [showCashOpenButton]="cashRegisterEnabled()"
+                (customerClicked)="onOpenCustomerModal()"
+                (clearCustomer)="onClearCustomer()"
+                (scheduleClicked)="showScheduleModal.set(true)"
+                (cashOpenClicked)="showSessionOpenModal.set(true)"
+                (cashCloseClicked)="showSessionCloseModal.set(true)"
+                (cashMovementClicked)="showCashMovementModal.set(true)"
+                (cashDetailClicked)="showSessionDetailModal.set(true)"
+              ></app-pos-header-dropdown>
+            </div>
+          </div>
+
+          <!-- Mobile Products -->
+          <div class="flex-1 min-h-0">
             <app-pos-product-selection
               class="h-full block"
               [refreshTrigger]="productRefreshCounter()"
               [selectedCustomer]="selectedCustomer()"
+              [canCreateCustomItems]="canCreateCustomItems()"
               (productSelected)="onProductSelected($event)"
               (productAddedToCart)="onProductAddedToCart($event)"
               (bookingRequired)="onBookingRequired($event)"
               (openCustomerModal)="onOpenCustomerModal()"
+              (openCustomItemModal)="openCustomItemModal()"
             ></app-pos-product-selection>
           </div>
         </div>
@@ -485,12 +454,10 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           [isEditMode]="isEditMode()"
           [readyToPayOrder]="readyToPayOrder()"
           [isCharging]="isCharging()"
-          [canCreateCustomItems]="canCreateCustomItems()"
           (viewCart)="onOpenCartModal()"
-          (customItem)="openCustomItemModal()"
+          (selectClient)="onOpenCustomerModal()"
           (create)="onOpenCreateModal()"
           (saveDraft)="onSaveDraft()"
-          (shipping)="onShipping()"
           (checkout)="onCheckout()"
           (charge)="onCharge()"
           (quote)="onQuote()"
@@ -505,6 +472,8 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         [canCreateCustomItems]="canCreateCustomItems()"
         [canOverridePrices]="canOverridePrices()"
         [isEditMode]="isEditMode()"
+        [isQuotationMode]="isQuotationMode()"
+        [isLayawayMode]="isLayawayMode()"
         [readyToPayOrder]="readyToPayOrder()"
         [isCharging]="isCharging()"
         (closed)="onCloseCartModal()"
@@ -515,14 +484,20 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (clearCart)="onClearCart()"
         (create)="onOpenCreateModal()"
         (saveDraft)="onSaveDraft()"
-        (shipping)="onShippingFromModal()"
         (checkout)="onCheckoutFromModal()"
         (charge)="onCharge()"
+        (openCustomerModal)="onOpenCustomerModal()"
+        (clearCustomer)="onClearCustomer()"
+        (quote)="onQuote()"
+        (layaway)="onLayaway()"
+        (customerSelected)="onCustomerSelected($event)"
+        (bookingsChanged)="onBookingsChanged($event)"
       ></app-pos-cart-modal>
 
       <!--
-        Ítem personalizado (camino móvil). Mismo modal compartido que usa el
-        carrito de escritorio y el carril fiscal: una sola captura, un solo
+        Ítem personalizado (camino móvil + botón "Ítem libre" del header del
+        catálogo en PC, paso 1 PSVERSION0001). Mismo modal compartido que usa
+        el carrito de escritorio y el carril fiscal: una sola captura, un solo
         contrato. Ver pos-custom-item-modal.component.ts.
       -->
       <app-pos-custom-item-modal
@@ -548,25 +523,13 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         </div>
       }
 
-      <!-- Modals -->
-      <app-pos-customer-modal
-        [isOpen]="showCustomerModal()"
-        [customer]="editingCustomer()"
-        [queueEnabled]="queueEnabled()"
-        [openInQueueMode]="openInQueueMode()"
-        (closed)="onCustomerModalClosed()"
-        (customerCreated)="onCustomerCreated($event)"
-        (customerUpdated)="onCustomerUpdated($event)"
-        (customerSelected)="onCustomerSelected($event)"
-      ></app-pos-customer-modal>
-
       <!-- Fase 5·B3: SHELL de checkout con stepper — único checkout del POS
            (cobro, cliente, envío y "Guardar borrador" en el footer). El paso
            Cobro autocarga sus métodos, por eso no se bindea [paymentMethods]. -->
       <app-pos-checkout-shell
         [isOpen]="showCheckoutModal()"
         [cartState]="cartState()"
-        [checkoutIntent]="checkoutIntent()"
+        [initialEntrega]="initialEntrega()"
         [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
         [tableId]="restaurantIntegration.currentTableSession()?.table_id ?? null"
         [mode]="checkoutMode()"
@@ -703,16 +666,34 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       (closed)="onChargeModalClosed()"
       (paymentSubmitted)="onPaymentSubmitted($event)"
     ></app-order-payment-modal>
+
+    <app-pos-customer-modal
+      [isOpen]="showCustomerModal()"
+      [customer]="editingCustomer()"
+      [queueEnabled]="queueEnabled()"
+      [openInQueueMode]="openInQueueMode()"
+      (closed)="onCustomerModalClosed()"
+      (customerCreated)="onCustomerCreated($event)"
+      (customerUpdated)="onCustomerUpdated($event)"
+      (customerSelected)="onCustomerSelected($event)"
+    ></app-pos-customer-modal>
   `,
   styles: [
     `
       :host {
-        display: block;
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 0%;
+        width: 100%;
         height: 100%;
+        min-height: 0;
         overflow: hidden;
       }
       .pos-container {
+        width: 100%;
         height: 100%;
+        min-height: 0;
+        border-top: 1px solid var(--color-border);
       }
 
       /* iOS-style blur header */
@@ -870,6 +851,11 @@ export class PosComponent {
     this.cartBookingsFromChild.set(new Map(map ?? []));
   }
 
+  // Matriz de permisos POS→reservations aquí (paso 1 plan POS-stitch;
+  // backend: reservations.controller.ts @Controller('store/reservations')):
+  // - POST /store/reservations → 'store:reservations:create'
+  // - PUT /store/reservations/:id → HALLAZGO: el backend solo define
+  //   PATCH ':id' ('store:reservations:update'); el PUT no tiene ruta (404).
   /**
    * CP-POS-SVC-PERF-001 / Annotation-3 — fire any pending booking blocks
    * collected by the cart scheduler once the order is persisted. New
@@ -1011,11 +997,11 @@ export class PosComponent {
 
   /**
    * Fase 5·B3: SHELL unificado de checkout (stepper) — único punto de entrada
-   * del cobro. Cubre cobro sin envío ('pickup'), delivery y "Guardar borrador"
+   * del cobro. Cubre cobro sin envío, delivery y "Guardar borrador"
    * desde el footer; los 3 modales viejos ya fueron retirados.
    */
   showCheckoutModal = signal(false);
-  checkoutIntent = signal<'pickup' | 'delivery'>('pickup');
+  readonly initialEntrega = signal<EntregaChoice>('llevar');
   /** Fulfillment type chosen for the current payment. Mirrors the
    *  payment-modal selector so the parent can react when the modal closes. */
   paymentFulfillment = signal<'consumo' | 'entrega' | null>(null);
@@ -1034,6 +1020,14 @@ export class PosComponent {
 
   // Edit mode
   isEditMode = signal(false);
+  readonly showSplitAccounts = signal(false);
+  readonly splitSourceOrderId = computed(() => Number(
+    this.restaurantIntegration.currentTableSession()?.order_id ?? this.editingOrderId() ?? this.readyToPayOrder()?.id ?? 0,
+  ) || null);
+  readonly splitSourceItems = computed<SplitSourceItem[]>(() => {
+    const rows = this.restaurantIntegration.currentTableSession()?.order?.order_items ?? this.editingOrder()?.order_items ?? this.readyToPayOrder()?.order_items ?? [];
+    return rows.map((item) => ({ id: Number(item.id), product_name: item.product_name, quantity: Number(item.quantity), cancelled_at: item.cancelled_at ?? null }));
+  });
   editingOrderId = signal<string | null>(null);
   editingOrderNumber = signal<string | null>(null);
   /**
@@ -1199,23 +1193,13 @@ export class PosComponent {
   );
 
   /**
-   * CP-pos-checkout-enter-focus (step A.2) — devuelve el foco al buscador de
-   * productos tras cerrar cualquier modal del POS. Diferido ~50ms para dejar
-   * que la animación de cierre libere el foco. Recorre todas las instancias
-   * (desktop + móvil, una oculta por CSS); enfocar la oculta es no-op en el
-   * navegador. No-op total si el buscador no está montado (p. ej. overlay de
-   * fuera de horario); jamás lanza en un flujo de cierre.
+   * CP-pos-checkout-enter-focus — el auto-focus del buscador ya no es automático
+   * al cerrar modales ni al iniciar la vista; se activa justo cuando el usuario
+   * intenta escribir una letra o número en la vista principal del POS.
    */
   private focusSearchSoon(): void {
-    setTimeout(() => {
-      try {
-        for (const child of this.productSelectionList()) {
-          child?.focusSearch();
-        }
-      } catch {
-        // El foco nunca debe romper un flujo de cierre.
-      }
-    }, 50);
+    // Intencionalmente no-op: el auto-focus del buscador no es automático al cerrar
+    // modales ni al iniciar la vista; el foco se activa bajo demanda al teclear.
   }
   private customerService = inject(PosCustomerService);
   private vexiPos = inject(VexiPosBridgeService);
@@ -1260,6 +1244,74 @@ export class PosComponent {
   readonly canOverridePrices = computed(() =>
     this.hasPermission('store:pos:price_override'),
   );
+
+  /**
+   * PSVERSION0001 paso 1 — bloque "Cajero: X (Rol · POS-01)" del header
+   * Stitch, con datos reales de sesión: nombre del AuthFacade, rol
+   * principal con etiqueta corta ES y código de la caja del turno activo
+   * (`null` sin sesión abierta: el template omite el terminal).
+   */
+  readonly cashierName = computed(() => {
+    // El selector solo lee camelCase; el login devuelve snake_case
+    // (misma resolución que user-dropdown: first_name + last_name).
+    const fromSelector = this.authFacade.userName();
+    if (fromSelector) return fromSelector;
+    const u = this.authFacade.user() as any;
+    const full = [u?.first_name ?? u?.firstName, u?.last_name ?? u?.lastName]
+      .filter(Boolean)
+      .join(' ');
+    return full || u?.name || u?.email || 'Cajero';
+  });
+  readonly cashierInitials = computed(() =>
+    this.cashierName()
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word: string) => word[0])
+      .join('')
+      .toUpperCase(),
+  );
+  readonly cashierRoleLabel = computed(() =>
+    PosComponent.roleLabel(this.authFacade.userRole()),
+  );
+  readonly cashierTerminal = computed(
+    () =>
+      this.activeSession()?.register?.code ||
+      this.activeSession()?.register?.name ||
+      null,
+  );
+  /**
+   * PSVERSION0001 paso 7b F3 — tooltip con la identidad completa del
+   * cajero. El bloque visible compacta a ≤1536px (rol/terminal ocultos)
+   * porque a 1280 con cliente el nombre colapsaba a ancho 0.
+   */
+  readonly cashierFullTitle = computed(() => {
+    const terminal = this.cashierTerminal();
+    return `${this.cashierName()} (${this.cashierRoleLabel()}${terminal ? ` · ${terminal}` : ''})`;
+  });
+
+  private static roleLabel(role: string | null): string {
+    switch ((role ?? '').toLowerCase()) {
+      case 'super_admin':
+        return 'Super Admin';
+      case 'admin':
+        return 'Admin';
+      case 'owner':
+        return 'Dueño';
+      case 'manager':
+        return 'Gerente';
+      case 'supervisor':
+        return 'Supervisor';
+      case 'cashier':
+        return 'Cajero';
+      case 'employee':
+        return 'Empleado';
+      case 'carrier':
+        return 'Repartidor';
+      default:
+        return role ? role : 'Cajero';
+    }
+  }
 
   constructor() {
     // Vexi reaches the POS through this handle while the screen is mounted.
@@ -1351,6 +1403,129 @@ export class PosComponent {
     this.isMobile.set(width < 768);
     // Tablet range: 768px - 1023px (where sidebar can be collapsed/expanded)
     this.isTablet.set(width >= 768 && width < 1024);
+  }
+
+  @HostListener('window:keydown', ['$event'])
+  onWindowKeydown(event: KeyboardEvent): void {
+    this.handleTypeToSearch(event);
+  }
+
+  /**
+   * Auto-focus inteligente bajo demanda: enfoca el buscador de productos del POS
+   * solo cuando el usuario teclea una letra o número en la vista principal,
+   * garantizando que NINGÚN modal abierto (nota, cupón, cliente, caja, cobro, etc.)
+   * ni ningún input/textarea activo pierda su funcionalidad de escritura.
+   */
+  private handleTypeToSearch(event: KeyboardEvent): void {
+    // 1. Teclas modificadoras (Ctrl, Alt, Meta/Cmd) no son escritura de texto
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      return;
+    }
+
+    // 2. Solo caracteres imprimibles de longitud 1
+    if (!event.key || event.key.length !== 1) {
+      return;
+    }
+
+    // 3. Validar estrictamente letras (con acentos/ñ) y números Unicode
+    if (!/^[\p{L}\p{N}]$/u.test(event.key)) {
+      return;
+    }
+
+    // 4. Si el foco actual ya está en un elemento editable, permitir la escritura nativa
+    const active =
+      typeof document !== 'undefined'
+        ? (document.activeElement as HTMLElement | null)
+        : null;
+    if (
+      active &&
+      (active.tagName === 'INPUT' ||
+        active.tagName === 'TEXTAREA' ||
+        active.tagName === 'SELECT' ||
+        active.isContentEditable)
+    ) {
+      return;
+    }
+
+    // 5. OJO REQUISITO CRÍTICO: Sin modales abiertos (nota, cupón, cliente, caja, cobro, etc.)
+    if (this.hasAnyModalOpen()) {
+      return;
+    }
+
+    // 6. Verificar que el target del evento no esté dentro de un diálogo o modal
+    const target = event.target as HTMLElement | null;
+    if (
+      target?.closest(
+        '[role="dialog"], [aria-modal="true"], app-modal, .modal-content, .modal-overlay, dialog',
+      )
+    ) {
+      return;
+    }
+
+    // 7. Si el target es editable, no interferir
+    if (
+      target &&
+      (target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable)
+    ) {
+      return;
+    }
+
+    // 8. Buscar la instancia visible de catálogo (desktop o móvil) y enfocar con el carácter inicial
+    const children = this.productSelectionList();
+    const targetChild = children.find((c) => c?.isVisible()) ?? children[0];
+    if (targetChild) {
+      event.preventDefault();
+      targetChild.focusSearch(event.key);
+    }
+  }
+
+  private hasAnyModalOpen(): boolean {
+    // Señales de modales en el shell POS:
+    if (
+      this.showCartModal() ||
+      this.customItemModalOpen() ||
+      this.showCustomerModal() ||
+      this.showCheckoutModal() ||
+      this.showOrderConfirmation() ||
+      this.showSessionOpenModal() ||
+      this.showSessionCloseModal() ||
+      this.showAISummaryModal() ||
+      this.showCashMovementModal() ||
+      this.showSessionDetailModal() ||
+      this.showScheduleModal() ||
+      this.showReservationModal() ||
+      this.showLayawayConfigModal() ||
+      this.kitchenConfirmOpen() ||
+      this.chargeModalOpen() ||
+      this.loading()
+    ) {
+      return true;
+    }
+
+    // Inspección en el DOM para modales hijos o modales globales:
+    if (typeof document !== 'undefined') {
+      // Modales con app-modal (notas de orden, notas de ítem, cupones, etc.)
+      if (document.querySelector('app-modal > div')) {
+        return true;
+      }
+      // Overlays abiertos en móvil o desktop
+      if (
+        document.querySelector(
+          '.modal-overlay.open, .modal-content.open, .modal.open, .modal.show, .app-dialog-backdrop, .app-dialog-panel, dialog[open]',
+        )
+      ) {
+        return true;
+      }
+      // Bloqueo de scroll global en body (activado por ModalComponent)
+      if (document.body && document.body.style.overflow === 'hidden') {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -1637,6 +1812,14 @@ export class PosComponent {
       });
   }
 
+  /** Payment success must never reuse the abandonment path that cancels an adopted order. */
+  private clearCartAfterCompletedSale(): void {
+    this.cartService
+      .clearCartAfterCompletedSale()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
+  }
+
   /**
    * CP-POS-CREAR-EDITAR-COBRAR-001 — Guardar must open the customer-selection
    * modal (Venta Anónima / Con Cliente) before persisting the order, like
@@ -1664,14 +1847,14 @@ export class PosComponent {
     // gate + saveDraft call; the parent just opens it. The (checkoutCompleted)
     // output stays reserved for the flow-pay path that Cobrar drives.
     this.mode.set('create-draft');
-    this.checkoutIntent.set('pickup');
+    this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(true);
   }
 
   /**
    * Fase 5·B3: the "Crear orden / Guardar borrador" flow now lives inside
-   * the checkout shell footer. This entrypoint just opens the shell in
-   * pickup intent; the shell owns the create flow (retail draft /
+   * the checkout shell footer. This entrypoint just opens the shell;
+   * the shell owns the create flow (retail draft /
    * restaurant counter draft / append-to-table) and the KDS fire, and
    * clears the cart on success.
    */
@@ -1685,7 +1868,7 @@ export class PosComponent {
     // the flow-pay path; the draft path emits `(draftSaved)` and never opens
     // a payment collector.
     this.mode.set('create-draft');
-    this.checkoutIntent.set('pickup');
+    this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(true);
   }
 
@@ -1713,6 +1896,7 @@ export class PosComponent {
     }
     const sc = this.selectedCustomer();
     const customerName =
+      result.order?.customer_alias ||
       result.order?.customer_name ||
       (result.order?.customer?.first_name
         ? `${result.order.customer.first_name} ${result.order.customer.last_name || ''}`.trim()
@@ -1799,6 +1983,10 @@ export class PosComponent {
       ...(cartNotes ? { notes: cartNotes } : {}),
     };
 
+    // Matriz de permisos POS→quotations (paso 1 plan POS-stitch; backend:
+    // quotations.controller.ts @Controller('store/quotations')). El POS solo usa:
+    // - createQuotation → POST /store/quotations → 'store:quotations:create'
+    // - updateQuotation → PATCH /store/quotations/:id → 'store:quotations:update'
     const editId = this.editingQuotationId();
     const obs$ = editId
       ? this.quotationsService.updateQuotation(Number(editId), dto as any)
@@ -1873,6 +2061,10 @@ export class PosComponent {
       installments: config.installments || [],
     };
 
+    // Matriz de permisos POS→layaway (paso 1 plan POS-stitch; backend:
+    // layaway.controller.ts @Controller('store/layaway')). El POS solo usa:
+    // - create → POST /store/layaway → 'store:layaway:create'
+    // (payment/cancel/complete los opera el módulo layaway, no el POS)
     this.layawayService
       .create(dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -2023,55 +2215,50 @@ export class PosComponent {
    */
   private fireCounterOrder(): void {
     const cart = this.cartState();
-    const preparedLines: CounterOrderLine[] = [];
-    for (const it of cart?.items ?? []) {
-      if (it.itemType === 'custom') continue;
-      if (it.product?.product_type !== 'prepared') continue;
-      const productId = parseInt(
-        typeof it.product.id === 'string'
-          ? it.product.id
-          : String(it.product.id),
-        10,
-      );
-      if (!Number.isFinite(productId)) continue;
-      const line: CounterOrderLine = {
-        product_id: productId,
-        product_name: it.product.name,
-        quantity: it.quantity,
-        unit_price: Number(it.unitPrice ?? 0),
-        total_price: Number(it.totalPrice ?? 0),
-        tax_rate: it.taxRate,
-      };
-      if (it.variant_id != null) {
-        line.product_variant_id = it.variant_id;
-      }
-      // Restaurant Suite — Fase K Gap 1: items flagged skipKds
-      // (cashier chose "Usar stock") are excluded from the kitchen
-      // dispatch list. Their product stock is consumed at payment.
-      if (it.skipKds) continue;
-      preparedLines.push(line);
-    }
+    // Solo los `prepared` que van a cocina: los que el cajero marcó "usar
+    // stock" (skipKds, Fase K Gap 1) se consumen al cobrar, no aquí.
+    const preparedItems = (cart?.items ?? []).filter(
+      (it) =>
+        it.itemType !== 'custom' &&
+        it.product?.product_type === 'prepared' &&
+        !it.skipKds &&
+        Number.isFinite(Number(it.product?.id)),
+    );
 
-    if (preparedLines.length === 0) {
+    if (!cart || preparedItems.length === 0) {
       this.toastService.warning(
         'No hay platos preparados en el carrito para enviar a cocina',
       );
       return;
     }
 
-    // Bug 4 (Fase K): orders.customer_id is optional. Only forward the
-    // id when the operator actually picked a customer; otherwise the
-    // integration service omits the field and the backend stores an
-    // anonymous Consumidor Final order.
-    const customer = this.selectedCustomer();
-    const customerId =
-      customer && Number.isFinite(Number(customer.id)) && Number(customer.id) > 0
-        ? Number(customer.id)
-        : 0;
+    // P0-3 — el borrador de mostrador viaja por `/store/payments/pos` con
+    // `is_draft` (ver `createCounterDraftOrder`), que resuelve en servidor el
+    // impuesto de catálogo y el precio de cada línea. La cabecera se recalcula
+    // en servidor; la que se manda aquí solo describe el subconjunto enviado.
+    // Sin promociones ni cupón: aplicarían sobre líneas que no viajan.
+    const taxAmount = preparedItems.reduce((sum, it) => sum + (it.taxAmount || 0), 0);
+    const total = preparedItems.reduce((sum, it) => sum + (it.totalPrice || 0), 0);
+    const counterState: CartState = {
+      ...cart,
+      items: preparedItems,
+      customer: this.selectedCustomer(),
+      appliedDiscounts: [],
+      appliedCoupon: undefined,
+      summary: {
+        ...cart.summary,
+        subtotal: total - taxAmount,
+        taxAmount,
+        discountAmount: 0,
+        total,
+        itemCount: preparedItems.length,
+        totalItems: preparedItems.reduce((sum, it) => sum + it.quantity, 0),
+      },
+    };
 
     this.loading.set(true);
     this.restaurantIntegration
-      .createCounterDraftOrder(customerId, preparedLines, cart?.notes)
+      .createCounterDraftOrder(counterState)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (order) => {
@@ -2126,6 +2313,56 @@ export class PosComponent {
     if (!open) this.focusSearchSoon();
   }
 
+  /**
+   * F-FLETE — carril del wizard con el que se abre el shell al editar.
+   *
+   * Había DOS copias de `delivery_type === 'home_delivery' ? 'enviar' :
+   * 'llevar'` (en `onCheckout` y en `onCharge`). Esa forma:
+   *  - no reconocía `dine_in` → una mesa QR se abría como "llevar";
+   *  - colapsaba `direct_delivery` y `other` a "llevar", que es lo que
+   *    empujaba al shell a forzar `delivery_type: 'pickup'`.
+   *
+   * Ahora hay UNA sola definición ({@link deliveryTypeToEntregaChoice}) y la
+   * entrada es el snapshot que `loadFromOrder` dejó en el carrito — el mismo
+   * dato con el que el shell decide qué mandar, así que no pueden divergir.
+   * Fallback a `editingOrder()` para el caso en que el carrito aún no haya
+   * hidratado (carrito libre adoptando una orden).
+   */
+  private entregaChoiceForEditingOrder(): EntregaChoice {
+    const context =
+      this.cartState()?.shippingContext ??
+      (() => {
+        const order = this.editingOrder() as any;
+        if (!order) return null;
+        return {
+          deliveryType: order.delivery_type ?? null,
+          shippingAddressId: null,
+          billingAddressId: null,
+          shippingMethodId: order.shipping_method_id ?? null,
+          shippingRateId: null,
+          shippingCost:
+            order.shipping_cost == null ? null : Number(order.shipping_cost),
+        };
+      })();
+    return deliveryTypeToEntregaChoice(context);
+  }
+
+  /**
+   * Resuelve el carril de entrega predeterminado al abrir el wizard o guardar borrador.
+   * Si la tienda es restaurante y hay una sesión de mesa abierta o activa, la entrega
+   * por defecto DEBE ser 'mesa', evitando que los platos se marquen como "para llevar".
+   */
+  private resolveDefaultEntrega(): EntregaChoice {
+    if (
+      this.restaurantIntegration.isRestaurantMode() &&
+      (this.restaurantIntegration.hasOpenTableSession() ||
+        this.restaurantIntegration.currentTableSession()?.table_id != null)
+    ) {
+      return 'mesa';
+    }
+    return 'llevar';
+  }
+
   onCheckout(): void {
     if (!this.cartState() || this.isEmpty) return;
 
@@ -2137,16 +2374,15 @@ export class PosComponent {
     // validar") is removed in favour of the shell handler.
     if (this.isEditMode()) {
       this.mode.set('edit');
-      this.checkoutIntent.set('pickup');
+      this.initialEntrega.set(this.entregaChoiceForEditingOrder());
       this.showCheckoutModal.set(true);
       return;
     }
 
-    // Fase 5·B3: el checkout sin envío ('pickup') pasa por el SHELL con
-    // stepper — único checkout del POS. mode='create-payment' so the shell
-    // skips Actualizar and shows only the Cobro CTA.
+    // Fase 5·B3: el checkout pasa por el SHELL con stepper — único checkout del POS.
+    // mode='create-payment' so the shell skips Actualizar and shows only the Cobro CTA.
     this.mode.set('create-payment');
-    this.checkoutIntent.set('pickup');
+    this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(true);
   }
 
@@ -2193,7 +2429,7 @@ export class PosComponent {
     // the legacy OrderPaymentModalComponent for non-edit flows.
     if (this.isEditMode()) {
       this.mode.set('edit');
-      this.checkoutIntent.set('pickup');
+      this.initialEntrega.set(this.entregaChoiceForEditingOrder());
       this.showCheckoutModal.set(true);
       return;
     }
@@ -2542,10 +2778,11 @@ export class PosComponent {
         discount_amount:
           paymentData.order?.discount_amount || csm.discountAmount,
         total_amount: paymentData.order?.total_amount || csm.total,
-        customer_name: paymentData.isAnonymousSale
-          ? 'Consumidor Final'
-          : paymentData.order?.customer_name ||
-            (sc ? `${sc.first_name} ${sc.last_name}` : ''),
+        customer_name: resolvePosPaymentCustomerName(
+          paymentData.order,
+          sc,
+          !!paymentData.isAnonymousSale,
+        ),
         customer_email:
           !paymentData.isAnonymousSale && sc?.email
             ? sc.email
@@ -2568,7 +2805,7 @@ export class PosComponent {
         : 'Venta procesada correctamente';
 
       this.toastService.success(successMessage);
-      this.onClearCart();
+      this.clearCartAfterCompletedSale();
       this.productRefreshCounter.update((v) => v + 1);
 
       if (sc?.fromQueue && sc?.queueEntryId && paymentData.order?.id) {
@@ -2599,7 +2836,7 @@ export class PosComponent {
       this.editingOrder.set(null);
       this.readyToPayOrder.set(null);
       this.mode.set('create-draft');
-      this.checkoutIntent.set('pickup');
+      this.initialEntrega.set(this.resolveDefaultEntrega());
     }
 
     // CP-DTLP Phase E.2 / QUI-764 — encadenar tiquete de despacho
@@ -2641,7 +2878,7 @@ export class PosComponent {
     this.currentOrderNumber.set(null);
     this.readyToPayOrder.set(null);
     this.mode.set('create-draft');
-    this.checkoutIntent.set('pickup');
+    this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(false);
 
     // Drop the `editOrder` query param too so a browser refresh on the same
@@ -2917,7 +3154,11 @@ export class PosComponent {
       .subscribe({
         next: () => {
           this.customItemModalOpen.set(false);
-          this.showCartModal.set(true);
+          // Solo móvil/tablet: en PC el carrito ya está visible al lado y
+          // abrir el estado del modal-cart dejaría un signal rancio.
+          if (this.isMobile() || this.isTablet()) {
+            this.showCartModal.set(true);
+          }
           this.toastService.success('Ítem personalizado agregado');
         },
         error: (error: any) => {
@@ -3445,28 +3686,6 @@ export class PosComponent {
     this.onCheckout();
   }
 
-  // Shipping Modal Methods
-  onShipping(): void {
-    if (!this.cartState() || this.isEmpty) {
-      this.toastService.warning(EMPTY_CART_MESSAGE);
-      return;
-    }
-    // Fase 5·B3: el flujo DELIVERY vive en el shell con stepper (único checkout).
-    this.checkoutIntent.set('delivery');
-    // CP-POS-ENVIO-REGRESSION-001: el shell default a 'create-draft' y su steps()
-    // short-circuita a [Cliente] cuando mode==='create-draft'. Sin esto, Envío y
-    // Cobro desaparecen. mode='create-payment' desbloquea la rama delivery de
-    // steps() que retorna [Cliente, Envío, Cobro]. Espejo del patrón pickup
-    // (onCheckout línea ~1863).
-    this.mode.set('create-payment');
-    this.showCheckoutModal.set(true);
-  }
-
-  onShippingFromModal(): void {
-    this.showCartModal.set(false);
-    this.onShipping();
-  }
-
   onShippingCompleted(shippingData: any): void {
     if (!this.cartState() || this.isEmpty) return;
 
@@ -3537,7 +3756,7 @@ export class PosComponent {
 
       this.showOrderConfirmation.set(true);
       this.toastService.success('Orden con envío creada correctamente');
-      this.onClearCart();
+      this.clearCartAfterCompletedSale();
       this.productRefreshCounter.update((v) => v + 1);
 
       if (sc?.fromQueue && sc?.queueEntryId && shippingData.order?.id) {
@@ -3878,10 +4097,20 @@ export class PosComponent {
    * `POS_CUSTOMER_REQUIRED_001` locally — saves a round-trip and matches
    * the backend's authoritative rejection.
    *
-   * Shipping fields: forwarded from `state.shippingContext` (populated by
-   * `loadFromOrder`). Undefined keys are omitted, not nulled — the editor
-   * endpoint treats absent keys as "no change" and any explicit `null`
-   * could clear a value the cashier did not intend to clear.
+   * Shipping fields: forwarded from `state.shippingContext`. Hasta F-FLETE
+   * esta nota mentía — decía "populated by `loadFromOrder`" cuando NADIE lo
+   * escribía y este bloque nunca podía emitir una sola clave de envío. Hoy el
+   * escritor existe (`PosCartService.buildShippingContextFromOrder`).
+   *
+   * OJO: este método es el carril LEGADO. Su único llamador,
+   * `updateExistingOrder()`, es privado y no lo invoca nadie — el carril vivo
+   * es `PosCheckoutShellComponent.buildEditorShippingPayload`, que consume el
+   * MISMO `state.shippingContext`. Si cambias la política de flete, cámbiala
+   * allí también o los dos carriles divergen.
+   *
+   * Undefined keys are omitted, not nulled — the editor endpoint treats
+   * absent keys as "no change" and any explicit `null` could clear a value
+   * the cashier did not intend to clear.
    *
    * `saveDraft` keeps using the cart-shaped builder in `PosPaymentService` —
    * drafts are a different endpoint with a different contract.

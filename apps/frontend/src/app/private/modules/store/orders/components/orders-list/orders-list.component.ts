@@ -46,6 +46,8 @@ import {
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { OrderPrintService } from '../../services/order-print.service';
 import { OrdersListSseService } from '../../services/orders-list-sse.service';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 
 @Component({
   selector: 'app-orders-list',
@@ -437,7 +439,7 @@ export class OrdersListComponent {
       action: (order: Order) => this.cancelOrder(order),
       variant: 'danger',
       show: (order: Order) =>
-        ['created', 'pending_payment', 'processing'].includes(order.state),
+        order.cancellation_policy?.can_cancel === true,
     },
   ];
 
@@ -1196,6 +1198,15 @@ export class OrdersListComponent {
   }
 
   async cancelOrder(order: Order): Promise<void> {
+    if (order.cancellation_policy?.can_cancel !== true) {
+      const code = order.cancellation_policy?.reason_code;
+      this.toastService.warning(
+        code
+          ? ERROR_MESSAGES[code]
+          : 'No se puede anular esta orden. Abre el detalle para consultar las acciones disponibles.',
+      );
+      return;
+    }
     const confirmed = await this.dialogService.confirm({
       title: 'Cancelar Orden',
       message: `¿Estás seguro de que deseas cancelar la orden ${order.order_number}? Esta acción no se puede deshacer.`,
@@ -1215,9 +1226,7 @@ export class OrdersListComponent {
           },
           error: (error: any) => {
             console.error('Error cancelling order:', error);
-            this.toastService.error(
-              'Error al cancelar la orden. Por favor intenta nuevamente.',
-            );
+            this.toastService.error(extractApiErrorMessage(error));
           },
         });
     }

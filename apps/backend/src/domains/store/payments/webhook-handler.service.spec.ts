@@ -1,3 +1,4 @@
+import { OrderStockCommitService } from '../inventory/shared/services/order-stock-commit.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { WebhookHandlerService } from './services/webhook-handler.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -13,6 +14,8 @@ describe('WebhookHandlerService', () => {
   let service: WebhookHandlerService;
   let prisma: StorePrismaService;
   let orderFlow: { confirmPayment: jest.Mock; cancelOrder: jest.Mock };
+  let projectTablePayment: jest.Mock;
+  let closeTableSession: jest.Mock;
 
   const mockStripeEvent: WebhookEvent = {
     processor: 'stripe',
@@ -36,6 +39,8 @@ describe('WebhookHandlerService', () => {
   };
 
   beforeEach(async () => {
+    projectTablePayment = jest.fn().mockResolvedValue(null);
+    closeTableSession = jest.fn();
     const mockPrismaService: any = {
       payments: {
         findFirst: jest.fn(),
@@ -44,7 +49,7 @@ describe('WebhookHandlerService', () => {
         updateMany: jest.fn(),
       },
       orders: {
-        findUnique: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({id: 1, store_id: 7, state: 'pending_payment', grand_total: 100, payments: []}),
         update: jest.fn(),
       },
       invoices: {
@@ -59,6 +64,7 @@ describe('WebhookHandlerService', () => {
       // Dedup guard: 1 inserted row = this event has not been seen. Returning 0
       // would make every test below exit early as a duplicate.
       $executeRaw: jest.fn().mockResolvedValue(1),
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 1, state: 'pending_payment' }]),
     };
     // updatePaymentStatus wraps lookup + compare-and-swap + order transition in
     // ONE transaction. Handing the same object back as `tx` keeps the tests'
@@ -73,11 +79,12 @@ describe('WebhookHandlerService', () => {
     // concludes a concurrent webhook already finalized the row and bails out.
     mockPrismaService.payments.updateMany.mockResolvedValue({ count: 1 });
 
-    orderFlow = { confirmPayment: jest.fn(), cancelOrder: jest.fn() };
+    orderFlow = { confirmPayment: jest.fn().mockResolvedValue({state:'processing',payment_confirmation_applied:true}), cancelOrder: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WebhookHandlerService,
+        { provide: OrderStockCommitService, useValue: { commitOrderDelivery: jest.fn().mockResolvedValue({totalCost:0,committedItemCount:0}) } },
         {
           provide: StorePrismaService,
           useValue: mockPrismaService,
@@ -100,7 +107,7 @@ describe('WebhookHandlerService', () => {
         },
         {
           provide: TableSessionsService,
-          useValue: { closeSession: jest.fn() },
+          useValue: { projectOrderPaymentToTableSession: projectTablePayment, closeSession: closeTableSession },
         },
         // A.3 CP-facturacion-fixes: webhook auto-send deps.
         {
@@ -138,7 +145,7 @@ describe('WebhookHandlerService', () => {
       jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue(mockPayment);
       jest.spyOn(prisma.payments, 'update').mockResolvedValue({});
       jest.spyOn(prisma.orders, 'findUnique').mockResolvedValue({
-        id: 1,
+        id: 1, store_id: 7, grand_total: 100,
         payments: [],
       });
       jest.spyOn(prisma.orders, 'update').mockResolvedValue({});
@@ -155,7 +162,7 @@ describe('WebhookHandlerService', () => {
       jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue(mockPayment);
       jest.spyOn(prisma.payments, 'update').mockResolvedValue({});
       jest.spyOn(prisma.orders, 'findUnique').mockResolvedValue({
-        id: 1,
+        id: 1, store_id: 7, grand_total: 100,
         payments: [],
       });
       jest.spyOn(prisma.orders, 'update').mockResolvedValue({});
@@ -203,7 +210,7 @@ describe('WebhookHandlerService', () => {
       jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue(mockPayment);
       jest.spyOn(prisma.payments, 'update').mockResolvedValue({});
       jest.spyOn(prisma.orders, 'findUnique').mockResolvedValue({
-        id: 1,
+        id: 1, store_id: 7, grand_total: 100,
         payments: [],
       });
       jest.spyOn(prisma.orders, 'update').mockResolvedValue({});
@@ -249,6 +256,93 @@ describe('WebhookHandlerService', () => {
       expect(result.transitioned).toBe(false);
       expect(result.shouldConfirmOrder).toBe(false);
       expect(orderFlow.confirmPayment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('table payment projection (B.2)', () => {
+    it('delegates projection to order confirmation without a second webhook write', async () => {
+      (prisma.orders.findUnique as jest.Mock).mockResolvedValue({
+        id: 1, store_id: 7, state: 'pending_payment', channel: 'pos', delivery_type: 'dine_in',
+      });
+      await service['confirmOrderPaid'](1);
+
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect(projectTablePayment).not.toHaveBeenCalled();
+      expect(prisma.table_sessions.findFirst).not.toHaveBeenCalled();
+      expect(closeTableSession).not.toHaveBeenCalled();
+    });
+
+    it('propagates an OrderFlow projection failure after the payment commit', async () => {
+      (prisma.orders.findUnique as jest.Mock).mockResolvedValue({
+        id: 1, store_id: 7, state: 'pending_payment', channel: 'pos', delivery_type: 'dine_in',
+      });
+      const projectionError = new Error('table projection failed after commit');
+      orderFlow.confirmPayment.mockRejectedValueOnce(projectionError);
+
+      await expect(service['confirmOrderPaid'](1)).rejects.toBe(projectionError);
+      expect(projectTablePayment).not.toHaveBeenCalled();
+      expect(prisma.payments.update).not.toHaveBeenCalled();
+      expect(prisma.table_sessions.findFirst).not.toHaveBeenCalled();
+      expect((service as any).orderStockCommit.commitOrderDelivery).not.toHaveBeenCalled();
+    });
+
+    it('releases webhook dedup after projection failure and repairs on terminal replay without another monetary effect', async () => {
+      const payment = { id: 31, order_id: 1, state: 'pending', gateway_response: null };
+      let orderState = 'pending_payment';
+      const order = () => ({
+        id: 1, store_id: 7, state: orderState, grand_total: 100,
+        channel: 'pos', delivery_type: 'dine_in',
+        payments: [{ state: payment.state, amount: 100 }],
+      });
+      (prisma.payments.findFirst as jest.Mock).mockImplementation(async () => payment);
+      (prisma.orders.findUnique as jest.Mock).mockImplementation(async () => order());
+      ((prisma as any).$queryRaw as jest.Mock).mockImplementation(async () => [{ id: 1, state: orderState }]);
+      ((prisma as any).payments.updateMany as jest.Mock).mockImplementation(async () => {
+        payment.state = 'succeeded';
+        return { count: 1 };
+      });
+      const dedup = (prisma as any).$executeRaw as jest.Mock;
+      dedup.mockReset().mockResolvedValueOnce(1).mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+      const receipt = jest.spyOn(service as any, 'emitPaymentReceivedAccounting')
+        .mockResolvedValue(undefined);
+      const stock = (service as any).orderStockCommit.commitOrderDelivery as jest.Mock;
+      const autoSend = jest.spyOn(service as any, 'autoSendOrderInvoice')
+        .mockResolvedValue(undefined);
+      const projectionError = new Error('table projection failed after commit');
+      const confirmationProjection = jest.fn().mockRejectedValueOnce(projectionError)
+        .mockResolvedValue(undefined);
+      orderFlow.confirmPayment.mockImplementation(async () => {
+        // OrderFlow committed its payment/order transition before projecting.
+        expect(payment.state).toBe('succeeded');
+        orderState = 'processing';
+        await confirmationProjection();
+        return { state: 'processing', payment_confirmation_applied: false };
+      });
+
+      await expect(service.handleWebhook(mockStripeEvent)).rejects.toBe(projectionError);
+      expect(payment.state).toBe('succeeded');
+      expect(dedup).toHaveBeenCalledTimes(2); // insert + release
+      expect(receipt).toHaveBeenCalledTimes(1);
+      expect(stock).not.toHaveBeenCalled();
+      expect(autoSend).not.toHaveBeenCalled();
+
+      await expect(service.handleWebhook(mockStripeEvent)).resolves.toBeUndefined();
+      expect(confirmationProjection).toHaveBeenCalledTimes(2);
+      expect(orderFlow.confirmPayment).toHaveBeenCalledTimes(2);
+      expect((prisma as any).payments.updateMany).toHaveBeenCalledTimes(1);
+      expect(receipt).toHaveBeenCalledTimes(1);
+      expect(stock).toHaveBeenCalledTimes(1);
+      // The existing no-op replay fiscal gate remains the webhook's owner.
+      expect(autoSend).toHaveBeenCalledTimes(1);
+      expect(projectTablePayment).not.toHaveBeenCalled();
+      expect(dedup).toHaveBeenCalledTimes(3); // replay re-claims the released event
+
+      await expect(service.handleWebhook(mockStripeEvent)).resolves.toBeUndefined();
+      expect(dedup).toHaveBeenCalledTimes(4); // successful replay now deduplicates
+      expect(confirmationProjection).toHaveBeenCalledTimes(2);
+      expect(stock).toHaveBeenCalledTimes(1);
+      expect(autoSend).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -420,25 +514,119 @@ describe('WebhookHandlerService', () => {
       });
     });
 
-    it('mostrador: no emite cuando invoicing.pos.auto_emit es false', async () => {
+    // Orden POS con confirmación APLICADA: `confirmPayment` ya disparó
+    // POS_SALE_COMPLETED_EVENT y el listener es el único dueño de la emisión.
+    // posAutoEmit=true a propósito: si la salida temprana faltara, la compuerta
+    // por carril dejaría pasar el envío y el test caería.
+    it('mostrador con confirmación aplicada: NO llama autoSendOrderInvoice ni InvoiceFlow (el listener POS es el dueño)', async () => {
       const { flow } = setup({
         channel: 'pos',
         deliveryType: 'direct_delivery',
-        posAutoEmit: false,
+        posAutoEmit: true,
       });
+      const autoSend = jest.spyOn(service as any, 'autoSendOrderInvoice');
 
       await expect(
         (service as any).confirmOrderPaid(1),
       ).resolves.toBeUndefined();
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect(autoSend).not.toHaveBeenCalled();
       expect(flow.validate).not.toHaveBeenCalled();
       expect(flow.send).not.toHaveBeenCalled();
-      expect(prisma.orders.update).not.toHaveBeenCalledWith({
-        where: { id: 1 },
-        data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+    });
+
+    describe('mostrador con confirmación NO aplicada (replay: la orden ya estaba confirmada)', () => {
+      beforeEach(() => {
+        orderFlow.confirmPayment.mockResolvedValue({
+          state: 'processing',
+          payment_confirmation_applied: false,
+        });
+      });
+
+      it('conserva el camino previo: con invoicing.pos.auto_emit=true envía por aquí', async () => {
+        const { flow } = setup({
+          channel: 'pos',
+          deliveryType: 'direct_delivery',
+          posAutoEmit: true,
+        });
+        const autoSend = jest.spyOn(service as any, 'autoSendOrderInvoice');
+
+        await expect(
+          (service as any).confirmOrderPaid(1),
+        ).resolves.toBeUndefined();
+        expect(autoSend).toHaveBeenCalledWith(1, 'pos', 'direct_delivery');
+        expect(flow.validate).toHaveBeenCalledWith(50);
+        expect(flow.send).toHaveBeenCalledWith(50);
+      });
+
+      it('conserva el camino previo: con invoicing.pos.auto_emit=false no envía', async () => {
+        const { flow } = setup({
+          channel: 'pos',
+          deliveryType: 'direct_delivery',
+          posAutoEmit: false,
+        });
+        const autoSend = jest.spyOn(service as any, 'autoSendOrderInvoice');
+
+        await expect(
+          (service as any).confirmOrderPaid(1),
+        ).resolves.toBeUndefined();
+        // Llega a la compuerta por carril (no es la salida temprana del
+        // listener) y es ELLA la que corta.
+        expect(autoSend).toHaveBeenCalledWith(1, 'pos', 'direct_delivery');
+        expect(flow.validate).not.toHaveBeenCalled();
+        expect(flow.send).not.toHaveBeenCalled();
+        expect(prisma.orders.update).not.toHaveBeenCalledWith({
+          where: { id: 1 },
+          data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+        });
       });
     });
 
-    it('mesa por QR (channel:ecommerce + delivery_type:dine_in) manda por invoicing.pos.auto_emit, no por ecommerce', async () => {
+    // Mesa abierta por QR y pagada online por el comensal: `confirmPayment`
+    // ya disparó POS_SALE_COMPLETED_EVENT (misma compuerta
+    // `isPresentialPosSale`). Enviar aquí también sería la doble transmisión
+    // que la salida temprana existe para impedir. ecommerceAutoEmit=true y
+    // posAutoEmit=true a propósito: ninguna compuerta de carril cortaría.
+    it('mesa por QR (ecommerce + dine_in) con confirmación aplicada: NO llama autoSendOrderInvoice (el listener POS es el dueño)', async () => {
+      const { flow } = setup({
+        channel: 'ecommerce',
+        deliveryType: 'dine_in',
+        posAutoEmit: true,
+        ecommerceAutoEmit: true,
+      });
+      const autoSend = jest.spyOn(service as any, 'autoSendOrderInvoice');
+
+      await expect(
+        (service as any).confirmOrderPaid(1),
+      ).resolves.toBeUndefined();
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect(autoSend).not.toHaveBeenCalled();
+      expect(flow.validate).not.toHaveBeenCalled();
+      expect(flow.send).not.toHaveBeenCalled();
+    });
+
+    it('ecommerce de domicilio con confirmación aplicada: SIGUE por autoSendOrderInvoice (carril tienda en línea)', async () => {
+      const { flow } = setup({
+        channel: 'ecommerce',
+        deliveryType: 'home_delivery',
+        posAutoEmit: false,
+        ecommerceAutoEmit: true,
+      });
+      const autoSend = jest.spyOn(service as any, 'autoSendOrderInvoice');
+
+      await expect(
+        (service as any).confirmOrderPaid(1),
+      ).resolves.toBeUndefined();
+      expect(autoSend).toHaveBeenCalledWith(1, 'ecommerce', 'home_delivery');
+      expect(flow.validate).toHaveBeenCalledWith(50);
+      expect(flow.send).toHaveBeenCalledWith(50);
+    });
+
+    it('mesa por QR con confirmación NO aplicada (replay) manda por invoicing.pos.auto_emit, no por ecommerce', async () => {
+      orderFlow.confirmPayment.mockResolvedValue({
+        state: 'processing',
+        payment_confirmation_applied: false,
+      });
       const { flow } = setup({
         channel: 'ecommerce',
         deliveryType: 'dine_in',
@@ -470,4 +658,47 @@ describe('WebhookHandlerService', () => {
     });
   });
 });
+  describe('anulación vs confirmación', () => {
+    it('APPROVED tardío conserva dinero y conciliación sin revivir ni consumir', async () => {
+      const initial = { id: 8, order_id: 1, state: 'pending' };
+      (prisma.payments.findFirst as jest.Mock).mockResolvedValue({ ...initial, state: 'cancelled' });
+      (prisma.orders.findUnique as jest.Mock).mockResolvedValue({ id: 1, store_id: 7, state: 'cancelled' });
+      ((prisma as any).$queryRaw as jest.Mock).mockResolvedValue([{id: 1, state: 'cancelled'}]);
+      const result = await service['updatePaymentStatus']('txn', 'succeeded', {status: 'APPROVED'}, {matchedPayment: initial});
+      expect(result).toMatchObject({transitioned:true, reconciliationRequired:true, shouldConfirmOrder:false});
+      expect(prisma.payments.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({state:'cancelled'}),
+        data: expect.objectContaining({state:'succeeded', gateway_response: expect.objectContaining({reconciliation_required:true})}),
+      }));
+      expect(orderFlow.confirmPayment).not.toHaveBeenCalled();
+      expect((service as any).eventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('no reanuda un pago marcado para conciliación aunque la orden se reactive', async () => {
+      (prisma.payments.findFirst as jest.Mock).mockResolvedValue({id:8,order_id:1,state:'succeeded',gateway_response:{reconciliation_required:true}});
+      (prisma.orders.findUnique as jest.Mock).mockResolvedValue({id:1,store_id:7,state:'processing',grand_total:100,payments:[{state:'succeeded',amount:100}]});
+      ((prisma as any).$queryRaw as jest.Mock).mockResolvedValue([{id:1,state:'processing'}]);
+      const result = await service['updatePaymentStatus']('txn','succeeded',{});
+      expect(result.shouldConfirmOrder).toBe(false);
+      expect(prisma.payments.updateMany).not.toHaveBeenCalled();
+      expect(orderFlow.confirmPayment).not.toHaveBeenCalled();
+    });
+
+    it('no-op de confirmación cancelada no cierra mesa ni invoca stock', async () => {
+      (prisma.orders.findUnique as jest.Mock).mockResolvedValue({id:1,store_id:7,state:'pending_payment'});
+      orderFlow.confirmPayment.mockResolvedValue({state:'cancelled',payment_confirmation_applied:false});
+      await service['confirmOrderPaid'](1);
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect((service as any).orderStockCommit.commitOrderDelivery).not.toHaveBeenCalled();
+      expect(prisma.table_sessions.findFirst).not.toHaveBeenCalled();
+      expect(projectTablePayment).not.toHaveBeenCalled();
+    });
+
+    it('dedup de Wompi distingue estados de una misma transacción', () => {
+      const event = (status: string): WebhookEvent => ({processor:'wompi',eventType:'transaction.updated',data:{transaction:{id:'same-txn',status}}});
+      expect(service['extractDedupKey'](event('PENDING'))).not.toBe(service['extractDedupKey'](event('APPROVED')));
+      expect(service['extractDedupKey'](event('APPROVED'))).toBe(service['extractDedupKey'](event('APPROVED')));
+    });
+  });
+
 });

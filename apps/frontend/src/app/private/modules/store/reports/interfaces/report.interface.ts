@@ -68,6 +68,15 @@ export interface ReportColumn {
   type: 'text' | 'number' | 'currency' | 'date' | 'date-only' | 'percentage';
   align?: 'left' | 'center' | 'right';
   footer?: 'sum' | 'average' | 'count';
+  badge?: boolean;
+  badgeConfig?: {
+    type?: 'status' | 'custom';
+    colorKey?: string;
+    colorMap?: Record<string, string>;
+    colorFn?: (value: any, item?: any) => string | null | undefined;
+    size?: 'sm' | 'md' | 'lg';
+  };
+  transform?: (value: any, row?: any) => string;
 }
 
 export interface ReportCategory {

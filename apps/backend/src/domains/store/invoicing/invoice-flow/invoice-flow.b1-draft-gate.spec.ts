@@ -147,4 +147,78 @@ describe('invoice-flow · puerta aritmética del borrador (B.1)', () => {
       expect(pre.kind).toBe('pre_fix_residual');
     });
   });
+
+  /**
+   * Forma base (incidente Pollo Arabe, store 105, INC 8 % incluido):
+   * `createFromOrder` persistía `unit_price` = base YA despejada con
+   * `is_inclusive = true`. El gate la leía como bruto, despejaba otra vez
+   * (17129.63 → 15860.77) y dejaba las 18 facturas POS del día en borrador
+   * con INVOICING_CALC_005. Casos de `line()`/`taxRow()` de arriba: no se
+   * modifican, se suman.
+   */
+  describe('judgeDraftLineSnapshot · forma base (unit_price ya despejado)', () => {
+    it('base 17129.63 + INC 1370.37 = 18500 marcada inclusiva ⇒ ok', () => {
+      const judgment = judgeDraftLineSnapshot(
+        line({
+          unit_price: 17129.63,
+          tax_amount: 1370.37,
+          total_amount: 18500,
+        }),
+        [taxRow({ tax_amount: 1370.37 })],
+      );
+      expect(judgment).toEqual({ kind: 'ok' });
+    });
+
+    it('forma base con qty 3 y descuento: 3 × 17129.63 − 1000 = 50388.89 + 4031.11 ⇒ ok', () => {
+      const judgment = judgeDraftLineSnapshot(
+        line({
+          quantity: 3,
+          unit_price: 17129.63,
+          discount_amount: 1000,
+          tax_amount: 4031.11,
+          total_amount: 54420,
+        }),
+        [taxRow({ tax_amount: 4031.11 })],
+      );
+      expect(judgment).toEqual({ kind: 'ok' });
+    });
+
+    it('forma base con descuento mal restado (total − impuesto ≠ neto) NO se exime', () => {
+      // Mismo snapshot pero el total ignora el descuento: la igualdad falla
+      // y el juicio vuelve al kernel.
+      const judgment = judgeDraftLineSnapshot(
+        line({
+          quantity: 3,
+          unit_price: 17129.63,
+          discount_amount: 1000,
+          tax_amount: 4031.11,
+          total_amount: 55420,
+        }),
+        [taxRow({ tax_amount: 4031.11 })],
+      );
+      expect(judgment.kind).not.toBe('ok');
+    });
+
+    it('cuota 0 no se exime por forma base: gross == total pero sin evidencia ⇒ lo juzga el kernel', () => {
+      // Dos filas inclusivas sin monto propio (el detector esculpido de
+      // F-076 no tiene evidencia y no salta): `gross` = total − 0, pero con
+      // cuota cero la igualdad NO prueba forma base.
+      const judgment = judgeDraftLineSnapshot(
+        line({ unit_price: 3000, tax_amount: 0, total_amount: 3000 }),
+        [
+          taxRow({ tax_rate_id: 7, tax_name: 'INC 4% A', tax_rate: 4 }),
+          taxRow({ tax_rate_id: 8, tax_name: 'INC 4% B', tax_rate: 4 }),
+        ],
+      );
+      expect(judgment.kind).toBe('pre_fix_residual');
+    });
+
+    it('bruto real inclusivo sigue igual: pre-fix 2999.99 se detecta', () => {
+      const judgment = judgeDraftLineSnapshot(
+        line({ tax_amount: 222.22, total_amount: 2999.99 }),
+        [taxRow()],
+      );
+      expect(judgment.kind).toBe('pre_fix_residual');
+    });
+  });
 });

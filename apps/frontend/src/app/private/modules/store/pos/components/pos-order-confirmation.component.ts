@@ -10,9 +10,11 @@ import {
   viewChild,
   DestroyRef } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { firstValueFrom, switchMap } from 'rxjs';
 
 
 import {
+  BadgeComponent,
   ButtonComponent,
   ModalComponent,
   IconComponent,
@@ -40,20 +42,38 @@ import {
 } from '../../../../../shared/services/print/dispatch-ticket-autoprint';
 import { DispatchTicketData } from '../../dispatch-ticket/models/dispatch-ticket-data.model';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import {
+  DispatchMethodSelectorModalComponent,
+  DispatchMethod,
+} from '../../orders/components/dispatch-method-selector-modal/dispatch-method-selector-modal.component';
+import { CourierNameModalComponent } from '../../orders/components/courier-name-modal/courier-name-modal.component';
+import { GenerateDispatchWizardComponent } from '../../orders/components/generate-dispatch-wizard/generate-dispatch-wizard.component';
+import { DispatchNotesService } from '../../dispatch-notes/services/dispatch-notes.service';
+import {
+  StoreOrdersService,
+  CreateAddressPayload,
+  UpdateAddressPayload,
+} from '../../orders/services/store-orders.service';
+import { ShippingAddressModalComponent } from '../../orders/components/shipping-address-modal/shipping-address-modal.component';
 
 @Component({
   selector: 'app-pos-order-confirmation',
   standalone: true,
   imports: [
+    BadgeComponent,
     ButtonComponent,
     ModalComponent,
     IconComponent,
     InvoicingNotConfiguredComponent,
-    PosFiscalStatusComponent
+    PosFiscalStatusComponent,
+    DispatchMethodSelectorModalComponent,
+    CourierNameModalComponent,
+    GenerateDispatchWizardComponent,
+    ShippingAddressModalComponent
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen()"
+      [isOpen]="isOpen() && !isDispatchFlowOpen()"
       [size]="'md'"
       [showCloseButton]="true"
       [title]="derivedModalTitle()"
@@ -61,58 +81,54 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
       (closed)="onModalClosed()"
       >
       <div slot="header"
-        class="w-10 h-10 rounded-full bg-success/10 flex items-center justify-center text-success flex-shrink-0">
+        class="confirm-header-icon">
         <app-icon name="check-circle" [size]="24"></app-icon>
       </div>
     
       <!-- Ticket Visual Representation -->
-      <div class="max-w-md mx-auto print:max-w-none">
-        <div
-          class="bg-surface border border-dashed border-border rounded-xl p-6 shadow-sm relative overflow-hidden receipt-container"
-          >
-          <!-- Decorative edges -->
-          <div class="absolute top-0 left-0 right-0 h-1 bg-primary/20"></div>
+      <div class="confirm-wrap print:max-w-none">
+        <div class="confirm-receipt">
+          <!-- Stitch paso 6 — acento superior sólido success. -->
+          <div class="confirm-receipt-accent"></div>
     
-          <div class="text-center border-b border-border pb-6 mb-6">
-            <h3 class="text-xl font-bold text-text-primary tracking-tight">
+          <div class="confirm-store">
+            <h3 class="confirm-store-name">
               Vendix POS
             </h3>
-            <p class="text-sm text-text-secondary font-medium">
+            <p class="confirm-store-sub">
               Sistema de Punto de Venta
             </p>
           </div>
     
-          <div class="space-y-3 mb-6 text-sm">
-            <div class="flex justify-between">
-              <span class="text-text-secondary">Fecha:</span>
-              <span class="font-medium text-text-primary">{{ derivedCurrentDate() }}</span>
+          <div class="confirm-meta">
+            <div class="confirm-row">
+              <span class="confirm-label">Fecha:</span>
+              <span class="confirm-value">{{ derivedCurrentDate() }}</span>
             </div>
-            <div class="flex justify-between">
-              <span class="text-text-secondary">Cajero:</span>
-              <span class="font-medium text-text-primary">{{ cashierName }}</span>
+            <div class="confirm-row">
+              <span class="confirm-label">Cajero:</span>
+              <span class="confirm-value">{{ cashierName }}</span>
             </div>
             @if (derivedCustomerName()) {
-              <div class="flex justify-between">
-                <span class="text-text-secondary">Cliente:</span>
-                <span class="font-medium text-text-primary">{{ derivedCustomerName() }}</span>
+              <div class="confirm-row">
+                <span class="confirm-label">Cliente:</span>
+                <span class="confirm-value">{{ derivedCustomerName() }}</span>
               </div>
             }
           </div>
     
           <!-- Items Table -->
-          <div class="space-y-4 mb-6">
-            <div
-              class="flex justify-between text-xs font-bold text-text-secondary uppercase tracking-wider pb-2 border-b border-border"
-              >
+          <div class="confirm-items">
+            <div class="confirm-items-head">
               <span>Producto</span>
               <span>Total</span>
             </div>
-            <div class="space-y-3">
+            <div class="confirm-items-body">
               @for (item of derivedOrderItems(); track item) {
-                <div class="flex justify-between text-sm">
-                  <div class="flex flex-col">
-                    <span class="font-medium text-text-primary">{{ item.name }}</span>
-	                    <span class="text-xs text-text-secondary">
+                <div class="confirm-item">
+                  <div class="confirm-item-main">
+                    <span class="confirm-item-name">{{ item.name }}</span>
+	                    <span class="confirm-item-detail">
 	                      @if (item.is_weight_product) {
 	                        {{ item.weight }} {{ item.weight_unit }} x {{ formatCurrency(item.unitPrice) }}/{{ item.weight_unit }}
 	                      } @else if (item.saleUnitCode && item.saleQuantity != null) {
@@ -123,18 +139,18 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
 	                      }
 	                    </span>
 	                    @if (item.appliedPriceTierName) {
-	                      <span class="mt-1 inline-flex w-fit rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+	                      <app-badge variant="warning" size="xs" class="confirm-item-badge">
 	                        Tarifa: {{ item.appliedPriceTierName }}
-	                      </span>
+	                      </app-badge>
 	                    }
 	                    @if (item.isPackageUnit && item.unitsPerPackage > 1) {
-	                      <span class="mt-1 inline-flex w-fit rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+	                      <app-badge variant="info" size="xs" class="confirm-item-badge">
 	                        {{ item.quantity }} {{ item.quantity === 1 ? 'paquete' : 'paquetes' }}
 	                        = {{ item.quantity * item.unitsPerPackage }} unid (Caja ×{{ item.unitsPerPackage }})
-	                      </span>
+	                      </app-badge>
 	                    }
 	                  </div>
-                  <span class="font-bold text-text-primary">{{ formatCurrency(item.totalPrice) }}</span>
+                  <span class="confirm-item-total">{{ formatCurrency(item.totalPrice) }}</span>
                 </div>
               }
             </div>
@@ -142,63 +158,61 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
     
           <!-- Summary -->
           <!-- F-134 (C.9, major — revisión 2026-09-14) -->
-          <div class="pt-4 border-t border-border space-y-2.5" aria-live="polite" aria-atomic="true">
+          <div class="confirm-summary" aria-live="polite" aria-atomic="true">
             @if (showSubtotal) {
-              <div class="flex justify-between text-sm text-text-secondary">
+              <div class="confirm-sum-row">
                 <span>Subtotal:</span>
                 <span>{{ formatCurrency(orderSubtotal) }}</span>
               </div>
             }
             @for (promo of derivedAppliedPromotions(); track promo.promotion_id || promo.id || promo.name) {
-              <div class="flex justify-between text-xs text-success">
-                <span class="truncate">
-                  <app-icon name="tag" [size]="12" class="inline mr-1"></app-icon>
+              <div class="confirm-sum-row confirm-sum-promo">
+                <span class="confirm-sum-promo-name">
+                  <app-icon name="tag" [size]="12"></app-icon>
                   {{ promo.name }}
                   @if (promo.code) {
-                    <span class="opacity-70">({{ promo.code }})</span>
+                    <span class="confirm-sum-promo-code">({{ promo.code }})</span>
                   }
                 </span>
-                <span class="font-medium whitespace-nowrap">-{{ formatCurrency(promo.discount_amount) }}</span>
+                <span class="confirm-sum-promo-amount">-{{ formatCurrency(promo.discount_amount) }}</span>
               </div>
             }
             @for (cp of derivedAppliedCoupons(); track cp.coupon_id || cp.id || cp.code) {
-              <div class="flex justify-between text-xs text-success">
-                <span class="truncate">
-                  <app-icon name="ticket" [size]="12" class="inline mr-1"></app-icon>
+              <div class="confirm-sum-row confirm-sum-promo">
+                <span class="confirm-sum-promo-name">
+                  <app-icon name="ticket" [size]="12"></app-icon>
                   Cupón <strong>{{ cp.code }}</strong>
                 </span>
-                <span class="font-medium whitespace-nowrap">-{{ formatCurrency(cp.discount_applied) }}</span>
+                <span class="confirm-sum-promo-amount">-{{ formatCurrency(cp.discount_applied) }}</span>
               </div>
             }
             @if (hasDiscount()) {
-              <div class="flex justify-between text-sm text-destructive font-medium">
+              <div class="confirm-sum-row confirm-sum-discount">
                 <span>Descuento total:</span>
                 <span>-{{ formatCurrency(orderDiscount) }}</span>
               </div>
             }
             @if (printsVatBreakdown()) {
-              <div class="flex justify-between text-sm text-text-secondary">
+              <div class="confirm-sum-row">
                 <span>Impuesto:</span>
                 <span>{{ formatCurrency(orderTax) }}</span>
               </div>
             }
-            <div
-              class="flex justify-between items-center pt-3 mt-2 border-t-2 border-double border-border"
-              >
-              <span class="text-lg font-bold text-text-primary">Total:</span>
-              <span class="text-2xl font-extrabold text-primary">{{ formatCurrency(orderTotal) }}</span>
+            <div class="confirm-grand">
+              <span class="confirm-grand-label">Total:</span>
+              <span class="confirm-grand-amount">{{ formatCurrency(orderTotal) }}</span>
             </div>
           </div>
     
           <!-- Payment Info -->
           @if (paymentInfo) {
-            <div class="mt-6 pt-4 border-t border-border bg-muted/20 -mx-6 px-6 -mb-6 pb-6 rounded-b-xl">
-              <div class="flex justify-between items-center text-sm">
-                <div class="flex items-center gap-2">
-                  <app-icon name="credit-card" [size]="16" class="text-text-secondary"></app-icon>
-                  <span class="font-medium text-text-secondary">{{ paymentInfo.method }}:</span>
+            <div class="confirm-payment">
+              <div class="confirm-payment-row">
+                <div class="confirm-payment-method">
+                  <app-icon name="credit-card" [size]="16"></app-icon>
+                  <span class="confirm-payment-method-name">{{ paymentInfo.method }}:</span>
                 </div>
-                <span class="font-bold text-text-primary">{{ formatCurrency(paymentInfo.amount) }}</span>
+                <span class="confirm-payment-amount">{{ formatCurrency(paymentInfo.amount) }}</span>
               </div>
             </div>
           }
@@ -209,13 +223,13 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
            es información de operación, no parte del documento que se entrega, y
            porque el ticket ya declara por su cuenta si es copia informativa.
            Nunca abre nada: informa mientras el cajero sigue trabajando. -->
-      <div class="max-w-md mx-auto mt-4 print:hidden">
+      <div class="confirm-wrap confirm-fiscal print:hidden">
         @if (fiscalFallbackNotice()) {
-          <div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-snug text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-            <div class="flex items-start gap-2">
-              <app-icon name="alert-triangle" [size]="16" class="mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400"></app-icon>
+          <div class="confirm-contingency" role="alert">
+            <div class="confirm-contingency-body">
+              <app-icon name="alert-triangle" [size]="16" class="confirm-contingency-icon"></app-icon>
               <div>
-                <span class="font-semibold block mb-0.5">Comprobante de contingencia</span>
+                <span class="confirm-contingency-title">Comprobante de contingencia</span>
                 <span>{{ fiscalFallbackNotice() }}</span>
               </div>
             </div>
@@ -238,7 +252,7 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
         ></app-pos-fiscal-status>
       </div>
 
-      <div slot="footer" class="flex flex-col gap-3 w-full">
+      <div slot="footer" class="confirm-footer">
         <!-- CTA Primario: full-width, prominente -->
         <app-button
           variant="primary"
@@ -251,11 +265,11 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
         </app-button>
     
         <!-- Acciones secundarias: ghost, compactos, en fila -->
-        <div class="flex items-center justify-center gap-1 sm:gap-2">
+        <div class="confirm-footer-row">
           @if (derivedIsPaid()) {
             <app-button
               variant="ghost"
-              size="sm"
+              size="md"
               (clicked)="printReceipt()"
               [loading]="printing || awaitingFiscalPrint()"
               [disabled]="awaitingFiscalPrint()"
@@ -266,7 +280,7 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
             </app-button>
           }
     
-          <app-button variant="ghost" size="sm" (clicked)="emailReceipt()" [disabled]="!derivedCustomerEmail()" [loading]="emailing" title="Enviar por Email">
+          <app-button variant="ghost" size="md" (clicked)="emailReceipt()" [disabled]="!derivedCustomerEmail()" [loading]="emailing" title="Enviar por Email">
             <app-icon name="mail" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Email</span>
           </app-button>
@@ -274,22 +288,22 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
           <!-- Emite el documento de verdad (no sólo crea el borrador). Se apaga
                cuando la DIAN ya lo aceptó: reemitir un documento aceptado no es
                un reintento, es un hecho económico distinto. -->
-          <app-button variant="ghost" size="sm" (clicked)="createInvoice()" [disabled]="!orderId || dianConfigsLoading() || alreadyIssued()" [loading]="creatingInvoice()" [title]="invoiceButtonTitle()">
+          <app-button variant="ghost" size="md" (clicked)="createInvoice()" [disabled]="!orderId || dianConfigsLoading() || alreadyIssued()" [loading]="creatingInvoice()" [title]="invoiceButtonTitle()">
             <app-icon name="file-text" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Factura</span>
           </app-button>
     
           <!-- Separador visual entre categorías -->
-          <div class="w-px h-5 bg-[var(--color-border)] mx-1"></div>
+          <div class="confirm-footer-sep"></div>
     
           @if (orderData()?.isShippingSale && orderId) {
-            <app-button variant="ghost" size="sm" (clicked)="dispatchOrder()" [loading]="dispatching()" title="Enviar la orden a despacho">
+            <app-button variant="ghost" size="md" (clicked)="dispatchOrder()" [loading]="dispatching()" title="Enviar la orden a despacho">
               <app-icon name="send" [size]="16" slot="icon" ></app-icon>
               <span class="hidden sm:inline">Despachar</span>
             </app-button>
           }
 
-          <app-button variant="ghost" size="sm" (clicked)="goToOrderDetail()" [disabled]="!orderId" title="Ver detalle de la orden">
+          <app-button variant="ghost" size="md" (clicked)="goToOrderDetail()" [disabled]="!orderId" title="Ver detalle de la orden">
             <app-icon name="external-link" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Ver detalle</span>
           </app-button>
@@ -304,6 +318,45 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
       ></app-invoicing-not-configured>
     }
 
+    <!-- QUI-844 — selector del método de despacho (solo opciones habilitadas) -->
+    <app-dispatch-method-selector-modal
+      [isOpen]="showDispatchSelector()"
+      [enabledMethods]="enabledDispatchMethods()"
+      (selected)="onDispatchMethodSelected($event)"
+      (closed)="showDispatchSelector.set(false)"
+    ></app-dispatch-method-selector-modal>
+
+    <!-- Nombre del domiciliario para "Entrega completa" -->
+    <app-courier-name-modal
+      [isOpen]="showCourierNameModal()"
+      (isOpenChange)="showCourierNameModal.set($event)"
+      (confirmed)="onCourierNameConfirmed($event)"
+      (closed)="onCourierNameClosed()"
+    ></app-courier-name-modal>
+
+    <!-- Wizard de remisión con ruta (orden completa con relaciones) -->
+    <app-generate-dispatch-wizard
+      [isOpen]="showDispatchModal()"
+      [order]="fullDispatchOrder()"
+      (generated)="onDispatchGenerated()"
+      (requestAddress)="onDispatchNeedsAddress()"
+      (closed)="showDispatchModal.set(false)"
+    ></app-generate-dispatch-wizard>
+
+    <!-- Dirección de envío dentro del flujo POS -->
+    @if (showShippingAddressModal()) {
+      <app-shipping-address-modal
+        [customerId]="fullDispatchOrder()?.customer_id ?? null"
+        [customerName]="derivedCustomerName()"
+        [saving]="savingShippingAddress()"
+        [addressId]="editingAddressId()"
+        [initialAddress]="editingInitialAddress()"
+        (close)="showShippingAddressModal.set(false)"
+        (submitForm)="onDispatchAddressSubmit($event)"
+        (submitEdit)="onDispatchAddressEdit($event)"
+      ></app-shipping-address-modal>
+    }
+
     <!-- Aquí NO hay modal de requisitos fiscales, y es deliberado.
          Ver la nota "SIN MODAL DE REQUISITOS FISCALES" en la clase. -->
     `,
@@ -313,11 +366,310 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
         display: block;
       }
 
-      .receipt-container {
-        /* Pseudo-paper texture */
-        background-image: radial-gradient(var(--color-border) 0.5px, transparent 0.5px);
-        background-size: 20px 20px;
-        background-color: var(--color-surface);
+      /* Stitch paso 6 — confirmación post-venta estilo panel: card sólida
+         radius 16 con acento success, jerarquía de totales como la pantalla
+         Stitch (etiqueta + monto grande a la derecha). Textos informativos
+         en neutral-600 (text-secondary falla AA); montos en text-primary. */
+      .confirm-wrap {
+        max-width: 28rem;
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      .confirm-fiscal {
+        margin-top: 16px;
+      }
+
+      .confirm-header-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 999px;
+        background: var(--color-success-50);
+        color: var(--color-success-700);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .confirm-receipt {
+        position: relative;
+        overflow: hidden;
+        background: var(--color-surface);
+        border: 1.5px solid var(--color-border);
+        border-radius: 16px;
+        padding: 24px;
+      }
+
+      .confirm-receipt-accent {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: var(--color-success);
+      }
+
+      .confirm-store {
+        text-align: center;
+        border-bottom: 1px solid var(--color-border);
+        padding-bottom: 24px;
+        margin-bottom: 24px;
+      }
+
+      .confirm-store-name {
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: var(--color-text-primary);
+        margin: 0;
+      }
+
+      .confirm-store-sub {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--color-neutral-600);
+        margin: 4px 0 0;
+      }
+
+      .confirm-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-bottom: 24px;
+        font-size: 14px;
+      }
+
+      .confirm-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .confirm-label {
+        color: var(--color-neutral-600);
+      }
+
+      .confirm-value {
+        font-weight: 500;
+        color: var(--color-text-primary);
+        text-align: right;
+      }
+
+      .confirm-items {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .confirm-items-head {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-neutral-600);
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--color-border);
+      }
+
+      .confirm-items-body {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .confirm-item {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 14px;
+      }
+
+      .confirm-item-main {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        min-width: 0;
+      }
+
+      .confirm-item-name {
+        font-weight: 500;
+        color: var(--color-text-primary);
+      }
+
+      .confirm-item-detail {
+        font-size: 12px;
+        color: var(--color-neutral-600);
+      }
+
+      .confirm-item-badge {
+        margin-top: 4px;
+      }
+
+      .confirm-item-total {
+        font-weight: 700;
+        color: var(--color-text-primary);
+        white-space: nowrap;
+      }
+
+      .confirm-summary {
+        padding-top: 16px;
+        border-top: 1px solid var(--color-border);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .confirm-sum-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 14px;
+        color: var(--color-neutral-600);
+      }
+
+      .confirm-sum-promo {
+        font-size: 12px;
+        color: var(--color-success-700);
+      }
+
+      .confirm-sum-promo-name {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .confirm-sum-promo-code {
+        opacity: 0.75;
+      }
+
+      .confirm-sum-promo-amount {
+        font-weight: 500;
+        white-space: nowrap;
+      }
+
+      .confirm-sum-discount {
+        font-weight: 500;
+        color: var(--color-error-700);
+      }
+
+      .confirm-grand {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding-top: 12px;
+        margin-top: 8px;
+        border-top: 1px solid var(--color-border);
+      }
+
+      .confirm-grand-label {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--color-text-primary);
+      }
+
+      .confirm-grand-amount {
+        font-size: 24px;
+        font-weight: 800;
+        color: var(--color-text-primary);
+      }
+
+      .confirm-payment {
+        margin-top: 24px;
+        padding-top: 16px;
+        border-top: 1px solid var(--color-border);
+      }
+
+      .confirm-payment-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        font-size: 14px;
+        background: var(--color-surface-secondary);
+        border-radius: 12px;
+        padding: 12px 16px;
+      }
+
+      .confirm-payment-method {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--color-neutral-600);
+      }
+
+      .confirm-payment-method-name {
+        font-weight: 500;
+      }
+
+      .confirm-payment-amount {
+        font-weight: 700;
+        color: var(--color-text-primary);
+      }
+
+      .confirm-contingency {
+        margin-bottom: 12px;
+        border-radius: 12px;
+        border: 1px solid var(--color-warning-200);
+        background: var(--color-warning-50);
+        padding: 12px;
+        font-size: 12px;
+        line-height: 1.4;
+        color: var(--color-warning-800);
+      }
+
+      .confirm-contingency-body {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .confirm-contingency-icon {
+        margin-top: 2px;
+        flex-shrink: 0;
+        color: var(--color-warning-700);
+      }
+
+      .confirm-contingency-title {
+        font-weight: 600;
+        display: block;
+        margin-bottom: 2px;
+      }
+
+      .confirm-footer {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: 100%;
+      }
+
+      .confirm-footer-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+      }
+
+      .confirm-footer-sep {
+        width: 1px;
+        height: 20px;
+        background: var(--color-border);
+        margin-left: 4px;
+        margin-right: 4px;
+      }
+
+      @media print {
+        .confirm-wrap {
+          max-width: none;
+        }
       }
     `,
   ] })
@@ -620,6 +972,8 @@ private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
   private ticketService = inject(PosTicketService);
   private repartosService = inject(RepartosService);
+  private readonly dispatchNotesService = inject(DispatchNotesService);
+  private readonly storeOrdersService = inject(StoreOrdersService);
   private currencyService = inject(CurrencyFormatService);
   private store = inject(Store);
   // CP-DTLP Phase E.1/E.2 — disparador POS del tiquete de despacho.
@@ -653,8 +1007,8 @@ private authFacade = inject(AuthFacade);
 
   /**
    * Decisión del usuario 2026-08-31: opt-in por admin para que el tiquete
-   * de despacho funcione como tiquete de reclamo en ventas de mostrador
-   * (`direct_delivery`) y para llevar (`pickup`). Enmienda al ADR-6;
+   * de despacho funcione como tiquete de reclamo en ventas de mostrador,
+   * incluido Para llevar (`direct_delivery`), y en recogida diferida (`pickup`). Enmienda al ADR-6;
    * default false. Pasado al predicado compartido en
    * `shouldAutoPrintDispatchTicket`.
    */
@@ -931,6 +1285,9 @@ private authFacade = inject(AuthFacade);
   }
 
   onModalClosed(): void {
+    // Ocultamiento programático mientras despacha: el ticket vuelve al
+    // cerrar/cancelar el flujo, no es un cierre real de la pantalla.
+    if (this.isDispatchFlowOpen()) return;
     this.cleanupFiscalPrintTimeout();
     this.awaitingFiscalPrint.set(false);
     this.closed.emit();
@@ -1054,13 +1411,93 @@ private authFacade = inject(AuthFacade);
     this.viewDetail.emit(this.orderId);
   }
 
+  /** Chooser del método de despacho (QUI-844): solo ventas con envío. */
+  showDispatchSelector = signal(false);
   /**
-   * "Despachar" (solo ventas con envío): publica la orden al pool de reparto
-   * (`POST /store/dispatch-notes/orders/:orderId/send-to-dispatch`, idempotente)
-   * para que un repartidor la tome. En éxito arranca una nueva venta
-   * (`startNewSale()`), replicando el reinicio total de "Nueva compra".
+   * Mientras el flujo de despacho está abierto o ejecutándose (vía directa
+   * sin modal: pool/entrega), el ticket se oculta. Al cerrar/cancelar, el
+   * ticket vuelve; al completar, se va a nueva venta.
+   */
+  readonly isDispatchFlowOpen = computed(
+    () =>
+      this.showDispatchSelector() ||
+      this.showCourierNameModal() ||
+      this.showDispatchModal() ||
+      this.showShippingAddressModal() ||
+      this.dispatching(),
+  );
+  /** Nombre del domiciliario para "Entrega completa". */
+  showCourierNameModal = signal(false);
+  /** Wizard de remisión con ruta ("Crear remisión con ruta de despacho"). */
+  showDispatchModal = signal(false);
+  /**
+   * QUI-844 — métodos que la tienda ofrece, con `?? true` para tiendas
+   * persistidas antes de estos flags (todo habilitado, como antes).
+   */
+  readonly enabledDispatchMethods = computed<DispatchMethod[]>(() => {
+    const dispatch = this.settingsFacade.dispatch();
+    const methods: Array<{ method: DispatchMethod; flag: boolean }> = [
+      { method: 'with-note', flag: dispatch?.enable_dispatch_with_remision ?? true },
+      { method: 'direct', flag: dispatch?.enable_dispatch_direct_delivery ?? true },
+      { method: 'to-dispatch', flag: dispatch?.enable_dispatch_to_pool ?? true },
+    ];
+    return methods.filter((m) => m.flag).map((m) => m.method);
+  });
+
+  /**
+   * "Despachar" (solo ventas con envío): abre el selector con los métodos
+   * habilitados (QUI-844). Con uno solo activo se ejecuta directo sin modal.
    */
   dispatchOrder(): void {
+    if (!this.orderId || this.dispatching()) return;
+    const enabled = this.enabledDispatchMethods();
+    if (enabled.length === 1) {
+      this.onDispatchMethodSelected(enabled[0]);
+      return;
+    }
+    if (enabled.length === 0) {
+      this.toastService.warning(
+        'Esta tienda no tiene ningún método de despacho habilitado. Actívalo en Ajustes > Logística.',
+      );
+      return;
+    }
+    this.showDispatchSelector.set(true);
+  }
+
+  /**
+   * Orden completa con relaciones (`order_items`, dirección de envío) para el
+   * wizard. El resumen del POS (`orderData`) no trae esas relaciones y el
+   * wizard la rechazaría como "sin dirección / sin items despachables".
+   */
+  readonly fullDispatchOrder = signal<any>(null);
+  /** Modal de dirección de envío (crear/editar) dentro del flujo POS. */
+  showShippingAddressModal = signal(false);
+  savingShippingAddress = signal(false);
+  editingAddressId = signal<number | null>(null);
+  editingInitialAddress = signal<any>(null);
+
+  /** Enruta el método elegido a su flujo (misma matriz que order-details). */
+  onDispatchMethodSelected(method: DispatchMethod): void {
+    this.showDispatchSelector.set(false);
+    switch (method) {
+      case 'with-note':
+        this.openDispatchWizard();
+        break;
+      case 'direct':
+        this.showCourierNameModal.set(true);
+        break;
+      case 'to-dispatch':
+        this.publishOrderToPool();
+        break;
+      default: {
+        const _exhaustive: never = method;
+        return _exhaustive;
+      }
+    }
+  }
+
+  /** "Enviar a despacho": publica al pool (idempotente) y arranca nueva venta. */
+  private publishOrderToPool(): void {
     if (!this.orderId || this.dispatching()) return;
     this.dispatching.set(true);
     this.repartosService
@@ -1084,6 +1521,175 @@ private authFacade = inject(AuthFacade);
           this.toastService.error(
             err?.message || 'No se pudo enviar la orden a despacho',
           );
+        },
+      });
+  }
+
+  /** Confirm del modal de domiciliario: corre la entrega completa. */
+  onCourierNameConfirmed(name: string): void {
+    this.showCourierNameModal.set(false);
+    void this.directFullDelivery(name);
+  }
+
+  /** Cancel del modal de domiciliario: aborta sin crear nada. */
+  onCourierNameClosed(): void {
+    this.showCourierNameModal.set(false);
+  }
+
+  /**
+   * "Entrega completa": crea una remisión confirmada SIN ruta y la marca como
+   * entregada (mismos 2 endpoints que order-details). Al terminar arranca una
+   * nueva venta; ante un fallo se avisa y se aborta.
+   */
+  private async directFullDelivery(courierName: string): Promise<void> {
+    const orderId = this.orderId;
+    if (!orderId || this.dispatching()) return;
+    this.dispatching.set(true);
+    try {
+      const note = await firstValueFrom(
+        this.dispatchNotesService.createFromOrder(Number(orderId), {
+          target_status: 'confirmed',
+          route_assignment: { mode: 'none' },
+          items: [],
+        }),
+      );
+      await firstValueFrom(
+        this.dispatchNotesService.deliver(note.id, { courier_name: courierName }),
+      );
+      this.toastService.success('Orden entregada');
+      this.startNewSale();
+    } catch (err: any) {
+      this.toastService.error(
+        err?.error?.message ||
+          err?.message ||
+          'No se pudo completar la entrega directa',
+      );
+    } finally {
+      this.dispatching.set(false);
+    }
+  }
+
+  /** Remisión generada desde el wizard: avisa y arranca una nueva venta. */
+  onDispatchGenerated(): void {
+    this.showDispatchModal.set(false);
+    this.toastService.success('Remisión generada');
+    this.startNewSale();
+  }
+
+  /**
+   * "Crear remisión": carga la orden completa y abre el wizard. Sin las
+   * relaciones el wizard no puede validar dirección ni items.
+   */
+  private openDispatchWizard(): void {
+    const orderId = this.orderId;
+    if (!orderId || this.dispatching()) return;
+    this.dispatching.set(true);
+    this.storeOrdersService
+      .getOrderById(String(orderId))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (order: any) => {
+          this.dispatching.set(false);
+          const data = order && typeof order === 'object' && 'success' in order
+            ? (order.data ?? order)
+            : order;
+          if (!data) {
+            this.toastService.error('No se pudo cargar la orden para despachar');
+            return;
+          }
+          this.fullDispatchOrder.set(data);
+          this.showDispatchModal.set(true);
+        },
+        error: (err: any) => {
+          this.dispatching.set(false);
+          this.toastService.error(
+            err?.message || 'No se pudo cargar la orden para despachar',
+          );
+        },
+      });
+  }
+
+  /** El wizard pidió dirección: abre el modal de captura en modo crear. */
+  onDispatchNeedsAddress(): void {
+    if (!this.fullDispatchOrder()) return;
+    this.editingAddressId.set(null);
+    this.editingInitialAddress.set(null);
+    this.showShippingAddressModal.set(true);
+  }
+
+  /** Guarda la edición de la dirección y refresca la orden del wizard. */
+  onDispatchAddressEdit(event: { addressId: number; payload: UpdateAddressPayload }): void {
+    if (this.savingShippingAddress()) return;
+    this.savingShippingAddress.set(true);
+    this.storeOrdersService
+      .updateAddress(event.addressId, event.payload)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.savingShippingAddress.set(false);
+          this.showShippingAddressModal.set(false);
+          this.refreshDispatchOrder();
+          this.toastService.success('Dirección de entrega actualizada');
+        },
+        error: (err: unknown) => {
+          this.savingShippingAddress.set(false);
+          this.toastService.error(
+            err instanceof Error ? err.message : 'No se pudo actualizar la dirección',
+          );
+        },
+      });
+  }
+
+  /** Crea la dirección, la asigna a la orden y refresca el wizard. */
+  onDispatchAddressSubmit(payload: CreateAddressPayload): void {
+    const order = this.fullDispatchOrder();
+    if (!order || this.savingShippingAddress()) return;
+    this.savingShippingAddress.set(true);
+    this.storeOrdersService
+      .createCustomerAddress(payload)
+      .pipe(
+        switchMap((address: any) =>
+          this.storeOrdersService.updateOrderShippingAddress(
+            String(order.id),
+            Number(address.id),
+          ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (updated: any) => {
+          const data = updated?.data ?? updated;
+          if (data) this.fullDispatchOrder.set(data);
+          else this.refreshDispatchOrder();
+          this.savingShippingAddress.set(false);
+          this.showShippingAddressModal.set(false);
+          this.toastService.success('Dirección de entrega asignada a la orden');
+        },
+        error: (err: unknown) => {
+          this.savingShippingAddress.set(false);
+          this.toastService.error(
+            err instanceof Error ? err.message : 'No se pudo asignar la dirección',
+          );
+        },
+      });
+  }
+
+  /** Recarga la orden completa del wizard (tras guardar dirección). */
+  private refreshDispatchOrder(): void {
+    const order = this.fullDispatchOrder();
+    if (!order?.id) return;
+    this.storeOrdersService
+      .getOrderById(String(order.id))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (fresh: any) => {
+          const data = fresh && typeof fresh === 'object' && 'success' in fresh
+            ? (fresh.data ?? fresh)
+            : fresh;
+          if (data) this.fullDispatchOrder.set(data);
+        },
+        error: () => {
+          // La dirección ya quedó guardada; el wizard revalida con lo que tiene.
         },
       });
   }
@@ -1333,8 +1939,8 @@ private authFacade = inject(AuthFacade);
    *
    * Con `trigger === 'automatic'`, exige además `print_dispatch_ticket_auto_with_pos`
    * (opt-in por admin). Con `trigger === 'explicit'`, sólo exige el switch
-   * global. `direct_delivery` se salta siempre. Sin envío no hay a quién
-   * despachar.
+   * global. Sin el opt-in de mostrador, `direct_delivery` no autoimprime;
+   * con él, Para llevar sí puede generar el tiquete de reclamo.
    */
   private async printDispatchTicketIfNeeded(
     trigger: 'automatic' | 'explicit',
@@ -1348,8 +1954,8 @@ private authFacade = inject(AuthFacade);
       printDispatchTicketEnabled: this.printDispatchTicketEnabled(),
       printDispatchTicketAuto:
         trigger === 'automatic' ? this.printDispatchTicketAutoWithPos() : undefined,
-      // Decisión del usuario 2026-08-31: tiquete de reclamo en mostrador
-      // y para llevar. Mismo flag, mismo origen que el detalle de orden.
+      // Decisión del usuario 2026-08-31: tiquete de reclamo para mostrador
+      // (incluido Para llevar) y pickup real. Mismo flag que el detalle.
       counterEnabled: this.printDispatchTicketOnCounter(),
       deliveryType: order.delivery_type,
       isShippingSale: order.isShippingSale,

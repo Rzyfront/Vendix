@@ -458,6 +458,82 @@ describe('ProductsBulkEditService', () => {
 
       expect(result.items[0].status).toBe('ok');
     });
+
+    describe('P1-4 — combinación de impuestos por fila', () => {
+      const ivaAssigned = {
+        product_id: 1,
+        tax_category_id: 3,
+        is_inclusive: false,
+        tax_categories: {
+          id: 3,
+          name: 'IVA 19%',
+          tax_type: 'iva',
+          tax_rates: [{ store_id: 10 }],
+        },
+      };
+
+      beforeEach(() => {
+        (prisma as any).tax_categories = { findMany: jest.fn() };
+        (prisma as any).product_tax_assignments = { findMany: jest.fn() };
+      });
+
+      it('ADD de INC sobre un producto con IVA ⇒ fila error PROD_TAX_COMBO_001, la otra fila ok', async () => {
+        prisma.products.findMany.mockResolvedValue([
+          makeProduct({ id: 1, store_id: 10 }),
+          makeProduct({ id: 2, store_id: 10 }),
+        ]);
+        (prisma as any).tax_categories.findMany.mockResolvedValue([
+          {
+            id: 4,
+            name: 'INC 8%',
+            is_inclusive: false,
+            tax_type: 'inc',
+            tax_rates: [{ is_inclusive: false, store_id: 10 }],
+          },
+        ]);
+        (prisma as any).product_tax_assignments.findMany.mockResolvedValue([
+          ivaAssigned,
+        ]);
+
+        const result = await service.preview(
+          makeDto([1, 2], {
+            tax_category_action: { mode: 'add', ids: [4] },
+          }),
+        );
+
+        const [first, second] = result.items;
+        expect(first.status).toBe('error');
+        expect(first.code).toBe('PROD_TAX_COMBO_001');
+        expect(first.message).toContain('IVA e INC son excluyentes');
+        expect(second.status).not.toBe('error');
+      });
+
+      it('REPLACE de IVA por INC es válido (el IVA sale del conjunto)', async () => {
+        prisma.products.findMany.mockResolvedValue([
+          makeProduct({ id: 1, store_id: 10 }),
+        ]);
+        (prisma as any).tax_categories.findMany.mockResolvedValue([
+          {
+            id: 4,
+            name: 'INC 8%',
+            is_inclusive: false,
+            tax_type: 'inc',
+            tax_rates: [{ is_inclusive: false, store_id: 10 }],
+          },
+        ]);
+        (prisma as any).product_tax_assignments.findMany.mockResolvedValue([
+          ivaAssigned,
+        ]);
+
+        const result = await service.preview(
+          makeDto([1], {
+            tax_category_action: { mode: 'replace', ids: [4] },
+          }),
+        );
+
+        expect(result.items[0].status).not.toBe('error');
+      });
+    });
   });
 
   describe('apply()', () => {

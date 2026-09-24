@@ -1,0 +1,101 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="onInnerOpenChange($event)"
+  [dialog]="true"
+  [closeOnBackdrop]="false"
+  [closeOnEscape]="!inFlight()"
+  [showCloseButton]="!inFlight()"
+  title="Destino del plato"
+  [subtitle]="itemName()"
+  size="md"
+>
+  <div class="space-y-4 p-1">
+    <p class="text-sm text-text-secondary">
+      Este plato se excluirá de la cuenta. El destino elegido quedará registrado junto con el motivo.
+    </p>
+    @if (showDestination()) {
+    <fieldset class="space-y-2">
+      <legend class="text-sm font-semibold text-gray-900 mb-2">¿Qué sucede con el plato?</legend>
+      <label class="flex gap-3 rounded-lg border border-border p-3 cursor-pointer">
+        <input type="radio" name="item-cancellation-destination" value="waste"
+          [checked]="destination() === 'waste'"
+          [disabled]="inFlight()"
+          (change)="destination.set('waste')" />
+        <span><strong>Desechar / registrar merma</strong><br />
+          <span class="text-sm text-text-secondary">No se devuelve al inventario lo que ya se consumió. Es la opción segura por defecto.</span>
+        </span>
+      </label>
+      <label class="flex gap-3 rounded-lg border border-border p-3"
+        [class.opacity-50]="!canReuse()"
+        [class.cursor-pointer]="canReuse()">
+        <input type="radio" name="item-cancellation-destination" value="reuse"
+          [checked]="destination() === 'reuse'"
+          [disabled]="!canReuse() || inFlight()"
+          (change)="destination.set('reuse')" />
+        <span><strong>Reutilizar / devolver a stock</strong><br />
+          <span class="text-sm text-text-secondary">
+            @if (canReuse()) {
+              Devuelve los insumos aprovechables al inventario.
+            } @else {
+              No hay insumos disparados que reutilizar.
+            }
+          </span>
+        </span>
+      </label>
+    </fieldset>
+    } @else {
+      <p class="text-sm text-text-secondary">Aún no se ha preparado: no hay ingredientes consumidos que desechar o reutilizar.</p>
+    }
+    <label for="item-cancellation-reason" class="block text-sm font-semibold text-gray-900">Motivo obligatorio</label>
+    <textarea id="item-cancellation-reason" #reasonInput rows="3" maxlength="500"
+      class="w-full rounded-lg border border-border p-3 text-sm"
+      placeholder="Describe el motivo (mínimo 3 caracteres)"
+      [disabled]="inFlight()"
+      [value]="reason()"
+      (input)="reason.set(reasonInput.value)"></textarea>
+    @if (error()) {
+      <p role="alert" class="text-sm text-red-700">{{ error() }}</p>
+    }
+    @if (preview(); as p) {
+      <div class="rounded-lg border border-border bg-surface p-3 text-sm space-y-1" aria-live="polite">
+        <p class="font-semibold text-gray-900">
+          Totales previstos
+          <span class="ml-1 rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800">calculado</span>
+        </p>
+        <div class="flex justify-between text-text-secondary">
+          <span>Total actual</span>
+          <span>{{ currentTotal() | currency }}</span>
+        </div>
+        <div class="flex justify-between font-semibold text-gray-900">
+          <span>Nuevo total previsto</span>
+          <span>{{ p.previewTotal | currency }}</span>
+        </div>
+        <div class="flex justify-between text-text-secondary">
+          <span>
+            Nueva propina prevista
+            @if (p.tipRederived) {
+              <span class="text-xs">(recalculada al % sobre la base viva)</span>
+            } @else {
+              <span class="text-xs">(se mantiene)</span>
+            }
+          </span>
+          <span>{{ p.newTip | currency }}</span>
+        </div>
+        <p class="text-xs text-text-secondary">Valores calculados antes de confirmar; se aplican al guardar.</p>
+      </div>
+    } @else {
+      <p class="text-sm text-text-secondary">
+        Total actual: {{ currentTotal() | currency }}.
+        El nuevo total y la propina se confirmarán al actualizar la orden después de guardar.
+      </p>
+    }
+  </div>
+  <div slot="footer" class="flex justify-end gap-2">
+    <app-button variant="outline" [disabled]="inFlight()"
+      (clicked)="close()">Volver sin cancelar</app-button>
+    <app-button variant="outline-danger"
+      [loading]="inFlight()"
+      [disabled]="inFlight() || reason().trim().length < 3 || reason().trim().length > 500"
+      (clicked)="onConfirm()">Confirmar cancelación</app-button>
+  </div>
+</app-modal>

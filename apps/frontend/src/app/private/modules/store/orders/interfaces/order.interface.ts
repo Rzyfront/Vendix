@@ -2,7 +2,7 @@
 export type OrderChannel = 'pos' | 'ecommerce' | 'agent' | 'whatsapp' | 'marketplace';
 
 // Delivery type - aligned with Prisma enum
-export type DeliveryType = 'pickup' | 'home_delivery' | 'direct_delivery' | 'other';
+export type DeliveryType = 'pickup' | 'home_delivery' | 'direct_delivery' | 'dine_in' | 'other';
 
 // Shipping entities - Aligned with backend shipping models
 export interface ShippingMethod {
@@ -29,6 +29,17 @@ export interface ShippingRate {
   shipping_zone?: ShippingZone;
 }
 
+/** Read-only policy computed by the backend; never infer it from state alone. */
+export interface OrderCancellationPolicy {
+  can_cancel: boolean;
+  can_cancel_payment: boolean;
+  reason_code:
+    | 'ORD_CANCEL_STOCK_COMMITTED_001'
+    | 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001'
+    | 'ORD_CANCEL_OPEN_TABLE_001'
+    | null;
+}
+
 // Core entities - Aligned with backend models
 export interface Order {
   id: number;
@@ -41,6 +52,9 @@ export interface Order {
   store_id: number;
   order_number: string;
   state: OrderState;
+  cancellation_policy?: OrderCancellationPolicy;
+  /** Financial accounts share this physical order; they are not child orders. */
+  active_financial_split_id?: number | null;
   channel?: OrderChannel;
   // A.3 CP-facturacion-fixes: alerta fiscal fijada por el auto-envío del webhook.
   // null = sin alerta conocida. Viaja en el detalle (include fila completa).
@@ -53,8 +67,29 @@ export interface Order {
   subtotal_amount: number;
   tax_amount: number;
   shipping_cost: number;
+  /**
+   * Copia congelada del impuesto del envío al vender (opcional por tarifa).
+   * Siempre INCLUIDO en `shipping_cost`: base = shipping_cost - shipping_tax_amount.
+   * `tax_amount` de la orden NO lo suma (sí la factura, FAU06).
+   */
+  shipping_tax_rate_id?: number | null;
+  shipping_tax_name?: string | null;
+  shipping_tax_type?: string | null;
+  shipping_tax_rate?: number | string | null;
+  shipping_tax_amount?: number | string;
   discount_amount: number;
   grand_total: number;
+  /**
+   * D.4 CP-pos-order-flows-remediation — propina persistida en `orders`
+   * (`tip_amount`, `tip_type`, `tip_value`). `orders.service.ts:findOne`
+   * devuelve la fila sin `select`, así que YA viajan por el cable; esto
+   * solo declara lo que llega (precedente: `delivered_at`). El preview
+   * del modal "Destino del plato" re-deriva la porcentual sobre la base
+   * viva con el mismo redondeo del backend.
+   */
+  tip_amount?: number | string | null;
+  tip_type?: string | null;
+  tip_value?: number | string | null;
   currency: string;
   payment_form?: string;
   credit_type?: 'free' | 'installments' | null;
@@ -299,6 +334,13 @@ export interface OrderItem {
   final_total_price?: number | null;
   tax_rate?: number;
   tax_amount_item?: number;
+  /**
+   * D.4 — desglose de impuesto PERSISTIDO por línea. `findOne` lo incluye
+   * (`order_item_taxes: true`): cada fila YA es el total de impuesto de
+   * esa línea. Es la única fuente válida para el preview (F-082 prohíbe
+   * sumar `tax_amount_item`, que mezcla convenciones por unidad/línea).
+   */
+  order_item_taxes?: Array<{ tax_amount?: number | string | null } | null> | null;
   applied_price_tier_id?: number | null;
   applied_price_tier_name_snapshot?: string | null;
   stock_units_consumed?: number | null;
@@ -319,6 +361,8 @@ export interface OrderItem {
    *   from the manual fire button.
    */
   inventory_consumed_at_fire?: boolean;
+  /** Stock committed by the delivery seam (distinct from kitchen consumption). */
+  inventory_committed?: boolean;
   skip_kds?: boolean;
   /**
    * Restaurant Suite — Fase K Gap 2: KDS state for this order_item.
@@ -986,6 +1030,8 @@ export interface RefundItemRecord {
 export interface ResolveRefundPayload {
   target_state: 'completed' | 'failed';
   resolution_notes: string;
+  payout_reference?: string;
+  payout_channel?: 'cash' | 'bank_transfer' | 'store_credit' | 'gateway';
 }
 
 /**

@@ -1,4 +1,4 @@
-import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, output, runInInjectionContext, signal } from '@angular/core';
+import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, model, output, runInInjectionContext, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ReactiveFormsModule } from '@angular/forms';
@@ -15,6 +15,9 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
 import { PaymentCollectorComponent } from '../../../../../../shared/components/payment-collector/payment-collector.component';
 import { PaymentMethodsCatalogService } from '../../../../../../shared/services/payment-methods-catalog.service';
 import type { PaymentMethod } from '../../../../../../shared/models/payment-method.model';
+import { deliveryTypeToEntregaChoice } from '../../models/cart.model';
+import { shouldAutoPrintDispatchTicket } from '../../../../../../shared/services/print/dispatch-ticket-autoprint';
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 
 /**
  * CP-POS-CHECKOUT-KEYBOARD — matriz teclado × paso del modal de pago.
@@ -61,18 +64,19 @@ class IconStub {
   readonly color = input<string | null>(null);
 }
 
-@Component({ selector: 'app-pos-consumo-step', standalone: true, template: `` })
-class ConsumoStub {
+@Component({ selector: 'app-pos-entrega-step', standalone: true, template: `` })
+class EntregaStub {
   readonly cartState = input<unknown>(null);
   readonly tableId = input<number | null>(null);
+  readonly initialChoice = input<string>('llevar');
+  // La plantilla del shell enlaza `[(choice)]="entregaChoice"` (`:71`) y el doble
+  // debe exponerlo como model() para aceptar two-way binding y evitar NG0303.
+  readonly choice = model<'mesa' | 'llevar' | 'enviar'>('llevar');
   readonly advanceRequested = output<void>();
-  fulfillmentMode = 'entrega';
   needsTableFlag = false;
   readonly openTablePicker = signal(false);
   readonly checkoutTableId = signal<number | null>(null);
-  fulfillment(): string {
-    return this.fulfillmentMode;
-  }
+  readonly effectiveTableId = signal<number | null>(null);
   needsTable(): boolean {
     return this.needsTableFlag;
   }
@@ -94,9 +98,9 @@ class PaymentStub {
   readonly editingOrderId = input<number | null>(null);
   readonly autoExecute = input(true);
   readonly amountOverride = input<number | null>(null);
-  // La plantilla del shell enlaza `[takeawayOrder]` (`:79`) y el doble no lo
-  // declaraba: NG0303 al primer `detectChanges()`, que tumbaba las 20 pruebas.
+  readonly paymentResetKey = input(0);
   readonly takeawayOrder = input(false);
+  readonly deliveryType = input<string | null>(null);
   readonly paymentCompleted = output<unknown>();
   readonly paymentReady = output<unknown>();
   readonly amountConfirmed = output<void>();
@@ -122,13 +126,26 @@ class PaymentStub {
 @Component({ selector: 'app-pos-shipping-step', standalone: true, template: `` })
 class ShippingStub {
   readonly cartState = input<unknown>(null);
-  readonly address = input<unknown>(null);
-  readonly addressId = input<number | null>(null);
+  readonly customerAlias = input<string>('');
+  readonly editingOrderId = input<number | null>(null);
   readonly shippingCompleted = output<unknown>();
   readonly shippingCost = signal(0);
   readonly shipSubStep = signal(0);
+  readonly shipSubSteps = signal<any[]>([]);
   readonly canConfirm = signal(true);
   readonly shipIsProcessing = signal(false);
+  readonly isProcessing = this.shipIsProcessing;
+  readonly hasShippingChanges = signal(false);
+  readonly editorValidationError = signal<string | null>(null);
+  readonly preservationWarning = signal<string | null>(null);
+  readonly shippingContext = signal<any>(null);
+  buildShippingContext(): any { return this.shippingContext(); }
+  attemptNextSubStep(): boolean {
+    return true;
+  }
+  attemptPrevSubStep(): boolean {
+    return false;
+  }
   flashValidation(): void {}
   execute(_submit: unknown): void {}
 }
@@ -184,8 +201,13 @@ class CreditFieldsStub {
 describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBOARD)', () => {
   let fixture: ComponentFixture<PosCheckoutShellComponent>;
   let component: PosCheckoutShellComponent;
-  let integrationMock: { isRestaurantMode: () => boolean; currentTableSession: () => null };
-  let settingsMock: { pos: () => null; checkout: () => null };
+  let integrationMock: {
+    isRestaurantMode: () => boolean;
+    currentTableSession: () => null;
+    hasOpenTableSession: () => boolean;
+  };
+  let settingsMock: { pos: () => any; checkout: () => null };
+  let posSettings: WritableSignal<any>;
   let restaurantMode: WritableSignal<boolean>;
 
   const payStub = (): PaymentStub =>
@@ -196,21 +218,44 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
    * shell vería todos los childs como undefined. Se inyectan los stubs
    * montados en los slots viewChild: el shell solo lee su API pública.
    */
+  /**
+   * El slot debe ser UNA señal estable por componente, no un closure nuevo en
+   * cada `wireStubs()`. Un viewChild real es una señal: los `computed()` del
+   * shell (p. ej. `shippingCost`) la rastrean y se recalculan cuando cambia la
+   * instancia. Con un closure plano, un computed que ya corrió queda atado a
+   * las señales del stub ANTERIOR y nunca ve el nuevo — el test mediría un
+   * memo rancio, no el componente.
+   */
+  const bindSlot = (name: string, instance: unknown): void => {
+    const current = (component as any)[name];
+    if (current?.__stubSlot) {
+      current.set(instance);
+      return;
+    }
+    const slot = signal(instance);
+    Object.defineProperty(slot, '__stubSlot', { value: true });
+    Object.defineProperty(component, name, { value: slot, configurable: true });
+  };
+
   const wireStubs = (): void => {
-    const pay = payStub();
-    Object.defineProperty(component, 'paymentStep', {
-      value: () => pay,
-      configurable: true,
-    });
+    bindSlot('paymentStep', payStub());
+    const entregaEl = fixture.debugElement.query(By.directive(EntregaStub));
+    bindSlot(
+      'entregaStep',
+      entregaEl
+        ? entregaEl.componentInstance
+        : TestBed.runInInjectionContext(() => new EntregaStub()),
+    );
     // Envío solo se monta en delivery: si no está, stub suelto para el slot.
+    // Se publica con `.set()` sobre la misma señal para que los computeds
+    // del shell se invaliden al re-enlazar (un closure nuevo no avisa).
     const shipEl = fixture.debugElement.query(By.directive(ShippingStub));
-    const ship = shipEl
-      ? shipEl.componentInstance
-      : TestBed.runInInjectionContext(() => new ShippingStub());
-    Object.defineProperty(component, 'shippingStep', {
-      value: () => ship,
-      configurable: true,
-    });
+    bindSlot(
+      'shippingStep',
+      shipEl
+        ? shipEl.componentInstance
+        : TestBed.runInInjectionContext(() => new ShippingStub()),
+    );
   };
 
   /** Evento de teclado mínimo; target falsificado para las ramas de Enter. */
@@ -243,8 +288,13 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     // El mock lee una señal: los computed del shell que hacen short-circuit
     // antes de leer señales solo se invalidan por deps reactivas.
     restaurantMode = signal(false);
-    integrationMock = { isRestaurantMode: () => restaurantMode(), currentTableSession: () => null };
-    settingsMock = { pos: () => null, checkout: () => null };
+    integrationMock = {
+      isRestaurantMode: () => restaurantMode(),
+      currentTableSession: () => null,
+      hasOpenTableSession: () => false,
+    };
+    posSettings = signal(null);
+    settingsMock = { pos: () => posSettings(), checkout: () => null };
 
     TestBed.configureTestingModule({
       imports: [PosCheckoutShellComponent],
@@ -253,7 +303,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         { provide: PosCartService, useValue: {} },
         { provide: PosPaymentService, useValue: {} },
         { provide: PosRestaurantIntegrationService, useValue: integrationMock },
-        { provide: StoreOrdersService, useValue: {} },
+        { provide: StoreOrdersService, useValue: { getOrderById: (id: string) => of({ id: Number(id) }) } },
         { provide: ToastService, useValue: {} },
         { provide: CurrencyFormatService, useValue: { loadCurrency: () => {} } },
       ],
@@ -265,7 +315,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
           ModalStub,
           StepsLineStub,
           IconStub,
-          ConsumoStub,
+          EntregaStub,
           PaymentStub,
           ShippingStub,
           CustomerSelectorStub,
@@ -285,9 +335,82 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     fixture.detectChanges();
   });
 
+  it('offers alias for delivery while leaving anonymous delivery disabled', () => {
+    posSettings.set({ allow_alias_sales: true });
+    component.entregaChoice.set('enviar');
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+
+    const alias = [...fixture.nativeElement.querySelectorAll('.sale-type-btn')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Venta con nombre o referencia')) as HTMLButtonElement;
+    expect(alias.textContent).toContain('Venta con nombre o referencia');
+    expect(alias.disabled).toBeFalse();
+    component.onSelectSaleMode('alias');
+    expect(component.saleMode()).toBe('alias');
+    expect(component.customerRequiredByAddress()).toBeFalse();
+    expect(component.anonymousBlockedByDelivery()).toBeTrue();
+  });
+
+  it('keeps clicked delivery alias selected after effects run and shows the alias input', () => {
+    posSettings.set({ allow_alias_sales: true });
+    component.entregaChoice.set('enviar');
+    component.currentStep.set(1); // Cliente panel must be visible, not just mounted.
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+
+    const aliasButton = [...fixture.nativeElement.querySelectorAll('.sale-type-btn')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Venta con nombre o referencia')) as HTMLButtonElement;
+    expect(aliasButton.disabled).toBeFalse();
+    aliasButton.click();
+    fixture.detectChanges(); // Flush constructor effects that can rewrite saleMode.
+    fixture.detectChanges();
+
+    expect(component.saleMode()).toBe('alias');
+    expect(component.clienteSubStep()).toBe(1);
+    const aliasInput = fixture.nativeElement.querySelector('input[aria-label="Nombre o referencia de la venta"]') as HTMLInputElement | null;
+    expect(aliasInput).not.toBeNull();
+    expect(aliasInput?.closest('.step-panel')?.classList.contains('step-hidden')).toBeFalse();
+  });
+
+  it('still resets an anonymous sale when delivery effects run', () => {
+    posSettings.set({ allow_anonymous_sales: true, allow_alias_sales: true });
+    component.entregaChoice.set('enviar');
+    fixture.detectChanges();
+    component.saleMode.set('anonymous');
+    fixture.detectChanges();
+
+    expect(component.saleMode()).toBe('customer');
+    expect(component.userOverrideAnonymous()).toBeFalse();
+  });
+
+  it('saves alias home-delivery draft with snapshot, no address POST and no customer', () => {
+    component.saleMode.set('alias');
+    component.customerAlias.set('Portería torre B');
+    const saveDraft = jasmine.createSpy('saveDraft').and.returnValue(of({ success: true, order: { id: 42 } }));
+    Object.assign(TestBed.inject(PosPaymentService), { saveDraft });
+    Object.assign(TestBed.inject(ToastService), { success: jasmine.createSpy('success') });
+    spyOn<any>(component, 'finishDraft').and.stub();
+    const state = { items: [{ product: { id: '7' }, quantity: 1 }], customer: {
+      id: 9, first_name: 'Stale',
+    } } as any;
+    const shipping = { deliveryType: 'home_delivery', shippingMethodId: 3, shippingAddressId: 33,
+      shippingCost: 500, shippingAddress: { address_line1: 'Calle 1', city: 'Bogotá', country_code: 'CO' },
+    } as any;
+
+    (component as any).createRetailDraft(state, shipping);
+
+    const args = saveDraft.calls.mostRecent().args;
+    expect(args[0].customer).toBeNull();
+    expect(args[2]).toBe('Portería torre B');
+    expect(args[3].shippingAddressId).toBeUndefined();
+    expect(args[3].shippingAddress.address_line1).toBe('Calle 1');
+  });
+
   it('→ en paso intermedio llama a Siguiente con source arrows y no cobra', () => {
-    // mode create-payment + pickup sin restaurante → [Cliente, Cobro], paso 0.
-    expect(component.currentStepKey()).toBe('cliente');
+    // mode create-payment + default llevar → [Entrega, Cliente, Cobro], paso 0.
+    expect(component.currentStepKey()).toBe('entrega');
     const next = spyOn(component, 'attemptNextStep');
     const confirm = spyOn(component, 'onPrimaryConfirm');
     component.onShellKeydown(keyEvent('ArrowRight'));
@@ -296,7 +419,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   });
 
   it('→ en CTA terminal es no-op: ni avanza ni cobra', () => {
-    component.currentStep.set(1); // Cobro, último
+    component.currentStep.set(2); // Cobro, último
     fixture.detectChanges();
     expect(component.isLastStep()).toBeTrue();
     const next = spyOn(component, 'attemptNextStep');
@@ -307,7 +430,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   });
 
   it('← siempre retrocede sin cobrar', () => {
-    component.currentStep.set(1);
+    component.currentStep.set(2);
     fixture.detectChanges();
     const prev = spyOn(component, 'prevStep');
     const confirm = spyOn(component, 'onPrimaryConfirm');
@@ -323,7 +446,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   });
 
   it('Enter en terminal con gate abierto cobra', () => {
-    component.currentStep.set(1); // Cobro: canSubmit stub = true
+    component.currentStep.set(2); // Cobro, último: canSubmit stub = true
     fixture.detectChanges();
     expect(component.confirmDisabled()).toBeFalse();
     const confirm = spyOn(component, 'onPrimaryConfirm');
@@ -332,7 +455,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   });
 
   it('Enter en terminal con gate cerrado destella y no cobra', () => {
-    component.currentStep.set(1);
+    component.currentStep.set(2); // Cobro, último
     payStub().canSubmit.set(false);
     fixture.detectChanges();
     expect(component.confirmDisabled()).toBeTrue();
@@ -417,7 +540,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     payStub().mode.set('credito');
     fixture.detectChanges();
     // Terminal.
-    component.currentStep.set(1);
+    component.currentStep.set(2);
     fixture.detectChanges();
     const confirm = spyOn(component, 'onPrimaryConfirm');
     const next = spyOn(component, 'attemptNextStep');
@@ -436,7 +559,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   it('flechas consumen el avance del sub-wizard sin llegar al submit (crédito)', () => {
     payStub().mode.set('credito');
     payStub().advanceRet = true; // hay sub-paso por avanzar (Forma→Plan)
-    component.currentStep.set(1);
+    component.currentStep.set(2);
     fixture.detectChanges();
     const confirm = spyOn(component, 'onPrimaryConfirm');
     component.attemptNextStep({ source: 'arrows' });
@@ -445,49 +568,74 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
 
   it('Enter sí cobra en modo crédito con gate válido', () => {
     payStub().mode.set('credito');
-    component.currentStep.set(1);
+    component.currentStep.set(2);
     fixture.detectChanges();
     const confirm = spyOn(component, 'onPrimaryConfirm');
     component.onShellKeydown(keyEvent('Enter'));
     expect(confirm).toHaveBeenCalledTimes(1);
   });
 
-  it('restaurante ordena [Consumo, Cliente, Cobro]', () => {
-    restaurantMode.set(true);
+  it('matriz Entrega: llevar o mesa ordena [Entrega, Cliente, Cobro], enviar ordena [Entrega, Cliente, Envío, Cobro]', () => {
+    component.entregaChoice.set('llevar');
     fixture.detectChanges();
-    expect(component.stepKeys()).toEqual(['consumo', 'cliente', 'cobro']);
-    expect(component.currentStepKey()).toBe('consumo');
+    expect(component.stepKeys()).toEqual(['entrega', 'cliente', 'cobro']);
+    expect(component.currentStepKey()).toBe('entrega');
+
+    component.entregaChoice.set('mesa');
+    fixture.detectChanges();
+    expect(component.stepKeys()).toEqual(['entrega', 'cliente', 'cobro']);
+
+    component.entregaChoice.set('enviar');
+    fixture.detectChanges();
+    expect(component.stepKeys()).toEqual(['entrega', 'cliente', 'envio', 'cobro']);
   });
 
-  it('Consumo-entrega avanza; consumo sin mesa abre el picker sin avanzar', () => {
-    const stub = TestBed.runInInjectionContext(() => new ConsumoStub());
-    Object.defineProperty(component, 'consumoStep', {
+  it('Entrega-llevar avanza; mesa sin mesa abre el picker sin avanzar', () => {
+    const stub = TestBed.runInInjectionContext(() => new EntregaStub());
+    Object.defineProperty(component, 'entregaStep', {
       value: () => stub,
       configurable: true,
     });
-    const advance = component as unknown as { advanceConsumo: () => void };
-    // Entrega (default) → avanza.
-    advance.advanceConsumo();
+    const advance = component as unknown as { advanceEntrega: () => void };
+    // Llevar (default) → avanza.
+    component.entregaChoice.set('llevar');
+    advance.advanceEntrega();
     expect(component.currentStep()).toBe(1);
-    // Consumo sin mesa → abre picker, no avanza.
+
+    // Mesa sin mesa → abre picker, no avanza.
     component.currentStep.set(0);
-    stub.fulfillmentMode = 'consumo';
+    component.entregaChoice.set('mesa');
     stub.needsTableFlag = true;
-    advance.advanceConsumo();
+    advance.advanceEntrega();
     expect(stub.openTablePicker()).toBeTrue();
     expect(component.currentStep()).toBe(0);
+
     // Con mesa → avanza.
     stub.needsTableFlag = false;
-    advance.advanceConsumo();
+    advance.advanceEntrega();
     expect(component.currentStep()).toBe(1);
+  });
+
+  it('flip enviar agrega paso envio y volver a llevar lo remueve', () => {
+    component.entregaChoice.set('llevar');
+    fixture.detectChanges();
+    expect(component.stepKeys()).not.toContain('envio');
+
+    component.onEntregaChoiceChange('enviar');
+    fixture.detectChanges();
+    expect(component.stepKeys()).toContain('envio');
+
+    component.onEntregaChoiceChange('llevar');
+    fixture.detectChanges();
+    expect(component.stepKeys()).not.toContain('envio');
   });
 
   it(`Para llevar estampa is_takeaway al anexar a mesa`, () => {
     restaurantMode.set(true);
-    const stub = TestBed.runInInjectionContext(() => new ConsumoStub());
-    stub.fulfillmentMode = 'entrega';
+    component.entregaChoice.set('llevar');
+    const stub = TestBed.runInInjectionContext(() => new EntregaStub());
     (stub as any).effectiveTableId = () => null;
-    Object.defineProperty(component, 'consumoStep', {
+    Object.defineProperty(component, 'entregaStep', {
       value: () => stub,
       configurable: true,
     });
@@ -542,10 +690,10 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
 
   it(`Consumo en mesa no marca takeaway salvo línea explícita`, () => {
     restaurantMode.set(true);
-    const stub = TestBed.runInInjectionContext(() => new ConsumoStub());
-    stub.fulfillmentMode = 'consumo';
+    component.entregaChoice.set('mesa');
+    const stub = TestBed.runInInjectionContext(() => new EntregaStub());
     (stub as any).effectiveTableId = () => 5;
-    Object.defineProperty(component, 'consumoStep', {
+    Object.defineProperty(component, 'entregaStep', {
       value: () => stub,
       configurable: true,
     });
@@ -613,6 +761,323 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       jasmine.objectContaining({ product_id: 10, is_takeaway: true }),
     );
   });
+
+  it(`propaga notas de los ítems del carrito al agregar a la sesión de mesa`, () => {
+    restaurantMode.set(true);
+    component.entregaChoice.set('mesa');
+    fixture.detectChanges();
+
+    fixture.componentRef.setInput('cartState', {
+      items: [
+        {
+          itemType: 'product',
+          product: { id: 15, name: 'Hamburguesa' },
+          quantity: 1,
+          unitPrice: 20000,
+          finalPrice: 20000,
+          totalPrice: 20000,
+          taxAmount: 0,
+          notes: 'Sin cebolla y término medio',
+        },
+        {
+          itemType: 'product',
+          product: { id: 16, name: 'Gaseosa' },
+          quantity: 1,
+          unitPrice: 5000,
+          finalPrice: 5000,
+          totalPrice: 5000,
+          taxAmount: 0,
+          notes: '   ',
+        },
+      ],
+    } as any);
+    fixture.detectChanges();
+
+    const sent: unknown[] = [];
+    (integrationMock as any).addItemsToTableSession = (
+      _sessionId: number,
+      items: unknown[],
+    ) => {
+      sent.push(items);
+      return of({ order: { id: 15, order_items: [] } });
+    };
+    (integrationMock as any).maybeFireKitchen = () => of(null);
+    (component as any).toastService = {
+      success: () => {},
+      warning: () => {},
+      error: () => {},
+    };
+    (component as any).cartService = { clearCart: () => of({}) };
+
+    (
+      component as unknown as {
+        appendToTableAndFire: (state: any, session: any) => void;
+      }
+    ).appendToTableAndFire(component.cartState() as any, {
+      id: 5,
+      order_id: 15,
+    });
+
+    expect(sent.length).toBe(1);
+    const lines = sent[0] as any[];
+    expect(lines[0]).toEqual(
+      jasmine.objectContaining({
+        product_id: 15,
+        notes: 'Sin cebolla y término medio',
+      }),
+    );
+    expect(lines[1].notes).toBeUndefined();
+  });
+
+  it(`Al abrir con mesa vinculada, auto-selecciona entrega 'mesa' y no 'llevar'`, () => {
+    restaurantMode.set(true);
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    fixture.componentRef.setInput('tableId', 42);
+    fixture.componentRef.setInput('initialEntrega', 'llevar');
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+
+    expect(component.entregaChoice()).toBe('mesa');
+    expect(component.isTakeawayOrder()).toBeFalse();
+  });
+
+  const prepareShippingEdit = () => {
+    const state = {
+      items: [{ product: { id: '7', name: 'Producto' }, quantity: 1,
+        unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 }],
+      customer: { id: 99, first_name: 'Cliente' }, summary: { total: 1000 },
+      appliedDiscounts: [], linkedOrderId: 700,
+      shippingContext: { orderId: 700, customerId: 99, deliveryType: 'direct_delivery',
+        shippingAddressId: 33, shippingMethodId: 7, shippingRateId: 88, shippingCost: 12500.5 },
+    };
+    const update = jasmine.createSpy('updateOrderFromEditor').and.returnValue(of({ id: 700 }));
+    (TestBed.inject(StoreOrdersService) as any).updateOrderFromEditor = update;
+    const error = jasmine.createSpy('error');
+    Object.assign(TestBed.inject(ToastService), { error, success: () => {}, warning: () => {} });
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    fixture.componentRef.setInput('mode', 'edit');
+    fixture.componentRef.setInput('editingOrderId', 700);
+    fixture.componentRef.setInput('initialEntrega', 'enviar');
+    fixture.componentRef.setInput('cartState', state);
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+    const ship = (component as any).shippingStep() as ShippingStub;
+    // Deliberately wrong automatic defaults recreate the previously destructive child.
+    ship.shippingCost.set(100);
+    ship.shippingContext.set({ deliveryType: 'home_delivery', shippingMethodId: 1,
+      shippingAddressId: 1, shippingCost: 100, shippingRateId: 2 });
+    return { state, update, error, ship };
+  };
+
+  it('omits synthetic custom cart ids from the editor request for a reopened shipping draft', () => {
+    const { state, update } = prepareShippingEdit();
+    fixture.componentRef.setInput('cartState', {
+      ...state,
+      items: [
+        { itemType: 'custom', product: { id: 'custom-82002fa7', name: 'Servicio QA' },
+          quantity: 1, unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 },
+        { itemType: 'product', product: { id: '7', name: 'Producto real' },
+          quantity: 1, unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 },
+      ],
+    });
+    fixture.detectChanges();
+
+    component.onPrimaryConfirm();
+
+    expect(update).toHaveBeenCalledTimes(1);
+    const items = update.calls.mostRecent().args[1].items;
+    expect(items[0].item_type).toBe('custom');
+    expect(items[0].product_id).toBeUndefined();
+    expect(items[1].product_id).toBe(7);
+  });
+
+  it('no guarda un borrador de envío como venta de mostrador cuando falta el método', () => {
+    const saveDraft = jasmine.createSpy('saveDraft');
+    const warning = jasmine.createSpy('warning');
+    Object.assign(TestBed.inject(PosPaymentService), { saveDraft });
+    Object.assign(TestBed.inject(ToastService), { warning });
+    fixture.componentRef.setInput('cartState', {
+      items: [{ product: { id: '7', name: 'Producto' }, quantity: 1,
+        unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 }],
+      customer: { id: 99, first_name: 'Cliente' }, summary: { total: 1000 },
+      appliedDiscounts: [],
+    });
+    component.entregaChoice.set('enviar');
+    fixture.detectChanges();
+    wireStubs();
+    const ship = (component as any).shippingStep() as ShippingStub;
+    ship.shippingContext.set(null);
+    component.currentStep.set(component.stepKeys().indexOf('envio'));
+    fixture.detectChanges();
+
+    expect(component.draftDeliveryBlocked()).toBeTrue();
+    component.onSaveDraft();
+    expect(saveDraft).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(jasmine.stringMatching(/método de envío/));
+    expect(component.currentStepKey()).toBe('envio');
+    expect(component.submittingDraft()).toBeFalse();
+  });
+
+  for (const previousStatus of ['cleaning', 'available'] as const) {
+    it(`al guardar borrador sobre mesa ${previousStatus} avisa solo si venía de limpieza`, () => {
+      const warning = jasmine.createSpy('warning');
+      const opened = {
+        previous_table_status: previousStatus,
+        session: { id: 108, order_id: 1125, table_id: 15 },
+        order: { id: 1125, state: 'draft', grand_total: 0 },
+      };
+      const openTableSession = jasmine.createSpy('openTableSession').and.returnValue(of(opened));
+      Object.assign(TestBed.inject(PosRestaurantIntegrationService), { openTableSession });
+      Object.assign(TestBed.inject(ToastService), { warning });
+      const append = spyOn<any>(component, 'appendToTableAndFire').and.stub();
+      const state = { items: [{ product: { id: '302' }, quantity: 1 }] } as any;
+
+      (component as any).openPickedTableThenAppend(15, state);
+
+      expect(openTableSession).toHaveBeenCalledTimes(1);
+      expect(append).toHaveBeenCalledOnceWith(state, opened.session);
+      if (previousStatus === 'cleaning') {
+        expect(warning).toHaveBeenCalledOnceWith(
+          ERROR_MESSAGES['TABLE_REOPENED_FROM_CLEANING_001'],
+          undefined,
+          5000,
+        );
+      } else {
+        expect(warning).not.toHaveBeenCalled();
+      }
+    });
+  }
+
+  it('la confirmación del borrador usa el snapshot completo releído, no solo el id', () => {
+    const persisted = {
+      id: 1132,
+      order_number: 'T-1132',
+      customer_alias: 'Mesa de Ana',
+      subtotal_amount: '38000',
+      tax_amount: '0',
+      grand_total: '38000',
+      order_items: [{ id: 1, product_name: 'Coca-Cola 400ml', quantity: 1 }],
+    };
+    const getOrderById = jasmine.createSpy('getOrderById').and.returnValue(of(persisted));
+    Object.assign(TestBed.inject(StoreOrdersService), { getOrderById });
+    const finish = spyOn<any>(component, 'finishDraft').and.stub();
+
+    (component as any).finishPersistedDraft(1132, [1], false, { id: 1132 });
+
+    expect(getOrderById).toHaveBeenCalledOnceWith('1132');
+    expect(finish).toHaveBeenCalledOnceWith(persisted, [1], false);
+  });
+
+  it('visitar Envío y Actualizar omite todas las claves y conserva el total original', () => {
+    const { update } = prepareShippingEdit();
+    expect(component.totalToPay()).toBe(13500.5);
+    component.currentStep.set(component.stepKeys().indexOf('envio'));
+    fixture.detectChanges();
+    component.attemptNextStep();
+    expect(component.currentStepKey()).toBe('cobro');
+    component.onPrimaryConfirm();
+    expect(update).toHaveBeenCalledTimes(1);
+    const payload = update.calls.mostRecent().args[1];
+    for (const key of ['delivery_type', 'shipping_address_id', 'shipping_method_id', 'shipping_rate_id', 'shipping_cost']) {
+      expect(Object.prototype.hasOwnProperty.call(payload, key)).withContext(key).toBeFalse();
+    }
+  });
+
+  it('solo una edición explícita envía método, dirección, tarifa y costo', () => {
+    const { update, ship } = prepareShippingEdit();
+    ship.hasShippingChanges.set(true);
+    component.onPrimaryConfirm();
+    expect(update.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      delivery_type: 'home_delivery', shipping_method_id: 1,
+      shipping_address_id: 1, shipping_rate_id: 2, shipping_cost: 100,
+    }));
+    expect(component.totalToPay()).toBe(1100);
+  });
+
+  for (const [choice, deliveryType] of [
+    ['llevar', 'direct_delivery'],
+    ['mesa', 'dine_in'],
+  ] as const) {
+    it(`edición explícita de ${choice} estampa ${deliveryType} sin flete`, () => {
+      const { update } = prepareShippingEdit();
+      component.entregaChoice.set(choice);
+      fixture.detectChanges();
+      component.onPrimaryConfirm();
+      expect(update.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+        delivery_type: deliveryType, shipping_cost: 0,
+      }));
+    });
+  }
+
+  it('reabre direct_delivery sin flete como Para llevar y pickup real como Enviar', () => {
+    const context = {
+      deliveryType: 'direct_delivery', shippingMethodId: null, shippingCost: 0,
+    };
+    expect(deliveryTypeToEntregaChoice(context as any)).toBe('llevar');
+    expect(deliveryTypeToEntregaChoice({ ...context, deliveryType: 'pickup', shippingMethodId: 7 } as any)).toBe('enviar');
+  });
+
+  it('preserva pickup histórico sin método al editar sin tocar Envío', () => {
+    const { state, ship } = prepareShippingEdit();
+    component.entregaChoice.set('enviar');
+    ship.shippingContext.set(null);
+    ship.editorValidationError.set('Selecciona un método de envío');
+    const result = (component as any).buildEditorShippingPayload({
+      ...state,
+      shippingContext: {
+        ...state.shippingContext, deliveryType: 'pickup',
+        shippingAddressId: null, shippingMethodId: null, shippingRateId: null, shippingCost: null,
+      },
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.payload).toEqual({});
+  });
+
+  it('autoimprime Para llevar con opt-in de mostrador sin cambiar pickup real', () => {
+    const context = { printDispatchTicketEnabled: true, printDispatchTicketAuto: true, counterEnabled: true };
+    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'direct_delivery' })).toBeTrue();
+    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'pickup' })).toBeTrue();
+    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'dine_in' })).toBeFalse();
+  });
+
+  for (const message of ['Espera a que termine el cálculo del envío', 'Selecciona una dirección del nuevo cliente', 'Guarda la dirección en la ficha del cliente']) {
+    it(`bloquea el PUT sin fallback cuando: ${message}`, () => {
+      const { update, error, ship } = prepareShippingEdit();
+      ship.hasShippingChanges.set(true);
+      ship.editorValidationError.set(message);
+      component.onPrimaryConfirm();
+      expect(update).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(message);
+      expect(component.currentStepKey()).toBe('envio');
+    });
+  }
+
+  it('no permite heredar la dirección del antiguo cliente cambiando a pickup', () => {
+    const { update, error, state } = prepareShippingEdit();
+    fixture.componentRef.setInput('cartState', { ...state, customer: { id: 100, first_name: 'Otro' } });
+    component.entregaChoice.set('llevar');
+    fixture.detectChanges();
+    component.onPrimaryConfirm();
+    expect(update).not.toHaveBeenCalled();
+    expect(error.calls.mostRecent().args[0]).toContain('Cambiaste el cliente');
+  });
+
+  it('deja avanzar y preservar envío no reconstruible aunque canConfirm sea false', () => {
+    const { update, ship } = prepareShippingEdit();
+    ship.canConfirm.set(false);
+    ship.preservationWarning.set('Método original inactivo; envío conservado');
+    component.currentStep.set(component.stepKeys().indexOf('envio'));
+    component.attemptNextStep();
+    expect(component.currentStepKey()).toBe('cobro');
+    component.onPrimaryConfirm();
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.calls.mostRecent().args[1].shipping_method_id).toBeUndefined();
+  });
+
 });
 
 describe('PaymentCollectorComponent.handleEnter — CP-pos-checkout-enter-focus', () => {

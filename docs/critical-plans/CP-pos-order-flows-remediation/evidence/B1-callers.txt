@@ -1,0 +1,8 @@
+apps/backend/src/domains/store/tables/table-sessions.service.ts:1564:  async projectOrderPaymentToTableSession(
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:127:  describe('projectOrderPaymentToTableSession (B.1)', () => {
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:137:        service.projectOrderPaymentToTableSession(orderId, paymentId),
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:164:      const projection = await service.projectOrderPaymentToTableSession(orderId, paymentId);
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:189:        service.projectOrderPaymentToTableSession(orderId, paymentId),
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:206:      await service.projectOrderPaymentToTableSession(orderId, paymentId);
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:207:      await service.projectOrderPaymentToTableSession(orderId, paymentId);
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:218:      const projection = await service.projectOrderPaymentToTableSession(

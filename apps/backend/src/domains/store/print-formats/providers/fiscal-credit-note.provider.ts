@@ -14,6 +14,7 @@ import {
   resolveRawLogoKey,
 } from './fiscal-document-print.mapper';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
+import { resolveFiscalQualitiesLine } from '../services/fiscal-issuer-identity';
 // C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-04: nota crédito
 // fiscal declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
 import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
@@ -134,7 +135,15 @@ export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
         email: 'fe@vendix.com',
         address: 'Calle 93B # 13-40, Oficina 502',
         city: 'Bogotá D.C.',
-        tax_regime: 'Responsable de IVA',
+        // Los datos de muestra NO son inocuos: `PrintGatewayService` cae a
+        // `getSampleData` dentro de un try/catch cuando la lectura real falla,
+        // así que un literal aquí acaba en el papel de un comercio real. Este
+        // bloque imprimía «Responsable de IVA» — una leyenda derogada con el
+        // art. 506 E.T. La muestra deriva ahora sus calidades de sus PROPIAS
+        // responsabilidades con la misma función que el carril real, así que no
+        // puede afirmar una calidad que sus códigos no respalden.
+        fiscal_responsibilities: ['O-48', 'O-42', 'O-52'],
+        fiscal_qualities: resolveFiscalQualitiesLine(['O-48', 'O-42', 'O-52']),
       },
       customer: {
         name: 'Compañía Minera y Comercial del Pacífico S.A.',

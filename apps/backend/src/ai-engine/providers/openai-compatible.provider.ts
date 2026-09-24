@@ -126,12 +126,15 @@ export class OpenAICompatibleProvider implements AIProvider {
         return await this.generateImageWithOpenRouterImages(prompt, options);
       }
 
-      if (options?.referenceImages?.length) {
-        return await this.generateImageWithResponses(prompt, options);
-      }
-
+      // Explicit images_api wins over referenceImages→/responses (mirror of
+      // generateImageStream): otherwise edits on OpenRouter image configs
+      // bypass the operator's chosen transport and 404.
       if (this.shouldUseOpenRouterImagesApi()) {
         return await this.generateImageWithOpenRouterImages(prompt, options);
+      }
+
+      if (options?.referenceImages?.length) {
+        return await this.generateImageWithResponses(prompt, options);
       }
 
       // Image-typed configs resolve to their own model (meta/muse-image, …):
@@ -1250,6 +1253,9 @@ export class OpenAICompatibleProvider implements AIProvider {
    * redirecting here. The URL derives from the operator's configured base
    * URL — a pasted full `…/v1/images` endpoint is used verbatim — and the
    * default host only fills in for an empty base URL, never overrides one.
+   *
+   * Reference images travel as `input_references` (OpenAI-style `image_url`
+   * parts), so edits keep their subject instead of generating from scratch.
    */
   private async generateImageWithOpenRouterImages(
     prompt: string,
@@ -1261,6 +1267,19 @@ export class OpenAICompatibleProvider implements AIProvider {
       this.config.modelId;
 
     const body: Record<string, any> = { model, prompt };
+    if (options?.referenceImages?.length) {
+      body.input_references = options.referenceImages.map((image) => ({
+        type: 'image_url',
+        image_url: {
+          url: image.url,
+          ...(image.detail
+            ? {
+                detail: image.detail === 'original' ? 'high' : image.detail,
+              }
+            : {}),
+        },
+      }));
+    }
     const providerPrefs =
       this.config.settings?.provider_preferences ||
       this.config.settings?.provider;

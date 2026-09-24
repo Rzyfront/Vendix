@@ -844,6 +844,7 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
   let listener: DispatchNoteEventsListener;
   let prismaMock: any;
   let orderFlowMock: any;
+  let storeContextRunnerMock: any;
 
   const note = {
     id: 900,
@@ -884,11 +885,22 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
         update: jest.fn().mockResolvedValue({}),
       },
       order_items: {
-        findMany: jest.fn().mockResolvedValue(pending),
+        findMany: jest.fn().mockImplementation(async ({ where }: any) =>
+          where.delivered_at instanceof Date
+            ? pending.filter((item) => where.id.in.includes(item.id))
+            : pending,
+        ),
         updateMany: jest.fn().mockResolvedValue({ count: pending.length }),
       },
+      kitchen_ticket_items: { findMany: jest.fn().mockResolvedValue([]) },
     };
-    orderFlowMock = { reconcileOrderFromDispatch: jest.fn().mockResolvedValue(undefined) };
+    orderFlowMock = {
+      reconcileKitchenAfterDispatch: jest.fn().mockResolvedValue(undefined),
+      reconcileOrderFromDispatch: jest.fn().mockResolvedValue(undefined),
+    };
+    storeContextRunnerMock = {
+      runInStoreContext: jest.fn(async (_storeId: number, callback: () => Promise<void>) => callback()),
+    };
 
     listener = new DispatchNoteEventsListener(
       prismaMock as unknown as StorePrismaService,
@@ -906,6 +918,7 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
       undefined,
       undefined,
       orderFlowMock,
+      storeContextRunnerMock,
     );
   };
 
@@ -937,6 +950,27 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
     // Idempotencia: sólo sella donde está NULL — un re-disparo no mueve la fecha.
     expect(arg.where.delivered_at).toBeNull();
     expect(arg.data.delivered_at).toBeInstanceOf(Date);
+    expect(storeContextRunnerMock.runInStoreContext).toHaveBeenCalledWith(100, expect.any(Function));
+    expect(orderFlowMock.reconcileKitchenAfterDispatch).toHaveBeenCalledWith(7777, 100);
+  });
+
+  it('(dispatch KDS) projects the stamped delivery before order-state reconciliation', async () => {
+    arrange([{ id: 11, product_id: 1, product_variant_id: null }], [{ status: 'delivered' }]);
+    const calls: string[] = [];
+    prismaMock.order_items.updateMany.mockImplementation(async () => {
+      calls.push('stamp');
+      return { count: 1 };
+    });
+    orderFlowMock.reconcileKitchenAfterDispatch.mockImplementation(async () => {
+      calls.push('kitchen');
+    });
+    orderFlowMock.reconcileOrderFromDispatch.mockImplementation(async () => {
+      calls.push('order');
+    });
+
+    await fire();
+
+    expect(calls).toEqual(['stamp', 'kitchen', 'order']);
   });
 
   it('(r) despacho parcial: sólo sella las líneas que viajan en ESTA remisión', async () => {
@@ -955,12 +989,64 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
     expect(arg.where.id.in).toEqual([11]);
   });
 
+  it('(C.2) logs only stamped lines without a kitchen ticket, not linked lines', async () => {
+    arrange(
+      [
+        { id: 11, product_id: 1, product_variant_id: null },
+        { id: 12, product_id: 99, product_variant_id: null },
+      ],
+      [{ status: 'delivered' }],
+    );
+    prismaMock.kitchen_ticket_items.findMany.mockResolvedValue([
+      { order_item_id: 12 },
+    ]);
+    const warn = jest.spyOn((listener as any).logger, 'warn').mockImplementation(() => undefined);
+
+    await fire();
+
+    expect(prismaMock.order_items.findMany).toHaveBeenCalledWith({
+      where: { id: { in: [11, 12] }, delivered_at: expect.any(Date) },
+      select: { id: true },
+    });
+    expect(prismaMock.kitchen_ticket_items.findMany).toHaveBeenCalledWith({
+      where: { order_item_id: { in: [11, 12] } },
+      select: { order_item_id: true },
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('line(s) without kitchen ticket: 11'));
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('without kitchen ticket: 11, 12'));
+  });
+
+  it('(C.2) does not log a no-ticket exception when no line won the stamp race', async () => {
+    arrange([{ id: 11, product_id: 1, product_variant_id: null }], [{ status: 'delivered' }]);
+    prismaMock.order_items.updateMany.mockResolvedValue({ count: 0 });
+    const warn = jest.spyOn((listener as any).logger, 'warn').mockImplementation(() => undefined);
+
+    await fire();
+
+    expect(prismaMock.kitchen_ticket_items.findMany).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('(C.2) keeps the committed stamp and order reconciliation when audit lookup fails', async () => {
+    arrange([{ id: 11, product_id: 1, product_variant_id: null }], [{ status: 'delivered' }]);
+    prismaMock.kitchen_ticket_items.findMany.mockRejectedValue(new Error('audit lookup unavailable'));
+    const warn = jest.spyOn((listener as any).logger, 'warn').mockImplementation(() => undefined);
+
+    await fire();
+
+    expect(prismaMock.order_items.updateMany).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not audit stamped lines'));
+    expect(orderFlowMock.reconcileOrderFromDispatch).toHaveBeenCalledWith(7777, 100);
+  });
+
   it('(s) nada pendiente: no escribe (idempotente ante re-disparo del evento)', async () => {
     arrange([], [{ status: 'delivered' }]);
 
     await fire();
 
     expect(prismaMock.order_items.updateMany).not.toHaveBeenCalled();
+    // A replay still reconciles a previously stamped item if KDS failed.
+    expect(orderFlowMock.reconcileKitchenAfterDispatch).toHaveBeenCalledWith(7777, 100);
     // El reconciliador sí corre igual: el estado de la orden no depende del sello.
     expect(orderFlowMock.reconcileOrderFromDispatch).toHaveBeenCalledWith(7777, 100);
   });

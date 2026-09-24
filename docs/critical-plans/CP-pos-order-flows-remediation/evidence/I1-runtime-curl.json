@@ -1,0 +1,12 @@
+{
+  "environment": "local",
+  "repeated_full_payment": [
+    {"order_id": 1113, "state": "created", "http_status": 409, "error_code": "ORD_PAY_ALREADY_PAID_001", "settled_payment_count_after": 1},
+    {"order_id": 1158, "state": "shipped", "http_status": 409, "error_code": "ORD_PAY_ALREADY_PAID_001", "settled_payment_count_after": 1},
+    {"order_id": 1144, "state": "processing", "http_status": 409, "error_code": "ORD_PAY_ALREADY_PAID_001", "settled_payment_count_after": 1}
+  ],
+  "concurrent_double_submit": {"order_id": 1157, "http_statuses": [200, 409], "loser_error_code": "ORD_FLOW_PAYMENT_FAILED_001", "settled_payment_count_after": 1},
+  "legitimate_partial_credit": {"order_id": 1156, "endpoint": "flow/credit-payment", "http_status": 200, "payment_amount": 3000, "remaining_balance": 7000, "settled_payment_count_after": 1},
+  "unauthenticated_http_status": 401,
+  "foreign_store_http_status": 404
+}

@@ -6,6 +6,7 @@ import {
   sales_document_item_type_enum,
 } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
+import { StoreContextRunner } from '@common/context/store-context-runner.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import {
   StockLevelManager,
@@ -80,6 +81,10 @@ export class DispatchNoteEventsListener {
     // remisiones + balance (POST-COMMIT) and applyDispatchCodPayment clears a COD
     // balance idempotently.
     private readonly orderFlowService?: OrderFlowService,
+    // Dispatch events may run after the HTTP tenant context has unwound. The
+    // order/KDS projection uses scoped Prisma, so restore the store context
+    // explicitly instead of relying on the event emitter's async boundary.
+    private readonly storeContextRunner?: StoreContextRunner,
   ) {}
 
   /**
@@ -431,6 +436,9 @@ export class DispatchNoteEventsListener {
    * del mesero —no sirvas un plato que cocina no terminó—, no el hecho del
    * despacho. Acá la mercancía YA salió físicamente con el domiciliario; negar
    * el sello dejaría la contradicción que este puente corrige.
+   * Excepción de despacho: este carril puede sellar una línea sin ticket de
+   * cocina asociado; se registra su ID. Si sí hay ticket, el listener proyecta
+   * el hecho de entrega a su última fila KDS, incluso si seguía pending.
    *
    * Idempotente por `delivered_at: null` en la `where`: la primera entrega es
    * la que ocurrió, un re-disparo del evento nunca mueve la fecha adelante.
@@ -511,6 +519,32 @@ export class DispatchNoteEventsListener {
           allFulfilled ? 'orden completa' : 'despacho parcial'
         })`,
       );
+      try {
+        // Confirmar qué líneas estampó ESTA escritura (no solo las candidatas,
+        // que pueden perder la carrera contra otro escritor) antes de reportar
+        // la excepción sin ticket.
+        const stamped = await db.order_items.findMany({
+          where: { id: { in: targetIds }, delivered_at: now },
+          select: { id: true },
+        });
+        const ticketLinks = await db.kitchen_ticket_items.findMany({
+          where: { order_item_id: { in: stamped.map((item) => item.id) } },
+          select: { order_item_id: true },
+        });
+        const linkedIds = new Set(ticketLinks.map((link) => link.order_item_id));
+        const withoutTicket = stamped
+          .map((item) => item.id)
+          .filter((id) => !linkedIds.has(id));
+        if (withoutTicket.length > 0) {
+          this.logger.warn(
+            `[delivered] Dispatch note #${dispatch_note.id} stamped order #${order_id} line(s) without kitchen ticket: ${withoutTicket.join(', ')}`,
+          );
+        }
+      } catch (error) {
+        this.logger.warn(
+          `[delivered] Dispatch note #${dispatch_note.id}: could not audit stamped lines without kitchen tickets: ${(error as Error).message}`,
+        );
+      }
     }
   }
 
@@ -642,6 +676,30 @@ export class DispatchNoteEventsListener {
           this.logger.error(
             `[delivered] Failed to stamp delivered order items of order #${dispatch_note.order_id}: ${err.message}`,
           );
+        }
+        // Physical delivery is authoritative even if the kitchen had not
+        // marked the dish ready. Project the committed order-side fact to
+        // the latest KDS row before reconciling the document state. Run on
+        // every event, including a replay with zero new stamps, so a prior
+        // best-effort failure can heal without moving delivered_at.
+        if (!this.storeContextRunner) {
+          this.logger.error(
+            `[delivered] StoreContextRunner unavailable: kitchen projection skipped for order #${dispatch_note.order_id}`,
+          );
+        } else {
+          try {
+            await this.storeContextRunner.runInStoreContext(
+              dispatch_note.store_id,
+              () => this.orderFlowService!.reconcileKitchenAfterDispatch(
+                dispatch_note.order_id!,
+                dispatch_note.store_id,
+              ),
+            );
+          } catch (err) {
+            this.logger.error(
+              `[delivered] Failed to project kitchen state for order #${dispatch_note.order_id}: ${(err as Error).message}`,
+            );
+          }
         }
         try {
           await this.orderFlowService.reconcileOrderFromDispatch(

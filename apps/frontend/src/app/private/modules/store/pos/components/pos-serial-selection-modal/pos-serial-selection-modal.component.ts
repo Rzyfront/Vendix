@@ -18,8 +18,8 @@ import {
 /**
  * QUI-431 — POS serial selection modal.
  *
- * Opened when the cashier adds a product with `requires_serial_numbers = true`
- * to the cart. The cashier picks serials from the in_stock pool (multi-select,
+ * Opened before charging a Para llevar product with
+ * `requires_serial_numbers = true`. The cashier picks serials from the in_stock pool (multi-select,
  * searchable) and/or types free-text serials (one per line / comma separated)
  * for units not yet in the pool. Free-text serials are resolved-or-created as
  * real pool rows by the backend at payment time, preserving pool↔stock parity.
@@ -83,7 +83,7 @@ export class PosSerialSelectionModalComponent {
   );
 
   /** Whether the cashier has chosen enough serials to cover the quantity. */
-  readonly canConfirm = computed(() => this.totalSelected() >= this.quantity());
+  readonly canConfirm = computed(() => this.totalSelected() === this.quantity());
 
   onSelectionChange(values: (string | number)[]): void {
     this.selectedSerialIds.set(values);

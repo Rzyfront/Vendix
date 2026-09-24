@@ -1,6 +1,37 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { OrderValidationResult } from '../interfaces';
+import { ErrorCodes } from '../../../../common/errors/error-codes';
+
+type TypedOrderValidationResult = OrderValidationResult & { errorCode?: string };
+
+type MonetaryValue = Prisma.Decimal | number | string;
+type OrderSettlementSnapshot = {
+  grand_total: MonetaryValue | null | undefined;
+  payments?: ReadonlyArray<{ state: string; amount: MonetaryValue }>;
+};
+
+/** Shared, exact-money settlement check for POS and the locked order-pay path. */
+export function getSettledOrderAmount(
+  order: Pick<OrderSettlementSnapshot, 'payments'>,
+): Prisma.Decimal {
+  return (order.payments ?? [])
+    .filter((payment) =>
+      payment.state === 'succeeded' || payment.state === 'captured',
+    )
+    .reduce(
+      (sum, payment) => sum.plus(payment.amount),
+      new Prisma.Decimal(0),
+    );
+}
+
+export function isOrderFullyPaid(
+  order: OrderSettlementSnapshot,
+  settledAmount = getSettledOrderAmount(order),
+): boolean {
+  return settledAmount.gte(new Prisma.Decimal(order.grand_total ?? 0));
+}
 
 @Injectable()
 export class PaymentValidatorService {
@@ -9,7 +40,7 @@ export class PaymentValidatorService {
   async validateOrder(
     orderId: number,
     storeId: number,
-  ): Promise<OrderValidationResult> {
+  ): Promise<TypedOrderValidationResult> {
     try {
       const order = await this.prisma.orders.findUnique({
         where: { id: orderId },
@@ -56,12 +87,10 @@ export class PaymentValidatorService {
         warnings.push('Order is already finished');
       }
 
-      const totalPaid = order.payments
-        .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
-        .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+      const alreadyPaid = isOrderFullyPaid(order);
 
-      if (totalPaid >= Number(order.grand_total)) {
-        warnings.push('Order is already fully paid');
+      if (alreadyPaid) {
+        errors.push('Order is already fully paid');
       }
 
       if (order.order_items.length === 0) {
@@ -79,6 +108,9 @@ export class PaymentValidatorService {
         order,
         errors: errors.length > 0 ? errors : undefined,
         warnings: warnings.length > 0 ? warnings : undefined,
+        ...(alreadyPaid && {
+          errorCode: ErrorCodes.ORD_PAY_ALREADY_PAID_001.code,
+        }),
       };
     } catch (error) {
       return {
@@ -122,6 +154,7 @@ export class PaymentValidatorService {
   async validatePaymentAmount(
     amount: number,
     orderId: number,
+    excludedPaymentId?: number,
   ): Promise<boolean> {
     try {
       const order = await this.prisma.orders.findUnique({
@@ -129,8 +162,9 @@ export class PaymentValidatorService {
         include: {
           payments: {
             where: {
+              ...(excludedPaymentId ? { id: { not: excludedPaymentId } } : {}),
               state: {
-                in: ['succeeded', 'captured', 'pending'],
+                in: ['succeeded', 'captured', 'pending', 'authorized'],
               },
             },
           },

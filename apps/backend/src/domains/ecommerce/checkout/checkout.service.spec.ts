@@ -224,6 +224,9 @@ describe('CheckoutService - promotions and coupons', () => {
           .fn()
           .mockResolvedValue({ first_name: 'Test', last_name: 'User', phone: null }),
       },
+      bank_accounts: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
 
     storePrisma = {
@@ -254,7 +257,8 @@ describe('CheckoutService - promotions and coupons', () => {
         update: jest.fn(),
         findUnique: jest.fn(),
       },
-      store_payment_methods: { findFirst: jest.fn() },
+      store_payment_methods: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      bank_accounts: { findMany: jest.fn().mockResolvedValue([]) },
       domain_settings: { findMany: jest.fn().mockResolvedValue([]) },
     };
 
@@ -840,9 +844,11 @@ describe('CheckoutService - promotions and coupons', () => {
       ]);
     });
 
-    it('rechaza el pago en efectivo aunque esté habilitado en la tienda', async () => {
+    it('permite el pago en efectivo si la entrega es pickup (recoger en tienda) (QUI-850)', async () => {
+      mockOrderCreate(10000);
       prisma.store_payment_methods.findFirst.mockResolvedValue({
         id: 9,
+        store_id: STORE_ID,
         state: 'enabled',
         system_payment_method: {
           id: 1,
@@ -851,10 +857,56 @@ describe('CheckoutService - promotions and coupons', () => {
           provider: 'manual',
         },
       });
+      storePrisma.shipping_methods.findFirst.mockResolvedValue({
+        id: 1,
+        type: 'pickup',
+        store_id: STORE_ID,
+        is_active: true,
+      });
+
+      const result: any = await service.checkout({
+        payment_method_id: 9,
+        shipping_method_id: 1,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+      } as any);
+
+      expect(result).toBeDefined();
+      expect(prisma.orders.create).toHaveBeenCalled();
+      expect(prisma.payments.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            state: 'pending',
+            store_payment_method_id: 9,
+          }),
+        }),
+      );
+    });
+
+    it('rechaza el pago en efectivo si la entrega no es pickup (QUI-850)', async () => {
+      mockOrderCreate(10000);
+      prisma.store_payment_methods.findFirst.mockResolvedValue({
+        id: 9,
+        store_id: STORE_ID,
+        state: 'enabled',
+        system_payment_method: {
+          id: 1,
+          display_name: 'Efectivo',
+          type: 'cash',
+          provider: 'manual',
+        },
+      });
+      storePrisma.shipping_methods.findFirst.mockResolvedValue({
+        id: 2,
+        type: 'own_fleet',
+        store_id: STORE_ID,
+        is_active: true,
+      });
 
       const err = await service
         .checkout({
           payment_method_id: 9,
+          shipping_method_id: 2,
+          shipping_address_id: 1,
           items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
         } as any)
         .then(
@@ -867,15 +919,12 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(prisma.payments.create).not.toHaveBeenCalled();
     });
 
-    it('getPaymentMethods excluye cash por tipo en todo shipping_type', async () => {
+    it('getPaymentMethods excluye cash para envíos que no son pickup y lo permite en pickup (QUI-850)', async () => {
       prisma.store_payment_methods.findMany.mockResolvedValue([]);
 
-      for (const shippingType of [undefined, 'pickup', 'own_fleet']) {
+      for (const shippingType of [undefined, 'own_fleet']) {
         jest.clearAllMocks();
         await service.getPaymentMethods(shippingType);
-        // El `AND` viaja DENTRO de `where`, no en la raíz del argumento. La
-        // aserción original lo buscaba en la raíz y fallaba aunque la
-        // exclusión de `cash` estuviera presente y correcta.
         expect(prisma.store_payment_methods.findMany).toHaveBeenCalledWith(
           expect.objectContaining({
             where: expect.objectContaining({
@@ -886,6 +935,18 @@ describe('CheckoutService - promotions and coupons', () => {
           }),
         );
       }
+
+      jest.clearAllMocks();
+      await service.getPaymentMethods('pickup');
+      expect(prisma.store_payment_methods.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            AND: expect.not.arrayContaining([
+              { system_payment_method: { type: { not: 'cash' } } },
+            ]),
+          }),
+        }),
+      );
     });
 
     it('getDeliveryOptions devuelve un tipo de entrega por método activo', async () => {
@@ -923,6 +984,257 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(err).toBeInstanceOf(VendixHttpException);
       expect(err.errorCode).toBe('ECOM_CHECKOUT_001');
       expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    describe('getBankAccountsForMethod (QUI-849)', () => {
+      it('retorna las cuentas bancarias configuradas si el método es bank_transfer', async () => {
+        prisma.stores.findUnique.mockResolvedValue({ organization_id: 1, store_code: 'EC' });
+        prisma.store_payment_methods.findFirst.mockResolvedValue({
+          id: 10,
+          custom_config: { accounts: [{ id: 101 }] },
+          system_payment_method: { type: 'bank_transfer' },
+        });
+        prisma.bank_accounts.findMany.mockResolvedValue([
+          {
+            id: 101,
+            name: 'Cuenta Principal',
+            bank_name: 'Bancolombia',
+            account_number: '123456789',
+            image_s3_key: null,
+          },
+        ]);
+
+        const result = await service.getBankAccountsForMethod(10, STORE_ID);
+
+        expect(result).toHaveLength(1);
+        expect(result[0]).toEqual(
+          expect.objectContaining({
+            id: 101,
+            bank_name: 'Bancolombia',
+            account_number: '123456789',
+          }),
+        );
+      });
+
+      it('retorna array vacío si el método es voucher (no expone cuentas de transferencia)', async () => {
+        prisma.stores.findUnique.mockResolvedValue({ organization_id: 1, store_code: 'EC' });
+        prisma.store_payment_methods.findFirst.mockResolvedValue({
+          id: 11,
+          custom_config: { allow_validation: true },
+          system_payment_method: { type: 'voucher' },
+        });
+
+        const result = await service.getBankAccountsForMethod(11, STORE_ID);
+
+        expect(result).toEqual([]);
+        expect(prisma.bank_accounts.findMany).not.toHaveBeenCalled();
+      });
+
+      it('retorna array vacío si el método de pago no existe', async () => {
+        prisma.stores.findUnique.mockResolvedValue({ organization_id: 1, store_code: 'EC' });
+        prisma.store_payment_methods.findFirst.mockResolvedValue(null);
+
+        const result = await service.getBankAccountsForMethod(999, STORE_ID);
+
+        expect(result).toEqual([]);
+      });
+    });
+  });
+
+  /**
+   * QUI-INC — el tipo fiscal se COPIA de la fila fuente; el punto de escritura
+   * no lo fabrica.
+   *
+   * El defecto original vivía en el `map` que arma `item_taxes`:
+   * `tax_type: (taxInfo.taxes[i] as any)?.tax_type ?? 'iva'`. Junto a un
+   * `prisma.create` ese `??` no puede distinguir «categoría genuinamente sin
+   * tipar» de «categoría INC cuyo tipo nadie propagó» — convierte la segunda
+   * en la primera. Evidencia de producción: `order_item_taxes.id=130` (tienda
+   * 105) persistió `tax_rate_id=68` / `tax_name='INC'` / `tax_rate=0.08` junto
+   * a un `tax_type='iva'` inventado, y la factura electrónica declaró ante la
+   * DIAN un «IVA del 8 %» que en Colombia no existe.
+   */
+  describe('QUI-INC — tax_type de la línea del checkout', () => {
+    const INC_ROW = {
+      tax_rate_id: 68,
+      name: 'INC',
+      rate: 0.08,
+      tax_type: 'inc',
+      is_inclusive: false,
+      amount: 800,
+      base: 10000,
+    };
+
+    it('una categoría INC persiste tax_type="inc" en order_item_taxes, no "iva"', async () => {
+      taxesService.calculateProductTaxes.mockResolvedValue({
+        total_rate: 0.08,
+        total_tax_amount: 800,
+        base: 10000,
+        total: 10800,
+        taxes: [INC_ROW],
+      });
+      mockOrderCreate(10800);
+
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+      } as any);
+
+      const orderArgs = prisma.orders.create.mock.calls[0][0].data;
+      const taxRow = orderArgs.order_items.create[0].order_item_taxes.create[0];
+      // Los CUATRO campos fiscales salen de la MISMA fila de catálogo: si
+      // `tax_rate_id=68` es INC, `tax_type` no puede decir otra cosa.
+      expect(taxRow).toMatchObject({
+        tax_rate_id: 68,
+        tax_name: 'INC',
+        tax_type: 'inc',
+      });
+      expect(taxRow.tax_type).not.toBe('iva');
+    });
+
+    it('una fila fuente SIN tipo no se convierte en IVA en el punto de escritura', async () => {
+      // Sonda del punto de ESCRITURA, no un input soportado:
+      // `TaxesService.calculateProductTaxes` siempre resuelve el tipo contra
+      // `tax_categories` (`?? IVA`, el default canónico en la FILA FUENTE).
+      // Forzar aquí un `tax_type: null` demuestra que el checkout ya no
+      // rellena el hueco: antes del arreglo esta fila se persistía como
+      // `'iva'` — la fabricación exacta que produjo el «IVA del 8 %».
+      taxesService.calculateProductTaxes.mockResolvedValue({
+        total_rate: 0.08,
+        total_tax_amount: 800,
+        base: 10000,
+        total: 10800,
+        taxes: [{ ...INC_ROW, tax_type: null }],
+      });
+      mockOrderCreate(10800);
+
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+      } as any);
+
+      const orderArgs = prisma.orders.create.mock.calls[0][0].data;
+      const taxRow = orderArgs.order_items.create[0].order_item_taxes.create[0];
+      expect(taxRow.tax_type).not.toBe('iva');
+      expect(taxRow.tax_type).toBeNull();
+    });
+  });
+
+  /**
+   * Impuesto opcional por tarifa de envío: el checkout (núcleo unificado y el
+   * endpoint WhatsApp antiguo) congela la copia de la tarifa en la orden sin
+   * mover `grand_total`, y la compuerta F4 cuenta el IVA del envío.
+   */
+  describe('impuesto del envío — copia congelada en la orden', () => {
+    const RATE = {
+      id: 31,
+      is_active: true,
+      base_cost: 15000,
+      shipping_method_id: 4,
+      shipping_method: { id: 4, type: 'delivery' },
+      shipping_zone: { id: 2, store_id: STORE_ID },
+    };
+    const INC_SNAPSHOT = {
+      shipping_tax_rate_id: 77,
+      shipping_tax_name: 'INC 8%',
+      shipping_tax_type: 'inc',
+      shipping_tax_rate: 0.08,
+      shipping_tax_amount: 1111.11,
+    };
+    const address = {
+      address_line1: 'Calle 1', city: 'Bogotá', country_code: 'CO',
+    };
+    let snapshotForRate: jest.Mock;
+
+    beforeEach(() => {
+      storePrisma.shipping_rates.findFirst.mockResolvedValue(RATE);
+      snapshotForRate = jest.fn().mockResolvedValue({ ...INC_SNAPSHOT });
+      (service as any).shippingTaxService = { snapshotForRate };
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
+    });
+
+    it('checkout: copia la tarifa y grand_total = subtotal + envío (impuesto incluido)', async () => {
+      mockOrderCreate(25000);
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Invitado' },
+        shipping_rate_id: 31,
+        shipping_address: address,
+      } as any);
+
+      expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 15000, { store_id: STORE_ID });
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        ...INC_SNAPSHOT,
+        shipping_rate_id: 31,
+        shipping_cost: 15000,
+        tax_amount: 0,
+        grand_total: 25000,
+      });
+    });
+
+    it('checkout: IVA en el envío pasa por la compuerta F4 (no responsable ⇒ 412)', async () => {
+      snapshotForRate.mockResolvedValue({
+        ...INC_SNAPSHOT,
+        shipping_tax_type: 'iva',
+        shipping_tax_rate: 0.19,
+        shipping_tax_amount: 2394.96,
+      });
+      settingsService.getFiscalData = jest.fn().mockResolvedValue({
+        tax_responsibilities: ['R-99-PN'],
+        tax_regime: 'no_responsable_iva',
+      });
+      mockOrderCreate(25000);
+      const guard = jest.spyOn(service as any, 'assertCheckoutVatAllowed');
+
+      await service
+        .checkout({
+          payment_method_id: 7,
+          items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+          guest_customer: { first_name: 'Invitado' },
+          shipping_rate_id: 31,
+          shipping_address: address,
+        } as any)
+        .catch(() => undefined);
+
+      const lines = guard.mock.calls[0][0] as any[];
+      expect(lines[lines.length - 1]).toEqual({
+        item_taxes: [{ tax_type: 'iva', amount: 2394.96 }],
+      });
+    });
+
+    it('checkout sin tarifa (solo método): copia vacía', async () => {
+      storePrisma.shipping_methods.findFirst.mockResolvedValue({ id: 4, type: 'pickup' });
+      mockOrderCreate(10000);
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Invitado' },
+        shipping_method_id: 4,
+      } as any);
+
+      expect(snapshotForRate).not.toHaveBeenCalled();
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data.shipping_tax_amount).toBe(0);
+      expect(data.shipping_tax_rate_id).toBeNull();
+    });
+
+    it('whatsappCheckout (endpoint antiguo): copia la tarifa y no mueve el total', async () => {
+      mockOrderCreate(25000);
+      await service.whatsappCheckout({
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        shipping_rate_id: 31,
+      } as any);
+
+      expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 15000, { store_id: STORE_ID });
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        ...INC_SNAPSHOT,
+        shipping_rate_id: 31,
+        shipping_cost: 15000,
+        grand_total: 25000,
+      });
     });
   });
 });

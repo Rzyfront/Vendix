@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsIn,
@@ -42,6 +43,9 @@ export class CreateRefundItemDto {
 
 export class CreateRefundDto {
   @IsArray()
+  @ArrayUnique((item: CreateRefundItemDto) => item?.order_item_id, {
+    message: 'Each order_item_id must appear only once in items',
+  })
   @ValidateNested({ each: true })
   @Type(() => CreateRefundItemDto)
   items: CreateRefundItemDto[];

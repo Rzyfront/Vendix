@@ -1,0 +1,1 @@
+select count(*) as historical_ticket_line_mismatches from kitchen_ticket_items k join order_items i on i.id=k.order_item_id where i.delivered_at is not null and k.status<>'delivered'; select count(*) as historical_delivered_after_updated from order_items where delivered_at > updated_at;

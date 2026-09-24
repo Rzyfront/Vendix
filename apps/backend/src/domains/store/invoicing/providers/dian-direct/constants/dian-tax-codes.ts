@@ -200,6 +200,71 @@ export function resolveDianTaxCodeByName(tax_name: string): string {
 }
 
 /**
+ * =====================================================================
+ * ESQUEMA TRIBUTARIO DE UNA **PARTE** — tabla 13.2.6.2, NO la 13.2.2
+ * =====================================================================
+ * `cac:PartyTaxScheme/cac:TaxScheme` NO declara el tributo de una línea:
+ * declara BAJO QUÉ ESQUEMA TRIBUTARIO está inscrita la parte (emisor o
+ * adquirente). Su dominio es una tabla propia de CUATRO valores, distinta de la
+ * tabla 13.2.2 de tributos que alimenta `cac:TaxTotal`:
+ *
+ *   `01` IVA · `04` INC · `ZA` IVA e INC · `ZZ` No aplica
+ *
+ * `ZA` NO existe en la 13.2.2 y por eso no aparece en `DIAN_TAX_TABLE`: mezclar
+ * las dos tablas es el error que este bloque separado existe para impedir.
+ *
+ * QUÉ SE EMITÍA ANTES Y POR QUÉ ESTABA MAL. El builder decidía con un solo
+ * booleano — `issuer.tax_regime !== '49'` — entre `01` y `ZZ`. Un restaurante
+ * responsable ÚNICAMENTE de INC (Art. 426 ET: el expendio de comidas está
+ * excluido de IVA) no tenía forma de declararse: o se le atribuía IVA, o se le
+ * negaba todo esquema. Medido en producción con el NIT de un restaurante cuya
+ * casilla 53 trae O-33 y no trae O-48, cuyo XML firmado declaraba `01`/`IVA`.
+ */
+export const DIAN_PARTY_TAX_SCHEMES = {
+  /** Inscrito sólo en IVA. */
+  IVA: { id: '01', name: 'IVA' },
+  /** Inscrito sólo en INC (restaurantes, bares, telefonía). */
+  INC: { id: '04', name: 'INC' },
+  /** Inscrito en ambos (p. ej. restaurante con franquicia o con venta al detal gravada). */
+  IVA_AND_INC: { id: 'ZA', name: 'IVA e INC' },
+  /** No inscrito en ninguno de los dos — consumidor final, no responsable. */
+  NOT_APPLICABLE: { id: 'ZZ', name: 'No aplica' },
+} as const;
+
+/** Par (ID, Name) que viaja a `cac:PartyTaxScheme/cac:TaxScheme`. */
+export interface DianPartyTaxScheme {
+  /** `cbc:ID` — '01' | '04' | 'ZA' | 'ZZ'. */
+  id: string;
+  /** `cbc:Name` — obligatorio; su ausencia produce FAJ41. */
+  name: string;
+}
+
+/**
+ * Resuelve el esquema tributario de una parte desde los DOS ejes de
+ * responsabilidad, que es la única información que lo determina.
+ *
+ * Pura y total: las cuatro combinaciones de los dos booleanos producen los
+ * cuatro valores de la tabla, así que no hay default silencioso que pueda
+ * atribuir IVA a quien no lo declaró.
+ *
+ * Los booleanos salen de `resolveFiscalResponsibilityFlags`
+ * (`common/helpers/vat-responsibility.helper.ts`), que los lee de la casilla 53
+ * del RUT. Esta función NO los deriva: mantener la lectura del RUT en un solo
+ * sitio es lo que impide que el emisor y el adquirente los interpreten distinto.
+ */
+export function resolveDianPartyTaxScheme(flags: {
+  vat_responsible?: boolean;
+  inc_responsible?: boolean;
+}): DianPartyTaxScheme {
+  const vat = flags.vat_responsible === true;
+  const inc = flags.inc_responsible === true;
+  if (vat && inc) return DIAN_PARTY_TAX_SCHEMES.IVA_AND_INC;
+  if (vat) return DIAN_PARTY_TAX_SCHEMES.IVA;
+  if (inc) return DIAN_PARTY_TAX_SCHEMES.INC;
+  return DIAN_PARTY_TAX_SCHEMES.NOT_APPLICABLE;
+}
+
+/**
  * Tarifas de IVA admitidas en `cac:TaxCategory[TaxScheme/ID='01']/cbc:Percent`.
  *
  * Fuente: `Listas de valores/TarifaImpuestoIVA-2.1.gc` (columnas code/name/

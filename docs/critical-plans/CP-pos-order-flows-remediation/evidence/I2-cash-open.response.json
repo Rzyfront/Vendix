@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "message": "Order cancelled successfully",
+  "error_code": null,
+  "order": {
+    "id": 1122,
+    "state": "cancelled",
+    "total_paid": "10000",
+    "remaining_balance": "0"
+  }
+}

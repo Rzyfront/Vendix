@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { PaymentEncryptionService } from './payment-encryption.service';
 import * as crypto from 'crypto';
 import { Prisma, refunds_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -17,6 +18,7 @@ import {
 import { PaymentValidatorService } from './payment-validator.service';
 import { PaymentError, PaymentErrorCodes } from '../utils';
 import { BasePaymentProcessor } from '../interfaces/base-processor.interface';
+import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 
 @Injectable()
 export class PaymentGatewayService {
@@ -26,6 +28,7 @@ export class PaymentGatewayService {
     private prisma: StorePrismaService,
     private validatorService: PaymentValidatorService,
     private s3Service: S3Service,
+    @Optional() private readonly paymentEncryption?: PaymentEncryptionService,
   ) {}
 
   /**
@@ -128,11 +131,97 @@ export class PaymentGatewayService {
         transactionId: result.transactionId || payment.transaction_id,
       };
     } catch (error) {
-      if (error instanceof PaymentError) {
+      if (error instanceof PaymentError || error instanceof VendixHttpException) {
         throw error;
       }
       throw new PaymentError(PaymentErrorCodes.PROCESSOR_ERROR, error.message);
     }
+  }
+
+  /** Server-only: executes an already budgeted account payment; never creates another row.
+   * Account service owns order reconciliation, register movements and after-commit events.
+   * The caller supplies only a row id, not trusted amounts/account flags in metadata.
+   */
+  async processReservedPayment(paymentId: number): Promise<PaymentResult> {
+    const payment = await this.prisma.payments.findFirst({
+      where: { id: paymentId },
+      include: {
+        orders: true,
+        financial_account: { include: { split: true, customer: true } },
+        store_payment_method: { include: { system_payment_method: true } },
+      },
+    });
+    const account = payment?.financial_account;
+    if (!payment || !account || !payment.store_payment_method_id ||
+        account.role !== 'payable' || account.state !== 'active' ||
+        account.split.state !== 'active' ||
+        account.split.source_order_id !== payment.order_id ||
+        account.store_id !== payment.orders.store_id ||
+        payment.orders.active_financial_split_id !== account.split_id ||
+        !payment.financial_idempotency_key) {
+      throw new PaymentError(PaymentErrorCodes.INVALID_ORDER, 'La reserva no pertenece a una cuenta financiera activa');
+    }
+    if (payment.state !== 'pending') {
+      return {
+        success: payment.state === 'succeeded' || payment.state === 'captured',
+        status: payment.state,
+        transactionId: payment.transaction_id ?? undefined,
+        gatewayResponse: payment.gateway_response,
+      };
+    }
+    const saved = (payment.gateway_response ?? {}) as Record<string, any>;
+    const request = saved.financial_request ?? {};
+    const reference = payment.gateway_reference || `financial_${payment.orders.store_id}_${payment.id}`;
+    const data: PaymentData = {
+      orderId: payment.order_id,
+      customerId: payment.customer_id ?? undefined,
+      amount: Number(payment.amount),
+      currency: payment.currency || payment.orders.currency || 'COP',
+      storePaymentMethodId: payment.store_payment_method_id,
+      storeId: payment.orders.store_id,
+      bankAccountId: payment.bank_account_id ?? undefined,
+      idempotencyKey: payment.financial_idempotency_key,
+      metadata: { paymentId: payment.id, reference, paymentMethod: request.wompi_payment_method, customerEmail: account.customer?.email },
+      returnUrl: request.return_url ?? undefined,
+      cancelUrl: request.cancel_url ?? undefined,
+    };
+    await this.validatePaymentData(data, payment.id);
+    const method = await this.getPaymentMethod(data.storePaymentMethodId!);
+    const methodType = method.system_payment_method?.type || method.type;
+    const processor = this.getProcessor(methodType);
+    if (methodType === 'wompi') {
+      if (!this.paymentEncryption) throw new PaymentError(PaymentErrorCodes.PROCESSOR_ERROR, 'Payment encryption provider unavailable');
+      data.metadata!.wompiConfig = this.paymentEncryption.decryptConfig((method.custom_config || {}) as Record<string, any>, methodType);
+    }
+    if (!processor.isEnabled()) {
+      throw new PaymentError(PaymentErrorCodes.PAYMENT_METHOD_DISABLED, 'Payment method is disabled');
+    }
+    if (data.bankAccountId) {
+      data.bankAccount = await this.resolveAndValidateBankAccount(data.bankAccountId, data.storeId);
+    }
+    const claimed = await this.prisma.payments.updateMany({
+      where: { id: payment.id, state: 'pending', financial_account_id: account.id, gateway_reference: null },
+      data: { gateway_reference: reference },
+    });
+    if (!claimed.count) {
+      return { success: true, status: 'pending', transactionId: payment.transaction_id ?? undefined,
+        message: 'Pago en proceso; se conciliará con el proveedor.', nextAction: { type: 'await' } };
+    }
+    const result = await processor.processPayment(data);
+    // A fast APPROVED callback may win while the provider call is in flight.
+    // Never regress a terminal state to the HTTP response's older PENDING.
+    await this.prisma.payments.updateMany({
+      where: { id: payment.id, state: 'pending', financial_account_id: account.id },
+      data: {
+        state: result.status,
+        ...(result.transactionId ? { transaction_id: result.transactionId } : {}),
+        gateway_reference: result.gatewayReference || reference,
+        gateway_response: { ...(result.gatewayResponse || {}), financial_request: request, nextAction: result.nextAction ?? null },
+        ...(['succeeded', 'captured'].includes(result.status) ? { paid_at: new Date() } : {}),
+        updated_at: new Date(),
+      },
+    });
+    return { ...result, transactionId: result.transactionId || payment.transaction_id || undefined };
   }
 
   async processPaymentWithNewOrder(
@@ -153,7 +242,7 @@ export class PaymentGatewayService {
         orderId: order.id,
       });
     } catch (error) {
-      if (error instanceof PaymentError) {
+      if (error instanceof PaymentError || error instanceof VendixHttpException) {
         throw error;
       }
       throw new PaymentError(PaymentErrorCodes.INVALID_ORDER, error.message);
@@ -271,28 +360,55 @@ export class PaymentGatewayService {
     }
   }
 
-  private async validatePaymentData(paymentData: PaymentData): Promise<void> {
-    // Skip order validation for POS payments — the order was just created
-    // inside the same Prisma transaction and isn't visible to the regular client yet
-    const skipOrderValidation = paymentData.metadata?.is_pos_payment === true;
-
+  /**
+   * Las CUATRO validaciones corren SIEMPRE. No hay bandera, de nadie, que
+   * seleccione cuáles se saltan.
+   *
+   * Historia — hasta este cambio existía `skipOrderValidation =
+   * paymentData.metadata?.is_pos_payment === true`, que saltaba a la vez
+   * `validateOrder` y `validatePaymentAmount`. Dos problemas:
+   *
+   * 1. La justificación era falsa. Decía "la orden se acaba de crear dentro de
+   *    la misma transacción Prisma y el cliente normal todavía no la ve", pero
+   *    el único llamador POS que ponía la bandera es el bloque digital
+   *    (wompi/wallet) de `processPosPaymentTransaction`, y a ese bloque solo se
+   *    llega desde `payments.service.ts:1958` — DESPUÉS del commit y con
+   *    `this.prisma`, no con `tx` (la llamada en `:1354`, la que sí pasa `tx`,
+   *    está guardada por `!isDigitalPayment`, así que nunca entra a la rama
+   *    digital). La orden ya es visible: la validación corre y pasa.
+   *
+   * 2. `metadata` es carga del cliente. Viaja en el body de
+   *    `POST /store/payments`, cuyo permiso es `store:pos:access`. Cualquier
+   *    cajero podía mandar `metadata: { is_pos_payment: true }` y desactivar la
+   *    compuerta anti-sobrepago de `validatePaymentAmount`
+   *    (`amount <= grand_total − pagos succeeded|captured|pending`), cobrando
+   *    dos veces una orden ya pagada o cobrando una cancelada.
+   *
+   * El otro llamador legítimo —`chargeAdoptedOrder` del POS, que cobra sobre una
+   * orden ya existente— no necesitaba nada de esto: un cobro de orden adoptada
+   * parcialmente pagada pasa `validateOrder` y `validatePaymentAmount` porque
+   * su monto es exactamente el saldo pendiente. Una orden ya saldada devuelve
+   * `ORD_PAY_ALREADY_PAID_001`. Lo cubre el caso "deja pasar el
+   * cobro legítimo de una orden adoptada" del spec.
+   *
+   * `metadata` queda como carga OPACA: se persiste en `payments.gateway_response`
+   * y se le pasa al processor, pero no decide nada del flujo de validación.
+   */
+  private async validatePaymentData(paymentData: PaymentData, reservedPaymentId?: number): Promise<void> {
     const validations: Promise<any>[] = [
-      skipOrderValidation
-        ? Promise.resolve({ valid: true })
-        : this.validatorService.validateOrder(
-            paymentData.orderId,
-            paymentData.storeId,
-          ),
+      this.validatorService.validateOrder(
+        paymentData.orderId,
+        paymentData.storeId,
+      ),
       this.validatorService.validatePaymentMethod(
         paymentData.storePaymentMethodId as number,
         paymentData.storeId,
       ),
-      skipOrderValidation
-        ? Promise.resolve(true)
-        : this.validatorService.validatePaymentAmount(
-            paymentData.amount,
-            paymentData.orderId,
-          ),
+      this.validatorService.validatePaymentAmount(
+        paymentData.amount,
+        paymentData.orderId,
+        ...(reservedPaymentId ? [reservedPaymentId] : []),
+      ),
       this.validatorService.validateCurrency(
         paymentData.currency,
         paymentData.storeId,
@@ -303,10 +419,22 @@ export class PaymentGatewayService {
       await Promise.all(validations);
 
     if (!orderValid.valid) {
+      if (orderValid.errorCode) {
+        const typedError = Object.values(ErrorCodes).find(
+          (entry) => entry.code === orderValid.errorCode,
+        );
+        if (typedError) {
+          throw new VendixHttpException(typedError, orderValid.errors?.join(', '));
+        }
+      }
       throw new PaymentError(
         PaymentErrorCodes.INVALID_ORDER,
         orderValid.errors?.join(', ') || 'Invalid order',
       );
+    }
+
+    if (orderValid.order?.active_financial_split_id && !reservedPaymentId) {
+      throw new PaymentError(PaymentErrorCodes.INVALID_ORDER, 'Esta orden tiene cuentas independientes. Cobra desde la cuenta correspondiente.');
     }
 
     if (!methodValid) {

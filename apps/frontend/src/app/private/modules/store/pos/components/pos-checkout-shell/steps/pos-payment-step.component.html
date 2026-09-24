@@ -1,11 +1,11 @@
 <!-- Fase 5·B1 — Paso Cobro. Réplica de la sección "Pago" de
      pos-payment-interface.html (collector + Wompi awaiting), sin el
      <app-modal> ni Resumen/Cliente. El tipo de servicio (fulfillment) y la
-     mesa viven ahora en el paso Consumo (`app-pos-consumo-step`). -->
+     mesa viven ahora en el paso Entrega (`app-pos-entrega-step`). -->
 <div class="payment-step pos-payment-context">
   <!-- Bloque de RECOLECCIÓN de pago delegado al collector headless. La
        orquestación (cliente, caja, horario, polling Wompi POST-submit) vive en
-       este step; el fulfillment/mesa los provee el paso Consumo por input. -->
+       este step; el fulfillment/mesa los provee el paso Entrega por input. -->
   <div [style.display]="wompiAwaitingPayment() ? 'none' : 'block'">
     <app-payment-collector
       context="pos"
@@ -20,6 +20,7 @@
       [requireCustomer]="!isAnonymous() && !isAlias()"
       [walletInfo]="collectorWalletInfo()"
       [allowTip]="authFacade.isRestaurant()"
+      [paymentResetKey]="paymentResetKey()"
       (submit)="onCollectorSubmit($event)"
       (requestCustomer)="requestCustomer.emit()"
       (walletLookup)="onWalletLookup($event)"
@@ -27,10 +28,13 @@
     ></app-payment-collector>
   </div>
 
-  <!-- Wompi Awaiting Payment UI (POST-submit polling vive en este step). -->
+  <!-- Wompi Awaiting Payment UI (POST-submit polling vive en este step).
+       Stitch paso 6 — card de estado con título, spinner y acciones md
+       (44px en desktop; sm da 36px y falla el target mínimo). -->
   @if (wompiAwaitingPayment()) {
-    <div class="wompi-awaiting">
+    <div class="wompi-awaiting" role="status">
       <app-spinner></app-spinner>
+      <h3 class="wompi-awaiting-title">Esperando confirmación de Wompi</h3>
       <p class="awaiting-message">{{ wompiAwaitingMessage() }}</p>
       @if (wompiPollingState().active) {
         <p class="awaiting-attempts">
@@ -43,24 +47,33 @@
         <app-button
           label="Verificar pago ahora"
           variant="outline"
-          size="sm"
+          size="md"
           (clicked)="manualVerifyPayment()"
         ></app-button>
         @if (!wompiPollingState().active) {
           <app-button
             label="Continuar esperando"
             variant="ghost"
-            size="sm"
+            size="md"
             (clicked)="startWompiPolling()"
           ></app-button>
         }
         <app-button
           label="Cancelar espera"
           variant="ghost"
-          size="sm"
+          size="md"
           (clicked)="cancelWompiAwait()"
         ></app-button>
       </div>
     </div>
   }
 </div>
+<app-pos-serial-selection-modal
+  [isOpen]="serialModalOpen()"
+  [productName]="serialModalProductName()"
+  [quantity]="serialModalQuantity()"
+  [options]="serialModalOptions()"
+  [loading]="serialModalLoading()"
+  (confirmed)="onSerialConfirmed($event)"
+  (cancelled)="onSerialCancelled()"
+></app-pos-serial-selection-modal>

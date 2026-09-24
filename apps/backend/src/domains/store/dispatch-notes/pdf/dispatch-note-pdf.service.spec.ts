@@ -90,6 +90,22 @@ describe('DispatchNotePdfService — courier_name (domiciliario) en el PDF', () 
     expect(data.courier_name).toBeUndefined();
   });
 
+  it('pasa nombre de referencia y dirección copiados al PDF sin cliente', async () => {
+    const generateSpy = mockBuilder();
+    prismaMock.dispatch_notes.findFirst.mockResolvedValue({
+      ...baseNote(),
+      customer_id: null,
+      customer_name: 'Portería Torre Norte',
+      customer_address: { address_line1: 'Cra 7 # 1-3', city: 'Bogotá' },
+    });
+
+    await service.generatePdf(220);
+
+    const data: DispatchNotePdfData = generateSpy.mock.calls[0][0];
+    expect(data.customer_name).toBe('Portería Torre Norte');
+    expect(data.delivery_address).toContain('Cra 7 # 1-3');
+  });
+
   it('ausenta courier_name cuando es solo espacios', async () => {
     const generateSpy = mockBuilder();
     prismaMock.dispatch_notes.findFirst.mockResolvedValue({

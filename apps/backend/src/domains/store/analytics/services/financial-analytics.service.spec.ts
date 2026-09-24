@@ -123,6 +123,74 @@ describe('FinancialAnalyticsService', () => {
       expect(result.bottom_line.order_count).toBe(2);
     });
 
+    it('taxed freight: revenue and refund net out on the freight BASE; the freight tax goes to tax_collected', async () => {
+      // Tarifa de envío $15.000 con INC 8 % incluido → base 13.888,89 + 1.111,11.
+      // La orden se entrega y se devuelve completa (subtotal + envío bruto) en
+      // el mismo período: el ingreso operativo debe cerrar en 0, no en +2×envío.
+      prisma.orders.aggregate.mockResolvedValue({
+        _sum: {
+          subtotal_amount: 1000,
+          discount_amount: 0,
+          tax_amount: 190,
+          shipping_cost: 15000,
+          shipping_tax_amount: 1111.11,
+          grand_total: 16190,
+        },
+        _count: { id: 1 },
+      });
+      prisma.refunds.aggregate.mockResolvedValue({
+        _sum: {
+          amount: 16190,
+          subtotal_refund: 1000,
+          tax_refund: 1301.11,
+          shipping_refund: 15000,
+        },
+      });
+      prisma.expenses.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+      prisma.$queryRaw.mockImplementation((q: any) => {
+        const text = Array.isArray(q) ? q.join('') : (q?.strings ?? []).join('');
+        if (text.includes('shipping_tax_refund')) {
+          return Promise.resolve([{ shipping_tax_refund: 1111.11 }]);
+        }
+        return Promise.resolve([{ cogs: 0 }]);
+      });
+
+      const result = await service.getProfitLossSummary(QUERY as any);
+
+      expect(result.revenue.shipping_revenue).toBe(13888.89);
+      expect(result.revenue.tax_collected).toBe(1301.11);
+      // 1000 + 13.888,89 − 1000 − (15.000 − 1.111,11) = 0
+      expect(result.revenue.operating_revenue).toBe(0);
+    });
+
+    it('untaxed freight refund is SUBTRACTED from operating revenue (never added back)', async () => {
+      prisma.orders.aggregate.mockResolvedValue({
+        _sum: {
+          subtotal_amount: 1000,
+          discount_amount: 0,
+          tax_amount: 0,
+          shipping_cost: 500,
+          shipping_tax_amount: 0,
+          grand_total: 1500,
+        },
+        _count: { id: 1 },
+      });
+      prisma.refunds.aggregate.mockResolvedValue({
+        _sum: {
+          amount: 500,
+          subtotal_refund: 0,
+          tax_refund: 0,
+          shipping_refund: 500,
+        },
+      });
+      prisma.expenses.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
+
+      const result = await service.getProfitLossSummary(QUERY as any);
+
+      // 1000 + 500 − 0 − 500 = 1000 (antes: 2000 por sumar el envío devuelto)
+      expect(result.revenue.operating_revenue).toBe(1000);
+    });
+
     it('QUI-662: cross-period refund makes operating_revenue negative (no base, refund in current period)', async () => {
       // Orders aggregate is called twice (current + previous). With the same
       // mock both calls return 0; the previous-period result has the same

@@ -32,6 +32,8 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
               formatCurrency(cartSummary()?.total || 0)
             }}</span>
             <span class="tax-amount">
+              {{ itemCount() }}
+              {{ itemCount() === 1 ? 'ítem' : 'ítems' }} ·
               IVA {{ formatCurrency(cartSummary()?.taxAmount || 0) }}
             </span>
           </div>
@@ -71,14 +73,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         <!-- Row 2: Secondary Action Buttons -->
         <div class="actions-row">
           <button
-            class="action-btn custom-item-btn"
-            (click)="customItem.emit()"
-            [disabled]="!canCreateCustomItems()"
-            >
-            <app-icon name="file-plus" [size]="16"></app-icon>
-            <span>Ítem</span>
-          </button>
-          <button
             class="action-btn save-btn"
             (click)="saveDraft.emit()"
             [disabled]="itemCount() === 0"
@@ -87,12 +81,13 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <span>{{ isEditMode() ? 'Actualizar' : 'Guardar' }}</span>
           </button>
           <button
-            class="action-btn shipping-btn"
-            (click)="shipping.emit()"
-            [disabled]="itemCount() === 0"
+            type="button"
+            class="action-btn client-btn"
+            (click)="selectClient.emit()"
+            aria-label="Asignar cliente a la venta"
             >
-            <app-icon name="truck" [size]="16"></app-icon>
-            <span>Envío</span>
+            <app-icon name="user-plus" [size]="16"></app-icon>
+            <span>+ Cliente</span>
           </button>
         </div>
         <!--
@@ -104,13 +99,13 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         -->
         <button
           type="button"
-          class="action-btn checkout-btn checkout-btn-full"
+          class="action-btn checkout-btn checkout-btn-full checkout-charge"
           (click)="checkout.emit()"
           [disabled]="itemCount() === 0 || isCharging()"
           [attr.aria-busy]="isCharging() ? 'true' : null"
         >
           <app-icon name="credit-card" [size]="18"></app-icon>
-          <span>Cobrar</span>
+          <span>Cobrar {{ formatCurrency(cartSummary()?.total || 0) }}</span>
         </button>
         <!--
           Phase D.3 — Cobrar only when an updated order is sitting in
@@ -219,7 +214,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       .total-amount {
         font-size: 18px;
         font-weight: 800;
-        color: var(--color-text-primary);
+        color: var(--color-primary);
         line-height: 1.2;
         white-space: nowrap;
         overflow: hidden;
@@ -239,12 +234,12 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         align-items: center;
         gap: 6px;
         padding: 8px 14px;
-        background: var(--color-muted);
-        border: 1px solid var(--color-border);
+        background: rgba(var(--color-primary-rgb), 0.08);
+        border: 1px solid rgba(var(--color-primary-rgb), 0.25);
         border-radius: 20px;
-        color: var(--color-text-primary);
+        color: var(--color-primary);
         font-size: 13px;
-        font-weight: 600;
+        font-weight: 700;
         cursor: pointer;
         transition: all 0.2s ease;
         flex-shrink: 0;
@@ -252,7 +247,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       }
 
       .view-detail-btn:hover:not(:disabled) {
-        background: var(--color-primary-light);
+        background: rgba(var(--color-primary-rgb), 0.16);
         border-color: var(--color-primary);
         color: var(--color-primary);
       }
@@ -269,7 +264,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       /* Row 2: Actions */
       .actions-row {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
       }
 
@@ -289,10 +284,20 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
       .checkout-btn-full {
         width: 100%;
-        height: 46px;
+        height: 48px;
         font-size: 15px;
         font-weight: 700;
         box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
+      }
+
+      /* CTA principal con monto visible en color primario */
+      .checkout-charge {
+        background: var(--color-primary);
+        box-shadow: 0 6px 16px rgba(var(--color-primary-rgb), 0.35);
+      }
+
+      .checkout-charge:hover:not(:disabled) {
+        filter: brightness(1.08);
       }
 
       .action-btn:active:not(:disabled) {
@@ -310,29 +315,20 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         color: var(--color-text-primary);
       }
 
-      .custom-item-btn {
+      .client-btn {
         background: rgba(var(--color-primary-rgb), 0.08);
         border: 1px solid rgba(var(--color-primary-rgb), 0.24);
         color: var(--color-primary);
       }
 
-      .custom-item-btn:hover:not(:disabled) {
+      .client-btn:hover:not(:disabled) {
         background: rgba(var(--color-primary-rgb), 0.14);
       }
 
       .save-btn:hover:not(:disabled) {
-        background: var(--color-muted);
-        border-color: var(--color-text-secondary);
-      }
-
-      .shipping-btn {
-        background: var(--color-surface);
-        border: 1px solid rgba(var(--color-primary-rgb), 0.5);
+        background: rgba(var(--color-primary-rgb), 0.06);
+        border-color: var(--color-primary);
         color: var(--color-primary);
-      }
-
-      .shipping-btn:hover:not(:disabled) {
-        background: rgba(var(--color-primary-rgb), 0.05);
       }
 
       .checkout-btn {
@@ -341,16 +337,12 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       }
 
       .checkout-btn:hover:not(:disabled) {
-        filter: brightness(1.1);
+        filter: brightness(1.08);
       }
 
       .cobrar-btn {
-        background: linear-gradient(
-          135deg,
-          var(--color-success, #16a34a) 0%,
-          var(--color-primary) 100%
-        );
-        box-shadow: 0 4px 14px rgba(34, 197, 94, 0.32);
+        background: var(--color-primary);
+        box-shadow: 0 4px 14px rgba(var(--color-primary-rgb), 0.35);
       }
 
       .cobrar-btn:focus-visible {
@@ -403,7 +395,6 @@ export class PosMobileFooterComponent {
   readonly isQuotationMode = input<boolean>(false);
   readonly isLayawayMode = input<boolean>(false);
   readonly isEditMode = input<boolean>(false);
-  readonly canCreateCustomItems = input<boolean>(false);
   /**
    * Phase D.3 — when non-null, the parent has a fresh order ready to be
    * charged. We render a separate `Cobrar` button mirroring the desktop cart.
@@ -411,7 +402,11 @@ export class PosMobileFooterComponent {
   readonly readyToPayOrder = input<unknown>(null);
   readonly isCharging = input<boolean>(false);
   readonly viewCart = output<void>();
-  readonly customItem = output<void>();
+  /**
+   * Stitch Fase 1 móvil — abre el modal de cliente desde el catálogo sin
+   * abrir el carrito. El ítem libre vive en la barra de búsqueda (Fase 3).
+   */
+  readonly selectClient = output<void>();
   readonly create = output<void>();
   /**
    * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the
@@ -420,7 +415,6 @@ export class PosMobileFooterComponent {
    * step. The Cobrar button uses the full shell wizard.
    */
   readonly saveDraft = output<void>();
-  readonly shipping = output<void>();
   readonly checkout = output<void>();
   readonly charge = output<void>();
   readonly quote = output<void>();

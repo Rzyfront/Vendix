@@ -58,7 +58,8 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
 
   beforeEach(() => {
     txMock = {
-      orders: { findUnique: jest.fn().mockResolvedValue(buildOrder()) },
+      orders: { findUnique: jest.fn().mockResolvedValue(buildOrder()), findFirst: jest.fn().mockResolvedValue(buildOrder()) },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 1, state: 'processing' }]),
       order_items: { updateMany: jest.fn() },
       // reservationReader = tx (tx presente) → sin reserva activa.
       stock_reservations: { findMany: jest.fn().mockResolvedValue([]) },
@@ -139,6 +140,137 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
     );
     expect(result.committedItemCount).toBe(1);
   });
+
+  it.each([undefined, [{ product_id: 100, product_variant_id: null, serial_ids: [], serial_numbers: [] }]])(
+    'direct_delivery serial exige selección explícita aun si flow/pay omite flags FE (%s)',
+    async (posSelection) => {
+      const direct = buildOrder();
+      direct.order_items[0].products = {
+        ...direct.order_items[0].products,
+        product_type: 'physical',
+        requires_serial_numbers: true,
+      } as any;
+      txMock.orders.findUnique.mockResolvedValue({ ...direct, delivery_type: 'direct_delivery' });
+      serialEnforcementMock.isSerialized.mockResolvedValue(true);
+      await expect(service.commitOrderDelivery(1, {
+        ...OPTS, consumeSerials: true, posSelection,
+      }, txMock)).rejects.toMatchObject({ errorCode: 'SERIAL_REQUIRED_001' });
+      expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+      expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('direct_delivery serial rejects a selection for a different product', async () => {
+    const direct = buildOrder();
+    direct.order_items[0].products = {
+      ...direct.order_items[0].products, product_type: 'physical',
+      requires_serial_numbers: true,
+    } as any;
+    txMock.orders.findUnique.mockResolvedValue({ ...direct, delivery_type: 'direct_delivery' });
+    await expect(service.commitOrderDelivery(1, {
+      ...OPTS, consumeSerials: true,
+      posSelection: [{ product_id: 999, serial_ids: [1] }],
+    }, txMock)).rejects.toMatchObject({ errorCode: 'SERIAL_REQUIRED_001' });
+    expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('direct_delivery serial with confirmed selection still commits and links the line', async () => {
+    const direct = buildOrder();
+    direct.order_items[0].products = {
+      ...direct.order_items[0].products, product_type: 'physical',
+      requires_serial_numbers: true,
+    } as any;
+    txMock.orders.findUnique.mockResolvedValue({ ...direct, delivery_type: 'direct_delivery' });
+    txMock.order_items.updateMany.mockResolvedValue({ count: 1 });
+    serialEnforcementMock.isSerialized.mockResolvedValue(true);
+    serialEnforcementMock.resolveOrCreateFromFreeText = jest.fn().mockResolvedValue([]);
+    serialEnforcementMock.requireConfirmedSerials = jest.fn().mockResolvedValue(undefined);
+    serialNumbersMock.transition = jest.fn().mockResolvedValue({ serial_number: 'IMEI-1' });
+    serialNumbersMock.linkToDocument = jest.fn().mockResolvedValue(undefined);
+
+    const result = await service.commitOrderDelivery(1, {
+      ...OPTS, consumeSerials: true,
+      posSelection: [{ product_id: 100, product_variant_id: null, serial_ids: [1] }],
+    }, txMock);
+
+    expect(result.committedItemCount).toBe(1);
+    expect(serialNumbersMock.linkToDocument).toHaveBeenCalledWith(1, 'order_item', 10, txMock);
+    expect(stockLevelManagerMock.updateStock).toHaveBeenCalledTimes(1);
+  });
+
+  it('no vuelve a consumir un plato cuyo BOM ya se descontó al disparar a cocina', async () => {
+    const firedOrder: any = buildOrder();
+    firedOrder.stores.industries = ['restaurant'];
+    firedOrder.order_items[0].products.product_type = 'prepared';
+    firedOrder.order_items[0].inventory_consumed_at_fire = true;
+    txMock.orders.findFirst.mockResolvedValue(firedOrder);
+    txMock.orders.findUnique.mockResolvedValue(firedOrder);
+
+    const result = await service.commitOrderDelivery(1, OPTS, txMock);
+
+    expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+    expect(stockLevelManagerMock.releaseReservation).not.toHaveBeenCalled();
+    expect(result.committedItemCount).toBe(0);
+  });
+
+  it('no descuenta el plato preparado pendiente de fire al cobrar la orden restaurante', async () => {
+    const pendingOrder: any = buildOrder();
+    pendingOrder.stores.industries = ['restaurant'];
+    pendingOrder.order_items[0].products.product_type = 'prepared';
+    txMock.orders.findFirst.mockResolvedValue(pendingOrder);
+    txMock.orders.findUnique.mockResolvedValue(pendingOrder);
+
+    const result = await service.commitOrderDelivery(1, OPTS, txMock);
+
+    expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+    expect(result.committedItemCount).toBe(0);
+  });
+
+  it('no consume una orden cancelada aunque el callback llegue tarde', async () => {
+    txMock.$queryRaw.mockResolvedValue([{ id: 1, state: 'cancelled' }]);
+    await expect(service.commitOrderDelivery(1, OPTS, txMock)).rejects
+      .toMatchObject({ errorCode: 'ORD_STOCK_COMMIT_STATE_001' });
+    expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('sin tx abre una transacción que incluye claim y stock', async () => {
+    prismaMock.$transaction = jest.fn(async (callback) => callback(txMock));
+    txMock.order_items.updateMany.mockResolvedValue({ count: 1 });
+    await service.commitOrderDelivery(1, OPTS);
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(stockLevelManagerMock.updateStock).toHaveBeenCalledWith(expect.anything(), txMock);
+  });
+
+  it('notifica solo después de que la transacción propietaria hizo commit', async () => {
+    let committed = false;
+    const publish = jest.fn(() => expect(committed).toBe(true));
+    prismaMock.$transaction = jest.fn(async (cb) => {
+      const result = await cb(txMock); committed = true; return result;
+    });
+    txMock.order_items.updateMany.mockResolvedValue({count:1});
+    stockLevelManagerMock.updateStock.mockImplementation(async (params) => {
+      params.afterCommit.push(publish);
+      return {cost_snapshot:{total_cost:0}};
+    });
+    await service.commitOrderDelivery(1, OPTS);
+    expect(publish).toHaveBeenCalledTimes(1);
+  });
+
+  it('rollback descarta notificaciones que se prepararon antes del fallo', async () => {
+    const publish = jest.fn();
+    prismaMock.$transaction = jest.fn(async (cb) => cb(txMock));
+    txMock.order_items.updateMany.mockResolvedValue({count:1});
+    stockLevelManagerMock.updateStock.mockImplementation(async (params) => {
+      params.afterCommit.push(publish);
+      throw new Error('fallo de escritura');
+    });
+    await expect(service.commitOrderDelivery(1, OPTS)).rejects.toThrow('fallo de escritura');
+    expect(publish).not.toHaveBeenCalled();
+  });
+
 });
 
 /**
@@ -187,7 +319,8 @@ describe('OrderStockCommitService — descuento multi-ubicación', () => {
   /** Arma el servicio con un allocator real sobre `levels` en memoria. */
   const setup = (quantity: number, levels = SPLIT_LEVELS, reservations: any[] = []) => {
     txMock = {
-      orders: { findUnique: jest.fn().mockResolvedValue(buildOrder(quantity)) },
+      orders: { findUnique: jest.fn().mockResolvedValue(buildOrder(quantity)), findFirst: jest.fn().mockResolvedValue(buildOrder(quantity)) },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 1, state: 'processing' }]),
       order_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       stock_reservations: { findMany: jest.fn().mockResolvedValue(reservations) },
     };

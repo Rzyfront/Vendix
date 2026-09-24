@@ -5,12 +5,17 @@
       <!-- Cliente seleccionado: tarjeta resumen -->
       <div class="selected-customer">
         <div class="customer-avatar">
-          <app-icon name="user" [size]="18" color="#ffffff"></app-icon>
+          <app-icon name="user" [size]="20" color="var(--color-primary)"></app-icon>
         </div>
         <div class="customer-info">
           <span class="customer-name">
             {{ customer.first_name }} {{ customer.last_name }}
           </span>
+          @if (customer.document_number) {
+            <span class="customer-document">
+              {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
+            </span>
+          }
           <span class="customer-email">
             {{ customer.email || customer.phone || '—' }}
           </span>
@@ -27,7 +32,7 @@
 
       @if (allowAnonymous()) {
         <div class="create-customer-action">
-          <app-button variant="ghost" size="sm" (clicked)="clearCustomer()">
+          <app-button variant="ghost" size="md" (clicked)="clearCustomer()">
             <app-icon name="user-x" [size]="16" slot="icon"></app-icon>
             Quitar cliente / venta anónima
           </app-button>
@@ -159,7 +164,7 @@
 
       @if (!isSearching() && searchPerformed() && results().length === 0) {
         <div class="no-results">
-          <app-icon name="user-x" [size]="32" color="var(--color-text-muted)"></app-icon>
+          <app-icon name="user-x" [size]="32" color="var(--color-neutral-600)"></app-icon>
           <p>No se encontraron clientes con esos criterios</p>
         </div>
       }

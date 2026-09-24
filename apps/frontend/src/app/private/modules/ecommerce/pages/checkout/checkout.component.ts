@@ -1150,6 +1150,11 @@ export class CheckoutComponent implements OnInit {
     if (t === 'bank_transfer' || t === 'voucher') {
       if (isSameMethod) {
         // Mismo método: re-abrimos el modal y salimos. Estado preservado.
+        // QUI-849: si es bank_transfer y las cuentas aún no están cacheadas
+        // (ej. preselección automática inicial), aseguramos su carga antes de abrir el modal.
+        if (t === 'bank_transfer' && !this.bankAccountsByMethod().has(method_id)) {
+          this.loadBankAccountsForMethod(method_id);
+        }
         this.show_payment_instructions_modal.set(true);
         return;
       }
@@ -1163,20 +1168,22 @@ export class CheckoutComponent implements OnInit {
       this.payment_receipt_file.set(null);
       this.payment_instructions_acknowledged.set(false);
 
-      // Carga lazy de cuentas. Si ya están cacheadas, no refetch — el modal
-      // las resuelve instantáneamente desde `bankAccountsByMethod`.
-      if (!this.bankAccountsByMethod().has(method_id)) {
-        this.loadBankAccountsForMethod(method_id);
-      } else {
-        // Cache hit: default a la primera cuenta SOLO si la elección actual
-        // no es válida para este método (cuenta borrada, método nuevo que
-        // nunca tuvo elección previa, etc.). Misma guarda que
-        // `loadBankAccountsForMethod` (líneas 1126-1131): respeta elecciones
-        // previas válidas y solo rellena el hueco. El predicado vive en
-        // `isBankAccountStillValid` para no divergir entre los dos sitios.
-        const cached = this.bankAccountsByMethod().get(method_id) ?? [];
-        if (!this.isBankAccountStillValid(cached)) {
-          this.selected_bank_account_id.set(cached[0]?.id ?? null);
+      // Carga lazy de cuentas. Solo aplica a `bank_transfer` (vouchers son cupones).
+      // Si ya están cacheadas, no refetch — el modal las resuelve instantáneamente.
+      if (t === 'bank_transfer') {
+        if (!this.bankAccountsByMethod().has(method_id)) {
+          this.loadBankAccountsForMethod(method_id);
+        } else {
+          // Cache hit: default a la primera cuenta SOLO si la elección actual
+          // no es válida para este método (cuenta borrada, método nuevo que
+          // nunca tuvo elección previa, etc.). Misma guarda que
+          // `loadBankAccountsForMethod` (líneas 1126-1131): respeta elecciones
+          // previas válidas y solo rellena el hueco. El predicado vive en
+          // `isBankAccountStillValid` para no divergir entre los dos sitios.
+          const cached = this.bankAccountsByMethod().get(method_id) ?? [];
+          if (!this.isBankAccountStillValid(cached)) {
+            this.selected_bank_account_id.set(cached[0]?.id ?? null);
+          }
         }
       }
 
@@ -1449,6 +1456,13 @@ export class CheckoutComponent implements OnInit {
       this.selected_address_id.set(null);
       // Se rastrea la promesa para que Continuar la espere si sigue en vuelo.
       this.shipping_fetch_promise = this.preparePickupQuote();
+    } else if (mode === 'home') {
+      // QUI-850: Si tenía seleccionado efectivo al recoger en tienda y cambia a domicilio,
+      // resetear selección y recargar métodos excluyendo efectivo.
+      if (this.selectedPaymentMethodObj()?.type === 'cash') {
+        this.selected_payment_method_id.set(null);
+      }
+      this.loadPaymentMethods('home');
     }
   }
 
@@ -1855,20 +1869,40 @@ export class CheckoutComponent implements OnInit {
   }
 
   /**
-   * Defensa en profundidad (auditoría D.3): aunque el backend ya excluye
-   * `cash` del ecommerce, la UI nunca lo renderiza aunque regresara por
-   * error. El único freno real sigue siendo el POST (ECOM_CHECKOUT_002).
+   * Defensa en profundidad (auditoría D.3 / QUI-850): el backend ya excluye
+   * `cash` si el envío no es 'pickup'. La UI refuerza esto no renderizando
+   * `cash` a menos que el modo de entrega seleccionado sea 'pickup'.
    */
-  private withoutCash(methods: PaymentMethod[]): PaymentMethod[] {
+  private filterPaymentMethods(
+    methods: PaymentMethod[],
+    isPickup: boolean,
+  ): PaymentMethod[] {
+    if (isPickup) return methods ?? [];
     return (methods ?? []).filter((m) => m?.type !== 'cash');
   }
 
   loadPaymentMethods(shippingType?: string): void {
+    const effectiveShippingType =
+      shippingType ??
+      (this.selected_delivery() === 'pickup'
+        ? 'pickup'
+        : this.selected_shipping_method_type ?? undefined);
+
+    const isPickup =
+      effectiveShippingType === 'pickup' ||
+      this.selected_delivery() === 'pickup' ||
+      this.selected_shipping_method_type === 'pickup';
+
     this.loading_payment_methods = true;
-    this.checkout_service.getPaymentMethods(shippingType).subscribe({
-      next: (response) => {
+    this.checkout_service
+      .getPaymentMethods(effectiveShippingType)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
         if (response.success) {
-          this.payment_methods.set(this.withoutCash(response.data));
+          this.payment_methods.set(
+            this.filterPaymentMethods(response.data, isPickup),
+          );
 
           // Reset selection if current method is no longer available
           if (this.selected_payment_method_id()) {
@@ -1895,6 +1929,22 @@ export class CheckoutComponent implements OnInit {
             );
           } else {
             this.isWompiPayment.set(false);
+          }
+
+          // QUI-849: Si el método seleccionado inicialmente es transferencia bancaria y no
+          // tiene cuentas cacheadas, precargar el catálogo de cuentas de inmediato para que
+          // el modal abra con datos válidos aunque el comprador no haya hecho clic en la tarjeta.
+          const initialMethodId = this.selected_payment_method_id();
+          if (initialMethodId) {
+            const initialMethod = this.payment_methods().find(
+              (m) => m.id === initialMethodId,
+            );
+            if (
+              initialMethod?.type === 'bank_transfer' &&
+              !this.bankAccountsByMethod().has(initialMethodId)
+            ) {
+              this.loadBankAccountsForMethod(initialMethodId);
+            }
           }
         }
         this.loading_payment_methods = false;
@@ -2059,6 +2109,15 @@ export class CheckoutComponent implements OnInit {
         this.requiresPaymentInstructions() &&
         !this.payment_instructions_acknowledged()
       ) {
+        // QUI-849: Asegurar carga de cuentas para bank_transfer si el modal abre directamente
+        const currentMethodId = this.selected_payment_method_id();
+        if (
+          currentMethodId &&
+          this.selectedPaymentMethodObj()?.type === 'bank_transfer' &&
+          !this.bankAccountsByMethod().has(currentMethodId)
+        ) {
+          this.loadBankAccountsForMethod(currentMethodId);
+        }
         this.error_message.set('');
         this.show_payment_instructions_modal.set(true);
         return;

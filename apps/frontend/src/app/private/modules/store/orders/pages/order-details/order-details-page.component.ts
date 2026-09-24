@@ -1,3 +1,5 @@
+import { SplitAccountsPanelComponent } from '../../../restaurant-ops/tables/components/split-accounts-panel/split-accounts-panel.component';
+import type { SplitResult } from '../../../restaurant-ops/tables/interfaces';
 import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { NgClass, DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
@@ -6,7 +8,7 @@ import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } 
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { forkJoin, firstValueFrom } from 'rxjs';
+import { forkJoin, firstValueFrom, Observable } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 import {
   StoreOrdersService,
@@ -55,6 +57,8 @@ import {
   Address,
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
 import { ResendDishModalComponent } from '../../../restaurant-ops/kds/components/resend-dish-modal/resend-dish-modal.component';
@@ -64,6 +68,22 @@ import { AlertBannerComponent, DialogService, ModalComponent, ToastService, Time
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+
+/** The finish guard returns its current KDS snapshot, which may be newer than this page's order. */
+export function pendingKitchenLabelsFromError(error: unknown): string[] {
+  const details = (error as { details?: { pending_items?: unknown } } | null)?.details;
+  if (!Array.isArray(details?.pending_items)) return [];
+  return details.pending_items.flatMap((item: unknown) => {
+    if (!item || typeof item !== 'object') return [];
+    const row = item as { product_name?: unknown; variant_label?: unknown; quantity?: unknown };
+    if (typeof row.product_name !== 'string' || !row.product_name.trim()) return [];
+    const variant = typeof row.variant_label === 'string' && row.variant_label.trim()
+      ? ` (${row.variant_label.trim()})` : '';
+    const quantity = typeof row.quantity === 'number' && row.quantity > 1
+      ? ` ×${row.quantity}` : '';
+    return [`${row.product_name}${variant}${quantity}`];
+  });
+}
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
   StickyHeaderComponent,
@@ -76,6 +96,7 @@ import { ShippingMethodsService } from '../../../settings/shipping/services/ship
 import { StoreShippingMethod } from '../../../settings/shipping/interfaces/shipping-methods.interface';
 import { ShippingRate } from '../../../settings/shipping/interfaces/shipping-zones.interface';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import { ItemCancellationModalComponent, previewItemCancellation, type ItemCancellationSubmit } from '../../../../../../shared/components';
 import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
@@ -123,11 +144,50 @@ import {
   type FiscalAlertEntry,
 } from '../../utils/fiscal-alert-dictionary';
 
+// Misma política de cobro que SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES en
+// order-flow.service.ts: estas entregas no necesitan método de envío.
+const SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES = new Set<string>([
+  'pickup',
+  'direct_delivery',
+  'dine_in',
+]);
+
 export interface LifecycleStep {
   key: string;
   label: string;
   status: 'completed' | 'current' | 'upcoming' | 'terminal';
 }
+
+export const ORDER_DELIVERY_STEP_LABELS: Record<DeliveryType, Record<string, string>> = {
+  home_delivery: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Procesando',
+    shipped: 'Enviada', delivered: 'Entregada', finished: 'Finalizada',
+  },
+  pickup: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Preparando',
+    shipped: 'Lista para recogida', delivered: 'Recogida en tienda', finished: 'Finalizada',
+  },
+  direct_delivery: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Procesando',
+    shipped: 'Entregada en mostrador', delivered: 'Entregada en mostrador', finished: 'Finalizada',
+  },
+  dine_in: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Preparando',
+    shipped: 'Servida en mesa', delivered: 'Servida en mesa', finished: 'Finalizada',
+  },
+  other: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Procesando',
+    shipped: 'Despachada', delivered: 'Entregada', finished: 'Finalizada',
+  },
+};
+
+export const ORDER_DELIVERY_CONFIG: Record<DeliveryType, { label: string; icon: string }> = {
+  home_delivery: { label: 'Envío a domicilio', icon: 'truck' },
+  pickup: { label: 'Recogida en tienda', icon: 'map-pin' },
+  direct_delivery: { label: 'Entrega directa en mostrador', icon: 'package' },
+  dine_in: { label: 'Consumo en mesa', icon: 'store' },
+  other: { label: 'Otro', icon: 'box' },
+};
 
 type PaymentReceiptPreviewKind = 'image' | 'pdf';
 
@@ -136,6 +196,30 @@ interface PaymentReceiptPreview {
   safeUrl: SafeResourceUrl;
   kind: PaymentReceiptPreviewKind;
   uploadedAt?: string | null;
+}
+
+type ItemCancellationDestination = 'waste' | 'reuse';
+type ItemCancellationMode = 'cancel' | 'reverse';
+
+/** Mirror the backend's settled-payment gate; UI is advisory, API remains authoritative. */
+export function isOrderItemCancellationPaid(order: Pick<Order, 'payments'> | null): boolean {
+  return !!order?.payments?.some((payment) =>
+    ['succeeded', 'captured', 'partially_refunded', 'refunded'].includes(payment.state),
+  );
+}
+
+export function cancellationBody(
+  mode: ItemCancellationMode,
+  reason: string,
+  destination: ItemCancellationDestination,
+  preparedFired: boolean,
+): { reason: string; cancellation_type?: 'after_fire_reused' | 'after_fire_waste'; destination?: 'waste' | 'restock' } {
+  if (mode === 'reverse') {
+    return { reason, destination: destination === 'reuse' ? 'restock' : 'waste' };
+  }
+  return preparedFired
+    ? { reason, cancellation_type: destination === 'reuse' ? 'after_fire_reused' : 'after_fire_waste' }
+    : { reason };
 }
 
 /**
@@ -158,6 +242,7 @@ type RefundState =
   selector: 'app-order-details-page',
   standalone: true,
   imports: [
+    SplitAccountsPanelComponent,
     RouterModule,
     ReactiveFormsModule,
     AlertBannerComponent,
@@ -172,6 +257,7 @@ type RefundState =
     DatePipe,
     ModalComponent,
     CurrencyPipe,
+    ItemCancellationModalComponent,
     OrderPaymentModalComponent,
     OrderRefundModalComponent,
     InvoiceDetailComponent,
@@ -272,6 +358,19 @@ export class OrderDetailsPageComponent {
   showDispatchModal = signal(false);
   /** Chooser modal: "con remisión" vs "sin remisión" (single dispatch entry). */
   showDispatchSelector = signal(false);
+  /**
+   * QUI-844 — dispatch methods the store offers, read with `?? true` so
+   * stores persisted before these flags behave as before (all enabled).
+   */
+  readonly enabledDispatchMethods = computed<DispatchMethod[]>(() => {
+    const dispatch = this.settingsFacade.dispatch();
+    const methods: Array<{ method: DispatchMethod; flag: boolean }> = [
+      { method: 'with-note', flag: dispatch?.enable_dispatch_with_remision ?? true },
+      { method: 'direct', flag: dispatch?.enable_dispatch_direct_delivery ?? true },
+      { method: 'to-dispatch', flag: dispatch?.enable_dispatch_to_pool ?? true },
+    ];
+    return methods.filter((m) => m.flag).map((m) => m.method);
+  });
   /** Courier-name modal: asked on "Entrega completa" before directFullDelivery. */
   showCourierNameModal = signal(false);
   /**
@@ -357,6 +456,18 @@ export class OrderDetailsPageComponent {
     );
     return this.authFacade.printsVatBreakdown() && tax > 0;
   });
+  /**
+   * Impuesto del envío (copia congelada de la tarifa al vender). Va SIEMPRE
+   * incluido en `shipping_cost`, así que es una nota informativa: no suma al
+   * total. 0 = envío sin impuesto (tarifa sin impuesto o costo manual).
+   */
+  readonly shippingTaxAmount = computed<number>(() => {
+    const amount = Number(this.order()?.shipping_tax_amount ?? 0);
+    return Number.isFinite(amount) && amount > 0 ? amount : 0;
+  });
+  readonly shippingTaxLabel = computed<string>(
+    () => this.order()?.shipping_tax_name?.trim() || 'impuesto',
+  );
   /**
    * Plan KDS fire-flows (F3): show the per-plate kitchen dispatch UI only
    * for restaurant stores, when there is at least one pending prepared
@@ -532,43 +643,7 @@ export class OrderDetailsPageComponent {
 
   readonly stepLabels = computed<Record<string, string>>(() => {
     const delivery = this.order()?.delivery_type || 'direct_delivery';
-
-    const labels: Record<DeliveryType, Record<string, string>> = {
-      home_delivery: {
-        created: 'Creada',
-        pending_payment: 'Pago Pendiente',
-        processing: 'Procesando',
-        shipped: 'Enviada',
-        delivered: 'Entregada',
-        finished: 'Finalizada',
-      },
-      pickup: {
-        created: 'Creada',
-        pending_payment: 'Pago Pendiente',
-        processing: 'Preparando',
-        shipped: 'Lista para Recoger',
-        delivered: 'Recogida',
-        finished: 'Finalizada',
-      },
-      direct_delivery: {
-        created: 'Creada',
-        pending_payment: 'Pago Pendiente',
-        processing: 'Procesando',
-        shipped: 'Despachada',
-        delivered: 'Entregada',
-        finished: 'Finalizada',
-      },
-      other: {
-        created: 'Creada',
-        pending_payment: 'Pago Pendiente',
-        processing: 'Procesando',
-        shipped: 'Despachada',
-        delivered: 'Entregada',
-        finished: 'Finalizada',
-      },
-    };
-
-    return labels[delivery] || labels.direct_delivery;
+    return ORDER_DELIVERY_STEP_LABELS[delivery] || ORDER_DELIVERY_STEP_LABELS.direct_delivery;
   });
 
   readonly lifecycleSteps = computed<LifecycleStep[]>(() => {
@@ -622,18 +697,13 @@ export class OrderDetailsPageComponent {
 
   readonly deliveryConfig = computed(() => {
     const delivery = this.order()?.delivery_type || 'direct_delivery';
-    const configs: Record<string, { label: string; icon: string }> = {
-      home_delivery: { label: 'Envio a domicilio', icon: 'truck' },
-      pickup: { label: 'Retiro en tienda', icon: 'map-pin' },
-      direct_delivery: { label: 'Entrega directa', icon: 'package' },
-      other: { label: 'Otro', icon: 'box' },
-    };
-    return configs[delivery] || configs['direct_delivery'];
+    return ORDER_DELIVERY_CONFIG[delivery] || ORDER_DELIVERY_CONFIG.direct_delivery;
   });
 
   readonly showShippingAssignment = computed(() => {
     const order = this.order();
     if (!order) return false;
+    if (order.delivery_type === 'dine_in') return false;
     const terminalStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
     if (terminalStates.includes(order.state as OrderState)) return false;
     if (order.delivery_type === 'direct_delivery') return false;
@@ -659,6 +729,7 @@ export class OrderDetailsPageComponent {
   readonly canEditShipping = computed(() => {
     const order = this.order();
     if (!order) return false;
+    if (order.delivery_type === 'dine_in') return false;
     const lockedStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
     return !lockedStates.includes(order.state as OrderState) && order.delivery_type !== 'direct_delivery';
   });
@@ -690,7 +761,8 @@ export class OrderDetailsPageComponent {
   readonly blockedByMissingShipping = computed(() => {
     const o = this.order();
     if (!o) return false;
-    const needsShipping = o.delivery_type !== 'direct_delivery' && o.delivery_type !== 'other';
+    const needsShipping = !o.delivery_type ||
+      !SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES.has(o.delivery_type);
     const terminal = ['cancelled', 'refunded', 'finished'].includes(o.state);
     return needsShipping && !o.shipping_method_id && !terminal;
   });
@@ -868,7 +940,7 @@ export class OrderDetailsPageComponent {
     if (!order) return [];
 
     if (this.blockedByMissingShipping()) {
-      return [
+      return this.applyCancellationPolicy(order, [
         {
           id: 'info',
           type: 'alert',
@@ -877,7 +949,7 @@ export class OrderDetailsPageComponent {
           label: 'Asigna un metodo de envio para continuar con el flujo.',
         } as OrderActionConfig,
         { id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' },
-      ];
+      ]);
     }
 
     const state = order.state;
@@ -955,7 +1027,7 @@ export class OrderDetailsPageComponent {
           // Pickup: can mark "ready to pick up" without payment (confirm dialog)
           actions.push({
             id: 'manual-ready-pickup',
-            label: 'Listo para Recoger',
+            label: 'Lista para recogida',
             icon: 'package',
             variant: 'primary',
           });
@@ -1043,7 +1115,7 @@ export class OrderDetailsPageComponent {
           if (delivery === 'home_delivery') {
             actions.push({ id: 'deliver', label: 'Marcar como Entregado', icon: 'package-check', variant: 'primary' });
           } else if (isPickup) {
-            actions.push({ id: 'deliver', label: 'Confirmar Recogida', icon: 'user-check', variant: 'primary' });
+            actions.push({ id: 'deliver', label: 'Confirmar recogida en tienda', icon: 'user-check', variant: 'primary' });
           } else {
             actions.push({ id: 'deliver', label: 'Confirmar Entrega', icon: 'check-circle', variant: 'primary' });
           }
@@ -1076,8 +1148,46 @@ export class OrderDetailsPageComponent {
         break;
     }
 
-    return actions;
+    return this.applyCancellationPolicy(order, order.active_financial_split_id
+      ? actions.filter((action) => !['pay', 'credit-payment', 'edit-order'].includes(action.id))
+      : actions);
   });
+
+  /** The server owns this policy, including legacy rows and settled gateways. */
+  private applyCancellationPolicy(
+    order: Order,
+    actions: OrderActionConfig[],
+  ): OrderActionConfig[] {
+    const policy = order.cancellation_policy;
+    const result = actions.filter((action) => {
+      if (action.id === 'cancel') return policy?.can_cancel === true;
+      if (action.id === 'cancel-payment') return policy?.can_cancel_payment === true;
+      return true;
+    });
+    if (
+      result.length !== actions.length &&
+      (!policy || policy.reason_code)
+    ) {
+      result.push({
+        id: 'cancellation-info',
+        type: 'alert',
+        color: 'warning',
+        icon: 'alert-triangle',
+        label: this.cancellationPolicyMessage(order),
+      });
+    }
+    return result;
+  }
+
+  private cancellationPolicyMessage(order: Order | null): string {
+    const code = order?.cancellation_policy?.reason_code;
+    if (code) {
+      return ERROR_MESSAGES[code] ?? 'No se puede cancelar esta orden. Recarga el detalle para consultar el motivo.';
+    }
+    return order
+      ? `La orden en estado ${this.formatStatus(order.state)} no admite cancelación. Recarga el detalle para consultar las acciones disponibles.`
+      : 'Recarga el detalle para consultar las acciones disponibles.';
+  }
 
   // ── Ship Modal Config (delivery-type aware) ────────────────
 
@@ -1098,7 +1208,7 @@ export class OrderDetailsPageComponent {
         };
       case 'pickup':
         return {
-          title: 'Marcar Listo para Recoger',
+          title: 'Marcar lista para recogida',
           showTracking: false,
           showCarrier: false,
           showNotes: true,
@@ -1476,7 +1586,15 @@ export class OrderDetailsPageComponent {
       // submit button stays disabled while the user types nothing (and stops
       // obsessing about the 2000-char backend cap by warning client-side).
       resolution_notes: ['', [Validators.required, Validators.maxLength(2000)]],
+      // PR #843 finding 1: backend requires payout reference + channel for
+      // 'completed' (REF_PAYOUT_REQUIRED_001). Validators toggle below.
+      payout_reference: [''],
+      payout_channel: [''],
     });
+    this.resolveRefundForm
+      .get('target_state')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((state) => this.syncResolvePayoutValidators(state));
 
     this.fastTrackForm = this.fb.group({
       payment: this.fb.group({
@@ -1610,6 +1728,15 @@ export class OrderDetailsPageComponent {
     });
   }
 
+  onFinancialAccountsLoaded(result: SplitResult | null): void {
+    this.order.update((order) => order ? { ...order, active_financial_split_id: result?.split_group_id ?? null } : order);
+  }
+
+  onFinancialAccountsChanged(result: SplitResult | null): void {
+    this.onFinancialAccountsLoaded(result);
+    this.loadData();
+  }
+
   loadData(): void {
     if (!this.orderId) return;
 
@@ -1686,7 +1813,7 @@ export class OrderDetailsPageComponent {
           this.isLoading.set(false);
 
           // Load payment methods if order can accept payment
-          const needsPayment = orderData.state === 'created' ||
+          const needsPayment = orderData.state === 'draft' || orderData.state === 'created' ||
             orderData.payment_form === '2' ||
             (orderData.state === 'shipped' && !(orderData.payments || []).some((p: any) => p.state === 'succeeded'));
           if (needsPayment) {
@@ -1804,6 +1931,10 @@ export class OrderDetailsPageComponent {
   // ── Flow Actions ───────────────────────────────────────────
 
   openPayModal(): void {
+    if (this.order()?.active_financial_split_id) {
+      this.toastService.info('Cobra desde el panel de cuentas independientes.');
+      return;
+    }
     if (this.paymentMethods().length === 0) {
       this.loadPaymentMethods();
     }
@@ -1812,6 +1943,7 @@ export class OrderDetailsPageComponent {
   }
 
   onPaymentSubmitted(submit: PaymentSubmit): void {
+    if (this.order()?.active_financial_split_id) return;
     if (!this.orderId) return;
 
     // Map the collector's normalized submit → PayOrderDto. A null method id would
@@ -1944,6 +2076,19 @@ export class OrderDetailsPageComponent {
     }
     if (!this.canGenerateRemision()) {
       this.startShipWithoutNote();
+      return;
+    }
+    // QUI-844 — single enabled method skips the chooser and runs directly;
+    // with none enabled (stale data) there is nothing to run.
+    const enabled = this.enabledDispatchMethods();
+    if (enabled.length === 1) {
+      this.onDispatchMethodSelected(enabled[0]);
+      return;
+    }
+    if (enabled.length === 0) {
+      this.toastService.warning(
+        'Esta tienda no tiene ningún método de despacho habilitado. Actívalo en Ajustes > Logística.',
+      );
       return;
     }
     this.showDispatchSelector.set(true);
@@ -2485,7 +2630,16 @@ export class OrderDetailsPageComponent {
             },
             error: (err) => {
               this.isProcessingAction.set(false);
-              this.toastService.error(err.message || 'Error al finalizar la orden');
+              const pendingKitchen = (err as { errorCode?: string | null })?.errorCode ===
+                'ORDER_HAS_PENDING_KITCHEN_ITEMS';
+              const dishes = pendingKitchen
+                ? pendingKitchenLabelsFromError(err)
+                : [];
+              this.toastService.error(
+                dishes.length > 0
+                  ? `Entrega o cancela estos platos antes de finalizar: ${dishes.join(', ')}`
+                  : (err as Error)?.message || 'Error al finalizar la orden',
+              );
             },
           });
       });
@@ -2496,8 +2650,8 @@ export class OrderDetailsPageComponent {
 
     this.dialogService
       .confirm({
-        title: 'Listo para recoger sin pago',
-        message: '¿Marcar esta orden como lista para recoger sin confirmar el pago? El pago deberá confirmarse antes de entregar al cliente.',
+        title: 'Lista para recogida sin pago',
+        message: '¿Marcar esta orden como lista para recogida sin confirmar el pago? El pago deberá confirmarse antes de entregar al cliente.',
         confirmText: 'Marcar como lista',
         cancelText: 'Cancelar',
         confirmVariant: 'primary',
@@ -2512,7 +2666,7 @@ export class OrderDetailsPageComponent {
           .subscribe({
             next: () => {
               this.isProcessingAction.set(false);
-              this.toastService.success('Orden marcada como lista para recoger');
+              this.toastService.success('Orden marcada como lista para recogida');
               this.loadData();
             },
             error: (err) => {
@@ -2593,6 +2747,10 @@ export class OrderDetailsPageComponent {
   }
 
   openCancelModal(): void {
+    if (this.order()?.cancellation_policy?.can_cancel !== true) {
+      this.toastService.warning(this.cancellationPolicyMessage(this.order()));
+      return;
+    }
     this.cancelForm.reset();
     this.cancelKitchenDisposition.set(null);
     this.showCancelModal.set(true);
@@ -2600,6 +2758,10 @@ export class OrderDetailsPageComponent {
 
   submitCancellation(): void {
     if (this.cancelForm.invalid || !this.orderId) return;
+    if (this.order()?.cancellation_policy?.can_cancel !== true) {
+      this.toastService.warning(this.cancellationPolicyMessage(this.order()));
+      return;
+    }
     if (
       this.cancelRequiresDisposition() &&
       this.cancelKitchenDisposition() == null
@@ -2645,7 +2807,7 @@ export class OrderDetailsPageComponent {
           this.toastService.error(
             forbidden
               ? 'Requiere permiso de cancelar comandas (owner/admin)'
-              : parsed.userMessage || 'Error al cancelar la orden',
+              : (err as Error)?.message || parsed.userMessage || 'Error al cancelar la orden',
           );
         },
       });
@@ -2683,12 +2845,40 @@ export class OrderDetailsPageComponent {
    * method only seeds the context (which refund is being resolved) and
    * resets the form to its default state.
    */
+  /**
+   * Mirror of ResolveRefundDto's `@ValidateIf(completed)`: payout fields are
+   * required only when resolving as completed; optional (and cleared) for
+   * 'failed', which closes without money movement.
+   */
+  private syncResolvePayoutValidators(state: unknown): void {
+    const reference = this.resolveRefundForm.get('payout_reference');
+    const channel = this.resolveRefundForm.get('payout_channel');
+    if (!reference || !channel) return;
+    if (state === 'completed') {
+      reference.setValidators([Validators.required, Validators.maxLength(255)]);
+      channel.setValidators([Validators.required]);
+    } else {
+      reference.clearValidators();
+      channel.clearValidators();
+    }
+    reference.updateValueAndValidity({ emitEvent: false });
+    channel.updateValueAndValidity({ emitEvent: false });
+  }
+
+  /** Payout section visibility for the resolve modal (completed only). */
+  resolveNeedsPayout(): boolean {
+    return this.resolveRefundForm.get('target_state')?.value === 'completed';
+  }
+
   openResolveRefundModal(refund: RefundRecord): void {
     if (!refund) return;
     this.resolveRefundForm.reset({
       target_state: 'completed',
       resolution_notes: '',
+      payout_reference: '',
+      payout_channel: '',
     });
+    this.syncResolvePayoutValidators('completed');
     this.resolveRefundContext.set(refund);
     this.showResolveRefundModal.set(true);
   }
@@ -2723,11 +2913,18 @@ export class OrderDetailsPageComponent {
     const formValue = this.resolveRefundForm.value as {
       target_state?: 'completed' | 'failed' | null;
       resolution_notes?: string | null;
+      payout_reference?: string | null;
+      payout_channel?: string | null;
     };
+    const targetState = (formValue.target_state ?? 'completed') as 'completed' | 'failed';
     const payload: ResolveRefundPayload = {
-      target_state: (formValue.target_state ?? 'completed') as 'completed' | 'failed',
+      target_state: targetState,
       resolution_notes: (formValue.resolution_notes ?? '').trim(),
     };
+    if (targetState === 'completed') {
+      payload.payout_reference = (formValue.payout_reference ?? '').trim();
+      payload.payout_channel = formValue.payout_channel as ResolveRefundPayload['payout_channel'];
+    }
 
     this.ordersFlowService
       .resolveRefund(orderId, String(refund.id), payload)
@@ -3442,6 +3639,10 @@ export class OrderDetailsPageComponent {
 
   cancelPayment(): void {
     if (!this.orderId) return;
+    if (this.order()?.cancellation_policy?.can_cancel_payment !== true) {
+      this.toastService.warning(this.cancellationPolicyMessage(this.order()));
+      return;
+    }
 
     this.dialogService
       .confirm({
@@ -3453,6 +3654,10 @@ export class OrderDetailsPageComponent {
       })
       .then((confirmed: boolean) => {
         if (!confirmed || !this.orderId) return;
+        if (this.order()?.cancellation_policy?.can_cancel_payment !== true) {
+          this.toastService.warning(this.cancellationPolicyMessage(this.order()));
+          return;
+        }
 
         this.isProcessingAction.set(true);
         this.ordersService
@@ -3466,7 +3671,7 @@ export class OrderDetailsPageComponent {
             },
             error: (err) => {
               this.isProcessingAction.set(false);
-              this.toastService.error(err.message || 'Error al cancelar el pago');
+              this.toastService.error(extractApiErrorMessage(err));
             },
           });
       });
@@ -3474,7 +3679,7 @@ export class OrderDetailsPageComponent {
 
   editOrderInPos(): void {
     const order = this.order();
-    if (!order) return;
+    if (!order || order.active_financial_split_id) return;
     this.router.navigate(['/admin/pos'], { queryParams: { editOrder: order.id } });
   }
 
@@ -3898,7 +4103,11 @@ export class OrderDetailsPageComponent {
         },
         error: (err: unknown) => {
           this.deliveringItemId.set(null);
-          this.toastService.error('No se pudo marcar como entregado');
+          // C.3: passthrough del mensaje mapeado (ERR-12 lleva al KDS).
+          const { userMessage } = parseApiError(err);
+          this.toastService.error(
+            userMessage || 'No se pudo marcar como entregado',
+          );
           console.error('Deliver item failed', err);
         },
       });
@@ -3912,6 +4121,47 @@ export class OrderDetailsPageComponent {
    * del botón Cancelar mientras corre el backend.
    */
   readonly cancellingItemId = signal<number | null>(null);
+  readonly cancellationTarget = signal<{ item: OrderItem; mode: ItemCancellationMode } | null>(null);
+  // D.4 — motivo/destino viven en el modal compartido (dueño del form);
+  // acá solo quedan target, error de red y preview.
+  readonly cancellationError = signal<string | null>(null);
+  readonly cancellationModalOpen = computed(() => this.cancellationTarget() !== null);
+  readonly cancellationPaid = computed(() => isOrderItemCancellationPaid(this.order()));
+
+  readonly cancellationPreparedFired = computed(() => {
+    const item = this.cancellationTarget()?.item;
+    return item?.products?.product_type === 'prepared' && item.inventory_consumed_at_fire === true;
+  });
+
+  readonly canReuseCancellation = computed(() =>
+    this.cancellationTarget()?.mode === 'reverse' || this.cancellationPreparedFired(),
+  );
+
+  /**
+   * D.4 — preview del modal "Destino del plato": nuevo total y nueva propina
+   * calculados sobre los valores vivos del Order cargado (el payload de
+   * cancelación no trae totales). Espejo exacto del recálculo backend.
+   */
+  readonly cancellationPreview = computed(() => {
+    const order = this.order();
+    const target = this.cancellationTarget();
+    if (!order || !target) return null;
+    return previewItemCancellation(order.order_items ?? [], target.item.id, order);
+  });
+
+  private cancellationBlockedByPayment(): boolean {
+    if (!isOrderItemCancellationPaid(this.order())) return false;
+    this.closeItemCancellationModal();
+    this.toastService.warning('La orden ya fue cobrada. Usa Reembolso para devolver el plato.');
+    this.openRefundModal();
+    return true;
+  }
+
+  closeItemCancellationModal(): void {
+    if (this.cancellingItemId() !== null || this.reversingItemId() !== null) return;
+    this.cancellationTarget.set(null);
+    this.cancellationError.set(null);
+  }
 
   /**
    * Espejo del gate de mesa (`canRemoveItem` en
@@ -3929,6 +4179,8 @@ export class OrderDetailsPageComponent {
    * y divergiría de ella.
    */
   canCancelItem(item: OrderItem): boolean {
+    if (isOrderItemCancellationPaid(this.order())) return false;
+    if (['finished', 'cancelled', 'refunded'].includes(this.order()?.state ?? '')) return false;
     if (item.cancelled_at) return false;
     if (item.delivered_at) return false;
     const ks = this.kitchenStateFor(item);
@@ -3946,9 +4198,14 @@ export class OrderDetailsPageComponent {
    * ítems proyectados, igual que deliver — patrón de `deliverItem`).
    */
   cancelItem(item: OrderItem): void {
+    if (this.cancellationBlockedByPayment()) return;
     if (!this.canCancelItem(item)) return;
     const orderId = this.order()?.id;
     if (!orderId) return;
+    if (item.products?.product_type === 'prepared') {
+      this.openItemCancellationModal(item, 'cancel');
+      return;
+    }
     const firedPending = this.kitchenStateFor(item)?.status === 'pending';
     this.dialogService
       .confirm({
@@ -4026,92 +4283,77 @@ export class OrderDetailsPageComponent {
    * ofrecer un 403 por sorpresa.
    */
   canReverseDeliveredItem(item: OrderItem): boolean {
-    return !!item.delivered_at && !item.cancelled_at;
+    return !!item.delivered_at && !item.cancelled_at &&
+      !['finished', 'cancelled', 'refunded'].includes(this.order()?.state ?? '') &&
+      !isOrderItemCancellationPaid(this.order());
   }
 
   /**
    * Acción: reversa la entrega vía
    * POST /store/orders/:orderId/flow/items/:orderItemId/cancel-delivered
    * con body `{ reason, destination: 'restock' | 'waste' }`.
-   * Reutiliza el patrón de motivo de `cancelItem` (`dialogService.confirm`
-   * + `dialogService.prompt`, motivo mín 3 chars). `DialogService` no
-   * tiene selector (solo confirm/prompt), así que el destino se elige con
-   * `confirm()` nativo: Aceptar = restock, Cancelar = waste.
+   * Motivo y destino se capturan en un único modal accesible de la app.
    * Tras éxito, toast + refreshOrder() (patrón de `deliverItem`).
    */
   reverseDeliveredItem(item: OrderItem): void {
+    if (this.cancellationBlockedByPayment()) return;
     if (!this.canReverseDeliveredItem(item) || !this.canUseReverseDelivered())
       return;
+    this.openItemCancellationModal(item, 'reverse');
+  }
+
+  private openItemCancellationModal(item: OrderItem, mode: ItemCancellationMode): void {
+    if (!this.order()?.id || this.cancellationTarget()) return;
+    this.cancellationError.set(null);
+    this.cancellationTarget.set({ item, mode });
+  }
+
+  submitItemCancellation(result: ItemCancellationSubmit): void {
+    if (this.cancellationBlockedByPayment()) return;
+    const target = this.cancellationTarget();
     const orderId = this.order()?.id;
-    if (!orderId) return;
-    this.dialogService
-      .confirm({
-        title: 'Reversar entrega',
-        message: `¿Reversar la entrega de "${item.product_name}"? El ítem quedará cancelado, se ajustará el total y se registrará el motivo.`,
-        confirmText: 'Continuar',
-        cancelText: 'Atrás',
-        confirmVariant: 'danger',
-      })
-      .then((confirmed) => {
-        if (!confirmed) return;
-        this.dialogService
-          .prompt({
-            title: 'Motivo de reversión',
-            message: 'Quedará registrado en el pedido.',
-            placeholder: 'Describe el motivo (mínimo 3 caracteres)',
-            confirmText: 'Reversar entrega',
-            cancelText: 'Atrás',
-          })
-          .then((reasonInput) => {
-            if (reasonInput === undefined) {
-              this.toastService.error('Reversión abortada');
-              return;
-            }
-            const reason = reasonInput.trim();
-            if (reason.length < 3) {
-              this.toastService.error(
-                'El motivo debe tener al menos 3 caracteres',
-              );
-              return;
-            }
-            const destination = confirm(
-              'Destino del ítem reversado:\n\nAceptar = reingresar al stock (restock).\nCancelar = registrar como merma (waste).',
-            )
-              ? 'restock'
-              : 'waste';
-            this.reversingItemId.set(item.id);
-            this.http
-              .post(
-                `${environment.apiUrl}/store/orders/${orderId}/flow/items/${item.id}/cancel-delivered`,
-                { reason, destination },
-              )
-              .pipe(takeUntilDestroyed(this.destroyRef))
-              .subscribe({
-                next: () => {
-                  this.reversingItemId.set(null);
-                  this.toastService.success('Entrega reversada');
-                  this.refreshOrder();
-                },
-                error: (err: unknown) => {
-                  this.reversingItemId.set(null);
-                  const wrapped = err as {
-                    status?: number;
-                    cause?: { status?: number } | null;
-                  };
-                  const forbidden =
-                    wrapped?.status === 403 ||
-                    wrapped?.cause?.status === 403;
-                  this.toastService.error(
-                    forbidden
-                      ? 'No tienes permiso para reversar entregas'
-                      : parseApiError(err).userMessage ||
-                          'Error al reversar la entrega',
-                  );
-                  console.error('Reverse delivered item failed', err);
-                },
-              });
-          });
-      });
+    if (!target || !orderId || this.cancellingItemId() !== null || this.reversingItemId() !== null) return;
+    const reason = result.reason.trim();
+    if (reason.length < 3 || reason.length > 500) {
+      this.cancellationError.set('El motivo debe tener entre 3 y 500 caracteres.');
+      return;
+    }
+    let body: ReturnType<typeof cancellationBody>;
+    try {
+      body = cancellationBody(target.mode, reason, result.destination,
+        this.cancellationPreparedFired());
+    } catch (err) {
+      this.cancellationError.set((err as Error).message);
+      return;
+    }
+    const request: Observable<unknown> = target.mode === 'reverse'
+      ? this.http.post(
+          `${environment.apiUrl}/store/orders/${orderId}/flow/items/${target.item.id}/cancel-delivered`,
+          body,
+        )
+      : this.ordersFlowService.cancelOrderItem(orderId, target.item.id, body);
+    const inFlight = target.mode === 'reverse' ? this.reversingItemId : this.cancellingItemId;
+    inFlight.set(target.item.id);
+    this.cancellationError.set(null);
+    request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        inFlight.set(null);
+        this.closeItemCancellationModal();
+        this.toastService.success(target.mode === 'reverse' ? 'Entrega reversada' : 'Plato cancelado');
+        this.refreshOrder();
+      },
+      error: (err: unknown) => {
+        inFlight.set(null);
+        const parsed = parseApiError(err);
+        if (parsed.errorCode === 'ORD_ITEM_CANCEL_PAID_001') {
+          this.closeItemCancellationModal();
+          this.toastService.warning('La orden ya fue cobrada. Usa Reembolso para devolver el plato.');
+          this.openRefundModal();
+          return;
+        }
+        this.cancellationError.set(parsed.userMessage || 'No se pudo cancelar el plato');
+      },
+    });
   }
 
   /** Localised label for the KDS state badge. */
@@ -4822,6 +5064,7 @@ export class OrderDetailsPageComponent {
    * detalle de una ORDEN; el endpoint correcto es el de órdenes.
    */
   createInvoiceFromOrder(): void {
+    if (this.order()?.active_financial_split_id) { this.toastService.info('Crea la factura desde cada cuenta independiente.'); return; }
     if (!this.orderId || this.hasSalesInvoice() || this.isEmittingInvoice()) return;
     this.isEmittingInvoice.set(true);
     this.invoicingService

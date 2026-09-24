@@ -26,10 +26,10 @@
  *   incorrecto. En producción `organizations.tax_id` guardaba '900123456-7' cuando
  *   el DV real de 900123456 es 8, así que el valor almacenado nunca fue de un NIT
  *   real. Calcularlo hace imposible propagar esa clase de basura.
- * - `tax_regime` (columna): sale de `isVatResponsible`, no de una columna. Un
- *   emisor que se declara no responsable de IVA facturando IVA es una contradicción
- *   interna del documento, y la columna almacenada es precisamente lo que puede
- *   quedar rancio.
+ * - `tax_regime` (columna): sale de `resolveFiscalResponsibilityFlags`, no de una
+ *   columna. Un emisor que se declara no responsable de IVA facturando IVA es una
+ *   contradicción interna del documento, y la columna almacenada es precisamente lo
+ *   que puede quedar rancio.
  *
  * EL CONTRATO ES ANCHO Y CRUDO: contiene la identidad en el vocabulario del RUT
  * (NIT, DV derivado, razón social, dirección, municipio, responsabilidades como
@@ -42,7 +42,11 @@ import {
   DIAN_DOCUMENT_TYPE_BY_NIT_TYPE,
   DIAN_PERSON_TYPE_BY_LABEL,
 } from './organization-fiscal-columns.helper';
-import { isVatResponsible } from './vat-responsibility.helper';
+import { resolveFiscalResponsibilityFlags } from './vat-responsibility.helper';
+import {
+  DianPartyTaxScheme,
+  resolveDianPartyTaxScheme,
+} from '../../domains/store/invoicing/providers/dian-direct/constants/dian-tax-codes';
 import { normalizeNit } from '../utils/nit.util';
 import { VendixHttpException } from '../errors/vendix-http.exception';
 import { ErrorCodes } from '../errors/error-codes';
@@ -378,9 +382,7 @@ export function tryResolveTenantFiscalIdentity(
  * la validación acá haría que el mismo hueco saliera con dos códigos distintos
  * según por dónde entrara la petición.
  */
-export function projectTenantIdentityToDian(
-  identity: TenantFiscalIdentity,
-): {
+export interface DianIdentityProjection {
   document_type: string;
   trade_name?: string;
   address_line: string;
@@ -389,10 +391,39 @@ export function projectTenantIdentityToDian(
   department_code: string;
   department_name: string;
   country_code: string;
+  /**
+   * '48' responsable de IVA / '49' no responsable. SE CONSERVA TAL CUAL.
+   *
+   * Es un colapso del dominio a dos estados y por sí solo no puede describir a
+   * un responsable únicamente de INC — por eso ahora viaja acompañado de
+   * `party_tax_scheme`. No se cambia su forma porque lo leen superficies fuera
+   * del XML (la representación gráfica de la factura y las colillas), y
+   * ensancharlo aquí rompería su lectura sin arreglar nada suyo.
+   */
   tax_regime: '48' | '49';
+  /** Responsabilidades crudas del RUT unidas con `;` — alimenta `cbc:TaxLevelCode`. */
   tax_scheme: string;
   person_type: string;
-} {
+  /** Eje IVA resuelto (casilla 53 con autoridad sobre `tax_regime`). */
+  vat_responsible: boolean;
+  /** Eje INC resuelto (O-33 afirmativo, O-50 negativo). */
+  inc_responsible: boolean;
+  /**
+   * Par (ID, Name) de `cac:PartyTaxScheme/cac:TaxScheme` — tabla 13.2.6.2.
+   * Es el campo que el XML necesita y que `tax_regime` no puede expresar:
+   * `01` IVA, `04` INC, `ZA` IVA e INC, `ZZ` No aplica.
+   */
+  party_tax_scheme: DianPartyTaxScheme;
+}
+
+export function projectTenantIdentityToDian(
+  identity: TenantFiscalIdentity,
+): DianIdentityProjection {
+  // Los DOS ejes se leen de UNA sola pasada sobre la casilla 53, para que el
+  // '48'/'49' de abajo y el esquema tributario no puedan contar historias
+  // distintas sobre el mismo RUT.
+  const flags = resolveFiscalResponsibilityFlags(identity);
+
   return {
     document_type:
       (identity.nit_type && DIAN_DOCUMENT_TYPE_BY_NIT_TYPE[identity.nit_type]) ||
@@ -403,11 +434,14 @@ export function projectTenantIdentityToDian(
     department_code: identity.municipality_code.slice(0, 2),
     department_name: identity.department,
     country_code: identity.country,
-    tax_regime: isVatResponsible(identity) ? '48' : '49',
+    tax_regime: flags.vat_responsible ? '48' : '49',
     tax_scheme: identity.tax_responsibilities.join(';') || 'R-99-PN',
     person_type:
       (identity.person_type &&
         DIAN_PERSON_TYPE_BY_LABEL[identity.person_type.toUpperCase()]) ||
       '1',
+    vat_responsible: flags.vat_responsible,
+    inc_responsible: flags.inc_responsible,
+    party_tax_scheme: resolveDianPartyTaxScheme(flags),
   };
 }

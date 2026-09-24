@@ -8,6 +8,7 @@ import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
+import { resolveFiscalQualitiesLine } from '../services/fiscal-issuer-identity';
 import { mapUserAddress } from '../lib/customer-address';
 import { formatFiscalMoney } from './fiscal-document-print.mapper';
 import {
@@ -83,13 +84,12 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             },
           },
         },
-        // C.3 QUI-733 — mesa + mesero en el recibo POS. Se une la sesión
-        // ABIERTA (closed_at IS NULL, la más reciente) para derivar
+        // C.3 QUI-733 / ADR-04 — mesa + mesero en el recibo POS. Se une la
+        // última sesión de la orden, aun si ya cerró, para derivar
         // `document.table_number` / `document.waiter_name` igual que el
         // proveedor de ticket de cocina. Sin sesión (venta de mostrador)
         // el array queda vacío y el recibo sale sin mesa/mesero.
         table_sessions: {
-          where: { closed_at: null },
           orderBy: { opened_at: 'desc' },
           take: 1,
           include: {
@@ -98,12 +98,6 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
                 id: true,
                 name: true,
                 zone: true,
-                // mesero asignado vía table_waiters, prioridad sobre opener
-                table_waiters: {
-                  select: {
-                    user: { select: { first_name: true, last_name: true } },
-                  },
-                },
               },
             },
             opener: { select: { first_name: true, last_name: true } },
@@ -186,9 +180,27 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       const discount = Number((invoice as any).discount_amount);
       const tax = Number((invoice as any).tax_amount);
       const total = Number((invoice as any).total_amount);
+      // El `subtotal_amount` de la factura YA incluye la línea «Envio» (ver
+      // `computeOrderInvoiceSubtotal`: Σ bases de ítems + envío). Pintarlo tal
+      // cual junto al `shipping_total` de la ORDEN mostraba el envío dos veces
+      // —y con INC del domicilio, el bruto de la orden encima de una base que
+      // ya lo despejó—. La tirilla separa: productos = subtotal − envío, y la
+      // fila Envío = `shipping_amount` de la factura (la base neta cuando el
+      // envío lleva impuesto, cuyo tributo ya viaja en `tax_amount`). Así
+      // subtotal − descuento + impuestos + envío == total en ambos casos.
+      // `shipping_amount` no finito o ausente ⇒ 0: el subtotal queda entero y
+      // la fila Envío no duplica nada.
+      const rawShipping = Number((invoice as any).shipping_amount);
+      const shipping = Number.isFinite(rawShipping) ? rawShipping : 0;
       if (Number.isFinite(subtotal)) {
-        model.totals.subtotal = subtotal;
-        model.totals.subtotal_formatted = formatFiscalMoney(subtotal);
+        // Resta en centavos: dos Decimal(12,2) leídos como double no restan
+        // exacto (23888.89 − 13888.89 ≠ 10000).
+        const productsSubtotal =
+          (Math.round(subtotal * 100) - Math.round(shipping * 100)) / 100;
+        model.totals.subtotal = productsSubtotal;
+        model.totals.subtotal_formatted = formatFiscalMoney(productsSubtotal);
+        model.totals.shipping_total = shipping;
+        model.totals.shipping_total_formatted = formatFiscalMoney(shipping);
       }
       if (Number.isFinite(discount)) {
         model.totals.discount_total = discount;
@@ -288,7 +300,15 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         email: 'ventas@vendix.com',
         address: 'Calle 100 # 15-20, Oficina 401',
         city: 'Bogotá D.C.',
-        tax_regime: 'Responsable de IVA',
+        // Los datos de muestra NO son inocuos: `PrintGatewayService` cae a
+        // `getSampleData` dentro de un try/catch cuando la lectura real falla,
+        // así que un literal aquí acaba en el papel de un comercio real. Este
+        // bloque imprimía «Responsable de IVA» — una leyenda derogada con el
+        // art. 506 E.T. La muestra deriva ahora sus calidades de sus PROPIAS
+        // responsabilidades con la misma función que el carril real, así que no
+        // puede afirmar una calidad que sus códigos no respalden.
+        fiscal_responsibilities: ['O-48', 'O-42', 'O-52'],
+        fiscal_qualities: resolveFiscalQualitiesLine(['O-48', 'O-42', 'O-52']),
       },
       customer: {
         name: 'Juan Pérez Rodríguez',
@@ -489,19 +509,15 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     const addr = store.addresses?.[0] || {};
     const user = order.users || {};
 
-    // C.3 QUI-733 — mesa + mesero derivados de la sesión ABIERTA. El mesero
-    // asignado (table_waiters) manda sobre el opener. Sin sesión (venta de
-    // mostrador) ambos quedan vacíos y el recibo no muestra bloque de mesa.
+    // ADR-04 — mesa + mesero derivados de la última sesión, abierta o cerrada.
+    // La asignación estática table_waiters no identifica al mesero de la venta.
+    // Sin sesión (venta de mostrador) ambos quedan vacíos.
     const session = (order.table_sessions || [])[0];
     const table = session?.table;
     const opener = session?.opener;
-    const assignedWaiter = table?.table_waiters?.[0]?.user;
-    const waiterName =
-      assignedWaiter && (assignedWaiter.first_name || assignedWaiter.last_name)
-        ? `${assignedWaiter.first_name || ''} ${assignedWaiter.last_name || ''}`.trim()
-        : opener
-        ? `${opener.first_name || ''} ${opener.last_name || ''}`.trim()
-        : '';
+    const waiterName = opener
+      ? `${opener.first_name || ''} ${opener.last_name || ''}`.trim()
+      : '';
     const tableName = table?.name ? `Mesa ${table.name}` : '';
 
     // C.7 / V-5 (CP-pos-exclusive-tax-double-charge, ADR-12 G-01) — el tiquete

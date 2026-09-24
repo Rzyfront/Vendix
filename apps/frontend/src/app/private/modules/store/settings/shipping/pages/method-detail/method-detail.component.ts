@@ -327,14 +327,19 @@ import { AddRateWizardModalComponent } from '../../components/index';
         </div>
       </div>
 
-      @defer (when show_rate_wizard() && method()) {
-        <app-add-rate-wizard-modal
-          [method_id]="method()!.id"
-          [existing_zones]="getAvailableZones()"
-          [edit_rate]="edit_rate()"
-          (close)="closeRateWizard()"
-          (saved)="onRateSaved()"
-        />
+      <!-- @if por fuera: un @defer (when) queda montado tras la primera
+           apertura y el wizard no se re-inicializa al reabrirlo. -->
+      @if (show_rate_wizard() && method()) {
+        @defer {
+          <app-add-rate-wizard-modal
+            [method_id]="method()!.id"
+            [existing_zones]="available_zones()"
+            [edit_rate]="edit_rate()"
+            (close)="closeRateWizard()"
+            (saved)="onRateSaved()"
+            (zones_changed)="onZonesChanged()"
+          />
+        }
       }
     </div>
   `,
@@ -453,6 +458,8 @@ export class MethodDetailComponent implements OnInit {
       countries_display: this.formatCountries(zr.zone.countries),
       rate_type_label: this.getRateTypeLabel(zr.rate.type),
       cost_display: this.formatCost(zr.rate),
+      tax_label:
+        this.shippingService.getRateTaxLabel(zr.rate.tax_category) ?? 'Sin impuesto',
       free_threshold_display:
         zr.rate.free_shipping_threshold == null ||
         isNaN(Number(zr.rate.free_shipping_threshold)) ||
@@ -481,6 +488,18 @@ export class MethodDetailComponent implements OnInit {
           Calculado: '#6B7280',
           Gratis: '#10B981'}}},
     { key: 'cost_display', label: 'Costo' },
+    {
+      key: 'tax_label',
+      label: 'Impuesto',
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorFn: (value: string) =>
+          value?.startsWith('IVA')
+            ? '#6366F1'
+            : value?.startsWith('INC')
+              ? '#0EA5E9'
+              : '#9CA3AF'}},
     { key: 'free_threshold_display', label: 'Envio Gratis' },
     {
       key: 'status_label',
@@ -516,6 +535,7 @@ export class MethodDetailComponent implements OnInit {
     badgeConfig: { type: 'custom' },
     detailKeys: [
       { key: 'cost_display', label: 'Costo' },
+      { key: 'tax_label', label: 'Impuesto' },
       { key: 'status_label', label: 'Estado' },
     ],
     footerKey: 'free_threshold_display',
@@ -563,7 +583,11 @@ export class MethodDetailComponent implements OnInit {
           this.router.navigate(['/admin/settings/shipping']);
         }});
 
-    // Load zones and their rates for this method
+    this.loadZonesWithRates(methodId);
+  }
+
+  /** Zonas de la tienda y las tarifas de este método (sin tocar la política). */
+  loadZonesWithRates(methodId: number): void {
     this.shippingService
       .getStoreZones()
       .pipe(
@@ -810,12 +834,26 @@ export class MethodDetailComponent implements OnInit {
     if (m) this.loadMethodData(m.id);
   }
 
-  getAvailableZones(): ShippingZone[] {
+  /** Una zona editada desde el wizard cambia cobertura/nombre en la tabla. */
+  onZonesChanged(): void {
+    const m = this.method();
+    if (m) this.loadZonesWithRates(m.id);
+  }
+
+  /**
+   * Zonas que el wizard puede ofrecer: las que aún no tienen tarifa de este
+   * método, más la zona de la tarifa en edición (si no, el paso de zona queda
+   * vacío al editar).
+   */
+  available_zones = computed<ShippingZone[]>(() => {
+    const editing_zone_id = this.edit_rate()?.shipping_zone_id ?? null;
     const existingZoneIds = new Set(
       this.zones_with_rates().map((zr) => zr.zone.id),
     );
-    return this.all_store_zones().filter((z) => !existingZoneIds.has(z.id));
-  }
+    return this.all_store_zones().filter(
+      (z) => z.id === editing_zone_id || !existingZoneIds.has(z.id),
+    );
+  });
 
   // ─── Helpers ───
 

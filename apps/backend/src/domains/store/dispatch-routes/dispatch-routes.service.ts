@@ -169,7 +169,7 @@ interface MapAddressRow {
 /** The dispatch_note shape loaded by {@link MAP_STOPS_INCLUDE}. */
 interface MapStopDispatchNote {
   id: number;
-  customer_id: number;
+  customer_id: number | null;
   customer_name: string | null;
   customer_address: Prisma.JsonValue | null;
   order: {

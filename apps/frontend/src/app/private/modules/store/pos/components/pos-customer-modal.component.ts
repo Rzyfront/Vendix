@@ -1,5 +1,6 @@
 import {
   Component,
+  ElementRef,
   input,
   output,
   inject,
@@ -7,6 +8,7 @@ import {
   DestroyRef,
   signal,
   computed } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
   FormsModule,
@@ -44,6 +46,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
   standalone: true,
   imports: [
     FormsModule,
+    NgClass,
     ReactiveFormsModule,
     ButtonComponent,
     ModalComponent,
@@ -59,7 +62,9 @@ import { StoreContextService } from '../../../../../core/services/store-context.
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
+      [dialog]="true"
       [showCloseButton]="false"
+      class="cm-aa-scope"
       >
       <!-- Modal Header -->
       <div
@@ -86,7 +91,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             : 'Crear Cliente Rápido'
             }}
           </h2>
-          <p class="text-sm text-[var(--color-text-secondary)]">
+          <p class="text-sm text-[var(--color-neutral-600)]">
             {{
             customer()
             ? 'Edita la información del cliente seleccionado'
@@ -100,61 +105,58 @@ import { StoreContextService } from '../../../../../core/services/store-context.
         </div>
         <button
           type="button"
-          class="absolute top-4 right-4 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-text-muted)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+          class="absolute top-4 right-4 min-w-11 min-h-11 flex items-center justify-center text-[var(--color-neutral-600)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-neutral-600)]/20 focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2"
           (click)="onModalClosed()"
           aria-label="Cerrar modal"
           >
-          <svg
-            class="h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
-            >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M6 18L18 6M6 6l12 12"
-              />
-          </svg>
+          <app-icon name="x" [size]="20"></app-icon>
         </button>
       </div>
     
       <!-- Tab Navigation -->
       @if (!customer()) {
-        <div class="flex border-b border-[var(--color-border)]">
+        <div class="flex border-b border-[var(--color-border)]" role="tablist" aria-label="Modo de cliente">
           <button
+            type="button"
+            role="tab"
             (click)="switchToSearchMode()"
-            class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
+            [attr.aria-selected]="currentStep() === 'search'"
+            class="flex-1 px-4 py-3 min-h-[44px] text-sm font-medium transition-colors focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)] focus-visible:ring-inset"
             [class.text-[var(--color-primary)]]="currentStep() === 'search'"
             [class.border-b-2]="currentStep() === 'search'"
             [class.border-[var(--color-primary)]]="currentStep() === 'search'"
-            [class.text-[var(--color-text-secondary)]]="currentStep() !== 'search'"
+            [class.text-[var(--color-neutral-600)]]="currentStep() !== 'search'"
             >
             Buscar
           </button>
           <button
+            type="button"
+            role="tab"
             (click)="switchToCreateMode()"
-            class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
+            [attr.aria-selected]="currentStep() === 'create'"
+            class="flex-1 px-4 py-3 min-h-[44px] text-sm font-medium transition-colors focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)] focus-visible:ring-inset"
             [class.text-[var(--color-primary)]]="currentStep() === 'create'"
             [class.border-b-2]="currentStep() === 'create'"
             [class.border-[var(--color-primary)]]="currentStep() === 'create'"
-            [class.text-[var(--color-text-secondary)]]="currentStep() !== 'create'"
+            [class.text-[var(--color-neutral-600)]]="currentStep() !== 'create'"
             >
             Crear
           </button>
           @if (queueEnabled()) {
             <button
+              type="button"
+              role="tab"
               (click)="switchToQueueMode()"
-              class="flex-1 px-4 py-3 text-sm font-medium transition-colors relative"
+              [attr.aria-selected]="currentStep() === 'queue'"
+              class="flex-1 px-4 py-3 min-h-[44px] text-sm font-medium transition-colors relative focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)] focus-visible:ring-inset"
               [class.text-[var(--color-primary)]]="currentStep() === 'queue'"
               [class.border-b-2]="currentStep() === 'queue'"
               [class.border-[var(--color-primary)]]="currentStep() === 'queue'"
-              [class.text-[var(--color-text-secondary)]]="currentStep() !== 'queue'"
+              [class.text-[var(--color-neutral-600)]]="currentStep() !== 'queue'"
               >
               Cola
               @if (queueEntries().length > 0) {
-                <span class="ml-1 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-[var(--color-primary)] rounded-full">
+                <span class="ml-1 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-[var(--color-success-700)] rounded-full">
                   {{ queueEntries().length }}
                 </span>
               }
@@ -203,12 +205,12 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                       <p class="font-medium text-[var(--color-text-primary)]">
                         {{ lr.first_name }} {{ lr.last_name }}
                       </p>
-                      <p class="text-sm text-[var(--color-text-secondary)]">{{ lr.email }}</p>
-                      <p class="text-xs text-[var(--color-text-muted)]">
+                      <p class="text-sm text-[var(--color-neutral-600)]">{{ lr.email }}</p>
+                      <p class="text-xs text-[var(--color-neutral-600)]">
                         {{ lr.document_type || 'Doc' }}: {{ lr.document_number }}
                       </p>
                     </div>
-                    <app-button variant="primary" size="sm" (clicked)="selectCustomer(lr)">
+                    <app-button variant="primary" size="sm" customClasses="min-h-[44px]" (clicked)="selectCustomer(lr)">
                       Seleccionar
                     </app-button>
                   </div>
@@ -217,10 +219,10 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               <!-- Lookup Result: Not Found -->
               @if (lookupPerformed() && !lookupResult() && !lookupLoading()) {
                 <div class="mt-3 text-center">
-                  <p class="text-sm text-[var(--color-text-secondary)] mb-2">
+                  <p class="text-sm text-[var(--color-neutral-600)] mb-2">
                     No se encontró cliente con este documento
                   </p>
-                  <app-button variant="outline" size="sm" (clicked)="createFromLookup()">
+                  <app-button variant="outline" size="sm" customClasses="min-h-[44px]" (clicked)="createFromLookup()">
                     <app-icon name="user-plus" [size]="16" slot="icon" ></app-icon>
                     Crear con este documento
                   </app-button>
@@ -233,7 +235,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 <div class="w-full border-t border-[var(--color-border)]"></div>
               </div>
               <div class="relative flex justify-center text-sm">
-                <span class="px-2 bg-[var(--color-surface)] text-[var(--color-text-muted)]">o buscar por nombre</span>
+                <span class="px-2 bg-[var(--color-surface)] text-[var(--color-neutral-600)]">o buscar por nombre</span>
               </div>
             </div>
             <app-inputsearch
@@ -244,38 +246,40 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             <!-- Search Results -->
             @if (searchResults().length > 0) {
               <div class="space-y-2">
-                <h3 class="text-sm font-medium text-[var(--color-text-secondary)]">
+                <h3 class="text-sm font-medium text-[var(--color-neutral-600)]">
                   Resultados de búsqueda:
                 </h3>
                 <div class="max-h-48 overflow-y-auto space-y-2">
                   @for (customer of searchResults(); track customer) {
-                    <div
+                    <button
+                      type="button"
                       (click)="selectCustomer(customer)"
-                      class="p-3 border border-[var(--color-border)] rounded-lg cursor-pointer hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-light)] transition-colors"
+                      [attr.aria-label]="'Seleccionar ' + customer.first_name + ' ' + customer.last_name"
+                      class="w-full min-h-[44px] p-3 border border-[var(--color-border)] rounded-lg text-left cursor-pointer hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-light)] transition-colors focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)]"
                       >
                       <div class="flex items-center justify-between">
                         <div>
                           <p class="font-medium text-[var(--color-text-primary)]">
                             {{ customer.first_name }} {{ customer.last_name }}
                           </p>
-                          <p class="text-sm text-[var(--color-text-secondary)]">
+                          <p class="text-sm text-[var(--color-neutral-600)]">
                             {{ customer.email }}
                           </p>
                           @if (customer.document_number) {
                             <p
-                              class="text-xs text-[var(--color-text-muted)]"
+                              class="text-xs text-[var(--color-neutral-600)]"
                               >
-                              Doc: {{ customer.document_number }}
+                              {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
                             </p>
                           }
                         </div>
                         <app-icon
                           name="chevron-right"
                           [size]="16"
-                          color="var(--color-text-secondary)"
+                          color="var(--color-neutral-600)"
                         ></app-icon>
                       </div>
-                    </div>
+                    </button>
                   }
                 </div>
               </div>
@@ -288,10 +292,10 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 <app-icon
                   name="user-x"
                   [size]="48"
-                  color="var(--color-text-muted)"
+                  color="var(--color-neutral-600)"
                   class="mx-auto mb-4"
                 ></app-icon>
-                <p class="text-[var(--color-text-secondary)] mb-4">
+                <p class="text-[var(--color-neutral-600)] mb-4">
                   No se encontraron clientes con esos criterios
                 </p>
                 <app-button
@@ -309,12 +313,13 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               <div
                 class="text-center py-4 border-t border-[var(--color-border)]"
                 >
-                <p class="text-sm text-[var(--color-text-secondary)] mb-2">
+                <p class="text-sm text-[var(--color-neutral-600)] mb-2">
                   ¿No quieres buscar?
                 </p>
                 <app-button
                   variant="outline"
                   size="sm"
+                  customClasses="min-h-[44px]"
                   (clicked)="switchToCreateMode()"
                   >
                   <app-icon name="user-plus" [size]="16" slot="icon" ></app-icon>
@@ -465,15 +470,15 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             }
             @if (!queueLoading() && queueEntries().length === 0) {
               <div class="text-center py-8">
-                <app-icon name="users" [size]="48" color="var(--color-text-muted)" class="mx-auto mb-4"></app-icon>
-                <p class="text-[var(--color-text-secondary)] mb-4">No hay clientes en la cola</p>
+                <app-icon name="users" [size]="48" color="var(--color-neutral-400)" class="mx-auto mb-4"></app-icon>
+                <p class="text-[var(--color-text-primary)] font-medium mb-4">No hay clientes en la cola</p>
                 @if (queueQrData(); as qr) {
                   <div class="mt-4">
-                    <p class="text-sm text-[var(--color-text-muted)] mb-2">Comparte este QR para que los clientes se registren:</p>
+                    <p class="text-sm text-[var(--color-neutral-600)] mb-2">Comparte este QR para que los clientes se registren:</p>
                     <img [src]="qr.qr_data_url" alt="QR Cola" class="mx-auto w-40 h-40">
-                    <p class="text-xs text-[var(--color-text-muted)] mt-2">{{ qr.url }}</p>
-                    <app-button variant="outline" size="sm" (clicked)="printQueueQr()" class="mt-3">
-                      <app-icon name="printer" [size]="14" slot="icon" ></app-icon>
+                    <p class="text-xs text-[var(--color-neutral-600)] mt-2">{{ qr.url }}</p>
+                    <app-button variant="outline" size="md" (clicked)="printQueueQr()" class="mt-3">
+                      <app-icon name="printer" [size]="16" slot="icon" ></app-icon>
                       Imprimir QR
                     </app-button>
                   </div>
@@ -485,8 +490,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 @for (entry of queueEntries(); track entry; let i = $index) {
                   <div
                     class="p-3 border border-[var(--color-border)] rounded-lg transition-colors"
-                    [class.bg-yellow-50]="entry.status === 'selected'"
-                    [class.border-yellow-300]="entry.status === 'selected'"
+                    [ngClass]="entry.status === 'selected' ? 'bg-[var(--color-warning-light)] border-[var(--color-warning)]' : ''"
                     >
                     <div class="flex items-center justify-between">
                       <div class="flex items-center gap-3">
@@ -497,13 +501,13 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                           <p class="font-medium text-[var(--color-text-primary)]">
                             {{ entry.first_name }} {{ entry.last_name }}
                           </p>
-                          <p class="text-xs text-[var(--color-text-muted)]">
+                          <p class="text-xs text-[var(--color-neutral-600)]">
                             {{ entry.document_type }}: {{ entry.document_number }}
                           </p>
                           @if (entry.status === 'selected') {
-                            <p class="text-xs text-yellow-600 font-medium">
+                            <span class="inline-flex items-center px-2 py-0.5 text-xs font-bold text-white bg-[var(--color-success-700)] rounded-full">
                               Seleccionado
-                            </p>
+                            </span>
                           }
                         </div>
                       </div>
@@ -511,7 +515,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                         @if (entry.status === 'waiting') {
                           <app-button
                             variant="primary"
-                            size="sm"
+                            size="md"
                             (clicked)="onSelectFromQueue(entry)"
                             >
                             Seleccionar
@@ -520,7 +524,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                         @if (entry.status === 'selected') {
                           <app-button
                             variant="outline"
-                            size="sm"
+                            size="md"
                             (clicked)="onReleaseFromQueue(entry)"
                             >
                             Liberar
@@ -536,11 +540,11 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             @if (!queueLoading() && queueEntries().length > 0 && queueQrData(); as qr2) {
               <div class="pt-4 border-t border-[var(--color-border)]">
                 <details class="text-center">
-                  <summary class="text-sm text-[var(--color-text-muted)] cursor-pointer">Mostrar QR de registro</summary>
+                  <summary class="inline-flex items-center justify-center min-h-[44px] px-4 rounded-lg text-sm font-medium text-[var(--color-neutral-600)] cursor-pointer focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)]">Mostrar QR de registro</summary>
                   <img [src]="qr2.qr_data_url" alt="QR Cola" class="mx-auto w-32 h-32 mt-2">
-                  <p class="text-xs text-[var(--color-text-muted)] mt-1">{{ qr2.url }}</p>
-                  <app-button variant="outline" size="sm" (clicked)="printQueueQr()" class="mt-2">
-                    <app-icon name="printer" [size]="14" slot="icon" ></app-icon>
+                  <p class="text-xs text-[var(--color-neutral-600)] mt-1">{{ qr2.url }}</p>
+                  <app-button variant="outline" size="md" (clicked)="printQueueQr()" class="mt-2">
+                    <app-icon name="printer" [size]="16" slot="icon" ></app-icon>
                     Imprimir QR
                   </app-button>
                 </details>
@@ -571,7 +575,20 @@ import { StoreContextService } from '../../../../../core/services/store-context.
         </div>
       }
     </app-modal>
-    ` })
+    `,
+  styles: [`
+    /* Stitch 11b (1)(2) — scope a11y del modal (shared/ fuera de alcance, se
+       remapean vars heredadas en vez de tocar app-button/app-input): primary
+       #2ecc71 -> success-700 (blanco encima pasa de 2.1 a ~5.0; tabs activos,
+       outline y focus rings heredan el verde oscuro), text-secondary ->
+       neutral-600 y text-muted -> neutral-500 (helpers/labels/placeholders de
+       2.56 a >=4.8). Solo afecta a este subárbol. */
+    .cm-aa-scope {
+      --color-primary: var(--color-success-700);
+      --color-text-secondary: var(--color-neutral-600);
+      --color-text-muted: var(--color-neutral-500);
+    }
+  `] })
 export class PosCustomerModalComponent {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);
@@ -667,6 +684,7 @@ export class PosCustomerModalComponent {
   readonly lookupPerformed = signal(false);
   readonly lookupLoading = signal(false);
 private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
+  private hostRef = inject(ElementRef);
   private dialogService = inject(DialogService);
   private fb = inject(FormBuilder);
   private customerService = inject(PosCustomerService);
@@ -907,6 +925,7 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
   onSave(): void {
     if (!this.customerForm.valid) {
       this.markFormGroupTouched();
+      this.focusFirstInvalidField();
       return;
     }
 
@@ -962,6 +981,27 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       if (control) {
         control.markAsTouched();
       }
+    });
+  }
+
+  /**
+   * Stitch paso 4 — business decision "errores por campo con foco al primer
+   * error": tras marcar touched, mueve el foco al primer campo inválido del
+   * formulario (DOM order = orden del form). Solo presentación/a11y: no cambia
+   * validaciones ni el contrato del servicio.
+   */
+  private focusFirstInvalidField(): void {
+    // Review PR #824: diferir un frame para que .ng-invalid se aplique en
+    // el siguiente ciclo CD (Zoneless) antes de buscar el campo inválido.
+    requestAnimationFrame(() => {
+      const root = this.hostRef.nativeElement as HTMLElement;
+      const invalidControl = root.querySelector(
+        'app-input.ng-invalid, app-selector.ng-invalid',
+      );
+      const focusable = invalidControl?.querySelector(
+        'input, select, textarea, button',
+      ) as HTMLElement | null;
+      focusable?.focus();
     });
   }
 

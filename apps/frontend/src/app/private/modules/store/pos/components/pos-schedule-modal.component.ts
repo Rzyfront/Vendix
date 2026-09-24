@@ -18,39 +18,35 @@ import type { BusinessHours } from '../../../../../core/models/store-settings.in
       (cancel)="onClose()"
       size="sm"
       [showCloseButton]="true"
+      [dialog]="true"
+      title="Horario de atención"
     >
-      <div slot="header" class="flex items-center gap-3">
+      <div slot="header" class="flex items-center justify-center">
         <div
-          class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center"
+          class="w-10 h-10 rounded-full bg-[var(--color-primary-light)] flex items-center justify-center"
         >
-          <app-icon name="clock" [size]="20" class="text-primary"></app-icon>
-        </div>
-        <div>
-          <h2 class="text-lg font-semibold text-text-primary">
-            Horario de Atención
-          </h2>
-          <p class="text-sm text-text-secondary">
-            {{ isWithinHours() ? 'Activo ahora' : 'Fuera de horario' }}
-          </p>
+          <app-icon name="clock" [size]="20" color="var(--color-primary)"></app-icon>
         </div>
       </div>
 
       <div class="space-y-3">
         <div
-          class="flex items-center gap-2 p-3 rounded-xl"
+          class="flex items-center gap-2 p-3 rounded-xl border"
+          role="status"
           [ngClass]="
             isWithinHours()
-              ? 'bg-green-50 border border-green-200'
-              : 'bg-amber-50 border border-amber-200'
+              ? 'bg-[var(--color-success-50)] border-[var(--color-success-200)]'
+              : 'bg-[var(--color-warning-50)] border-[var(--color-warning-200)]'
           "
         >
           <span
             class="h-2.5 w-2.5 rounded-full flex-shrink-0"
-            [ngClass]="isWithinHours() ? 'bg-green-500' : 'bg-amber-400'"
+            aria-hidden="true"
+            [ngClass]="isWithinHours() ? 'bg-[var(--color-success-500)]' : 'bg-[var(--color-warning-500)]'"
           ></span>
           <span
             class="text-sm font-medium"
-            [ngClass]="isWithinHours() ? 'text-green-700' : 'text-amber-700'"
+            [ngClass]="isWithinHours() ? 'text-[var(--color-success-800)]' : 'text-[var(--color-warning-800)]'"
           >
             {{
               isWithinHours()
@@ -62,41 +58,42 @@ import type { BusinessHours } from '../../../../../core/models/store-settings.in
 
         @for (day of daysOfWeek; track day.key) {
           <div
-            class="flex items-center justify-between py-2.5 px-3 rounded-lg"
+            class="flex items-center justify-between py-2.5 px-3 rounded-lg min-h-[44px]"
             [ngClass]="{
-              'bg-primary/5 border border-primary/20': day.key === todayKey(),
-              'hover:bg-surface/50': day.key !== todayKey(),
+              'bg-[var(--color-primary-light)] border border-[var(--color-primary)]': day.key === todayKey(),
+              'border border-transparent': day.key !== todayKey(),
             }"
           >
             <div class="flex items-center gap-2">
               @if (day.key === todayKey()) {
                 <span
-                  class="h-1.5 w-1.5 rounded-full bg-primary flex-shrink-0"
+                  class="h-1.5 w-1.5 rounded-full bg-[var(--color-primary)] flex-shrink-0"
+                  aria-hidden="true"
                 ></span>
               }
               <span
                 class="text-sm"
                 [ngClass]="
                   day.key === todayKey()
-                    ? 'font-semibold text-text-primary'
-                    : 'text-text-secondary'
+                    ? 'font-semibold text-[var(--color-text-primary)]'
+                    : 'text-[var(--color-neutral-600)]'
                 "
               >
                 {{ day.label }}
               </span>
               @if (day.key === todayKey()) {
                 <span
-                  class="text-[10px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded-md uppercase tracking-wider"
+                  class="text-[10px] font-bold text-[var(--color-text-on-primary)] bg-[var(--color-success-700)] px-1.5 py-0.5 rounded-md uppercase tracking-wider"
                   >Hoy</span
                 >
               }
             </div>
             <span
-              class="text-sm"
+              class="text-sm font-medium tabular-nums"
               [ngClass]="
                 isDayClosed(day.key)
-                  ? 'text-red-400 font-medium'
-                  : 'text-text-primary font-medium'
+                  ? 'text-[var(--color-error-600)]'
+                  : 'text-[var(--color-text-primary)]'
               "
             >
               {{ isDayClosed(day.key) ? 'Cerrado' : getDayHours(day.key) }}
@@ -107,14 +104,14 @@ import type { BusinessHours } from '../../../../../core/models/store-settings.in
 
       <div slot="footer">
         <div
-          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+          class="flex items-center justify-end gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-[var(--color-border)]"
         >
-          <app-button variant="outline" size="sm" (clicked)="onClose()"
+          <app-button variant="outline" size="md" (clicked)="onClose()"
             >Cerrar</app-button
           >
-          <app-button variant="primary" size="sm" (clicked)="onGoToSettings()">
+          <app-button variant="primary" size="md" (clicked)="onGoToSettings()">
             <app-icon name="settings" [size]="16" slot="icon" ></app-icon>
-            Configurar Horarios
+            Configurar horarios
           </app-button>
         </div>
       </div>

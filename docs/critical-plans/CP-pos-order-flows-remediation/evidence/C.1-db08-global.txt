@@ -1,0 +1,10 @@
+ db08_global_mismatch 
+----------------------
+                   18
+(1 row)
+
+ db08_postcut_mismatch 
+-----------------------
+                     0
+(1 row)
+

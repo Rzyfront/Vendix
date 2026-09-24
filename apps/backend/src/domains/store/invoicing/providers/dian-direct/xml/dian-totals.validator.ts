@@ -32,7 +32,7 @@ import {
  * compuerta, y esta es. Corre en el mismo punto obligado que la estructural
  * (`signXml`, antes de firmar), donde abortar todavía no cuesta el consecutivo.
  *
- * LAS CINCO REGLAS
+ * LAS SEIS REGLAS
  * ----------------
  *
  * Las cuatro de totales (`AU02`, `AU04`, `AU06`, `AU14`) forman una CADENA: cada
@@ -111,6 +111,16 @@ import {
  *   recomputa: así un `TaxInclusiveAmount` mal escrito produce UNA violación
  *   (FAU06) y no dos, y el hallazgo apunta al eslabón que falló.
  *
+ * · **FAX07 / CAX07 / DAX07** (anexo19.txt:23077, fórmula en 5191) — por cada
+ *   `<línea>/cac:TaxTotal/cac:TaxSubtotal` con `cbc:Percent`:
+ *   `|cbc:TaxAmount − cbc:TaxableAmount × cbc:Percent ÷ 100| ≤ 2.00` (holgura
+ *   del Anexo 1.9 §5.2.1.1; a peso entero rechazaba cuotas correctas).
+ *   Atrapa la línea que hereda la tarifa de cabecera sin haber causado el
+ *   tributo (envío sintético, propina de cuenta dividida): `INC 8 %` sobre base
+ *   15000 con cuota 0,00. Un exento (`Percent 0.00`, cuota 0) cuadra por
+ *   construcción. Los tributos nominales (`cbc:PerUnitAmount`, sin `Percent`)
+ *   se calculan de otra forma y no se juzgan aquí.
+ *
  * Se implementan sobre el DOM y no con la aritmética del emisor a propósito: el
  * valor de esta compuerta está en LEER lo que se va a transmitir, no en
  * recalcularlo por segunda vez desde la misma fuente.
@@ -185,6 +195,7 @@ export type DianTotalsViolationKind =
   | 'tax-exclusive-base-mismatch'
   | 'tax-inclusive-total-mismatch'
   | 'payable-amount-mismatch'
+  | 'line-tax-amount-mismatch'
   | 'malformed';
 
 export interface DianTotalsViolation {
@@ -264,6 +275,7 @@ export class DianTotalsValidator {
     this.checkTaxExclusiveBase(root, root_name, family, violations);
     this.checkTaxInclusiveTotal(root, root_name, family, violations);
     this.checkPayableAmount(root, root_name, family, violations);
+    this.checkLineTaxSubtotalAmounts(root, root_name, family, violations);
 
     return { valid: violations.length === 0, violations, root: root_name };
   }
@@ -592,6 +604,100 @@ export class DianTotalsValidator {
   }
 
   // ---------------------------------------------------------------------------
+  // FAX07 — cuota de cada subtotal de línea = base × tarifa
+  // ---------------------------------------------------------------------------
+
+  /**
+   * `every $i in //<línea>/cac:TaxTotal/cac:TaxSubtotal satisfies
+   *  round($i/cbc:TaxAmount) = round($i/cbc:TaxableAmount * $i/cac:TaxCategory/cbc:Percent div 100)`.
+   *
+   * Sólo líneas: el mismo cálculo sobre la cabecera es otra regla (FAS07). Sólo
+   * subtotales con `cbc:Percent`: un tributo nominal (bolsas, IBUA) declara
+   * `cbc:PerUnitAmount` y se calcula por cantidad, no por porcentaje.
+   *
+   * TOLERANCIA ±2.00, NO igualdad a peso entero. Comparar `round(declarado)`
+   * contra `round(base × tarifa)` rechaza cuotas correctas: IVA 19 % sobre
+   * 2.602,61 = 494,4959; la cuota bien redondeada a centavos es 494,50, y a
+   * peso entero (ROUND_HALF_UP) queda 495 frente a 494. Un redondeo legítimo
+   * de medio centavo cruzaba la frontera del medio peso. El Anexo
+   * 1.9 §5.2.1.1 («Holgura en los valores monetarios») fija para los elementos
+   * monetarios una tolerancia de «+ o - 2.00», y esa es la que se aplica:
+   * `|TaxAmount − TaxableAmount × Percent ÷ 100| ≤ 2.00`. Sigue atrapando la
+   * herencia de tarifa con cuota 0 (0 contra 1.200, 0 contra 480), que es el
+   * defecto que esta regla existe para ver.
+   *
+   * No se usa la holgura de ±5.00 del §5.2.1.2: esa es sólo para IVA y sólo
+   * para la aproximación AL MÚLTIPLO DE $10 del art. 1.3.1.1.1 DUR 1625/2016,
+   * que el emisor no practica. Si algún día la practica, esta regla debe
+   * ampliarse a ±5.00 para el esquema 01.
+   */
+  private static checkLineTaxSubtotalAmounts(
+    root: any,
+    root_name: string,
+    family: DocumentFamily,
+    violations: DianTotalsViolation[],
+  ): void {
+    const rule = this.ruleId('line_tax_subtotal_amount', root_name);
+    if (!rule) return;
+
+    let line_index = 0;
+    for (const line of this.childrenNamed(root, family.line_element)) {
+      line_index += 1;
+      let subtotal_index = 0;
+      for (const tax_total of this.childrenNamed(line, 'cac:TaxTotal')) {
+        for (const subtotal of this.childrenNamed(tax_total, 'cac:TaxSubtotal')) {
+          subtotal_index += 1;
+          const [category] = this.childrenNamed(subtotal, 'cac:TaxCategory');
+          const percent_text = category
+            ? this.textOfChild(category, 'cbc:Percent')
+            : null;
+          if (percent_text === null) continue; // tributo nominal u otra forma
+
+          const taxable_text = this.textOfChild(subtotal, 'cbc:TaxableAmount');
+          const amount_text = this.textOfChild(subtotal, 'cbc:TaxAmount');
+          if (taxable_text === null || amount_text === null) continue;
+
+          const expected = toDecimal(taxable_text)
+            .times(toDecimal(percent_text))
+            .dividedBy(100);
+          const declared = toDecimal(amount_text);
+          const difference = declared.minus(expected);
+          if (difference.abs().lte(this.MONETARY_TOLERANCE)) continue;
+
+          const [scheme] = category
+            ? this.childrenNamed(category, 'cac:TaxScheme')
+            : [];
+          const scheme_id = scheme ? this.textOfChild(scheme, 'cbc:ID') : null;
+
+          violations.push({
+            rule,
+            kind: 'line-tax-amount-mismatch',
+            path: `${root_name}/${family.line_element}[${line_index}]/cac:TaxTotal/cac:TaxSubtotal[${subtotal_index}]/cbc:TaxAmount`,
+            message:
+              `La línea ${line_index} declara un tributo ` +
+              `${scheme_id ?? ''} de ${amount_text} sobre una base de ` +
+              `${taxable_text} al ${percent_text} %, cuando base × tarifa da ` +
+              `${this.exact(expected)} (diferencia ${this.exact(difference)}). ` +
+              `La regla ${rule} exige TaxAmount = TaxableAmount × Percent ÷ 100 ` +
+              `con la holgura de ±2.00 del Anexo 1.9 §5.2.1.1. Una ` +
+              `línea que no causa el tributo (envío, propina) no debe informar ` +
+              `\`cac:TaxTotal\`.`,
+            details: {
+              line: line_index,
+              scheme_id,
+              percent: percent_text,
+              taxable_amount: taxable_text,
+              declared: amount_text,
+              expected: this.exact(expected),
+              difference: this.exact(difference),
+            },
+          });
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // RESOLUCIÓN DE IDENTIFICADORES Y ARITMÉTICA
   // ---------------------------------------------------------------------------
 
@@ -665,13 +771,28 @@ export class DianTotalsValidator {
   }
 
   /**
-   * A peso entero, que es la precisión a la que comparan las reglas (`round()`).
+   * A peso entero, la precisión a la que comparan las reglas de totales
+   * (`round()`); FAX07 usa en cambio la holgura ±2.00 (`MONETARY_TOLERANCE`).
    * Comparar con más precisión inventaría rechazos que la DIAN no produce: el
    * truncado hoja por hoja separa dos representaciones del mismo importe en
    * centavos.
    */
   private static pesos(value: ReturnType<typeof toDecimal>): string {
     return value.toDecimalPlaces(0).toString();
+  }
+
+  /**
+   * Anexo 1.9 §5.2.1.1: «Los elementos que definen valores monetarios
+   * permitirán una tolerancia de error + o - 2.00».
+   */
+  private static readonly MONETARY_TOLERANCE = toDecimal('2.00');
+
+  /**
+   * El valor SIN redondear (al menos 2 decimales): un `toFixed(2)` de
+   * 494,4959 imprime 494,50 y esconde por qué dos cifras «iguales» difieren.
+   */
+  private static exact(value: ReturnType<typeof toDecimal>): string {
+    return value.toFixed(Math.max(2, value.decimalPlaces()));
   }
 
   /** Texto del PRIMER descendiente con ese nombre, o `null` si no hay ninguno. */

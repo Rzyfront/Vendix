@@ -150,6 +150,12 @@
       (actionClicked)="onHeaderAction($event)"
     ></app-sticky-header>
 
+    @if (orderData.active_financial_split_id) {
+      <div class="max-w-[1600px] mx-auto mb-4">
+        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="false" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" />
+      </div>
+    }
+
     <!-- Main Grid: Two columns -->
     <div class="max-w-[1600px] mx-auto">
       <!-- Order summary strip: channel + delivery + credit (ultra-thin) -->
@@ -175,9 +181,10 @@
           <button
             type="button"
             (click)="focusGestionEnvio()"
-            title="Editar envío: ir a Gestión de Envío"
-            aria-label="Editar envío: ir a Gestión de Envío"
-            class="flex items-center gap-1.5 text-text-primary font-medium cursor-pointer hover:underline underline-offset-2"
+            [disabled]="orderData.delivery_type === 'dine_in'"
+            [title]="orderData.delivery_type === 'dine_in' ? 'Consumo en mesa: no requiere envío' : 'Editar envío: ir a Gestión de Envío'"
+            [attr.aria-label]="orderData.delivery_type === 'dine_in' ? 'Consumo en mesa: no requiere envío' : 'Editar envío: ir a Gestión de Envío'"
+            class="flex items-center gap-1.5 text-text-primary font-medium enabled:cursor-pointer enabled:hover:underline underline-offset-2"
           >
             <app-icon
               [name]="deliveryConfig().icon"
@@ -188,7 +195,9 @@
             <span class="text-text-secondary font-normal">{{
               deliveryConfig().label
             }}</span>
-            <app-icon name="pencil" size="11" class="text-text-secondary"></app-icon>
+            @if (orderData.delivery_type !== 'dine_in') {
+              <app-icon name="pencil" size="11" class="text-text-secondary"></app-icon>
+            }
           </button>
           <!-- T10 B2 — la sección "Mesa" sólo aparece en tiendas restaurante
                Y si la orden trae sesión de mesa. Hoy se pintaba con sólo
@@ -809,6 +818,14 @@
                           <app-icon slot="icon" name="rotate-ccw" [size]="10" />
                           Reversar
                         </app-button>
+                      }
+                      @if ((item.delivered_at || !item.cancelled_at) && cancellationPaid()) {
+                        <span class="text-xs text-amber-700">
+                          Orden cobrada: no se puede cancelar este plato.
+                          <button type="button" class="underline font-semibold" (click)="openRefundModal()">
+                            Abrir Reembolso
+                          </button>
+                        </span>
                       }
                       <!-- Paso 2 PLAN-order-detail-cancel-item — badge de
                            cancelado + motivo persistido (misma data que ya
@@ -2232,6 +2249,16 @@
                   orderData.shipping_cost || 0 | currency
                 }}</span>
               </div>
+              @if (shippingTaxAmount() > 0) {
+                <div class="flex justify-between items-center text-xs -mt-1">
+                  <span class="text-text-secondary pl-3"
+                    >Incluye {{ shippingTaxLabel() }}:</span
+                  >
+                  <span class="text-text-secondary">{{
+                    shippingTaxAmount() | currency
+                  }}</span>
+                </div>
+              }
               <!-- C.7 (§5.3, base gross): sin fila de impuesto que sume; con
                    desglose respaldado, nota informativa fuera de la aritmética. -->
               @if (showDetailVatNote()) {
@@ -2477,6 +2504,20 @@
          FLOW MODALS
          ═══════════════════════════════════════════════════════════ -->
 
+    <!-- D.4 — modal compartido "Destino del plato" (mismo componente que mesa). -->
+    <app-item-cancellation-modal
+      [isOpen]="cancellationModalOpen()"
+      (isOpenChange)="!$event && closeItemCancellationModal()"
+      [itemName]="cancellationTarget()?.item?.product_name || ''"
+      [showDestination]="cancellationTarget()?.mode === 'reverse' || cancellationPreparedFired()"
+      [canReuse]="canReuseCancellation()"
+      [inFlight]="cancellingItemId() !== null || reversingItemId() !== null"
+      [serverError]="cancellationError()"
+      [currentTotal]="order()?.grand_total || 0"
+      [preview]="cancellationPreview()"
+      (confirmed)="submitItemCancellation($event)"
+    />
+
     <app-modal
       [isOpen]="showPaymentReceiptModal()"
       (closed)="closePaymentReceiptModal()"
@@ -2700,6 +2741,7 @@
     <!-- DISPATCH METHOD CHOOSER (con remisión vs sin remisión) -->
     <app-dispatch-method-selector-modal
       [isOpen]="showDispatchSelector()"
+      [enabledMethods]="enabledDispatchMethods()"
       (selected)="onDispatchMethodSelected($event)"
       (closed)="showDispatchSelector.set(false)"
     ></app-dispatch-method-selector-modal>
@@ -2783,11 +2825,11 @@
       [isOpen]="showDeliverModal()"
       (closed)="showDeliverModal.set(false); isManualDeliverMode.set(false)"
       [title]="
-        isManualDeliverMode()
-          ? orderData.delivery_type === 'pickup'
-            ? 'Entregar directamente al cliente'
-            : 'Entregar sin confirmar pago'
-          : 'Marcar como Entregado'
+        orderData.delivery_type === 'pickup'
+          ? 'Confirmar recogida en tienda'
+          : isManualDeliverMode()
+            ? 'Entregar sin confirmar pago'
+            : 'Marcar como Entregado'
       "
       size="md"
     >
@@ -2804,12 +2846,12 @@
             <div>
               @if (orderData.delivery_type === "pickup") {
                 <p class="text-sm font-bold text-orange-800">
-                  Entrega directa al cliente
+                  Recogida en tienda
                 </p>
                 <p class="text-xs text-orange-600 mt-0.5">
-                  Se omitira el paso "Lista para recoger" y la orden se marcara
-                  como entregada directamente. Si el pago esta confirmado, la
-                  orden se finalizara automaticamente.
+                  Se omitirá el estado "Lista para recogida" y la orden se
+                  marcará como recogida. Si el pago está confirmado, la orden
+                  se finalizará automáticamente.
                 </p>
               } @else {
                 <p class="text-sm font-bold text-orange-800">
@@ -2930,6 +2972,88 @@
       </div>
     </app-modal>
 
+    <!-- RESOLVE REFUND MODAL -->
+    <app-modal
+      [isOpen]="showResolveRefundModal()"
+      (closed)="closeResolveRefundModal()"
+      title="Resolver reembolso manualmente"
+      size="md"
+    >
+      <div class="p-4 space-y-4" [formGroup]="resolveRefundForm">
+        <div>
+          <label class="block text-sm font-bold text-gray-700 mb-1.5"
+            >Estado destino</label
+          >
+          <select
+            formControlName="target_state"
+            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          >
+            <option value="completed">Completado (el dinero salió)</option>
+            <option value="failed">Fallido (cerrar sin reversión)</option>
+          </select>
+        </div>
+
+        @if (resolveNeedsPayout()) {
+          <div>
+            <label class="block text-sm font-bold text-gray-700 mb-1.5"
+              >Canal del desembolso</label
+            >
+            <select
+              formControlName="payout_channel"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            >
+              <option value="" disabled>Selecciona el canal...</option>
+              <option value="cash">Efectivo</option>
+              <option value="bank_transfer">Transferencia bancaria</option>
+              <option value="store_credit">Crédito en tienda</option>
+              <option value="gateway">Pasarela de pago</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-bold text-gray-700 mb-1.5"
+              >Referencia del desembolso</label
+            >
+            <input
+              type="text"
+              formControlName="payout_reference"
+              placeholder="N° comprobante, referencia o folio verificable"
+              maxlength="255"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            />
+          </div>
+        }
+
+        <div>
+          <label class="block text-sm font-bold text-gray-700 mb-1.5"
+            >Nota de resolución (obligatoria)</label
+          >
+          <textarea
+            formControlName="resolution_notes"
+            rows="3"
+            placeholder="Quién confirma y por qué se cierra así..."
+            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
+          ></textarea>
+        </div>
+      </div>
+
+      <div
+        slot="footer"
+        class="flex items-center justify-end gap-2 p-4 border-t border-border"
+      >
+        <app-button variant="outline" (clicked)="closeResolveRefundModal()"
+          >Volver</app-button
+        >
+        <app-button
+          variant="primary"
+          (clicked)="submitResolveRefund()"
+          [disabled]="resolveRefundForm.invalid || isProcessingAction()"
+        >
+          {{ isProcessingAction() ? "Resolviendo..." : "Resolver reembolso" }}
+        </app-button>
+      </div>
+    </app-modal>
+
     <!-- CANCEL MODAL -->
     <app-modal
       [isOpen]="showCancelModal()"
@@ -2948,10 +3072,10 @@
           ></app-icon>
           <div>
             <p class="text-sm font-bold text-red-800">
-              Esta accion no se puede deshacer
+              Confirma la cancelación
             </p>
             <p class="text-xs text-red-600 mt-0.5">
-              La orden sera cancelada permanentemente.
+              La orden quedará cancelada y conservará su historial. Para reactivarla necesitarás permisos.
             </p>
           </div>
         </div>

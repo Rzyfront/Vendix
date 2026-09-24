@@ -150,7 +150,7 @@ export function buildFiscalInvoicePdfData(
     company_email: issuer.email,
     company_logo_buffer: io.logo_buffer,
     company_trade_name: issuer.trade_name,
-    company_tax_regime: issuer.tax_regime,
+    company_fiscal_qualities: issuer.fiscal_qualities,
     company_tax_responsibilities: issuer.tax_responsibilities,
 
     // Paper format configured for this store.

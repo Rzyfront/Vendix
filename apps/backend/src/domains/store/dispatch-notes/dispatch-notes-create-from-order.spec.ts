@@ -120,6 +120,63 @@ describe('DispatchNotesService — createFromOrder prorratea el impuesto de lín
     expect(persisted.grand_total).toBe(297500);
   });
 
+  it('copia alias y dirección de entrega sin crear cliente para una venta con nombre de referencia', async () => {
+    const address = {
+      address_line1: 'Cra 7 # 1-3',
+      city: 'Bogotá',
+      latitude: 4.61,
+      longitude: -74.08,
+    };
+    prismaMock.orders.findFirst.mockResolvedValue({
+      ...orderWith([orderItem()]),
+      delivery_type: 'home_delivery',
+      customer_id: null,
+      customer_alias: 'Portería Torre Norte',
+      users: null,
+      shipping_address_snapshot: address,
+    });
+
+    await service.createFromOrder(ORDER_ID, {
+      items: [{ order_item_id: ORDER_ITEM_ID, dispatched_quantity: 5, location_id: LOCATION_ID }],
+    } as any);
+
+    const persisted = txCreate.mock.calls[0][0].data;
+    expect(persisted.customer_id).toBeNull();
+    expect(persisted.customer_name).toBe('Portería Torre Norte');
+    expect(persisted.customer_address).toEqual(address);
+    expect(persisted.customer_tax_id).toBeNull();
+  });
+
+  it('conserva el gate de dirección para una venta con alias sin destino', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue({
+      ...orderWith([orderItem()]),
+      delivery_type: 'home_delivery',
+      customer_id: null,
+      customer_alias: 'Portería Torre Norte',
+      users: null,
+    });
+
+    await expect(service.createFromOrder(ORDER_ID, { items: [] } as any)).rejects.toThrow();
+    expect(txCreate).not.toHaveBeenCalled();
+  });
+
+  it('re-snapshotear la dirección no modifica el nombre copiado', async () => {
+    jest.spyOn(service, 'findOne').mockResolvedValue({ id: 7, customer_name: 'Portería Torre Norte' } as any);
+    const update = jest.fn().mockResolvedValue({ id: 7, customer_name: 'Portería Torre Norte' });
+    prismaMock.dispatch_notes = { update };
+
+    await expect(service.updateCustomerAddressSnapshot(7, {
+      address_line_1: 'Cra 7 # 1-3',
+      city: 'Bogotá',
+    } as any)).resolves.toMatchObject({ customer_name: 'Portería Torre Norte' });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        customer_address: expect.objectContaining({ address_line1: 'Cra 7 # 1-3' }),
+      }),
+    }));
+    expect(update.mock.calls[0][0].data).not.toHaveProperty('customer_name');
+  });
+
   it('despacho parcial qty 10 → 4 persiste tax = lineTax × 0.4', async () => {
     // Impuesto de línea completa: 9.500 × 10 = 95.000; × 0.4 = 38.000.
     const { persisted } = await runCreate(

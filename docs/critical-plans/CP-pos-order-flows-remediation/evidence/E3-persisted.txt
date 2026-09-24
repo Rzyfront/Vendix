@@ -1,0 +1,6 @@
+  id  |   state   |  delivery_type  | channel  |        customer_alias
+------+-----------+-----------------+----------+------------------------------
+ 1147 | cancelled | dine_in         | pos      | QA E3 dine in 20260923
+ 1148 | cancelled | home_delivery   | whatsapp | QA E3 home whatsapp 20260923
+ 1149 | cancelled | direct_delivery | pos      | QA E3 default 20260923
+(3 rows)

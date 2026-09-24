@@ -96,6 +96,7 @@ export const reportsRoutes: Routes = [
           { path: 'inventory-movements',           data: { reportId: 'inventory-movements' },           loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'inventory-movement-analysis',   data: { reportId: 'inventory-movement-analysis' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'inventory-ingredient-consumption', data: { reportId: 'inventory-ingredient-consumption' }, loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'inventory-by-supplier',         data: { reportId: 'inventory-by-supplier' },         loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {
@@ -143,6 +144,7 @@ export const reportsRoutes: Routes = [
           { path: 'purchase-summary',      data: { reportId: 'purchase-summary' },      loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'purchase-by-supplier',  data: { reportId: 'purchase-by-supplier' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'purchase-trends',       data: { reportId: 'purchase-trends' },       loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'payable-aging',         data: { reportId: 'payable-aging' },         loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {

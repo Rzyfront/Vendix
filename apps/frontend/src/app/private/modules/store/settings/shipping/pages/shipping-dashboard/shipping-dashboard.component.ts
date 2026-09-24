@@ -286,6 +286,7 @@ import {
           [edit_rate]="rate_wizard_edit_rate()"
           (close)="closeRateWizard()"
           (saved)="onRateSaved()"
+          (zones_changed)="onZonesChanged()"
         />
       }
     </div>
@@ -775,12 +776,19 @@ export class ShippingDashboardComponent implements OnInit {
     this.closeRateWizard();
   }
 
+  /** Una zona editada desde el wizard: recargar zonas y tarifas cacheadas. */
+  onZonesChanged(): void {
+    this.method_zones_cache.set(new Map());
+    this.loadStoreZones();
+    this.loadZoneStats();
+  }
+
   // ===== HELPERS =====
 
   getTypeLabel(type: string): string {
     const label_map: Record<string, string> = {
       custom: 'Personalizado',
-      pickup: 'Recogida',
+      pickup: 'Recogida en tienda',
       own_fleet: 'Flota propia',
       carrier: 'Transportadora',
       third_party_provider: 'Externo'};

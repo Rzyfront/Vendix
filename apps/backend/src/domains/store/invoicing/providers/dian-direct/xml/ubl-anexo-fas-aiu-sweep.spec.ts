@@ -584,8 +584,18 @@ describe('Anexo 1.9 — barrido de los grupos FAS, FAV03 y FAD02', () => {
       // Y NO es rechazo: FAU06 compara con `round()`, es decir A PESO ENTERO
       // —`DianTotalsValidator.pesos` replica esa semántica—, así que un céntimo
       // de residuo es invisible para la regla. Medido, no supuesto: la compuerta
-      // no encuentra nada que objetar.
-      expect(DianTotalsValidator.validate(xml).violations).toEqual([]);
+      // no encuentra nada que objetar en las reglas de TOTALES.
+      //
+      // Se excluye FAX07 a propósito: el fixture usa UNA línea sin desglose que
+      // hereda sólo la primera tarifa (19 %) con la cuota de LAS DOS (20,01)
+      // sobre base 1.000, y FAX07 —cuota de línea contra base × tarifa— la
+      // rechaza. Por el camino real no ocurre: un documento con ≥2 tarifas
+      // persiste desglose por línea. Este caso mide la cabecera, no la línea.
+      expect(
+        DianTotalsValidator.validate(xml).violations.filter(
+          (v) => v.rule !== 'FAX07',
+        ),
+      ).toEqual([]);
     });
 
     it('FAT04 (pág. 83) — la función hermana de retenciones SÍ abre un subtotal por tarifa', () => {

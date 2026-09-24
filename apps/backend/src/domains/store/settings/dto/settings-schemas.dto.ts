@@ -420,16 +420,7 @@ export class PosSettingsDto {
   @IsBoolean()
   allow_alias_sales?: boolean;
 
-  /**
-   * F-127 — severidad de la compuerta fiscal por linea del carril de cobro
-   * (`POS_TABLE_LINE_TAX_UNRESOLVABLE_001`, `payments.service.ts`). Ausente o
-   * `'block'` = comportamiento de siempre (lanza y revierte). `'warn'` deja
-   * pasar la linea normalizando el impuesto a cero y registra el detalle;
-   * `'off'` deja pasar en silencio. Bajarla es una valvula de emergencia por
-   * tienda para no dejar la caja parada mientras se corrige el catalogo: toda
-   * venta que pasa por `'warn'`/`'off'` lleva IVA potencialmente
-   * sub-declarado a la DIAN (F-065).
-   */
+  /** @deprecated ADR-10: aceptar JSON histórico sin afectar el cobro. */
   @ApiProperty({ example: 'block', required: false, enum: ['block', 'warn', 'off'] })
   @IsOptional()
   @IsIn(['block', 'warn', 'off'], {
@@ -1103,6 +1094,33 @@ export class DispatchSettingsDto {
   @IsOptional()
   @IsBoolean()
   requires_dispatch_address?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Permite "Crear remisión con ruta de despacho" en el selector de despacho (QUI-844). Default: true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_dispatch_with_remision?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Permite "Entrega completa" en el selector de despacho (QUI-844). Default: true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_dispatch_direct_delivery?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Permite "Enviar a despacho" (pool de repartidores) en el selector de despacho (QUI-844). Default: true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_dispatch_to_pool?: boolean;
 }
 
 export class RestaurantSettingsDto {

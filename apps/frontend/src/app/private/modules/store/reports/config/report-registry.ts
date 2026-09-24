@@ -59,7 +59,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/overview/summary',
   },
 
-  // ─── COMPRAS (2) ─────────────────────────────────────────────────────────────────
+  // ─── COMPRAS (4) ─────────────────────────────────────────────────────────────────
 
   {
     id: 'purchase-summary',
@@ -154,6 +154,68 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/purchases/trends',
     exportEndpoint: 'store/analytics/purchases/trends/export',
+  },
+
+  {
+    // QUI-542: Cuentas por pagar a proveedores por edades (aging).
+    // Saldo pendiente por proveedor distribuido en buckets (corriente, 1-30, 31-60, 61-90, >90 días).
+    id: 'payable-aging',
+    category: 'purchases',
+    title: 'Cuentas por Pagar Proveedor',
+    description: 'Saldo pendiente a proveedores por edades de vencimiento',
+    detailedDescription:
+      'Reporte de cartera a proveedores distribuida por antigüedad (corriente, 1-30, 31-60, 61-90 y más de 90 días). Permite priorizar la gestión de pagos y controlar la deuda comercial.',
+    icon: 'clock',
+    route: '/admin/reports/purchases/payable-aging',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    serverPagination: true,
+    trackKey: 'supplier_id',
+    columns: [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_document', header: 'Documento', type: 'text' },
+      { key: 'total_paid', header: 'Total Abonado', type: 'currency', footer: 'sum' },
+      { key: 'total_outstanding', header: 'Saldo Total', type: 'currency', footer: 'sum' },
+      {
+        key: 'due_in_days',
+        header: 'Vencimiento',
+        type: 'text',
+        badge: true,
+        badgeConfig: {
+          type: 'custom',
+          size: 'sm',
+          colorFn: (value: any) => {
+            if (value === null || value === undefined || value === '') return '#9ca3af';
+            const num = Number(value);
+            if (!Number.isFinite(num)) return '#9ca3af';
+            if (num < 0) return '#ef4444';
+            if (num === 0) return '#f97316';
+            if (num <= 7) return '#f59e0b';
+            return '#10b981';
+          },
+        },
+        transform: (value: any, row?: any) => {
+          const days = row?.due_in_days ?? value;
+          if (days === null || days === undefined) return 'Sin fecha';
+          const num = Number(days);
+          if (!Number.isFinite(num)) return 'Sin fecha';
+          if (num < 0) return `Vencida hace ${Math.abs(num)}d`;
+          if (num === 0) return 'Vence hoy';
+          return `Vence en ${num}d`;
+        },
+      },
+      { key: 'last_payment_date', header: 'Último Pago', type: 'date' },
+    ],
+    exportFilename: 'cuentas_por_pagar_aging',
+    stats: [
+      { key: 'total_outstanding', label: 'Saldo Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'current', label: 'Corriente', type: 'currency', icon: 'check-circle' },
+      { key: 'days_over_90', label: 'Vencido >90d', type: 'currency', icon: 'alert-triangle' },
+      { key: '_count', label: 'Proveedores', type: 'number', icon: 'building-2' },
+    ],
+    dataEndpoint: 'store/analytics/purchases/payable-aging',
+    exportEndpoint: 'store/analytics/purchases/payable-aging/export',
   },
 
   // ─── RESEÑAS (2) ──────────────────────────────────────────────────────────────────
@@ -637,6 +699,42 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/inventory/low-stock-by-supplier',
     exportEndpoint: 'store/analytics/inventory/low-stock-by-supplier/export',
+  },
+
+  {
+    id: 'inventory-by-supplier',
+    category: 'inventory',
+    title: 'Inventario por Proveedor',
+    description:
+      'Concentración de existencias, valorización a costo y producto principal agrupado por proveedor.',
+    detailedDescription:
+      'Muestra el capital invertido y las existencias en mano, reservadas y disponibles por cada proveedor comercial registrado en la tienda, permitiendo identificar la concentración de compras y el producto con mayor valor en stock.',
+    icon: 'truck',
+    route: '/admin/reports/inventory/inventory-by-supplier',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'supplier_id',
+    columns: [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_document', header: 'Documento', type: 'text' },
+      { key: 'product_count', header: 'Productos', type: 'number', footer: 'sum' },
+      { key: 'total_units_on_hand', header: 'En Mano', type: 'number', footer: 'sum' },
+      { key: 'total_units_reserved', header: 'Reservadas', type: 'number', footer: 'sum' },
+      { key: 'total_units_available', header: 'Disponibles', type: 'number', footer: 'sum' },
+      { key: 'total_stock_value', header: 'Valor Stock', type: 'currency', footer: 'sum' },
+      { key: 'avg_unit_cost', header: 'Costo Promedio', type: 'currency' },
+      { key: 'top_product_name', header: 'Producto Principal', type: 'text' },
+    ],
+    exportFilename: 'inventario_por_proveedor',
+    stats: [
+      { key: 'product_count', label: 'Total Productos', type: 'number', icon: 'package' },
+      { key: 'total_units_on_hand', label: 'Unidades en Mano', type: 'number', icon: 'boxes' },
+      { key: 'total_units_available', label: 'Unidades Disponibles', type: 'number', icon: 'check-circle' },
+      { key: 'total_stock_value', label: 'Valor Total Stock', type: 'currency', icon: 'dollar-sign' },
+    ],
+    dataEndpoint: 'store/analytics/inventory/by-supplier',
+    exportEndpoint: 'store/analytics/inventory/by-supplier/export',
   },
 
   {

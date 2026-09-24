@@ -96,8 +96,12 @@ export interface PendingBookingSummary {
 export interface TableSessionSummary {
   id: number;
   order_id: number;
-  opened_by: number;
+  opened_by: number | null;
+  /** ADR-04: quien abrió la sesión, no la asignación estática de la mesa. */
+  waiter: TableWaiter | null;
   opened_at: string | Date;
+  /** Marca de cuenta saldada; la mesa permanece ocupada hasta su cierre. */
+  paid_at?: string | Date | null;
   closed_at: string | Date | null;
   guest_count: number | null;
 }
@@ -107,7 +111,7 @@ export interface TableSession {
   store_id: number;
   table_id: number;
   order_id: number;
-  opened_by: number;
+  opened_by: number | null;
   opened_at: string | Date;
   closed_at: string | Date | null;
   /**
@@ -125,7 +129,14 @@ export interface TableSession {
     name: string;
     zone: string | null;
     status: string;
+    waiter?: TableWaiter | null;
   };
+}
+
+export interface TableWaiter {
+  id: number;
+  first_name: string;
+  last_name: string;
 }
 
 export interface TableSessionOrder {
@@ -218,13 +229,12 @@ export interface TableSessionOrderItem {
    * `cancelled_at` es la fuente de verdad (no hay columna `state` enum);
    * `cancellation_reason` queda persistido para auditoría y para que
    * el KDS / listado de ordenes puedan mostrarlo.
-   * `cancellation_type` clasifica el efecto contable:
-   *   - 'before_fire'      → stock revertido.
-   *   - 'after_fire_waste' → merma, stock NO revertido.
+   * `cancellation_type` clasifica el destino. `delivered_*` sólo se lee
+   * en registros históricos; ninguna cancelación nueva lo escribe.
    */
   cancelled_at: string | null;
   cancellation_reason: string | null;
-  cancellation_type: 'before_fire' | 'after_fire_waste' | null;
+  cancellation_type: 'before_fire' | 'after_fire_reused' | 'after_fire_waste' | 'delivered_restock' | 'delivered_waste' | null;
   /**
    * Snapshot of `products.product_type` taken at order creation by the
    * backend (see `table-sessions.service.ts:addItems`). The table
@@ -326,25 +336,119 @@ export interface TableSessionAddItem {
 }
 
 export type SplitMode = 'equal' | 'custom';
+export type SplitMoney = string;
 
-export interface SplitByItemsDto {
+export interface SplitAccountCustomer {
+  /** Read-only display field; never send it as request data. */
+  customer_name?: string | null;
+  label?: string;
+  customer_id?: number | null;
+  customer_alias?: string | null;
+}
+
+export interface SplitRequestContext {
+  source_version?: string;
+  idempotency_key?: string;
+  accounts?: SplitAccountCustomer[];
+}
+
+export interface SplitByItemsDto extends SplitRequestContext {
   item_groups: Array<{ order_item_ids: number[] }>;
 }
 
-export interface SplitByAmountDto {
+export interface SplitByAmountDto extends SplitRequestContext {
   mode: SplitMode;
   n_splits: number;
   amounts?: number[];
 }
 
+export interface SplitPreviewDto extends SplitRequestContext {
+  mode: SplitMode | 'items';
+  n_splits?: number;
+  amounts?: number[];
+  item_groups?: Array<{ order_item_ids: number[] }>;
+}
+
+/** Financial IDs are NOT order IDs. Kitchen and stock remain on source_order_id. */
+export interface SplitFinancialAccount {
+  id: number | null;
+  ordinal: number;
+  role: 'paid_original' | 'payable';
+  label: string;
+  customer_id: number | null;
+  customer_alias: string | null;
+  customer_name?: string | null;
+  payer: { customer_id: number | null; customer_alias: string | null };
+  subtotal_amount: SplitMoney;
+  discount_amount: SplitMoney;
+  tax_amount: SplitMoney;
+  shipping_cost: SplitMoney;
+  tip_amount: SplitMoney;
+  grand_total: SplitMoney;
+  paid_snapshot: SplitMoney;
+  total_paid: SplitMoney;
+  reserved_amount: SplitMoney;
+  remaining_balance: SplitMoney;
+  available_to_pay: SplitMoney;
+  payment_state: 'unpaid' | 'pending' | 'partial' | 'paid';
+  invoice_id: number | null;
+  payments: Array<{ id: number; amount: SplitMoney; state: string; can_confirm?: boolean; next_action?: SplitPaymentNextAction | null }>;
+}
+
 export interface SplitResult {
   source_order_id: number;
-  sub_orders: Array<{
+  split_group_id: number | null;
+  source_version: string;
+  currency: string;
+  original_total: SplitMoney;
+  preserved_paid: SplitMoney;
+  pending_to_split: SplitMoney;
+  accounts: SplitFinancialAccount[];
+  retained_account: SplitFinancialAccount | null;
+  kitchen_fire: null;
+}
+
+export interface SplitSourceItem {
+  id: number;
+  product_name: string;
+  quantity: number;
+  cancelled_at?: string | null;
+}
+
+export interface SplitPaymentNextAction { type?: string; url?: string; message?: string; }
+
+export interface SplitWompiPaymentMethod {
+  type: string;
+  token?: string;
+  installments?: number;
+  phone_number?: string;
+  user_type?: number;
+  user_legal_id_type?: string;
+  user_legal_id?: string;
+  financial_institution_code?: string;
+  payment_description?: string;
+}
+
+export interface SplitAccountPayDto {
+  store_payment_method_id: number;
+  amount: number;
+  idempotency_key: string;
+  amount_received?: number;
+  bank_account_id?: number;
+  payment_reference?: string;
+  wompi_payment_method?: SplitWompiPaymentMethod;
+  return_url?: string;
+  cancel_url?: string;
+}
+
+export interface SplitAccountPaymentResult {
+  payment: {
     id: number;
-    order_number: string;
-    grand_total: number | string;
-    items_count: number;
-  }>;
+    amount: string;
+    state: string;
+    nextAction?: SplitPaymentNextAction | null;
+  };
+  split: SplitResult;
 }
 
 /**
@@ -478,6 +582,23 @@ export interface ConfirmTablePaymentResult {
 export interface TransferTableSessionDto {
   source_table_id: number;
   target_table_id: number;
+}
+
+/** G.2: reuses the existing order and creates a new table session. */
+export interface ReassignTableSessionDto {
+  order_id: number;
+  target_table_id: number;
+}
+
+/** Read-side evidence for hiding reassignment when financial history exists. */
+export interface TableOrderReassignmentEvidence {
+  id: number;
+  state: string;
+  total_paid: number | string;
+  active_financial_split_id: number | null;
+  payments: Array<{ state: string }>;
+  // The orders detail endpoint currently projects only its latest invoice.
+  invoices: Array<{ status: string }>;
 }
 
 export type TransferMode = 'transfer' | 'swap';

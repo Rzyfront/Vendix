@@ -44,63 +44,54 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
       (cancel)="onCancel()"
       [size]="'sm'"
       [showCloseButton]="true"
+      [dialog]="true"
     >
       <!-- Header -->
-      <div slot="header" class="flex items-center gap-3">
-        <div
-          class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center"
-        >
-          <app-icon name="cash" [size]="20" class="text-primary"></app-icon>
+      <div slot="header" class="cm-header">
+        <div class="cm-header-icon">
+          <app-icon name="cash" [size]="20"></app-icon>
         </div>
         <div>
-          <h2 class="text-lg font-semibold text-text-primary">
-            Movimiento de Efectivo
-          </h2>
-          <p class="text-sm text-text-secondary">
-            Registrar entrada o salida de efectivo
-          </p>
+          <h2 class="cm-title">Movimiento de Efectivo</h2>
+          <p class="cm-subtitle">Registrar entrada o salida de efectivo</p>
         </div>
       </div>
 
       <!-- Body -->
-      <form [formGroup]="form" class="space-y-5">
+      <form [formGroup]="form" class="cm-form">
         <!-- Type Selection -->
-        <div class="grid grid-cols-2 gap-3">
+        <div class="cm-types" role="radiogroup" aria-label="Tipo de movimiento">
           <button
             type="button"
+            role="radio"
+            [attr.aria-checked]="form.value.type === 'cash_in'"
             (click)="form.patchValue({ type: 'cash_in' })"
-            class="p-4 rounded-xl border-2 text-center transition-all"
-            [class]="
-              form.value.type === 'cash_in'
-                ? 'border-green-500 bg-green-50 text-green-700 shadow-sm'
-                : 'border-border text-text-secondary hover:border-green-300 hover:bg-green-50/50'
-            "
+            class="cm-type cm-type-in"
+            [class.cm-type-selected]="form.value.type === 'cash_in'"
           >
             <app-icon
               name="trending-up"
               [size]="24"
-              class="mx-auto mb-1.5"
+              class="cm-type-icon"
             ></app-icon>
-            <p class="text-sm font-semibold">Entrada</p>
-            <p class="text-[10px] opacity-60">Agregar efectivo</p>
+            <p class="cm-type-name">Entrada</p>
+            <p class="cm-type-hint">Agregar efectivo</p>
           </button>
           <button
             type="button"
+            role="radio"
+            [attr.aria-checked]="form.value.type === 'cash_out'"
             (click)="form.patchValue({ type: 'cash_out' })"
-            class="p-4 rounded-xl border-2 text-center transition-all"
-            [class]="
-              form.value.type === 'cash_out'
-                ? 'border-red-500 bg-red-50 text-red-700 shadow-sm'
-                : 'border-border text-text-secondary hover:border-red-300 hover:bg-red-50/50'
-            "
+            class="cm-type cm-type-out"
+            [class.cm-type-selected]="form.value.type === 'cash_out'"
           >
             <app-icon
               name="trending-down"
               [size]="24"
-              class="mx-auto mb-1.5"
+              class="cm-type-icon"
             ></app-icon>
-            <p class="text-sm font-semibold">Salida</p>
-            <p class="text-[10px] opacity-60">Retirar efectivo</p>
+            <p class="cm-type-name">Salida</p>
+            <p class="cm-type-hint">Retirar efectivo</p>
           </button>
         </div>
 
@@ -135,7 +126,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
       </form>
 
       <!-- Footer -->
-      <div slot="footer" class="flex justify-end gap-2">
+      <div slot="footer" class="cm-footer">
         <app-button variant="secondary" size="md" (clicked)="onCancel()">
           Cancelar
         </app-button>
@@ -161,6 +152,123 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
       </div>
     </app-modal>
   `,
+  styles: [`
+    /* Stitch paso 7 — movimiento de caja: selector entrada/salida como
+       radiogroup con estados seleccionado/no-seleccionado distinguibles sin
+       solo color (borde 2px + fondo + icono), hints en neutral-600 sólido
+       (opacity-60 falla AA) y foco 3px primary. */
+    .cm-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .cm-header-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      background: var(--color-info-50);
+      color: var(--color-info-700);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .cm-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--color-text-primary);
+      margin: 0;
+    }
+
+    .cm-subtitle {
+      font-size: 14px;
+      color: var(--color-neutral-600);
+      margin: 0;
+    }
+
+    .cm-form {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .cm-types {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .cm-type {
+      min-height: 44px;
+      padding: 16px;
+      border-radius: 12px;
+      border: 2px solid var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-neutral-600);
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s ease, background-color 0.2s ease;
+    }
+
+    .cm-type:focus-visible {
+      outline: 3px solid var(--color-primary);
+      outline-offset: 2px;
+    }
+
+    .cm-type-in:hover {
+      border-color: var(--color-success-500);
+      background: var(--color-success-50);
+    }
+
+    .cm-type-out:hover {
+      border-color: var(--color-error-500);
+      background: var(--color-error-50);
+    }
+
+    .cm-type-in.cm-type-selected {
+      border-color: var(--color-success-600);
+      background: var(--color-success-50);
+      color: var(--color-success-800);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+
+    .cm-type-out.cm-type-selected {
+      border-color: var(--color-error-600);
+      background: var(--color-error-50);
+      color: var(--color-error-800);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+
+    .cm-type-icon {
+      display: block;
+      margin: 0 auto 6px;
+    }
+
+    .cm-type-name {
+      font-size: 14px;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    .cm-type-hint {
+      font-size: 11px;
+      font-weight: 500;
+      margin: 2px 0 0;
+      color: var(--color-neutral-600);
+    }
+
+    .cm-type-selected .cm-type-hint {
+      color: inherit;
+    }
+
+    .cm-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+  `],
 })
 export class PosCashMovementModalComponent {
   readonly isOpen = input<boolean>(false);

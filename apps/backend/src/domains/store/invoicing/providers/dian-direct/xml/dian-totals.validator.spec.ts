@@ -306,13 +306,14 @@ describe('DianTotalsValidator', () => {
     taxable: string,
     subtotal_tax: string,
     total_tax: string,
+    percent = '19.00',
   ): string {
     return (
       `<cac:TaxTotal><cbc:TaxAmount currencyID="COP">${total_tax}</cbc:TaxAmount>` +
       `<cac:TaxSubtotal>` +
       `<cbc:TaxableAmount currencyID="COP">${taxable}</cbc:TaxableAmount>` +
       `<cbc:TaxAmount currencyID="COP">${subtotal_tax}</cbc:TaxAmount>` +
-      `<cac:TaxCategory><cbc:Percent>19.00</cbc:Percent>` +
+      `<cac:TaxCategory><cbc:Percent>${percent}</cbc:Percent>` +
       `<cac:TaxScheme><cbc:ID>01</cbc:ID><cbc:Name>IVA</cbc:Name></cac:TaxScheme>` +
       `</cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>`
     );
@@ -432,7 +433,12 @@ describe('DianTotalsValidator', () => {
             inclusive: '1190.00',
             payable: '1190.00',
           }) +
-          invoiceLine('1000.00', taxTotalOf('1000.00', '150.00', '150.00')),
+          // 15 % sobre 1000 = 150: la línea cuadra consigo misma (FAX07), así
+          // que el único desacuerdo es cabecera↔línea, el que FAU06 no mira.
+          invoiceLine(
+            '1000.00',
+            taxTotalOf('1000.00', '150.00', '150.00', '15.00'),
+          ),
       );
 
       expect(DianTotalsValidator.validate(xml).valid).toBe(true);
@@ -447,7 +453,12 @@ describe('DianTotalsValidator', () => {
             inclusive: '1150.00',
             payable: '1150.00',
           }) +
-          invoiceLine('1000.00', taxTotalOf('1000.00', '150.00', '150.00')),
+          // 15 % sobre 1000 = 150: la línea cuadra consigo misma (FAX07), así
+          // que el único desacuerdo es cabecera↔línea, el que FAU06 no mira.
+          invoiceLine(
+            '1000.00',
+            taxTotalOf('1000.00', '150.00', '150.00', '15.00'),
+          ),
       );
 
       const result = DianTotalsValidator.validate(xml);
@@ -685,6 +696,195 @@ describe('DianTotalsValidator', () => {
   // ---------------------------------------------------------------------------
   // Alcance (continúa)
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // FAX07 — cuota de cada subtotal de LÍNEA = base × tarifa
+  // ---------------------------------------------------------------------------
+
+  describe('FAX07 — TaxAmount = TaxableAmount × Percent ÷ 100 (±2.00) por línea', () => {
+    /** Subtotal de línea con esquema y tarifa arbitrarios. */
+    function lineTax(
+      taxable: string,
+      amount: string,
+      percent: string,
+      scheme = '04',
+      name = 'INC',
+    ): string {
+      return (
+        `<cac:TaxTotal><cbc:TaxAmount currencyID="COP">${amount}</cbc:TaxAmount>` +
+        `<cac:TaxSubtotal>` +
+        `<cbc:TaxableAmount currencyID="COP">${taxable}</cbc:TaxableAmount>` +
+        `<cbc:TaxAmount currencyID="COP">${amount}</cbc:TaxAmount>` +
+        `<cac:TaxCategory><cbc:Percent>${percent}</cbc:Percent>` +
+        `<cac:TaxScheme><cbc:ID>${scheme}</cbc:ID><cbc:Name>${name}</cbc:Name></cac:TaxScheme>` +
+        `</cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>`
+      );
+    }
+
+    function inc8Invoice(shipping_line: string): string {
+      // Plato 100.000 con INC 8 % = 8.000; envío 15.000.
+      return invoice(
+        lineTax('100000.00', '8000.00', '8.00') +
+          monetaryOf({
+            line_ext: '115000.00',
+            exclusive: '100000.00',
+            inclusive: '123000.00',
+            payable: '123000.00',
+          }) +
+          invoiceLine('100000.00', lineTax('100000.00', '8000.00', '8.00')) +
+          shipping_line,
+      );
+    }
+
+    it('EL DEFECTO: la línea de envío que hereda INC 8 % con cuota 0 sobre base 15.000', () => {
+      const xml = inc8Invoice(
+        invoiceLine('15000.00', lineTax('15000.00', '0.00', '8.00')),
+      );
+
+      const result = DianTotalsValidator.validate(xml);
+      const fax07 = result.violations.filter((v) => v.rule === 'FAX07');
+
+      expect(fax07).toHaveLength(1);
+      expect(fax07[0].kind).toBe('line-tax-amount-mismatch');
+      expect(fax07[0].details).toMatchObject({
+        line: 2,
+        scheme_id: '04',
+        percent: '8.00',
+        taxable_amount: '15000.00',
+        declared: '0.00',
+        expected: '1200.00',
+        difference: '-1200.00',
+      });
+      expect(result.valid).toBe(false);
+    });
+
+    it('la misma línea de envío SIN cac:TaxTotal pasa limpia', () => {
+      const xml = inc8Invoice(invoiceLine('15000.00'));
+      const result = DianTotalsValidator.validate(xml);
+      expect(result.violations).toEqual([]);
+    });
+
+    it('el exento (Percent 0.00, cuota 0) cuadra por construcción', () => {
+      const xml = invoice(
+        taxTotal('1000.00', '0.00', '0.00') +
+          monetary('1000.00', '1000.00', '1000.00') +
+          invoiceLine('1000.00', taxTotal('1000.00', '0.00', '0.00')),
+      );
+      expect(DianTotalsValidator.validate(xml).violations).toEqual([]);
+    });
+
+    it('un céntimo de truncado no es rechazo (holgura ±2.00)', () => {
+      // 19 % de 1.000,05 = 190,0095; el emisor trunca a 190,00.
+      const xml = invoice(
+        taxTotal('1000.05', '190.00') +
+          monetary('1000.05', '1000.05', '1190.05') +
+          invoiceLine('1000.05', taxTotal('1000.05', '190.00')),
+      );
+      expect(DianTotalsValidator.validate(xml).violations).toEqual([]);
+    });
+
+    /** Factura de UNA línea con IVA 19 % y la cuota que se quiera declarar. */
+    function iva19SingleLine(taxable: string, amount: string): string {
+      return invoice(
+        taxTotal(taxable, amount) +
+          monetary(taxable, taxable, taxable) +
+          invoiceLine(taxable, taxTotal(taxable, amount)),
+      );
+    }
+
+    function fax07Of(xml: string) {
+      return DianTotalsValidator.validate(xml).violations.filter(
+        (v) => v.rule === 'FAX07',
+      );
+    }
+
+    it('caso límite del medio peso: 19 % de 2.602,61 = 494,4959 con cuota 494,50 pasa (Anexo §5.2.1.1 ±2.00)', () => {
+      // A peso entero serían 495 contra 494: la comparación anterior rechazaba
+      // una cuota correctamente redondeada a centavos.
+      expect(fax07Of(iva19SingleLine('2602.61', '494.50'))).toEqual([]);
+    });
+
+    it('una diferencia de 3 pesos excede la holgura de ±2.00 y se rechaza', () => {
+      // 19 % de 10.000 = 1.900; declarar 1.903 difiere 3,00.
+      const fax07 = fax07Of(iva19SingleLine('10000.00', '1903.00'));
+      expect(fax07).toHaveLength(1);
+      expect(fax07[0].details).toMatchObject({
+        declared: '1903.00',
+        expected: '1900.00',
+        difference: '3.00',
+      });
+    });
+
+    it('2,00 exactos de diferencia están dentro de la holgura', () => {
+      expect(fax07Of(iva19SingleLine('10000.00', '1902.00'))).toEqual([]);
+      expect(fax07Of(iva19SingleLine('10000.00', '1898.00'))).toEqual([]);
+    });
+
+    it('el mensaje muestra la cuota esperada SIN redondeo y la diferencia real', () => {
+      // 19 % de 2.602,61 = 494,4959; declarar 497,00 difiere 2,5041.
+      const [violation] = fax07Of(iva19SingleLine('2602.61', '497.00'));
+      expect(violation.details).toMatchObject({
+        expected: '494.4959',
+        difference: '2.5041',
+      });
+      expect(violation.message).toContain('494.4959');
+      expect(violation.message).toContain('2.5041');
+    });
+
+    it('la herencia de tarifa con cuota 0 sigue rechazándose: 0 contra 480 (8 % de 6.000)', () => {
+      const xml = inc8Invoice(
+        invoiceLine(
+          '6000.00',
+          `<cac:TaxTotal><cbc:TaxAmount currencyID="COP">0.00</cbc:TaxAmount>` +
+            `<cac:TaxSubtotal><cbc:TaxableAmount currencyID="COP">6000.00</cbc:TaxableAmount>` +
+            `<cbc:TaxAmount currencyID="COP">0.00</cbc:TaxAmount>` +
+            `<cac:TaxCategory><cbc:Percent>8.00</cbc:Percent>` +
+            `<cac:TaxScheme><cbc:ID>04</cbc:ID><cbc:Name>INC</cbc:Name></cac:TaxScheme>` +
+            `</cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>`,
+        ),
+      );
+      const fax07 = fax07Of(xml);
+      expect(fax07).toHaveLength(1);
+      expect(fax07[0].details).toMatchObject({
+        declared: '0.00',
+        expected: '480.00',
+        difference: '-480.00',
+      });
+    });
+
+    it('no juzga los subtotales de CABECERA (eso es FAS07, otra regla)', () => {
+      const xml = invoice(
+        lineTax('15000.00', '0.00', '8.00') +
+          monetary('15000.00', '0.00', '15000.00') +
+          invoiceLine('15000.00'),
+      );
+      expect(
+        DianTotalsValidator.validate(xml).violations.filter(
+          (v) => v.rule === 'FAX07',
+        ),
+      ).toEqual([]);
+    });
+
+    it('en nota crédito cita CAX07', () => {
+      const xml =
+        `<?xml version="1.0" encoding="UTF-8"?><CreditNote ${CN_NS}>` +
+        lineTax('15000.00', '0.00', '8.00') +
+        `<cac:LegalMonetaryTotal>` +
+        `<cbc:LineExtensionAmount currencyID="COP">15000.00</cbc:LineExtensionAmount>` +
+        `<cbc:TaxExclusiveAmount currencyID="COP">15000.00</cbc:TaxExclusiveAmount>` +
+        `<cbc:TaxInclusiveAmount currencyID="COP">15000.00</cbc:TaxInclusiveAmount>` +
+        `<cbc:PayableAmount currencyID="COP">15000.00</cbc:PayableAmount>` +
+        `</cac:LegalMonetaryTotal>` +
+        `<cac:CreditNoteLine><cbc:ID>1</cbc:ID>` +
+        `<cbc:LineExtensionAmount currencyID="COP">15000.00</cbc:LineExtensionAmount>` +
+        lineTax('15000.00', '0.00', '8.00') +
+        `</cac:CreditNoteLine></CreditNote>`;
+
+      const rules = DianTotalsValidator.validate(xml).violations.map(
+        (v) => v.rule,
+      );
+      expect(rules).toContain('CAX07');
+    });
+  });
 });
 
 /**

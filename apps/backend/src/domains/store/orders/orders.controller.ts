@@ -300,38 +300,8 @@ export class OrdersController {
   @Get(':id')
   @Permissions('store:orders:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.ordersService.findOne(id);
-      return this.responseService.success(
-        result,
-        'Orden obtenida exitosamente',
-      );
-    } catch (error) {
-      // CP-POS-SVC-PERF-001 / Bugfix — never leak Prisma stack traces or
-      // raw `Unknown field …` errors into the response body. VendixHttpException
-      // errors carry a curated devMessage; everything else is an internal
-      // server error and must surface as a generic 500 with a stable
-      // error_code the frontend can switch on.
-      if (error instanceof VendixHttpException) {
-        return this.responseService.error(
-          (error as any).devMessage || error.message,
-          (error as any).userMessage || error.message,
-          error.getStatus ? error.getStatus() : 400,
-          (error as any).errorCode,
-        );
-      }
-      // Unexpected — log the full trace server-side, return generic.
-      this.logger.error(
-        `[findOne:${id}] Unexpected error`,
-        error?.stack || String(error),
-      );
-      return this.responseService.error(
-        'No se pudo cargar la orden. Intenta de nuevo.',
-        'INTERNAL_ORDER_LOAD_001',
-        500,
-        'INTERNAL_ORDER_LOAD_001',
-      );
-    }
+    const result = await this.ordersService.findOne(id);
+    return this.responseService.success(result, 'Orden obtenida exitosamente');
   }
 
   @Get(':id/timeline')
@@ -406,6 +376,8 @@ export class OrdersController {
         'Orden actualizada exitosamente',
       );
     } catch (error) {
+      // Dejar pasar el código tipado (y el HTTP 400 real) al filtro global.
+      if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al actualizar la orden',
         error.response?.message || error.message,
@@ -511,15 +483,7 @@ export class OrdersController {
   @Delete(':id')
   @Permissions('store:orders:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
-    try {
-      await this.ordersService.remove(id);
-      return this.responseService.deleted('Orden eliminada exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar la orden',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    await this.ordersService.remove(id);
+    return this.responseService.deleted('Orden eliminada exitosamente');
   }
 }

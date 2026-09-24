@@ -23,6 +23,7 @@ import {
   ApplyDiscountRequest,
   CartValidationError,
   PendingBooking,
+  ShippingContext,
 } from '../models/cart.model';
 
 // Re-export types for component usage
@@ -223,8 +224,24 @@ export class PosCartService {
         return null;
       }
 
+      let loadedCustomer = parsed.state.customer;
+      if (loadedCustomer) {
+        const full = [loadedCustomer.first_name, loadedCustomer.last_name].filter(Boolean).join(' ').trim();
+        loadedCustomer = {
+          ...loadedCustomer,
+          name:
+            loadedCustomer.name?.trim() ||
+            full ||
+            loadedCustomer.legal_name?.trim() ||
+            loadedCustomer.business_name?.trim() ||
+            loadedCustomer.email?.trim() ||
+            'Cliente',
+        };
+      }
+
       return {
         ...parsed.state,
+        customer: loadedCustomer,
         createdAt: parsed.state.createdAt ? new Date(parsed.state.createdAt) : new Date(),
         updatedAt: parsed.state.updatedAt ? new Date(parsed.state.updatedAt) : new Date(),
       };
@@ -436,6 +453,14 @@ export class PosCartService {
       return of(state);
     }
 
+    // Matriz de permisos POS→price-tiers (paso 1 plan POS-stitch; backend:
+    // price-tiers.controller.ts @Controller('store/price-tiers'), vía
+    // PriceTierCacheService → PriceTiersService). El POS solo lee:
+    // - getActiveTiers → GET /store/price-tiers → 'store:price-tiers:read'
+    // - getProductOverrides → GET /store/price-tiers/products/:id/overrides
+    //   → 'store:price-tiers:read'
+    // (Mismos 2 endpoints consumen pos-cart.component.ts y
+    // pos-cart-modal.component.ts vía el mismo caché.)
     return forkJoin({
       tiers: this.priceTierCache.getActiveTiers(),
       overrides: this.priceTierCache.getProductOverrides(productId),
@@ -535,14 +560,7 @@ export class PosCartService {
   clearCart(): Observable<CartState> {
     const adoptedId = this.cartState().linkedOrderId;
     const adoptedNumber = this.cartState().linkedOrderNumber;
-
-    const reset$ = of(null).pipe(
-      map(() => this.getInitialState()),
-      tap((newState) => {
-        this.cartState.set(newState);
-        this.clearStorage();
-      }),
-    );
+    const reset$ = this.resetCartState();
 
     if (adoptedId == null) {
       return reset$;
@@ -554,15 +572,48 @@ export class PosCartService {
   }
 
   /**
+   * A successful charge has already finalized the adopted order. Clear only
+   * local cart state: `clearCart()` is the abandonment action and would call
+   * `flow/cancel` against the newly paid order.
+   */
+  clearCartAfterCompletedSale(): Observable<CartState> {
+    return this.resetCartState();
+  }
+
+  private resetCartState(): Observable<CartState> {
+    return of(null).pipe(
+      map(() => this.getInitialState()),
+      tap((newState) => {
+        this.cartState.set(newState);
+        this.clearStorage();
+      }),
+    );
+  }
+
+  /**
    * Set customer for cart
    */
   setCustomer(customer: PosCustomer | null): Observable<CartState> {
     return of(customer).pipe(
       map((cust) => {
+        let normalizedCust = cust;
+        if (cust) {
+          const full = [cust.first_name, cust.last_name].filter(Boolean).join(' ').trim();
+          normalizedCust = {
+            ...cust,
+            name:
+              cust.name?.trim() ||
+              full ||
+              (cust as any).legal_name?.trim() ||
+              (cust as any).business_name?.trim() ||
+              cust.email?.trim() ||
+              'Cliente',
+          };
+        }
         const currentState = this.cartState();
         return {
           ...currentState,
-          customer: cust,
+          customer: normalizedCust,
           updatedAt: new Date(),
         };
       }),
@@ -633,6 +684,8 @@ export class PosCartService {
    *  - Restore `appliedDiscounts` from `order.order_promotions`.
    *  - Restore `appliedCoupon` from `order.coupons` / `order.coupon_code`.
    *  - Restore `customer` from `order.users` (NOT from cartState default).
+   *  - F-FLETE: restore `shippingContext` (delivery_type + ids + costo). Ver
+   *    {@link buildShippingContextFromOrder}.
    */
   loadFromOrder(order: any): Observable<CartState> {
     if (!order?.order_items || order.order_items.length === 0) {
@@ -656,6 +709,9 @@ export class PosCartService {
         appliedCoupon: this.mapOrderCouponsToAppliedCoupon(order),
         customer: this.mapOrderUsersToCustomer(order),
         summary: this.calculateSummary([], this.mapOrderPromotionsToDiscounts(order)),
+        // F-FLETE — la rama vacía también repone el envío: editar una orden
+        // sin líneas no puede ser la puerta trasera que borra el flete.
+        shippingContext: this.buildShippingContextFromOrder(order),
         updatedAt: new Date(),
       };
       this.cartState.set(built);
@@ -886,6 +942,74 @@ export class PosCartService {
       // explicitly clears it; the editor uses this for re-load + save.
       linkedOrderId: order?.id ?? null,
       linkedOrderNumber: order?.order_number ?? null,
+      // F-FLETE — snapshot de fulfillment. Sin él el carril vivo de edición
+      // no tiene contra qué comparar y rearma el envío desde cero.
+      shippingContext: this.buildShippingContextFromOrder(order),
+    };
+  }
+
+  /**
+   * F-FLETE — snapshot de fulfillment de la orden que se está editando.
+   *
+   * `GET /store/orders/:id` ya trae los seis campos; el POS los descartaba y
+   * el shell terminaba mandando `delivery_type: 'pickup'` con el envío
+   * ausente. El editor del backend lee `shipping_cost` ausente como CERO
+   * (`orders.service.ts:1931` → `:3071`) y ese cero ENTRA al `grand_total`
+   * (`:2292`): reabrir un borrador con flete le borraba el flete y el cajero
+   * leía "Orden actualizada correctamente".
+   *
+   * Normalización:
+   *  - Ids: sólo enteros positivos; cualquier otra cosa es `null`. El DTO los
+   *    valida con `@IsInt() @Min(1)`, así que un 0 o un `NaN` sería un 400.
+   *  - Costo: Prisma serializa `Decimal` como STRING (`"12500.50"`). Se
+   *    convierte a número conservando los centavos. `null`/`''` se quedan en
+   *    `null` — ausencia NO es cero: un `shipping_cost: 0` explícito borraría
+   *    el flete, mientras que la clave ausente significa "sin cambio".
+   */
+  private buildShippingContextFromOrder(order: any): ShippingContext {
+    const toId = (value: any): number | null => {
+      if (value == null || value === '') return null;
+      const n = Number(value);
+      return Number.isFinite(n) && n >= 1 ? Math.trunc(n) : null;
+    };
+    const toMoney = (value: any): number | null => {
+      if (value == null || value === '') return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const addressId = toId(order?.shipping_address_id);
+    // Never fall back to the customer's primary address: it may not be the
+    // destination persisted on this order.
+    const address = order?.addresses_orders_shipping_address_idToaddresses
+      ?? order?.users?.addresses?.find((a: { id: number }) => Number(a.id) === addressId)
+      ?? null;
+    const method = order?.shipping_method;
+    return {
+      orderId: toId(order?.id),
+      customerId: toId(order?.customer_id ?? order?.users?.id),
+      shippingAddress: address ? {
+        address_line1: address.address_line1 ?? null,
+        address_line2: address.address_line2 ?? null,
+        city: address.city ?? null,
+        state_province: address.state_province ?? null,
+        country_code: address.country_code ?? null,
+        postal_code: address.postal_code ?? null,
+        phone_number: address.phone_number ?? order?.users?.phone ?? null,
+        latitude: toMoney(address.latitude),
+        longitude: toMoney(address.longitude),
+        municipality_code: address.municipality_code ?? null,
+      } : null,
+      shippingMethod: method ? {
+        id: Number(method.id), name: method.name, type: method.type,
+        is_active: method.is_active !== false,
+      } : null,
+      deliveryType: order?.delivery_type ?? null,
+      shippingAddressId: toId(order?.shipping_address_id),
+      billingAddressId: toId(order?.billing_address_id),
+      shippingMethodId: toId(order?.shipping_method_id),
+      shippingRateId: toId(order?.shipping_rate_id),
+      shippingCost: toMoney(order?.shipping_cost),
     };
   }
 
@@ -974,9 +1098,16 @@ export class PosCartService {
     if (!u || (!u.id && !u.user_id)) return null;
     const id = Number(u.id ?? u.user_id ?? 0) || 0;
     if (!id) return null;
+    const full = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
     return {
       id,
-      name: `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() || u.name || '',
+      name:
+        u.name?.trim() ||
+        full ||
+        u.legal_name?.trim() ||
+        u.business_name?.trim() ||
+        u.email ||
+        'Cliente',
       first_name: u.first_name ?? '',
       last_name: u.last_name ?? '',
       email: u.email ?? '',
@@ -2565,7 +2696,12 @@ export class PosCartService {
       taxAmount: this.calculateItemTaxWithBase(item.product, item.unitPrice, taxMultiplier),
       finalPrice: finalUnitPrice,
       totalPrice: newTotalPrice,
-      notes: request.notes || item.notes,
+      // PSVERSION0001 paso 5 — `request.notes || item.notes` hacía imposible
+      // BORRAR una nota (undefined/'' caían al valor viejo): el "Quitar nota"
+      // de QUI-787 mostraba éxito pero la nota sobrevivía. La presencia de la
+      // clave distingue intención: ambos editores de nota la pasan siempre,
+      // los cambios solo-cantidad la omiten y preservan.
+      notes: 'notes' in request ? request.notes : item.notes,
     };
 
     return {

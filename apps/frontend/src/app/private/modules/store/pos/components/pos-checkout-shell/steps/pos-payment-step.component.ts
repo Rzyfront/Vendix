@@ -13,7 +13,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Subscription, firstValueFrom } from 'rxjs';
+import { Observable, Subscription, firstValueFrom } from 'rxjs';
 
 import {
   SpinnerComponent,
@@ -30,6 +30,7 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 import {
   PosPaymentService,
   PaymentMethod,
+  PosSalePaymentResponse,
 } from '../../../services/pos-payment.service';
 import { PaymentMethodType } from '../../../../../../../shared/models/payment-method.model';
 import { FulfillmentType } from '../../pos-fulfillment-selector.component';
@@ -46,6 +47,12 @@ import { extractApiError } from '../../../../../../../shared/utils/http-error.ut
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import type { BusinessHours } from '../../../../../../../core/models/store-settings.interface';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
+import { ERROR_MESSAGES } from '../../../../../../../core/utils/error-messages';
+import { PosSerialSelectionModalComponent } from '../../pos-serial-selection-modal/pos-serial-selection-modal.component';
+import { SerialNumbersService } from '../../../../serial-numbers/services/serial-numbers.service';
+import { PosCashRegisterService } from '../../../services/pos-cash-register.service';
+import { CartItem } from '../../../models/cart.model';
+import { MultiSelectorOption } from '../../../../../../../shared/components/multi-selector/multi-selector.component';
 
 /**
  * Fase 5·B1 — `app-pos-payment-step`.
@@ -72,6 +79,7 @@ import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
     SpinnerComponent,
     ButtonComponent,
     PaymentCollectorComponent,
+    PosSerialSelectionModalComponent,
   ],
   templateUrl: './pos-payment-step.component.html',
   styleUrl: './pos-payment-step.component.scss',
@@ -108,6 +116,10 @@ export class PosPaymentStepComponent implements OnInit {
    * `is_takeaway` por línea. Default false = comportamiento actual.
    */
   readonly takeawayOrder = input<boolean>(false);
+  /**
+   * Tipo de entrega resuelto por el shell ('dine_in', 'direct_delivery', 'home_delivery').
+   */
+  readonly deliveryType = input<string | null>(null);
   /**
    * CP-POS-MODAL-SCOPE-001 / Phase F.11 — when the shell is paying an
    * EXISTING draft order (edit → Actualizar → Cobrar path), the charge
@@ -159,6 +171,7 @@ export class PosPaymentStepComponent implements OnInit {
    * charge; null → falls back to the cart total.
    */
   readonly amountOverride = input<number | null>(null);
+  readonly paymentResetKey = input<number>(0);
 
   // ── Outputs (same contract the legacy interface emitted) ─────────────────
   readonly paymentCompleted = output<any>();
@@ -179,6 +192,125 @@ export class PosPaymentStepComponent implements OnInit {
   protected readonly collector = viewChild(PaymentCollectorComponent);
 
   private readonly paymentService = inject(PosPaymentService);
+  private readonly serialNumbersService = inject(SerialNumbersService);
+  private readonly cashRegisterService = inject(PosCashRegisterService);
+  readonly serialModalOpen = signal(false);
+  readonly serialModalProductName = signal('');
+  readonly serialModalQuantity = signal(1);
+  readonly serialModalOptions = signal<MultiSelectorOption[]>([]);
+  readonly serialModalLoading = signal(false);
+  private serialQueue: CartItem[] = [];
+  private pendingSerialSubmit: PaymentSubmit | null = null;
+  private readonly serialChoices = new Map<string, { productId: string; variantId: number | null; quantity: number; serialIds: number[]; serialNumbers: string[] }>();
+
+  private serialQuantity(item: CartItem): number {
+    // Mirrors PosPaymentService.mapCartItemForPos.stock_units_consumed and the
+    // backend OrderStockCommitService quantity, including pack/stock-unit tiers.
+    const factor = Number(item.units_per_package) > 1
+      ? Number(item.units_per_package)
+      : Number(item.stock_units_per_sale_unit) > 1
+        ? Number(item.stock_units_per_sale_unit)
+        : 1;
+    return item.quantity * factor;
+  }
+
+  private needsImmediateSerialCapture(submit: PaymentSubmit): boolean {
+    return this.autoExecute() && this.checkoutIntent() === 'pickup' &&
+      this.fulfillment() === 'entrega' && this.tableId() == null &&
+      this.sessionId() == null && submit.mode === 'contado';
+  }
+
+  private collectSerialsBeforeCharge(submit: PaymentSubmit): boolean {
+    if (!this.needsImmediateSerialCapture(submit)) return false;
+    if (this.pendingSerialSubmit) return true;
+    const items = (this.cartState()?.items ?? []).filter(
+      (item) => item.product.requires_serial_numbers === true,
+    );
+    const missing = items.filter((item) => {
+      const choice = this.serialChoices.get(item.id);
+      return !choice || choice.productId !== String(item.product.id) ||
+        choice.variantId !== (item.variant_id ?? null) ||
+        choice.quantity !== this.serialQuantity(item) ||
+        choice.serialIds.length + choice.serialNumbers.length !== this.serialQuantity(item);
+    });
+    if (!missing.length) return false;
+    this.pendingSerialSubmit = submit;
+    this.serialQueue = missing;
+    this.openNextSerialModal();
+    return true;
+  }
+
+  private openNextSerialModal(): void {
+    const item = this.serialQueue[0];
+    if (!item) {
+      const submit = this.pendingSerialSubmit;
+      this.pendingSerialSubmit = null;
+      this.serialModalOpen.set(false);
+      if (submit) this.onCollectorSubmit(submit);
+      return;
+    }
+    this.serialModalProductName.set(item.product.name);
+    this.serialModalQuantity.set(this.serialQuantity(item));
+    this.serialModalOptions.set([]);
+    this.serialModalOpen.set(true);
+    const session = this.cashRegisterService.getActiveSessionSnapshot();
+    const locationId = session?.register?.location_id ?? session?.register?.location?.id;
+    if (locationId == null) return; // Free-text capture remains available.
+    this.serialModalLoading.set(true);
+    this.serialNumbersService.listAvailable({
+      product_id: Number(item.product.id),
+      product_variant_id: item.variant_id,
+      location_id: locationId,
+    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (rows) => {
+        this.serialModalOptions.set(rows.map((row) => ({ value: row.id, label: row.serial_number })));
+        this.serialModalLoading.set(false);
+      },
+      error: () => this.serialModalLoading.set(false),
+    });
+  }
+
+  onSerialConfirmed(selection: { serialIds: number[]; freeTextSerials: string[] }): void {
+    const item = this.serialQueue[0];
+    if (!item) return;
+    const serialIds = selection.serialIds;
+    const serialNumbers = selection.freeTextSerials.map((serial) => serial.trim()).filter(Boolean);
+    const quantity = this.serialQuantity(item);
+    if (serialIds.length + serialNumbers.length !== quantity ||
+        new Set(serialIds).size !== serialIds.length ||
+        new Set(serialNumbers).size !== serialNumbers.length) {
+      this.toastService.error(`Selecciona exactamente ${quantity} serial(es) distintos para ${item.product.name}.`);
+      return;
+    }
+    this.serialChoices.set(item.id, {
+      productId: String(item.product.id), variantId: item.variant_id ?? null,
+      quantity, serialIds, serialNumbers,
+    });
+    this.serialQueue.shift();
+    this.openNextSerialModal();
+  }
+
+  onSerialCancelled(): void {
+    this.pendingSerialSubmit = null;
+    this.serialQueue = [];
+    this.serialModalOpen.set(false);
+  }
+
+  private cartWithConfirmedSerials(): CartState {
+    const cart = this.cartState()!;
+    return {
+      ...cart,
+      items: cart.items.map((item) => {
+        const choice = this.serialChoices.get(item.id);
+        return choice && item.product.requires_serial_numbers &&
+          choice.productId === String(item.product.id) &&
+          choice.variantId === (item.variant_id ?? null) &&
+          choice.quantity === this.serialQuantity(item)
+          ? { ...item, serial_ids: choice.serialIds, serial_numbers: choice.serialNumbers }
+          : item;
+      }),
+    };
+  }
   // CP-POS-MODAL-SCOPE-001 / Phase F.11 — ordersService owns the flow/pay
   // endpoint that charges an EXISTING draft order. The payment-step is
   // shared between create-payment (processSaleWithPayment) and edit-then-
@@ -352,6 +484,21 @@ export class PosPaymentStepComponent implements OnInit {
    */
   private readonly advancePending = signal<boolean>(false);
   private advancePendingTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  goToSubStep(index: number): void {
+    this.collector()?.goToSubStep(index);
+  }
+
+  attemptPrevSubStep(): boolean {
+    const c = this.collector();
+    if (!c) return false;
+    const cur = c.subStep();
+    if (cur > 0) {
+      c.goToSubStep(cur - 1);
+      return true;
+    }
+    return false;
+  }
 
   /**
    * Footer "Siguiente" driver for the stepped Cobro sub-wizard (pickup flows,
@@ -564,6 +711,18 @@ export class PosPaymentStepComponent implements OnInit {
   //
   onCollectorSubmit(submit: PaymentSubmit): void {
     if (!this.cartState()) return;
+    if (this.autoExecute() && this.checkoutIntent() === 'pickup' &&
+        this.fulfillment() === 'entrega' && this.tableId() == null && this.sessionId() == null &&
+        this.cartState()!.items.some((item) => item.product.requires_serial_numbers) &&
+        (submit.mode === 'credito' || submit.method?.type === 'wompi' ||
+          submit.method?.type === 'wallet' ||
+          (submit.method?.original as any)?.system_payment_method?.processing_mode === 'ON_DELIVERY')) {
+      this.toastService.error(
+        'Los productos con serial para llevar requieren pago inmediato en caja. Elige efectivo, tarjeta o transferencia; para cobrar después usa un envío con remisión.',
+      );
+      return;
+    }
+    if (this.collectSerialsBeforeCharge(submit)) return;
 
     // T10.B1 — defensa de profundidad (NO confiar sólo en `[allowTip]="..."`):
     // la propina vive DENTRO de `grand_total` y FUERA de `subtotal`/`tax_amount`,
@@ -688,7 +847,10 @@ export class PosPaymentStepComponent implements OnInit {
     // atomically promotes the draft and charges it), NOT processSaleWithPayment
     // (which would create a SECOND order).
     const editingId = this.editingOrderId();
-    const obs = editingId
+    const selectedCart = this.cartWithConfirmedSerials();
+    const immediateSerials = this.needsImmediateSerialCapture(submit) &&
+      selectedCart.items.some((item) => item.product.requires_serial_numbers);
+    const obs: Observable<PosSalePaymentResponse> = editingId && !immediateSerials
       ? this.ordersService.flowPayOrder(String(editingId), {
           store_payment_method_id: method.id,
           payment_type: 'direct',
@@ -696,13 +858,17 @@ export class PosPaymentStepComponent implements OnInit {
           amount_received: submit.amountReceived,
         } as any)
       : this.paymentService.processSaleWithPayment(
-          this.cartState()!,
+          editingId && immediateSerials
+            ? { ...selectedCart, linkedOrderId: editingId }
+            : selectedCart,
           payment_request,
           'current_user',
           this.sessionId() ?? null,
           this.tableId() ?? null,
           // QUI-653 — 'Para llevar' de la orden hacia `order_items.is_takeaway`.
           this.takeawayOrder(),
+          immediateSerials,
+          this.deliveryType(),
         );
 
     obs.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
@@ -723,6 +889,17 @@ export class PosPaymentStepComponent implements OnInit {
             }
 
             this.processing.set(false);
+            if (
+              !editingId &&
+              response.order?.payment_status === 'succeeded' &&
+              response.previous_table_status === 'cleaning'
+            ) {
+              this.toastService.warning(
+                ERROR_MESSAGES['TABLE_REOPENED_FROM_CLEANING_001'],
+                undefined,
+                5000,
+              );
+            }
             this.paymentCompleted.emit({
               success: true,
               order: response.order,

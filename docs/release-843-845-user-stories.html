@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Releases #843 + #845 — Historias de usuario y flujos</title>
+</head>
+<body>
+<style>
+  :root {
+    --ground: #EEF1F6;
+    --surface: #FFFFFF;
+    --surface-2: #F7F9FC;
+    --ink: #161922;
+    --ink-2: #4C5361;
+    --line: #DCE2EC;
+    --accent: #3A3A7A;
+    --accent-2: #ECECF7;
+    --accent-ink: #2A2A62;
+    --active-t: #15803D; --active-b: #DCFCE7; --active-l: #86EFAC;
+    --pend-t: #B45309;   --pend-b: #FEF3C7;   --pend-l: #FCD34D;
+    --deny-t: #B91C1C;   --deny-b: #FEE2E2;   --deny-l: #FCA5A5;
+    --froz-t: #1D4ED8;   --froz-b: #DBEAFE;   --froz-l: #93C5FD;
+    --exp-t: #57534E;    --exp-b: #ECEBE9;    --exp-l: #D6D3D1;
+    --mono: "SF Mono", ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --r: 6px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans);
+         font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  header.masthead { padding: 64px 0 40px; border-bottom: 1px solid var(--line); }
+  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .14em;
+             text-transform: uppercase; color: var(--accent); margin: 0 0 18px;
+             display: flex; align-items: center; gap: 10px; }
+  .eyebrow::before { content: ""; width: 26px; height: 2px; background: var(--accent); display: inline-block; }
+  h1 { font-size: clamp(2.1rem, 5.2vw, 3.3rem); line-height: 1.04; letter-spacing: -.02em;
+       margin: 0 0 18px; text-wrap: balance; font-weight: 700; }
+  h1 span { color: var(--accent); }
+  .lede { max-width: 60ch; color: var(--ink-2); font-size: 1.05rem; margin: 0 0 26px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 10px; }
+  .stat { display: flex; flex-direction: column; gap: 2px; padding: 10px 16px 11px;
+          background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); min-width: 96px; }
+  .stat b { font-size: 1.5rem; line-height: 1; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+  .stat small { font-family: var(--mono); font-size: .62rem; letter-spacing: .08em;
+                text-transform: uppercase; color: var(--ink-2); }
+  nav.toc { position: sticky; top: 0; z-index: 20;
+            background: color-mix(in srgb, var(--ground) 88%, transparent);
+            backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  nav.toc .wrap { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 12px; padding-bottom: 12px; }
+  nav.toc a { font-family: var(--mono); font-size: .72rem; text-decoration: none; color: var(--ink-2);
+              padding: 6px 11px; border: 1px solid var(--line); border-radius: 100px; background: var(--surface);
+              transition: color .15s, border-color .15s, background .15s; white-space: nowrap; }
+  nav.toc a:hover, nav.toc a:focus-visible, nav.toc a.active {
+              color: var(--accent-ink); border-color: var(--accent); background: var(--accent-2); }
+  .legend { margin: 40px 0 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 22px 34px; padding: 24px 26px; background: var(--surface); border: 1px solid var(--line);
+            border-radius: var(--r); }
+  .legend h3 { font-family: var(--mono); font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+               color: var(--ink-2); margin: 0 0 14px; font-weight: 600; }
+  .legend .row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; font-size: .85rem; }
+  .swatch { width: 26px; height: 18px; border-radius: 4px; flex: 0 0 auto; border: 1px solid rgba(0,0,0,.08); }
+  section.epic { padding: 52px 0 8px; scroll-margin-top: 64px; }
+  .epic-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 6px; }
+  .epic-num { font-family: var(--mono); font-size: .95rem; font-weight: 600; color: var(--accent);
+              padding: 3px 9px; background: var(--accent-2); border-radius: 4px; letter-spacing: .04em; }
+  .epic-head h2 { font-size: 1.55rem; letter-spacing: -.015em; margin: 0; font-weight: 700; text-wrap: balance; }
+  .epic-purpose { color: var(--ink-2); margin: 0 0 26px; max-width: 68ch; font-size: .96rem; }
+  .story { background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+           padding: 22px 24px 26px; margin-bottom: 18px; }
+  .story-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 14px; margin-bottom: 4px; }
+  .hu-id { font-family: var(--mono); font-size: .74rem; font-weight: 600; color: var(--surface);
+           background: var(--accent); padding: 3px 8px; border-radius: 4px; letter-spacing: .02em; }
+  .story-top h4 { font-size: 1.06rem; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  .as-a { color: var(--ink-2); font-size: .9rem; margin: 8px 0 20px; max-width: 74ch; }
+  .as-a em { color: var(--accent-ink); font-style: normal; font-weight: 600; }
+  .track { overflow-x: auto; padding: 4px 2px 12px; margin: 0 -4px; }
+  .flow { display: flex; align-items: center; gap: 0; flex-wrap: nowrap; min-width: min-content; }
+  .node { flex: 0 0 auto; width: 168px; min-height: 62px; display: flex; flex-direction: column;
+          justify-content: center; gap: 4px; padding: 11px 13px; border-radius: var(--r);
+          font-size: .83rem; line-height: 1.35; background: var(--surface-2); border: 1px solid var(--line); }
+  .node .tag { font-family: var(--mono); font-size: .58rem; letter-spacing: .09em;
+               text-transform: uppercase; color: var(--ink-2); }
+  .node code, .pill code { font-family: var(--mono); font-size: .74rem; }
+  .node.action { border-color: var(--ink); border-width: 1.5px; background: var(--surface); }
+  .node.action .tag { color: var(--ink); }
+  .node.system { background: var(--accent-2); border-color: transparent; }
+  .node.system .tag { color: var(--accent); }
+  .node.system code { color: var(--accent-ink); }
+  .node.decision { border-style: dashed; border-color: var(--ink-2); background: var(--surface); }
+  .node.decision .tag { color: var(--ink-2); }
+  .node.decision .tag::before { content: "\25C7 "; }
+  .connector { flex: 0 0 auto; width: 40px; align-self: center; position: relative;
+               display: flex; align-items: center; justify-content: center;
+               color: var(--accent); font-size: 1.15rem; }
+  .connector::before { content: ""; position: absolute; left: 2px; right: 2px; top: 50%;
+                       height: 2px; transform: translateY(-50%); background: var(--line); border-radius: 2px; }
+  .connector::after { content: ""; position: absolute; top: 50%; left: 0; width: 14px; height: 2px;
+                      transform: translateY(-50%); border-radius: 2px;
+                      background: linear-gradient(90deg, transparent, var(--accent)); opacity: 0; }
+  .connector .chev { position: relative; z-index: 1; }
+  .branch { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  .branch-item { display: flex; align-items: center; gap: 8px; }
+  .cond { font-family: var(--mono); font-size: .6rem; letter-spacing: .04em; color: var(--ink-2);
+          white-space: nowrap; align-self: center; }
+  .pill { flex: 0 0 auto; width: 168px; min-height: 62px; display: flex; flex-direction: column;
+          justify-content: center; gap: 4px; padding: 11px 13px; border-radius: var(--r);
+          font-size: .83rem; line-height: 1.3; border: 1px solid; }
+  .pill .tag { font-family: var(--mono); font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; }
+  .s-active { color: var(--active-t); background: var(--active-b); border-color: var(--active-l); }
+  .s-pend   { color: var(--pend-t);   background: var(--pend-b);   border-color: var(--pend-l); }
+  .s-deny   { color: var(--deny-t);   background: var(--deny-b);   border-color: var(--deny-l); }
+  .s-froz   { color: var(--froz-t);   background: var(--froz-b);   border-color: var(--froz-l); }
+  .s-exp    { color: var(--exp-t);    background: var(--exp-b);    border-color: var(--exp-l); }
+  .evidence { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 16px; }
+  .chip { font-family: var(--mono); font-size: .66rem; letter-spacing: .03em; padding: 4px 9px;
+          border-radius: 100px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); }
+  .chip.ok  { color: var(--active-t); background: var(--active-b); border-color: var(--active-l); }
+  .chip.acc { color: var(--accent-ink); background: var(--accent-2); border-color: transparent; }
+  footer { margin-top: 56px; padding: 34px 0 72px; border-top: 1px solid var(--line);
+           color: var(--ink-2); font-size: .88rem; }
+  footer .status { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .qa-steps { margin: 16px 0 0; padding: 14px 16px 12px; background: var(--surface-2);
+             border: 1px solid var(--line); border-radius: var(--r); }
+  .qa-steps h5 { margin: 0 0 8px; font-family: var(--mono); font-size: .68rem; letter-spacing: .09em;
+                text-transform: uppercase; color: var(--accent-ink); font-weight: 600; }
+  .qa-steps ol { margin: 0 0 4px; padding-left: 20px; font-size: .85rem; color: var(--ink); }
+  .qa-steps ol li { margin-bottom: 5px; }
+  .qa-steps ol code, .qa-exp code { font-family: var(--mono); font-size: .76rem; }
+  .qa-exp { margin: 10px 0 2px; padding: 10px 14px; border-radius: var(--r); font-size: .85rem;
+           color: var(--active-t); background: var(--active-b); border: 1px solid var(--active-l); }
+  .qa-exp b { display: block; font-family: var(--mono); font-size: .66rem; letter-spacing: .09em;
+             text-transform: uppercase; margin-bottom: 4px; }
+  a:focus-visible, .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (max-width: 760px) {
+    .flow { flex-direction: column; align-items: stretch; }
+    .node, .pill { width: 100%; }
+    .connector { width: 100%; height: 28px; transform: rotate(90deg); }
+    .branch { width: 100%; }
+    .branch-item { flex-direction: column; align-items: stretch; }
+    .cond { align-self: flex-start; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .story { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
+    .story.in { opacity: 1; transform: none; }
+    .story .flow > * { opacity: 0; transform: translateY(8px);
+                       transition: opacity .45s ease, transform .45s ease;
+                       transition-delay: calc(var(--i, 0) * 70ms); }
+    .story.in .flow > * { opacity: 1; transform: none; }
+    .story.in .connector::after { animation: flow-comet 1.8s linear infinite; }
+    @keyframes flow-comet {
+      0%   { left: 0;    width: 8px;  opacity: 0; }
+      15%  { opacity: 1; }
+      85%  { opacity: 1; }
+      100% { left: 100%; width: 16px; opacity: 0; }
+    }
+    .story.in .pill.s-active, .story.in .pill.s-pend { animation: pill-pulse 2.6s ease-in-out infinite; }
+    @keyframes pill-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(21,128,61,0); }
+      50%      { box-shadow: 0 0 0 4px rgba(21,128,61,.10); }
+    }
+  }
+</style>
+
+<nav class="toc" aria-label="Índice de épicas">
+  <div class="wrap">
+    <a href="#ep1">01 · Órdenes POS</a>
+    <a href="#ep2">02 · Envío con alias</a>
+    <a href="#ep3">03 · Mesas dine_in</a>
+    <a href="#ep4">04 · Cocina / KDS</a>
+    <a href="#ep5">05 · Cancelaciones</a>
+    <a href="#ep6">06 · Reembolsos</a>
+    <a href="#ep7">07 · Despacho</a>
+    <a href="#ep8">08 · Productos + IA</a>
+    <a href="#ep9">09 · CxP aging</a>
+    <a href="#ep10">10 · Notificaciones</a>
+  </div>
+</nav>
+
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">Releases #843 + #845 · Historias de usuario</p>
+    <h1>Flujos para verificar <span>en producción</span></h1>
+    <p class="lede">Cada historia mapea a código real de los dos releases: qué hace el actor, qué endpoint responde, qué estado queda y qué error sale si algo falla. Úsalo como guion de QA en prod: recorre cada flujo y marca lo que no cuadre.</p>
+    <div class="meta">
+      <div class="stat"><b>10</b><small>Épicas</small></div>
+      <div class="stat"><b>25</b><small>Historias</small></div>
+      <div class="stat"><b>2</b><small>Releases</small></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="legend" aria-label="Leyenda">
+    <div>
+      <h3>Tipos de nodo</h3>
+      <div class="row"><span class="node action" style="width:auto;min-height:0;padding:5px 9px"><span class="tag">Acción</span></span> El actor hace algo</div>
+      <div class="row"><span class="node system" style="width:auto;min-height:0;padding:5px 9px"><span class="tag">Sistema</span></span> Backend / endpoint / servicio</div>
+      <div class="row"><span class="node decision" style="width:auto;min-height:0;padding:5px 9px"><span class="tag">Decisión</span></span> Bifurcación / validación</div>
+    </div>
+    <div>
+      <h3>Estados (paleta real)</h3>
+      <div class="row"><span class="swatch" style="background:var(--active-b);border-color:var(--active-l)"></span> <code style="font-family:var(--mono);font-size:.78rem;color:var(--active-t)">finished · completed · delivered · shipped</code></div>
+      <div class="row"><span class="swatch" style="background:var(--pend-b);border-color:var(--pend-l)"></span> <code style="font-family:var(--mono);font-size:.78rem;color:var(--pend-t)">draft · processing · requested · pending · ready</code></div>
+      <div class="row"><span class="swatch" style="background:var(--deny-b);border-color:var(--deny-l)"></span> <code style="font-family:var(--mono);font-size:.78rem;color:var(--deny-t)">4xx tipado · failed</code></div>
+      <div class="row"><span class="swatch" style="background:var(--exp-b);border-color:var(--exp-l)"></span> <code style="font-family:var(--mono);font-size:.78rem;color:var(--exp-t)">cancelled (terminal neutro)</code></div>
+    </div>
+  </div>
+
+  <!-- ==================== EP1 ÓRDENES POS ==================== -->
+  <section class="epic" id="ep1">
+    <div class="epic-head"><span class="epic-num">01</span><h2>Órdenes POS de mostrador</h2></div>
+    <p class="epic-purpose">Superficie: POS → checkout. Venta inmediata con entrega en mano: stock, COGS y estados.</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-1.1</span><h4>Venta de mostrador cobrada en efectivo</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>cobrar una venta de mostrador en efectivo</em> para <em>entregar la mercancía con stock y contabilidad cuadrados</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Agrega productos al carrito y pulsa Cobrar</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/store/payments/pos</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Crea orden <code>direct_delivery</code> + reserva stock</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Commit inventario + emite <code>order.completed</code> (COGS)</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span><code>finished</code> · recibo OK</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">handover inmediato = stock + COGS al cobrar</span>
+        <span class="chip ok">E2E Roku #1233/#1236 PASS</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>POS → agrega 2 productos (uno con stock controlado) y pulsa <code>Cobrar</code>.</li><li>Elige <code>Efectivo</code>, monto exacto, confirma y observa el recibo.</li><li>Abre el detalle de la orden y revisa el stock del producto.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Orden en <code>finished</code> · stock descontado · recibo con totales correctos · 0 errores en consola.</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-1.2</span><h4>Guardar borrador sin cobrar</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>guardar un borrador</em> para <em>retomarlo luego sin mover stock ni contabilidad</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Arma el carrito y pulsa Guardar borrador</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/store/payments/pos</code> con <code>is_draft</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node decision"><span class="tag">Decisión</span>¿Es borrador?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">sí</span><div class="pill s-pend" style="width:150px"><span class="tag">Estado</span><code>draft</code> · 0 eventos</div></div>
+          <div class="branch-item"><span class="cond">no</span><div class="pill s-active" style="width:150px"><span class="tag">Sigue</span>flujo HU-1.1</div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">draft salta eventos, stock y COGS</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Arma un carrito y pulsa <code>Guardar borrador</code>.</li><li>Sal del POS, vuelve a entrar y reabre el borrador.</li><li>Revisa el stock de los productos del carrito.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Borrador visible en lista (<code>draft</code>) · stock intacto · sin movimientos contables.</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-1.3</span><h4>Serializado para llevar con preflight (E.1)</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>vender un producto serializado para llevar</em> para <em>que el serial quede amarrado a la venta</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Cobra serializado con seriales confirmados</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Preflight E.1: exige cobro inmediato + seriales</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node decision"><span class="tag">Decisión</span>¿Seriales + pago inmediato?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">sí</span><div class="pill s-active" style="width:150px"><span class="tag">Estado</span><code>finished</code> + seriales</div></div>
+          <div class="branch-item"><span class="cond">no</span><div class="pill s-deny" style="width:150px"><span class="tag">Error</span><code>SERIAL_REQUIRED_001</code></div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">specs E.1 verdes en CI</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Agrega un producto serializado y cobra <b>sin</b> confirmar seriales.</li><li>Repite confirmando los seriales en el paso inmediato.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Sin seriales: <code>SERIAL_REQUIRED_001</code> y no cobra · con seriales: <code>finished</code> + seriales amarrados.</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-1.4</span><h4>Envío sin método bloquea con razón (E.5)</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>ver por qué no puedo cobrar un envío sin método</em> para <em>no dejar ventas a medias</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Elige envío a domicilio sin método configurado</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Muestra razón + Guardar <code>disabled</code>, 0 POST</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node decision"><span class="tag">Decisión</span>¿Fuerza por API?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">no</span><div class="pill s-pend" style="width:150px"><span class="tag">Estado</span>Bloqueado con razón</div></div>
+          <div class="branch-item"><span class="cond">sí</span><div class="pill s-deny" style="width:150px"><span class="tag">Error</span><code>ORD_SHIP_REQUIRED_001</code></div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">E2E Roku E.5-UI PASS (20 png)</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Elige <code>Envío a domicilio</code> en tienda sin método configurado.</li><li>Observa el botón Guardar e intenta cobrar; revisa la pestaña Network.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Razón visible + <code>Guardar disabled</code> + <b>0 POST</b> · por API directa: <code>ORD_SHIP_REQUIRED_001</code>.</div></div>
+      </div>
+    </div>
+  </section>
+  <!-- ==================== EP2 ALIAS ==================== -->
+  <section class="epic" id="ep2">
+    <div class="epic-head"><span class="epic-num">02</span><h2>Envío con nombre de referencia (alias)</h2></div>
+    <p class="epic-purpose">Superficie: POS → envío. Vender con envío a un nombre sin crear ficha de cliente (ADR-05).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-2.1</span><h4>Venta con alias y envío, sin cliente</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>vender con envío a un nombre de referencia</em> para <em>no crear fichas basura</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Elige Envío → nombre/referencia + dirección con mapa</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/store/payments/pos</code> alias + snapshot</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Crea huérfana <code>user_id NULL</code> + FK en la orden</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span>201 · alias visible, 0 clientes</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">DB-06 excluyente · DB-07 FK+snapshot</span>
+        <span class="chip ok">E2E Roku #1233 PASS (20 png)</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>En POS elige <code>Envío</code> → escribe alias (ej. “Portería B”) + dirección con mapa → cobra.</li><li>Abre el detalle de la orden.</li><li>En Clientes busca el alias escrito.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Orden 201 con alias + dirección visibles · <b>0 fichas de cliente creadas</b> · dirección huérfana con FK.</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-2.2</span><h4>Remisión desde orden con envío</h4></div>
+      <p class="as-a">Como <em>despachador</em> quiero <em>crear la remisión desde el detalle</em> para <em>despachar lo cobrado</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>En el detalle pulsa Despachar → wizard → Generar</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Crea remisión <code>REM…</code> en <code>draft</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node decision"><span class="tag">Decisión</span>¿Orden con dirección?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">sí</span><div class="pill s-active" style="width:150px"><span class="tag">Estado</span>orden <code>shipped</code></div></div>
+          <div class="branch-item"><span class="cond">no</span><div class="pill s-deny" style="width:150px"><span class="tag">Error</span><code>DISPATCH_NOTE_NO_ADDRESS</code></div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">E2E Roku #232 REM2609240002 PASS</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>En el detalle de una orden con envío pulsa <code>Despachar</code> → completa el wizard → Generar.</li><li>Abre la remisión creada y revisa el estado de la orden.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Remisión <code>REM…</code> en <code>draft</code> · orden pasa a <code>shipped</code> · sin dirección: error tipado.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== EP3 MESAS ==================== -->
+  <section class="epic" id="ep3">
+    <div class="epic-head"><span class="epic-num">03</span><h2>Mesas dine_in</h2></div>
+    <p class="epic-purpose">Superficie: restaurante + comensal QR. Cuenta abierta con consumo en el local (#840).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-3.1</span><h4>Abrir mesa y vender en cuenta</h4></div>
+      <p class="as-a">Como <em>mesero</em> quiero <em>abrir una mesa y cargar platos</em> para <em>llevar la cuenta abierta</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Abre mesa (POS o QR) y agrega ítems</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/store/tables/sessions</code> → draft <code>dine_in</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-pend"><span class="tag">Estado</span>sesión abierta · mesa <code>occupied</code></div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">dine_in = handover como mostrador</span>
+        <span class="chip ok">spec dine_in verde</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Abre una mesa desde POS (o QR) y cárgale 2 platos.</li><li>Revisa el estado de la mesa y de la orden.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Sesión abierta · orden <code>draft dine_in</code> · mesa <code>occupied</code>.</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-3.2</span><h4>Notas de plato sincronizadas en cuenta</h4></div>
+      <p class="as-a">Como <em>mesero</em> quiero <em>anotar indicaciones del plato</em> para <em>que cocina y cuenta las vean</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Edita la nota del ítem (“sin cebolla”)</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">PATCH</span><code>…/items/:id/notes</code> → persiste</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span>Nota visible en cuenta + KDS</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">#840: notas proyectadas en toView</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>En la cuenta edita la nota de un plato (“sin cebolla”).</li><li>Mira la cuenta y el tablero KDS.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Nota visible en la cuenta <b>y</b> en el ticket KDS · vaciarla la limpia (<code>null</code>).</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-3.3</span><h4>Comensal ve su cuenta por QR</h4></div>
+      <p class="as-a">Como <em>comensal</em> quiero <em>ver mi cuenta escaneando el QR</em> para <em>saber qué debo</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Escanea el QR de la mesa</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">GET</span><code>getBill(token)</code> líneas + notas</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span>Cuenta con notas, sin costos</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">#840 HIGH-1: notes en select</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Escanea el QR de una mesa con cuenta abierta y notas en platos.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Cuenta con líneas + notas legibles · <b>sin</b> costos, márgenes ni datos sensibles.</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-3.4</span><h4>Cobrar mesa dine_in con stock y COGS</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>cobrar la mesa</em> para <em>cerrar la cuenta con inventario cuadrado</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Cobra la sesión abierta</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span><code>isImmediateHandover</code>: commit + <code>order.completed</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span>sesión cerrada · mesa <code>cleaning</code></div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">#840 HIGH-2: stock+COGS en dine_in</span>
+        <span class="chip ok">re-review 93/100</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Cobra una mesa con sesión abierta (efectivo).</li><li>Revisa movimientos de inventario y estado de mesa.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Sesión cerrada · mesa en <code>cleaning</code> · stock descontado + COGS emitido (igual que mostrador).</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== EP4 KDS ==================== -->
+  <section class="epic" id="ep4">
+    <div class="epic-head"><span class="epic-num">04</span><h2>Cocina / KDS</h2></div>
+    <p class="epic-purpose">Superficie: KDS + detalle. Fuego, tickets y distintivo para llevar.</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-4.1</span><h4>Disparar platos a cocina</h4></div>
+      <p class="as-a">Como <em>mesero</em> quiero <em>enviar platos a cocina</em> para <em>que los preparen y se descuenten insumos</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Selecciona ítems y pulsa Enviar a cocina</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span><code>fireOrderItems</code>: BOM + ticket + COGS fuego</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-pend"><span class="tag">Estado</span>ticket <code>pending</code> en KDS</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">flag <code>inventory_consumed_at_fire</code> anti-doble</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Selecciona ítems preparados y pulsa <code>Enviar a cocina</code>.</li><li>Revisa el KDS y el stock de un insumo de la receta.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Ticket <code>pending</code> en KDS · insumos descontados <b>una sola vez</b> (<code>inventory_consumed_at_fire</code>).</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-4.2</span><h4>Avanzar ticket hasta entrega</h4></div>
+      <p class="as-a">Como <em>cocinero</em> quiero <em>avanzar el ticket</em> para <em>avisar que el plato está listo y entregado</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Start → Ready → Deliver en el KDS</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Transiciones + eventos SSE al tablero</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span><code>delivered</code></div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">44/44 specs cocina verdes</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>En el KDS pulsa <code>Start → Ready → Deliver</code> en un ticket.</li><li>Observa el tablero sin recargar.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Ticket llega a <code>delivered</code> · el tablero se actualiza solo (SSE).</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-4.3</span><h4>Badge para llevar solo explícito</h4></div>
+      <p class="as-a">Como <em>cocinero</em> quiero <em>ver Para llevar solo si aplica</em> para <em>no empacar platos de mesa</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node system"><span class="tag">Sistema</span>KDS evalúa <code>is_takeaway</code> por línea</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node decision"><span class="tag">Decisión</span>¿Línea marcada explícita?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">sí</span><div class="pill s-froz" style="width:150px"><span class="tag">Muestra</span>badge Para llevar</div></div>
+          <div class="branch-item"><span class="cond">no</span><div class="pill s-exp" style="width:150px"><span class="tag">Oculta</span>sin badge (mesa)</div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">#840: badge aislado de mesa</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Compara un ticket para llevar explícito con uno de mesa normal.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Badge <code>Para llevar</code> <b>solo</b> en la línea marcada explícita · mesa sin badge.</div></div>
+      </div>
+    </div>
+  </section>
+  <!-- ==================== EP5 CANCEL ==================== -->
+  <section class="epic" id="ep5">
+    <div class="epic-head"><span class="epic-num">05</span><h2>Cancelaciones</h2></div>
+    <p class="epic-purpose">Superficie: detalle de orden + mesa. Cancelar órdenes y platos con dinero y stock honestos (ADR-12).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-5.1</span><h4>Cancelar venta cobrada en efectivo</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>cancelar una venta en efectivo</em> para <em>devolver el dinero con egreso registrado</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Cancela con motivo en el detalle</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">POST</span><code>…/flow/cancel</code> claim atómico</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Egreso de caja + refund <code>completed</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-exp"><span class="tag">Estado</span>orden <code>cancelled</code></div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">152/152 specs cancelOrder verdes</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>En el detalle de una venta en efectivo pulsa <code>Cancelar</code> + motivo.</li><li>Revisa caja y el historial de reembolsos.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Orden <code>cancelled</code> · egreso de caja registrado · refund <code>completed</code> por el monto exacto.</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-5.2</span><h4>Cancelar venta no-efectivo (piernas pendientes)</h4></div>
+      <p class="as-a">Como <em>cajero</em> quiero <em>cancelar una venta con tarjeta</em> para <em>dejar el reembolso pendiente sin fingir devolución</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Cancela con motivo en el detalle</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Crea piernas <code>requested</code>, pago intacto</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node decision"><span class="tag">Decisión</span>¿Factura DIAN aceptada?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">no</span><div class="pill s-exp" style="width:150px"><span class="tag">Estado</span><code>cancelled</code></div></div>
+          <div class="branch-item"><span class="cond">sí, sin NC</span><div class="pill s-deny" style="width:150px"><span class="tag">Error</span><code>ORD_CANCEL_CREDIT_NOTE…</code></div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">ADR-12: no-efectivo nunca auto-revierte</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Cancela una venta con tarjeta + motivo.</li><li>Si tiene factura DIAN aceptada sin nota crédito, intenta cancelar.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Orden <code>cancelled</code> · piernas <code>requested</code> · pago intacto · con DIAN sin NC: <code>ORD_CANCEL_CREDIT_NOTE…</code>.</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-5.3</span><h4>Cancelar plato preparado con destino + propina</h4></div>
+      <p class="as-a">Como <em>mesero</em> quiero <em>cancelar un plato con destino</em> para <em>que insumos, total y propina cuadren</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Abre “Destino del plato”, elige reuse/waste</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">POST</span><code>…/items/:id/cancel-delivered</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Reversa BOM + re-deriva propina %</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span>línea emer/merma · total cuadra</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip ok">E2E modal D.4 PASS (9 png) · D.4 12/12</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>En mesa o detalle abre <code>Destino del plato</code> en un preparado, elige merma/reuso y confirma.</li><li>Compara total y propina antes/después (una % y una fija).</li></ol><div class="qa-exp"><b>Resultado esperado</b>Línea cancelada · propina <b>% re-derivada</b> sobre la base viva · propina <b>fija intacta</b> · modal operable con teclado.</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-5.4</span><h4>Orden ya cobrada deriva a reembolso</h4></div>
+      <p class="as-a">Como <em>sistema</em> quiero <em>bloquear cancelación directa post-cobro</em> para <em>forzar el carril de reembolso</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Intenta cancelar ítem de orden cobrada</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Oculta la acción; API responde 409</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-deny"><span class="tag">Error</span>409 → usa Reembolsos (EP6)</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">live 409 verificado #1961/#1962</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Intenta cancelar un ítem de una orden ya cobrada.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Acción oculta en UI · por API responde <code>409</code> → el camino correcto es Reembolsos (épica 06).</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== EP6 REFUNDS ==================== -->
+  <section class="epic" id="ep6">
+    <div class="epic-head"><span class="epic-num">06</span><h2>Reembolsos manuales</h2></div>
+    <p class="epic-purpose">Superficie: detalle → Historial de reembolsos. Cerrar piernas pendientes con evidencia.</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-6.1</span><h4>Resolver reembolso como completado</h4></div>
+      <p class="as-a">Como <em>operador</em> quiero <em>marcar completado un reembolso</em> para <em>cerrar la pierna con comprobante</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Resolver → completed + canal + referencia + nota</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">PATCH</span><code>…/refunds/:id/resolve</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node decision"><span class="tag">Decisión</span>¿Payout + nota válidos?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">sí</span><div class="pill s-active" style="width:150px"><span class="tag">Estado</span>refund <code>completed</code></div></div>
+          <div class="branch-item"><span class="cond">no</span><div class="pill s-deny" style="width:150px"><span class="tag">Error</span><code>REF_PAYOUT_REQUIRED</code></div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">#843 F1: modal + códigos ES mapeados</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>En reembolsos pulsa <code>Resolver</code> → <code>completed</code> + canal + referencia + nota → confirma.</li><li>Repite omitiendo canal/referencia.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Con evidencia: refund <code>completed</code> · sin payout: <code>REF_PAYOUT_REQUIRED_001</code> en español.</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-6.2</span><h4>Resolver reembolso como fallido</h4></div>
+      <p class="as-a">Como <em>operador</em> quiero <em>cerrar sin reversión</em> para <em>terminar una pierna incobrable</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Resolver → failed + nota (sin payout)</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">PATCH</span><code>…/refunds/:id/resolve</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-exp"><span class="tag">Estado</span>refund <code>failed</code></div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">failed no exige payout (mirror DTO)</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>En reembolsos pulsa <code>Resolver</code> → <code>failed</code> + nota → confirma.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Refund <code>failed</code> sin pedir canal ni referencia.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== EP7 DISPATCH ==================== -->
+  <section class="epic" id="ep7">
+    <div class="epic-head"><span class="epic-num">07</span><h2>Despacho y métodos</h2></div>
+    <p class="epic-purpose">Superficie: ajustes + remisiones. Configurar métodos y despachar con ruta (#838).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-7.1</span><h4>Configurar métodos de despacho por tienda</h4></div>
+      <p class="as-a">Como <em>admin</em> quiero <em>activar métodos de despacho</em> para <em>ofrecerlos en el checkout</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Ajustes → logística → modal condicional</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Guarda flags por tienda</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span>métodos visibles en POS</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">#838 QUI-844 dispatch-flags</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Ajustes → logística → activa 2 métodos en el modal → guarda.</li><li>Abre el checkout del POS.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Solo los métodos activos aparecen como opciones de envío.</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-7.2</span><h4>Despachar remisión con ruta</h4></div>
+      <p class="as-a">Como <em>despachador</em> quiero <em>asignar ruta y mensajero</em> para <em>entregar y cerrar el ciclo</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Abre remisión → asigna ruta/courier</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Paradas geolocalizadas + by-order</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span>remisión en ruta → entregada</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">F.3: alias visible en ruta/mapa</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Abre una remisión → asigna ruta y mensajero → marca entregada.</li><li>Revisa el mapa de paradas.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Remisión en ruta → <code>entregada</code> · alias visible en paradas y mapa.</div></div>
+      </div>
+    </div>
+  </section>
+  <!-- ==================== EP8 AI IMAGE ==================== -->
+  <section class="epic" id="ep8">
+    <div class="epic-head"><span class="epic-num">08</span><h2>Productos + imagen con IA</h2></div>
+    <p class="epic-purpose">Superficie: catálogo → modal IA. Mejorar o generar fotos de producto (#842).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-8.1</span><h4>Mejorar foto de producto con IA</h4></div>
+      <p class="as-a">Como <em>mercadeo</em> quiero <em>mejorar la foto del producto</em> para <em>publicar imágenes decentes</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Abre modal IA en modo enhance + foto</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">SSE</span><code>/store/ai/stream/product_image_enhancer</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>Resuelve provider por <code>model_type</code> + logea</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span>imagen mejorada → guardar</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">#842 QUI-857: resolve + config_id en log</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>En un producto abre el modal IA → modo <code>enhance</code> + foto → genera → guarda.</li><li>Revisa la galería del producto.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Imagen mejorada guardada en el producto · log con <code>config_id</code> del provider usado.</div></div>
+      </div>
+    </div>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-8.2</span><h4>Generar imagen desde cero + error controlado</h4></div>
+      <p class="as-a">Como <em>mercadeo</em> quiero <em>generar una imagen con prompt</em> para <em>crear fotos sin estudio</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Modal en modo generate + prompt</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node decision"><span class="tag">Decisión</span>¿Hay config IA válida?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">sí</span><div class="pill s-active" style="width:150px"><span class="tag">Estado</span>imagen generada</div></div>
+          <div class="branch-item"><span class="cond">no</span><div class="pill s-deny" style="width:150px"><span class="tag">Error</span><code>AI_CONFIG_003</code></div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">happy + sad path con specs</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Modal IA → modo <code>generate</code> + prompt → genera.</li><li>Repite en tienda sin configuración IA.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Con config: imagen generada · sin config: <code>AI_CONFIG_003</code> controlado, sin crash.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== EP9 AGING ==================== -->
+  <section class="epic" id="ep9">
+    <div class="epic-head"><span class="epic-num">09</span><h2>Cuentas por pagar (aging)</h2></div>
+    <p class="epic-purpose">Superficie: analítica + reportes. Antigüedad de CxP con exporte (#836).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-9.1</span><h4>Ver aging de CxP y exportar</h4></div>
+      <p class="as-a">Como <em>contador</em> quiero <em>ver la antigüedad por proveedor</em> para <em>priorizar pagos</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Abre Analítica → Aging CxP + filtros</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">GET</span><code>/store/analytics/…/payable-aging</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node action"><span class="tag">Acción</span>Exporta XLSX “Cuentas por Pagar Proveedor”</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span>buckets + archivo descargado</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">#836 QUI-542 + navegación bidireccional</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Analítica → <code>Aging CxP</code> → filtra por proveedor → exporta.</li><li>Salta del reporte a la vista y viceversa.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Buckets por antigüedad correctos · XLSX “Cuentas por Pagar Proveedor” descargado · navegación ida y vuelta.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== EP10 NOTIF ==================== -->
+  <section class="epic" id="ep10">
+    <div class="epic-head"><span class="epic-num">10</span><h2>Notificaciones</h2></div>
+    <p class="epic-purpose">Superficie: campana. Contador multi-tenant sin fugas (#841).</p>
+
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-10.1</span><h4>Campana con conteo aislado por tenant</h4></div>
+      <p class="as-a">Como <em>cliente</em> quiero <em>ver mis no-leídas</em> para <em>no perderme avisos (y no ver ajenos)</em>.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>Abre la app / pulsa la campana</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">GET</span><code>/store/notifications/unread-count</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node decision"><span class="tag">Decisión</span>¿Tenant resuelto?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">sí</span><div class="pill s-active" style="width:150px"><span class="tag">Estado</span>conteo propio</div></div>
+          <div class="branch-item"><span class="cond">no</span><div class="pill s-deny" style="width:150px"><span class="tag">Cierre</span>fail-closed, 0 fuga</div></div>
+        </div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">#841 QUI-854 fail-closed customer</span>
+      <div class="qa-steps"><h5>Cómo ejecutarlo</h5><ol><li>Entra como cliente de la tienda A y mira la campana.</li><li>Entra como cliente de la tienda B.</li></ol><div class="qa-exp"><b>Resultado esperado</b>Cada uno ve solo su conteo · sin tenant resuelto: campana vacía controlada, <b>0 fuga</b> entre tiendas.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap" style="padding:0;max-width:none">
+      Verificación pre-producción: E2E Roku (#1233 alias+envío, #1236→#232 remisión, modal D.4 teclado) · specs 152/152 cancelOrder, 127/127 payments, 203/203 tables, 21/21 ecommerce, karma 44+12+15 · reviews 92/100 (#843) y 93/100 (#840). El mini-release #845 no pasó review formal por instrucción del dueño: este guion ES su QA.
+      <div class="status">
+        <span class="chip ok">#843 mergeado + deployado</span>
+        <span class="chip acc">#845 en espera de CI verde para merge</span>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var stories = document.querySelectorAll('.story');
+    if (reduce || !('IntersectionObserver' in window)) {
+      stories.forEach(function (s) { s.classList.add('in'); });
+    } else {
+      stories.forEach(function (s) {
+        var kids = s.querySelectorAll('.flow > *');
+        kids.forEach(function (k, i) { k.style.setProperty('--i', i); });
+      });
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+        });
+      }, { rootMargin: '0px 0px -12% 0px', threshold: 0.12 });
+      stories.forEach(function (s) { io.observe(s); });
+    }
+    var links = {};
+    document.querySelectorAll('nav.toc a').forEach(function (a) {
+      links[a.getAttribute('href').slice(1)] = a;
+    });
+    if ('IntersectionObserver' in window) {
+      var navIo = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          var a = links[e.target.id];
+          if (a && e.isIntersecting) {
+            Object.keys(links).forEach(function (k) { links[k].classList.remove('active'); });
+            a.classList.add('active');
+          }
+        });
+      }, { rootMargin: '-40% 0px -55% 0px' });
+      document.querySelectorAll('section.epic').forEach(function (s) { navIo.observe(s); });
+    }
+  })();
+</script>
+</body>
+</html>

@@ -174,11 +174,18 @@ export class OrdersService {
    * desde el detalle de la orden (mismo flujo de mesa).
    *
    * Endpoint: PATCH /api/store/orders/:orderId/flow/items/:orderItemId/cancel
-   * con body `{reason}` (3-500 chars). El seam vive en
-   * `order-flow/order-flow.service.ts:cancelOrderItem` y aplica los mismos
-   * guards de mesa (bloquea orden cobrada o en `completed/cancelled/refunded`;
-   * ticket KDS en `pending` se cancela in-tx con SSE post-commit, si avanzó
-   * queda como merma sin tocar cocina; recálculo excluyendo cancelados).
+   * con body `{reason, cancellation_type?}` (`reason` 3-500 chars). El seam
+   * vive en `order-flow/order-flow.service.ts:cancelOrderItem` y aplica los
+   * mismos guards de mesa (bloquea orden cobrada o en
+   * `completed/cancelled/refunded`; ticket KDS en `pending` se cancela in-tx
+   * con SSE post-commit, si avanzó queda como merma sin tocar cocina;
+   * recálculo excluyendo cancelados).
+   *
+   * `cancellation_type` lo elige el llamador (modal "Destino del plato"):
+   * `before_fire` (revierte), `after_fire_waste` (merma), `after_fire_reused`
+   * (reutiliza). Si se omite, el backend decide según
+   * `inventory_consumed_at_fire`. Mismo vocabulario que
+   * `tables.service.ts:cancelOrderItem`.
    *
    * La respuesta trae la orden SIN los ítems proyectados (igual que deliver),
    * así que la página NO usa este payload: refresca con `refreshOrder()`
@@ -187,7 +194,13 @@ export class OrdersService {
   cancelOrderItem(
     orderId: number,
     itemId: number,
-    body: { reason: string },
+    body: {
+      reason: string;
+      cancellation_type?:
+        | 'before_fire'
+        | 'after_fire_waste'
+        | 'after_fire_reused';
+    },
   ): Observable<Order> {
     return this.http
       .patch<Order>(

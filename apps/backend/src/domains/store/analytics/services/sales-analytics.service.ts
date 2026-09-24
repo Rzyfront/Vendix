@@ -110,8 +110,19 @@ export interface OrderExportRow {
   currency: string | null;
   subtotal: number;
   discount: number;
+  /** `orders.tax_amount` — taxes of the product LINES only. */
   tax: number;
+  /**
+   * `orders.shipping_tax_amount` — tax embedded in the freight of a taxed
+   * shipping rate (frozen copy). NOT in `tax`, always inside `shipping`.
+   */
+  shipping_tax: number;
+  /** `tax + shipping_tax` — same "impuestos recaudados" as the sales summary. */
+  total_tax: number;
+  /** `orders.shipping_cost` — freight charged, GROSS (includes `shipping_tax`). */
   shipping: number;
+  /** `shipping − shipping_tax` — freight base, the part that is revenue. */
+  shipping_base: number;
   tip: number;
   grand_total: number;
   state: order_state_enum;
@@ -240,6 +251,7 @@ export class SalesAnalyticsService {
             subtotal_amount: true,
             discount_amount: true,
             shipping_cost: true,
+            shipping_tax_amount: true,
             tax_amount: true,
             tip_amount: true,
           },
@@ -260,6 +272,7 @@ export class SalesAnalyticsService {
             subtotal_amount: true,
             discount_amount: true,
             shipping_cost: true,
+            shipping_tax_amount: true,
             tax_amount: true,
             tip_amount: true,
           },
@@ -306,15 +319,21 @@ export class SalesAnalyticsService {
       subtotal: Number(currentPeriod._sum.subtotal_amount || 0),
       discounts: Number(currentPeriod._sum.discount_amount || 0),
       shipping: Number(currentPeriod._sum.shipping_cost || 0),
+      shipping_tax: Number(currentPeriod._sum.shipping_tax_amount || 0),
       tax: Number(currentPeriod._sum.tax_amount || 0),
     });
-    const totalTaxes = Number(currentPeriod._sum.tax_amount || 0);
+    // Collected taxes = line taxes (`orders.tax_amount`) + the tax embedded in
+    // the freight (`shipping_tax_amount`), which revenue above excludes.
+    const totalTaxes =
+      Number(currentPeriod._sum.tax_amount || 0) +
+      Number(currentPeriod._sum.shipping_tax_amount || 0);
     const totalTips = Number(currentPeriod._sum.tip_amount || 0);
     const totalOrders = currentPeriod._count.id || 0;
     const previousRevenue = computeOperatingRevenue({
       subtotal: Number(previousPeriod._sum.subtotal_amount || 0),
       discounts: Number(previousPeriod._sum.discount_amount || 0),
       shipping: Number(previousPeriod._sum.shipping_cost || 0),
+      shipping_tax: Number(previousPeriod._sum.shipping_tax_amount || 0),
       tax: Number(previousPeriod._sum.tax_amount || 0),
     });
     const previousOrders = previousPeriod._count.id || 0;
@@ -1072,6 +1091,7 @@ export class SalesAnalyticsService {
         subtotal_amount: true,
         discount_amount: true,
         shipping_cost: true,
+        shipping_tax_amount: true,
       },
       _count: {
         id: true,
@@ -1091,6 +1111,7 @@ export class SalesAnalyticsService {
         subtotal: Number(r._sum.subtotal_amount || 0),
         discounts: Number(r._sum.discount_amount || 0),
         shipping: Number(r._sum.shipping_cost || 0),
+        shipping_tax: Number(r._sum.shipping_tax_amount || 0),
         tax: 0,
       });
       return { r, revenue };
@@ -1161,6 +1182,7 @@ export class SalesAnalyticsService {
         subtotal_amount: true,
         discount_amount: true,
         shipping_cost: true,
+        shipping_tax_amount: true,
       },
       _count: { id: true },
     });
@@ -1179,6 +1201,7 @@ export class SalesAnalyticsService {
         subtotal: Number(r._sum.subtotal_amount || 0),
         discounts: Number(r._sum.discount_amount || 0),
         shipping: Number(r._sum.shipping_cost || 0),
+        shipping_tax: Number(r._sum.shipping_tax_amount || 0),
         tax: 0,
       }),
     }));
@@ -1335,6 +1358,9 @@ export class SalesAnalyticsService {
         // eligió, y es contrato visible de su columna «Método de Pago».
         const paymentMethod = resolveOrderPaymentLabel(order.payments) ?? 'N/A';
 
+        const lineTax = Number(order.tax_amount);
+        const shippingCharged = Number(order.shipping_cost);
+        const shippingTax = Number(order.shipping_tax_amount ?? 0);
         orders.push({
           order_number: order.order_number,
           // RAW instant — do NOT format here (emission phase renders in TZ).
@@ -1349,8 +1375,11 @@ export class SalesAnalyticsService {
           currency: order.currency ?? null,
           subtotal: Number(order.subtotal_amount),
           discount: Number(order.discount_amount),
-          tax: Number(order.tax_amount),
-          shipping: Number(order.shipping_cost),
+          tax: lineTax,
+          shipping_tax: shippingTax,
+          total_tax: round2(lineTax + shippingTax),
+          shipping: shippingCharged,
+          shipping_base: round2(shippingCharged - shippingTax),
           tip: Number(order.tip_amount ?? 0),
           grand_total: Number(order.grand_total),
           state: order.state,

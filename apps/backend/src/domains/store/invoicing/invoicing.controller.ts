@@ -200,6 +200,14 @@ export class InvoicingController {
     );
   }
 
+  @Post('from-financial-account/:accountId')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.CREATED)
+  async createFromFinancialAccount(@Param('accountId', ParseIntPipe) accountId: number) {
+    const invoice = await this.invoicing_service.createFromFinancialAccount(accountId);
+    return this.response_service.success(invoice, 'Factura de cuenta creada correctamente');
+  }
+
   @Post('from-sales-order/:salesOrderId')
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.CREATED)

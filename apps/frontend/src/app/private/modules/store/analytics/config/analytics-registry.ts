@@ -323,6 +323,17 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     category: 'purchases',
     icon: 'truck',
   },
+  {
+    // QUI-542: Cuentas por pagar a proveedores por edades de mora
+    key: 'purchases_payable_aging',
+    title: 'Cuentas por Pagar Proveedor',
+    description: 'Cartera a proveedores y saldos por edades de vencimiento',
+    detailedDescription:
+      'Gestiona las cuentas por pagar a proveedores con distribución de mora por edades (corriente, 1-30, 31-60, 61-90 y >90 días) y detalle por proveedor.',
+    route: '/admin/analytics/purchases/payable-aging',
+    category: 'purchases',
+    icon: 'clock',
+  },
 
   // Customers (4)
   {

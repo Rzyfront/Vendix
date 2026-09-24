@@ -1,0 +1,19 @@
+apps/backend/src/domains/store/payments/payments.service.ts:1977:          this.tableSessionsService.emitSessionPaid(
+apps/backend/src/domains/store/payments/payments.service.ts:1981:            // `emitSessionPaid` declara `paymentId?: number` (opcional =
+apps/backend/src/domains/store/payments/payments.service.ts:3784:    // fantasma. `markSessionPaid` es idempotente sobre `paid_at` (no
+apps/backend/src/domains/store/payments/payments.service.ts:3793:      const marked = await this.tableSessionsService.markSessionPaid(
+apps/backend/src/domains/store/payments/payments.service.spec.ts:1485:      (service as any).tableSessionsService.markSessionPaid = jest
+apps/backend/src/domains/store/payments/payments.service.spec.ts:1554:      // `tableSessionsService.markSessionPaid`, absent from the module
+apps/backend/src/domains/store/payments/payments.service.spec.ts:1558:      (service as any).tableSessionsService.markSessionPaid = jest
+apps/backend/src/domains/store/tables/split-account-payment.service.spec.ts:216:      markSessionPaid: jest.fn(async () => ({ id: 3, order_id: 100 })),
+apps/backend/src/domains/store/tables/split-account-payment.service.spec.ts:217:      emitSessionPaid: jest.fn(),
+apps/backend/src/domains/store/tables/split-account-payment.service.spec.ts:268:      expect(tableSessions.markSessionPaid).not.toHaveBeenCalled();
+apps/backend/src/domains/store/tables/split-account-payment.service.spec.ts:518:    expect(tableSessions.markSessionPaid).toHaveBeenCalledTimes(1);
+apps/backend/src/domains/store/tables/split-account-payment.service.spec.ts:519:    expect(tableSessions.markSessionPaid).toHaveBeenCalledWith(3, 3, db);
+apps/backend/src/domains/store/tables/split-account-payment.service.spec.ts:520:    expect(tableSessions.emitSessionPaid).toHaveBeenCalledWith(10, 3, 100, 3);
+apps/backend/src/domains/store/tables/split-account-payment.service.ts:556:            paidSession = await this.tableSessions.markSessionPaid(
+apps/backend/src/domains/store/tables/split-account-payment.service.ts:572:        this.tableSessions.emitSessionPaid(
+apps/backend/src/domains/store/tables/table-sessions.service.ts:1589:      await this.markSessionPaid(openSession.id, paymentId, client);
+apps/backend/src/domains/store/tables/table-sessions.service.ts:1596:            this.emitSessionPaid(storeId, openSession.id, orderId, paymentId);
+apps/backend/src/domains/store/tables/table-sessions.service.ts:1627:  async markSessionPaid(
+apps/backend/src/domains/store/tables/table-sessions.service.ts:1713:  emitSessionPaid(

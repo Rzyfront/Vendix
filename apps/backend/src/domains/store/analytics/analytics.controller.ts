@@ -28,6 +28,8 @@ import {
   LowStockBySupplierQueryDto,
   LowStockBySupplierAnalyticsQueryDto,
 } from './dto/low-stock-by-supplier-query.dto';
+import { InventoryBySupplierQueryDto } from './dto/inventory-by-supplier-query.dto';
+import { PayableAgingQueryDto } from './dto/payable-aging-query.dto';
 import { ResponseService } from '../../../common/responses/response.service';
 import {
   buildReportBuffer,
@@ -87,12 +89,14 @@ export class AnalyticsController {
     columns: ReportColumn[],
     rows: readonly unknown[],
     tz: string,
+    totals?: Record<string, unknown>,
   ): ReportSheet {
     return {
       name,
       columns,
       rows: rows as unknown as Record<string, unknown>[],
       tz,
+      ...(totals ? { totals } : {}),
     };
   }
 
@@ -261,8 +265,14 @@ export class AnalyticsController {
       { key: 'currency', header: 'Moneda', type: 'text' },
       { key: 'subtotal', header: 'Subtotal', type: 'currency' },
       { key: 'discount', header: 'Descuento', type: 'currency' },
-      { key: 'tax', header: 'Impuesto', type: 'currency' },
-      { key: 'shipping', header: 'Envío', type: 'currency' },
+      // Impuestos y envío separados: el impuesto de una tarifa de envío gravada
+      // NO está en `tax` (orders.tax_amount) y SÍ está dentro del envío cobrado.
+      // Se muestra la base del envío para que la fila cuadre sin doble conteo:
+      // Subtotal − Descuento + Total impuestos + Envío (base) + Propina = Gran Total.
+      { key: 'tax', header: 'Impuesto productos', type: 'currency' },
+      { key: 'shipping_tax', header: 'Impuesto envío', type: 'currency' },
+      { key: 'total_tax', header: 'Total impuestos', type: 'currency' },
+      { key: 'shipping_base', header: 'Envío (base)', type: 'currency' },
       { key: 'tip', header: 'Propina', type: 'currency' },
       { key: 'grand_total', header: 'Gran Total', type: 'currency' },
       { key: 'state', header: 'Estado', type: 'text' },
@@ -792,6 +802,68 @@ export class AnalyticsController {
     ]);
   }
 
+  // ==================== INVENTORY BY SUPPLIER (QUI-550) ====================
+  // Reporte valorizado de inventario agrupado por proveedor comercial.
+  // Calcula concentración de stock, valorización a costo y producto principal.
+
+  @Get('inventory/by-supplier')
+  @Permissions('store:analytics:read')
+  async getInventoryBySupplier(@Query() query: InventoryBySupplierQueryDto) {
+    const result =
+      await this.inventory_analytics_service.getInventoryBySupplier(query);
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+      'Data retrieved successfully',
+      undefined,
+      { totals: result.meta.totals },
+    );
+  }
+
+  @Get('inventory/by-supplier/export')
+  @Permissions('store:analytics:read')
+  async exportInventoryBySupplierXlsx(
+    @Query() query: InventoryBySupplierQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const { rows, totals } =
+      await this.inventory_analytics_service.getInventoryBySupplierForExport(
+        query,
+      );
+
+    const columns: ReportColumn[] = [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_document', header: 'Documento', type: 'text' },
+      { key: 'product_count', header: 'Productos', type: 'number' },
+      { key: 'total_units_on_hand', header: 'En Mano', type: 'number' },
+      { key: 'total_units_reserved', header: 'Reservadas', type: 'number' },
+      { key: 'total_units_available', header: 'Disponibles', type: 'number' },
+      { key: 'total_stock_value', header: 'Valor Stock', type: 'currency' },
+      { key: 'avg_unit_cost', header: 'Costo Promedio', type: 'currency' },
+      { key: 'top_product_name', header: 'Producto Principal', type: 'text' },
+    ];
+
+    const sheet = this.toSheet(
+      'Inventario por Proveedor',
+      columns,
+      rows,
+      tz,
+      {
+        supplier_name: 'TOTAL',
+        product_count: totals.product_count,
+        total_units_on_hand: totals.total_units_on_hand,
+        total_units_reserved: totals.total_units_reserved,
+        total_units_available: totals.total_units_available,
+        total_stock_value: totals.total_stock_value,
+      },
+    );
+
+    await this.emitReport(res, 'inventario_por_proveedor', tz, [sheet]);
+  }
+
   // ==================== LOW STOCK BY SUPPLIER (CP-low-stock-by-supplier) ====================
   // Reporte operativo para el comprador: une bajo stock (ADR-1) con proveedor
   // preferido (ADR-3), última OC (PURCHASE_COMMITTED_STATES) y velocidad de
@@ -1167,6 +1239,74 @@ export class AnalyticsController {
     await this.emitReport(res, 'compras', tz, [
       this.toSheet('Compras', columns, rows, tz),
     ]);
+  }
+
+  /**
+   * QUI-542: Cuentas por pagar a proveedores por edades (aging) - Vista previa paginada.
+   * Agrupa saldos pendientes por proveedor en buckets (corriente, 1-30, 31-60, 61-90, >90).
+   */
+  @Get('purchases/payable-aging')
+  @Permissions('store:analytics:read')
+  async getPayableAging(@Query() query: PayableAgingQueryDto) {
+    const result =
+      await this.purchases_analytics_service.getPayableAging(query);
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+      'Data retrieved successfully',
+      undefined,
+      { totals: result.meta.totals },
+    );
+  }
+
+  /**
+   * QUI-542: Cuentas por pagar a proveedores por edades (aging) - Exportación XLSX.
+   * Genera reporte ExcelJS completo con fechas en timezone de la tienda y totales agregados.
+   */
+  @Get('purchases/payable-aging/export')
+  @Permissions('store:analytics:read')
+  async exportPayableAging(
+    @Query() query: PayableAgingQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const { rows, totals } =
+      await this.purchases_analytics_service.getPayableAgingForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_document', header: 'Documento', type: 'text' },
+      { key: 'total_paid', header: 'Total Abonado', type: 'currency' },
+      { key: 'current', header: 'Corriente', type: 'currency' },
+      { key: 'days_1_30', header: '1-30 días', type: 'currency' },
+      { key: 'days_31_60', header: '31-60 días', type: 'currency' },
+      { key: 'days_61_90', header: '61-90 días', type: 'currency' },
+      { key: 'days_over_90', header: '>90 días', type: 'currency' },
+      { key: 'total_outstanding', header: 'Saldo Total', type: 'currency' },
+      { key: 'due_date', header: 'Vencimiento', type: 'date', tz },
+      { key: 'last_payment_date', header: 'Último Pago', type: 'date', tz },
+    ];
+
+    const sheet = this.toSheet(
+      'Cuentas por Pagar Proveedor',
+      columns,
+      rows,
+      tz,
+      {
+        supplier_name: 'TOTAL',
+        total_paid: totals.total_paid,
+        current: totals.current,
+        days_1_30: totals.days_1_30,
+        days_31_60: totals.days_31_60,
+        days_61_90: totals.days_61_90,
+        days_over_90: totals.days_over_90,
+        total_outstanding: totals.total_outstanding,
+      },
+    );
+
+    await this.emitReport(res, 'cuentas_por_pagar_aging', tz, [sheet]);
   }
 
   // ==================== REVIEWS ANALYTICS ====================

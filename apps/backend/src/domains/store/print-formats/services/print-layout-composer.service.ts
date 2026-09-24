@@ -213,8 +213,13 @@ export class PrintLayoutComposerService {
     const nitVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.tax_id">&#123;&#123; store.tax_id &#125;&#125;</span>' : `${nitLabel}: ${this.compiler.escapeHtml(store.tax_id || '')}`;
     const nit = isNitActive && (store.tax_id || mode === 'tokenized') ? `<div class="store-nit" data-element-id="f_nit" data-section-id="sec_header" data-token="store.tax_id">${nitVal}</div>` : '';
 
-    const regimeVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.tax_regime">&#123;&#123; store.tax_regime &#125;&#125;</span>' : this.compiler.escapeHtml(store.tax_regime || '');
-    const regime = isRegimeActive && (store.tax_regime || mode === 'tokenized') ? `<div class="store-regime" data-element-id="f_regime" data-section-id="sec_header" data-token="store.tax_regime">${regimeVal}</div>` : '';
+    // Num. 12 art. 11 Res. DIAN 000165/2023 — «cuando corresponda». Sin ninguna
+    // de las cuatro calidades, `store.fiscal_qualities` llega `undefined` y el
+    // renglón NO se emite. NO hay respaldo a `store.tax_regime`: ese respaldo es
+    // justamente lo que imprimía «Responsable de IVA» a un emisor que sólo
+    // responde por INC (leyenda derogada con el art. 506 E.T.).
+    const regimeVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.fiscal_qualities">&#123;&#123; store.fiscal_qualities &#125;&#125;</span>' : this.compiler.escapeHtml(store.fiscal_qualities || '');
+    const regime = isRegimeActive && (store.fiscal_qualities || mode === 'tokenized') ? `<div class="store-regime" data-element-id="f_regime" data-section-id="sec_header" data-token="store.fiscal_qualities">${regimeVal}</div>` : '';
 
     const addrVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.address">&#123;&#123; store.address &#125;&#125;</span>' : `${this.compiler.escapeHtml(store.address || '')}${store.city ? ', ' + this.compiler.escapeHtml(store.city) : ''}`;
     const addr = isAddrActive && (store.address || mode === 'tokenized') ? `<div class="store-address" data-element-id="f_addr" data-section-id="sec_header" data-token="store.address">${addrVal}</div>` : '';
@@ -230,7 +235,7 @@ export class PrintLayoutComposerService {
       'f_logo', 'store.logo_url', 'f_name', 'store.name', 'store_name',
       'f_legal', 'store.legal_name', 'store_legal_name',
       'f_nit', 'store.tax_id', 'store_tax_id',
-      'f_regime', 'store.tax_regime', 'store_regime',
+      'f_regime', 'store.fiscal_qualities', 'store.tax_regime', 'store_regime',
       'f_addr', 'store.address', 'store_address',
       'f_phone', 'store.phone', 'store_phone',
     ]);
@@ -312,8 +317,13 @@ export class PrintLayoutComposerService {
     const nitVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.tax_id">&#123;&#123; store.tax_id &#125;&#125;</span>' : `${nitLabel}: ${this.compiler.escapeHtml(store.tax_id || '')}`;
     const nit = isNitActive && (store.tax_id || mode === 'tokenized') ? `<div class="store-nit" data-element-id="f_nit" data-section-id="sec_header" data-token="store.tax_id">${nitVal}</div>` : '';
 
-    const regimeVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.tax_regime">&#123;&#123; store.tax_regime &#125;&#125;</span>' : this.compiler.escapeHtml(store.tax_regime || '');
-    const regime = isRegimeActive && (store.tax_regime || mode === 'tokenized') ? `<div class="store-regime" data-element-id="f_regime" data-section-id="sec_header" data-token="store.tax_regime">${regimeVal}</div>` : '';
+    // Num. 12 art. 11 Res. DIAN 000165/2023 — «cuando corresponda». Sin ninguna
+    // de las cuatro calidades, `store.fiscal_qualities` llega `undefined` y el
+    // renglón NO se emite. NO hay respaldo a `store.tax_regime`: ese respaldo es
+    // justamente lo que imprimía «Responsable de IVA» a un emisor que sólo
+    // responde por INC (leyenda derogada con el art. 506 E.T.).
+    const regimeVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.fiscal_qualities">&#123;&#123; store.fiscal_qualities &#125;&#125;</span>' : this.compiler.escapeHtml(store.fiscal_qualities || '');
+    const regime = isRegimeActive && (store.fiscal_qualities || mode === 'tokenized') ? `<div class="store-regime" data-element-id="f_regime" data-section-id="sec_header" data-token="store.fiscal_qualities">${regimeVal}</div>` : '';
 
     const addrVal = mode === 'tokenized' ? '<span class="vendix-token-pill" data-token="store.address">&#123;&#123; store.address &#125;&#125;</span>' : `${this.compiler.escapeHtml(store.address || '')}${store.city ? ', ' + this.compiler.escapeHtml(store.city) : ''}`;
     const addr = isAddrActive && (store.address || mode === 'tokenized') ? `<div class="store-address" data-element-id="f_addr" data-section-id="sec_header" data-token="store.address">${addrVal}</div>` : '';
@@ -380,7 +390,7 @@ export class PrintLayoutComposerService {
     const extraFiscalHeader = this.renderExtraSectionFields(section, data, mode, [
       'f_logo', 'store.logo_url',
       'f_name', 'store.name', 'store_name', 'f_legal', 'store.legal_name',
-      'f_nit', 'store.tax_id', 'f_regime', 'store.tax_regime',
+      'f_nit', 'store.tax_id', 'f_regime', 'store.fiscal_qualities', 'store.tax_regime',
       'f_addr', 'store.address', 'f_phone', 'store.phone',
     ]);
 
@@ -540,8 +550,12 @@ export class PrintLayoutComposerService {
         return store.tax_id;
       case 'DV':
         return store.tax_id_dv || store.verification_digit;
+      // Misma regla que el renglón `f_regime` de la cabecera: la fila del
+      // company_block lleva las calidades del num. 12, no el régimen derogado.
+      // `undefined` cuando no corresponde ninguna y `renderCompanyBlock` ya
+      // descarta las filas vacías, así que la fila desaparece sola.
       case 'regimen':
-        return store.tax_regime;
+        return store.fiscal_qualities;
       case 'address':
         return store.address;
       case 'phone':

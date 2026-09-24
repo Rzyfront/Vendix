@@ -36,7 +36,7 @@ describe('PrintLayoutComposerService — v2 fields (P1.3)', () => {
       name: 'Mi Tienda',
       legal_name: 'Mi Tienda S.A.S.',
       tax_id: '900123456',
-      tax_regime: 'Común',
+      fiscal_qualities: 'Gran contribuyente',
       address: 'Calle 1 # 2-3',
       city: 'Bogotá',
       phone: '+57 1 555 5555',
@@ -329,7 +329,7 @@ describe('PrintLayoutComposerService — tirilla 80mm en negro absoluto', () => 
       name: 'Restaurante El Fogón',
       legal_name: 'El Fogón S.A.S.',
       tax_id: '900123456',
-      tax_regime: 'Común',
+      fiscal_qualities: 'Gran contribuyente',
       address: 'Calle 10 # 5-20',
       city: 'Medellín',
       phone: '+57 4 555 1234',
@@ -853,7 +853,7 @@ describe('PrintLayoutComposerService — fiscal_header con datos de factura y re
       tax_id: '1123408049-0',
       address: 'CR 21 N 14C-58',
       city: 'Riohacha',
-      tax_regime: 'Responsable de IVA',
+      fiscal_qualities: 'Agente retenedor del Impuesto sobre las Ventas (IVA)',
     },
     document: {
       id: 5,
@@ -970,3 +970,83 @@ describe('PrintLayoutComposerService — fiscal_header con datos de factura y re
   });
 });
 
+/**
+ * CP-fiscal-qualities — la cabecera obedece el num. 12 del art. 11 de la
+ * Res. DIAN 000165/2023: imprime la calidad «cuando corresponda» y NADA cuando
+ * no corresponde ninguna.
+ *
+ * El defecto que cierra: la cabecera pintaba `store.tax_regime`, y un
+ * restaurante responsable únicamente de INC salía con «Responsable de IVA».
+ * Por eso la compuerta comprueba las DOS cosas — que el div desaparezca y que
+ * la leyenda derogada no aparezca por ningún respaldo.
+ */
+describe('PrintLayoutComposerService — calidades fiscales en la cabecera', () => {
+  const composer = new PrintLayoutComposerService(new PrintTemplateCompilerService());
+
+  const storeBase = {
+    name: 'Pollo Árabe',
+    legal_name: 'Pollo Árabe S.A.S.',
+    tax_id: '900123456-1',
+    address: 'Calle 1 # 2-3',
+    city: 'Bogotá',
+    phone: '+57 1 555 5555',
+  };
+
+  const dataWith = (store: any): StandardPrintDataModel =>
+    ({
+      store,
+      document: {
+        id: 1,
+        number: 'F-1',
+        date: '2026-09-22T10:00:00.000Z',
+        date_formatted: '22/09/2026',
+      },
+      items: [],
+      totals: {
+        subtotal: 0,
+        discount_total: 0,
+        shipping_total: 0,
+        tax_total: 0,
+        grand_total: 0,
+      },
+    }) as any;
+
+  const headerDef = (type: string): PrintFormatDefinition => ({
+    v: 2,
+    paper: { format: 'letter', width_mm: 216, is_roll: false, margin_mm: 10, copies: 1, orientation: 'portrait' },
+    sections: [{ id: 'sec_header', type, title: 'Cabecera', enabled: true, order: 1 }],
+  }) as any;
+
+  for (const sectionType of ['header', 'fiscal_header']) {
+    it(`${sectionType}: omite el renglón por completo cuando el emisor no ostenta ninguna calidad`, () => {
+      const html = composer.compose(headerDef(sectionType), dataWith({ ...storeBase }));
+      expect(html).not.toContain('store-regime');
+      expect(html).not.toContain('Responsable de IVA');
+      expect(html).not.toContain('No responsable de IVA');
+      // La cabecera sí sigue imprimiendo lo que la norma sí exige.
+      expect(html).toContain('900123456-1');
+    });
+
+    it(`${sectionType}: imprime las calidades cuando sí corresponden`, () => {
+      const html = composer.compose(
+        headerDef(sectionType),
+        dataWith({
+          ...storeBase,
+          fiscal_qualities: 'Autorretenedor del Impuesto sobre la Renta y Complementarios | Gran contribuyente',
+        }),
+      );
+      expect(html).toContain('store-regime');
+      expect(html).toContain('Gran contribuyente');
+      expect(html).toContain('data-token="store.fiscal_qualities"');
+    });
+
+    it(`${sectionType}: un tax_regime rancio NO reaparece como respaldo`, () => {
+      const html = composer.compose(
+        headerDef(sectionType),
+        dataWith({ ...storeBase, tax_regime: 'Responsable de IVA' }),
+      );
+      expect(html).not.toContain('Responsable de IVA');
+      expect(html).not.toContain('store-regime');
+    });
+  }
+});

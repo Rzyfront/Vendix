@@ -11,6 +11,7 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { ResponseService } from '@common/responses/response.service';
 import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
 import { order_state_enum } from '@prisma/client';
+import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 
 describe('OrdersController', () => {
   let controller: OrdersController;
@@ -295,42 +296,20 @@ describe('OrdersController', () => {
       );
     });
 
-    it('should handle errors when fetching order by id', async () => {
+    it('propagates a typed not-found error so the HTTP filter returns 404', async () => {
       const orderId = 999;
-      // F-164 — este test quedó invisible desde `3aa1960ed` (DI rota, todo
-      // el archivo fallaba en `compile()`). Al arreglar la DI queda expuesto
-      // un segundo desface, previo e independiente: el catch de `findOne`
-      // (CP-POS-SVC-PERF-001 / Bugfix) distingue a propósito `VendixHttpException`
-      // (mensaje curado, pasa tal cual) de cualquier otro `Error` (nunca
-      // filtra el mensaje crudo — responde 500 genérico + código estable
-      // `INTERNAL_ORDER_LOAD_001`) para no filtrar stack traces / mensajes
-      // internos de Prisma al cliente. Un `new Error('Order not found')`
-      // plano cae por la segunda rama, no por la primera — la expectativa
-      // vieja (400 con el mensaje del error) asumía que el mensaje pasaba
-      // directo, contrato que el bugfix de seguridad ya reemplazó.
-      const error = new Error('Order not found');
-
-      const errorResponse = {
-        success: false as const,
-        message: 'No se pudo cargar la orden. Intenta de nuevo.',
-        error: 'INTERNAL_ORDER_LOAD_001',
-        statusCode: 500,
-        timestamp: '2024-01-01T00:00:00.000Z',
-      };
-
+      const error = new VendixHttpException(ErrorCodes.ORD_FIND_001);
       mockOrdersService.findOne.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(errorResponse);
-
-      const result = await controller.findOne(orderId);
-
-      expect(result).toEqual(errorResponse);
+      await expect(controller.findOne(orderId)).rejects.toBe(error);
       expect(mockOrdersService.findOne).toHaveBeenCalledWith(orderId);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'No se pudo cargar la orden. Intenta de nuevo.',
-        'INTERNAL_ORDER_LOAD_001',
-        500,
-        'INTERNAL_ORDER_LOAD_001',
-      );
+      expect(mockResponseService.error).not.toHaveBeenCalled();
+    });
+
+    it('propagates unexpected failures for generic 500 handling by the HTTP filter', async () => {
+      const error = new Error('Internal Prisma details');
+      mockOrdersService.findOne.mockRejectedValue(error);
+      await expect(controller.findOne(999)).rejects.toBe(error);
+      expect(mockResponseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -402,6 +381,16 @@ describe('OrdersController', () => {
         400,
       );
     });
+
+    it('propaga el error tipado de motivo para que el filtro responda HTTP 400', async () => {
+      const error = new VendixHttpException(
+        ErrorCodes.ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001,
+      );
+      mockOrdersService.update.mockRejectedValue(error);
+      await expect(controller.update(1, { state: order_state_enum.processing } as UpdateOrderDto))
+        .rejects.toBe(error);
+      expect(mockResponseService.error).not.toHaveBeenCalled();
+    });
   });
 
   describe('remove', () => {
@@ -426,30 +415,19 @@ describe('OrdersController', () => {
       );
     });
 
-    it('should handle errors when deleting order', async () => {
+    it('propagates typed delete rejection so the exception filter preserves HTTP status/details', async () => {
       const orderId = 999;
-      const error = new Error('Order not found');
-
-      const errorResponse = {
-        success: false as const,
-        message: 'Error al eliminar la orden',
-        error: 'Order not found',
-        statusCode: 400,
-        timestamp: '2024-01-01T00:00:00.000Z',
-      };
+      const error = new VendixHttpException(
+        ErrorCodes.ORD_VALIDATE_001,
+        'Cannot delete an order with financial records',
+        { state: 'finished', reason: 'financial_evidence' },
+      );
 
       mockOrdersService.remove.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(errorResponse);
-
-      const result = await controller.remove(orderId);
-
-      expect(result).toEqual(errorResponse);
+      await expect(controller.remove(orderId)).rejects.toBe(error);
       expect(mockOrdersService.remove).toHaveBeenCalledWith(orderId);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Order not found',
-        'Order not found',
-        400,
-      );
+      expect(mockResponseService.error).not.toHaveBeenCalled();
+      expect(mockResponseService.deleted).not.toHaveBeenCalled();
     });
   });
 });

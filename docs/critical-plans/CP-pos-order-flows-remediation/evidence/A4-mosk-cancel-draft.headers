@@ -1,0 +1,19 @@
+HTTP/1.1 200 OK
+Server: nginx/1.29.5
+Date: Thu, 24 Sep 2026 01:17:19 GMT
+Content-Type: application/json; charset=utf-8
+Content-Length: 7549
+Connection: keep-alive
+X-Powered-By: Express
+Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate
+Pragma: no-cache
+Expires: 0
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Access-Control-Expose-Headers: Authorization,Cache-Control,Pragma,Content-Disposition
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 299
+X-RateLimit-Reset: 60
+X-Request-Id: 4dd10f68-0b84-478c-a3d8-64c515120c6d
+ETag: W/"1d7d-c7hBArl+j7FCn6ctCUm7lb/fkeM"
+

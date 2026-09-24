@@ -798,16 +798,20 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 <span class="text-text-secondary">Subtotal</span>
                 <span class="text-text-primary">{{ formatCurrency(inv.subtotal_amount) }}</span>
               </div>
+              <!-- El subtotal de la factura YA suma la línea «Envio» (base
+                   neta si el domicilio lleva INC incluido; su tributo va en
+                   Impuestos). Mostrarlo como fila propia lo contaba dos veces:
+                   se deja como desglose informativo del subtotal, no sumando. -->
+              @if (shippingAmount() > 0) {
+                <div class="flex justify-between pl-3 text-xs">
+                  <span class="text-text-secondary">Incluye envío (base)</span>
+                  <span class="text-text-secondary">{{ formatCurrency(shippingAmount()) }}</span>
+                </div>
+              }
               @if (inv.discount_amount > 0) {
                 <div class="flex justify-between text-sm">
                   <span class="text-text-secondary">Descuentos</span>
                   <span class="text-error">−{{ formatCurrency(inv.discount_amount) }}</span>
-                </div>
-              }
-              @if (shippingAmount() > 0) {
-                <div class="flex justify-between text-sm">
-                  <span class="text-text-secondary">Envío</span>
-                  <span class="text-text-primary">{{ formatCurrency(shippingAmount()) }}</span>
                 </div>
               }
               <div class="flex justify-between text-sm">

@@ -7,7 +7,10 @@ import {
   parseApiError,
   withApiErrorReference,
 } from '../../../../../../../app/core/utils/parse-api-error';
-import { DEFAULT_ERROR_MESSAGE } from '../../../../../../../app/core/utils/error-messages';
+import {
+  DEFAULT_ERROR_MESSAGE,
+  ERROR_MESSAGES,
+} from '../../../../../../../app/core/utils/error-messages';
 import {
   Table,
   CreateTableDto,
@@ -19,6 +22,10 @@ import {
   SplitByItemsDto,
   SplitByAmountDto,
   SplitResult,
+  SplitPreviewDto,
+  SplitAccountCustomer,
+  SplitAccountPayDto,
+  SplitAccountPaymentResult,
   TableStatus,
   TableSessionAddItem,
   PayTableSessionDto,
@@ -28,6 +35,8 @@ import {
   ConfirmTablePaymentResult,
   TransferResult,
   TransferTableSessionDto,
+  ReassignTableSessionDto,
+  TableOrderReassignmentEvidence,
 } from '../interfaces';
 import type { IconName } from '../../../../../../shared/components/icon/icons.registry';
 
@@ -267,7 +276,7 @@ export class TablesService {
   cancelOrderItem(
     sessionId: number,
     orderItemId: number,
-    body: { reason: string; cancellation_type?: 'before_fire' | 'after_fire_waste' },
+    body: { reason: string; cancellation_type?: 'before_fire' | 'after_fire_reused' | 'after_fire_waste' },
   ): Observable<TableSession> {
     return this.http
       .post<ApiResponse<TableSession>>(
@@ -285,7 +294,7 @@ export class TablesService {
    *
    * La entrega es un hecho de SERVICIO, no de cocina, así que este endpoint
    * aplica a cualquier tipo de producto. Un plato preparado sigue exigiendo
-   * estado `ready` en cocina (409 `TABLE_SESSION_ITEM_NOT_DELIVERABLE`); una
+   * estado `ready` en cocina (409 `ORDER_ITEM_NOT_DELIVERABLE`); una
    * cerveza en botella se entrega directo, porque nunca pasa por cocina y por
    * eso nunca tuvo un estado de entrega alcanzable.
    *
@@ -299,6 +308,26 @@ export class TablesService {
       .patch<ApiResponse<TableSession>>(
         `${this.apiUrl}/store/table-sessions/${sessionId}/items/${orderItemId}/deliver`,
         {},
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * Actualiza la nota de un ítem en la cuenta de mesa.
+   * `PATCH /store/table-sessions/:id/items/:orderItemId/notes`
+   */
+  updateItemNotes(
+    sessionId: number,
+    orderItemId: number,
+    notes?: string | null,
+  ): Observable<TableSession> {
+    return this.http
+      .patch<ApiResponse<TableSession>>(
+        `${this.apiUrl}/store/table-sessions/${sessionId}/items/${orderItemId}/notes`,
+        { notes: notes ?? null },
       )
       .pipe(
         map((res) => res.data),
@@ -388,6 +417,64 @@ export class TablesService {
         catchError(this.handleError),
       );
   }
+
+  /** The session projection omits payments/invoices; fail closed without this read. */
+  getOrderReassignmentEvidence(orderId: number): Observable<TableOrderReassignmentEvidence> {
+    return this.http
+      .get<ApiResponse<TableOrderReassignmentEvidence>>(`${this.apiUrl}/store/orders/${orderId}`)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** Reassign an existing order, then refresh the local floor-map projection. */
+  reassignOrderToTable(orderId: number, targetTableId: number): Observable<TableSession> {
+    const dto: ReassignTableSessionDto = {
+      order_id: orderId,
+      target_table_id: targetTableId,
+    };
+    return this.http
+      .post<ApiResponse<TableSession>>(`${this.apiUrl}/store/table-sessions/reassign`, dto)
+      .pipe(
+        map((res) => res.data),
+        switchMap((session) => this.getFloorMap().pipe(
+          map(() => session),
+          // Reassignment is already committed; a refresh outage is not a
+          // failed write. Backend SSE also updates other floor-map clients.
+          catchError(() => of(session)),
+        )),
+        catchError(this.handleReassignmentError),
+      );
+  }
+
+  private handleReassignmentError = (error: unknown): Observable<never> => {
+    const parsed = parseApiError(error);
+    let message: string;
+    switch (parsed.errorCode) {
+      case 'ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001':
+        message = parsed.details?.reason === 'settled_payment'
+          ? 'La orden ya tiene un pago registrado. Revisa o revierte el cobro antes de reasignarla.'
+          : parsed.details?.reason === 'active_financial_split'
+            ? 'La orden tiene cuentas divididas. Cancela el reparto antes de reasignarla.'
+            : parsed.details?.reason === 'issued_invoice'
+              ? 'La orden ya tiene una factura numerada. Revísala antes de reasignar la mesa.'
+              : ERROR_MESSAGES['ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001'];
+        break;
+      case 'TABLE_SESSION_NOT_FOUND':
+        message = 'Esta orden no venía de una mesa. Comprueba el número de orden.';
+        break;
+      case 'TABLE_INVALID_STATUS':
+        message = 'La mesa de destino está reservada o en limpieza. Elige una mesa disponible.';
+        break;
+      case 'TABLE_SESSION_ALREADY_OPEN':
+        message = 'Esa mesa ya tiene una cuenta abierta. Elige otra mesa disponible.';
+        break;
+      case 'SYS_CONFLICT_001':
+        message = 'La mesa cambió de estado. Refresca el plano y vuelve a intentarlo.';
+        break;
+      default:
+        return this.handleError(error);
+    }
+    return throwError(() => withApiErrorReference(message, parsed.request_id));
+  };
 
   /**
    * Assign (or clear) the customer of the table session's draft order.
@@ -542,6 +629,54 @@ export class TablesService {
       );
   }
 
+  getFinancialSplit(orderId: number): Observable<SplitResult | null> {
+    return this.http.get<ApiResponse<SplitResult | null>>(
+      `${this.apiUrl}/store/orders/${orderId}/split`,
+    ).pipe(map((res) => res.data));
+  }
+
+  reconcileFinancialSplit(orderId: number): Observable<SplitResult> {
+    return this.http.post<ApiResponse<SplitResult>>(
+      `${this.apiUrl}/store/orders/${orderId}/split/reconcile`, {},
+    ).pipe(map((res) => res.data));
+  }
+
+  previewFinancialSplit(orderId: number, dto: SplitPreviewDto): Observable<SplitResult> {
+    return this.http.post<ApiResponse<SplitResult>>(
+      `${this.apiUrl}/store/orders/${orderId}/split/preview`, dto,
+    ).pipe(map((res) => res.data));
+  }
+
+  cancelFinancialSplit(orderId: number, sourceVersion: string): Observable<{ cancelled: true }> {
+    return this.http.post<ApiResponse<{ cancelled: true }>>(
+      `${this.apiUrl}/store/orders/${orderId}/split/cancel`, { source_version: sourceVersion },
+    ).pipe(map((res) => res.data));
+  }
+
+  updateFinancialAccountCustomer(orderId: number, accountId: number, dto: SplitAccountCustomer): Observable<SplitResult> {
+    return this.http.patch<ApiResponse<SplitResult>>(
+      `${this.apiUrl}/store/orders/${orderId}/split/accounts/${accountId}/customer`, dto,
+    ).pipe(map((res) => res.data));
+  }
+
+  payFinancialAccount(orderId: number, accountId: number, dto: SplitAccountPayDto): Observable<SplitAccountPaymentResult> {
+    return this.http.post<ApiResponse<SplitAccountPaymentResult>>(
+      `${this.apiUrl}/store/orders/${orderId}/split/accounts/${accountId}/pay`, dto,
+    ).pipe(map((res) => res.data));
+  }
+
+  confirmFinancialAccountPayment(orderId: number, accountId: number, paymentId: number): Observable<SplitAccountPaymentResult> {
+    return this.http.post<ApiResponse<SplitAccountPaymentResult>>(
+      `${this.apiUrl}/store/orders/${orderId}/split/accounts/${accountId}/payments/${paymentId}/confirm`, {},
+    ).pipe(map((res) => res.data));
+  }
+
+  invoiceFinancialAccount(accountId: number): Observable<{ id: number; status: string }> {
+    return this.http.post<ApiResponse<{ id: number; status: string }>>(
+      `${this.apiUrl}/store/invoicing/from-financial-account/${accountId}`, {},
+    ).pipe(map((res) => res.data));
+  }
+
   // ─── Helpers ───────────────────────────────────────────────────────
 
   static statusLabel(status: TableStatus): string {
@@ -612,7 +747,13 @@ export class TablesService {
     console.error('TablesService Error:', error);
 
     const parsed = parseApiError(error);
-    let message = parsed.userMessage;
+    // El seam de orden incluye un diagnóstico de estado en español. El parser
+    // lo prioriza sobre ERROR_MESSAGES, pero aquí el mesero necesita el paso
+    // siguiente (esperar a que cocina marque listo en el KDS).
+    let message =
+      parsed.errorCode === 'ORDER_ITEM_NOT_DELIVERABLE'
+        ? ERROR_MESSAGES['ORDER_ITEM_NOT_DELIVERABLE']
+        : parsed.userMessage;
 
     if (message === DEFAULT_ERROR_MESSAGE) {
       message = tablesStatusErrorCopy(error);

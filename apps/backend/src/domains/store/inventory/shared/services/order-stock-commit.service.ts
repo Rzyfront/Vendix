@@ -1,3 +1,4 @@
+import { lockOrderLifecycle } from '../../../orders/order-flow/order-lifecycle-lock.util';
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
@@ -22,6 +23,8 @@ import { resolveLineStockUnits } from '../../../products/services/packaging.util
  * note delivered) so stock deduction is uniform across all delivery paths.
  */
 export interface CommitOpts {
+  /** Events owned by the outer transaction, when one is supplied. */
+  afterCommit?: Array<() => void>;
   /**
    * Inventory movement recorded on `updateStock`:
    * - `'sale'`   → order-flow / POS / credit close (a retail/ecommerce sale).
@@ -139,7 +142,28 @@ export class OrderStockCommitService {
     opts: CommitOpts,
     tx?: Prisma.TransactionClient,
   ): Promise<CommitResult> {
-    const db: any = tx ?? this.prisma;
+    if (!tx) {
+      const afterCommit: Array<() => void> = [];
+      const result = await this.prisma.$transaction(
+        (client) => this.commitOrderDelivery(orderId, { ...opts, afterCommit }, client),
+        { timeout: 20000 },
+      );
+      for (const publish of afterCommit) {
+        try { publish(); } catch (error) {
+          this.logger.warn(`Stock committed; notification failed: ${(error as Error).message}`);
+        }
+      }
+      return result;
+    }
+    const db = tx;
+    const scopedOrder = await db.orders.findFirst({
+      where: { id: orderId }, select: { id: true, store_id: true },
+    });
+    if (!scopedOrder) return { totalCost: 0, committedItemCount: 0 };
+    const locked = await lockOrderLifecycle(tx, orderId, scopedOrder.store_id);
+    if (['cancelled', 'refunded'].includes(locked.state)) {
+      throw new VendixHttpException(ErrorCodes.ORD_STOCK_COMMIT_STATE_001);
+    }
 
     const order = await db.orders.findUnique({
       where: { id: orderId },
@@ -148,7 +172,7 @@ export class OrderStockCommitService {
         order_items: {
           include: {
             products: {
-              select: { id: true, track_inventory: true, product_type: true },
+              select: { id: true, track_inventory: true, product_type: true, requires_serial_numbers: true },
             },
             product_variants: { select: { id: true } },
           },
@@ -162,6 +186,39 @@ export class OrderStockCommitService {
 
     const isRestaurant = storeIsRestaurant((order as any).stores?.industries);
     const posMatcher = this.buildPosMatcher(opts.posSelection);
+    const serialSelectionByLine = new Map<number, PosSelection>();
+
+    // E.1: flow/pay and other callers can reach this canonical commit without
+    // the POS DTO. For immediate direct delivery, never fall back to FIFO just
+    // because the frontend lost requires_serial_numbers during hydration.
+    // The persisted product flag is authoritative and the guard runs before
+    // ANY line claims stock; a throw rolls the caller's transaction back.
+    if (order.delivery_type === 'direct_delivery') {
+      const selectedIds = new Set<number>();
+      const selectedTexts = new Set<string>();
+      for (const item of order.order_items ?? []) {
+        if (!item.products?.requires_serial_numbers || item.inventory_committed ||
+            item.inventory_consumed_at_fire) continue;
+        const selection = posMatcher(item);
+        const ids = selection?.serial_ids ?? [];
+        const texts = (selection?.serial_numbers ?? []).map((value: string) => value.trim());
+        const count = Number(item.stock_units_consumed ?? item.quantity);
+        if (!opts.consumeSerials || !item.products.track_inventory ||
+            item.products.product_type !== 'physical' ||
+            !Number.isInteger(count) || count < 1 || ids.length + texts.length !== count ||
+            ids.some((id: number) => !Number.isInteger(id) || id < 1 || selectedIds.has(id)) ||
+            texts.some((text: string) => !text || selectedTexts.has(text)) ||
+            new Set(ids).size !== ids.length || new Set(texts).size !== texts.length) {
+          throw new VendixHttpException(
+            ErrorCodes.SERIAL_REQUIRED_001,
+            `Selecciona exactamente ${count} seriales distintos antes de entregar el producto ${item.product_name ?? item.product_id}.`,
+          );
+        }
+        ids.forEach((id: number) => selectedIds.add(id));
+        texts.forEach((value: string) => selectedTexts.add(value));
+        serialSelectionByLine.set(item.id, selection!);
+      }
+    }
 
     let totalCost = 0;
     let committedItemCount = 0;
@@ -181,7 +238,9 @@ export class OrderStockCommitService {
         inventory_committed: item.inventory_committed,
         inventory_consumed_at_fire: item.inventory_consumed_at_fire,
         skip_kds: item.skip_kds,
-        posSelection: opts.consumeSerials ? posMatcher(item) : undefined,
+        posSelection: opts.consumeSerials
+          ? (serialSelectionByLine.get(item.id) ?? posMatcher(item))
+          : undefined,
       };
 
       const res = await this.processLine(
@@ -541,6 +600,7 @@ export class OrderStockCommitService {
           user_id: opts.userId ?? RequestContextService.getUserId() ?? undefined,
           order_item_id: line.order_item_id ?? undefined,
           create_movement: true,
+          afterCommit: opts.afterCommit,
         },
         tx,
       );

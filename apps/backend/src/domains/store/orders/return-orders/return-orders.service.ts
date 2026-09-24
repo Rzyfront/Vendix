@@ -348,7 +348,13 @@ export class ReturnOrdersService {
         }
 
         this.eventEmitter.emit('refund.completed', {
+          // `refund_id` es `return_orders.id`, NO `refunds.id`: `source`
+          // separa el espacio de ids (source_type `return_order.refund` en el
+          // asiento) y `order_id` habilita el carril único de reversa frente
+          // a una nota crédito de la misma orden.
           refund_id: processed_return.id,
+          source: 'return_order',
+          order_id: processed_return.related_order_id ?? undefined,
           organization_id: processed_return.organization_id,
           store_id,
           amount: refund_amount,

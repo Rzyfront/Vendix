@@ -1,5 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+// QUI-INC — `tax_type_enum` se importa como VALOR además de como tipo: sus
+// miembros (`tax_type_enum.iva`) tienen el tipo literal que el create de
+// `invoice_taxes` espera, así que la clasificación fiscal llega al escritor
+// sin un solo cast. El `TaxFiscalType` de la capa de dominio refleja los
+// mismos seis valores, pero es un enum NOMINAL de TS y no es asignable a la
+// unión de literales de Prisma — de ahí venía el `as any` de salida.
+import { Prisma, tax_type_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -45,6 +51,42 @@ const INVOICE_INCLUDE = {
     select: { id: true, first_name: true, last_name: true },
   },
 };
+
+/**
+ * QUI-INC — la fila de impuesto de una nota, TAL COMO LLEGA. `tax_type` es
+ * opcional acá porque las tres procedencias posibles lo son en distinto
+ * grado: `dto.taxes[]` lo declara opcional, y las dos copias del documento
+ * padre lo leen de `invoice_taxes.tax_type`, que es una columna NULLABLE.
+ */
+interface IncomingNoteTaxRow {
+  tax_rate_id?: number;
+  tax_name: string;
+  tax_rate: number;
+  taxable_amount?: number;
+  tax_amount?: number;
+  tax_type?: string | null;
+}
+
+/**
+ * QUI-INC — la misma fila DESPUÉS de resolver el tipo fiscal contra su fila
+ * fuente. `tax_type` es obligatorio: una nota crédito es un documento
+ * electrónico FIRMADO que va a la DIAN, y acreditar un tributo distinto del
+ * que se facturó es un descuadre fiscal, no un detalle de forma.
+ */
+interface ResolvedNoteTaxRow extends IncomingNoteTaxRow {
+  tax_type: tax_type_enum;
+}
+
+const TAX_TYPE_VALUES: readonly string[] = Object.values(tax_type_enum);
+
+/**
+ * Guarda de tipo respaldada por una comprobación REAL contra el catálogo de
+ * valores del `tax_type_enum` de Postgres. Es lo que permite estrechar un
+ * `string` suelto sin escribir un cast a ciegas.
+ */
+function isTaxTypeEnum(value: unknown): value is tax_type_enum {
+  return typeof value === 'string' && TAX_TYPE_VALUES.includes(value);
+}
 
 @Injectable()
 export class CreditNotesService {
@@ -297,11 +339,13 @@ export class CreditNotesService {
       store_id: gate_context.store_id,
     });
 
-    const { invoice_number, resolution_id } =
-      await this.invoice_number_generator.generateNextNumber({
-        document_type: type,
-        accounting_entity_id: note_accounting_entity_id,
-      });
+    // El armado de líneas, impuestos y totales va ANTES de numerar. No es
+    // cosmético: `derivePartialNoteLinesViaKernel` falla cerrada
+    // (`INVOICING_CALC_005`/`_006`) y su propio docblock dice «el llamador
+    // numera después» — pero el llamador numeraba ANTES, así que una línea
+    // inválida gastaba el consecutivo antes de rechazarse. Además el total
+    // derivado es el insumo de la guarda de saldo acreditable de más abajo,
+    // que por la misma razón tiene que correr antes del generador.
 
     // Nota TOTAL: sin líneas propias se copian las de la factura corregida.
     // Iterar `dto.items` sin este fallback lanzaba un `TypeError` crudo —un 500
@@ -348,7 +392,7 @@ export class CreditNotesService {
             this.logger,
           )
         : null;
-    const taxes = dto.taxes?.length
+    const incoming_taxes: IncomingNoteTaxRow[] = dto.taxes?.length
       ? dto.taxes
       : derived_partial
         ? derived_partial.taxes
@@ -360,6 +404,16 @@ export class CreditNotesService {
             tax_amount: Number(t.tax_amount),
             tax_type: t.tax_type,
           }));
+
+    // QUI-INC — el tipo fiscal se resuelve ACÁ, contra la fila fuente, y ANTES
+    // de que `generateNextNumber` consuma un consecutivo: una nota que no
+    // puede clasificar su tributo no debe quemar un número de resolución.
+    const taxes = await this.resolveNoteTaxTypes(
+      incoming_taxes,
+      related_invoice.id,
+      type,
+      context.store_id ?? null,
+    );
 
     // Calculate amounts
     let subtotal = 0;
@@ -381,6 +435,32 @@ export class CreditNotesService {
       }
       total = subtotal - discount + tax;
     }
+
+    // ANTES de numerar, por la misma razón que las dos guardas de arriba: un
+    // consecutivo gastado no se devuelve. Se mide `new Prisma.Decimal(total)`,
+    // que es EXACTAMENTE la expresión que más abajo aterriza en la columna
+    // `total_amount`: la guarda juzga lo que se va a escribir, no una
+    // aproximación paralela.
+    //
+    // Sólo nota CRÉDITO: la nota débito AUMENTA el valor de la factura, no lo
+    // acredita, así que no consume saldo ni tiene techo que agotar.
+    if (type === 'credit_note') {
+      await this.assertWithinCreditableBalance(
+        {
+          id: related_invoice.id,
+          invoice_number: related_invoice.invoice_number,
+          total_amount: related_invoice.total_amount,
+          accounting_entity_id: note_accounting_entity_id,
+        },
+        new Prisma.Decimal(total),
+      );
+    }
+
+    const { invoice_number, resolution_id } =
+      await this.invoice_number_generator.generateNextNumber({
+        document_type: type,
+        accounting_entity_id: note_accounting_entity_id,
+      });
 
     // Fecha fiscal de la nota: HOY en el huso de la tienda. Derivarla en el
     // navegador es de donde salen los desfases de un día.
@@ -491,11 +571,19 @@ export class CreditNotesService {
                   // desambiguador que el escritor de facturas.
                   tax_rate: normalizeInvoiceTaxRate(
                     tax_item.tax_rate,
-                    (tax_item as any).tax_type,
+                    tax_item.tax_type,
                   ),
                   taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
                   tax_amount: new Prisma.Decimal(tax_item.tax_amount),
-                  tax_type: ((tax_item as any).tax_type ?? 'iva') as any,
+                  // QUI-INC — sin `??` y sin ningún `as`. `resolveNoteTaxTypes`
+                  // ya lo resolvió contra la fila fuente (el propio tributo del
+                  // documento padre, o la `tax_categories` del `tax_rate_id`),
+                  // y si no había de dónde resolverlo la nota no llegó hasta
+                  // acá. El `?? 'iva'` que había en este punto no podía
+                  // distinguir «tributo genuinamente sin tipar» de «tributo INC
+                  // cuyo tipo nadie propagó»: acreditaba con IVA lo que se
+                  // facturó como INC, en un documento que va firmado a la DIAN.
+                  tax_type: tax_item.tax_type,
                 };
               }),
             },
@@ -515,6 +603,185 @@ export class CreditNotesService {
       `${type === 'credit_note' ? 'Credit' : 'Debit'} note ${note.invoice_number} created for invoice #${related_invoice.id}`,
     );
     return note;
+  }
+
+  /**
+   * QUI-INC — resuelve el tipo fiscal de cada tributo de la nota EN SU FILA
+   * FUENTE, nunca en el punto de escritura.
+   *
+   * ## Por qué no vale un `?? 'iva'` junto al `create`
+   *
+   * En la capa de LECTURA «sin tipar significa IVA» es la regla correcta
+   * (`vendix-tax-typing`): toda fila histórica sin `tax_type` se agrega como
+   * IVA. Pero junto a un `prisma.create` ese mismo default deja de ser una
+   * lectura y pasa a ser una ESCRITURA: no puede distinguir «el tributo venía
+   * genuinamente sin clasificar» de «el tributo es INC y nadie propagó su
+   * tipo», y convierte el segundo caso en el primero. Así nació la factura
+   * electrónica de la tienda 105 declarando ante la DIAN un «IVA del 8 %»,
+   * tarifa que para IVA no existe en Colombia.
+   *
+   * ## La cascada
+   *
+   * 1. El tributo YA trae un tipo válido del `tax_type_enum` → se usa. Es el
+   *    caso normal: la copia total y la parcial derivada leen
+   *    `invoice_taxes.tax_type` del documento padre, que es la fila fuente de
+   *    esta nota (lo que se acredita es lo que se facturó).
+   * 2. No lo trae, pero sí un `tax_rate_id` → se resuelve contra el CATÁLOGO
+   *    (`tax_rates` → `tax_categories.tax_type`), que es la dueña única de la
+   *    columna. Ahí el `?? IVA` sí significa algo: es una categoría de verdad
+   *    sin clasificar. Mismo criterio que `payments.service.ts`.
+   * 3. Ni tipo ni id de catálogo → NO se inventa: se rechaza la nota. Una
+   *    nota crédito es un documento electrónico firmado; acreditar un tributo
+   *    distinto del facturado es un descuadre fiscal, no un detalle de forma.
+   *
+   * El lookup del catálogo va `withoutScope()` + filtro explícito de tienda
+   * (tarifa de la tienda o global, `store_id IS NULL`) porque el scope
+   * automático de `StorePrismaService` exige `store_id = <tienda>` y dejaría
+   * invisible la tarifa global/organizacional — que es justamente el caso que
+   * se está intentando resolver.
+   */
+  private async resolveNoteTaxTypes(
+    rows: IncomingNoteTaxRow[],
+    related_invoice_id: number,
+    document_type: 'credit_note' | 'debit_note',
+    store_id: number | null,
+  ): Promise<ResolvedNoteTaxRow[]> {
+    if (rows.length === 0) return [];
+
+    const pending_rate_ids = [
+      ...new Set(
+        rows
+          .filter((row) => !isTaxTypeEnum(row.tax_type))
+          .map((row) => row.tax_rate_id)
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    ];
+
+    const catalog = new Map<number, tax_type_enum>();
+    if (pending_rate_ids.length > 0) {
+      const catalog_rows = await this.prisma.withoutScope().tax_rates.findMany({
+        where: {
+          id: { in: pending_rate_ids },
+          ...(store_id != null
+            ? { OR: [{ store_id }, { store_id: null }] }
+            : {}),
+        },
+        select: {
+          id: true,
+          tax_categories: { select: { tax_type: true } },
+        },
+      });
+      for (const rate of catalog_rows) {
+        // La categoría es la fila fuente: acá —y sólo acá— «sin tipar
+        // significa IVA» es una lectura, no una fabricación.
+        catalog.set(
+          rate.id,
+          rate.tax_categories?.tax_type ?? tax_type_enum.iva,
+        );
+      }
+    }
+
+    return rows.map((row, index) => {
+      if (isTaxTypeEnum(row.tax_type)) {
+        return { ...row, tax_type: row.tax_type };
+      }
+      const resolved =
+        row.tax_rate_id != null ? catalog.get(row.tax_rate_id) : undefined;
+      if (resolved !== undefined) {
+        return { ...row, tax_type: resolved };
+      }
+      throw new VendixHttpException(
+        ErrorCodes.NOTE_TAX_TYPE_UNRESOLVABLE_001,
+        `El impuesto «${row.tax_name}» de la nota no declara tipo fiscal y no hay ` +
+          'fila de catálogo de la cual deducirlo. Envía `tax_type` (iva/inc/ica/...) ' +
+          'o un `tax_rate_id` que exista en esta tienda: una nota que acredita un ' +
+          'tributo distinto del que se facturó descuadra la declaración.',
+        {
+          tax_index: index,
+          tax_name: row.tax_name,
+          tax_rate_id: row.tax_rate_id ?? null,
+          related_invoice_id,
+          document_type,
+        },
+      );
+    });
+  }
+
+  /**
+   * Rechaza la nota crédito que excede el saldo acreditable que le queda a su
+   * factura padre.
+   *
+   * ## El límite es del CONJUNTO, no de cada nota
+   *
+   * Tres notas del 50 % sobre una factura de $100 acreditan $150 sobre $100
+   * facturados, y **cada una cabe por separado**: comparar cada nota contra el
+   * `total_amount` bruto del padre las deja pasar a las tres. Por eso el
+   * cálculo parte del SALDO RESTANTE —total del padre menos lo ya acreditado—
+   * y no del total bruto.
+   *
+   * ## Sólo cuentan las `accepted`
+   *
+   * Una nota es vigente cuando la DIAN la aceptó. `draft` todavía no se
+   * transmitió, `rejected` la devolvieron, y `cancelled`/`voided` dejaron de
+   * surtir efecto: ninguna acreditó un peso, así que ninguna consume saldo.
+   * Contarlas convertiría un borrador abandonado en un techo permanente sobre
+   * la factura.
+   *
+   * ## Helper propio, no `findNotesByRelatedInvoice`
+   *
+   * Aquel método es el lector de las cards de la orden (A.2) y devuelve NC y
+   * ND de TODOS los estados a propósito: el operador tiene que ver la nota
+   * rechazada. Meterle un `status: 'accepted'` para reciclarlo acá le cambiaría
+   * la respuesta a su consumidor de lectura, que es un contrato distinto del
+   * que necesita esta guarda. Se prefiere una consulta propia de diez líneas
+   * antes que un `where` compartido que sirva a medias a dos llamadores.
+   *
+   * Todo en `Decimal`: comparar saldos en `number` es de donde salen los
+   * centavos que se cuelan o se rechazan de más.
+   */
+  private async assertWithinCreditableBalance(
+    parent: {
+      id: number;
+      invoice_number: string;
+      total_amount: Prisma.Decimal;
+      accounting_entity_id: number;
+    },
+    note_total: Prisma.Decimal,
+  ): Promise<void> {
+    const prior_notes = await this.prisma.invoices.findMany({
+      where: {
+        related_invoice_id: parent.id,
+        accounting_entity_id: parent.accounting_entity_id,
+        invoice_type: 'credit_note',
+        status: 'accepted',
+      },
+      select: { id: true, invoice_number: true, total_amount: true },
+    });
+
+    const already_credited = prior_notes.reduce(
+      (acc, note) => acc.plus(new Prisma.Decimal(note.total_amount ?? 0)),
+      new Prisma.Decimal(0),
+    );
+    const parent_total = new Prisma.Decimal(parent.total_amount ?? 0);
+    const remaining = parent_total.minus(already_credited);
+
+    if (note_total.lessThanOrEqualTo(remaining)) return;
+
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_CREDIT_NOTE_001,
+      `La nota crédito de ${note_total.toString()} excede el saldo acreditable de la factura ${parent.invoice_number}: ` +
+        `de ${parent_total.toString()} facturados ya hay ${already_credited.toString()} acreditados en ${prior_notes.length} nota(s) aceptada(s), ` +
+        `así que quedan ${remaining.toString()}. Emite la nota por ese saldo o menos.`,
+      {
+        related_invoice_id: parent.id,
+        related_invoice_number: parent.invoice_number,
+        parent_total: parent_total.toString(),
+        already_credited: already_credited.toString(),
+        remaining: remaining.toString(),
+        attempted: note_total.toString(),
+        accepted_note_ids: prior_notes.map((note) => note.id),
+      },
+    );
   }
 
   /**
@@ -636,6 +903,23 @@ export interface DerivedPartialNoteLine {
  * (`divisor_for`, N3 y —desde R3-01— también N2): el precio del DTO copia la
  * escala de la factura (paquete de 12 a $36000, no $3000/unidad).
  */
+/**
+ * Agrupa las filas de `invoice_taxes` por tributo (tipo fiscal normalizado,
+ * untyped ⇒ iva) + tarifa. Conserva la PRIMERA fila de cada grupo como
+ * representante (su `tax_rate_id`/`tax_name` viajan a la fila de la nota).
+ */
+export function distinctInvoiceTaxSchemes<
+  T extends { tax_type: string | null; tax_rate: Prisma.Decimal | number },
+>(invoice_taxes: T[]): T[] {
+  const seen = new Map<string, T>();
+  for (const row of invoice_taxes) {
+    const type = (row.tax_type ?? '').trim().toLowerCase() || 'iva';
+    const key = `${type}|${Number(row.tax_rate).toFixed(4)}`;
+    if (!seen.has(key)) seen.set(key, row);
+  }
+  return Array.from(seen.values());
+}
+
 export function derivePartialNoteLinesViaKernel(
   items: Array<{
     product_id?: number | null;
@@ -649,6 +933,12 @@ export function derivePartialNoteLinesViaKernel(
     taxes?: Array<{ is_inclusive?: boolean | null }> | null;
   }>,
   related_items: Array<{
+    /**
+     * Id de la línea de la factura. Sólo lo usa el carril de esquemas
+     * mezclados: las filas de `invoice_taxes` ligadas por `invoice_item_id` a
+     * la gemela dicen qué tributo lleva ESA línea.
+     */
+    id?: number | null;
     product_id: number | null;
     product_variant_id: number | null;
     is_inclusive: boolean | null;
@@ -656,12 +946,18 @@ export function derivePartialNoteLinesViaKernel(
     // estas dos para exención por gemela y divisor de presentación.
     tax_amount?: Prisma.Decimal | number | null;
     price_unit_quantity?: Prisma.Decimal | number | null;
+    // Sólo para reconocer una nota que acredita la línea COMPLETA y heredar
+    // su cuota persistida (ver `fullTwinQuota`).
+    quantity?: Prisma.Decimal | number | null;
+    unit_price?: Prisma.Decimal | number | null;
+    discount_amount?: Prisma.Decimal | number | null;
   }>,
   invoice_taxes: Array<{
     tax_rate_id: number | null;
     tax_name: string;
     tax_rate: Prisma.Decimal | number;
     tax_type: string | null;
+    invoice_item_id?: number | null;
   }>,
   related_invoice_id: number,
   type: 'credit_note' | 'debit_note',
@@ -711,7 +1007,23 @@ export function derivePartialNoteLinesViaKernel(
       ? Math.floor(divisor_raw)
       : 1;
   };
-  if (invoice_taxes.length !== 1) {
+  // Un MISMO tributo puede venir en varias filas de `invoice_taxes`: desde el
+  // domicilio con INC (restaurante O-33) la factura de 1 plato + envío trae dos
+  // filas «INC 8%» (la del plato y la ligada al Envío). El despeje sólo necesita
+  // tipo + tarifa, así que se agrupa por ese par (untyped ⇒ iva, tarifa a 4
+  // decimales) antes de decidir si el esquema es único. Una factura de una fila
+  // se comporta idéntico: su único grupo ES su fila.
+  const schemes = distinctInvoiceTaxSchemes(invoice_taxes);
+  // FACTURA MIXTA con desglose por línea (p. ej. envío con IVA y platos con
+  // INC, `createFromOrder` con impuesto del envío): el esquema de cada línea
+  // de la nota sale de las filas ligadas por `invoice_item_id` a SU gemela.
+  // `null` = gemela exenta (sin filas y sin impuesto). Si alguna línea no se
+  // resuelve sin ambigüedad, el carril no aplica y se exige `taxes` como hoy.
+  const per_line_schemes =
+    schemes.length > 1
+      ? resolvePerLineNoteSchemes(items, related_items, invoice_taxes)
+      : null;
+  if (schemes.length !== 1 && !per_line_schemes) {
     const label = type === 'credit_note' ? 'nota crédito' : 'nota débito';
     const claimed = items.reduce(
       (acc, i) => acc.plus(new Prisma.Decimal(i.tax_amount || 0)),
@@ -721,7 +1033,7 @@ export function derivePartialNoteLinesViaKernel(
     // camino cero preservado (la regresión funcional: antes no lanzaba).
     // R3-01: la base también se escala por el divisor de la gemela — una
     // presentación en factura sin impuestos no vale 12× por omitir N3.
-    if (invoice_taxes.length === 0 && claimed.equals(0)) {
+    if (schemes.length === 0 && claimed.equals(0)) {
       const zero_lines = items.map((item) => {
         const base = new Prisma.Decimal(item.quantity)
           .times(new Prisma.Decimal(item.unit_price))
@@ -756,25 +1068,32 @@ export function derivePartialNoteLinesViaKernel(
     }
     throw new VendixHttpException(
       ErrorCodes.INVOICING_CALC_001,
-      invoice_taxes.length === 0
+      schemes.length === 0
         ? `Las líneas de la ${label} declaran ${claimed.toString()} de impuesto, pero la factura que corrigen no tiene ningún impuesto registrado del que derivarlo. Envía el desglose en «taxes».`
-        : `La factura que corrige esta ${label} mezcla ${invoice_taxes.length} impuestos (${invoice_taxes.map((t) => t.tax_name).join(', ')}), y las líneas sólo traen el importe total. Envía el desglose en «taxes» indicando cuánto corresponde a cada uno.`,
+        : `La factura que corrige esta ${label} mezcla ${schemes.length} impuestos (${schemes.map((t) => t.tax_name).join(', ')}), y las líneas sólo traen el importe total. Envía el desglose en «taxes» indicando cuánto corresponde a cada uno.`,
       {
         note_tax_amount: claimed.toNumber(),
-        invoice_tax_schemes: invoice_taxes.length,
+        invoice_tax_schemes: schemes.length,
       },
     );
   }
 
-  const scheme = invoice_taxes[0];
-  const scheme_type = (scheme.tax_type ?? '').trim().toLowerCase() || 'iva';
-  // Espejo de `resolveRateBasis` del motor y de `rateFractionPpm` del
-  // preview: sin `rate_basis` explícito el ICA (y su retención) van POR MIL.
-  const rate_basis =
-    scheme_type === 'ica' || scheme_type === 'reteica'
-      ? ('per_mil' as const)
-      : ('percent' as const);
-  const scheme_rate = Number(scheme.tax_rate);
+  type Scheme = (typeof invoice_taxes)[number];
+  const scheme_params = (row: Scheme) => {
+    const type = (row.tax_type ?? '').trim().toLowerCase() || 'iva';
+    return {
+      scheme_type: type,
+      // Espejo de `resolveRateBasis` del motor y de `rateFractionPpm` del
+      // preview: sin `rate_basis` explícito el ICA (y su retención) van POR MIL.
+      rate_basis:
+        type === 'ica' || type === 'reteica'
+          ? ('per_mil' as const)
+          : ('percent' as const),
+      scheme_rate: Number(row.tax_rate),
+    };
+  };
+  const scheme_of = (index: number): Scheme | null =>
+    per_line_schemes ? per_line_schemes[index] : schemes[0];
 
   const lines: DerivedPartialNoteLine[] = items.map((item, index) => {
     const quantity = new Prisma.Decimal(item.quantity);
@@ -785,6 +1104,18 @@ export function derivePartialNoteLinesViaKernel(
     // también en el carril de notas. Divisor compartido con N2 (`divisor_for`).
     const divisor = divisor_for(item);
     const gross = quantity.times(unit_price).dividedBy(divisor).minus(discount);
+
+    // Carril mixto: la gemela de esta línea es exenta ⇒ sin cuota.
+    const line_scheme = scheme_of(index);
+    if (line_scheme === null) {
+      return {
+        base_amount: gross,
+        tax_amount: new Prisma.Decimal(0),
+        total_amount: gross,
+        is_inclusive: false,
+      };
+    }
+    const { scheme_type, rate_basis, scheme_rate } = scheme_params(line_scheme);
 
     // Herencia de inclusividad del motor: flag de línea ⇒ primer impuesto
     // del DTO ⇒ línea de la factura (misma pareja, o la única) ⇒ adicional.
@@ -861,7 +1192,19 @@ export function derivePartialNoteLinesViaKernel(
       );
     }
 
-    const quota = kernel.quotas[0]?.quota ?? new Prisma.Decimal(0);
+    const kernel_quota = kernel.quotas[0]?.quota ?? new Prisma.Decimal(0);
+    // La nota que acredita la línea ENTERA devuelve exactamente la cuota que
+    // la factura declaró, no su re-despeje: una cuota truncada al vender
+    // (envío gravado, precio con impuesto incluido) difiere hasta un centavo.
+    const twin_quota = fullTwinQuota(
+      item,
+      related_items,
+      single_related,
+      is_inclusive,
+      kernel_quota,
+    );
+    const quota = twin_quota ?? kernel_quota;
+    const delta = quota.minus(kernel_quota);
     const claimed_tax = new Prisma.Decimal(item.tax_amount || 0);
     if (!claimed_tax.equals(quota)) {
       logger?.warn(
@@ -870,9 +1213,13 @@ export function derivePartialNoteLinesViaKernel(
       );
     }
     return {
-      base_amount: kernel.base,
+      // Inclusiva: el total queda (es el bruto) y la base absorbe el delta.
+      // Adicional: la base queda y el total lo suma.
+      base_amount: is_inclusive ? kernel.base.minus(delta) : kernel.base,
       tax_amount: quota,
-      total_amount: kernel.closed_total,
+      total_amount: is_inclusive
+        ? kernel.closed_total
+        : kernel.closed_total.plus(delta),
       is_inclusive,
     };
   });
@@ -895,12 +1242,46 @@ export function derivePartialNoteLinesViaKernel(
   );
 
   if (totals.tax.isZero()) return { taxes: [], lines, totals };
+  if (per_line_schemes) {
+    // Una fila por tributo (tipo + tarifa), con la base y la cuota de SUS
+    // líneas: cada fila cuadra base × tarifa y Σ filas = impuesto de cabecera.
+    const groups = new Map<
+      string,
+      { scheme: Scheme; base: Prisma.Decimal; tax: Prisma.Decimal }
+    >();
+    lines.forEach((line, index) => {
+      const line_scheme = per_line_schemes[index];
+      if (line_scheme === null) return;
+      const key = schemeKey(line_scheme);
+      const group = groups.get(key) ?? {
+        scheme: line_scheme,
+        base: new Prisma.Decimal(0),
+        tax: new Prisma.Decimal(0),
+      };
+      group.base = group.base.plus(line.base_amount);
+      group.tax = group.tax.plus(line.tax_amount);
+      groups.set(key, group);
+    });
+    return {
+      taxes: Array.from(groups.values()).map((group) => ({
+        tax_rate_id: group.scheme.tax_rate_id ?? undefined,
+        tax_name: group.scheme.tax_name,
+        tax_rate: Number(group.scheme.tax_rate),
+        taxable_amount: group.base.toNumber(),
+        tax_amount: group.tax.toNumber(),
+        tax_type: group.scheme.tax_type,
+      })),
+      lines,
+      totals,
+    };
+  }
+  const scheme = schemes[0];
   return {
     taxes: [
       {
         tax_rate_id: scheme.tax_rate_id ?? undefined,
         tax_name: scheme.tax_name,
-        tax_rate: scheme_rate,
+        tax_rate: Number(scheme.tax_rate),
         taxable_amount: totals.subtotal.toNumber(),
         tax_amount: totals.tax.toNumber(),
         tax_type: scheme.tax_type,
@@ -909,4 +1290,164 @@ export function derivePartialNoteLinesViaKernel(
     lines,
     totals,
   };
+}
+
+const FULL_TWIN_MAX_DELTA = new Prisma.Decimal('0.01');
+
+const decimalOrNull = (value: unknown): Prisma.Decimal | null => {
+  if (value == null) return null;
+  try {
+    return new Prisma.Decimal(value as Prisma.Decimal.Value);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Cuota persistida de la línea gemela cuando la nota la acredita COMPLETA:
+ * misma pareja producto+variante (o la única línea), misma cantidad, mismo
+ * precio unitario, mismo descuento y misma inclusividad. Sólo se hereda si
+ * difiere del re-despeje en un centavo o menos —la holgura de un truncado
+ * hecho al vender—; más que eso no es truncado y el kernel manda. `null` =
+ * no aplica (nota parcial de la línea, o sin gemela exacta).
+ */
+function fullTwinQuota(
+  item: {
+    product_id?: number | null;
+    product_variant_id?: number | null;
+    quantity: number;
+    unit_price: number;
+    discount_amount?: number | null;
+  },
+  related_items: Array<{
+    product_id: number | null;
+    product_variant_id: number | null;
+    is_inclusive: boolean | null;
+    tax_amount?: Prisma.Decimal | number | null;
+    quantity?: Prisma.Decimal | number | null;
+    unit_price?: Prisma.Decimal | number | null;
+    discount_amount?: Prisma.Decimal | number | null;
+  }>,
+  single_related: (typeof related_items)[number] | undefined,
+  is_inclusive: boolean,
+  kernel_quota: Prisma.Decimal,
+): Prisma.Decimal | null {
+  const quantity = new Prisma.Decimal(item.quantity);
+  const unit_price = new Prisma.Decimal(item.unit_price);
+  const discount = new Prisma.Decimal(item.discount_amount || 0);
+  const candidates = single_related
+    ? [single_related]
+    : related_items.filter(
+        (rel) =>
+          (rel.product_id ?? null) === (item.product_id ?? null) &&
+          (rel.product_variant_id ?? null) ===
+            (item.product_variant_id ?? null),
+      );
+  const twin = candidates.find((rel) => {
+    const rel_quantity = decimalOrNull(rel.quantity);
+    const rel_price = decimalOrNull(rel.unit_price);
+    return (
+      rel_quantity !== null &&
+      rel_price !== null &&
+      rel_quantity.equals(quantity) &&
+      rel_price.equals(unit_price) &&
+      (decimalOrNull(rel.discount_amount) ?? new Prisma.Decimal(0)).equals(
+        discount,
+      ) &&
+      (rel.is_inclusive === true) === is_inclusive &&
+      decimalOrNull(rel.tax_amount) !== null
+    );
+  });
+  if (!twin) return null;
+  const persisted = decimalOrNull(twin.tax_amount) as Prisma.Decimal;
+  const delta = persisted.minus(kernel_quota).abs();
+  if (delta.isZero() || delta.greaterThan(FULL_TWIN_MAX_DELTA)) return null;
+  return persisted;
+}
+
+/** Clave de tributo de `distinctInvoiceTaxSchemes` (untyped ⇒ iva, tarifa a 4 decimales). */
+function schemeKey(row: {
+  tax_type: string | null;
+  tax_rate: Prisma.Decimal | number;
+}): string {
+  const type = (row.tax_type ?? '').trim().toLowerCase() || 'iva';
+  return `${type}|${Number(row.tax_rate).toFixed(4)}`;
+}
+
+/**
+ * Esquema de cada línea de una nota PARCIAL sobre una factura que mezcla
+ * tributos, leído del desglose persistido (`invoice_taxes.invoice_item_id`)
+ * de la línea gemela. Devuelve, por línea: la fila representante de su único
+ * tributo, o `null` si la gemela es exenta (sin filas, sin impuesto, y la nota
+ * no reclama cuota). Devuelve `null` para TODO si alguna línea no se resuelve
+ * sin ambigüedad (sin gemela con id, gemelas con esquemas distintos, varias
+ * filas de tributo en la misma línea): el llamador exige `taxes` como hoy.
+ */
+function resolvePerLineNoteSchemes<
+  S extends {
+    tax_type: string | null;
+    tax_rate: Prisma.Decimal | number;
+    invoice_item_id?: number | null;
+  },
+>(
+  items: Array<{
+    product_id?: number | null;
+    product_variant_id?: number | null;
+    tax_amount?: number | null;
+    taxes?: unknown[] | null;
+  }>,
+  related_items: Array<{
+    id?: number | null;
+    product_id: number | null;
+    product_variant_id: number | null;
+    tax_amount?: Prisma.Decimal | number | null;
+  }>,
+  invoice_taxes: S[],
+): Array<S | null> | null {
+  if (!invoice_taxes.some((row) => row.invoice_item_id != null)) return null;
+  const resolved: Array<S | null> = [];
+  for (const item of items) {
+    const twins =
+      related_items.length === 1
+        ? related_items
+        : related_items.filter(
+            (rel) =>
+              (rel.product_id ?? null) === (item.product_id ?? null) &&
+              (rel.product_variant_id ?? null) ===
+                (item.product_variant_id ?? null),
+          );
+    if (twins.length === 0 || twins.some((twin) => twin.id == null)) {
+      return null;
+    }
+    // Todas las gemelas candidatas deben declarar el MISMO tributo (o ser
+    // todas exentas): elegir una sería inventar el esquema de la nota.
+    const verdicts = twins.map((twin) => {
+      const linked = invoice_taxes.filter(
+        (row) =>
+          row.invoice_item_id != null &&
+          Number(row.invoice_item_id) === Number(twin.id),
+      );
+      const line_schemes = distinctInvoiceTaxSchemes(linked);
+      if (line_schemes.length === 1) return line_schemes[0];
+      if (line_schemes.length === 0 && Number(twin.tax_amount ?? NaN) === 0) {
+        return null;
+      }
+      return undefined;
+    });
+    if (verdicts.some((verdict) => verdict === undefined)) return null;
+    const keys = new Set(
+      verdicts.map((verdict) => (verdict ? schemeKey(verdict) : 'exempt')),
+    );
+    if (keys.size !== 1) return null;
+    const verdict = verdicts[0] as S | null;
+    // Gemela exenta pero la nota reclama cuota ⇒ no hay de dónde derivarla.
+    if (
+      verdict === null &&
+      (Number(item.tax_amount || 0) !== 0 || (item.taxes?.length ?? 0) > 0)
+    ) {
+      return null;
+    }
+    resolved.push(verdict);
+  }
+  return resolved;
 }

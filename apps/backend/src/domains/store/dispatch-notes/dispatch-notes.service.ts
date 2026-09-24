@@ -2024,13 +2024,19 @@ export class DispatchNotesService {
     // ready to leave). `pending_payment` is admitted for the COD shortcut: the
     // courier collects on delivery, so the order may not be paid yet.
     if (order.state !== 'processing' && order.state !== 'pending_payment') {
-      throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
+      throw new VendixHttpException(
+        ErrorCodes.DSP_ORDER_STATE_001,
+        `La orden #${order_id} está en estado "${order.state}". Para generar la remisión debe estar en "processing" o "pending_payment". Revise el estado de la orden antes de despacharla.`,
+      );
     }
 
     // Direct-delivery orders hand the goods over immediately at the counter;
     // they do not go through the remisión + recaudo cycle.
     if (order.delivery_type === 'direct_delivery') {
-      throw new VendixHttpException(ErrorCodes.DSP_ORDER_DELIVERY_001);
+      throw new VendixHttpException(
+        ErrorCodes.DSP_ORDER_DELIVERY_001,
+        `La orden #${order_id} tiene tipo de entrega "${order.delivery_type}", que se entrega en el acto y no requiere remisión. Si necesita envío, corrija el tipo de entrega antes de despacharla.`,
+      );
     }
 
     // Delivery address gate: a remisión needs a place to deliver. The address
@@ -2058,8 +2064,9 @@ export class DispatchNotesService {
       );
     }
 
-    const customer_name =
-      `${order.users?.first_name || ''} ${order.users?.last_name || ''}`.trim();
+    const customer_name = order.users
+      ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
+      : order.customer_alias?.trim() || '';
 
     // Resolve the default dispatch location: the active reservation's location
     // for this order, falling back to the store default. Used when an item
@@ -2120,7 +2127,10 @@ export class DispatchNotesService {
       }
       if (effective_items.length === 0) {
         // Nothing left to dispatch — order already fully remitida.
-        throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
+        throw new VendixHttpException(
+          ErrorCodes.DSP_ORDER_STATE_001,
+          `La orden #${order_id} no tiene unidades pendientes por remitir. Revise las remisiones existentes antes de intentar crear otra.`,
+        );
       }
     }
 
@@ -3282,12 +3292,18 @@ export class DispatchNotesService {
     if (
       !(POOL_PUBLISHABLE_ORDER_STATES as readonly string[]).includes(order.state)
     ) {
-      throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
+      throw new VendixHttpException(
+        ErrorCodes.DSP_ORDER_STATE_001,
+        `La orden #${order_id} está en estado "${order.state}". Para publicarla en el pool de despacho debe estar en "processing" o "pending_payment". Revise el estado de la orden.`,
+      );
     }
 
     // Envío directo se entrega en el mostrador; no pasa por el ciclo remisión.
     if (order.delivery_type === 'direct_delivery') {
-      throw new VendixHttpException(ErrorCodes.DSP_ORDER_DELIVERY_001);
+      throw new VendixHttpException(
+        ErrorCodes.DSP_ORDER_DELIVERY_001,
+        `La orden #${order_id} tiene tipo de entrega "${order.delivery_type}", que se entrega en el acto y no va al pool de despacho. Si necesita envío, corrija el tipo de entrega antes de publicarla.`,
+      );
     }
 
     // Ya remitida al 100% → sólo se rechaza si NO queda nada que un repartidor
@@ -3307,10 +3323,14 @@ export class DispatchNotesService {
         },
       });
       if (takeableNotes === 0) {
-        throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001, undefined, {
-          order_id,
-          reason: 'order_fully_dispatched_nothing_takeable',
-        });
+        throw new VendixHttpException(
+          ErrorCodes.DSP_ORDER_STATE_001,
+          `La orden #${order_id} ya está remitida por completo y no tiene remisiones disponibles para el repartidor. Revise sus remisiones y paradas de ruta antes de publicarla.`,
+          {
+            order_id,
+            reason: 'order_fully_dispatched_nothing_takeable',
+          },
+        );
       }
     }
 
@@ -3344,7 +3364,7 @@ export class DispatchNotesService {
         // preservar y el contexto del pool es lo único útil que podemos dar.
         throw new VendixHttpException(
           ErrorCodes.DSP_ORDER_STATE_001,
-          undefined,
+          `No se pudo crear la remisión de la orden #${order_id} para el pool de despacho. Revise la orden e intente publicarla de nuevo.`,
           {
             order_id,
             reason: 'send_to_pool_create_note_failed',

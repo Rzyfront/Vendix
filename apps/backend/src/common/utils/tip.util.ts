@@ -9,8 +9,9 @@
  *
  *  - Si llega `tip_amount` directo, gana sobre cualquier porcentaje.
  *  - Si NO llega `tip_amount` y llega `tip_type='percentage'`, se calcula sobre
- *    la BASE GRAVABLE (subtotal de venta), no sobre el total: nadie da propina
- *    sobre el IVA ni sobre el envío. Convención contable colombiana.
+ *    el BRUTO DE PRODUCTOS (subtotal + impuesto de productos). No incluye
+ *    envío, descuentos ni una propina previa. E.6: 100.000 + 19.000 al 10 %
+ *    da 11.900 en mesa, POS retail y flow/pay.
  *  - Si `tip_value` falta o es <= 0, no se calcula nada. La propina nunca es
  *    obligatoria.
  *  - El porcentaje se persiste RESUELTO A MONTO con `tip_type='fixed'`: si
@@ -40,13 +41,14 @@ export interface ResolvedTip {
 
 /**
  * @param input        Campos de propina tal como llegan del DTO.
- * @param taxableBase  Subtotal de venta sobre el que se calcula un porcentaje.
+ * @param grossProductsBase  Subtotal + impuesto de productos sobre el que se
+ *                           calcula un porcentaje; no incluye la propina.
  * @param round        Redondeo monetario del llamador (para que POS y
  *                     order-flow redondeen idéntico y no difieran en centavos).
  */
 export function resolveTip(
   input: TipInput,
-  taxableBase: number,
+  grossProductsBase: number,
   round: (value: number) => number,
 ): ResolvedTip {
   let amount = round(input.tip_amount || 0);
@@ -55,8 +57,7 @@ export function resolveTip(
     input.tip_value != null ? round(input.tip_value) : null;
 
   if (amount === 0 && type === 'percentage' && value != null && value > 0) {
-    // Base: subtotal de venta, NO total con impuestos.
-    amount = round((taxableBase * value) / 100);
+    amount = round((grossProductsBase * value) / 100);
     // Resuelto a monto: la propina ya está pactada.
     type = 'fixed';
     value = amount;

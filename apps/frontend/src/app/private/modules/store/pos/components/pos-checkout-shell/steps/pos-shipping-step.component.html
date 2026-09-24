@@ -7,6 +7,16 @@
     </div>
   }
 
+  @if (preservationWarning()) {
+    <div class="flash-banner" role="status">{{ preservationWarning() }}</div>
+  }
+  @if (quoteError()) {
+    <div class="flash-banner" role="alert">{{ quoteError() }}</div>
+  }
+  @if (missingShippingMethodReason()) {
+    <div class="flash-banner" role="alert">{{ missingShippingMethodReason() }}</div>
+  }
+
   <!-- Sub-wizard vertical: opciones a la izquierda · steps-line a la derecha.
        Sub-pasos: 0=Método · 1=Costo (terminal). Espeja Cobro. El "cuándo paga"
        ya no es un sub-paso: contra entrega es el método cash_on_delivery que el
@@ -26,9 +36,9 @@
             <h2 class="section-title">Método de envío</h2>
           </div>
 
-          @if (shippingMethods().length > 0) {
+          @if (activeShippingMethods().length > 0) {
             <div class="method-grid">
-              @for (method of shippingMethods(); track method.id) {
+              @for (method of activeShippingMethods(); track method.id) {
                 <button
                   type="button"
                   (click)="selectShippingMethod(method)"
@@ -72,15 +82,72 @@
         </button>
       }
 
-      <!-- SUB-STEP 1 · Costo de envío + notas + totales (terminal) -->
-      @if (shipSubStep() === 1) {
+      <!-- SUB-STEP 1 · Dirección de entrega (solo cuando el método lo requiere) -->
+      @if (requiresAddress()) {
+        @if (shipSubStep() === 1) {
+          <section
+            class="address-section"
+            [class.config-flash-warning]="flashSection() === 'address'"
+          >
+            <div class="section-header">
+              <app-icon name="map-pin" [size]="20" class="section-icon"></app-icon>
+              <h2 class="section-title">Dirección de entrega</h2>
+              @if (!addressValid()) {
+                <span
+                  class="addr-required-badge"
+                  [class.addr-required-badge--error]="showAddressErrors()"
+                  >Obligatoria</span
+                >
+              }
+            </div>
+            @if (cartState()?.shippingContext && cartState()?.customer?.addresses?.length) {
+              <div class="method-grid" aria-label="Direcciones guardadas del cliente">
+                @for (saved of cartState()!.customer!.addresses!; track saved.id) {
+                  <button type="button" class="method-card"
+                    [class.selected]="addressId() === saved.id"
+                    (click)="selectSavedAddress(saved.id)">
+                    {{ saved.address_line1 }}, {{ saved.city }}
+                  </button>
+                }
+              </div>
+            }
+            @if (originalShipping() && !addressEditing()) {
+              <p>{{ addressSummary() }}</p>
+              <button type="button" class="no-methods-link" (click)="addressEditing.set(true)">
+                Editar dirección
+              </button>
+            } @else {
+              <app-address-form-fields
+                [initialAddress]="initialAddress()"
+                [requirePhone]="true"
+                [showErrors]="showAddressErrors()"
+                (addressChange)="onAddressChange($event)"
+                (validChange)="onAddressValidChange($event)"
+              ></app-address-form-fields>
+            }
+          </section>
+        } @else if (shipSubStep() > 1 && address()) {
+          <button type="button" class="ship-collapsed" (click)="goToShipSubStep(1)">
+            <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
+            <span class="sw-label">Dirección: {{ addressSummary() }}</span>
+            <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
+          </button>
+        }
+      }
+
+      <!-- SUB-STEP TERMINAL · Costo de envío + notas + totales -->
+      @if (isCostSubStep()) {
         @if (selectedShippingMethod()) {
           <!-- Card · Costo de envío -->
           <div class="cost-card">
             <div class="cost-row">
               <span class="cost-row-label"
                 >Costo de envío
-                {{ manualCostOverride() ? '(manual)' : '(automático)' }}</span
+                @if (isPickupMethod()) {
+                  (sin costo)
+                } @else {
+                  {{ manualCostOverride() ? '(manual)' : '(automático)' }}
+                }</span
               >
               @if (isCalculatingShipping()) {
                 <span class="cost-calculating">
@@ -92,7 +159,7 @@
               }
             </div>
 
-            @if (calculatedShippingCost() !== null) {
+            @if (!isPickupMethod() && calculatedShippingCost() !== null) {
               <div class="cost-divider"></div>
               <div class="cost-row cost-row--toggle">
                 <span class="cost-toggle-label">Editar costo manualmente</span>
@@ -104,7 +171,7 @@
               </div>
             }
 
-            @if (manualCostOverride() || calculatedShippingCost() === null) {
+            @if (!isPickupMethod() && (manualCostOverride() || calculatedShippingCost() === null)) {
               <div class="manual-cost-input">
                 <div class="cash-input">
                   <span class="currency">{{ currencySymbol() }}</span>
@@ -121,13 +188,15 @@
 
           <!-- Notas de envío (opcional) -->
           <div class="notes-block">
-            <label class="notes-label" for="ship-notes">Notas de envío (opcional)</label>
+            <label class="notes-label" for="ship-notes">
+              {{ isPickupMethod() ? 'Notas (opcional)' : 'Notas de envío (opcional)' }}
+            </label>
             <textarea
               id="ship-notes"
               class="notes-textarea"
               [formControl]="deliveryNotesControl"
               rows="2"
-              placeholder="Dejar en portería, timbre 2"
+              [placeholder]="isPickupMethod() ? 'Persona que retira, etc.' : 'Dejar en portería, timbre 2'"
             ></textarea>
           </div>
 
@@ -178,6 +247,10 @@
         [clickable]="true"
         (stepClicked)="goToShipSubStep($event)"
       ></app-steps-line>
+      <p class="sr-only" aria-live="polite" aria-atomic="true">
+        Sub-paso {{ shipSubStep() + 1 }} de {{ shipSubSteps().length }}:
+        {{ shipSubSteps()[shipSubStep()]?.label }}
+      </p>
     </aside>
   </div>
 </div>

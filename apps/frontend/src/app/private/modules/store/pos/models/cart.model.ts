@@ -1,5 +1,6 @@
 import { Product, PosProductVariant } from '../services/pos-product.service';
 import { PosCustomer } from '../models/customer.model';
+import type { PosShippingMethod } from './shipping.model';
 import { WithholdingLine } from '../../withholding-tax/interfaces/withholding.interface';
 
 export interface CartItem {
@@ -180,18 +181,101 @@ export interface PendingBooking {
  * Fulfillment context carried by the cart. Mirrors the editor payload shape
  * (`UpdateOrderEditorDto` accepts `delivery_type`, `shipping_address_id`,
  * `billing_address_id`, `shipping_method_id`, `shipping_rate_id`,
- * `shipping_cost`). Read from `editingOrder` on load, forwarded verbatim by
- * `buildEditorRequest`. Nulls are intentional: an order with no shipping
- * (pickup) keeps every key null and the editor endpoint treats them as
+ * `shipping_cost`). Nulls are intentional: an order with no shipping
+ * (direct_delivery) keeps every key null and the editor endpoint treats them as
  * "no change".
+ *
+ * F-FLETE — quién lo escribe y quién lo lee (antes esta nota MENTÍA: decía
+ * "populated by `loadFromOrder`" cuando no existía un solo escritor en todo
+ * el POS, y el carril vivo de edición reconstruía el envío desde cero):
+ *
+ *  - ESCRITOR: `PosCartService.loadFromOrder` (`pos-cart.service.ts`), en sus
+ *    DOS ramas (orden con líneas y orden vacía).
+ *  - LECTORES: `PosCheckoutShellComponent.buildEditorShippingPayload` (carril
+ *    VIVO, el que arma el PUT /editor) y `PosComponent.buildEditorRequest`
+ *    (carril legado). Ambos deciden con `hasShipmentContext()`.
+ *  - MAPEO INVERSO al wizard: `deliveryTypeToEntregaChoice()` — único sitio
+ *    donde `order_delivery_type_enum` (5 valores) se colapsa a los 3 de
+ *    `EntregaChoice`.
  */
+export interface ShippingAddressSnapshot {
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  state_province: string | null;
+  country_code: string | null;
+  postal_code: string | null;
+  phone_number: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  municipality_code?: string | null;
+}
+
 export interface ShippingContext {
+  /** Immutable order identity/owner: customer changes must not adopt this address. */
+  orderId?: number | null;
+  customerId?: number | null;
+  shippingAddress?: ShippingAddressSnapshot | null;
+  shippingMethod?: PosShippingMethod | null;
   deliveryType: string | null;
   shippingAddressId: number | null;
   billingAddressId: number | null;
   shippingMethodId: number | null;
   shippingRateId: number | null;
   shippingCost: number | null;
+}
+
+/**
+ * ¿El snapshot describe una orden CON flete? Es el predicado que separa
+ * "preservar el envío de la orden" de "no hay nada que preservar".
+ *
+ * Evidencia de flete = método de envío asignado O costo > 0. Un
+ * `delivery_type` por sí solo NO alcanza: `order_delivery_type_enum` tiene
+ * `direct_delivery` como DEFAULT de columna (`schema.prisma:1522`), así que
+ * una venta de mostrador creada sin especificar nada ya nace
+ * `direct_delivery` sin un peso de flete.
+ */
+export function hasShipmentContext(
+  context: Pick<ShippingContext, 'shippingMethodId' | 'shippingCost'> | null | undefined,
+): boolean {
+  if (!context) return false;
+  if (context.shippingMethodId != null) return true;
+  const cost = Number(context.shippingCost ?? 0);
+  return Number.isFinite(cost) && cost > 0;
+}
+
+/**
+ * Mapeo inverso `order_delivery_type_enum` → carril del wizard de checkout.
+ *
+ * ÚNICA definición. Antes vivía duplicada y coja en dos sitios de
+ * `pos.component.ts` como `delivery_type === 'home_delivery' ? 'enviar' :
+ * 'llevar'`: no reconocía `dine_in` (mesa QR se veía como "llevar") y
+ * colapsaba `direct_delivery` y `other` a "llevar", que es justo lo que
+ * llevaba al shell a forzar `delivery_type: 'pickup'` sobre un borrador que
+ * era `direct_delivery` — cambiarle la naturaleza a la orden por el solo
+ * hecho de reabrirla.
+ *
+ * `pickup` es una recogida diferida elegida como método de envío: vuelve al
+ * carril Enviar, nunca al botón Para llevar. `direct_delivery` / `other` son
+ * ambiguos por sí mismos (ver
+ * {@link hasShipmentContext}): se resuelven por la EVIDENCIA de flete, no por
+ * la etiqueta.
+ */
+export function deliveryTypeToEntregaChoice(
+  context: ShippingContext | null | undefined,
+): 'mesa' | 'llevar' | 'enviar' {
+  switch (context?.deliveryType ?? null) {
+    case 'home_delivery':
+      return 'enviar';
+    case 'dine_in':
+      return 'mesa';
+    case 'pickup':
+      return 'enviar';
+    case 'direct_delivery':
+    case 'other':
+    default:
+      return hasShipmentContext(context) ? 'enviar' : 'llevar';
+  }
 }
 
 export interface CartState {
@@ -216,8 +300,11 @@ export interface CartState {
   linkedOrderId: number | null;
   linkedOrderNumber: string | null;
   /**
-   * Fulfillment snapshot — populated by `loadFromOrder`, forwarded by
-   * `buildEditorRequest`. Undefined = no shipping / unknown.
+   * Fulfillment snapshot de la orden en edición. Lo escribe
+   * `PosCartService.loadFromOrder`; lo consumen el shell (PUT /editor) y
+   * `buildEditorRequest`. Undefined = carrito libre (no venimos de una
+   * orden), que NO es lo mismo que "orden sin envío" — esa llega con el
+   * objeto poblado y sus ids en `null`.
    */
   shippingContext?: ShippingContext;
 }

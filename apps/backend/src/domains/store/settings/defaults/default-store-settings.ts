@@ -130,9 +130,6 @@ export function getDefaultStoreSettings(): StoreSettings {
       // DTO garantiza que nunca se guarde true con allow_alias_sales=false.
       allow_alias_sales: false,
       alias_sales_as_default: false,
-      // F-127 — la compuerta fiscal por linea nace BLOQUEANTE: sin esta
-      // clave configurada el comportamiento es identico al de siempre.
-      tax_line_gate: 'block' as const,
       business_hours: getDefaultBusinessHours(),
       schedule_mode: 'continuous',
       enable_schedule_validation: false,
@@ -455,6 +452,12 @@ export function getDefaultStoreSettings(): StoreSettings {
       default_settlement_type: 'none',
       default_cost_settlement_timing: 'immediate_on_close',
       requires_dispatch_address: true,
+      // QUI-844 — métodos ofrecidos en el selector de despacho. Opt-out: la
+      // tienda apaga los que no usa; el merge con defaults cubre tiendas
+      // existentes sin estos keys.
+      enable_dispatch_with_remision: true,
+      enable_dispatch_direct_delivery: true,
+      enable_dispatch_to_pool: true,
     },
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is

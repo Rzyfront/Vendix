@@ -5,6 +5,8 @@ import {
 } from './fiscal-invoice-pdf-render.service';
 import {
   resolveFiscalIssuerForPrint,
+  resolveFiscalQualitiesLine,
+  resolvePrintableFiscalQualities,
 } from './fiscal-issuer-identity';
 import { PrintLayoutComposerService } from './print-layout-composer.service';
 import { PrintTemplateCompilerService } from './print-template-compiler.service';
@@ -542,7 +544,76 @@ describe('FiscalInvoicePdfRenderService — integración con paper_definitions (
     expect(debugSpy.mock.calls.some((c) => String(c[0] ?? '').includes('paper_definition_resolved'))).toBe(true);
   });
 
-  describe('resolveFiscalIssuerForPrint — resolución segura de régimen tributario', () => {
+  /**
+   * CALIDADES FISCALES DEL NUM. 12 — la cabecera ya no declara régimen.
+   *
+   * Defecto cerrado: Pollo Árabe, restaurante responsable ÚNICAMENTE de INC
+   * (casilla 53 = O-05, O-07, O-14, O-33, O-42, O-52, O-55), imprimía
+   * «Responsable de IVA» en la cabecera de su factura electrónica. Esa leyenda
+   * es herencia del art. 506 E.T., derogado por la Ley 1943/2018 (art. 122) y
+   * la Ley 2010/2019 (art. 160); el num. 12 del art. 11 de la Res. DIAN
+   * 000165/2023 enumera otras CUATRO calidades y sólo «cuando corresponda».
+   *
+   * Que el resultado correcto sea la AUSENCIA de línea es justo lo que un
+   * reemplazo ingenuo («No responsable de IVA») volvería a romper, así que la
+   * compuerta fija `undefined`, no una cadena.
+   */
+  describe('resolveFiscalQualitiesLine — num. 12 art. 11 Res. 000165/2023', () => {
+    it('no emite ninguna calidad para Pollo Árabe (INC, sin O-13/O-15/O-23/O-47)', () => {
+      const polloArabe = ['O-05', 'O-07', 'O-14', 'O-33', 'O-42', 'O-52', 'O-55'];
+      expect(resolvePrintableFiscalQualities(polloArabe)).toEqual([]);
+      expect(resolveFiscalQualitiesLine(polloArabe)).toBeUndefined();
+    });
+
+    it('NO sustituye la leyenda derogada por «No responsable de IVA»', () => {
+      // O-49 declara explícitamente la NO responsabilidad de IVA y aun así no
+      // produce renglón: el num. 12 no la enumera. Para una persona jurídica el
+      // código 49 normalmente ni siquiera procede.
+      expect(resolveFiscalQualitiesLine(['O-49'])).toBeUndefined();
+      expect(resolveFiscalQualitiesLine(['O-48'])).toBeUndefined();
+    });
+
+    it('emite las DOS calidades de un gran contribuyente autorretenedor, en el orden del num. 12', () => {
+      expect(resolveFiscalQualitiesLine(['O-13', 'O-15', 'O-48'])).toBe(
+        'Autorretenedor del Impuesto sobre la Renta y Complementarios | Gran contribuyente',
+      );
+      // El orden del renglón NO depende del orden en que el tenant guardó los
+      // códigos: dos emisores con las mismas calidades imprimen lo mismo.
+      expect(resolveFiscalQualitiesLine(['O-15', 'O-13'])).toBe(
+        resolveFiscalQualitiesLine(['O-13', 'O-15']),
+      );
+    });
+
+    it('emite la calidad del régimen SIMPLE', () => {
+      expect(resolveFiscalQualitiesLine(['O-47', 'O-42'])).toBe(
+        'Contribuyente del Régimen Simple de Tributación (SIMPLE)',
+      );
+    });
+
+    it('emite la calidad de agente retenedor de IVA (la única que el art. 617 lit. i) E.T. exige)', () => {
+      expect(resolveFiscalQualitiesLine(['O-23'])).toBe(
+        'Agente retenedor del Impuesto sobre las Ventas (IVA)',
+      );
+    });
+
+    it('normaliza la casilla 53 cruda: «13» cuenta igual que «O-13»', () => {
+      expect(resolveFiscalQualitiesLine(['13', '15'])).toBe(
+        resolveFiscalQualitiesLine(['O-13', 'O-15']),
+      );
+      expect(resolveFiscalQualitiesLine(['o-47'])).toBe(
+        'Contribuyente del Régimen Simple de Tributación (SIMPLE)',
+      );
+    });
+
+    it('tolera lista vacía, ausente y entradas no-string', () => {
+      expect(resolveFiscalQualitiesLine([])).toBeUndefined();
+      expect(resolveFiscalQualitiesLine(undefined)).toBeUndefined();
+      expect(resolveFiscalQualitiesLine(null)).toBeUndefined();
+      expect(resolveFiscalQualitiesLine([null, 13, {}] as any)).toBeUndefined();
+    });
+  });
+
+  describe('resolveFiscalIssuerForPrint — calidades fiscales del emisor', () => {
     const baseOrg = {
       name: 'Org Real',
       legal_name: 'Org Real S.A.S.',
@@ -555,60 +626,95 @@ describe('FiscalInvoicePdfRenderService — integración con paper_definitions (
       addresses: [],
     };
 
-    it('resuelve No responsable de IVA cuando el tenant tiene O-49 aunque tax_regime tenga COMUN rancio', () => {
-      const store = {
-        ...baseStore,
-        store_settings: {
-          settings: {
-            fiscal_data: {
-              legal_name: 'Mi Tienda Simplificada',
-              nit: '900123456',
-              nit_dv: '1',
-              tax_regime: 'COMUN', // Rancio
-              tax_responsibilities: ['O-49', 'R-99-PN'],
-            },
-          },
-        },
-      };
-      const issuer = resolveFiscalIssuerForPrint(baseOrg, store, false);
-      expect(issuer.tax_regime).toBe('No responsable de IVA');
+    const withFiscalData = (fiscal_data: Record<string, unknown>) => ({
+      ...baseStore,
+      store_settings: { settings: { fiscal_data } },
     });
 
-    it('resuelve Responsable de IVA cuando el tenant tiene O-48', () => {
-      const store = {
-        ...baseStore,
-        store_settings: {
-          settings: {
-            fiscal_data: {
-              legal_name: 'Mi Tienda Común',
-              nit: '900123456',
-              nit_dv: '1',
-              tax_regime: 'COMUN',
-              tax_responsibilities: ['O-48', 'R-99-PN'],
-            },
-          },
-        },
-      };
-      const issuer = resolveFiscalIssuerForPrint(baseOrg, store, false);
-      expect(issuer.tax_regime).toBe('Responsable de IVA');
+    it('Pollo Árabe: cabecera SIN ninguna línea de calidad fiscal, aunque tax_regime traiga COMUN rancio', () => {
+      const issuer = resolveFiscalIssuerForPrint(
+        baseOrg,
+        withFiscalData({
+          legal_name: 'Pollo Árabe S.A.S.',
+          nit: '900123456',
+          nit_dv: '1',
+          tax_regime: 'COMUN', // Rancio — ya no arbitra nada en el papel.
+          tax_responsibilities: [
+            'O-05',
+            'O-07',
+            'O-14',
+            'O-33',
+            'O-42',
+            'O-52',
+            'O-55',
+          ],
+        }),
+        false,
+      );
+      expect(issuer.fiscal_qualities).toBeUndefined();
+      // El renglón desaparece; las responsabilidades crudas siguen disponibles
+      // para la línea `Responsabilidades:` del PDF, que sí está en el XML.
+      expect(issuer.tax_responsibilities).toContain('O-33');
     });
 
-    it('resuelve Regimen Simple cuando el tenant tiene O-47', () => {
-      const store = {
-        ...baseStore,
-        store_settings: {
-          settings: {
-            fiscal_data: {
-              legal_name: 'Mi Tienda RST',
-              nit: '900123456',
-              nit_dv: '1',
-              tax_responsibilities: ['O-47'],
-            },
-          },
-        },
-      };
-      const issuer = resolveFiscalIssuerForPrint(baseOrg, store, false);
-      expect(issuer.tax_regime).toBe('Regimen Simple de Tributacion (RST)');
+    it('un O-49 declarado tampoco produce leyenda: la línea se elimina, no se reemplaza', () => {
+      const issuer = resolveFiscalIssuerForPrint(
+        baseOrg,
+        withFiscalData({
+          legal_name: 'Mi Tienda Simplificada',
+          nit: '900123456',
+          nit_dv: '1',
+          tax_regime: 'COMUN',
+          tax_responsibilities: ['O-49', 'R-99-PN'],
+        }),
+        false,
+      );
+      expect(issuer.fiscal_qualities).toBeUndefined();
+    });
+
+    it('gran contribuyente y autorretenedor: DOS calidades en el renglón', () => {
+      const issuer = resolveFiscalIssuerForPrint(
+        baseOrg,
+        withFiscalData({
+          legal_name: 'Gran Contribuyente S.A.',
+          nit: '900123456',
+          nit_dv: '1',
+          tax_responsibilities: ['O-13', 'O-15', 'O-48'],
+        }),
+        false,
+      );
+      expect(issuer.fiscal_qualities).toBe(
+        'Autorretenedor del Impuesto sobre la Renta y Complementarios | Gran contribuyente',
+      );
+    });
+
+    it('tenant del régimen SIMPLE: su calidad sí se imprime', () => {
+      const issuer = resolveFiscalIssuerForPrint(
+        baseOrg,
+        withFiscalData({
+          legal_name: 'Mi Tienda RST',
+          nit: '900123456',
+          nit_dv: '1',
+          tax_responsibilities: ['O-47'],
+        }),
+        false,
+      );
+      expect(issuer.fiscal_qualities).toBe(
+        'Contribuyente del Régimen Simple de Tributación (SIMPLE)',
+      );
+    });
+
+    it('un tenant sin responsabilidades declaradas no inventa ninguna calidad', () => {
+      const issuer = resolveFiscalIssuerForPrint(
+        baseOrg,
+        withFiscalData({
+          legal_name: 'Tienda Sin Fiscal',
+          nit: '900123456',
+          nit_dv: '1',
+        }),
+        false,
+      );
+      expect(issuer.fiscal_qualities).toBeUndefined();
     });
   });
 });
