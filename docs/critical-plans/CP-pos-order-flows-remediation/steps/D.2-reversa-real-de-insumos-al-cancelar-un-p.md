@@ -5,7 +5,7 @@ phase: D
 status: pending
 owner: none
 updated: 2026-09-20
-contracts: [FB-27, FB-28, DB-28, DB-29, DB-30, DB-31, DB-32, DB-44]
+contracts: [FB-27, FB-28, DB-28, DB-29, DB-30, DB-31, DB-32, DB-44, DB-11]
 adrs: [ADR-08, ADR-02]
 skills: [vendix-restaurant-ops, vendix-inventory-stock, vendix-auto-entries, vendix-accounting-rules, vendix-inventory-valuation]
 ---
