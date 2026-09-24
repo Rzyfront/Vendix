@@ -3,7 +3,7 @@ id: D.3
 title: "Unificar el vocabulario de cancellation_type para desbloquear el remake"
 phase: D
 status: pending
-owner: none
+owner: fox
 updated: 2026-09-20
 contracts: [FB-25, FB-26, FB-28, FB-29, FB-30, FB-40, DB-09, ERR-17, ERR-42]
 adrs: [ADR-08]

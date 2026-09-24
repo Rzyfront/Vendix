@@ -3,7 +3,7 @@ id: A.4
 title: "Borrador cancelable y rama de cancelación inalcanzable"
 phase: A
 status: in-progress
-owner: Fabio
+owner: mosk
 updated: 2026-09-20
 contracts: [FB-22, FB-24, DB-01, DB-16, DB-27, ERR-38, ERR-43]
 adrs: []

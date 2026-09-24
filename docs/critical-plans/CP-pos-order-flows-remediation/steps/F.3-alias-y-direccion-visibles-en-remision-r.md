@@ -3,7 +3,7 @@ id: F.3
 title: "Alias y dirección visibles en remisión, ruta y documento impreso"
 phase: F
 status: in-progress
-owner: none
+owner: fox
 updated: 2026-09-20
 contracts: [FB-60, FB-61, FB-62, FB-63, DB-35, DB-36, ERR-21]
 adrs: [ADR-05]
