@@ -83,7 +83,12 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
         hint="Determina en qué momento del reparto la orden cambia de estado para el cliente.">
         <app-dispatch-settings-form
           [settings]="
-            store.settings().dispatch || { order_state_update_mode: 'on_close' }
+            store.settings().dispatch || {
+              order_state_update_mode: 'on_close',
+              enable_dispatch_with_remision: true,
+              enable_dispatch_direct_delivery: true,
+              enable_dispatch_to_pool: true
+            }
           "
           (settingsChange)="store.onSectionChange('dispatch', $event)" />
       </app-settings-section>

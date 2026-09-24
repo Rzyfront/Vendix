@@ -197,6 +197,14 @@ export class PosShippingStepComponent {
 
   // ── Shipping state ────────────────────────────────────────────────────────
   readonly shippingMethods = signal<PosShippingMethod[]>([]);
+  /**
+   * QUI-844 — lo que ve el cajero al elegir envío a domicilio: solo métodos
+   * activos. La lista completa se conserva para la preservación de snapshots
+   * históricos (un original inactivo intacto sigue guardable).
+   */
+  readonly activeShippingMethods = computed<PosShippingMethod[]>(() =>
+    this.shippingMethods().filter((m) => m.is_active !== false),
+  );
   readonly selectedShippingMethod = signal<PosShippingMethod | null>(null);
   readonly shippingCost = signal<number>(0);
   readonly calculatedShippingCost = signal<number | null>(null);

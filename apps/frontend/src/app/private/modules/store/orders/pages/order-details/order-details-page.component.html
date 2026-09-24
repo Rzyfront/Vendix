@@ -2741,6 +2741,7 @@
     <!-- DISPATCH METHOD CHOOSER (con remisión vs sin remisión) -->
     <app-dispatch-method-selector-modal
       [isOpen]="showDispatchSelector()"
+      [enabledMethods]="enabledDispatchMethods()"
       (selected)="onDispatchMethodSelected($event)"
       (closed)="showDispatchSelector.set(false)"
     ></app-dispatch-method-selector-modal>

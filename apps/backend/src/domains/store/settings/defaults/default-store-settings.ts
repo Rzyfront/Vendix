@@ -452,6 +452,12 @@ export function getDefaultStoreSettings(): StoreSettings {
       default_settlement_type: 'none',
       default_cost_settlement_timing: 'immediate_on_close',
       requires_dispatch_address: true,
+      // QUI-844 — métodos ofrecidos en el selector de despacho. Opt-out: la
+      // tienda apaga los que no usa; el merge con defaults cubre tiendas
+      // existentes sin estos keys.
+      enable_dispatch_with_remision: true,
+      enable_dispatch_direct_delivery: true,
+      enable_dispatch_to_pool: true,
     },
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is
