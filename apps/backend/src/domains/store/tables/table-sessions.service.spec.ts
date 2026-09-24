@@ -2432,5 +2432,52 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       expect(item.cancellation_reason).toBe('cliente se arrepintió');
       expect(prismaMock.$transaction).not.toHaveBeenCalled();
     });
+
+    it('updateItemNotes actualiza la nota del item y sincroniza kitchen_ticket_items si está pendiente', async () => {
+      const row = findOneRow({ id: 501, notes: null });
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(row);
+      const txMock = {
+        order_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        kitchen_ticket_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      };
+      (prismaMock.$transaction as jest.Mock).mockImplementation((cb: any) => cb(txMock));
+
+      await service.updateItemNotes(83, 501, '  Sin cebolla, por favor  ');
+
+      expect(txMock.order_items.updateMany).toHaveBeenCalledWith({
+        where: { id: 501, order_id: 9001 },
+        data: expect.objectContaining({ notes: 'Sin cebolla, por favor' }),
+      });
+      expect(txMock.kitchen_ticket_items.updateMany).toHaveBeenCalledWith({
+        where: { order_item_id: 501, status: 'pending' },
+        data: { notes: 'Sin cebolla, por favor' },
+      });
+    });
+
+    it('updateItemNotes normaliza notas vacías a null', async () => {
+      const row = findOneRow({ id: 501, notes: 'Nota previa' });
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(row);
+      const txMock = {
+        order_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        kitchen_ticket_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      };
+      (prismaMock.$transaction as jest.Mock).mockImplementation((cb: any) => cb(txMock));
+
+      await service.updateItemNotes(83, 501, '   ');
+
+      expect(txMock.order_items.updateMany).toHaveBeenCalledWith({
+        where: { id: 501, order_id: 9001 },
+        data: expect.objectContaining({ notes: null }),
+      });
+    });
+
+    it('updateItemNotes rechaza si el item está cancelado', async () => {
+      const row = findOneRow({ id: 501, cancelled_at: new Date() });
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(row);
+
+      await expect(
+        service.updateItemNotes(83, 501, 'Nota'),
+      ).rejects.toThrow();
+    });
   });
 });

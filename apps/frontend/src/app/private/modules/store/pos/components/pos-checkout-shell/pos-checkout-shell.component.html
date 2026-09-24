@@ -85,6 +85,7 @@
               [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
               [tableId]="checkoutTableId()"
               [fulfillment]="entregaChoice() === 'mesa' ? 'consumo' : 'entrega'"
+              [deliveryType]="deliveryTypeForPayment()"
               [takeawayOrder]="isTakeawayOrder()"
               [sessionId]="checkoutSessionId()"
               [isAnonymous]="isAnonymousSale()"

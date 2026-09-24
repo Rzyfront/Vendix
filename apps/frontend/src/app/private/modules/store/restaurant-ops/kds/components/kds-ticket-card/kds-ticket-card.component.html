@@ -75,9 +75,8 @@
           <span class="kds-card__name">
             {{ item.product?.name || ('Producto #' + item.product_id) }}
           </span>
-          <!-- El rótulo de empaque depende de la orden, no de is_takeaway;
-               su @if propio lo mantiene visible junto a cualquier estado. -->
-          @if (deliveryBadgeLabel(); as label) {
+          <!-- El rótulo de empaque respeta el plato individual en mesa y la orden en mostrador/envío. -->
+          @if (itemDeliveryBadge(item); as label) {
             <app-badge variant="info" size="xs" [title]="label === 'ENVÍO' ? 'Pedido para envío a domicilio' : 'Pedido para llevar'">
               <app-icon name="shopping-bag" [size]="10" /> {{ label }}
             </app-badge>
