@@ -2,7 +2,7 @@
 id: A.1
 title: "Guard contra orden duplicada al cobrar un borrador reabierto"
 phase: A
-status: closed
+status: done
 owner: A1-pos-draft
 updated: 2026-09-24
 contracts: [FB-01, FB-02, ERR-34, ERR-35, DB-02, DB-14]
