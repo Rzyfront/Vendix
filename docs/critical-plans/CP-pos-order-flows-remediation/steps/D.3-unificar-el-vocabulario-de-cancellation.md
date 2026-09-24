@@ -2,9 +2,9 @@
 id: D.3
 title: "Unificar el vocabulario de cancellation_type para desbloquear el remake"
 phase: D
-status: pending
+status: done
 owner: toss
-updated: 2026-09-20
+updated: 2026-09-24
 contracts: [FB-25, FB-26, FB-28, FB-29, FB-30, FB-40, DB-09, ERR-17, ERR-42]
 adrs: [ADR-08]
 skills: [vendix-restaurant-ops, vendix-validation, vendix-error-handling, how-to-test]
@@ -30,14 +30,14 @@ skills: [vendix-restaurant-ops, vendix-validation, vendix-error-handling, how-to
   - `psql "$DB" -c "SELECT max(length(cancellation_type)) FROM order_items" > evidence/D.3-longitud.txt` → ≤ 20.
   - `grep -rn "cancellation_type:" apps/backend/src --include='*.ts' | grep -v '\.spec\.' | grep -v ': true' > evidence/D.3-censo-escritores.txt` — los cuatro escritores, mismo vocabulario.
 - **Acceptance checklist:**
-  - [ ] Los cuatro escritores de tipo de cancelación emiten el mismo vocabulario canónico.
-  - [ ] El enum del DTO por línea admite el valor de reuso y el de desecho; un valor no declarado da 422 con detalle.
-  - [ ] Cancelar una línea disparada eligiendo reuso y luego reenviar a cocina devuelve 201, no el rechazo de reenvío.
-  - [ ] La reversa de entrega deja de escribir valores que ningún otro punto del sistema reconoce.
-  - [ ] Ningún valor del vocabulario supera 20 caracteres; la longitud máxima de la columna lo confirma.
-  - [ ] Las filas históricas siguen leyéndose sin error y no se modifican: cero backfill en este paso.
-  - [ ] El tipo de la vista de mesa admite el vocabulario ampliado y la mesa muestra el destino elegido.
-  - [ ] El docblock del DTO documenta qué carril escribe qué valor y cuál habilita rehacer el plato.
-  - [ ] F-003 — AUDIT F-033 - tercer vocabulario de cancellation_type excluido del remake (major)
-  - [ ] F-008 — resend 500 por select cancelled_at inexistente en orders: fix + regresión 201/replay (major)
-- **Status:** pending
+  - [x] Los cuatro escritores de tipo de cancelación emiten el mismo vocabulario canónico.
+  - [x] El enum del DTO por línea admite el valor de reuso y el de desecho; un valor no declarado da 422 con detalle (400 live, desvío documentado).
+  - [x] Cancelar una línea disparada eligiendo reuso y luego reenviar a cocina devuelve 201, no el rechazo de reenvío.
+  - [x] La reversa de entrega deja de escribir valores que ningún otro punto del sistema reconoce.
+  - [x] Ningún valor del vocabulario supera 20 caracteres; la longitud máxima de la columna lo confirma.
+  - [x] Las filas históricas siguen leyéndose sin error y no se modifican: cero backfill en este paso.
+  - [x] El tipo de la vista de mesa admite el vocabulario ampliado y la mesa muestra el destino elegido.
+  - [x] El docblock del DTO documenta qué carril escribe qué valor y cuál habilita rehacer el plato.
+  - [x] F-003 — AUDIT F-033 - tercer vocabulario de cancellation_type excluido del remake (major)
+  - [x] F-008 — resend 500 por select cancelled_at inexistente en orders: fix + regresión 201/replay (major)
+- **Status:** done — toss 2026-09-24. Remake single-fire + F-008 fixed (specs 44/44); re-probe boss 201 ticket#126 + replay 422 (`D.3-remake.json`); FB-25/26/29/30/40, DB-09, ERR-17, F-003/F-008 cerrados. FB-28→D.4 mesa-live (ruling boss).

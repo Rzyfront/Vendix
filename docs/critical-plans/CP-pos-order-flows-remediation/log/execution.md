@@ -74,3 +74,5 @@
 | 2026-09-24 | boss | — | Cleanup 2b: sesiones #133/#135 cerradas (201), mesas #32/#33→cleaning, 0 abiertas. #1223 finished. | — |
 | 2026-09-24 | boss | F.2 | fox sin actividad en cola nueva (F.2 intacto desde 09-23) → F.2/F.3 a loks (E.5 se desbloquea solo). fox→reserva/gates. loks: E.1-cierre + F.2→F.3→E.5. | — |
 | 2026-09-24 | loks | E.1 | Cierre 10/10 done: volcado E2E boss runner-2 4/4 direct_delivery (L1-L4), DB-05 0 implícitas, DB-10 inv. | evidence/E.1-lanes-runner2-20260924.md |
+| 2026-09-24 | toss | D.3 | Cierre 10/10 done: vocabulario único + remake single-fire + F-008; re-probe boss 201+422; FB-25/26/29/30/40 DB-09 ERR-17 F-003/008. FB-28→D.4. | evidence/D.3-closeout-20260924.md |
+| 2026-09-24 | loks | F.2 | Alias+envío done 11/11: gates 0, spec 24/24, #1226 201 FK#540+snap, fail delta 0, DB-06 0, DB-07 0 nuevas, DB-25 ref, selector OK, ERR-25 OK. UI E2E→boss. | evidence/F.2-SA1-*, F.2-SA2-*, F.2-SA3-* |

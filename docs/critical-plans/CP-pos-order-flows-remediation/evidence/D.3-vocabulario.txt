@@ -1,0 +1,9 @@
+ cancellation_type 
+-------------------
+ after_fire_reused
+ after_fire_waste
+ before_fire
+ delivered_restock
+ delivered_waste
+(5 rows)
+
