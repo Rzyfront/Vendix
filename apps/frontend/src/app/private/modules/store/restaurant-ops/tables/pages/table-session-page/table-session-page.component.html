@@ -470,10 +470,37 @@
                           </p>
                         }
                         @if (item.notes) {
-                          <p class="item-comanda-note">
+                          <div
+                            class="item-comanda-note"
+                            [class.is-updating]="updatingNoteItemId() === item.id"
+                          >
                             <app-icon name="message-square" [size]="11"></app-icon>
-                            {{ item.notes }}
-                          </p>
+                            <span class="item-comanda-note__text">{{ item.notes }}</span>
+                            @if (!isClosed() && !item.cancelled_at) {
+                              <button
+                                type="button"
+                                class="item-note-edit-btn"
+                                [disabled]="updatingNoteItemId() === item.id"
+                                (click)="openEditItemNote(item); $event.stopPropagation()"
+                                title="Editar nota del plato"
+                                aria-label="Editar nota del plato"
+                              >
+                                <app-icon name="pencil" [size]="10"></app-icon>
+                              </button>
+                            }
+                          </div>
+                        } @else if (!isClosed() && !item.cancelled_at) {
+                          <button
+                            type="button"
+                            class="item-note-add-btn"
+                            [disabled]="updatingNoteItemId() === item.id"
+                            (click)="openEditItemNote(item); $event.stopPropagation()"
+                            title="Agregar nota al plato"
+                            aria-label="Agregar nota al plato"
+                          >
+                            <app-icon name="plus" [size]="10"></app-icon>
+                            <span>Nota</span>
+                          </button>
                         }
                         <!-- El unitario sólo aporta cuando hay más de una
                              unidad: con cantidad 1 repite literalmente el

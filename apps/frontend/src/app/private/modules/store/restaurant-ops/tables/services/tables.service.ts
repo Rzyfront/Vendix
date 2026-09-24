@@ -311,6 +311,26 @@ export class TablesService {
   }
 
   /**
+   * Actualiza la nota de un ítem en la cuenta de mesa.
+   * `PATCH /store/table-sessions/:id/items/:orderItemId/notes`
+   */
+  updateItemNotes(
+    sessionId: number,
+    orderItemId: number,
+    notes?: string | null,
+  ): Observable<TableSession> {
+    return this.http
+      .patch<ApiResponse<TableSession>>(
+        `${this.apiUrl}/store/table-sessions/${sessionId}/items/${orderItemId}/notes`,
+        { notes: notes ?? null },
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
    * QUI-655 — receta activa de un producto, para el picker de "sin papas" al
    * tomar el pedido. Devuelve las lineas directas de la receta con su nombre.
    *

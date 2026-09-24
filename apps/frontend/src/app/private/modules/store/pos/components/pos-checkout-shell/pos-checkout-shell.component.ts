@@ -2107,6 +2107,8 @@ export class PosCheckoutShellComponent {
         ...((it.isTakeaway || this.isTakeawayOrder()) && {
           is_takeaway: true,
         }),
+        // Nota del mesero por línea capturada en el carrito
+        ...(it.notes?.trim() && { notes: it.notes.trim() }),
       }));
     if (items.length === 0) {
       this.submittingDraft.set(false);

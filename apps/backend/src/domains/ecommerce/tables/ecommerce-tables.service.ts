@@ -149,6 +149,10 @@ export interface BillItemView {
    * are passed through untouched to avoid double-signing.
    */
   image_url: string | null;
+  /**
+   * Nota libre de preparación del mesero o comensal (ej: "sin cebolla").
+   */
+  notes?: string | null;
 }
 
 export interface BillView {
@@ -1012,6 +1016,7 @@ export class EcommerceTablesService {
           // redondeo (tasa 0% ⇒ grossUnit === netUnit ⇒ 0).
           tax_amount: Math.max(Math.round((lineTotalGross - netTotal) * 100) / 100, 0),
           image_url: signedImageUrl,
+          notes: it.notes ?? null,
         };
       }),
     );

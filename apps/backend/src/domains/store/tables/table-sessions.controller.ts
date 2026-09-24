@@ -28,6 +28,7 @@ import {
   ConfirmTablePaymentDto,
   CancelOrderItemDto,
   TransferTableSessionDto,
+  UpdateOrderItemNotesDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -315,6 +316,25 @@ export class TableSessionsController {
       orderItemId,
     );
     return this.responseService.updated(result, 'Item marcado como entregado');
+  }
+
+  /**
+   * Update notes on a single item of the check (QUI-840 / notas de mesa).
+   * PATCH /api/store/table-sessions/:id/items/:orderItemId/notes
+   */
+  @Patch(':id/items/:orderItemId/notes')
+  @Permissions('store:table_sessions:update')
+  async updateItemNotes(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('orderItemId', ParseIntPipe) orderItemId: number,
+    @Body() dto: UpdateOrderItemNotesDto,
+  ) {
+    const result = await this.tableSessionsService.updateItemNotes(
+      id,
+      orderItemId,
+      dto.notes,
+    );
+    return this.responseService.updated(result, 'Nota del ítem actualizada');
   }
 
   /**

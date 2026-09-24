@@ -16,6 +16,7 @@ describe('TableSessionPageComponent waiter delivery', () => {
   let api: jasmine.SpyObj<TablesService>;
   let kitchen: jasmine.SpyObj<KitchenTicketsService>;
   let toast: jasmine.SpyObj<ToastService>;
+  let dialog: jasmine.SpyObj<DialogService>;
 
   const item = (id: number, isTakeaway: boolean): TableSessionOrderItem => ({
     id,
@@ -58,9 +59,10 @@ describe('TableSessionPageComponent waiter delivery', () => {
   });
 
   beforeEach(async () => {
-    api = jasmine.createSpyObj('TablesService', ['markItemDelivered']);
+    api = jasmine.createSpyObj('TablesService', ['markItemDelivered', 'updateItemNotes']);
     kitchen = jasmine.createSpyObj('KitchenTicketsService', ['markDelivered']);
     toast = jasmine.createSpyObj('ToastService', ['success', 'error']);
+    dialog = jasmine.createSpyObj('DialogService', ['confirm', 'prompt']);
     await TestBed.configureTestingModule({
       imports: [TableSessionPageComponent],
       providers: [
@@ -72,7 +74,7 @@ describe('TableSessionPageComponent waiter delivery', () => {
         { provide: StoreSettingsFacade, useValue: { settings: signal(null) } },
         { provide: AuthFacade, useValue: {} },
         { provide: ToastService, useValue: toast },
-        { provide: DialogService, useValue: {} },
+        { provide: DialogService, useValue: dialog },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => '7' } } } },
         { provide: Router, useValue: jasmine.createSpyObj('Router', ['navigate']) },
       ],
@@ -160,5 +162,63 @@ describe('TableSessionPageComponent waiter delivery', () => {
     });
 
     expect(component.waiterName()).toBeNull();
+  });
+
+  describe('openEditItemNote', () => {
+    it('prompts the waiter and updates item notes via tablesService.updateItemNotes', async () => {
+      const itm = item(101, false);
+      component.session.set(session([itm]));
+      dialog.prompt.and.returnValue(Promise.resolve('Sin sal y bien cocido'));
+      const updatedSession = session([{ ...itm, notes: 'Sin sal y bien cocido' }]);
+      api.updateItemNotes.and.returnValue(of(updatedSession));
+
+      component.openEditItemNote(itm);
+      // Wait for promise resolution
+      await Promise.resolve();
+
+      expect(dialog.prompt).toHaveBeenCalledOnceWith(jasmine.objectContaining({
+        title: 'Agregar nota al plato',
+        defaultValue: '',
+      }));
+      expect(api.updateItemNotes).toHaveBeenCalledOnceWith(7, 101, 'Sin sal y bien cocido');
+      expect(component.updatingNoteItemId()).toBeNull();
+      expect(toast.success).toHaveBeenCalledWith('Nota actualizada');
+      expect(component.session()).toEqual(updatedSession);
+    });
+
+    it('clears the note when prompt input is empty or whitespace', async () => {
+      const itm = { ...item(101, false), notes: 'Nota previa' };
+      component.session.set(session([itm]));
+      dialog.prompt.and.returnValue(Promise.resolve('   '));
+      const updatedSession = session([{ ...itm, notes: null }]);
+      api.updateItemNotes.and.returnValue(of(updatedSession));
+
+      component.openEditItemNote(itm);
+      await Promise.resolve();
+
+      expect(dialog.prompt).toHaveBeenCalledOnceWith(jasmine.objectContaining({
+        title: 'Editar nota del plato',
+        defaultValue: 'Nota previa',
+      }));
+      expect(api.updateItemNotes).toHaveBeenCalledOnceWith(7, 101, null);
+      expect(toast.success).toHaveBeenCalledWith('Nota eliminada');
+    });
+
+    it('does not call updateItemNotes if prompt is cancelled or note unchanged', async () => {
+      const itm = { ...item(101, false), notes: 'Misma nota' };
+      component.session.set(session([itm]));
+
+      // Cancelled prompt
+      dialog.prompt.and.returnValue(Promise.resolve(undefined));
+      component.openEditItemNote(itm);
+      await Promise.resolve();
+      expect(api.updateItemNotes).not.toHaveBeenCalled();
+
+      // Unchanged note
+      dialog.prompt.and.returnValue(Promise.resolve('  Misma nota  '));
+      component.openEditItemNote(itm);
+      await Promise.resolve();
+      expect(api.updateItemNotes).not.toHaveBeenCalled();
+    });
   });
 });

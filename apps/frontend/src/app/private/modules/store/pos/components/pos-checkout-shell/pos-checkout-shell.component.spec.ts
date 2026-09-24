@@ -684,6 +684,73 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     );
   });
 
+  it(`propaga notas de los ítems del carrito al agregar a la sesión de mesa`, () => {
+    restaurantMode.set(true);
+    component.entregaChoice.set('mesa');
+    fixture.detectChanges();
+
+    fixture.componentRef.setInput('cartState', {
+      items: [
+        {
+          itemType: 'product',
+          product: { id: 15, name: 'Hamburguesa' },
+          quantity: 1,
+          unitPrice: 20000,
+          finalPrice: 20000,
+          totalPrice: 20000,
+          taxAmount: 0,
+          notes: 'Sin cebolla y término medio',
+        },
+        {
+          itemType: 'product',
+          product: { id: 16, name: 'Gaseosa' },
+          quantity: 1,
+          unitPrice: 5000,
+          finalPrice: 5000,
+          totalPrice: 5000,
+          taxAmount: 0,
+          notes: '   ',
+        },
+      ],
+    } as any);
+    fixture.detectChanges();
+
+    const sent: unknown[] = [];
+    (integrationMock as any).addItemsToTableSession = (
+      _sessionId: number,
+      items: unknown[],
+    ) => {
+      sent.push(items);
+      return of({ order: { id: 15, order_items: [] } });
+    };
+    (integrationMock as any).maybeFireKitchen = () => of(null);
+    (component as any).toastService = {
+      success: () => {},
+      warning: () => {},
+      error: () => {},
+    };
+    (component as any).cartService = { clearCart: () => of({}) };
+
+    (
+      component as unknown as {
+        appendToTableAndFire: (state: any, session: any) => void;
+      }
+    ).appendToTableAndFire(component.cartState() as any, {
+      id: 5,
+      order_id: 15,
+    });
+
+    expect(sent.length).toBe(1);
+    const lines = sent[0] as any[];
+    expect(lines[0]).toEqual(
+      jasmine.objectContaining({
+        product_id: 15,
+        notes: 'Sin cebolla y término medio',
+      }),
+    );
+    expect(lines[1].notes).toBeUndefined();
+  });
+
   it(`Al abrir con mesa vinculada, auto-selecciona entrega 'mesa' y no 'llevar'`, () => {
     restaurantMode.set(true);
     fixture.componentRef.setInput('isOpen', false);

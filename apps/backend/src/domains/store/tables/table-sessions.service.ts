@@ -2247,6 +2247,70 @@ export class TableSessionsService {
     return this.findOne(sessionId);
   }
 
+  /**
+   * Update notes on a single item of an open table check.
+   *
+   * Validates:
+   *   1. Session is open.
+   *   2. Item belongs to this session's order and is not cancelled.
+   * Updates:
+   *   - order_items.notes (trimmed, or null if empty string)
+   *   - kitchen_ticket_items.notes if a pending kitchen ticket item exists.
+   * Returns:
+   *   - Fresh TableSessionView.
+   */
+  async updateItemNotes(
+    sessionId: number,
+    orderItemId: number,
+    notes?: string,
+  ): Promise<TableSessionView> {
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+    const item = session.order?.order_items.find((it) => it.id === orderItemId);
+    if (!item) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        `El ítem #${orderItemId} no pertenece a esta cuenta`,
+      );
+    }
+    if (item.cancelled_at) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'No se pueden editar las notas de un ítem cancelado',
+      );
+    }
+
+    const cleanNotes = notes?.trim() || null;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.order_items.updateMany({
+        where: { id: orderItemId, order_id: session.order_id },
+        data: {
+          notes: cleanNotes,
+          updated_at: new Date(),
+        },
+      });
+
+      await tx.kitchen_ticket_items.updateMany({
+        where: {
+          order_item_id: orderItemId,
+          status: 'pending',
+        },
+        data: {
+          notes: cleanNotes,
+        },
+      });
+    });
+
+    this.logger.log(
+      `Table item notes updated: session=${sessionId} orderItemId=${orderItemId} notes="${cleanNotes ?? ''}"`,
+    );
+
+    return this.findOne(sessionId);
+  }
+
   // ------------------------------------------------------------ customer
   /**
    * Assign (or detach) the customer of the draft order backing an open

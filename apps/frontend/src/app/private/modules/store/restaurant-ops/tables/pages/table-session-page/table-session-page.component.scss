@@ -697,6 +697,66 @@
     font-size: 0.75rem;
     font-weight: 500;
     width: fit-content;
+    max-width: 100%;
+
+    &.is-updating {
+      opacity: 0.6;
+      pointer-events: none;
+    }
+
+    .item-comanda-note__text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 22rem;
+    }
+
+    .item-note-edit-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: none;
+      padding: 0.1rem;
+      margin-left: 0.15rem;
+      cursor: pointer;
+      color: var(--color-warning-700, #b45309);
+      opacity: 0.7;
+      border-radius: 2px;
+      transition: opacity 0.15s ease;
+
+      &:hover:not(:disabled) {
+        opacity: 1;
+      }
+    }
+  }
+
+  .item-note-add-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    margin: 0.15rem 0 0 0;
+    padding: 0.08rem 0.35rem;
+    border-radius: var(--radius-sm, 4px);
+    border: 1px dashed var(--color-border, #d1d5db);
+    background: transparent;
+    color: var(--color-text-secondary, #6b7280);
+    font-size: 0.72rem;
+    font-weight: 500;
+    cursor: pointer;
+    width: fit-content;
+    transition: all 0.15s ease;
+
+    &:hover:not(:disabled) {
+      border-color: var(--color-warning-500, #f59e0b);
+      color: var(--color-warning-700, #b45309);
+      background-color: var(--color-warning-50, #fffbeb);
+    }
+
+    &.is-updating {
+      opacity: 0.6;
+      pointer-events: none;
+    }
   }
 
   .item-meta {
