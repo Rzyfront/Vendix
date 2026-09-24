@@ -72,3 +72,4 @@
 | 2026-09-24 | boss | E.1 | E2E 4 carriles PASS runner-2 (4/4 direct_delivery, DB-05 0 implícitas, DB-10 inv, 0 JS). Ítem 10/10 cerrado. loks: volcar step+log+commit. | evidence/E.1-lanes-runner2-20260924.md |
 | 2026-09-24 | boss | B.3 | Re-verify session_paid PASS runner-2 (#134 Pagada live+snapshot, whitelist OK, 0 JS). Batch-2 E2E 3/3. Runner-2b duplicado cancelado (interfería). | evidence/B3-reverify-runner2-20260924.md |
 | 2026-09-24 | boss | — | Cleanup 2b: sesiones #133/#135 cerradas (201), mesas #32/#33→cleaning, 0 abiertas. #1223 finished. | — |
+| 2026-09-24 | boss | F.2 | fox sin actividad en cola nueva (F.2 intacto desde 09-23) → F.2/F.3 a loks (E.5 se desbloquea solo). fox→reserva/gates. loks: E.1-cierre + F.2→F.3→E.5. | — |

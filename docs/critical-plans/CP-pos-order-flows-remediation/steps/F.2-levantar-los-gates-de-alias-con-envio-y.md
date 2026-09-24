@@ -3,7 +3,7 @@ id: F.2
 title: "Levantar los gates de alias con envío y persistir la dirección"
 phase: F
 status: in-progress
-owner: fox
+owner: loks
 updated: 2026-09-23
 contracts: [FB-55, FB-57, DB-06, DB-07, DB-25, ERR-25]
 adrs: [ADR-05]
