@@ -2,9 +2,9 @@
 id: A.1
 title: "Guard contra orden duplicada al cobrar un borrador reabierto"
 phase: A
-status: in-progress
+status: closed
 owner: A1-pos-draft
-updated: 2026-09-23
+updated: 2026-09-24
 contracts: [FB-01, FB-02, ERR-34, ERR-35, DB-02, DB-14]
 adrs: []
 skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-error-handling, vendix-prisma-scopes, vendix-zoneless-signals, how-to-test]
@@ -45,5 +45,5 @@ skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-error-han
   - [x] Hay un test que falla antes del fix y que fija `errorCode` (no solo `toBeInstanceOf(VendixHttpException)`)
   - [x] `error-messages.ts` mapea `POS_DRAFT_DUPLICATE_ORDER_001` y `POS_DRAFT_REQUIRES_PAYMENT_001` a texto accionable en español
   - [x] Ningún carril de este paso termina en 500: las evidencias no contienen `SYS_INTERNAL_001`
-  - [ ] Las filas FB-01, FB-02, ERR-34, ERR-35, DB-02 y DB-14 quedan marcadas con su evidencia enlazada
-- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/A1-same-order-api.md`, `A1-ui-full-recorrido-1153.md`, `A1-edited-total-1155.md`: UI guardó/reabrió #1153 y cobró la misma orden $38.000/IVA0; en #1155 añadió una segunda línea vía PUT /items, editor 200 y POS 201 cobraron $76.000 sobre esa misma orden/pago #838. Fiado libre #1145 y cuotas #1154: CxC única; replay 409/cross-store 404. Bugs de ID custom/autocancelación corregidos en 8545e2e5e/59780f68a. Suites backend 106/106+9/9; Angular 18/18+16/16+38/38+30/30. **Sigue abierto** por DB-02/DB-14: SQL global detecta sobrepagos históricos. Snapshot sin FK bloqueado (ADR-05/F.2); CxC #110/#111 de fiados cancelados aún abiertas, sin SQL manual.
+  - [x] Las filas FB-01, FB-02, ERR-34, ERR-35, DB-02 y DB-14 quedan marcadas con su evidencia enlazada
+- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/A1-same-order-api.md`, `A1-ui-full-recorrido-1153.md`, `A1-edited-total-1155.md`: UI guardó/reabrió #1153 y cobró la misma orden $38.000/IVA0; en #1155 añadió una segunda línea vía PUT /items, editor 200 y POS 201 cobraron $76.000 sobre esa misma orden/pago #838. Fiado libre #1145 y cuotas #1154: CxC única; replay 409/cross-store 404. Bugs de ID custom/autocancelación corregidos en 8545e2e5e/59780f68a. Suites backend 106/106+9/9; Angular 18/18+16/16+38/38+30/30. **Cerrado** por mosk 2026-09-24: DB-02/DB-14 verificados por corte (precedente I.1) — Q1 baseline 10 órdenes históricas idénticas a I.1, Q2/Q3 post-corte `be9015d3d` = 0/0, Q4 43 pagos ofensores todos ≤2026-09-13 (`A1-db02-db14-closure-20260924.md` + `.sql`). Anti-regresión: backend por lectura (DTO+scope+409+specs fijan errorCode; jest OOM infra, 0 ejecutados — `A1-backend-regression-20260924.md`); frontend 44/44 Karma en verde (`A1-frontend-regression-20260924.md`). Snapshot sin FK bloqueado (ADR-05/F.2); CxC #110/#111 siguen abiertas como deuda conocida, sin SQL manual. Sin cambios de código en este cierre (solo evidencia + registry + log).
