@@ -2,9 +2,9 @@
 id: F.2
 title: "Levantar los gates de alias con envío y persistir la dirección"
 phase: F
-status: in-progress
+status: done
 owner: loks
-updated: 2026-09-23
+updated: 2026-09-24
 contracts: [FB-55, FB-57, DB-06, DB-07, DB-25, ERR-25]
 adrs: [ADR-05]
 skills: [vendix-address-geocoding, vendix-frontend, vendix-zoneless-signals, vendix-backend, how-to-test]
@@ -31,15 +31,15 @@ skills: [vendix-address-geocoding, vendix-frontend, vendix-zoneless-signals, ven
   - `curl -s "$API/store/addresses?customer_id=$CUSTOMER_ID" -H "Authorization: Bearer $TOKEN" | tee evidence/F.2-selector-sin-huerfanas.json` → ninguna entrada con `user_id` nulo.
   - Playwright MCP contra `https://vendix.com`: POS → envío → nombre de referencia → dirección con el mapa → cobrar → abrir el detalle y comprobar alias y dirección. Capturas en `evidence/F.2-alias-e2e/`.
 - **Acceptance checklist:**
-  - [ ] El paso que desactiva la mina de la predeterminada está terminado y verificado antes de este.
-  - [ ] El dueño aceptó la decisión de arquitectura de la dirección antes de ejecutar el paso.
-  - [ ] Existe un test que falla antes del arreglo: la venta con alias y envío no llegaba al pago.
-  - [ ] Los tres bloqueos de frontend desaparecieron y el comentario que los originó quedó corregido.
-  - [ ] Una venta con nombre de referencia y envío se cobra sin crear ficha de cliente.
-  - [ ] La dirección se persiste como fila sin cliente y queda referenciada por la orden.
-  - [ ] La orden guarda además la copia de texto de la dirección.
-  - [ ] Ninguna orden queda con cliente y nombre de referencia a la vez.
-  - [ ] Este carril no crea direcciones huérfanas sin orden; el legado se censó aparte.
-  - [ ] El selector de direcciones del checkout no muestra direcciones sin cliente.
-  - [ ] Ninguna dirección creada por este carril queda marcada como predeterminada.
-- **Status:** in-progress — ADR-05 aprobado. Backend transaccional y API/SQL real: `evidence/F2-atomic-alias-runtime-20260923.md`; frontend alias hasta formulario de dirección y fix del efecto que lo revertía: `evidence/F2-pos-alias-ui-20260923.md`, Angular 76/76. Falta E2E Guardar/Cobrar desde UI y barrido de consumidores F.3.
+  - [x] El paso que desactiva la mina de la predeterminada está terminado y verificado antes de este.
+  - [x] El dueño aceptó la decisión de arquitectura de la dirección antes de ejecutar el paso.
+  - [x] Existe un test que falla antes del arreglo: la venta con alias y envío no llegaba al pago.
+  - [x] Los tres bloqueos de frontend desaparecieron y el comentario que los originó quedó corregido.
+  - [x] Una venta con nombre de referencia y envío se cobra sin crear ficha de cliente.
+  - [x] La dirección se persiste como fila sin cliente y queda referenciada por la orden.
+  - [x] La orden guarda además la copia de texto de la dirección.
+  - [x] Ninguna orden queda con cliente y nombre de referencia a la vez.
+  - [x] Este carril no crea direcciones huérfanas sin orden; el legado se censó aparte.
+  - [x] El selector de direcciones del checkout no muestra direcciones sin cliente.
+  - [x] Ninguna dirección creada por este carril queda marcada como predeterminada.
+- **Status:** done — loks 2026-09-24, 11/11. Gates 0 (grep); spec ship 24/24; #1226 201 FK#540+snap; fail delta 0; DB-06 0; DB-07 0 nuevas; DB-25 #540 ref; selector estructural OK; ERR-25 OK. UI E2E Guardar/Cobrar → boss (ban login peers).
