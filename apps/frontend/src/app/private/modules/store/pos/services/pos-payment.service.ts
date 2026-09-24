@@ -398,6 +398,8 @@ export class PosPaymentService {
     takeawayOrder?: boolean | null,
     /** Route a serialized adopted draft through the POS order transaction, not flow/pay. */
     usePosOrderTransaction = false,
+    // QUI-653 (PR #840): delivery decision stamped on lines without mutating cart.
+    deliveryType?: string | null,
   ): Observable<PosSalePaymentResponse> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
@@ -507,6 +509,11 @@ export class PosPaymentService {
       // único momento en que el POS ocupa una mesa. Mutuamente excluyente con
       // `table_session_id`, que sigue siendo el camino del módulo de mesas y del QR.
       ...(tableId != null && tableSessionId == null ? { table_id: tableId } : {}),
+      ...(deliveryType
+        ? { delivery_type: deliveryType }
+        : tableId != null || tableSessionId != null
+          ? { delivery_type: 'dine_in' }
+          : {}),
     };
 
     // For anonymous sales, use "Consumidor Final" as customer name

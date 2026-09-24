@@ -36,14 +36,13 @@
             <h2 class="section-title">Método de envío</h2>
           </div>
 
-          @if (shippingMethods().length > 0) {
+          @if (activeShippingMethods().length > 0) {
             <div class="method-grid">
-              @for (method of shippingMethods(); track method.id) {
+              @for (method of activeShippingMethods(); track method.id) {
                 <button
                   type="button"
                   (click)="selectShippingMethod(method)"
                   class="method-card"
-                  [disabled]="method.is_active === false"
                   [class.selected]="selectedShippingMethod()?.id === method.id"
                 >
                   <app-icon

@@ -192,6 +192,8 @@ export class TableSessionPageComponent implements OnInit {
   readonly isAssigningCustomer = signal(false);
   /** Order-item id currently being removed (drives the per-row spinner). */
   readonly removingItemId = signal<number | null>(null);
+  /** Order-item id whose note is currently being updated. */
+  readonly updatingNoteItemId = signal<number | null>(null);
   /**
    * D.4 — objetivo del modal compartido "Destino del plato" (solo preparados;
    * el resto conserva el flujo confirm+prompt). `null` = modal cerrado.
@@ -1152,6 +1154,51 @@ export class TableSessionPageComponent implements OnInit {
                   );
                 },
               });
+          });
+      });
+  }
+
+  /**
+   * Abre un prompt modal para agregar o editar la nota de preparación del plato.
+   * Si el texto se vacía, la nota se limpia (`null`).
+   */
+  openEditItemNote(item: TableSessionOrderItem): void {
+    const sessionId = this.session()?.id;
+    if (!sessionId || this.isClosed() || item.cancelled_at) return;
+
+    this.dialogService
+      .prompt({
+        title: item.notes ? 'Editar nota del plato' : 'Agregar nota al plato',
+        message: `Especificación o indicación para "${item.product_name}":`,
+        defaultValue: item.notes ?? '',
+        placeholder: 'Ej: Sin cebolla, término medio, etc.',
+        confirmText: 'Guardar',
+        cancelText: 'Cancelar',
+      })
+      .then((newNote) => {
+        if (newNote === undefined) return;
+        const trimmed = newNote.trim();
+        if (trimmed === (item.notes ?? '').trim()) return;
+
+        this.updatingNoteItemId.set(item.id);
+        this.tablesService
+          .updateItemNotes(sessionId, item.id, trimmed || null)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: (s) => {
+              this.updatingNoteItemId.set(null);
+              this.session.set(s);
+              this.seedKitchenStateFromOrder(s);
+              this.toastService.success(
+                trimmed ? 'Nota actualizada' : 'Nota eliminada',
+              );
+            },
+            error: (err: unknown) => {
+              this.updatingNoteItemId.set(null);
+              this.toastService.error(
+                typeof err === 'string' ? err : 'Error al actualizar la nota',
+              );
+            },
           });
       });
   }

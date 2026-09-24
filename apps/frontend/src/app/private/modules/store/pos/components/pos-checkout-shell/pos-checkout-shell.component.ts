@@ -335,6 +335,24 @@ export class PosCheckoutShellComponent {
   );
 
   /**
+   * Tipo de entrega para persistencia de la orden al pagar.
+   * Si la entrega es 'mesa' o hay mesa/sesión asignada, es 'dine_in'.
+   */
+  readonly deliveryTypeForPayment = computed<string>(() => {
+    if (
+      this.entregaChoice() === 'mesa' ||
+      this.checkoutTableId() != null ||
+      this.checkoutSessionId() != null
+    ) {
+      return 'dine_in';
+    }
+    if (this.entregaChoice() === 'enviar') {
+      return 'home_delivery';
+    }
+    return 'direct_delivery';
+  });
+
+  /**
    * Orden dinámico de pasos.
    * Entrega SIEMPRE va primero (Paso 0).
    * Si entregaChoice es 'enviar', se inserta dinámicamente el paso 'Envío'.
@@ -829,7 +847,18 @@ export class PosCheckoutShellComponent {
           // lo que traiga `initialEntrega()` es la naturaleza de la orden, no
           // una decisión del cajero. `seededEntrega` guarda ese valor para que
           // el effect de detección no lo confunda con un click.
-          this.seededEntrega = this.initialEntrega();
+          const hasTable =
+            this.tableId() != null ||
+            (typeof this.integration?.hasOpenTableSession === 'function'
+              ? this.integration.hasOpenTableSession()
+              : this.integration?.currentTableSession?.() != null);
+          const defaultEntrega =
+            this.initialEntrega() === 'enviar'
+              ? 'enviar'
+              : hasTable && this.initialEntrega() === 'llevar'
+                ? 'mesa'
+                : this.initialEntrega();
+          this.seededEntrega = defaultEntrega;
           this.entregaChoice.set(this.seededEntrega);
           this.entregaTouched.set(false);
           this.focusActiveStepSoon();
@@ -2065,6 +2094,8 @@ export class PosCheckoutShellComponent {
         ...((it.isTakeaway || this.isTakeawayOrder()) && {
           is_takeaway: true,
         }),
+        // Nota del mesero por línea capturada en el carrito
+        ...(it.notes?.trim() && { notes: it.notes.trim() }),
       }));
     if (items.length === 0) {
       this.submittingDraft.set(false);

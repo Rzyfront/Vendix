@@ -3349,7 +3349,7 @@ describe('PaymentsService', () => {
      *   `isDeferredDigitalMethod`: `wompi`/`wallet` difieren al webhook,
      *   `cash`/`card`/`bank_transfer` liquidan en banda.
      */
-    const arrangePosSale = (methodType: string, serialized = false) => {
+    const arrangePosSale = (methodType: string, serialized = false, deliveryType = 'direct_delivery') => {
       // `RequestContextService.getContext` es estático: el espía que instala
       // este helper lo retira el `jest.restoreAllMocks()` del afterEach.
       mockRequestContext({ store_id: 1, organization_id: 1 });
@@ -3359,7 +3359,7 @@ describe('PaymentsService', () => {
         store_id: 1,
         // Venta de mostrador: el cliente se lleva la mercancía en el acto.
         // Es EXACTAMENTE el caso que el predicado viejo daba por entregado.
-        delivery_type: 'direct_delivery',
+        delivery_type: deliveryType,
         stores: { id: 1, organization_id: 1 },
         // Sin líneas: los bucles de validación/reserva de stock quedan en
         // no-op y el caso se concentra en la decisión de consumo.
@@ -3476,6 +3476,31 @@ describe('PaymentsService', () => {
           blockOnInsufficient: true,
           consumeSerials: true,
         }),
+        expect.anything(),
+      );
+    });
+
+    it('PR #840: dine_in consume stock igual que direct_delivery (handover inmediato)', async () => {
+      const { order } = arrangePosSale('cash', false, 'dine_in');
+
+      jest
+        .spyOn(service as any, 'processPosPaymentTransaction')
+        .mockResolvedValue({ id: 7, state: 'succeeded' });
+      jest
+        .spyOn(service as any, 'hasPendingKitchenItemsTx')
+        .mockResolvedValue(false);
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_INVENTORY);
+
+      // Misma entrega inmediata que mostrador: solo cambió la etiqueta.
+      // El emit `order.completed` (COGS) comparte el mismo
+      // `isImmediateHandover`, así que este verde lo cubre por construcción.
+      expect(commitOrderDeliveryMock).toHaveBeenCalledTimes(1);
+      expect(commitOrderDeliveryMock).toHaveBeenCalledWith(
+        order.id,
+        expect.objectContaining({ movementType: 'sale' }),
         expect.anything(),
       );
     });

@@ -336,7 +336,7 @@ export class TableSessionsService {
    *   - `openedBy`     null for anonymous QR sessions, userId for POS.
    *   - `customerId`   null for anonymous, userId fallback for POS.
    *   - `channel`      'pos' for POS, 'ecommerce' for QR.
-   *   - `deliveryType` 'direct_delivery' for POS, 'dine_in' for QR.
+   *   - `deliveryType` 'dine_in' for both POS and QR table sessions.
    *
    * QUI-535: the DB work now lives in `createOpenSessionInTx` so a
    * caller that already owns a transaction (the POS payment, which opens
@@ -553,7 +553,7 @@ export class TableSessionsService {
       openedBy: userId,
       customerId,
       channel: 'pos',
-      deliveryType: 'direct_delivery',
+      deliveryType: 'dine_in',
       guestCount: dto.guest_count ?? null,
       // QUI-737 (B.4 / FB-21) — el DTO ya lo declara y el controller ya lo
       // liga; sin este paso el alias moria aca y la orden nacia sin el.
@@ -2309,6 +2309,7 @@ export class TableSessionsService {
               ...(finalsByItemId.get(it.id) ?? {}),
               inventory_consumed_at_fire: it.inventory_consumed_at_fire,
               item_type: it.item_type,
+              notes: it.notes ?? null,
               is_takeaway: it.is_takeaway,
               delivered_at: it.delivered_at,
               delivered_by_user_id: it.delivered_by_user_id,
@@ -2404,6 +2405,70 @@ export class TableSessionsService {
     // `findOne(sessionId)` para que vea el `order_items[].delivered_at`
     // nuevo.
     await this.orderFlowService.deliverOrderItem(session.order_id, orderItemId);
+
+    return this.findOne(sessionId);
+  }
+
+  /**
+   * Update notes on a single item of an open table check.
+   *
+   * Validates:
+   *   1. Session is open.
+   *   2. Item belongs to this session's order and is not cancelled.
+   * Updates:
+   *   - order_items.notes (trimmed, or null if empty string)
+   *   - kitchen_ticket_items.notes if a pending kitchen ticket item exists.
+   * Returns:
+   *   - Fresh TableSessionView.
+   */
+  async updateItemNotes(
+    sessionId: number,
+    orderItemId: number,
+    notes?: string,
+  ): Promise<TableSessionView> {
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+    const item = session.order?.order_items.find((it) => it.id === orderItemId);
+    if (!item) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        `El ítem #${orderItemId} no pertenece a esta cuenta`,
+      );
+    }
+    if (item.cancelled_at) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'No se pueden editar las notas de un ítem cancelado',
+      );
+    }
+
+    const cleanNotes = notes?.trim() || null;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.order_items.updateMany({
+        where: { id: orderItemId, order_id: session.order_id },
+        data: {
+          notes: cleanNotes,
+          updated_at: new Date(),
+        },
+      });
+
+      await tx.kitchen_ticket_items.updateMany({
+        where: {
+          order_item_id: orderItemId,
+          status: 'pending',
+        },
+        data: {
+          notes: cleanNotes,
+        },
+      });
+    });
+
+    this.logger.log(
+      `Table item notes updated: session=${sessionId} orderItemId=${orderItemId} notes="${cleanNotes ?? ''}"`,
+    );
 
     return this.findOne(sessionId);
   }

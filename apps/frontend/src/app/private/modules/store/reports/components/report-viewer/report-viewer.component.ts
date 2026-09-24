@@ -99,7 +99,11 @@ function toTableColumns(columns: ReportColumn[]): TableColumn[] {
     label: col.header,
     align: col.align,
     defaultValue: '—',
-    transform: (value: any) => formatCellValue(value, col.type, col.key),
+    badge: col.badge,
+    badgeConfig: col.badgeConfig,
+    transform: col.transform
+      ? col.transform
+      : (value: any) => formatCellValue(value, col.type, col.key),
   }));
 }
 

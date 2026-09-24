@@ -200,3 +200,13 @@ export class AddItemsToTableSessionDto {
   @Type(() => TableSessionAddItemDto)
   items!: TableSessionAddItemDto[];
 }
+
+/**
+ * DTO to update notes on a single item of an open table check.
+ */
+export class UpdateOrderItemNotesDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  notes?: string;
+}

@@ -911,10 +911,15 @@ export class PaymentsService {
           user,
         ))!;
         const order = orderCreation.order;
+        // PR #840: dine_in (table consumption) keeps direct_delivery handover
+        // semantics — goods leave our hands at charge (stock commit + COGS).
+        // Only the label changed; every predicate below must treat both alike.
+        const isImmediateHandover =
+          order.delivery_type === 'direct_delivery' || order.delivery_type === 'dine_in';
         // E.1: the persisted order lines (including adopted drafts) determine
         // whether immediate POS delivery requires serial confirmation.
         const hasSerialized = orderCreation.hasSerialized;
-        const immediateSerialized = hasSerialized && order.delivery_type === 'direct_delivery' &&
+        const immediateSerialized = hasSerialized && isImmediateHandover &&
           !createPosPaymentDto.is_draft;
         const paymentRoute = await this.resolvePosPaymentRoute(tx, createPosPaymentDto);
         if (immediateSerialized) {
@@ -1396,7 +1401,7 @@ export class PaymentsService {
             // Home delivery and non-immediate serialized flows defer stock;
             // serialized direct_delivery is committed before this tx finishes.
             order.delivery_type === 'home_delivery' ||
-              (hasSerialized && order.delivery_type !== 'direct_delivery'),
+              (hasSerialized && !isImmediateHandover),
             hasKitchenItems,
           );
         } else if (isDigitalPayment) {
@@ -1407,7 +1412,7 @@ export class PaymentsService {
             'pending_payment',
             // Digital serialized direct_delivery is rejected above.
             order.delivery_type === 'home_delivery' ||
-              (hasSerialized && order.delivery_type !== 'direct_delivery'),
+              (hasSerialized && !isImmediateHandover),
             hasKitchenItems,
           );
         } else if (!createPosPaymentDto.is_draft) {
@@ -1419,7 +1424,7 @@ export class PaymentsService {
             'pending_payment',
             // Credit serialized direct_delivery is rejected above.
             order.delivery_type === 'home_delivery' ||
-              (hasSerialized && order.delivery_type !== 'direct_delivery'),
+              (hasSerialized && !isImmediateHandover),
             hasKitchenItems,
           );
         }
@@ -1460,7 +1465,7 @@ export class PaymentsService {
           createPosPaymentDto.requires_payment &&
           !isDigitalPayment &&
           !isOnDelivery &&
-          order.delivery_type === 'direct_delivery';
+          isImmediateHandover;
 
 
         if (isDirectDeliveryFinished) {
@@ -1688,8 +1693,8 @@ export class PaymentsService {
               client: tx,
             });
 
-            // 5b. Emit order.completed for COGS on direct POS sales
-            if (order.delivery_type === 'direct_delivery') {
+            // 5b. Emit order.completed for COGS on direct POS sales (dine_in included)
+            if (isImmediateHandover) {
               const total_cost = inventoryCost;
               if (total_cost > 0) {
                 this.eventEmitter.emit('order.completed', {
@@ -3864,6 +3869,7 @@ export class PaymentsService {
     const updated = await tx.orders.update({
       where: { id: session.order_id },
       data: {
+        delivery_type: 'dine_in',
         ...(session.order?.created_by_user_id == null && tableSellerUserId
           ? { created_by_user_id: tableSellerUserId }
           : {}),
@@ -4107,7 +4113,7 @@ export class PaymentsService {
       openedBy: user?.id ?? null,
       customerId: dto.customer_id ?? null,
       channel: 'pos',
-      deliveryType: 'direct_delivery',
+      deliveryType: 'dine_in',
       // The POS charge does not capture the party size; the mesa can be
       // annotated later via `setGuestCount` exactly like a QR open.
       guestCount: null,
@@ -4649,7 +4655,12 @@ export class PaymentsService {
           // E.1: preserve the operator's delivery intent. Serialized takeaway
           // is direct_delivery only after strict preflight + transactional
           // serial/stock commit; real shipping-method pickup stays pickup.
-          delivery_type: dto.delivery_type || 'direct_delivery',
+          // (Merge: el forzado QUI-431 serialized→pickup de la rama queda
+          // superado por el preflight E.1 de develop — mantenerlo mataría E.1.)
+          // PR #840: la venta atada a mesa es dine_in.
+          delivery_type: (dto.table_id != null || dto.table_session_id != null || dto.delivery_type === 'dine_in')
+            ? 'dine_in'
+            : (dto.delivery_type || 'direct_delivery'),
           payment_form: dto.is_draft
             ? null
             : dto.payment_form || (dto.requires_payment ? '1' : '2'),

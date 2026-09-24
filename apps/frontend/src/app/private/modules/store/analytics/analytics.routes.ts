@@ -250,6 +250,13 @@ export const analyticsRoutes: Routes = [
                 (c) => c.PurchasesBySupplierComponent,
               ),
           },
+          {
+            path: 'payable-aging',
+            loadComponent: () =>
+              import('./pages/purchases/payable-aging.component').then(
+                (c) => c.PayableAgingComponent,
+              ),
+          },
         ],
       },
       // Customers Analytics (shell)

@@ -53,13 +53,48 @@ export class KdsTicketCardComponent {
         return null;
     }
   });
+
   /**
-   * Takeaway-only KDS: "Entregar" se habilita solo cuando TODOS los items
-   * visibles del ticket son para llevar (`order_item.is_takeaway`). El dato
-   * ya viaja con el ticket (snapshot + eventos SSE), sin fetch extra.
+   * Determina si el ticket pertenece a una mesa de salón (table_id != null, table != null o dine_in).
+   */
+  readonly isTableTicket = computed<boolean>(() => {
+    const t = this.ticket();
+    return t.table_id != null || t.table != null || t.order?.delivery_type === 'dine_in';
+  });
+
+  /**
+   * Rótulo de empaque por plato individual:
+   * - 'ENVÍO' para domicilio.
+   * - En mesas de salón, SOLO 'PARA LLEVAR' si el plato fue expresamente marcado (order_item.is_takeaway = true).
+   * - 'PARA LLEVAR' para pedidos de mostrador (direct_delivery) sin mesa.
+   * - null para consumo regular en mesa.
+   */
+  itemDeliveryBadge(item: KitchenTicketItem): string | null {
+    if (this.ticket().order?.delivery_type === 'home_delivery') {
+      return 'ENVÍO';
+    }
+    if (this.isTableTicket()) {
+      return item.order_item?.is_takeaway === true ? 'PARA LLEVAR' : null;
+    }
+    if (
+      this.ticket().order?.delivery_type === 'direct_delivery' ||
+      item.order_item?.is_takeaway === true
+    ) {
+      return 'PARA LLEVAR';
+    }
+    return null;
+  }
+
+  /**
+   * Takeaway-only KDS: "Entregar" se habilita cuando TODOS los items
+   * visibles del ticket son para llevar o la orden completa es de mostrador (direct_delivery sin mesa).
    */
   readonly allTakeaway = computed(() => {
-    const items = this.ticket()?.items ?? [];
+    const ticket = this.ticket();
+    if (!this.isTableTicket() && ticket?.order?.delivery_type === 'direct_delivery') {
+      return true;
+    }
+    const items = ticket?.items ?? [];
     return (
       items.length > 0 &&
       items.every((it) => it.order_item?.is_takeaway === true)

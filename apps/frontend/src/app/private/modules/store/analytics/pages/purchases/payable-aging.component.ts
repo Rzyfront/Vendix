@@ -1,0 +1,374 @@
+import {
+  Component,
+  OnInit,
+  inject,
+  signal,
+  computed,
+  DestroyRef,
+} from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import type { EChartsOption } from 'echarts';
+
+import {
+  CardComponent,
+  ChartComponent,
+  IconComponent,
+  StatsComponent,
+} from '../../../../../../shared/components';
+import {
+  OptionsDropdownComponent,
+} from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import type {
+  DropdownAction,
+} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../../shared/pipes/currency/currency.pipe';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+
+import { AnalyticsService } from '../../services/analytics.service';
+import type {
+  PayableAgingTotals,
+} from '../../interfaces/purchases-analytics.interface';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
+
+@Component({
+  selector: 'vendix-payable-aging',
+  standalone: true,
+  imports: [
+    CommonModule,
+    CardComponent,
+    ChartComponent,
+    IconComponent,
+    StatsComponent,
+    OptionsDropdownComponent,
+    CurrencyPipe,
+    AnalyticsCardComponent,
+  ],
+  styles: [
+    `
+      :host {
+        display: block;
+        margin: -16px;
+        @media (min-width: 768px) {
+          margin: -24px;
+        }
+      }
+      :host ::ng-deep .stats-container {
+        padding: 0;
+        margin: 0;
+        margin-bottom: 0;
+      }
+      :host ::ng-deep .results-header {
+        padding: 0.75rem 1rem;
+      }
+    `,
+  ],
+  template: `
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+      <!-- Stats Cards -->
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+        <app-stats
+          title="Saldo Total"
+          [value]="totals().total_outstanding | currency"
+          smallText="Deuda total a proveedores"
+          iconName="dollar-sign"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+        ></app-stats>
+
+        <app-stats
+          title="Corriente (Al día)"
+          [value]="totals().current | currency"
+          smallText="Sin mora de pago"
+          iconName="check-circle"
+          iconBgColor="bg-emerald-100"
+          iconColor="text-emerald-600"
+        ></app-stats>
+
+        <app-stats
+          title="Mora Crítica (>90d)"
+          [value]="totals().days_over_90 | currency"
+          smallText="Vencimiento superior a 90 días"
+          iconName="alert-triangle"
+          iconBgColor="bg-rose-100"
+          iconColor="text-rose-600"
+        ></app-stats>
+
+        <app-stats
+          title="Proveedores con Deuda"
+          [value]="total()"
+          smallText="Cuentas comerciales activas"
+          iconName="building-2"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+      </div>
+
+      <!-- Main Card -->
+      <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+        <div slot="header" class="results-header flex items-center justify-between gap-3 flex-wrap">
+          <div class="flex items-center gap-2 min-w-0">
+            <app-icon name="clock" [size]="20" class="shrink-0 text-[var(--color-primary)]"></app-icon>
+            <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">
+              Cuentas por Pagar Proveedor
+            </span>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap shrink-0">
+            <app-options-dropdown
+              class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+              [actions]="dropdownActions()"
+              [showActions]="true"
+              triggerLabel="Acciones"
+              triggerIcon="plus"
+              [isLoading]="exporting()"
+              (actionClick)="onActionClick($event)"
+            ></app-options-dropdown>
+          </div>
+        </div>
+
+        <div class="p-4 space-y-6">
+          <!-- Aging Distribution Chart -->
+          <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+            <div slot="header" class="results-header flex flex-col">
+              <span class="text-sm font-bold text-[var(--color-text-primary)]">Distribución por Antigüedad</span>
+              <span class="text-xs text-[var(--color-text-secondary)]">
+                Saldos pendientes agrupados por tramos de vencimiento (Corriente, 1-30d, 31-60d, 61-90d, >90d)
+              </span>
+            </div>
+            <div class="p-4 space-y-4">
+              <div class="h-72">
+                <app-chart [options]="chartOptions()" [loading]="loading()"></app-chart>
+              </div>
+            </div>
+          </app-card>
+
+          <!-- Quick Links -->
+          <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Compras</span>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+              @for (view of purchasesViews; track view.key) {
+                <app-analytics-card [view]="view"></app-analytics-card>
+              }
+            </div>
+          </app-card>
+        </div>
+      </app-card>
+    </div>
+  `,
+})
+export class PayableAgingComponent implements OnInit {
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly analyticsService = inject(AnalyticsService);
+  private readonly toastService = inject(ToastService);
+  private readonly currencyService = inject(CurrencyFormatService);
+
+  readonly loading = signal<boolean>(false);
+  readonly exporting = signal<boolean>(false);
+  readonly total = signal<number>(0);
+
+  readonly totals = signal<PayableAgingTotals>({
+    total_paid: 0,
+    current: 0,
+    days_1_30: 0,
+    days_31_60: 0,
+    days_61_90: 0,
+    days_over_90: 0,
+    total_outstanding: 0,
+  });
+
+  readonly chartOptions = signal<EChartsOption>({});
+
+  readonly purchasesViews: AnalyticsView[] = getViewsByCategory('purchases').filter(
+    (v) => v.key !== 'purchases_payable_aging',
+  );
+
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'export-xlsx',
+      label: 'Exportar XLSX',
+      icon: 'download',
+    },
+  ]);
+
+  ngOnInit(): void {
+    this.currencyService.loadCurrency();
+    this.loadData();
+  }
+
+  loadData(): void {
+    this.loading.set(true);
+
+    this.analyticsService
+      .getPayableAging({ page: 1, limit: 1 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => {
+          const pagination = res?.meta?.pagination;
+          const totalCount =
+            typeof pagination?.total === 'number'
+              ? pagination.total
+              : typeof res?.total === 'number'
+                ? res.total
+                : 0;
+          this.total.set(totalCount);
+
+          const totalsData: PayableAgingTotals = res?.meta?.totals ?? {
+            total_paid: 0,
+            current: 0,
+            days_1_30: 0,
+            days_31_60: 0,
+            days_61_90: 0,
+            days_over_90: 0,
+            total_outstanding: 0,
+          };
+          this.totals.set(totalsData);
+
+          this.updateChart(totalsData);
+          this.loading.set(false);
+        },
+        error: () => {
+          this.total.set(0);
+          this.updateChart({
+            total_paid: 0,
+            current: 0,
+            days_1_30: 0,
+            days_31_60: 0,
+            days_61_90: 0,
+            days_over_90: 0,
+            total_outstanding: 0,
+          });
+          this.loading.set(false);
+          this.toastService.error('Error al cargar las cuentas por pagar a proveedores');
+        },
+      });
+  }
+
+  onActionClick(action: string): void {
+    if (action === 'export-xlsx') {
+      this.exportReport();
+    }
+  }
+
+  exportReport(): void {
+    this.exporting.set(true);
+
+    this.analyticsService
+      .exportPayableAging()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (blob) => {
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `cuentas_por_pagar_proveedor_${new Date().toISOString().split('T')[0]}.xlsx`;
+          a.click();
+          window.URL.revokeObjectURL(url);
+          this.exporting.set(false);
+          this.toastService.success('Reporte exportado exitosamente');
+        },
+        error: () => {
+          this.exporting.set(false);
+          this.toastService.error('No se pudo exportar el reporte');
+        },
+      });
+  }
+
+  // Etiquetas cortas para el eje en móvil ($1,2 M / $45 mil).
+  // El tooltip mantiene el valor completo, no se pierde información.
+  private formatCompact(value: number): string {
+    const abs = Math.abs(value);
+    if (abs >= 1_000_000) {
+      const m = value / 1_000_000;
+      const text = m >= 100 ? `${Math.round(m)}` : `${Math.round(m * 10) / 10}`;
+      return `$${text.replace('.', ',')} M`;
+    }
+    if (abs >= 1_000) return `$${Math.round(value / 1_000)} mil`;
+    return this.currencyService.format(value);
+  }
+
+  private updateChart(t: PayableAgingTotals): void {
+    const categories = ['Corriente', '1-30 días', '31-60 días', '61-90 días', '>90 días'];
+    const values = [t.current, t.days_1_30, t.days_31_60, t.days_61_90, t.days_over_90];
+    const colors = ['#10b981', '#3b82f6', '#f59e0b', '#f97316', '#ef4444'];
+
+    this.chartOptions.set({
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          const p = Array.isArray(params) ? params[0] : params;
+          const val = this.currencyService.format(Number(p.value) || 0);
+          return `<div class="p-1"><strong>${p.name}</strong><br/>Monto pendiente: ${val}</div>`;
+        },
+      },
+      grid: {
+        top: 20,
+        right: 25,
+        bottom: 60,
+        left: 80,
+        containLabel: true,
+      },
+      // El icono del legend hereda el primer color de la paleta de la serie.
+      color: ['#10b981'],
+      legend: {
+        show: true,
+        left: 'center',
+        bottom: 0,
+      },
+      xAxis: {
+        type: 'value',
+        axisLabel: {
+          hideOverlap: true,
+          formatter: (value: number) => this.currencyService.format(value),
+        },
+        splitLine: {
+          lineStyle: { color: 'var(--color-border, #e2e8f0)', type: 'dashed' },
+        },
+      },
+      media: [
+        {
+          query: { maxWidth: 640 },
+          option: {
+            grid: {
+              left: 40,
+              right: 15,
+            },
+            xAxis: {
+              axisLabel: {
+                fontSize: 10,
+                formatter: (value: number) => this.formatCompact(value),
+              },
+            },
+            yAxis: {
+              axisLabel: { fontSize: 11 },
+            },
+          },
+        },
+      ],
+      yAxis: {
+        type: 'category',
+        data: categories,
+        axisLine: { lineStyle: { color: 'var(--color-border, #cbd5e1)' } },
+        axisLabel: { fontWeight: 'bold' },
+      },
+      series: [
+        {
+          name: 'Saldo Pendiente',
+          type: 'bar',
+          data: values.map((val, idx) => ({
+            value: val,
+            itemStyle: {
+              color: colors[idx],
+              borderRadius: [0, 6, 6, 0],
+            },
+          })),
+          barMaxWidth: 32,
+        },
+      ],
+    });
+  }
+}
