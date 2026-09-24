@@ -1200,6 +1200,7 @@ export class TableSessionPageComponent implements OnInit {
               );
             },
           });
+      });
   }
 
   /**
