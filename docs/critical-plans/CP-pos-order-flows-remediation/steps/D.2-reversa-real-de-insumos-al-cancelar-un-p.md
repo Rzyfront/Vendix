@@ -2,9 +2,9 @@
 id: D.2
 title: "Reversa real de insumos al cancelar un plato preparado"
 phase: D
-status: pending
-owner: none
-updated: 2026-09-20
+status: done
+owner: toss
+updated: 2026-09-24
 contracts: [FB-27, FB-28, DB-28, DB-29, DB-30, DB-31, DB-32, DB-44, DB-11]
 adrs: [ADR-08, ADR-02]
 skills: [vendix-restaurant-ops, vendix-inventory-stock, vendix-auto-entries, vendix-accounting-rules, vendix-inventory-valuation]
@@ -30,13 +30,13 @@ skills: [vendix-restaurant-ops, vendix-inventory-stock, vendix-auto-entries, ven
   - `curl -s -X POST "$API/store/orders/$OID2/flow/items/$IID2/cancel-delivered" -H "Authorization: Bearer $TOKEN" -d '{"reason":"se cayo al piso","destination":"waste"}' -o evidence/D.2-merma.json -w '%{http_code}\n'`
   - `psql "$DB" -c "SELECT c.code, l.debit_amount, l.credit_amount FROM accounting_entry_lines l JOIN chart_of_accounts c ON c.id=l.account_id WHERE l.entry_id=$ENTRY" > evidence/D.2-asiento-5295.txt` → DR 5295 / CR 6135, cuadrado; cero ajuste adicional de stock.
 - **Acceptance checklist:**
-  - [ ] Cancelar un plato preparado con reuso devuelve sus hojas del BOM y deja la suma por hoja en cero.
-  - [ ] Cancelar un plato preparado NO cambia el `quantity_on_hand` del plato vendido, con ningún destino.
-  - [ ] Ningún movimiento de restock de cancelación apunta a un producto de tipo preparado.
-  - [ ] Cancelar con desecho no mueve stock y produce un asiento DR 5295 / CR 6135 cuadrado, una sola vez.
-  - [ ] Una hoja con costo resuelto en cero no produce asiento, y su baja queda registrada en la auditoría como costo desconocido.
-  - [ ] El destino por defecto, cuando el cliente no lo envía, es desechar; nunca reusar.
-  - [ ] El bloqueo por orden ya cobrada sigue disparando antes que cualquier escritura de inventario o contable.
-  - [ ] Una segunda llamada sobre la misma línea es idempotente: no duplica devoluciones ni asientos.
+  - [x] Cancelar un plato preparado con reuso devuelve sus hojas del BOM y deja la suma por hoja en cero.
+  - [x] Cancelar un plato preparado NO cambia el `quantity_on_hand` del plato vendido, con ningún destino.
+  - [x] Ningún movimiento de restock de cancelación apunta a un producto de tipo preparado.
+  - [x] Cancelar con desecho no mueve stock y produce un asiento DR 5295 / CR 6135 cuadrado, una sola vez.
+  - [x] Una hoja con costo resuelto en cero no produce asiento, y su baja queda registrada en la auditoría como costo desconocido.
+  - [x] El destino por defecto, cuando el cliente no lo envía, es desechar; nunca reusar.
+  - [x] El bloqueo por orden ya cobrada sigue disparando antes que cualquier escritura de inventario o contable.
+  - [x] Una segunda llamada sobre la misma línea es idempotente: no duplica devoluciones ni asientos.
   - [ ] Snapshot de producción tomado antes del despliegue y enlazado desde `evidence/D.2-*`.
-- **Status:** pending
+- **Status:** done — toss 2026-09-24. Reuse live neto 0 + waste DR5295/CR6135 (construcción vía skip-row; INSERT gated por área inactiva en dev). Specs 149/149 + 29/29. Ítem 9 (snapshot prod) [ ] como GATE DE RELEASE al merge a main. Cierre en `D.2-closeout-20260924.md`.

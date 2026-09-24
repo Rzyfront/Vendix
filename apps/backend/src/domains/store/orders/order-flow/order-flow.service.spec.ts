@@ -2400,12 +2400,14 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
         validate_availability: false,
       }),
     );
-    // Soft cancel con el tipo contable de la reversa.
+    // Soft cancel con el tipo contable de la reversa. D.2+D.3: vocabulario
+    // canónico — la reversa de entrega escribe after_fire_* (el remake lo
+    // exige); 'before_fire' era el contrato pre-D.2 de 1060 paso 2.
     expect(txMock.order_items.update).toHaveBeenCalledWith({
       where: { id: ITEM_ID },
       data: expect.objectContaining({
         cancellation_reason: 'el cliente devolvió el plato intacto',
-        cancellation_type: 'before_fire',
+        cancellation_type: 'after_fire_reused',
         updated_at: expect.any(Date),
       }),
     });
@@ -2443,7 +2445,7 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
     ).not.toHaveBeenCalled();
     expect(txMock.order_items.update).toHaveBeenCalledWith({
       where: { id: ITEM_ID },
-      data: expect.objectContaining({ cancellation_type: 'before_fire' }),
+      data: expect.objectContaining({ cancellation_type: 'after_fire_waste' }),
     });
     expect(auditService.logCustom).toHaveBeenCalledTimes(1);
     expect(auditService.logCustom.mock.calls[0][3]).toEqual(
@@ -2615,7 +2617,7 @@ describe('D.2 — cancelación de una línea prepared ya consumida', () => {
       ? service.cancelDeliveredOrderItem(orderId, itemId, 'motivo válido', destination)
       : service.cancelOrderItem(orderId, itemId, 'motivo válido',
           destination === 'restock' ? 'after_fire_reused' : 'after_fire_waste');
-    return { cancel, tx, stock, events, audit, accounting, item };
+    return { cancel, tx, stock, events, audit, accounting, item, service };
   };
 
   it.each([false, true])('reuse delivered=%s devuelve SOLO hojas reales y excluye el plato del total', async (delivered) => {
@@ -2730,6 +2732,21 @@ describe('D.2 — cancelación de una línea prepared ya consumida', () => {
     expect(accounting.onPreparedDishDisposition).not.toHaveBeenCalled();
     expect(tx.audit_logs.create).toHaveBeenCalledWith({ data: expect.objectContaining({
       metadata: expect.objectContaining({ leaves: [], consumed_cost: 0 }),
+    }) });
+  });
+
+  it('D.2 item 6: sin tipo explícito, la línea disparada cae a desechar, nunca a reusar', async () => {
+    const { tx, stock, accounting, service } = harness(false, 'waste');
+    await service.cancelOrderItem(orderId, itemId, 'motivo válido');
+    expect(tx.order_items.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ cancellation_type: 'after_fire_waste' }),
+    }));
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(accounting.onPreparedDishDisposition).toHaveBeenCalledWith(expect.objectContaining({
+      disposition: 'waste',
+    }));
+    expect(tx.audit_logs.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      metadata: expect.objectContaining({ destination: 'waste' }),
     }) });
   });
 });
