@@ -84,6 +84,8 @@ describe('MenuFilterService.diagnose', () => {
     userStoreType: ReturnType<typeof signal<string | null>>;
     isModuleVisible: jasmine.Spy;
     hasPermission: jasmine.Spy;
+    hasAnyRole: jasmine.Spy;
+    hasAnyPermission: jasmine.Spy;
     isOwner: jasmine.Spy;
     isAdmin: jasmine.Spy;
     getVisibleModules$: jasmine.Spy;
@@ -107,6 +109,8 @@ describe('MenuFilterService.diagnose', () => {
       userStoreType: signal<string | null>('physical'),
       isModuleVisible: jasmine.createSpy('isModuleVisible').and.returnValue(true),
       hasPermission: jasmine.createSpy('hasPermission').and.returnValue(true),
+      hasAnyRole: jasmine.createSpy('hasAnyRole').and.returnValue(true),
+      hasAnyPermission: jasmine.createSpy('hasAnyPermission').and.returnValue(true),
       isOwner: jasmine.createSpy('isOwner').and.returnValue(true),
       isAdmin: jasmine.createSpy('isAdmin').and.returnValue(true),
       getVisibleModules$: jasmine.createSpy('getVisibleModules$'),
@@ -247,6 +251,8 @@ describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
     userStoreType: ReturnType<typeof signal<string | null>>;
     isModuleVisible: jasmine.Spy;
     hasPermission: jasmine.Spy;
+    hasAnyRole: jasmine.Spy;
+    hasAnyPermission: jasmine.Spy;
     isOwner: jasmine.Spy;
     isAdmin: jasmine.Spy;
     getVisibleModules$: jasmine.Spy;
@@ -267,6 +273,8 @@ describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
       userStoreType: signal<string | null>('physical'),
       isModuleVisible: jasmine.createSpy('isModuleVisible').and.returnValue(false),
       hasPermission: jasmine.createSpy('hasPermission').and.returnValue(true),
+      hasAnyRole: jasmine.createSpy('hasAnyRole').and.returnValue(false),
+      hasAnyPermission: jasmine.createSpy('hasAnyPermission').and.returnValue(false),
       isOwner: jasmine.createSpy('isOwner').and.returnValue(false),
       isAdmin: jasmine.createSpy('isAdmin').and.returnValue(false),
       getVisibleModules$: jasmine.createSpy('getVisibleModules$'),
@@ -296,6 +304,29 @@ describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
     expect(route).toBe('/admin/pos');
   });
 
+  it('un usuario operativo con dashboard: true en panel_ui pero sin permisos omite el dashboard y es enrutado a /admin/pos', () => {
+    // Simular que el usuario tiene 'dashboard' y 'pos' en panel_ui, pero sin permisos para dashboard
+    authFacade.isModuleVisible.and.callFake(
+      (key: string) => key === 'dashboard' || key === 'pos',
+    );
+    const route = service.firstActiveModuleRoute([]);
+    expect(route).toBe('/admin/pos');
+  });
+
+  it('diagnose para /admin/dashboard devuelve visible: false con blockedBy: permission si no tiene acceso', () => {
+    authFacade.isOwner.and.returnValue(false);
+    authFacade.isAdmin.and.returnValue(false);
+    authFacade.hasAnyRole.and.returnValue(false);
+    authFacade.hasAnyPermission.and.returnValue(false);
+    const diagnosis = service.diagnose({
+      label: 'Panel Principal',
+      route: '/admin/dashboard',
+      icon: '',
+    } as any);
+    expect(diagnosis.visible).toBeFalse();
+    expect(diagnosis.blockedBy).toBe('permission');
+  });
+
   it('un usuario operativo con solo pedidos es enrutado a la primera ruta de pedidos visible', () => {
     authFacade.isModuleVisible.and.callFake(
       (key: string) => key === 'orders' || key === 'orders_sales',
@@ -317,4 +348,5 @@ describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
     expect(route).not.toBe('/admin/no-access');
   });
 });
+
 
