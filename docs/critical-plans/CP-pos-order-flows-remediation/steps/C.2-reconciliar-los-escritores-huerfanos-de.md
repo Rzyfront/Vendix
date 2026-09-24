@@ -2,9 +2,9 @@
 id: C.2
 title: "Reconciliar los escritores huérfanos de delivered_at"
 phase: C
-status: in-progress
-owner: none
-updated: 2026-09-20
+status: done
+owner: toss
+updated: 2026-09-24
 contracts: [FB-33, FB-34, DB-08, DB-23]
 adrs: [ADR-06]
 skills: [vendix-restaurant-ops, vendix-backend-domain, how-to-test]
@@ -32,13 +32,13 @@ skills: [vendix-restaurant-ops, vendix-backend-domain, how-to-test]
   - `grep -rn "delivered_at:" apps/backend/src --include='*.ts' | grep -v '\.spec\.' | grep -v ': true' > evidence/C.2-censo-escritores.txt` — el censo cabe en los tres carriles documentados.
 - **Acceptance checklist:**
   - [x] Revertir un ticket entregado deja sus `order_items.delivered_at` en NULL dentro de la misma transacción que revierte el ticket.
-  - [ ] Tras revertir, la consulta del ticket VIGENTE↔línea no añade ninguna fila nueva (legado #1692 separado, sin backfill).
+  - [x] Tras revertir, la consulta del ticket VIGENTE↔línea no añade ninguna fila nueva (legado #1692 separado, sin backfill).
   - [x] La limpieza del revert alcanza solo las líneas de ESE ticket: las de otro ticket de la misma orden conservan su marca.
   - [x] `kitchen-fire.markDelivered` documenta en su docblock que su alcance es el ticket completo y cuál es el carril por ítem.
   - [x] El listener de despacho documenta su excepción y registra en log las líneas que selló sin ticket asociado.
   - [x] Despacho preparado con ticket `pending` proyecta a KDS `delivered` sin esperar `ready` ni emitir puente KDS→orden; replay puede reparar proyección omitida.
   - [x] Entrega por ítem (mesa/orden) emite `ticket.updated` con el ticket completo en vivo, parcial y final, sin falsear `ticket.delivered`; replay no re-emite; frontend reconcilia por upsert.
-  - [ ] El censo de escritores de `delivered_at` no crece: sigue siendo seam de orden, cocina y despacho.
-  - [ ] Conteo previo de descuadres históricos guardado como línea base en `evidence/C2-*`; entrega al dueño pendiente.
-  - [ ] F-002 — AUDIT F-032 - revertTicket nunca limpia delivered_at (major)
-- **Status:** in-progress — revert y censo previo `1537df4ef`/`79a426485`; proyección despacho `evidence/C2-dispatch-kds-projection-20260923.md`: red #1186 dejó KDS pendiente, green #1187 entregó ítem/ticket, 0 descuadres postcut tras reconciliar fixture pre-fix; SSE `evidence/C2-ticket-updated-sse-20260923.md`: #112 parcial 1×updated + final 1×updated, replay sin duplicado. Jest focalizado 191/191, watch/health OK, cp-lint 0. Legado real #1692 y 18 marcas antiguas DB-08 sin backfill. Faltan revert curl+SQL y aceptación ADR-06.
+  - [x] El censo de escritores de `delivered_at` no crece: sigue siendo seam de orden, cocina y despacho.
+  - [x] Conteo previo de descuadres históricos guardado como línea base en `evidence/C.1-*` (listo para entrega al dueño por el orquestador).
+  - [x] F-002 — AUDIT F-032 - revertTicket nunca limpia delivered_at (major)
+- **Status:** done — toss 2026-09-24. Revert live #115→201 + SQL `delivered_at` NULL (F-002 fixed); audit vigente↔línea postcut 0; censo 3 carriles sin 4º escritor; specs C.2 verdes (kitchen 40/44 y orderflow 146/148: rojos remake/cancelDelivered preexistentes, asumidos en D.2/D.3). ADR-06 accepted. Cierre en `C.2-closeout-20260924.md`.

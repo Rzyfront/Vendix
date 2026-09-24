@@ -1,0 +1,69 @@
+# C.2 — censo de escritores de delivered_at (verificación de cierre del step)
+# comando: grep -rn "delivered_at:" apps/backend/src --include='*.ts' | grep -v '\.spec\.' | grep -v ': true'
+# cwd:     repo root (/Users/rzy/Documents/Organizations/Quickss/Vendix)
+# fecha:   2026-09-24 ~01:0xZ (tras las 2 corridas jest)
+# rama:    develop
+# nota:    el grep calza también `estimated_delivered_at:` (subcadena) y hits de
+#          lectura (where/select/tipos/comentarios); la clasificación abajo separa
+#          escrituras reales (data:) de no-escrituras. Total hits: 23.
+#
+# ---- salida completa del comando (verbatim) ----
+apps/backend/src/domains/organization/orders/organization-orders.service.ts:348:      estimated_delivered_at: order.estimated_delivered_at?.toISOString(),
+apps/backend/src/domains/organization/orders/organization-orders.service.ts:582:      estimated_delivered_at: order.estimated_delivered_at?.toISOString(),
+apps/backend/src/domains/store/tables/table-sessions.service.ts:136:      delivered_at: Date | null;
+apps/backend/src/domains/store/tables/table-sessions.service.ts:2312:              delivered_at: it.delivered_at,
+apps/backend/src/domains/store/kitchen-fire/kitchen-fire.service.ts:2715:          delivered_at: null,
+apps/backend/src/domains/store/kitchen-fire/kitchen-fire.service.ts:2718:          delivered_at: new Date(),
+apps/backend/src/domains/store/kitchen-fire/kitchen-fire.service.ts:3065:            delivered_at: { not: null },
+apps/backend/src/domains/store/kitchen-fire/kitchen-fire.service.ts:3068:            delivered_at: null,
+apps/backend/src/domains/store/dispatch-notes/dispatch-note-flow/dispatch-note-flow.service.ts:381:        delivered_at: new Date(),
+apps/backend/src/domains/store/dispatch-notes/dispatch-note-flow/dispatch-note-flow.service.ts:544:        delivered_at: new Date(),
+apps/backend/src/domains/store/dispatch-notes/listeners/dispatch-note-events.listener.ts:443:   * Idempotente por `delivered_at: null` en la `where`: la primera entrega es
+apps/backend/src/domains/store/dispatch-notes/listeners/dispatch-note-events.listener.ts:467:        delivered_at: null,
+apps/backend/src/domains/store/dispatch-notes/listeners/dispatch-note-events.listener.ts:508:      where: { id: { in: targetIds }, delivered_at: null },
+apps/backend/src/domains/store/dispatch-notes/listeners/dispatch-note-events.listener.ts:510:        delivered_at: now,
+apps/backend/src/domains/store/dispatch-notes/listeners/dispatch-note-events.listener.ts:527:          where: { id: { in: targetIds }, delivered_at: now },
+apps/backend/src/domains/store/dispatch-routes/route-flow/route-flow.service.ts:351:        delivered_at: new Date(),
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:2162:      delivered_at: new Date(),
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:2224:        delivered_at: new Date(),
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:2348:          delivered_at: now,
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:2513:        delivered_at: { not: null },
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:5245:          estimated_delivered_at: eta.deliveredAt,
+apps/backend/src/domains/store/analytics/services/dispatch-analytics.service.ts:278:  delivered_at: Date | null;
+apps/backend/src/domains/store/analytics/services/dispatch-analytics.service.ts:567:        delivered_at: n.delivered_at,
+#
+# ---- clasificación por carril ----
+# ESCRITURAS REALES (9) — todas dentro de los 3 carriles documentados:
+# [SEAM ORDEN — 3]
+#   order-flow.service.ts:2162  deliverOrder → updateOrderState('delivered', { delivered_at }) sobre orders (cabecera)
+#   order-flow.service.ts:2224  markKitchenOrderDelivered (puente kitchen_bridge) → orders.delivered_at (cabecera)
+#   order-flow.service.ts:2348  deliverOrderItem paso 4 → order_items.updateMany data { delivered_at: now } (C.2)
+# [COCINA — 2]
+#   kitchen-fire.service.ts:2718  deliverTicket QUI-652 → order_items.updateMany data { delivered_at: new Date() } (HECHO DE SERVICIO)
+#   kitchen-fire.service.ts:3068  revertTicket → order_items.updateMany data { delivered_at: null } (limpia stamps, C.2)
+# [DESPACHO — 4]
+#   dispatch-note-flow.service.ts:381  entrega outbound → dispatch_notes.update data { delivered_at }
+#   dispatch-note-flow.service.ts:544  recepción inbound → dispatch_notes.update data { delivered_at }
+#   dispatch-note-events.listener.ts:510  proyección post-commit despacho→líneas → order_items.updateMany data { delivered_at: now }
+#   route-flow.service.ts:351  cierre de ruta → dispatch_notes.update data { delivered_at }
+#
+# NO-ESCRITURAS (14) — filtros where, tipos, proyecciones, comentarios, otro campo:
+# [OTRO — campo distinto estimated_delivered_at / tipos / proyecciones / comentario]
+#   organization-orders.service.ts:348,582  mapeo DTO estimated_delivered_at (lectura, OTRO campo)
+#   table-sessions.service.ts:136  declaración de tipo `delivered_at: Date | null` (no escribe)
+#   table-sessions.service.ts:2312  proyección `delivered_at: it.delivered_at` (lectura)
+#   dispatch-note-events.listener.ts:443  comentario en JSDoc
+#   order-flow.service.ts:5245  mapeo estimated_delivered_at (lectura, OTRO campo)
+#   dispatch-analytics.service.ts:278  declaración de tipo (no escribe)
+#   dispatch-analytics.service.ts:567  proyección `delivered_at: n.delivered_at` (lectura)
+# [Lecturas dentro de los 3 carriles — where acompañando escrituras/reconciliación]
+#   kitchen-fire.service.ts:2715  where guard `delivered_at: null` (acompaña :2718)
+#   kitchen-fire.service.ts:3065  where `delivered_at: { not: null }` (acompaña :3068)
+#   dispatch-note-events.listener.ts:467  where `delivered_at: null` (lee pendientes)
+#   dispatch-note-events.listener.ts:508  where `delivered_at: null` (acompaña :510)
+#   dispatch-note-events.listener.ts:527  where re-lectura `delivered_at: now` (confirma estampa propia)
+#   order-flow.service.ts:2513  where `delivered_at: { not: null }` (reconcileKitchenAfterDispatch, lectura)
+#
+# VEREDICTO: el censo CABE en los 3 carriles documentados (orden/cocina/despacho).
+# NO aparece un 4º escritor: fuera de los 3 carriles solo hay lecturas, tipos,
+# un comentario y el campo distinto `estimated_delivered_at`.

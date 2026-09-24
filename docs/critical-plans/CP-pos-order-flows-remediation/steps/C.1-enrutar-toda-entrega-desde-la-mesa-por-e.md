@@ -4,7 +4,7 @@ title: "Enrutar toda entrega desde la mesa por el seam de orden"
 phase: C
 status: done
 owner: toss
-updated: 2026-09-23
+updated: 2026-09-24
 contracts: [FB-31, FB-32, FB-33, DB-08, DB-23, DB-24, ERR-07, ERR-08, ERR-12]
 adrs: [ADR-06]
 skills: [vendix-restaurant-ops, vendix-zoneless-signals, how-to-test]

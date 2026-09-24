@@ -46,5 +46,6 @@
 | 2026-09-23 | Hypatia | I.3 | COD mostrador deja orden/pago pendientes, saldo 10000 y 0 stock; processor genérico queda registrado. | 88235b0e2; evidence/I3-cod-counter.* |
 | 2026-09-23 | Fabio | I.3 | COD domicilio deja saldo vivo y permite remisión; método POS ajeno/inexistente/omitido rechaza 400 sin orden. Paso cerrado. | evidence/I3-cod-home-20260923.md; 4ef91b0e7 |
 | 2026-09-24 | fox | B.1 | Canónica 226c25ee6 verificada: spec 77/77, ERR-33 409 ambos catálogos, baseline 15; item-42 [-] boss; DB-19 [x] vivo. Cerrado. | evidence/B.1-spec.txt, B.1-baseline.txt, B.1-cero-llamadores-descartado.md |
-| 2026-09-23 | toss | C.1 | Barrido global DB-08 (18 legacy, 0 postcut) y DB-23 (#1692 legacy, 0 postcut); grep 0 hits mesa/KDS conserva; shim 77/77; order-flow 146/148 con 2 rojos preexistentes cancelDelivered asumidos en D.2. Paso cerrado, ADR-06 accepted. | evidence/C.1-closeout-20260923.md; C.1-db08-global.txt; C.1-db23-sweep.txt; C.1-jest-shim.txt; C.1-jest-orderflow.txt |
+| 2026-09-23 | toss | C.1 | Barridos DB-08/DB-23 (0 postcut) + specs; paso cerrado, ADR-06 accepted. | evidence/C.1-closeout-20260923.md |
 | 2026-09-24 | mosk | A.1 | Guard adoptado done: DB-02/14 por corte (10 hist, 0 post); backend lectura + FE 44/44. | evidence/A1-db02-db14-closure-20260924.md; A1-*-regression-20260924.md |
+| 2026-09-24 | toss | C.2 | Revert live #115→201 + delivered_at NULL; audit postcut 0; censo 3 carriles; F-002 fixed. | evidence/C.2-closeout-20260924.md |
