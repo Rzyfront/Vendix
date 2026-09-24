@@ -297,6 +297,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No hay despacho a esta dirección, pero puedes retirar tu pedido en la tienda.',
   ORD_SHIP_CITY_UNRESOLVED_001:
     'No pudimos identificar tu ciudad. Vuelve a seleccionar departamento y ciudad e intenta de nuevo.',
+  // E.5 — el backend redacta el detalle con la orden; este texto es el respaldo corto.
+  ORD_SHIP_REQUIRED_FOR_FLOW_001:
+    'Selecciona un método de envío antes de guardar o cobrar esta venta.',
 
   // Quotations
   QUOTE_CONVERT_STATUS_001:
@@ -470,6 +473,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DSP_VALIDATE_004: 'La remisión solo puede modificarse en estado borrador',
   DSP_VALIDATE_005:
     'La cantidad a despachar excede la cantidad pendiente del pedido',
+  // E.5 — el backend nombra #orden/estado en el detalle; estos textos son respaldos cortos.
+  DSP_ORDER_DELIVERY_001: 'Las entregas en el acto no generan remisión.',
+  DSP_ORDER_STATE_001:
+    'Esta orden no admite remisión en su estado actual. Revísala antes de despacharla.',
 
   // ICA Municipal Tax
   ICA_RATE_NOT_FOUND: 'No se encontro tarifa ICA para el municipio.',

@@ -252,3 +252,56 @@ describe('ERROR_MESSAGES — INV_SCAN_* (escáner de facturas POP)', () => {
     expect(copy).toContain('productos');
   });
 });
+
+/**
+ * E.5 — respaldos cortos de venta/despacho. El backend redacta el detalle con
+ * #orden/estado y `parseApiError` lo prefiere cuando es presentable; estas
+ * copies solo aparecen si ese detalle no llega, así que los casos fijan la
+ * resolución contra un devMessage inglés no presentable.
+ */
+describe('ERROR_MESSAGES — E.5 shipping/dispatch guards', () => {
+  it('ORD_SHIP_REQUIRED_FOR_FLOW_001 resuelve a su copy y no al genérico', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 422,
+        error_code: 'ORD_SHIP_REQUIRED_FOR_FLOW_001',
+        message: 'Shipping method required for this order flow',
+      },
+    });
+
+    expect(parsed.errorCode).toBe('ORD_SHIP_REQUIRED_FOR_FLOW_001');
+    expect(parsed.userMessage).toBe(ERROR_MESSAGES['ORD_SHIP_REQUIRED_FOR_FLOW_001']);
+    expect(parsed.userMessage).not.toBe(DEFAULT_ERROR_MESSAGE);
+    expect(parsed.userMessage).not.toContain('Shipping method required');
+  });
+
+  it('DSP_ORDER_DELIVERY_001 resuelve a su copy y no al genérico', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 422,
+        error_code: 'DSP_ORDER_DELIVERY_001',
+        message: 'On-the-spot deliveries do not generate a dispatch note',
+      },
+    });
+
+    expect(parsed.errorCode).toBe('DSP_ORDER_DELIVERY_001');
+    expect(parsed.userMessage).toBe(ERROR_MESSAGES['DSP_ORDER_DELIVERY_001']);
+    expect(parsed.userMessage).not.toBe(DEFAULT_ERROR_MESSAGE);
+    expect(parsed.userMessage).not.toContain('dispatch note');
+  });
+
+  it('DSP_ORDER_STATE_001 resuelve a su copy y no al genérico', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 409,
+        error_code: 'DSP_ORDER_STATE_001',
+        message: 'Order state does not admit a dispatch note',
+      },
+    });
+
+    expect(parsed.errorCode).toBe('DSP_ORDER_STATE_001');
+    expect(parsed.userMessage).toBe(ERROR_MESSAGES['DSP_ORDER_STATE_001']);
+    expect(parsed.userMessage).not.toBe(DEFAULT_ERROR_MESSAGE);
+    expect(parsed.userMessage).not.toContain('dispatch note');
+  });
+});

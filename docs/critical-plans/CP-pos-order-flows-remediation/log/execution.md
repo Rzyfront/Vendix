@@ -53,3 +53,5 @@
 | 2026-09-24 | fox | B.2 | Verificación-only: 4 escritores+2 confirms delegan; live #1133 200, ERR-33/05 409 tipados; specs 118+27+146/148. Cerrado. | evidence/B.2-cutover-verification-20260924.md |
 | 2026-09-24 | loks | E.1 | Llevar=direct_delivery 9/10: enum 3 cajones, labels F-011 unificadas, specs 42+30+9+24, editor PUT 200, DB-05 0 implicit, DB-10 f1021/t32, serial pre-cobro OK. E2E boss. | evidence/E.1-SA1-*, E.1-SA2-*, E.1-SA3-*, E.1-pos-directo.json, E.1-regression-* |
 | 2026-09-24 | fox | B.3 | Legacy 33 clasificadas, 0 post-corte, sin backfill; snapshot live #1059 paid. Cerrado. | evidence/B3-legacy-paid-at-decision-20260924.md; B.3-sse.txt |
+| 2026-09-24 | loks | E.5 | Freno envío-sin-método 9/10: UX copy 3 códigos (spec 23/23), gate+mensajes ES verificados (backend OOM→lectura A.1), huérfanas 0. FB-19 trim 395. DB-07 abierto→F.2. | evidence/E.5-SA1-*, E.5-SA2-*, E5-* |
+| 2026-09-24 | fox | G.1 | Guard ABIERTA + util 107/107+19/19; live PUT cerrada 409, abierta 200; barrido #1192. Cerrado. | evidence/G1-guard-live-20260924.md |
