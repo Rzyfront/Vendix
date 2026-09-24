@@ -3,7 +3,7 @@ id: D.4
 title: "Modal de destino del plato y recálculo de propina"
 phase: D
 status: in-progress
-owner: fox
+owner: toss
 updated: 2026-09-20
 contracts: [FB-25, FB-26, FB-27, FB-28, DB-02, DB-44, ERR-15, ERR-42]
 adrs: [ADR-08, ADR-02]

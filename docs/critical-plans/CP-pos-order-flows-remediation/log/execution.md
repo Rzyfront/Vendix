@@ -67,3 +67,4 @@
 | 2026-09-24 | boss | D.3 | Probe resend #1188: 500+500 → F-008. E2E C.3 OK: S2b API 409, UI N/A. ERR-12 N/A; raza→I.6. F-009→I.6. | evidence/D.3-resend-boss-20260924.md |
 | 2026-09-24 | boss | D.3 | F-008 no es QUI-762: HEAD ok, cancelled_at lo mete el WIP D.3 (toss, su fix). Árbol: 11 M, staging selectivo. | — |
 | 2026-09-24 | boss | D.4 | toss-block: (1) mosk commitea ADR-12+I.2 verde 1º, toss rebasea D.4-tip después. (2) resend=F-008 tu WIP, fix+re-probe boss. (3) SQL UPDATE own-fixtures dev OK doc. | — |
+| 2026-09-24 | boss | D.4 | D.4→toss (ya trae tip-hunks+FE; evita colisión). fox=F.2→F.3. mosk I.2-logic OK (staging selectivo); specs f2→tras F-008 toss. G.2-visual PASS runner-2 (#30/#31). | evidence/G2-recorrido-runner2-20260924.md |
