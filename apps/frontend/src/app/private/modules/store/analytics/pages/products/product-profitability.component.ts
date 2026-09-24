@@ -91,6 +91,18 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
   readonly topProfitable = toSignal(this.topProfitable$, { initialValue: [] });
   readonly mostProfitable = toSignal(this.mostProfitable$, { initialValue: null });
 
+  // QUI-623: margen promedio es `null` sin base (nada vendido) — la UI muestra
+  // "—", jamás "0 %". La cobertura de costo es `n de m unidades sin costo`.
+  readonly averageMarginLabel = computed<string>(() => {
+    const margin = this.summary()?.overall_margin;
+    return margin === null || margin === undefined ? '—' : `${Number(margin).toFixed(1)}%`;
+  });
+  readonly costCoverageNotice = computed<string | null>(() => {
+    const coverage = this.summary()?.cost_coverage;
+    if (!coverage || coverage.units_without_cost <= 0) return null;
+    return `${coverage.units_without_cost} de ${coverage.units_total} unidades vendidas sin costo registrado — el margen de esas filas no es real`;
+  });
+
   marginDistributionChartOptions= signal<EChartsOption>({});
   topProfitChartOptions= signal<EChartsOption>({});
   comparativeChartOptions= signal<EChartsOption>({});
