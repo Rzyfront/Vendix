@@ -85,3 +85,4 @@
 | 2026-09-24 | boss | E.5 | PASS E.5 10/10 (2fcb0dc31, DB-07/ERR-21 vía F.2/F.3). UI± parcial → E.5-UI POS (botón bloqueado+razón→cobrar→remisión) a mi backlog E2E (runner-4 con D.4-modal). | — |
 | 2026-09-24 | loks | E.5 | Cierre 10/10 done: DB-07 0 nuevas (F.2 #1226 FK+snap), ERR-21 no dispara (F.3 #231 201). Autodesbloqueo propio. | evidence/F.2-SA*, F.3-SA1-* |
 | 2026-09-24 | boss | D.4 | PASS D.4 11/12 (1a2dd8b0b, fase D completa 4/4, 34/38). Ítem 9 E2E modal→runner-4. Obs toss mesa-cancel sin audit vs detalle-con-audit→mosk I.5. |
+| 2026-09-24 | boss | D.4 | Verificación indep: specs D.4 3/3 ✓. 14 rojos cancelOrder (egreso caja + kitchenDisposition) = mocks ADR-12 mosk, fuera de D.4 → derivado a mosk. |
