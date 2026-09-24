@@ -652,7 +652,12 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
       order_items: ['findMany', 'update'],
       inventory_transactions: ['findMany'],
       kitchen_tickets: ['findFirst'],
+      invoices: ['findMany', 'findFirst'],
+      accounts_receivable: ['findMany', 'update'],
+      order_installments: ['updateMany'],
     });
+    prismaMock.invoices.findMany.mockResolvedValue([]);
+    prismaMock.accounts_receivable.findMany.mockResolvedValue([]);
     prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'processing' }]);
     prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, store_id: 100, state: 'cancelled' });
@@ -3015,7 +3020,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
   let audit: { log: jest.Mock; logCustom: jest.Mock };
   let stock: { releaseReservationsByReference: jest.Mock };
   let emitter: { emit: jest.Mock };
-  let refundFlow: { recordCancellationCashRefund: jest.Mock; completeCancellationCashRefund: jest.Mock; emitCancellationCashRefund: jest.Mock };
+  let refundFlow: { recordCancellationPendingRefunds: jest.Mock; recordCancellationCashRefund: jest.Mock; completeCancellationCashRefund: jest.Mock; emitCancellationCashRefund: jest.Mock };
 
   /** Orden cancelable (estado `processing`) con los pagos que se le pasen. */
   const cancelableOrder = (payments: any[]) =>
@@ -3042,7 +3047,12 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       order_items: ['findMany'],
       payments: ['findMany', 'update'],
       table_sessions: ['findFirst'],
+      invoices: ['findMany', 'findFirst'],
+      accounts_receivable: ['findMany', 'update'],
+      order_installments: ['updateMany'],
     });
+    prismaMock.invoices.findMany.mockResolvedValue([]);
+    prismaMock.accounts_receivable.findMany.mockResolvedValue([]);
     prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'processing' }]);
     // Sin ítems de cocina: la rama KDS de `cancelOrder` no participa aquí.
     prismaMock.order_items.findMany.mockResolvedValue([]);
@@ -3079,6 +3089,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     };
     emitter = { emit: jest.fn() };
     refundFlow = {
+      recordCancellationPendingRefunds: jest.fn().mockResolvedValue(undefined),
       recordCancellationCashRefund: jest.fn().mockResolvedValue({
         refund: { id: 81, state: 'processing', amount: new Prisma.Decimal('59.50') },
         breakdown: { amount: new Prisma.Decimal('59.50') },
