@@ -2,9 +2,9 @@
 id: A.4
 title: "Borrador cancelable y rama de cancelación inalcanzable"
 phase: A
-status: in-progress
+status: done
 owner: mosk
-updated: 2026-09-20
+updated: 2026-09-24
 contracts: [FB-22, FB-24, DB-01, DB-16, DB-27, ERR-38, ERR-43]
 adrs: []
 skills: [vendix-backend, vendix-error-handling, vendix-inventory-stock, vendix-restaurant-ops, vendix-frontend, vendix-zoneless-signals, how-to-test]
@@ -48,4 +48,4 @@ skills: [vendix-backend, vendix-error-handling, vendix-inventory-stock, vendix-r
   - [x] FB-22 y FB-24 quedan marcadas con evidencia; DB-01/DB-27/ERR-38 siguen abiertas por sus invariantes compartidas de I/E
   - [x] F-005 — Falta contrato de error para cancelar draft con mesa abierta (major)
   - [x] F-006 — DELETE de borrador poblado retorna error tipado y no 500 (major)
-- **Status:** in-progress · Fabio · 2026-09-23 · `d13ce5b79`, `1ed057bd5`; policy 46/46 y OrdersService 105/105. API: draft #1104 cancela 200, mesa abierta #1105 rechaza 409/cero writes (`evidence/A4-local-api-verification.md`). Playwright: POS draft #1135→detalle→Cancelar Orden→200, CANCELADA/historial (`evidence/A4-ui-draft-cancel.md`). FB-22: DELETE draft poblado y pagado 400 tipado, cancelación 200 (`evidence/A4-fb22-delete-guard.md`). `CANCELABLE_ORDER_STATES` es fuente única. Pendiente confirmación del dueño y DB-01/DB-27/ERR-38 con I/E.
+- **Status:** done · mosk 2026-09-24 · 16/16; FB-22/24 DB-16/27 ERR-43 [x]; DB-01→I.4, ERR-38→I.2 (míos). Previo (Fabio): draft 200, mesa 409, UI cancel OK, FB-22 400 (`A4-local-api-verification.md`, `A4-ui-draft-cancel.md`, `A4-fb22-delete-guard.md`). Cierre: runtime 7/7 #1196-1198 (`A4-runtime-matrix-20260924.md`); OrdersService 107/107, race SKIP diseño (`A4-backend-specs-20260924.md`). Dueño: confirmar carve-out Mesas.
