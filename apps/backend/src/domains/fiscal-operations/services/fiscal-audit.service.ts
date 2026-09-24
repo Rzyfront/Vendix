@@ -26,6 +26,8 @@ interface FiscalAuditEventParams {
   metadata?: Record<string, unknown>;
 }
 
+const POS_UNCOVERED_SALE_EVENT_TYPE = 'pos_sale_without_fiscal_document';
+
 @Injectable()
 export class FiscalAuditService {
   constructor(private readonly prisma: GlobalPrismaService) {}
@@ -63,6 +65,7 @@ export class FiscalAuditService {
   async list(
     contexts: FiscalOperationsContext[],
     query: FiscalHistoryQueryDto,
+    storeScope?: { store_id: number },
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
@@ -80,11 +83,22 @@ export class FiscalAuditService {
             ? { close_session_id: query.close_session_id }
             : {}),
           ...(query.evidence_id ? { evidence_id: query.evidence_id } : {}),
-          ...(query.store_id ? { store_id: query.store_id } : {}),
+          ...(!storeScope && query.store_id ? { store_id: query.store_id } : {}),
           ...(query.accounting_entity_id
             ? { accounting_entity_id: query.accounting_entity_id }
             : {}),
         },
+        // Store history keeps shared-entity events (NULL) but never sibling
+        // store events. POS uncovered-sale events are always store-owned.
+        ...(storeScope
+          ? [
+              query.event_type === POS_UNCOVERED_SALE_EVENT_TYPE
+                ? { store_id: storeScope.store_id }
+                : {
+                    OR: [{ store_id: storeScope.store_id }, { store_id: null }],
+                  },
+            ]
+          : []),
       ],
     };
 

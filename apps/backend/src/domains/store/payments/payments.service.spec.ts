@@ -47,6 +47,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { AuditService } from '@common/audit/audit.service';
 import { mockRequestContext } from 'src/testing/prisma-mock';
 import { buildOrder } from 'src/testing/money-fixtures';
+import * as tipUtil from '../../../common/utils/tip.util';
 
 /**
  * Tests for PaymentsService focused on the POS sale recalculation flow:
@@ -1469,6 +1470,168 @@ describe('PaymentsService', () => {
       }));
       expect(client.orders.update.mock.calls[0][0].data.order_items).toBeUndefined();
     });
+
+    it('F.2 creates an alias shipping address in the same order transaction and links its FK', async () => {
+      const client: any = tx(null);
+      client.orders.create.mockResolvedValue({
+        ...order, id: 42, state: 'draft', store_id: 1, order_items: [], stores: { id: 1 },
+      });
+      client.orders.update.mockResolvedValue({
+        ...order, id: 42, state: 'draft', store_id: 1,
+        shipping_address_id: 901, order_items: [], stores: { id: 1 },
+      });
+      client.addresses = { create: jest.fn().mockResolvedValue({ id: 901 }) };
+      jest.spyOn(service as any, 'generateOrderNumber').mockResolvedValue('POS-42');
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        product_name: 'Artículo', quantity: 1, total_price: 1000, tax_amount_item: 0,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+      const snapshot = {
+        address_line1: 'Cra 7 # 1-2', city: 'Bogotá', country_code: 'CO',
+        latitude: 4.6, longitude: -74.08, recipient_phone: '3001234567',
+        municipality_code: '11001',
+      };
+
+      const result = await (service as any).createOrUpdateOrderFromPos(
+        client,
+        dto({ order_id: undefined, is_draft: true, requires_payment: false,
+          customer_alias: 'Portería torre B', delivery_type: 'home_delivery',
+          shipping_method_id: 1, shipping_address_snapshot: snapshot }),
+        user,
+      );
+
+      expect(client.addresses.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          store_id: 1, user_id: null, is_primary: false,
+          address_line1: snapshot.address_line1, city: snapshot.city,
+          latitude: 4.6, longitude: -74.08, municipality_code: '11001',
+        }),
+        select: { id: true },
+      });
+      expect(client.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 42, store_id: 1 },
+        data: { shipping_address_id: 901 },
+      }));
+      expect(result.order.shipping_address_id).toBe(901);
+      expect(client.orders.create.mock.calls[0][0].data).toEqual(expect.objectContaining({
+        customer_alias: 'Portería torre B', customer_id: null,
+        shipping_address_snapshot: snapshot,
+      }));
+    });
+
+    it('F.2 reuses the adopted alias draft orphan row instead of leaking a second address', async () => {
+      const client: any = tx({ ...order, shipping_address_id: 901 });
+      client.orders.count = jest.fn().mockResolvedValue(0);
+      client.sales_orders = { count: jest.fn().mockResolvedValue(0) };
+      client.bookings.count = jest.fn().mockResolvedValue(0);
+      client.inventory_locations = { count: jest.fn().mockResolvedValue(0) };
+      client.suppliers = { count: jest.fn().mockResolvedValue(0) };
+      client.addresses = {
+        findFirst: jest.fn().mockResolvedValue({ id: 901 }),
+        update: jest.fn().mockResolvedValue({ id: 901 }),
+        create: jest.fn(),
+      };
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        product_name: 'Artículo', quantity: 1, total_price: 1000, tax_amount_item: 0,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+
+      await (service as any).createOrUpdateOrderFromPos(
+        client,
+        dto({ customer_alias: 'Portería torre B', delivery_type: 'home_delivery',
+          shipping_method_id: 1,
+          shipping_address_snapshot: {
+            address_line1: 'Calle 5 # 4-3', city: 'Bogotá', country_code: 'CO',
+          } }),
+        user,
+      );
+
+      expect(client.addresses.update).toHaveBeenCalledWith({
+        where: { id: 901, store_id: 1 },
+        data: expect.objectContaining({ address_line1: 'Calle 5 # 4-3', user_id: null }),
+      });
+      expect(client.addresses.create).not.toHaveBeenCalled();
+      expect(client.orders.update).toHaveBeenLastCalledWith(expect.objectContaining({
+        data: { shipping_address_id: 901 },
+      }));
+    });
+
+    it('F.2 rejects borrowing another sale address under an alias', async () => {
+      const client: any = tx(null);
+      client.orders.create.mockResolvedValue({
+        ...order, id: 42, store_id: 1, order_items: [], stores: { id: 1 },
+      });
+      client.addresses = { findFirst: jest.fn(), create: jest.fn() };
+      jest.spyOn(service as any, 'generateOrderNumber').mockResolvedValue('POS-42');
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        product_name: 'Artículo', quantity: 1, total_price: 1000, tax_amount_item: 0,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+
+      await expect((service as any).createOrUpdateOrderFromPos(
+        client,
+        dto({ order_id: undefined, customer_alias: 'Portería torre B',
+          delivery_type: 'home_delivery', shipping_method_id: 1,
+          shipping_address_id: 777,
+          shipping_address_snapshot: {
+            address_line1: 'Calle 5 # 4-3', city: 'Bogotá', country_code: 'CO',
+          } }),
+        user,
+      )).rejects.toMatchObject({ errorCode: ErrorCodes.PAY_VALIDATE_001.code });
+      expect(client.addresses.findFirst).not.toHaveBeenCalled();
+      expect(client.addresses.create).not.toHaveBeenCalled();
+    });
+
+    it('E.6 retail: delegates 10% of gross products to resolveTip without taxing the tip', async () => {
+      const client = tx({ ...order, subtotal_amount: 100000, tax_amount: 19000 });
+      const resolveTipSpy = jest.spyOn(tipUtil, 'resolveTip');
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        product_name: 'Artículo', quantity: 1, total_price: 100000,
+        tax_amount_item: 19000,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 2000, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+
+      await (service as any).createOrUpdateOrderFromPos(
+        client, dto({ tip_type: 'percentage', tip_value: 10, shipping_cost: 5000 }), user,
+      );
+
+      expect(resolveTipSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ tip_type: 'percentage', tip_value: 10 }),
+        119000, expect.any(Function),
+      );
+      expect(client.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal_amount: 100000, tax_amount: 19000,
+          discount_amount: 2000, shipping_cost: 5000,
+          tip_amount: 11900, tip_type: 'fixed', tip_value: 11900,
+          grand_total: 133900,
+        }),
+      }));
+    });
   });
 
   describe('createOrderInstallments — projected persisted POS credit total', () => {
@@ -1478,13 +1641,16 @@ describe('PaymentsService', () => {
 
       await (service as any).createOrderInstallments(
         { credit_type: 'free', installment_terms: { interest_rate: 0 } },
-        { id: 41, total_amount: new Prisma.Decimal(1500) },
+        { id: 41, total_amount: new Prisma.Decimal('1500.01') },
       );
 
-      expect(update).toHaveBeenCalledWith({
-        where: { id: 41 },
-        data: { credit_type: 'free', remaining_balance: 1500, total_paid: 0 },
-      });
+      const write = update.mock.calls[0][0];
+      expect(write.where).toEqual({ id: 41 });
+      expect(write.data).toEqual(expect.objectContaining({
+        credit_type: 'free', total_paid: 0,
+      }));
+      expect(write.data.remaining_balance).toBeInstanceOf(Prisma.Decimal);
+      expect(write.data.remaining_balance.equals('1500.01')).toBe(true);
     });
 
     it('finances installments from projected result.order.total_amount', async () => {
@@ -1748,6 +1914,36 @@ describe('PaymentsService', () => {
       expect(existingLine.order_item_taxes).toEqual([oldTaxSnapshot]);
       expect(tx.order_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
         where: { order_id: 1001, cancelled_at: null },
+      }));
+    });
+
+    it('E.6 mesa: calcula 10% del producto bruto sin sumar propina al subtotal o impuesto', async () => {
+      const { tx, posUser } = arrangeCashSale();
+      const resolveTipSpy = jest.spyOn(tipUtil, 'resolveTip');
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 2000, applied: [],
+      });
+      tx.order_items.findMany.mockResolvedValue([{
+        id: 17, quantity: 1, total_price: 100000,
+        order_item_taxes: [{ tax_amount: 19000 }],
+      }]);
+
+      await (service as any).applyPosPaymentToTableSession(
+        tx, buildDto({ tip_type: 'percentage', tip_value: 10, shipping_cost: 5000 }),
+        posUser, CONTEXT_STORE_ID,
+      );
+
+      expect(resolveTipSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ tip_type: 'percentage', tip_value: 10 }),
+        119000, expect.any(Function),
+      );
+      expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal_amount: 100000, tax_amount: 19000,
+          discount_amount: 2000, shipping_cost: 5000,
+          tip_amount: 11900, tip_type: 'fixed', tip_value: 11900,
+          grand_total: 133900,
+        }),
       }));
     });
   });
@@ -3153,7 +3349,7 @@ describe('PaymentsService', () => {
      *   `isDeferredDigitalMethod`: `wompi`/`wallet` difieren al webhook,
      *   `cash`/`card`/`bank_transfer` liquidan en banda.
      */
-    const arrangePosSale = (methodType: string) => {
+    const arrangePosSale = (methodType: string, serialized = false) => {
       // `RequestContextService.getContext` es estático: el espía que instala
       // este helper lo retira el `jest.restoreAllMocks()` del afterEach.
       mockRequestContext({ store_id: 1, organization_id: 1 });
@@ -3178,7 +3374,7 @@ describe('PaymentsService', () => {
           findUnique: jest.fn().mockResolvedValue({ industries: ['retail'] }),
         },
         store_payment_methods: {
-          findUnique: jest.fn().mockResolvedValue({
+          findFirst: jest.fn().mockResolvedValue({
             id: 9,
             system_payment_method: { type: methodType },
           }),
@@ -3197,7 +3393,7 @@ describe('PaymentsService', () => {
         .spyOn(service as any, 'createOrUpdateOrderFromPos')
         .mockResolvedValue({
           order,
-          hasSerialized: false,
+          hasSerialized: serialized,
           promotionsSnapshot: [],
           appliedPromotions: [],
           couponInfo: {
@@ -3282,6 +3478,52 @@ describe('PaymentsService', () => {
         }),
         expect.anything(),
       );
+    });
+
+    it('E.1 serializado para llevar conserva direct_delivery y consume seriales dentro del tx', async () => {
+      const { order } = arrangePosSale('cash', true);
+      const selections = [{ product_id: 77, quantity: 1, serial_ids: [501] }];
+      const preflight = jest.spyOn(service as any, 'assertImmediatePosSerials').mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'processPosPaymentTransaction')
+        .mockResolvedValue({ id: 7, state: 'succeeded' });
+      jest.spyOn(service as any, 'hasPendingKitchenItemsTx').mockResolvedValue(false);
+
+      await expect(service.processPosPayment(buildPosDto({ items: selections }), posUser))
+        .rejects.toThrow(STOP_AFTER_INVENTORY);
+
+      expect(preflight).toHaveBeenCalledWith(expect.anything(), order, selections);
+      expect(commitOrderDeliveryMock).toHaveBeenCalledWith(
+        order.id,
+        expect.objectContaining({ consumeSerials: true, posSelection: selections }),
+        expect.anything(),
+      );
+    });
+
+    it.each(['wompi', 'wallet'])('E.1 rechaza %s diferido antes de cobrar/consumir seriales', async (type) => {
+      arrangePosSale(type, true);
+      await expect(service.processPosPayment(buildPosDto({
+        items: [{ product_id: 77, quantity: 1, serial_ids: [501] }],
+      }), posUser)).rejects.toMatchObject({ errorCode: 'SERIAL_REQUIRED_001' });
+      expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+    });
+
+    it('E.1 rechaza crédito sin pago inmediato para Para llevar serializado', async () => {
+      arrangePosSale('cash', true);
+      await expect(service.processPosPayment(buildPosDto({
+        requires_payment: false,
+        items: [{ product_id: 77, quantity: 1, serial_ids: [501] }],
+      }), posUser)).rejects.toMatchObject({ errorCode: 'SERIAL_REQUIRED_001' });
+      expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+    });
+
+    it('E.1 no declara entregado un borrador serial sin pago', async () => {
+      const { order } = arrangePosSale('cash', true);
+      order.state = 'draft';
+      await expect(service.processPosPayment(buildPosDto({
+        is_draft: true, requires_payment: false,
+      }), posUser)).rejects.toThrow();
+      expect(order.state).toBe('draft');
+      expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
     });
   });
 
@@ -3436,6 +3678,29 @@ describe('PaymentsService', () => {
 
     afterEach(() => {
       jest.restoreAllMocks();
+    });
+
+    it.each([
+      ['missing', undefined, 'payment_method_required'],
+      ['unknown or foreign-store', 999999, 'payment_method_not_found'],
+    ])('rechaza método %s con 400 tipado antes de escribir pago', async (_case, methodId, reason) => {
+      const { tx } = arrangePosSale({
+        type: 'cash',
+        processing_mode: payment_processing_mode_enum.DIRECT,
+      });
+      if (methodId != null) {
+        tx.store_payment_methods.findFirst.mockResolvedValueOnce(null);
+      }
+
+      const error = await service.processPosPayment(
+        buildPosDto({ store_payment_method_id: methodId }), posUser,
+      ).catch((caught) => caught);
+
+      expect(error).toMatchObject({ errorCode: 'PAY_METHOD_DISABLED_001' });
+      expect(error.getStatus()).toBe(400);
+      expect(error.getResponse()).toMatchObject({ details: { reason } });
+      expect(tx.payments.create).not.toHaveBeenCalled();
+      expect(tx.orders.update).not.toHaveBeenCalled();
     });
 
     it('el pago nace pending y NO emite el evento de caja: el dinero todavía no entró', async () => {

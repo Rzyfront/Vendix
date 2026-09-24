@@ -2,14 +2,17 @@ import { OrderItem, OrderState } from '../../interfaces/order.interface';
 
 /**
  * Decisiones de cocina persistidas por ítem al cancelar una orden con
- * `kitchenDisposition` (`POST /store/orders/:id/flow/cancel`). Solo con una
- * de estas decisiones el resend acepta un remake post-cancelación.
+ * `kitchenDisposition` (`POST /store/orders/:id/flow/cancel`). Los valores
+ * `delivered_*` previos a D.3 se aceptan sólo en lectura.
  */
 export type CancellationDecision = 'after_fire_reused' | 'after_fire_waste';
 
 const POST_CANCEL_DECISIONS: ReadonlySet<string> = new Set([
   'after_fire_reused',
   'after_fire_waste',
+  // Read-only aliases on orders cancelled before D.3.
+  'delivered_restock',
+  'delivered_waste',
 ]);
 
 /** True cuando el ítem trae una decisión de cocina post-cancelación. */
@@ -36,7 +39,7 @@ export function hasCancellationDecision(
  *    no debe ofrecerse durante la ventana de carga.
  *  - `orderState === 'refunded'` veta siempre (ni la decisión lo levanta).
  *  - `orderState === 'cancelled'` veta SALVO decisión persistida
- *    (`after_fire_reused` | `after_fire_waste`): es el remake
+ *    (canónica o alias histórico `delivered_*`): es el remake
  *    post-cancelación.
  *  - Un `kitchen_ticket_items` con `status === 'delivered'` veta SALVO
  *    decisión persistida (el remake de un plato entregado-cancelado

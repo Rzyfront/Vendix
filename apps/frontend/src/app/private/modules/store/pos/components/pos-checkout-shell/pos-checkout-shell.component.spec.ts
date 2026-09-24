@@ -127,6 +127,7 @@ class PaymentStub {
 @Component({ selector: 'app-pos-shipping-step', standalone: true, template: `` })
 class ShippingStub {
   readonly cartState = input<unknown>(null);
+  readonly customerAlias = input<string>('');
   readonly editingOrderId = input<number | null>(null);
   readonly shippingCompleted = output<unknown>();
   readonly shippingCost = signal(0);
@@ -202,7 +203,8 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   let fixture: ComponentFixture<PosCheckoutShellComponent>;
   let component: PosCheckoutShellComponent;
   let integrationMock: { isRestaurantMode: () => boolean; currentTableSession: () => null };
-  let settingsMock: { pos: () => null; checkout: () => null };
+  let settingsMock: { pos: () => any; checkout: () => null };
+  let posSettings: WritableSignal<any>;
   let restaurantMode: WritableSignal<boolean>;
 
   const payStub = (): PaymentStub =>
@@ -282,7 +284,8 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     // antes de leer señales solo se invalidan por deps reactivas.
     restaurantMode = signal(false);
     integrationMock = { isRestaurantMode: () => restaurantMode(), currentTableSession: () => null };
-    settingsMock = { pos: () => null, checkout: () => null };
+    posSettings = signal(null);
+    settingsMock = { pos: () => posSettings(), checkout: () => null };
 
     TestBed.configureTestingModule({
       imports: [PosCheckoutShellComponent],
@@ -321,6 +324,79 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     fixture.detectChanges();
     wireStubs();
     fixture.detectChanges();
+  });
+
+  it('offers alias for delivery while leaving anonymous delivery disabled', () => {
+    posSettings.set({ allow_alias_sales: true });
+    component.entregaChoice.set('enviar');
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+
+    const alias = [...fixture.nativeElement.querySelectorAll('.sale-type-btn')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Venta con nombre o referencia')) as HTMLButtonElement;
+    expect(alias.textContent).toContain('Venta con nombre o referencia');
+    expect(alias.disabled).toBeFalse();
+    component.onSelectSaleMode('alias');
+    expect(component.saleMode()).toBe('alias');
+    expect(component.customerRequiredByAddress()).toBeFalse();
+    expect(component.anonymousBlockedByDelivery()).toBeTrue();
+  });
+
+  it('keeps clicked delivery alias selected after effects run and shows the alias input', () => {
+    posSettings.set({ allow_alias_sales: true });
+    component.entregaChoice.set('enviar');
+    component.currentStep.set(1); // Cliente panel must be visible, not just mounted.
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+
+    const aliasButton = [...fixture.nativeElement.querySelectorAll('.sale-type-btn')]
+      .find((button: HTMLButtonElement) => button.textContent?.includes('Venta con nombre o referencia')) as HTMLButtonElement;
+    expect(aliasButton.disabled).toBeFalse();
+    aliasButton.click();
+    fixture.detectChanges(); // Flush constructor effects that can rewrite saleMode.
+    fixture.detectChanges();
+
+    expect(component.saleMode()).toBe('alias');
+    expect(component.clienteSubStep()).toBe(1);
+    const aliasInput = fixture.nativeElement.querySelector('input[aria-label="Nombre o referencia de la venta"]') as HTMLInputElement | null;
+    expect(aliasInput).not.toBeNull();
+    expect(aliasInput?.closest('.step-panel')?.classList.contains('step-hidden')).toBeFalse();
+  });
+
+  it('still resets an anonymous sale when delivery effects run', () => {
+    posSettings.set({ allow_anonymous_sales: true, allow_alias_sales: true });
+    component.entregaChoice.set('enviar');
+    fixture.detectChanges();
+    component.saleMode.set('anonymous');
+    fixture.detectChanges();
+
+    expect(component.saleMode()).toBe('customer');
+    expect(component.userOverrideAnonymous()).toBeFalse();
+  });
+
+  it('saves alias home-delivery draft with snapshot, no address POST and no customer', () => {
+    component.saleMode.set('alias');
+    component.customerAlias.set('Portería torre B');
+    const saveDraft = jasmine.createSpy('saveDraft').and.returnValue(of({ success: true, order: { id: 42 } }));
+    Object.assign(TestBed.inject(PosPaymentService), { saveDraft });
+    Object.assign(TestBed.inject(ToastService), { success: jasmine.createSpy('success') });
+    spyOn<any>(component, 'finishDraft').and.stub();
+    const state = { items: [{ product: { id: '7' }, quantity: 1 }], customer: {
+      id: 9, first_name: 'Stale',
+    } } as any;
+    const shipping = { deliveryType: 'home_delivery', shippingMethodId: 3, shippingAddressId: 33,
+      shippingCost: 500, shippingAddress: { address_line1: 'Calle 1', city: 'Bogotá', country_code: 'CO' },
+    } as any;
+
+    (component as any).createRetailDraft(state, shipping);
+
+    const args = saveDraft.calls.mostRecent().args;
+    expect(args[0].customer).toBeNull();
+    expect(args[2]).toBe('Portería torre B');
+    expect(args[3].shippingAddressId).toBeUndefined();
+    expect(args[3].shippingAddress.address_line1).toBe('Calle 1');
   });
 
   it('→ en paso intermedio llama a Siguiente con source arrows y no cobra', () => {
@@ -707,6 +783,28 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       shippingAddressId: 1, shippingCost: 100, shippingRateId: 2 });
     return { state, update, error, ship };
   };
+
+  it('omits synthetic custom cart ids from the editor request for a reopened shipping draft', () => {
+    const { state, update } = prepareShippingEdit();
+    fixture.componentRef.setInput('cartState', {
+      ...state,
+      items: [
+        { itemType: 'custom', product: { id: 'custom-82002fa7', name: 'Servicio QA' },
+          quantity: 1, unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 },
+        { itemType: 'product', product: { id: '7', name: 'Producto real' },
+          quantity: 1, unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 },
+      ],
+    });
+    fixture.detectChanges();
+
+    component.onPrimaryConfirm();
+
+    expect(update).toHaveBeenCalledTimes(1);
+    const items = update.calls.mostRecent().args[1].items;
+    expect(items[0].item_type).toBe('custom');
+    expect(items[0].product_id).toBeUndefined();
+    expect(items[1].product_id).toBe(7);
+  });
 
   it('no guarda un borrador de envío como venta de mostrador cuando falta el método', () => {
     const saveDraft = jasmine.createSpy('saveDraft');

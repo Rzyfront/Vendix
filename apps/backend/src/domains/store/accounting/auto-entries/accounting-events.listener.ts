@@ -742,7 +742,10 @@ export class AccountingEventsListener {
     order_id?: number;
     /** `return_order` ⇒ `refund_id` es `return_orders.id`. */
     source?: 'return_order';
+    /** Manual completion has a transactional delivery row; never post twice. */
+    accounting_delivery?: 'manual_durable';
   }) {
+    if (event.accounting_delivery === 'manual_durable') return;
     try {
       if (
         !(await this.isFlowEnabled(

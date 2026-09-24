@@ -16,6 +16,9 @@ export interface PosShippingAddress {
   state_province?: string;
   postal_code?: string;
   country_code: string;
+  latitude?: number;
+  longitude?: number;
+  municipality_code?: string;
   recipient_name?: string;
   recipient_phone?: string;
 }
@@ -27,6 +30,8 @@ export interface PosShippingAddress {
  * pierde estas claves es una orden de domicilio sin domicilio.
  */
 export interface PosShippingSaleData {
+  /** POS alias identity, mutually exclusive with customer_id. */
+  customerAlias?: string;
   shippingMethodId: number;
   shippingCost: number;
   deliveryType: string;
@@ -80,4 +85,3 @@ export type PosShippingPaymentMode =
   | 'online'
   | 'pay_now'
   | 'ecommerce';
-

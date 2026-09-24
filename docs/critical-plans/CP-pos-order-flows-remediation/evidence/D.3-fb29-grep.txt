@@ -1,0 +1,64 @@
+# FB-29 — censo de llamadores del DELETE deprecado de mesa (solo lectura)
+
+Fecha (UTC): 2026-09-24T01:40Z · Rama: develop · Ejecutor: D.3 frontend disposition wiring
+
+## Comandos y salida literal
+
+### 1. Literal del task (`items/${orderItemId}'` con comilla simple)
+```
+$ grep -rn "items/${orderItemId}'" apps/frontend/src
+(rc=1, sin matches)
+```
+Nota: el frontend usa template literals (backtick), la comilla simple nunca matchea.
+Equivalente real con backtick → solo 3 líneas, todas en tables.service.ts (ver §4).
+
+### 2. `.delete(` dentro del módulo tables (¿http.delete fuera del service?)
+```
+$ grep -rn "\.delete(" apps/frontend/src/app/private/modules/store/restaurant-ops/tables/
+add-items-modal.component.ts:309,311,328,350,360,378,580,587,595,601,610,616 → Map.delete
+table-floor-map.component.ts:432,482 → Set/Map.delete (pointers)
+table-session-page.component.ts:964 → Map.delete
+tables-manage-page.component.ts:623,626 → Set.delete (pendingMoves)
+```
+Cero `http.delete` fuera del service. (El del service usa `.delete<T>(`, ver §5.)
+
+### 3. Llamadores de `tables.service removeItem(sessionId, orderItemId)` (DELETE legacy)
+```
+$ grep -rn "removeItem(" .../tables/ .../pos/ [+ barrido global filtrado]
+tables.service.ts:244: removeItem(sessionId, orderItemId)  → SOLO LA DEFINICIÓN
+```
+Ni table-session-page, ni POS, ni ningún otro componente/servicio lo invoca.
+`removeItem` legacy = código muerto (0 llamadores).
+
+### 4. URLs `table-sessions/.../items/...` en todo el frontend
+```
+$ grep -rn "table-sessions.*items" apps/frontend/src --include=*.ts | grep -v tables.service
+pos-restaurant-integration.service.ts:481: .../table-sessions/${sessionId}/add-items  (POST agregar, no DELETE)
+```
+Y dentro del service:
+```
+tables.service.ts:247: .../table-sessions/${sessionId}/items/${orderItemId}          (DELETE legacy, removeItem)
+tables.service.ts:283: .../table-sessions/${sessionId}/items/${orderItemId}/cancel   (POST cancel, cancelOrderItem)
+tables.service.ts:309: .../table-sessions/${sessionId}/items/${orderItemId}/deliver  (PATCH deliver, markItemDelivered)
+```
+
+### 5. Definiciones http.delete en tables.service.ts
+```
+$ grep -n "delete<" .../tables/services/tables.service.ts
+139: .delete<void>(`${this.apiUrl}/store/tables/${id}`)              → borrar MESA (no ítem, fuera de alcance)
+246: .delete<ApiResponse<TableSession>>(                               → DELETE ítem legacy (removeItem, 0 llamadores)
+```
+
+### 6. Llamadores del POST cancel nuevo (mesa)
+```
+$ grep -rn "cancelOrderItem(" .../restaurant-ops/
+table-session-page.component.ts:1102: .cancelOrderItem(sessionId, item.id, { reason })  → ÚNICO llamador
+tables.service.ts:276: cancelOrderItem(                                                 → definición
+```
+
+## VEREDICTO
+SIN LLAMADORES NUEVOS. El DELETE deprecado `DELETE /store/table-sessions/:id/items/:orderItemId`
+vive solo como definición (`tables.service.ts:244-253`, `removeItem`) con CERO invocaciones en
+todo `apps/frontend/src`. El único flujo activo de cancelación en mesa es el POST
+`/items/:orderItemId/cancel` vía `cancelOrderItem` (table-session-page.component.ts:1102).
+FB-29: no hay nada que migrar; `removeItem` es candidato a borrado futuro (no tocado en D.3).

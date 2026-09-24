@@ -1,0 +1,123 @@
+F.2-SA3 DB-06 / DB-07 / DB-25 — invariantes SQL (solo lectura, sin login)
+HEAD: 5c2c1472b docs: ledger E.1 cerrado (28/38 done)
+UTC: 2026-09-24T02:22:08Z
+DB: vendix_postgres / vendix_db (docker exec psql, SOLO SELECT; \d addresses solo metadatos)
+Metodo: re-corridas canonicas de E.5-SA1-db07-actual.txt + F.1-SA1-db26.txt con mismo WHERE.
+
+Corte temporal F.2: fallback '2026-09-23 06:53:01' (created de #1119, mismo :deploy que E.5-SA1).
+Motivo: a la hora de esta corrida NO hay venta alias home_delivery de F.2-SA1 visible.
+Ultimas ordenes alias: #1222/#1221 QA I2 pickup (2026-09-24 02:02, no home_delivery);
+ultima alias home_delivery: #1191 QA F2 atomic (2026-09-23 15:24, cancelada, SANA: FK+snapshot).
+Si SA1 crea su venta despues, re-correr [DB-07] con created_at > created(SA1): con los datos
+de abajo el resultado sera 0 salvo que SA1 viole el invariante (max created violadora = #1179 12:32).
+
+=====================================================================
+[DB-06] Exclusion customer_id XOR customer_alias
+SQL: SELECT count(*) FROM orders WHERE customer_id IS NOT NULL AND customer_alias IS NOT NULL;
+Resultado: 0  => DB-06 CUMPLE (si, es 0)
+=====================================================================
+
+=====================================================================
+[DB-07] home_delivery nuevas sin FK o sin snapshot (corte fallback E.5)
+SQL: SELECT count(*) FROM orders WHERE delivery_type='home_delivery'
+     AND (shipping_address_id IS NULL OR shipping_address_snapshot IS NULL)
+     AND created_at > '2026-09-23 06:53:01';
+Resultado: 11  (identico a E.5-SA1 = 11; SIN regresion, SIN nuevas atribuibles a F.1/F.2)
+
+Desglose por estado (GROUP BY state, mismo WHERE):
+  pending_payment | 1
+  processing      | 2
+  shipped         | 1
+  cancelled       | 7
+(identico a E.5-SA1)
+
+No-canceladas que violan (state <> 'cancelled', ORDER BY id) — las 4 E.5, cierre E.5:
+  id   | state         | ship_method | ship_addr_id | has_snapshot | customer | alias (25)           | created_at
+  1119 | processing    | 9           | NULL         | t            | NULL     | QA E5 envio con metodo | 2026-09-23 06:53:01.839
+  1144 | processing    | 9           | NULL         | f            | NULL     | QA A2 domicilio 202609 | 2026-09-23 09:38:43.41
+  1158 | shipped       | 9           | 489          | f            | 197      | (registrado)           | 2026-09-23 10:33:25.09
+  1167 | pending_paymt | 9           | NULL         | t            | NULL     | QA I3 COD domicilio 202 | 2026-09-23 11:31:23.259
+Estado vs E.5-SA1: SIN CAMBIOS en las 4 (mismo state, mismo FK, mismo snapshot).
+
+Canceladas que violan (7, ORDER BY id):
+  1139 | cancelled | NULL | t | (registrado)           | 2026-09-23 09:35:36.291
+  1143 | cancelled | NULL | t | (registrado)           | 2026-09-23 09:38:10.928
+  1145 | cancelled | NULL | t | (registrado)           | 2026-09-23 09:39:49.373
+  1148 | cancelled | NULL | f | QA E3 home whatsapp    | 2026-09-23 09:42:01.172
+  1150 | cancelled | NULL | t | (registrado)           | 2026-09-23 10:02:57.868
+  1162 | cancelled | NULL | f | QA E4 no-method 202609 | 2026-09-23 11:10:24.075
+  1179 | cancelled | NULL | f | QA C4 KDS home 202609  | 2026-09-23 12:32:03.363
+
+Lectura F.2: max(created_at) entre las 11 violadoras = #1179 2026-09-23 12:32:03.
+Todo violador es QA pre-F.1/F.2 (manana Sept 23). Cero violaciones creadas en ventana F.1/F.2.
+La home_delivery alias de F.2 (#1191 -> addr 539) es SANA (FK + snapshot, ver abajo).
+Conclusion DB-07: ABIERTO solo por legado E.5 (las 4, inmutables por plan); F.2 no aporta violaciones.
+
+Sanas nuevas (FK + snapshot, mismo corte, ORDER BY id) — 10 ordenes:
+  1137 cancelled 489 t | 1151 cancelled 489 t | 1152 processing 489 t | 1153 processing 489 t
+  1154 cancelled 489 t | 1155 processing 489 t | 1174 finished 489 t
+  1186 finished 489 t  | 1187 finished 489 t
+  1191 cancelled 539 t | alias 'QA F2 atomic draft 202609' | 2026-09-23 15:24:38.101  <- F.2 atomica
+=====================================================================
+
+=====================================================================
+[DB-25] Huerfanas de tienda (user_id NULL, store_id NOT NULL)
+Nota addresses: SIN created_at (verificado \d); sin corte temporal directo.
+Baseline F.1-SA1-db26 media SOLO is_primary: 8 tienda + 45 org = 53.
+
+a) Totales:
+  user_id NULL AND store_id NOT NULL (sin filtro primary): 12
+  is_primary AND user_id NULL AND store_id NOT NULL:        8
+  => manzanas-con-manzanas vs baseline 8: 8 = 8, delta 0, mismos ids
+     {5,6,10,12,478,488,492,515}. CERO huerfanas primary nuevas en F.1+F.2.
+
+b) Lista 12 huerfanas (id, store, primary, city, addr):
+   4   |  3 | f | Bogota   | Centro Comercial Santafe      <- seed legacy (id 4, type store_physical)
+   5   |  4 | t | Medellin | Centro Comercial Oviedo       <- baseline F.1
+   6   |  6 | t | Bogota   | Centro Comercial Andino       <- baseline F.1
+  10   | 10 | t | Riohacha | Carrera 26 con Calle 14H Bis  <- baseline F.1
+  12   | 11 | t | 694      | Calle 12                      <- baseline F.1
+  478  | 38 | t | 694      | Calle 12                      <- baseline F.1
+  488  | 39 | t | 167      | Calle 100 # 15-20             <- baseline F.1
+  492  | 41 | t | 694      | Calle 12                      <- baseline F.1
+  515  |  3 | t | Bogota   | Calle 100 # 15-20 Of 501      <- baseline F.1
+  520  | 10 | f | Riohacha | Calle 15 con Carrera 20       <- NO baseline; duplicada con 521; 0 refs
+  521  | 10 | f | Riohacha | Calle 15 con Carrera 20       <- NO baseline; duplicada con 520; 0 refs
+  539  | 10 | f | Bogota   | QA F2 atomic Calle 40         <- F.2 QA; ref por orden alias #1191
+
+c) JOIN ordenes alias (orders.shipping_address_id + customer_alias NOT NULL):
+  addr_id | store | primary | ordenes_ref | order_ids | alias                  | max_order_created
+    4     |   3   | f       | 0           | NULL      | NULL                   | NULL
+    5     |   4   | t       | 0           | NULL      | NULL                   | NULL
+    6     |   6   | t       | 0           | NULL      | NULL                   | NULL
+   10     |  10   | t       | 0           | NULL      | NULL                   | NULL
+   12     |  11   | t       | 0           | NULL      | NULL                   | NULL
+  478     |  38   | t       | 0           | NULL      | NULL                   | NULL
+  488     |  39   | t       | 0           | NULL      | NULL                   | NULL
+  492     |  41   | t       | 0           | NULL      | NULL                   | NULL
+  515     |   3   | t       | 0           | NULL      | NULL                   | NULL
+  520     |  10   | f       | 0           | NULL      | NULL                   | NULL
+  521     |  10   | f       | 0           | NULL      | NULL                   | NULL
+  539     |  10   | f       | 1           | 1191      | QA F2 atomic draft 2   | 2026-09-23 15:24:38.101
+  => La huerfana F.2 (#539) SI tiene orden alias que la referencia (#1191, FK+snapshot sanos).
+
+d) Huerfanas SIN orden (shipping_address_id): 11 de 12 (todas menos #539).
+   Delta vs F.1: F.1 midio 8 primary con 0 refs de ordenes; hoy esas 8 siguen en 0
+   + #4 (legacy seed, fuera del conteo primary de F.1) + #520/#521 (fuera del conteo
+   primary de F.1, procedencia no datable: sin created_at; rango de ids 520-521 entre
+   direcciones de usuario QA 516-534, sin mencion en evidencias F.1).
+   Chequeo extra todas las FKs (billing, bookings, inventory_locations, sales_orders,
+   suppliers): solo #539 tiene ref de orden (shipping #1191); #12/#478/#488/#492 tienen
+   1 ref c/u en inventory_locations (no es orden; no afecta criterio DB-25, F.1 no lo media).
+   #4/#520/#521: 0 refs en TODAS las tablas.
+
+e) [Item 4] is_primary de huerfanas nuevas (F.1+F.2) = false:
+   #4=f, #520=f, #521=f, #539=f => CUMPLE (todas las no-baseline son non-primary).
+   Ninguna huerfana primary nueva: el default/primary de tienda sigue intacto.
+
+Conclusion DB-25: primary 8=8 delta 0; unica huerfana F.2 confirmada (#539) referenciada
+por orden alias #1191 e is_primary=false. #520/#521 sin orden ni fecha: no atribuibles a
+F.1/F.2 con la evidencia disponible (fuera del alcance primary que F.1 baselinizaba).
+=====================================================================
+
+Resumen SA3: DB-06=0 SI | DB-07=11 (mismas 11 E.5, 0 nuevas F.1/F.2) | DB-25 nuevas F.2 (#539) referenciadas SI, is_primary=false SI.

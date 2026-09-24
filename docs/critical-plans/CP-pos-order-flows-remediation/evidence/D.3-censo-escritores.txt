@@ -1,0 +1,8 @@
+apps/backend/src/domains/store/tables/table-sessions.service.ts:145:      cancellation_type: 'before_fire' | 'after_fire_reused' | 'after_fire_waste' | 'delivered_restock' | 'delivered_waste' | null;
+apps/backend/src/domains/store/tables/table-sessions.service.ts:2319:              cancellation_type: it.cancellation_type as
+apps/backend/src/domains/store/kitchen-fire/kitchen-fire.service.ts:24:  items: ReadonlyArray<{ cancellation_type: string | null }>,
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:2802:          cancellation_type: resolvedType,
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:3101:          cancellation_type: cancellationType,
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:3167:          cancellation_type: cancellationType,
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:3922:                cancellation_type: 'after_fire_waste',
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:3988:            cancellation_type: cancellationType,

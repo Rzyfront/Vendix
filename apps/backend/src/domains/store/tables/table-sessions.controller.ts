@@ -29,6 +29,7 @@ import {
   CancelOrderItemDto,
   TransferTableSessionDto,
 } from './dto';
+import { ReassignTableSessionDto } from './dto/table-session.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
@@ -129,6 +130,13 @@ export class TableSessionsController {
       result,
       'Sesión de mesa abierta exitosamente',
     );
+  }
+
+  @Post('reassign')
+  @Permissions('store:table_sessions:update')
+  async reassign(@Body() dto: ReassignTableSessionDto) {
+    const result = await this.tableSessionsService.reassignSessionToTable(dto);
+    return this.responseService.created(result, 'Cuenta reasignada a la mesa de destino');
   }
 
   /**

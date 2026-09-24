@@ -560,14 +560,7 @@ export class PosCartService {
   clearCart(): Observable<CartState> {
     const adoptedId = this.cartState().linkedOrderId;
     const adoptedNumber = this.cartState().linkedOrderNumber;
-
-    const reset$ = of(null).pipe(
-      map(() => this.getInitialState()),
-      tap((newState) => {
-        this.cartState.set(newState);
-        this.clearStorage();
-      }),
-    );
+    const reset$ = this.resetCartState();
 
     if (adoptedId == null) {
       return reset$;
@@ -575,6 +568,25 @@ export class PosCartService {
 
     return this.releaseAdoptedOrder(adoptedId, adoptedNumber).pipe(
       switchMap(() => reset$),
+    );
+  }
+
+  /**
+   * A successful charge has already finalized the adopted order. Clear only
+   * local cart state: `clearCart()` is the abandonment action and would call
+   * `flow/cancel` against the newly paid order.
+   */
+  clearCartAfterCompletedSale(): Observable<CartState> {
+    return this.resetCartState();
+  }
+
+  private resetCartState(): Observable<CartState> {
+    return of(null).pipe(
+      map(() => this.getInitialState()),
+      tap((newState) => {
+        this.cartState.set(newState);
+        this.clearStorage();
+      }),
     );
   }
 

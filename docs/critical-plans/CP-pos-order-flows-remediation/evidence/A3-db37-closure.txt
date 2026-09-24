@@ -1,0 +1,9 @@
+$ docker exec vendix_postgres psql -U username -d vendix_db -c "SELECT i.id FROM invoices i JOIN order_items x ON x.order_id=i.order_id WHERE i.status='accepted' AND x.cancelled_at>i.updated_at;"
+ id
+----
+(0 rows)
+
+$ docker exec vendix_postgres psql -U username -d vendix_db -c "SELECT i.id AS invoice_id, i.status, i.updated_at AS invoice_updated_at, x.id AS order_item_id, x.order_id, x.cancelled_at FROM invoices i JOIN order_items x ON x.order_id=i.order_id WHERE i.status='accepted' AND x.cancelled_at>i.updated_at ORDER BY i.id, x.id;"
+ invoice_id | status | invoice_updated_at | order_item_id | order_id | cancelled_at
+------------+--------+--------------------+---------------+----------+--------------
+(0 rows)

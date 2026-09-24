@@ -190,7 +190,7 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
  */
 describe('PosCartService — removeFromCart (modo adoptado)', () => {
   let service: PosCartService;
-  let posApi: { updateOrderItems: jasmine.Spy };
+  let posApi: { updateOrderItems: jasmine.Spy; cancelOrder: jasmine.Spy };
 
   const embeddedProduct = (id: number) => ({
     id: String(id),
@@ -225,6 +225,7 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
   beforeEach(() => {
     posApi = {
       updateOrderItems: jasmine.createSpy('updateOrderItems'),
+      cancelOrder: jasmine.createSpy('cancelOrder').and.returnValue(of({ success: true })),
     };
 
     TestBed.configureTestingModule({
@@ -255,6 +256,26 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
     });
 
     service = TestBed.inject(PosCartService);
+  });
+
+  it('clears a completed adopted sale locally without cancelling its paid order', (done) => {
+    seedCart(500);
+    service.clearCartAfterCompletedSale().subscribe((state) => {
+      expect(posApi.cancelOrder).not.toHaveBeenCalled();
+      expect(state.linkedOrderId).toBeNull();
+      expect(state.items).toEqual([]);
+      expect(service.cartState().linkedOrderId).toBeNull();
+      done();
+    });
+  });
+
+  it('still cancels an abandoned adopted cart when the cashier uses Vaciar', (done) => {
+    seedCart(500);
+    service.clearCart().subscribe((state) => {
+      expect(posApi.cancelOrder).toHaveBeenCalledTimes(1);
+      expect(state.linkedOrderId).toBeNull();
+      done();
+    });
   });
 
   it('en modo adoptado envía la lista restante por PUT y resincroniza', (done) => {

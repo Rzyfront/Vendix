@@ -319,7 +319,31 @@ export class RefundCalculationService {
       shipping_cost: Prisma.Decimal;
       shipping_tax_amount: Prisma.Decimal;
       shipping_tax_type: string | null;
+      tip_amount?: Prisma.Decimal | null;
     },
+  ) {
+    return this.calculateCancellationRefund(
+      orderId, paidAmount, client, totals, 'Cash refund',
+    );
+  }
+
+  /** ADR-12 — same ceiling math for non-cash cancellation legs. Only the
+   * breach message changes (`kindLabel`); the cash entry point above keeps
+   * its exact message so the cash lane stays byte-identical.
+   */
+  async calculateCancellationRefund(
+    orderId: number,
+    paidAmount: Prisma.Decimal,
+    client: Prisma.TransactionClient,
+    totals: {
+      grand_total: Prisma.Decimal;
+      tax_amount: Prisma.Decimal;
+      shipping_cost: Prisma.Decimal;
+      shipping_tax_amount: Prisma.Decimal;
+      shipping_tax_type: string | null;
+      tip_amount?: Prisma.Decimal | null;
+    },
+    kindLabel = 'Cancellation refund',
   ) {
     const ceiling = await this.calculate(
       { order_id: orderId, items: [], include_shipping: false }, client,
@@ -328,18 +352,22 @@ export class RefundCalculationService {
     if (amount.lessThanOrEqualTo(0) || amount.greaterThan(ceiling.max_refundable)) {
       throw new VendixHttpException(
         ErrorCodes.REF_VALIDATE_001,
-        `Cash refund ${amount.toString()} exceeds the remaining refundable total ${ceiling.max_refundable.toFixed(2)}`,
+        `${kindLabel} ${amount.toString()} exceeds the remaining refundable total ${ceiling.max_refundable.toFixed(2)}`,
       );
     }
     const ratio = amount.div(totals.grand_total);
     const tax = new Prisma.Decimal(totals.tax_amount).mul(ratio).toDecimalPlaces(2);
     const shipping = new Prisma.Decimal(totals.shipping_cost).mul(ratio).toDecimalPlaces(2);
     const shippingTax = new Prisma.Decimal(totals.shipping_tax_amount).mul(ratio).toDecimalPlaces(2);
+    const tip = new Prisma.Decimal(totals.tip_amount ?? 0).mul(ratio).toDecimalPlaces(2);
     return {
       amount,
-      subtotal: amount.minus(tax).minus(shipping),
+      // Product revenue excludes the voluntary tip. The refund amount still
+      // includes it; replay debits the tip payable liability separately.
+      subtotal: amount.minus(tax).minus(shipping).minus(tip),
       tax,
       shipping,
+      tip,
       shippingTax,
       shippingTaxType: totals.shipping_tax_type,
     };

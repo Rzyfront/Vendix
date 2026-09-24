@@ -54,6 +54,60 @@ describe('PosPaymentService.processShippingSale — adopted order reference', ()
     ));
     expect(post.calls.mostRecent().args[1].order_id).toBe(57);
   });
+
+  it('sends alias without customer or address FK, but with snapshot for home delivery', async () => {
+    const aliasCart = { ...cart(null), customer: null };
+    await firstValueFrom(service.processShippingSale(aliasCart, {
+      ...shipping, customerAlias: 'Portería torre B', shippingAddressId: 123,
+    }, null, 'current_user'));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.customer_alias).toBe('Portería torre B');
+    expect(payload.customer_id).toBeUndefined();
+    expect(payload.shipping_address_id).toBeUndefined();
+    expect(payload.shipping_address_snapshot).toEqual(shipping.shippingAddress);
+  });
+
+  it('keeps registered-customer shipping identity unchanged', async () => {
+    await firstValueFrom(service.processShippingSale(cart(null), shipping, null, 'current_user'));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.customer_id).toBe(9);
+    expect(payload.customer_alias).toBeUndefined();
+  });
+
+  it('omits a stale address id for an adopted alias draft while keeping its snapshot', async () => {
+    await firstValueFrom(service.saveDraft(
+      { ...cart(41), customer: null }, 'current_user', 'Portería torre B',
+      { ...shipping, shippingAddressId: 123 },
+    ));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.customer_alias).toBe('Portería torre B');
+    expect(payload.customer_id).toBeUndefined();
+    expect(payload.shipping_address_id).toBeUndefined();
+    expect(payload.shipping_address_snapshot).toEqual(shipping.shippingAddress);
+  });
+
+  it('routes a serialized adopted takeaway through POS tx with exact serial selection', async () => {
+    const serializedCart = {
+      ...cart(41),
+      items: [{
+        id: 'line-1', itemType: 'product',
+        product: { id: '77', name: 'Teléfono', requires_serial_numbers: true },
+        quantity: 2, unitPrice: 500, finalPrice: 500, totalPrice: 1000, taxAmount: 0,
+        serial_ids: [10], serial_numbers: ['IMEI-2'],
+      }],
+    } as unknown as CartState;
+    await firstValueFrom(service.processSaleWithPayment(
+      serializedCart,
+      { paymentMethod: { id: '1', type: 'cash' }, isAnonymousSale: false } as any,
+      'current_user', null, null, true, true,
+    ));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.order_id).toBe(41);
+    expect(payload.delivery_type).toBe('direct_delivery');
+    expect(payload.items[0]).toEqual(jasmine.objectContaining({
+      serial_ids: [10], serial_numbers: ['IMEI-2'],
+    }));
+  });
 });
 
 describe('PosPaymentService.processSaleWithPayment — prior table status', () => {

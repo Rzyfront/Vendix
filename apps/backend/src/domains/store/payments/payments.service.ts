@@ -36,6 +36,7 @@ import {
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
 import { assertVariantRequiredForPrepared } from '../orders/utils/variant-required.validator';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { findDianMunicipality } from '../invoicing/providers/dian-direct/constants/dian-geography';
 import {
   resolveTierSnapshotsForItems,
   type TierSnapshot,
@@ -910,11 +911,21 @@ export class PaymentsService {
           user,
         ))!;
         const order = orderCreation.order;
-        // QUI-431 — ¿la venta tiene productos serializados? Calculado UNA vez
-        // dentro de `createOrUpdateOrderFromPos` (antes de crear la orden, para
-        // poder forzar su delivery_type) y reutilizado aquí en el gate de
-        // inventario (paso 3) y la máquina de estados (`deferToFulfillment`).
+        // E.1: the persisted order lines (including adopted drafts) determine
+        // whether immediate POS delivery requires serial confirmation.
         const hasSerialized = orderCreation.hasSerialized;
+        const immediateSerialized = hasSerialized && order.delivery_type === 'direct_delivery' &&
+          !createPosPaymentDto.is_draft;
+        const paymentRoute = await this.resolvePosPaymentRoute(tx, createPosPaymentDto);
+        if (immediateSerialized) {
+          if (!createPosPaymentDto.requires_payment || paymentRoute.isDigitalPayment || paymentRoute.isOnDelivery) {
+            throw new VendixHttpException(
+              ErrorCodes.SERIAL_REQUIRED_001,
+              'Los productos serializados para llevar requieren cobro inmediato en caja y seriales confirmados.',
+            );
+          }
+          await this.assertImmediatePosSerials(tx, order, createPosPaymentDto.items ?? []);
+        }
 
         // Frontera 5 UVT (Art. 616-1 ET / Res. 000165 de 2023): una venta
         // anónima por encima de 5 UVT no puede soportarse con el documento
@@ -1355,8 +1366,7 @@ export class PaymentsService {
         // 2. Process payment if required
         let payment: any = null;
         let paidSessionId: number | null = null;
-        const { isDigitalPayment, isOnDelivery } =
-          await this.resolvePosPaymentRoute(tx, createPosPaymentDto);
+        const { isDigitalPayment, isOnDelivery } = paymentRoute;
 
         if (createPosPaymentDto.requires_payment && !isDigitalPayment) {
           // Direct methods (cash, card, bank_transfer) — process inside transaction
@@ -1383,10 +1393,10 @@ export class PaymentsService {
             tx,
             order.id,
             isOnDelivery ? 'pending_payment' : 'succeeded',
-            // QUI-431 — difiere a fulfillment para domicilio O serializado.
-            // OJO: tras forzar el delivery_type, order.delivery_type ya es
-            // 'pickup' para serializado, por eso se incluye `hasSerialized`.
-            order.delivery_type === 'home_delivery' || hasSerialized,
+            // Home delivery and non-immediate serialized flows defer stock;
+            // serialized direct_delivery is committed before this tx finishes.
+            order.delivery_type === 'home_delivery' ||
+              (hasSerialized && order.delivery_type !== 'direct_delivery'),
             hasKitchenItems,
           );
         } else if (isDigitalPayment) {
@@ -1395,8 +1405,9 @@ export class PaymentsService {
             tx,
             order.id,
             'pending_payment',
-            // QUI-431 — difiere a fulfillment para domicilio O serializado.
-            order.delivery_type === 'home_delivery' || hasSerialized,
+            // Digital serialized direct_delivery is rejected above.
+            order.delivery_type === 'home_delivery' ||
+              (hasSerialized && order.delivery_type !== 'direct_delivery'),
             hasKitchenItems,
           );
         } else if (!createPosPaymentDto.is_draft) {
@@ -1406,8 +1417,9 @@ export class PaymentsService {
             tx,
             order.id,
             'pending_payment',
-            // QUI-431 — difiere a fulfillment para domicilio O serializado.
-            order.delivery_type === 'home_delivery' || hasSerialized,
+            // Credit serialized direct_delivery is rejected above.
+            order.delivery_type === 'home_delivery' ||
+              (hasSerialized && order.delivery_type !== 'direct_delivery'),
             hasKitchenItems,
           );
         }
@@ -1415,11 +1427,8 @@ export class PaymentsService {
         // 3. Update inventory only when product is physically delivered
         // Direct delivery with payment = finished = product left our hands
         // Any other flow (home_delivery, credit sale) = keep reservation until delivery/cancellation
-        // QUI-431 — los productos serializados NO se entregan/consumen al
-        // instante: se cobran pero la reserva queda ACTIVA y el serial se
-        // registra luego en una remisión. Por eso `!hasSerialized` excluye la
-        // venta serializada de `updateInventoryFromOrder` (no se consume stock
-        // ni se marcan seriales como vendidos en este punto).
+        // E.1: paid serialized direct_delivery consumes cashier-confirmed
+        // serials through OrderStockCommitService inside this payment tx.
         //
         // `!isDigitalPayment` — El inventario sale cuando el dinero ENTRA, no
         // cuando se promete. Un pago diferido a pasarela (wompi / wallet) NO es
@@ -1451,8 +1460,7 @@ export class PaymentsService {
           createPosPaymentDto.requires_payment &&
           !isDigitalPayment &&
           !isOnDelivery &&
-          order.delivery_type !== 'home_delivery' &&
-          !hasSerialized;
+          order.delivery_type === 'direct_delivery';
 
 
         if (isDirectDeliveryFinished) {
@@ -2244,11 +2252,12 @@ export class PaymentsService {
       typeof order.id === 'object' ? Number(order.id) : Number(order.id);
     // processPosPayment projects persisted orders.grand_total as
     // result.order.total_amount; this is not the client's DTO estimate.
-    const orderTotal = Number(order.total_amount);
+    const persistedTotal = new Prisma.Decimal(order.total_amount);
+    const orderTotal = persistedTotal.toNumber();
 
     const updateData: Record<string, any> = {
       credit_type: creditType,
-      remaining_balance: orderTotal,
+      remaining_balance: persistedTotal,
       total_paid: 0,
     };
 
@@ -3556,10 +3565,24 @@ export class PaymentsService {
     if (!dto.requires_payment) {
       return { isDigitalPayment: false, isOnDelivery: false };
     }
-    const method = await tx.store_payment_methods.findUnique({
-      where: { id: dto.store_payment_method_id },
+    if (dto.store_payment_method_id == null) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_METHOD_DISABLED_001,
+        'Selecciona un método de pago para continuar.',
+        { reason: 'payment_method_required' },
+      );
+    }
+    const method = await tx.store_payment_methods.findFirst({
+      where: { id: dto.store_payment_method_id, store_id: dto.store_id },
       include: { system_payment_method: true },
     });
+    if (!method) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_METHOD_DISABLED_001,
+        'El método de pago ya no está disponible. Elige otro.',
+        { reason: 'payment_method_not_found' },
+      );
+    }
     const type = method?.system_payment_method?.type || '';
     const isOnDelivery = this.isOnDeliveryMethod(
       dto.store_payment_method_id,
@@ -3807,32 +3830,9 @@ export class PaymentsService {
     // recortada. Ver ADR-07 — lo comercial se expresa en bruto.
     const newSubtotalGross = this.roundMoney(newSubtotal + newTax);
     const shippingCost = this.roundMoney(dto.shipping_cost || 0);
-    // GAP-6 — Propina del cierre de mesa. Aditiva al grand_total, SIN IVA:
-    // NO se suma a subtotal_amount ni tax_amount (no es ingreso ni base
-    // gravable). Se persiste aparte en orders.tip_amount y la contabilidad
-    // la reconoce como pasivo custodio (propinas por pagar).
-    //
-    // carril D / lina — D3: cálculo y metadatos de la propina.
-    //  - Si llega `tip_amount` directo, gana sobre cualquier porcentaje.
-    //  - Si NO llega `tip_amount` y llega `tip_type='percentage'`, se
-    //    calcula sobre `newSubtotal` (la base gravable): un % sobre
-    //    envío/envío + propina es absurdo, la convención contable
-    //    colombiana es "% sobre lo consumido". Si `tip_value` falta o
-    //    es <= 0, no se calcula nada (propina 0, no obligatoria).
-    //  - El % se guarda RESUELTO A MONTO (no como porcentaje crudo):
-    //    si mañana cambia el subtotal de esa orden, la propina ya
-    //    pactada no puede moverse sola. Persistimos `tip_value` con
-    //    el monto final y `tip_type='fixed'`, porque el operador ya
-    //    eligió la cifra que va a pagar el cliente.
-    //  - El `tip_type` que persiste es 'fixed' cuando se calculó desde
-    //    percentage; o el que vino cuando fue 'fixed' directo. La
-    //    auditoría ve la decisión original del operador en una
-    //    columna y el monto anclado en otra.
-    // Las reglas viven en `resolveTip` (common/utils/tip.util.ts). Se
-    // extrajeron de aquí cuando el pago desde el detalle de orden necesitó las
-    // mismas: dos implementaciones de la misma regla divergen, y una propina
-    // que se calcula distinto según por dónde cobró el operador es un
-    // descuadre que nadie ve hasta la conciliación.
+    // E.6 — el porcentaje usa productos brutos (subtotal + impuesto), nunca
+    // envío ni la propina previa. La propina suma al total, pero queda fuera
+    // de subtotal_amount y tax_amount; resolveTip ancla el monto pactado.
     const resolvedTip = resolveTip(dto, newSubtotalGross, (v) =>
       this.roundMoney(v),
     );
@@ -4285,6 +4285,83 @@ export class PaymentsService {
     }
   }
 
+  /** ADR-05/F.2: persist an alias delivery address with its POS order, never
+   * as an earlier standalone POST that could leave an unreferenced orphan. */
+  private aliasShippingAddressData(
+    snapshot: Record<string, unknown> | undefined,
+    storeId: number,
+  ): Prisma.addressesUncheckedCreateInput {
+    const required = (key: string, max: number): string => {
+      const value = snapshot?.[key];
+      if (typeof value !== 'string' || !value.trim() || value.trim().length > max) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          `Completa una dirección de envío válida: ${key}.`,
+          { reason: 'alias_shipping_address_invalid', field: key },
+        );
+      }
+      return value.trim();
+    };
+    const optional = (key: string, max: number): string | null => {
+      const value = snapshot?.[key];
+      if (value == null || value === '') return null;
+      if (typeof value !== 'string' || value.trim().length > max) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          `Corrige el campo ${key} de la dirección de envío.`,
+          { reason: 'alias_shipping_address_invalid', field: key },
+        );
+      }
+      return value.trim() || null;
+    };
+    const coordinate = (key: 'latitude' | 'longitude', max: number): number | null => {
+      const value = snapshot?.[key];
+      if (value == null || value === '') return null;
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || Math.abs(numeric) > max) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          `Corrige la coordenada ${key} de la dirección de envío.`,
+          { reason: 'alias_shipping_address_invalid', field: key },
+        );
+      }
+      return numeric;
+    };
+    const country = required('country_code', 3).toUpperCase();
+    if (!/^[A-Z]{2,3}$/.test(country)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'El país de la dirección debe ser un código de dos o tres letras.',
+        { reason: 'alias_shipping_address_invalid', field: 'country_code' },
+      );
+    }
+    const municipalityCode = optional('municipality_code', 10);
+    if (municipalityCode && !findDianMunicipality(municipalityCode)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'El municipio DANE de la dirección no es válido.',
+        { reason: 'alias_shipping_address_invalid', field: 'municipality_code' },
+      );
+    }
+    return {
+      store_id: storeId,
+      organization_id: null,
+      user_id: null,
+      is_primary: false,
+      type: 'shipping',
+      address_line1: required('address_line1', 255),
+      address_line2: optional('address_line2', 255),
+      city: required('city', 100),
+      state_province: optional('state_province', 100),
+      postal_code: optional('postal_code', 20),
+      country_code: country,
+      municipality_code: municipalityCode,
+      phone_number: optional('recipient_phone', 50),
+      latitude: coordinate('latitude', 90),
+      longitude: coordinate('longitude', 180),
+    };
+  }
+
   private async createOrUpdateOrderFromPos(
     tx: any,
     dto: CreatePosPaymentDto,
@@ -4355,6 +4432,7 @@ export class PaymentsService {
           select: {
             id: true, order_number: true, state: true,
             subtotal_amount: true, tax_amount: true,
+            shipping_address_id: true,
           },
         })
       : null;
@@ -4412,11 +4490,7 @@ export class PaymentsService {
       );
     }
 
-    // QUI-431 — ¿Hay productos serializados en esta venta? Se computa UNA vez
-    // ANTES de crear la orden porque condiciona el delivery_type persistido
-    // (abajo). Se retorna al caller (`processPosPayment`) para reutilizarlo en
-    // el gate de inventario y la máquina de estados sin re-consultar la BD.
-    const hasSerialized = await this.orderHasSerializedItems(tx, items);
+    // For adopted orders, the persisted lines (not the client DTO) own stock.
 
     let retries = 3;
     let orderNumber: string;
@@ -4526,37 +4600,14 @@ export class PaymentsService {
           orderItems,
         );
 
-        // carril D / lina — D3: cálculo y metadatos de la propina
-        // (rama retail / POS caja). Misma regla que mesa: el % se
-        // calcula sobre el subtotal (no sobre total con impuestos) y
-        // se guarda RESUELTO A MONTO, no como porcentaje crudo. Si
-        // llega tip_amount directo, gana sobre cualquier porcentaje.
-        let tip = this.roundMoney(dto.tip_amount || 0);
-        let resolvedTipType: 'percentage' | 'fixed' | null = dto.tip_type ?? null;
-        let resolvedTipValue: number | null =
-          dto.tip_value != null ? this.roundMoney(dto.tip_value) : null;
-        if (
-          tip === 0 &&
-          resolvedTipType === 'percentage' &&
-          resolvedTipValue != null &&
-          resolvedTipValue > 0
-        ) {
-          // F-017 — el porcentaje va sobre el BRUTO, igual que en el cierre
-          // de mesa (`resolveTip(dto, newSubtotalGross, …)`). Dos carriles
-          // que calculan distinto la misma propina es un descuadre que no se
-          // ve hasta la conciliación.
-          tip = this.roundMoney(
-            (calculatedSubtotalGross * resolvedTipValue) / 100,
-          );
-          resolvedTipType = 'fixed';
-          resolvedTipValue = tip;
-        }
-        if (resolvedTipType == null && tip > 0) {
-          resolvedTipType = 'fixed';
-        }
-        if (resolvedTipType === 'fixed' && resolvedTipValue == null && tip > 0) {
-          resolvedTipValue = tip;
-        }
+        // E.6 — retail shares the table/flow resolver and its gross product
+        // base; the tip remains outside taxable subtotal and product tax.
+        const resolvedTip = resolveTip(dto, calculatedSubtotalGross, (v) =>
+          this.roundMoney(v),
+        );
+        const tip = resolvedTip.amount;
+        const resolvedTipType = resolvedTip.type;
+        const resolvedTipValue = resolvedTip.value;
 
         const grandTotal = this.roundMoney(
           Math.max(
@@ -4595,18 +4646,10 @@ export class PaymentsService {
           internal_notes: dto.internal_notes,
           notes: dto.notes,
           // Shipping fields (for delivery orders)
-          // QUI-431 — Una venta con productos serializados NO se entrega al
-          // instante en el mostrador: el serial concreto se registra después en
-          // una remisión. Por eso se difiere a fulfillment. `home_delivery` se
-          // respeta tal cual (ya es un flujo diferido con su propia logística);
-          // cualquier otro tipo (direct_delivery / pickup / other) con
-          // serializado se fuerza a `pickup`, porque pickup ES elegible para
-          // remisión y direct_delivery NO lo es.
-          delivery_type: hasSerialized
-            ? (dto.delivery_type === 'home_delivery'
-                ? 'home_delivery'
-                : 'pickup')
-            : dto.delivery_type || 'direct_delivery',
+          // E.1: preserve the operator's delivery intent. Serialized takeaway
+          // is direct_delivery only after strict preflight + transactional
+          // serial/stock commit; real shipping-method pickup stays pickup.
+          delivery_type: dto.delivery_type || 'direct_delivery',
           payment_form: dto.is_draft
             ? null
             : dto.payment_form || (dto.requires_payment ? '1' : '2'),
@@ -4659,7 +4702,14 @@ export class PaymentsService {
         delete adoptedOrderData.created_by_user_id;
         delete adoptedOrderData.store_id;
         delete adoptedOrderData.channel;
-        const order = existingOrder
+        const aliasDeliveryAddress = dto.customer_alias?.trim() &&
+          dto.delivery_type === 'home_delivery'
+          ? this.aliasShippingAddressData(
+              dto.shipping_address_snapshot as Record<string, unknown> | undefined,
+              dtoStoreId,
+            )
+          : null;
+        let order = existingOrder
           ? await tx.orders.update({
               where: { id: existingOrder.id, store_id: dtoStoreId },
               data: adoptedOrderData,
@@ -4669,6 +4719,78 @@ export class PaymentsService {
               data: orderData,
               include: { order_items: true, stores: true },
             });
+
+        if (aliasDeliveryAddress) {
+          if (dto.shipping_address_id != null) {
+            // A customer-owned address is never silently converted to an
+            // alias address. Nor may a new alias borrow another sale's row.
+            if (existingOrder?.shipping_address_id !== dto.shipping_address_id) {
+              throw new VendixHttpException(
+                ErrorCodes.PAY_VALIDATE_001,
+                'La dirección del nombre de referencia debe crearse con esta venta.',
+                { reason: 'alias_shipping_address_not_owned' },
+              );
+            }
+            const supplied = await tx.addresses.findFirst({
+              where: { id: dto.shipping_address_id, store_id: dtoStoreId, user_id: null },
+              select: { id: true },
+            });
+            if (!supplied) {
+              throw new VendixHttpException(
+                ErrorCodes.PAY_VALIDATE_001,
+                'La dirección del nombre de referencia no pertenece a esta tienda.',
+                { reason: 'alias_shipping_address_not_owned' },
+              );
+            }
+          } else {
+            let addressId: number | null = null;
+            if (existingOrder?.shipping_address_id != null) {
+              const oldOrphan = await tx.addresses.findFirst({
+                where: {
+                  id: existingOrder.shipping_address_id,
+                  store_id: dtoStoreId,
+                  user_id: null,
+                },
+                select: { id: true },
+              });
+              if (oldOrphan) {
+                const referenceCounts = await Promise.all([
+                  tx.orders.count({
+                    where: {
+                      OR: [
+                        { shipping_address_id: oldOrphan.id, id: { not: order.id } },
+                        { billing_address_id: oldOrphan.id },
+                      ],
+                    },
+                  }),
+                  tx.sales_orders.count({ where: { shipping_address_id: oldOrphan.id } }),
+                  tx.bookings.count({ where: { service_address_id: oldOrphan.id } }),
+                  tx.inventory_locations.count({ where: { address_id: oldOrphan.id } }),
+                  tx.suppliers.count({ where: { address_id: oldOrphan.id } }),
+                ]);
+                if (referenceCounts.every((count) => count === 0)) {
+                  await tx.addresses.update({
+                    where: { id: oldOrphan.id, store_id: dtoStoreId },
+                    data: aliasDeliveryAddress,
+                  });
+                  addressId = oldOrphan.id;
+                }
+              }
+            }
+            if (addressId == null) {
+              const created = await tx.addresses.create({
+                data: aliasDeliveryAddress,
+                select: { id: true },
+              });
+              addressId = created.id;
+            }
+            order = await tx.orders.update({
+              where: { id: order.id, store_id: dtoStoreId },
+              data: { shipping_address_id: addressId },
+              include: { order_items: true, stores: true },
+            });
+          }
+        }
 
         // Link pending bookings to this order
         if (dto.booking_ids?.length) {
@@ -4690,7 +4812,10 @@ export class PaymentsService {
           order,
           // QUI-431 — se propaga al caller para reutilizar la detección de
           // serializados en el gate de inventario y la máquina de estados.
-          hasSerialized,
+          hasSerialized: await this.orderHasSerializedItems(
+            tx,
+            (order.order_items ?? []).map((item: any) => ({ product_id: item.product_id })),
+          ),
           promotionsSnapshot: promotionQuote.order_promotions_snapshot,
           appliedPromotions: promotionQuote.applied_promotions,
           couponInfo,
@@ -4758,18 +4883,26 @@ export class PaymentsService {
 
     // Get payment method details
     if (!dto.store_payment_method_id) {
-      throw new Error('Payment method is required when payment is enabled');
+      throw new VendixHttpException(
+        ErrorCodes.PAY_METHOD_DISABLED_001,
+        'Selecciona un método de pago para continuar.',
+        { reason: 'payment_method_required' },
+      );
     }
 
     const paymentMethod = await tx.store_payment_methods.findFirst({
-      where: { id: dto.store_payment_method_id },
+      where: { id: dto.store_payment_method_id, store_id: dtoStoreId },
       include: {
         system_payment_method: true,
       },
     });
 
     if (!paymentMethod) {
-      throw new Error('Payment method not found');
+      throw new VendixHttpException(
+        ErrorCodes.PAY_METHOD_DISABLED_001,
+        'El método de pago ya no está disponible. Elige otro.',
+        { reason: 'payment_method_not_found' },
+      );
     }
 
     // Contra entrega — resuelto ANTES de leer `system_payment_method.type`
@@ -5170,6 +5303,96 @@ export class PaymentsService {
       select: { id: true },
     });
     return found.length > 0;
+  }
+
+  /** Strict, transaction-local preflight before charging an immediate serialized sale.
+   * The canonical OrderStockCommitService then sells and links the same serials
+   * to each order_item inside this transaction; any failure rolls payment back.
+   */
+  private async assertImmediatePosSerials(
+    tx: any,
+    order: any,
+    selections: PosOrderItemDto[],
+  ): Promise<void> {
+    const lines = (order.order_items ?? []).filter((line: any) => line.product_id != null);
+    const ids = [...new Set(lines.map((line: any) => line.product_id as number))];
+    const serialized = await tx.products.findMany({
+      where: { id: { in: ids }, requires_serial_numbers: true },
+      select: { id: true, store_id: true, track_inventory: true, product_type: true },
+    });
+    const serializedIds = new Set<number>(serialized.map((product: any) => product.id));
+    if (serialized.some((product: any) => product.store_id !== order.store_id ||
+        product.track_inventory !== true || product.product_type !== 'physical')) {
+      throw new VendixHttpException(
+        ErrorCodes.SERIAL_REQUIRED_001,
+        'El producto serializado debe ser físico, manejar inventario y pertenecer a esta tienda.',
+      );
+    }
+    const claimed = new Set<number>();
+    const usedIds = new Set<number>();
+    const usedTexts = new Set<string>();
+    for (const line of lines) {
+      if (!serializedIds.has(line.product_id)) continue;
+      const index = selections.findIndex((selection, i) => !claimed.has(i) &&
+        selection.product_id === line.product_id &&
+        (selection.product_variant_id ?? null) === (line.product_variant_id ?? null));
+      if (index < 0) {
+        throw new VendixHttpException(ErrorCodes.SERIAL_REQUIRED_001, 'Selecciona los seriales antes de cobrar.');
+      }
+      claimed.add(index);
+      const selection = selections[index];
+      const serialIds = selection.serial_ids ?? [];
+      const serialTexts = (selection.serial_numbers ?? []).map((value) => value.trim());
+      const quantity = Number(line.stock_units_consumed ?? line.quantity);
+      if (!Number.isInteger(quantity) || quantity < 1 ||
+          serialIds.length + serialTexts.length !== quantity ||
+          serialIds.some((id) => !Number.isInteger(id) || id < 1 || usedIds.has(id)) ||
+          serialTexts.some((value) => !value || usedTexts.has(value)) ||
+          new Set(serialTexts).size !== serialTexts.length) {
+        throw new VendixHttpException(
+          ErrorCodes.SERIAL_REQUIRED_001,
+          `Selecciona exactamente ${quantity} seriales distintos para ${line.product_name ?? line.product_id}.`,
+        );
+      }
+      const existing = await tx.inventory_serial_numbers.findMany({
+        where: { OR: [
+          { id: { in: serialIds } },
+          { serial_number: { in: serialTexts } },
+        ] },
+        select: {
+          id: true, serial_number: true, product_id: true, product_variant_id: true,
+          status: true, inventory_locations: { select: { store_id: true } },
+        },
+      });
+      const byId = new Map<number, any>(existing.map((row: any) => [row.id, row]));
+      const byText = new Map<string, any>(existing.map((row: any) => [row.serial_number, row]));
+      for (const id of serialIds) {
+        const row = byId.get(id);
+        if (!row || row.product_id !== line.product_id ||
+            (row.product_variant_id ?? null) !== (line.product_variant_id ?? null) ||
+            row.status !== 'in_stock' || row.inventory_locations?.store_id !== order.store_id ||
+            usedTexts.has(row.serial_number) || serialTexts.includes(row.serial_number)) {
+          throw new VendixHttpException(ErrorCodes.SERIAL_REQUIRED_001, 'Serial duplicado, reservado o ajeno a esta tienda/producto.');
+        }
+        usedIds.add(id);
+        usedTexts.add(row.serial_number);
+      }
+      for (const text of serialTexts) {
+        const row = byText.get(text);
+        if (row && (row.product_id !== line.product_id ||
+            (row.product_variant_id ?? null) !== (line.product_variant_id ?? null) ||
+            row.status !== 'in_stock' || row.inventory_locations?.store_id !== order.store_id ||
+            usedIds.has(row.id))) {
+          throw new VendixHttpException(ErrorCodes.SERIAL_REQUIRED_001, 'Serial duplicado, reservado o ajeno a esta tienda/producto.');
+        }
+        usedTexts.add(text);
+      }
+      if (existing.length && await tx.sales_document_serials.count({
+        where: { serial_number_id: { in: existing.map((row: any) => row.id) } },
+      })) {
+        throw new VendixHttpException(ErrorCodes.SERIAL_REQUIRED_001, 'Un serial ya está asociado a otro documento.');
+      }
+    }
   }
 
   /**

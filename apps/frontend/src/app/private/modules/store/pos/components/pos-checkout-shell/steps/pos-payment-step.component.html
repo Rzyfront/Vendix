@@ -68,3 +68,12 @@
     </div>
   }
 </div>
+<app-pos-serial-selection-modal
+  [isOpen]="serialModalOpen()"
+  [productName]="serialModalProductName()"
+  [quantity]="serialModalQuantity()"
+  [options]="serialModalOptions()"
+  [loading]="serialModalLoading()"
+  (confirmed)="onSerialConfirmed($event)"
+  (cancelled)="onSerialCancelled()"
+></app-pos-serial-selection-modal>

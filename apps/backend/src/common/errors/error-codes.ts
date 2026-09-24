@@ -1105,6 +1105,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La orden pertenece a una mesa abierta; cierra la cuenta desde Mesas antes de cancelarla.',
   },
+  ORD_CANCEL_CREDIT_NOTE_REQUIRED_001: {
+    code: 'ORD_CANCEL_CREDIT_NOTE_REQUIRED_001',
+    httpStatus: 409,
+    devMessage: 'Order has a DIAN-accepted electronic invoice without an accepted credit note; issue the credit note before cancelling',
+  },
   ORD_STOCK_COMMIT_STATE_001: {
     code: 'ORD_STOCK_COMMIT_STATE_001',
     httpStatus: 409,
@@ -1366,6 +1371,17 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'This order is no longer in an editable state (created/draft required)',
+  },
+  // ADR-07 / G.1 — future table-reassignment route uses these policy outcomes.
+  ORD_TABLE_REASSIGN_ORDER_STATE_001: {
+    code: 'ORD_TABLE_REASSIGN_ORDER_STATE_001',
+    httpStatus: 409,
+    devMessage: 'Cancelled or refunded orders cannot be returned to a table',
+  },
+  ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001: {
+    code: 'ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001',
+    httpStatus: 409,
+    devMessage: 'This order has financial activity that prevents table reassignment',
   },
   // CP-POS-CREAR-EDITAR-COBRAR-001 — el customer_id que manda el frontend no
   // pertenece a la tienda del contexto. 403 (no es problema de autenticación, es
@@ -1774,6 +1790,21 @@ export const ErrorCodes = {
     code: 'REF_VALIDATE_001',
     httpStatus: 400,
     devMessage: 'Refund validation failed',
+  },
+  REF_PAYOUT_REQUIRED_001: {
+    code: 'REF_PAYOUT_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'Completed manual refund requires payout reference and channel',
+  },
+  REF_RESOLUTION_CONFLICT_001: {
+    code: 'REF_RESOLUTION_CONFLICT_001',
+    httpStatus: 409,
+    devMessage: 'Refund resolution conflicts with its current state or payout reference',
+  },
+  REF_TAX_BREAKDOWN_MISSING_001: {
+    code: 'REF_TAX_BREAKDOWN_MISSING_001',
+    httpStatus: 409,
+    devMessage: 'Refund tax breakdown cannot be reconstructed safely',
   },
 
   // Superadmin
@@ -5562,7 +5593,7 @@ export const ErrorCodes = {
     code: 'KDS_STATION_LOCKED',
     httpStatus: 403,
     devMessage:
-      'La estación está siendo gestionada por otro operador. Solo el dueño del turno o un administrador pueden actuar sobre sus tickets.',
+      'Otro operador tiene esta estación. Pídele que cierre su turno o solicita a un administrador que tome la estación.',
   },
   /** @deprecated Sin lanzadores; usar ORDER_ITEM_NOT_DELIVERABLE para la entrega por ítem. */
   TABLE_SESSION_ITEM_NOT_DELIVERABLE: {
@@ -5750,7 +5781,7 @@ export const ErrorCodes = {
     code: 'KITCHEN_TICKET_NOT_TAKEAWAY',
     httpStatus: 422,
     devMessage:
-      'El ticket contiene platos que no son para llevar; en cocina solo se entregan pedidos takeaway',
+      'Este ticket incluye platos de mesa. Entrégalos desde la mesa, no desde cocina.',
   },
   // Restaurant Suite — Fase K audit jun-2026: explicit operator-friendly
   // codes for the common invalid transitions surfaced by the table-session

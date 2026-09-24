@@ -96,6 +96,12 @@ const REQUIRED_COLUMNS = [
   'organizations.fiscal_scope',
   'accounting_entities.fiscal_scope',
   'dian_configurations.accounting_entity_id',
+
+  // --- ADR-12 · anulación de fiado sin condonar deuda ni duplicar refund ---
+  'accounts_receivable.cancelled_amount',
+  'accounts_receivable.cancelled_at',
+  'accounts_receivable.cancellation_reason',
+  'refunds.ar_payment_id',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */
@@ -131,7 +137,12 @@ const REQUIRED_ENUM_VALUES = {
   // valor, la primera factura de un autorretenedor revienta al persistir
   // `withholding_calculations.role`.
   withholding_role_enum: ['self'],
+  order_installment_state_enum: ['cancelled'],
 };
+
+/** La identidad única de un abono CxC manual evita refund duplicado por retry. */
+const REQUIRED_INDEXES = ['refunds_ar_payment_id_key'];
+const REQUIRED_FOREIGN_KEYS = ['refunds_ar_payment_id_fkey'];
 
 async function main() {
   const connectionString = process.env.DATABASE_URL;
@@ -145,25 +156,27 @@ async function main() {
   await client.connect();
 
   try {
-    const [columns, tables, enums, enumValues] = await Promise.all([
-      client.query(
+    // One pg Client must not run concurrent query() calls (pg@9 removes that
+    // deprecated behavior); this gate runs only once per deploy.
+    const columns = await client.query(
         `SELECT table_name, column_name
            FROM information_schema.columns
           WHERE table_schema = current_schema()`,
-      ),
-      client.query(
+      );
+    const tables = await client.query(
         `SELECT table_name
            FROM information_schema.tables
           WHERE table_schema = current_schema()`,
-      ),
-      client.query(`SELECT typname FROM pg_type WHERE typtype = 'e'`),
-      client.query(
+      );
+    const enums = await client.query(`SELECT typname FROM pg_type WHERE typtype = 'e'`);
+    const enumValues = await client.query(
         `SELECT t.typname, e.enumlabel
            FROM pg_type t
            JOIN pg_enum e ON e.enumtypid = t.oid
           WHERE t.typtype = 'e'`,
-      ),
-    ]);
+      );
+    const indexes = await client.query(`SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()`);
+    const foreignKeys = await client.query(`SELECT conname FROM pg_constraint WHERE contype = 'f' AND connamespace = current_schema()::regnamespace`);
 
     const haveColumns = new Set(
       columns.rows.map((r) => `${r.table_name}.${r.column_name}`),
@@ -173,6 +186,8 @@ async function main() {
     const haveEnumValues = new Set(
       enumValues.rows.map((r) => `${r.typname}.${r.enumlabel}`),
     );
+    const haveIndexes = new Set(indexes.rows.map((r) => r.indexname));
+    const haveForeignKeys = new Set(foreignKeys.rows.map((r) => r.conname));
 
     const missingEnumValues = Object.entries(REQUIRED_ENUM_VALUES).flatMap(
       ([enum_name, values]) =>
@@ -192,6 +207,12 @@ async function main() {
         (e) => `tipo enum ${e}`,
       ),
       ...missingEnumValues,
+      ...REQUIRED_INDEXES.filter((i) => !haveIndexes.has(i)).map(
+        (i) => `índice ${i}`,
+      ),
+      ...REQUIRED_FOREIGN_KEYS.filter((f) => !haveForeignKeys.has(f)).map(
+        (f) => `clave foránea ${f}`,
+      ),
     ];
 
     if (missing.length > 0) {
@@ -217,7 +238,8 @@ async function main() {
     console.log(
       `✅ Esquema verificado contra la base: ${REQUIRED_COLUMNS.length} columnas, ` +
         `${REQUIRED_TABLES.length} tabla(s), ${REQUIRED_ENUM_TYPES.length} tipo(s) enum ` +
-        `y ${enumValueCount} valor(es) de enum presentes.`,
+        `${enumValueCount} valor(es) de enum, ${REQUIRED_INDEXES.length} índice(s) ` +
+        `y ${REQUIRED_FOREIGN_KEYS.length} clave(s) foránea(s) presentes.`,
     );
   } finally {
     await client.end();

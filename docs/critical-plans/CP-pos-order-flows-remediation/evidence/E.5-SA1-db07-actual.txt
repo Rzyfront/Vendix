@@ -1,0 +1,39 @@
+E.5-SA1 DB-07 estado actual + huérfanas históricas (solo lectura, sin login)
+HEAD: aa32bfa18ee15c18b4ce3b813f4a8806c53b4a0e
+UTC: 2026-09-24T01:18:54Z
+DB: vendix_postgres / vendix_db (docker exec psql, SELECT only)
+
+[1] Huérfanas históricas (E5-historic-direct-delivery.sql re-corrrido)
+SQL: select count(*) from orders where delivery_type='direct_delivery' and shipping_address_snapshot is not null and state='finished';
+Resultado: 0  (igual que E5-historic-direct-delivery.txt = 0)
+
+[2] DB-07 canónico (registry db.md): home_delivery nuevas sin FK o sin snapshot
+SQL: SELECT count(*) AS db07_nuevas_sin_fk_o_snapshot FROM orders WHERE delivery_type='home_delivery' AND (shipping_address_id IS NULL OR shipping_address_snapshot IS NULL) AND created_at > '2026-09-23 06:53:01';
+Umbral: created_at de orden E5 #1119 (2026-09-23 06:53:01.839) como :deploy.
+Resultado: 11
+
+[3] Desglose por estado (mismo WHERE, GROUP BY state)
+ pending_payment | 1
+ processing      | 2
+ shipped         | 1
+ cancelled       | 7
+
+[4] No-canceladas que violan DB-07 (state <> 'cancelled', ORDER BY id)
+  id  | state           | shipping_method_id | shipping_address_id | has_snapshot
+ 1119 | processing      | 9                  | NULL                | t
+ 1144 | processing      | 9                  | NULL                | f
+ 1158 | shipped         | 9                  | 489                 | f
+ 1167 | pending_payment | 9                  | NULL                | t
+(4 rows)
+
+[5] E5-new-orders.sql re-corrido (id 1119-1121, sin cambios)
+  id  | state           | delivery_type   | shipping_method_id | shipping_address_id | has_snapshot
+ 1119 | processing      | home_delivery   | 9                  | NULL                | t
+ 1120 | finished        | direct_delivery | NULL               | NULL                | f
+ 1121 | finished        | pickup          | NULL               | NULL                | f
+
+[6] Remisión E5 sigue válida
+SQL: SELECT d.id,d.order_id,d.status,(d.customer_address IS NOT NULL) AS has_address FROM dispatch_notes d WHERE d.id=226;
+ 226 | 1119 | draft | t
+
+Conclusión: DB-07 ABIERTO (esperado, pendiente F.2/ADR-05). #1119 conserva snapshot pero shipping_address_id=NULL, igual que en E5-ui-order-remision.txt. Huérfanas históricas = 0, sin regresión.

@@ -172,7 +172,7 @@ export class OrderStockCommitService {
         order_items: {
           include: {
             products: {
-              select: { id: true, track_inventory: true, product_type: true },
+              select: { id: true, track_inventory: true, product_type: true, requires_serial_numbers: true },
             },
             product_variants: { select: { id: true } },
           },
@@ -186,6 +186,39 @@ export class OrderStockCommitService {
 
     const isRestaurant = storeIsRestaurant((order as any).stores?.industries);
     const posMatcher = this.buildPosMatcher(opts.posSelection);
+    const serialSelectionByLine = new Map<number, PosSelection>();
+
+    // E.1: flow/pay and other callers can reach this canonical commit without
+    // the POS DTO. For immediate direct delivery, never fall back to FIFO just
+    // because the frontend lost requires_serial_numbers during hydration.
+    // The persisted product flag is authoritative and the guard runs before
+    // ANY line claims stock; a throw rolls the caller's transaction back.
+    if (order.delivery_type === 'direct_delivery') {
+      const selectedIds = new Set<number>();
+      const selectedTexts = new Set<string>();
+      for (const item of order.order_items ?? []) {
+        if (!item.products?.requires_serial_numbers || item.inventory_committed ||
+            item.inventory_consumed_at_fire) continue;
+        const selection = posMatcher(item);
+        const ids = selection?.serial_ids ?? [];
+        const texts = (selection?.serial_numbers ?? []).map((value: string) => value.trim());
+        const count = Number(item.stock_units_consumed ?? item.quantity);
+        if (!opts.consumeSerials || !item.products.track_inventory ||
+            item.products.product_type !== 'physical' ||
+            !Number.isInteger(count) || count < 1 || ids.length + texts.length !== count ||
+            ids.some((id: number) => !Number.isInteger(id) || id < 1 || selectedIds.has(id)) ||
+            texts.some((text: string) => !text || selectedTexts.has(text)) ||
+            new Set(ids).size !== ids.length || new Set(texts).size !== texts.length) {
+          throw new VendixHttpException(
+            ErrorCodes.SERIAL_REQUIRED_001,
+            `Selecciona exactamente ${count} seriales distintos antes de entregar el producto ${item.product_name ?? item.product_id}.`,
+          );
+        }
+        ids.forEach((id: number) => selectedIds.add(id));
+        texts.forEach((value: string) => selectedTexts.add(value));
+        serialSelectionByLine.set(item.id, selection!);
+      }
+    }
 
     let totalCost = 0;
     let committedItemCount = 0;
@@ -205,7 +238,9 @@ export class OrderStockCommitService {
         inventory_committed: item.inventory_committed,
         inventory_consumed_at_fire: item.inventory_consumed_at_fire,
         skip_kds: item.skip_kds,
-        posSelection: opts.consumeSerials ? posMatcher(item) : undefined,
+        posSelection: opts.consumeSerials
+          ? (serialSelectionByLine.get(item.id) ?? posMatcher(item))
+          : undefined,
       };
 
       const res = await this.processLine(

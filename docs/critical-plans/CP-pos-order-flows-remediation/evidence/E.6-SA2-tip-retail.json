@@ -1,0 +1,74 @@
+{
+  "lane": "retail",
+  "endpoint": "POST /store/payments/pos",
+  "http_status": 201,
+  "account": "owner@roku.vendix.com (user 162, org roku, store 10)",
+  "request": {
+    "store_id": 10,
+    "store_payment_method_id": 5,
+    "subtotal": 20000,
+    "tax_amount": 0,
+    "total_amount": 22000,
+    "items": [
+      {
+        "product_id": 317,
+        "product_name": "Retail Regresion 1781552200",
+        "quantity": 1,
+        "unit_price": 20000,
+        "total_price": 20000
+      }
+    ],
+    "tip_type": "percentage",
+    "tip_value": 10
+  },
+  "response": {
+    "success": true,
+    "message": "POS payment processed successfully",
+    "data": {
+      "success": true,
+      "message": "Payment processed successfully",
+      "order": {
+        "id": 1199,
+        "order_number": "POS-2026-0353",
+        "customer_alias": null,
+        "status": "finished",
+        "payment_status": "succeeded",
+        "total_amount": "22000",
+        "subtotal": "20000",
+        "tax_amount": "0",
+        "discount_amount": "0",
+        "shipping_cost": "0",
+        "applied_promotions": [],
+        "applied_coupons": [],
+        "invoice_data_token": "8588c47b-34c7-4072-ae9a-eccf381895d5"
+      },
+      "kitchen_fire": null,
+      "closed_session_id": null,
+      "paid_session_id": null,
+      "applied_promotions": [],
+      "applied_coupons": [],
+      "payment": {
+        "id": 859,
+        "amount": "22000",
+        "payment_method": "Efectivo",
+        "transaction_id": "POS-1790213033992-U6I6ZY0EA"
+      },
+      "_digitalPaymentPending": false
+    }
+  },
+  "sql_tip_check": {
+    "order_id": 1199,
+    "subtotal_amount": "20000.00",
+    "tax_amount": "0.00",
+    "tip_amount": "2000.00",
+    "tip_type": "fixed",
+    "tip_value": "2000.00",
+    "grand_total": "22000.00"
+  },
+  "verdict": {
+    "base_gross": 20000,
+    "expected_tip_10pct": 2000,
+    "observed_tip": 2000,
+    "match": true
+  }
+}

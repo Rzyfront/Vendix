@@ -2,9 +2,9 @@
 id: E.5
 title: "Despachar la orden de envío después de finalizarla"
 phase: E
-status: in-progress
-owner: none
-updated: 2026-09-20
+status: done
+owner: loks
+updated: 2026-09-24
 contracts: [FB-20, FB-60, FB-61, DB-07, ERR-04, ERR-19, ERR-20, ERR-21]
 adrs: [ADR-01]
 skills: [vendix-backend, vendix-dispatch-routes, vendix-error-handling, vendix-frontend, how-to-test]
@@ -39,5 +39,5 @@ skills: [vendix-backend, vendix-dispatch-routes, vendix-error-handling, vendix-f
   - [x] El gate de estado de la remisión no se relaja y su mensaje nombra el estado real.
   - [x] Una venta con envío y método genera remisión y el badge del detalle la muestra.
   - [x] El conteo de órdenes huérfanas históricas queda registrado como evidencia.
-  - [ ] Ninguna venta con envío nueva queda sin dirección con FK y snapshot.
-- **Status:** in-progress · Fabio · 2026-09-23 · API: sin método 400 tipado; con método orden #1119 `processing`, remisión #226 201/by-order 200; mostrador #1120 y pickup #1121 siguen 201. Playwright positivo `evidence/E5-ui-order-remision.md`: método/dirección/badge y navegación a remisión. Negativo `evidence/E5-ui-no-method.md`: sin métodos activos simulados en GET, aviso visible, Guardar deshabilitado y cero escrituras. Gates remisión test 4/4. DB-07 abierto: #1119 tiene snapshot pero `shipping_address_id=NULL`, pendiente ADR-05/F.2.
+  - [x] Ninguna venta con envío nueva queda sin dirección con FK y snapshot.
+- **Status:** done — loks 2026-09-24, 10/10. Gate 400 tipado, #1119+#226 201/by-order, mostrador/pickup OK, UI±, gates 4/4, UX copy 23/23, huérfanas 0. DB-07: 0 nuevas (F.2 #1226 FK+snap); ERR-21 no dispara (F.3 #231).

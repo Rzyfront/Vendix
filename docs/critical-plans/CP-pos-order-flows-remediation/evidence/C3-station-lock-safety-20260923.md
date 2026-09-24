@@ -1,0 +1,5 @@
+# C.3 — sonda de lock KDS detenida sin alterar inventario
+
+QA local de solo lectura 2026-09-23. El agente de verificación consultó salud y recursos autenticados: `GET /store/kds` 200 muestra estaciones #1 Cocina y #7 Barra; `GET /store/kds-sessions/open/1` y `/open/7` 200 con `data:null`; `GET /store/kitchen-fire/tickets?limit=200` 200 muestra 101 tickets, **todos** de estación #1 y cero de #7. No hubo POST/PATCH/DELETE, turno KDS abierto, transición de ticket ni cambio de base de datos.
+
+No se afirmó el esperado HTTP403 `KDS_STATION_LOCKED`: abrir oficialmente #1 habría invocado `backfillOrphanConsumption` y generado seis transacciones históricas huérfanas; abrir #7 no prueba el guard sobre un ticket de #1, y #7 no tiene ticket. La prueba requiere un fixture QA aislado en estación #7 o un turno de #1 abierto después de sanear su backfill, sin tocar datos de negocio compartidos por accidente. Evidencia cruda local: `/tmp/c3-lock-blocker.txt` y `/tmp/c3-lock-*.json`. C.3 permanece **in-progress**.

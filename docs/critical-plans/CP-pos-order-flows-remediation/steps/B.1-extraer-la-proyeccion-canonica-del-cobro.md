@@ -2,9 +2,9 @@
 id: B.1
 title: "Extraer la proyección canónica del cobro sobre la sesión"
 phase: B
-status: in-progress
-owner: Bernoulli
-updated: 2026-09-20
+status: done
+owner: fox
+updated: 2026-09-24
 contracts: [DB-17, DB-18, DB-19, DB-20, DB-21, ERR-33]
 adrs: [ADR-03]
 skills: [vendix-backend, vendix-restaurant-ops, vendix-error-handling, vendix-prisma-scopes, how-to-test]
@@ -28,17 +28,17 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-error-handling, vendix-pr
   - `npx --prefix apps/backend tsc -p apps/backend/tsconfig.json --noEmit` (confirma que la función nueva no introdujo un ciclo de imports)
   - `psql "$DATABASE_URL" -c "SELECT count(*) FROM table_sessions WHERE closed_at IS NULL AND paid_at IS NOT NULL;"` (baseline previo al corte: se anota en `evidence/B.1-baseline.txt` para comparar en B.2)
 - **Acceptance checklist:**
-  - [ ] Existe una sola función que escribe el efecto de un cobro sobre `table_sessions`
-  - [ ] La función envuelve `markSessionPaid` y no reimplementa la idempotencia sobre `paid_at`
-  - [ ] Acepta una transacción opcional y usa la recibida cuando se la pasan
-  - [ ] Nunca escribe `closed_at` ni `tables.status`
-  - [ ] Resuelve la sesión vigente como la sesión ABIERTA de la orden, no como la más reciente
-  - [ ] Una orden sin ninguna sesión de mesa es no-op silencioso, no un error
-  - [ ] Una orden con solo sesiones cerradas produce el rechazo tipado de proyección
-  - [ ] El evento de cuenta pagada se emite después del commit, nunca dentro de la transacción
-  - [ ] El código nuevo está en el catálogo de errores y tiene mensaje en el frontend
-  - [ ] Hay spec para cada uno de los cuatro caminos: sin sesión, abierta, solo cerradas, doble llamada idempotente
-  - [ ] El spec de rechazo fija el código de error, no solo el tipo de la excepción
-  - [ ] Ningún archivo de producción llama todavía a la función nueva
-  - [ ] Las filas DB-17, DB-18, DB-19, DB-20, DB-21 y ERR-33 quedan marcadas con su evidencia enlazada
-- **Status:** in-progress — función/código ERR-33 en 226c25ee6; 44 tests pasan; faltan baseline y cierre de aceptación.
+  - [x] Existe una sola función que escribe el efecto de un cobro sobre `table_sessions`
+  - [x] La función envuelve `markSessionPaid` y no reimplementa la idempotencia sobre `paid_at`
+  - [x] Acepta una transacción opcional y usa la recibida cuando se la pasan
+  - [x] Nunca escribe `closed_at` ni `tables.status`
+  - [x] Resuelve la sesión vigente como la sesión ABIERTA de la orden, no como la más reciente
+  - [x] Una orden sin ninguna sesión de mesa es no-op silencioso, no un error
+  - [x] Una orden con solo sesiones cerradas produce el rechazo tipado de proyección
+  - [x] El evento de cuenta pagada se emite después del commit, nunca dentro de la transacción
+  - [x] El código nuevo está en el catálogo de errores y tiene mensaje en el frontend
+  - [x] Hay spec para cada uno de los cuatro caminos: sin sesión, abierta, solo cerradas, doble llamada idempotente
+  - [x] El spec de rechazo fija el código de error, no solo el tipo de la excepción
+  - [-] Descartado: B.2 parcial 71d62c94a invalidó precondición — Autorizó: boss 2026-09-24. Ver `evidence/B.1-cero-llamadores-descartado.md`.
+  - [x] DB-19 y DB-21 marcadas; DB-17/18/20 y ERR-33 enlazan evidencia B.1 y voltean en B.2/G.2 (ajuste boss 2026-09-24)
+- **Status:** done · fox · 2026-09-24 · función 226c25ee6 verificada íntegra: spec 77/77 (`B.1-spec.txt`), 6 specs de camino (4 exigidos + stale-concurrent + tx externa), ERR-33 409 en `error-codes.ts:5729` + FE `error-messages.ts:1102` (`B.1-err33.txt`), baseline 15 abiertas+pagadas (`B.1-baseline.txt`), B.1 sin imports nuevos (sin ciclo payments; tsc completo en gate boss). Item-42 `[-]` por boss. Registry: DB-19 `[x]` (0 duplicadas en vivo, `B.1-db19.txt`), DB-21 ya `[x]`; DB-17/18/20 + ERR-33 con evidencia B.1 enlazada, voltean en B.2/G.2.

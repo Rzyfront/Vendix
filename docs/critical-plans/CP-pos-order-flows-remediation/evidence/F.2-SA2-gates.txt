@@ -1,0 +1,28 @@
+F.2-SA2 — Verificación levantamiento de gates (carril envío POS)
+Fecha: 2026-09-24
+Comando: grep -rn 'Selecciona un cliente|seleccionar un cliente para órdenes con envío|aliasBlockedByDelivery|no hay forma de atar' apps/frontend/src
+
+== Resultado: 0 coincidencias en carril envío (pos-checkout-shell / pos-shipping-step / pos-payment.service) ==
+
+Coincidencias restantes (11 líneas, todas fuera del carril envío — legítimas):
+- payment-collector.component.html:373,740 + .ts:900,946,964 → crédito ("para vender a crédito / para este método / completar la venta") LEGÍTIMO
+- open-table-modal.component.ts:112 + pos-open-table-modal.component.ts:175 → mesa LEGÍTIMO
+- pos-customer-modal.component.ts:101 → cola de espera ("de la cola de espera") LEGÍTIMO
+- dispatch-note-wizard.component.ts:464 → módulo dispatch-notes (wizard independiente, NO carril POS envío) — fuera de alcance F.2
+- membership-form-page.component.html:33 → placeholder membresías LEGÍTIMO
+- error-messages.ts:176 → dirección predeterminada LEGÍTIMO
+- 'seleccionar un cliente para órdenes con envío' → 0 en todo apps/frontend/src (gate envío eliminado)
+- 'aliasBlockedByDelivery' → 0 en todo apps/frontend/src
+- 'no hay forma de atar' → 0 en todo apps/frontend/src
+
+== Lectura de exenciones (solo-lectura) ==
+- pos-checkout-shell.component.ts:250 customerRequiredByAddress exime saleMode 'alias'
+- pos-checkout-shell.component.ts:265-266 customerRequired exime saleMode 'alias'
+- pos-checkout-shell.component.ts:1599-1604 setAliasMode / exención alias
+- pos-checkout-shell.component.ts:1335-1336 payload customer_id null + customer_alias en modo alias
+- pos-shipping-step.component.ts:841-871 persistAddressThenProcess (alias→snapshot sin POST previo)
+- pos-shipping-step.component.ts:928 mapAddressToDto
+- pos-payment.service.ts:~434 exime customerAlias ("salvo alias", QUI-737 B.4)
+- pos-payment.service.ts:~740,~823 requieren customer SOLO en flujo crédito LEGÍTIMO
+
+Conclusión gates: SÍ — 0 gates en carril envío.

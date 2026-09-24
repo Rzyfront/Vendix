@@ -1,0 +1,7 @@
+# E.2 — borrador POS con cuentas financieras y stock (QA local)
+
+Tienda #10, POS draft **#1176**, producto físico #421 x2, total $10.000 y **cero reservas al guardar**. `POST /store/orders/1176/split/preview` con `mode=equal,n_splits=2` respondió 200, dos cuentas de $5.000 y `source_version` válido. `POST split-by-amount` con ese version/idempotency key respondió **201**, cuentas **#4/#5**. Orden aún `draft`, cero reservas: dividir la cuenta no consume stock.
+
+`POST split/accounts/4/pay` y `/5/pay`, efectivo #5/$5.000 cada una, respondieron **201** y crearon pagos `succeeded` **#846/#847**. Tras la última cuenta, orden `processing`, `total_paid=grand_total=10000`, saldo cero; exactamente una reserva de orden **#508** por dos unidades quedó `consumed`, `order_items #1899.inventory_committed=true` y una única transacción de inventario **#2010** por `quantity_change=-2`. El `idempotency_key` repetido de cuenta #5 devolvió 201 sin nueva fila; un `flow/pay` paralelo posterior rechazó **409 `ORD_PAY_ALREADY_PAID_001`**. Conteo final: dos pagos de las dos cuentas, una transacción -2 y una reserva consumida, sin sobrepago ni doble stock.
+
+Evidencia cruda local `/tmp/e2-split-*`. Este caso prueba el carril **split**; el carril mesa todavía necesita su propia sonda y la invariante global DB-12 queda abierta. La orden split queda `processing` aun siendo `direct_delivery` y totalmente pagada; registrar esa diferencia de ciclo frente al POS directo, sin inferir que ya es `finished`.

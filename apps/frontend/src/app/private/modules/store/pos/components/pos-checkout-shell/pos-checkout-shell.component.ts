@@ -243,12 +243,11 @@ export class PosCheckoutShellComponent {
   );
 
   /**
-   * El cliente es obligatorio PORQUE la venta tiene dirección de envío (no por
-   * política): la dirección se ata a un cliente y sin él no se puede capturar
-   * un envío. Distinto motivo → distinto computed.
+   * El domicilio requiere identidad: cliente registrado o alias. La dirección
+   * con alias se guarda como fila sin usuario y snapshot en la orden (ADR-05).
    */
   readonly customerRequiredByAddress = computed<boolean>(
-    () => this.requiresAddress(),
+    () => this.requiresAddress() && this.saleMode() !== 'alias',
   );
 
   /**
@@ -259,11 +258,11 @@ export class PosCheckoutShellComponent {
    * aunque la política exija cliente, el cashier puede vender sin él desde el
    * POS. Por tanto "obligatorio" sólo cuando la política lo exige Y el POS
    * no tiene la ventana abierta. La dirección de envío sigue exigiendo
-   * cliente siempre (no hay forma de atar un envío sin un customer_id).
+   * identidad siempre; el alias permitido satisface la política sin ficha CRM.
    */
   readonly customerRequired = computed<boolean>(
     () =>
-      (this.customerRequiredByPolicy() && !this.allowAnonymousSales()) ||
+      (this.customerRequiredByPolicy() && !this.allowAnonymousSales() && this.saleMode() !== 'alias') ||
       this.customerRequiredByAddress(),
   );
 
@@ -291,7 +290,7 @@ export class PosCheckoutShellComponent {
    */
   readonly customerErrorMessage = computed<string>(() =>
     this.requiresAddress()
-      ? 'Selecciona un cliente para continuar con el envío.'
+      ? 'Indica un cliente o un nombre de referencia para continuar con el envío.'
       : 'Selecciona o crea un cliente para continuar.',
   );
 
@@ -559,8 +558,8 @@ export class PosCheckoutShellComponent {
    * QUI-737 (B.4) — whether the "Venta con nombre o referencia" option is
    * offered. Mirrors {@link canBeAnonymous}: alias needs `pos.allow_alias_sales`
    * AND is incompatible with a credit sale (fiarse a "Mesa 5" en crédito no
-   * tiene sentido — el plan a crédito se ata a una persona). Delivery también lo
-   * excluye (la dirección se ata a un cliente real).
+   * tiene sentido — el plan a crédito se ata a una persona). Delivery admite
+   * alias: el backend crea la dirección huérfana desde el snapshot en la transacción POS.
    */
   readonly canBeAlias = computed<boolean>(
     () =>
@@ -574,14 +573,6 @@ export class PosCheckoutShellComponent {
    * (with an explanatory legend) — see the template.
    */
   readonly anonymousBlockedByDelivery = computed<boolean>(
-    () => this.effectiveIntent() === 'delivery',
-  );
-
-  /**
-   * QUI-737 (B.4) — delivery sales cannot be alias-based either: the shipping
-   * address is bound to a real customer. The alias option is hidden in delivery.
-   */
-  readonly aliasBlockedByDelivery = computed<boolean>(
     () => this.effectiveIntent() === 'delivery',
   );
 
@@ -898,10 +889,9 @@ export class PosCheckoutShellComponent {
       }
     });
 
-    // Delivery sales cannot be anonymous or alias-based (they require a
-    // customer + address). Force the flag off AND pin the override to false so
-    // the config-driven "anonymous as default" sync effect above never flips it
-    // back on while the intent stays delivery. Leaves "Con Cliente" selected.
+    // Delivery still cannot be anonymous: require a customer or an alias with
+    // address. Pin the anonymous override off so the configured default cannot
+    // turn it back on; do not reset an explicitly selected alias (ADR-05).
     effect(() => {
       if (this.anonymousBlockedByDelivery()) {
         const mode = this.saleMode();
@@ -910,8 +900,6 @@ export class PosCheckoutShellComponent {
             this.saleMode.set('customer');
             this.userOverrideAnonymous.set(false);
           });
-        } else if (mode === 'alias') {
-          untracked(() => this.saleMode.set('customer'));
         }
       }
     });
@@ -1015,7 +1003,7 @@ export class PosCheckoutShellComponent {
           if (this.cartState()?.customer) {
             this.customerCleared.emit();
           }
-          // Alias es terminal en pickup (delivery bloquea alias) → avanzamos.
+          // El alias queda confirmado; la dirección de domicilio se captura en Envío.
           this.nextStep();
           return;
         }
@@ -1278,9 +1266,17 @@ export class PosCheckoutShellComponent {
     };
     const items = state.items.map((it: any) => {
       const booking = buildBooking(it);
+      // Hydrated custom lines carry a local `custom-<uuid>` cart id, not a
+      // catalog product id. The editor DTO accepts only positive integer
+      // product_id values; sending that synthetic string rejects the entire
+      // reopened order with SYS_VALIDATION_001 before the cashier can charge.
+      const productId = Number(it.product?.id);
       return {
         item_type: it.itemType ?? 'product',
-        product_id: it.product?.id ?? null,
+        product_id:
+          it.itemType !== 'custom' && Number.isSafeInteger(productId) && productId > 0
+            ? productId
+            : undefined,
         product_variant_id: it.variant_id ?? null,
         product_name: it.product?.name ?? '',
         product_sku: it.product?.sku ?? null,
@@ -1599,12 +1595,6 @@ export class PosCheckoutShellComponent {
     }
 
     if (mode === 'alias') {
-      // Delivery no admite alias (la dirección se ata a un cliente real).
-      if (this.aliasBlockedByDelivery()) {
-        this.toggleAnonymousSale(false);
-        this.goToClienteSubStep(1);
-        return;
-      }
       // Re-clic en alias ya activo → avanza el wizard (alias tiene [Tipo, Alias]).
       if (this.saleMode() === 'alias') {
         this.nextStep();
@@ -1633,14 +1623,11 @@ export class PosCheckoutShellComponent {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
     event.preventDefault();
     const modes: Array<'anonymous' | 'alias' | 'customer'> = [];
-    // CP-POLLO-ARABE-727 F.1 Round 2 — excluir los modos bloqueados por
-    // envío (checkoutIntent === 'delivery'): el botón está deshabilitado y la
-    // navegación por teclado no debe activar programáticamente un modo que el
-    // usuario no puede pulsar (regresión WCAG del fix de flechas).
+    // Anónimo sigue bloqueado en domicilio; alias sí puede crear dirección.
     if (this.canBeAnonymous() && !this.anonymousBlockedByDelivery()) {
       modes.push('anonymous');
     }
-    if (this.canBeAlias() && !this.aliasBlockedByDelivery()) {
+    if (this.canBeAlias()) {
       modes.push('alias');
     }
     modes.push('customer');
@@ -2160,13 +2147,30 @@ export class PosCheckoutShellComponent {
     // is a defaulting convenience, not an override of an explicit pick.
     const customerPicked = state.customer?.id != null;
     const draftState =
-      (this.isAnonymousSale() || this.saleMode() === 'alias') && !customerPicked
+      this.saleMode() === 'alias' || (this.isAnonymousSale() && !customerPicked)
         ? { ...state, customer: null }
         : state;
 
+    if (shipping?.deliveryType === 'home_delivery' && this.saleMode() === 'alias') {
+      const ship = this.shippingStep();
+      if (!ship?.canConfirm()) {
+        this.submittingDraft.set(false);
+        ship?.flashValidation();
+        this.goToStepKey('envio');
+        return;
+      }
+      // El backend crea/enlaza la dirección huérfana en la transacción POS.
+      this.submitRetailDraft(draftState, { ...shipping, shippingAddressId: undefined });
+      return;
+    }
+
+    this.submitRetailDraft(draftState, shipping);
+  }
+
+  private submitRetailDraft(state: CartState, shipping: PosShippingSaleData | null): void {
     this.paymentService
       .saveDraft(
-        draftState,
+        state,
         'current_user',
         this.customerAliasForPayload(),
         shipping,

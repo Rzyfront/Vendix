@@ -1,0 +1,7 @@
+# G.1 sesiones por orden — 2026-09-24T01:19:44Z
+query: SELECT order_id, count(*) FILTER (WHERE closed_at IS NULL) AS abiertas, count(*) AS total FROM table_sessions GROUP BY 1 HAVING count(*) > 1;
+ order_id | abiertas | total 
+----------+----------+-------
+     1192 |        0 |     2
+(1 row)
+

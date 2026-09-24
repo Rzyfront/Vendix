@@ -2,9 +2,9 @@
 id: A.3
 title: "Reparar las dos guardas muertas de cancelación de línea entregada"
 phase: A
-status: in-progress
+status: done
 owner: Fabio
-updated: 2026-09-22
+updated: 2026-09-24
 contracts: [FB-27, ERR-14, ERR-15, ERR-16, DB-02, DB-13, DB-37, DB-44]
 adrs: [ADR-02]
 skills: [vendix-backend, vendix-error-handling, vendix-prisma-scopes, vendix-restaurant-ops, how-to-test]
@@ -25,24 +25,24 @@ skills: [vendix-backend, vendix-error-handling, vendix-prisma-scopes, vendix-res
   - `curl -sk -o ../evidence/A.3-cancel-delivered-refunded.json -w '%{http_code}\n' -X POST "https://api.vendix.com/api/store/orders/$REFUNDED_ORDER/flow/items/$ITEM/cancel-delivered" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"reason":"prueba de estado","destination":"waste"}'` (espera 409 `ORD_ITEM_CANCEL_STATE_001` con `details.state`)
   - `curl -sk -o ../evidence/A.3-cancel-delivered-open.json -w '%{http_code}\n' -X POST "https://api.vendix.com/api/store/orders/$OPEN_ORDER/flow/items/$ITEM/cancel-delivered" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"reason":"mosca en el plato","destination":"waste"}'` (espera 200)
   - `psql "$DATABASE_URL" -c "SELECT p.order_id FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.state IN ('succeeded','captured') GROUP BY p.order_id,o.grand_total HAVING SUM(p.amount) > o.grand_total + 0.01;"` (debe devolver 0 filas nuevas tras el paso)
-  - `psql "$DATABASE_URL" -c "SELECT count(*) FROM audit_logs WHERE action='order_item.cancel_delivered' AND resource_id=$ITEM;"`
+  - `psql "$DATABASE_URL" -c "SELECT count(*) FROM audit_logs WHERE action='order_item.cancel_delivered' AND resource_id=$ORDER AND metadata->>'order_item_id'='$ITEM';"`
   - `npm --prefix apps/backend run test:path -- src/domains/store/orders/order-flow/order-cancellation-policy.util.spec.ts`
   - `npm --prefix apps/backend run test:path -- src/domains/store/orders/order-flow/order-flow.service.spec.ts`
   - `grep -n "payment_status\|'completed'" apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts` → cero apariciones dentro de `cancelDeliveredOrderItem`
   - Playwright MCP — recorrido 4 del hub: cancelar un plato entregado sobre orden cobrada (rechaza) y sobre orden sin cobrar (acepta); guardar en `evidence/A.3-e2e-recorrido4.md`
 - **Acceptance checklist:**
-  - [ ] `cancelDeliveredOrderItem` ya no referencia `payment_status` ni el estado `completed`
-  - [ ] La derivación de «orden cobrada» usa el conjunto exportado desde `order-cancellation-policy.util.ts`, sin duplicarlo
-  - [ ] `SETTLED_PAYMENT_STATES` (o su predicado) queda exportado y con su caso en el spec del util
-  - [ ] `ORD_ITEM_CANCEL_PAID_001` está en `error-codes.ts` con HTTP 409 y se lanza con `VendixHttpException`
-  - [ ] `ORD_ITEM_CANCEL_STATE_001` está en `error-codes.ts` con HTTP 409 y lleva el estado real en `details.state`
-  - [ ] La lista de estados bloqueados es `cancelled`, `refunded` y `finished`, todos valores reales de `order_state_enum`
-  - [ ] El guard corre ANTES de abrir la transacción del recálculo: un rechazo no escribe nada
-  - [ ] Cancelar una línea de una orden SIN cobrar sigue funcionando y sigue recalculando totales
-  - [ ] Hay un test de rechazo que fija el `errorCode`, no solo `toBeInstanceOf(VendixHttpException)`
-  - [ ] Hay un test que falla contra el código actual (la guarda vieja lo dejaría pasar)
-  - [ ] `error-messages.ts` mapea los dos códigos nuevos con la CTA al reembolso
-  - [ ] La fila de auditoría `order_item.cancel_delivered` se sigue escribiendo en el camino aceptado
-  - [ ] El espejo de las mismas dos guardas en `cancelOrderItem` queda declarado como deuda de la fase D, no arreglado aquí
-  - [ ] Las filas FB-27, ERR-14, ERR-15, ERR-16, DB-02, DB-13, DB-37 y DB-44 quedan marcadas con evidencia
-- **Status:** in-progress
+  - [x] `cancelDeliveredOrderItem` ya no referencia `payment_status` ni el estado `completed`
+  - [x] La derivación de «orden cobrada» usa el conjunto exportado desde `order-cancellation-policy.util.ts`, sin duplicarlo
+  - [x] `SETTLED_PAYMENT_STATES` (o su predicado) queda exportado y con su caso en el spec del util
+  - [x] `ORD_ITEM_CANCEL_PAID_001` está en `error-codes.ts` con HTTP 409 y se lanza con `VendixHttpException`
+  - [x] `ORD_ITEM_CANCEL_STATE_001` está en `error-codes.ts` con HTTP 409 y lleva el estado real en `details.state`
+  - [x] La lista de estados bloqueados es `cancelled`, `refunded` y `finished`, todos valores reales de `order_state_enum`
+  - [x] El guard corre ANTES de abrir la transacción del recálculo: un rechazo no escribe nada
+  - [x] Cancelar una línea de una orden SIN cobrar sigue funcionando y sigue recalculando totales
+  - [x] Hay un test de rechazo que fija el `errorCode`, no solo `toBeInstanceOf(VendixHttpException)`
+  - [x] Hay un test que falla contra el código actual (la guarda vieja lo dejaría pasar)
+  - [x] `error-messages.ts` mapea los dos códigos nuevos con la CTA al reembolso
+  - [x] La fila de auditoría `order_item.cancel_delivered` se sigue escribiendo en el camino aceptado
+  - [x] El espejo de las mismas dos guardas en `cancelOrderItem` queda declarado como deuda de la fase D, no arreglado aquí
+  - [x] Las filas FB-27, ERR-14, ERR-15, ERR-16, DB-02, DB-13, DB-37 y DB-44 quedan marcadas con evidencia
+- **Status:** done · mosk 2026-09-24 · 14/14; FB-27 ERR-14/15/16 DB-02/13/37/44 [x]. Previo (Fabio): #1091/#1012/#1093 409 sin escribir, #1160/#1161 200 waste+auditoría (`A3-cancel-delivered-matrix.md`). Cierre: mutación guardas muertas → 10 guard-tests rojo, vivo 10/10 + policy 46/46 (`A3-guard-specs-20260924.md`); DB-37 0 filas (`A3-db37-closure-20260924.md`); 2 rojos D.2 intactos.

@@ -1,0 +1,12 @@
+-- E.1-SA3 DB-10: order_items.is_takeaway group count (E.1 performs no writes to is_takeaway: single count + note suffices)
+-- run: 2026-09-24T01:05Z, db=vendix_db (docker vendix_postgres)
+
+-- Q: distribution of is_takeaway (NULL-safe grouping)
+ is_takeaway | count 
+-------------+-------
+ f           |  1021
+ t           |    32
+(2 rows)
+
+
+-- NOTE: E.1 touches no writer of order_items.is_takeaway (shell writer change is delivery_type-only at pos-checkout-shell.component.ts:1417; backend default is delivery_type-only at payments.service.ts:4652; editor PUT in this same session re-persisted items without altering takeaway flags). No before/after delta is possible from E.1; this count is the post-E.1 baseline. Registry DB-10 already [x] via evidence/C4-current-day-full-matrix-20260923.md (false937/true29 identical across reads).

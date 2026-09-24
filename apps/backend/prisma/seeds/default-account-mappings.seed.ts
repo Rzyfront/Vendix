@@ -95,6 +95,9 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'purchase_order.payment.supplier_advance': '133005',
   'inventory.adjusted.inventory': '1435',
   'inventory.adjusted.shrinkage': '5295',
+  'order_item.prepared_waste.shrinkage': '5295',
+  'order_item.prepared_reuse.inventory': '1435',
+  'order_item.prepared_disposition.cogs': '6135',
   // Restaurant Suite Fase C — sub-recipe batch production.
   // Produccion is a value transfer between inventory buckets; the two
   // default to 1435 because the entry is intra-inventory. Orgs that split

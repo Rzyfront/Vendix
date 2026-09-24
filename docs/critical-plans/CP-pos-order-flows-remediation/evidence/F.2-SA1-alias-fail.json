@@ -1,0 +1,15 @@
+{
+  "statusCode": 400,
+  "error_code": "PAY_METHOD_DISABLED_001",
+  "message": "El método de pago ya no está disponible. Elige otro.",
+  "details": {
+    "reason": "payment_method_not_found"
+  },
+  "request_id": "2572278f-4af7-4683-b9e5-905be0703cae",
+  "timestamp": "2026-09-24T02:23:26.301Z",
+  "path": "/api/store/payments/pos",
+  "devDetails": {
+    "name": "VendixHttpException",
+    "stack": "[STRIPPED: see F.2-SA1-db25.txt for in-tx throw frames]"
+  }
+}

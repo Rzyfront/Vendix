@@ -15,6 +15,7 @@ describe('WebhookHandlerService', () => {
   let prisma: StorePrismaService;
   let orderFlow: { confirmPayment: jest.Mock; cancelOrder: jest.Mock };
   let projectTablePayment: jest.Mock;
+  let closeTableSession: jest.Mock;
 
   const mockStripeEvent: WebhookEvent = {
     processor: 'stripe',
@@ -39,6 +40,7 @@ describe('WebhookHandlerService', () => {
 
   beforeEach(async () => {
     projectTablePayment = jest.fn().mockResolvedValue(null);
+    closeTableSession = jest.fn();
     const mockPrismaService: any = {
       payments: {
         findFirst: jest.fn(),
@@ -105,7 +107,7 @@ describe('WebhookHandlerService', () => {
         },
         {
           provide: TableSessionsService,
-          useValue: { projectOrderPaymentToTableSession: projectTablePayment, closeSession: jest.fn() },
+          useValue: { projectOrderPaymentToTableSession: projectTablePayment, closeSession: closeTableSession },
         },
         // A.3 CP-facturacion-fixes: webhook auto-send deps.
         {
@@ -258,28 +260,89 @@ describe('WebhookHandlerService', () => {
   });
 
   describe('table payment projection (B.2)', () => {
-    it('projects only after confirmation and does not close or clean the table', async () => {
+    it('delegates projection to order confirmation without a second webhook write', async () => {
       (prisma.orders.findUnique as jest.Mock).mockResolvedValue({
         id: 1, store_id: 7, state: 'pending_payment', channel: 'pos', delivery_type: 'dine_in',
       });
-      await service['confirmOrderPaid'](1, 31);
+      await service['confirmOrderPaid'](1);
 
       expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
-      expect(projectTablePayment).toHaveBeenCalledWith(1, 31);
+      expect(projectTablePayment).not.toHaveBeenCalled();
       expect(prisma.table_sessions.findFirst).not.toHaveBeenCalled();
-      expect((service as any).tableSessionsService.closeSession).not.toHaveBeenCalled();
+      expect(closeTableSession).not.toHaveBeenCalled();
     });
 
-    it('reports a projection failure without reverting or retrying the confirmed payment', async () => {
+    it('propagates an OrderFlow projection failure after the payment commit', async () => {
       (prisma.orders.findUnique as jest.Mock).mockResolvedValue({
         id: 1, store_id: 7, state: 'pending_payment', channel: 'pos', delivery_type: 'dine_in',
       });
-      projectTablePayment.mockRejectedValue(new Error('missing open session'));
+      const projectionError = new Error('table projection failed after commit');
+      orderFlow.confirmPayment.mockRejectedValueOnce(projectionError);
 
-      await expect(service['confirmOrderPaid'](1, 31)).resolves.toBeUndefined();
-      expect(projectTablePayment).toHaveBeenCalledWith(1, 31);
+      await expect(service['confirmOrderPaid'](1)).rejects.toBe(projectionError);
+      expect(projectTablePayment).not.toHaveBeenCalled();
       expect(prisma.payments.update).not.toHaveBeenCalled();
       expect(prisma.table_sessions.findFirst).not.toHaveBeenCalled();
+      expect((service as any).orderStockCommit.commitOrderDelivery).not.toHaveBeenCalled();
+    });
+
+    it('releases webhook dedup after projection failure and repairs on terminal replay without another monetary effect', async () => {
+      const payment = { id: 31, order_id: 1, state: 'pending', gateway_response: null };
+      let orderState = 'pending_payment';
+      const order = () => ({
+        id: 1, store_id: 7, state: orderState, grand_total: 100,
+        channel: 'pos', delivery_type: 'dine_in',
+        payments: [{ state: payment.state, amount: 100 }],
+      });
+      (prisma.payments.findFirst as jest.Mock).mockImplementation(async () => payment);
+      (prisma.orders.findUnique as jest.Mock).mockImplementation(async () => order());
+      ((prisma as any).$queryRaw as jest.Mock).mockImplementation(async () => [{ id: 1, state: orderState }]);
+      ((prisma as any).payments.updateMany as jest.Mock).mockImplementation(async () => {
+        payment.state = 'succeeded';
+        return { count: 1 };
+      });
+      const dedup = (prisma as any).$executeRaw as jest.Mock;
+      dedup.mockReset().mockResolvedValueOnce(1).mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+      const receipt = jest.spyOn(service as any, 'emitPaymentReceivedAccounting')
+        .mockResolvedValue(undefined);
+      const stock = (service as any).orderStockCommit.commitOrderDelivery as jest.Mock;
+      const autoSend = jest.spyOn(service as any, 'autoSendOrderInvoice')
+        .mockResolvedValue(undefined);
+      const projectionError = new Error('table projection failed after commit');
+      const confirmationProjection = jest.fn().mockRejectedValueOnce(projectionError)
+        .mockResolvedValue(undefined);
+      orderFlow.confirmPayment.mockImplementation(async () => {
+        // OrderFlow committed its payment/order transition before projecting.
+        expect(payment.state).toBe('succeeded');
+        orderState = 'processing';
+        await confirmationProjection();
+        return { state: 'processing', payment_confirmation_applied: false };
+      });
+
+      await expect(service.handleWebhook(mockStripeEvent)).rejects.toBe(projectionError);
+      expect(payment.state).toBe('succeeded');
+      expect(dedup).toHaveBeenCalledTimes(2); // insert + release
+      expect(receipt).toHaveBeenCalledTimes(1);
+      expect(stock).not.toHaveBeenCalled();
+      expect(autoSend).not.toHaveBeenCalled();
+
+      await expect(service.handleWebhook(mockStripeEvent)).resolves.toBeUndefined();
+      expect(confirmationProjection).toHaveBeenCalledTimes(2);
+      expect(orderFlow.confirmPayment).toHaveBeenCalledTimes(2);
+      expect((prisma as any).payments.updateMany).toHaveBeenCalledTimes(1);
+      expect(receipt).toHaveBeenCalledTimes(1);
+      expect(stock).toHaveBeenCalledTimes(1);
+      // The existing no-op replay fiscal gate remains the webhook's owner.
+      expect(autoSend).toHaveBeenCalledTimes(1);
+      expect(projectTablePayment).not.toHaveBeenCalled();
+      expect(dedup).toHaveBeenCalledTimes(3); // replay re-claims the released event
+
+      await expect(service.handleWebhook(mockStripeEvent)).resolves.toBeUndefined();
+      expect(dedup).toHaveBeenCalledTimes(4); // successful replay now deduplicates
+      expect(confirmationProjection).toHaveBeenCalledTimes(2);
+      expect(stock).toHaveBeenCalledTimes(1);
+      expect(autoSend).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -624,7 +687,7 @@ describe('WebhookHandlerService', () => {
     it('no-op de confirmación cancelada no cierra mesa ni invoca stock', async () => {
       (prisma.orders.findUnique as jest.Mock).mockResolvedValue({id:1,store_id:7,state:'pending_payment'});
       orderFlow.confirmPayment.mockResolvedValue({state:'cancelled',payment_confirmation_applied:false});
-      await service['confirmOrderPaid'](1, 31);
+      await service['confirmOrderPaid'](1);
       expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
       expect((service as any).orderStockCommit.commitOrderDelivery).not.toHaveBeenCalled();
       expect(prisma.table_sessions.findFirst).not.toHaveBeenCalled();

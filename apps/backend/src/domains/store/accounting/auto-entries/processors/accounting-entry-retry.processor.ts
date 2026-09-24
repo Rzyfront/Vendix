@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { RequestContextService } from '../../../../../common/context/request-context.service';
 import { AutoEntryService, AutoEntryEventData } from '../auto-entry.service';
+import { ManualRefundDeliveryService, MANUAL_REFUND_DELIVERY_KEY } from '../manual-refund-delivery.service';
 import {
   ACCOUNTING_ENTRY_RETRY_QUEUE,
   AccountingEntryRetryJob,
@@ -23,6 +24,7 @@ export class AccountingEntryRetryProcessor extends WorkerHost {
   constructor(
     private readonly auto_entry_service: AutoEntryService,
     private readonly failure_service: AccountingEntryFailureService,
+    private readonly manualRefundDelivery: ManualRefundDeliveryService,
   ) {
     super();
   }
@@ -36,6 +38,10 @@ export class AccountingEntryRetryProcessor extends WorkerHost {
     }
     if (failure.resolved_at) {
       // Ya se resolvió (p.ej. por un reintento manual o el evento original).
+      return;
+    }
+    if (failure.handler_key === MANUAL_REFUND_DELIVERY_KEY) {
+      await this.manualRefundDelivery.deliver(failure_id);
       return;
     }
 

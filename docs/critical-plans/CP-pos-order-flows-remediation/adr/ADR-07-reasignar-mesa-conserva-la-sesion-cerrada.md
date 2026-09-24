@@ -1,9 +1,9 @@
 ---
 id: ADR-07
 title: "Reasignar mesa crea sesión nueva y conserva la cerrada como historia"
-status: proposed
+status: accepted
 reversibility: costly
-updated: 2026-09-20
+updated: 2026-09-23
 ---
 # ADR-07 — Reasignar mesa crea sesión nueva y conserva la cerrada como historia
 
@@ -12,3 +12,5 @@ updated: 2026-09-20
 - **Consequences:** El índice único parcial `table_sessions_one_open_per_table` impide el peor caso — dos sesiones abiertas en la misma mesa — por construcción de base de datos, no por lógica de aplicación. La auditoría de qué pasó queda completa: se ve el cierre erróneo y la reapertura. Cualquier consumidor que asuma «una sesión por orden» debe enumerarse en el paso; la proyección canónica de ADR-03 debe resolver cuál sesión es la vigente (la abierta; si no hay, la última cerrada).
 - **Reversibility:** costly — revertir deja órdenes con más de una sesión que la UI ya no sabe explicar; las filas siguen siendo válidas.
 - **Revisit if:** el negocio necesita fusionar el consumo de ambas sesiones en una sola cuenta, lo que exigiría un modelo de cuenta separado de la sesión.
+
+- **Owner approval:** 2026-09-23 — el dueño autorizó expresamente las cuatro propuestas ADR-05/06/07/08 para completar el plan.

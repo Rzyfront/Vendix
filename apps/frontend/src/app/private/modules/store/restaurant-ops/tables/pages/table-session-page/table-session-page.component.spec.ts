@@ -9,13 +9,16 @@ import { KitchenTicketsService, KdsSseService } from '../../../kds/services';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { DialogService, ToastService } from '../../../../../../../shared/components';
-import type { TableSession, TableSessionOrderItem } from '../../interfaces';
+import type { Table, TableSession, TableSessionOrderItem } from '../../interfaces';
 
 describe('TableSessionPageComponent waiter delivery', () => {
   let component: TableSessionPageComponent;
   let api: jasmine.SpyObj<TablesService>;
   let kitchen: jasmine.SpyObj<KitchenTicketsService>;
   let toast: jasmine.SpyObj<ToastService>;
+  let kdsSse: { tickets: ReturnType<typeof signal<unknown[]>>; refreshSnapshot: jasmine.Spy };
+  let router: jasmine.SpyObj<Router>;
+  let floorTables: ReturnType<typeof signal<Table[]>>;
 
   const item = (id: number, isTakeaway: boolean): TableSessionOrderItem => ({
     id,
@@ -46,6 +49,7 @@ describe('TableSessionPageComponent waiter delivery', () => {
     opened_at: '2026-09-23T12:00:00Z',
     closed_at: null,
     guest_count: 2,
+    table: { id: 2, name: 'Mesa 2', zone: null, status: 'cleaning' },
     order: {
       id: 30,
       state: 'pending',
@@ -58,23 +62,28 @@ describe('TableSessionPageComponent waiter delivery', () => {
   });
 
   beforeEach(async () => {
-    api = jasmine.createSpyObj('TablesService', ['markItemDelivered']);
+    api = jasmine.createSpyObj('TablesService', ['markItemDelivered', 'getOrderReassignmentEvidence', 'getSession', 'getFloorMap']);
+    floorTables = signal<Table[]>([]);
+    Object.defineProperty(api, 'floorTables', { value: floorTables });
+    api.getFloorMap.and.returnValue(of([]));
     kitchen = jasmine.createSpyObj('KitchenTicketsService', ['markDelivered']);
     toast = jasmine.createSpyObj('ToastService', ['success', 'error']);
+    kdsSse = { tickets: signal([]), refreshSnapshot: jasmine.createSpy().and.resolveTo([]) };
+    router = jasmine.createSpyObj('Router', ['navigate']);
     await TestBed.configureTestingModule({
       imports: [TableSessionPageComponent],
       providers: [
         provideZonelessChangeDetection(),
         { provide: TablesService, useValue: api },
         { provide: KitchenTicketsService, useValue: kitchen },
-        { provide: KdsSseService, useValue: { tickets: signal([]) } },
+        { provide: KdsSseService, useValue: kdsSse },
         { provide: AdminTablesSseService, useValue: { lastEvent: signal(null) } },
         { provide: StoreSettingsFacade, useValue: { settings: signal(null) } },
         { provide: AuthFacade, useValue: {} },
         { provide: ToastService, useValue: toast },
         { provide: DialogService, useValue: {} },
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => '7' } } } },
-        { provide: Router, useValue: jasmine.createSpyObj('Router', ['navigate']) },
+        { provide: Router, useValue: router },
       ],
     })
       .overrideComponent(TableSessionPageComponent, {
@@ -82,6 +91,77 @@ describe('TableSessionPageComponent waiter delivery', () => {
       })
       .compileComponents();
     component = TestBed.createComponent(TableSessionPageComponent).componentInstance;
+  });
+
+  it('checks scoped order evidence before exposing a closed-session reassignment action', () => {
+    const closed = { ...session([]), closed_at: '2026-09-23T12:10:00Z',
+      order: { ...session([]).order!, state: 'draft' } };
+    api.getSession.and.returnValue(of(closed));
+    api.getOrderReassignmentEvidence.and.returnValue(of({
+      id: 30, state: 'draft', total_paid: '0', active_financial_split_id: null,
+      payments: [], invoices: [],
+    }));
+
+    component.loadSession(7);
+
+    expect(api.getOrderReassignmentEvidence).toHaveBeenCalledOnceWith(30);
+    expect(api.getFloorMap).toHaveBeenCalled();
+    expect((component as any).canReassignClosedOrder()).toBeTrue();
+  });
+
+  it('offers reassignment only for a closed, unpaid draft without financial evidence', () => {
+    const closed = { ...session([]), closed_at: '2026-09-23T12:10:00Z', paid_at: null,
+      order: { ...session([]).order!, state: 'draft' } };
+    component.session.set(closed);
+    (component as any).reassignmentEvidence.set({
+      id: 30, state: 'draft', total_paid: '0', active_financial_split_id: null,
+      payments: [], invoices: [],
+    });
+    component.reassignmentFloorLoaded.set(true);
+    expect((component as any).canReassignClosedOrder()).toBeTrue();
+    expect(component.secondaryActions().map((action) => action.id)).toContain('reassign');
+    floorTables.set([{ id: 9, store_id: 1, name: 'Mesa 9', zone: null, capacity: 4,
+      status: 'occupied', pos_x: null, pos_y: null,
+      created_at: '2026-09-23', updated_at: '2026-09-23',
+      active_session: { id: 88, order_id: 30, opened_by: 4, waiter: null,
+        opened_at: '2026-09-23', closed_at: null, guest_count: 2 },
+    }]);
+    expect((component as any).canReassignClosedOrder()).toBeFalse();
+    floorTables.set([]);
+    component.onSecondaryAction('reassign');
+    expect(component.tableMoveMode()).toBe('reassign');
+    expect(component.isTransferOpen()).toBeTrue();
+    component.session.set({ ...closed, closed_at: null });
+    expect(component.tableMoveMode()).toBe('reassign');
+
+    component.session.set({ ...closed, paid_at: '2026-09-23T12:11:00Z' });
+    expect((component as any).canReassignClosedOrder()).toBeFalse();
+    component.session.set(closed);
+    (component as any).reassignmentEvidence.set({
+      id: 30, state: 'draft', total_paid: '0', active_financial_split_id: null,
+      payments: [{ state: 'partially_refunded' }], invoices: [],
+    });
+    expect((component as any).canReassignClosedOrder()).toBeFalse();
+    (component as any).reassignmentEvidence.set({
+      id: 30, state: 'draft', total_paid: '0', active_financial_split_id: null,
+      payments: [], invoices: [{ status: 'validated' }],
+    });
+    expect((component as any).canReassignClosedOrder()).toBeFalse();
+    expect(component.secondaryActions().map((action) => action.id)).not.toContain('reassign');
+  });
+
+  it('switches to the new session and refreshes kitchen snapshot after reassignment', () => {
+    const fresh = { ...session([]), id: 88, table_id: 5, closed_at: null };
+    api.getSession.and.returnValue(of(fresh));
+    component.session.set({ ...session([]), closed_at: '2026-09-23T12:10:00Z' });
+    component.isTransferOpen.set(true);
+
+    (component as any).onReassignmentConfirmed(fresh);
+
+    expect(component.session()?.id).toBe(88);
+    expect(component.isTransferOpen()).toBeFalse();
+    expect(kdsSse.refreshSnapshot).toHaveBeenCalled();
+    expect(router.navigate).toHaveBeenCalledWith(['/admin/restaurant-ops/tables/session', 88]);
   });
 
   it('delivers only the selected takeaway line of a mixed ticket via the order-item seam', () => {
@@ -105,6 +185,11 @@ describe('TableSessionPageComponent waiter delivery', () => {
     response.complete();
     expect(component.deliveringItemId()).toBeNull();
     expect(component.session()?.order?.order_items.filter((row) => row.delivered_at != null).map((row) => row.id)).toEqual([101]);
+    // The order delivery fact outranks a stale KDS `ready` projection in the
+    // returned session; otherwise this row still renders as "Listo".
+    expect(component.kitchenStatusFor(delivered.order!.order_items[0])).toBe('delivered');
+    expect(component.inKitchenCount()).toBe(1);
+    expect(component.deliveredCount()).toBe(1);
     expect(toast.success).toHaveBeenCalledOnceWith('Item marcado como entregado');
   });
 

@@ -230,6 +230,11 @@ export type KdsEvent =
       ts: number;
     }
   | {
+      type: 'ticket.updated';
+      ticket: KitchenTicket;
+      ts: number;
+    }
+  | {
       type: 'ticket.delivered';
       ticket: KitchenTicket;
       ts: number;

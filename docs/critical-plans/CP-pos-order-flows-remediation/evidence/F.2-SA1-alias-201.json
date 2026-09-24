@@ -1,0 +1,35 @@
+{
+  "success": true,
+  "message": "POS payment processed successfully",
+  "data": {
+    "success": true,
+    "message": "Payment processed successfully",
+    "order": {
+      "id": 1226,
+      "order_number": "POS-2026-0361",
+      "customer_alias": "Portería torre B",
+      "status": "pending_payment",
+      "payment_status": "pending",
+      "total_amount": "26000",
+      "subtotal": "20000",
+      "tax_amount": "0",
+      "discount_amount": "0",
+      "shipping_cost": "6000",
+      "applied_promotions": [],
+      "applied_coupons": [],
+      "invoice_data_token": "[REDACTED]"
+    },
+    "kitchen_fire": null,
+    "closed_session_id": null,
+    "paid_session_id": null,
+    "applied_promotions": [],
+    "applied_coupons": [],
+    "payment": {
+      "id": 879,
+      "amount": "26000",
+      "payment_method": "Pago Contra Entrega",
+      "transaction_id": "POS-1790216593561-W0NHELZE2"
+    },
+    "_digitalPaymentPending": false
+  }
+}

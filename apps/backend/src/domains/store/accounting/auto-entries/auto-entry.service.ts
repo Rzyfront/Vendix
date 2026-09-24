@@ -978,7 +978,10 @@ export class AutoEntryService {
    * `postAutoEntry` directamente (ver AccountingEntryRetryProcessor) para no
    * volver a registrar el mismo fallo.
    */
-  async createAutoEntry(event_data: AutoEntryEventData) {
+  async createAutoEntry(event_data: AutoEntryEventData, transaction?: Prisma.TransactionClient) {
+    // Manual refund delivery owns failure recording and acknowledgement in its
+    // locked transaction. Other event paths retain their existing behavior.
+    if (transaction) return this.postAutoEntry(event_data, transaction);
     try {
       return await this.postAutoEntry(event_data);
     } catch (error) {
@@ -2657,8 +2660,9 @@ export class AutoEntryService {
   private async findPostedPosCreditNoteReversal(
     order_id: number,
     organization_id: number,
+    transaction?: Prisma.TransactionClient,
   ): Promise<{ cents: bigint; entry_ids: number[]; cash_account_code: string } | null> {
-    const db = this.prisma.withoutScope();
+    const db = transaction ?? this.prisma.withoutScope();
     const notes = await db.invoices.findMany({
       where: {
         organization_id,
@@ -4814,6 +4818,46 @@ export class AutoEntryService {
     });
   }
 
+  /** Reclassifies a fired dish's already-booked COGS inside the order claim. */
+  async onPreparedDishDisposition(data: {
+    order_id: number;
+    order_item_id: number;
+    organization_id: number;
+    store_id?: number;
+    disposition: 'reuse' | 'waste';
+    total_cost: number;
+    user_id?: number;
+  }) {
+    const amount = Number(data.total_cost || 0);
+    if (amount <= 0) return null;
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        data.disposition === 'waste'
+          ? 'order_item.prepared_waste.shrinkage'
+          : 'order_item.prepared_reuse.inventory',
+        `${data.disposition === 'waste' ? 'Merma' : 'Reuso'} plato cancelado (orden #${data.order_id}, ítem #${data.order_item_id})`,
+        amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'order_item.prepared_disposition.cogs',
+        `Reclasificación costo cocina (orden #${data.order_id}, ítem #${data.order_item_id})`,
+        0, amount, data.store_id,
+      ),
+    ]);
+    const entryData = {
+      source_type: 'order_item.prepared_disposition',
+      source_id: data.order_item_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `${data.disposition === 'waste' ? 'Merma' : 'Reuso'} plato preparado — orden #${data.order_id}, ítem #${data.order_item_id}`,
+      lines,
+      user_id: data.user_id,
+    };
+    return this.createAutoEntry(entryData);
+  }
+
   /**
    * refund.completed: Debit Revenue + VAT (reversal), Credit Cash/Bank
    * For 'refund' type: reverse revenue + IVA, credit cash
@@ -4883,7 +4927,9 @@ export class AutoEntryService {
      * source_type `return_order.refund` para no chocar con `refunds.id`.
      */
     source?: 'return_order';
-  }) {
+    /** Paid tip reverses the original tip liability, never sales revenue. */
+    tip_amount?: number;
+  }, transaction?: Prisma.TransactionClient) {
     const from_return_order = data.source === 'return_order';
     const reversal_source = from_return_order
       ? AutoEntryService.RETURN_ORDER_REFUND_SOURCE
@@ -4908,6 +4954,7 @@ export class AutoEntryService {
       ? await this.findPostedPosCreditNoteReversal(
           data.order_id,
           data.organization_id,
+          transaction,
         )
       : null;
     if (credit_note_lane) {
@@ -4915,10 +4962,10 @@ export class AutoEntryService {
       // se abstuvieron no dejan asiento, así que se cuenta desde `refunds`.
       // Las devoluciones (`return_orders`) no guardan monto: cuentan por sus
       // asientos posteados (reversa o reclasificación), más la actual.
-      const db = this.prisma.withoutScope();
+      const db = transaction ?? this.prisma.withoutScope();
       const completed = await db.refunds.findMany({
         where: { order_id: data.order_id, state: 'completed' },
-        select: { id: true, amount: true },
+        select: { id: true, amount: true, subtotal_refund: true, tax_refund: true, shipping_refund: true },
       });
       const returns = await db.return_orders.findMany({
         where: {
@@ -4949,7 +4996,15 @@ export class AutoEntryService {
       const ids = new Set(completed.map((row: any) => row.id));
       const refunded_cents =
         completed.reduce(
-          (sum: bigint, row: any) => sum + getCents(row.amount ?? 0),
+          (sum: bigint, row: any) => {
+            const residual = getCents(row.amount ?? 0) - getCents(row.subtotal_refund ?? 0)
+              - getCents(row.tax_refund ?? 0) - getCents(row.shipping_refund ?? 0);
+            // Historical tip is only identifiable up to the current refund's
+            // explicit amount. Unknown residuals must not be silently netted
+            // against a credit note's sale reversal.
+            if (residual < 0n) throw new Error(`Refund #${row.id} has unexplained fiscal residual`);
+            return sum + getCents(row.amount ?? 0) - residual;
+          },
           0n,
         ) +
         return_entries.reduce(
@@ -4958,7 +5013,7 @@ export class AutoEntryService {
         ) +
         (!from_return_order && ids.has(data.refund_id)
           ? 0n
-          : getCents(data.amount));
+          : getCents(data.amount - Number(data.tip_amount ?? 0)));
       if (credit_note_lane.cents + 1n >= refunded_cents) {
         const channel_line = await this.resolveAccountLine(
           data.organization_id,
@@ -4971,10 +5026,9 @@ export class AutoEntryService {
           data.amount,
           data.store_id,
         );
-        if (
-          !channel_line ||
-          channel_line.account_code === credit_note_lane.cash_account_code
-        ) {
+        if (!channel_line) throw new Error('Refund payout channel account is not configured');
+        const saleAmount = data.amount - Number(data.tip_amount ?? 0);
+        if (channel_line.account_code === credit_note_lane.cash_account_code && !data.tip_amount) {
           this.logger.log(
             `refund.completed #${data.refund_id}: la NC [${credit_note_lane.entry_ids.join(', ')}] ` +
               `ya reversó la venta de la orden #${data.order_id}; sin asiento adicional.`,
@@ -4990,6 +5044,11 @@ export class AutoEntryService {
         // cuenta sólo reversas de venta (`refund.completed`), nunca esta
         // reclasificación de caja/banco. La deduplicación por
         // (source_type, source_id) sigue siendo por refund.
+        const tipLine = data.tip_amount
+          ? await this.resolveAccountLine(data.organization_id, 'payment.received.tip_payable',
+              'Propina por pagar (reversa)', data.tip_amount, 0, data.store_id)
+          : null;
+        if (data.tip_amount && !tipLine) throw new Error('Refund tip liability account is not configured');
         return this.createAutoEntry({
           source_type: reclassification_source,
           source_id: data.refund_id,
@@ -4997,21 +5056,26 @@ export class AutoEntryService {
           store_id: data.store_id,
           description: `Devolución #${data.refund_id} (reclasificación tras nota crédito)`,
           lines: [
-            {
+            ...(saleAmount > 0 ? [{
               account_code: credit_note_lane.cash_account_code,
               description: 'Reverso ya contabilizado por nota crédito',
-              debit_amount: data.amount,
+              debit_amount: saleAmount,
               credit_amount: 0,
-            },
+            }] : []),
+            ...(tipLine ? [tipLine] : []),
             channel_line,
           ],
           user_id: data.user_id,
-        });
+        }, transaction);
       }
     }
 
     const tax = Number(data.tax_amount || 0);
-    const revenue_amount = tax > 0 ? data.amount - tax : data.amount;
+    const tip = Number(data.tip_amount ?? 0);
+    if (tip < 0 || tip > data.amount || tax + tip > data.amount) {
+      throw new Error('Refund tax/tip exceeds payout amount');
+    }
+    const revenue_amount = data.amount - tax - tip;
 
     // La base del envío devuelto se reversa contra el ingreso por fletes
     // (414505), la misma cuenta que la acreditó en la venta, no contra 4135.
@@ -5026,6 +5090,8 @@ export class AutoEntryService {
       subtotal: data.subtotal,
       shipping: data.shipping,
       revenue_amount,
+      tip,
+      transaction,
     });
     const product_revenue_amount = shipping_line
       ? Math.round((revenue_amount - shipping_line.debit_amount) * 100) / 100
@@ -5042,6 +5108,14 @@ export class AutoEntryService {
       ),
       ...(shipping_line ? [shipping_line] : []),
     ];
+    if (tip > 0) {
+      const tipLine = await this.resolveAccountLine(
+        data.organization_id, 'payment.received.tip_payable',
+        'Propina por pagar (reversa)', tip, 0, data.store_id,
+      );
+      if (!tipLine) throw new Error('Refund tip liability account is not configured');
+      lines.push(tipLine);
+    }
 
     // Reverse tax per fiscal type (debit side): IVA→2408, INC→2436, ICA→241205
     lines.push(
@@ -5100,7 +5174,7 @@ export class AutoEntryService {
         : `Devolución #${data.refund_id}`,
       lines,
       user_id: data.user_id,
-    });
+    }, transaction);
   }
 
   /**
@@ -5119,12 +5193,14 @@ export class AutoEntryService {
     subtotal?: number;
     shipping?: number;
     revenue_amount: number;
+    tip?: number;
+    transaction?: Prisma.TransactionClient;
   }): Promise<AutoEntryLine | null> {
     const shipping_gross = Number(params.shipping || 0);
     if (!(shipping_gross > 0) || params.subtotal == null) return null;
     const derived =
       Math.round(
-        (Number(params.amount) - params.tax - Number(params.subtotal)) * 100,
+        (Number(params.amount) - params.tax - Number(params.tip ?? 0) - Number(params.subtotal)) * 100,
       ) / 100;
     const shipping_net = Math.min(
       Math.max(0, derived),
@@ -5145,8 +5221,7 @@ export class AutoEntryService {
     // `getMapping` cae al default constante (414505) aunque la organización no
     // tenga esa cuenta en su plan; postear así haría fallar el asiento entero
     // (`Account code not found`). Sin la cuenta ⇒ fallback histórico.
-    const account = await this.prisma
-      .withoutScope()
+    const account = await (params.transaction ?? this.prisma.withoutScope())
       .chart_of_accounts.findFirst({
         where: {
           organization_id: params.organization_id,
