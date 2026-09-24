@@ -2151,6 +2151,7 @@ export class TableSessionsService {
               ...(finalsByItemId.get(it.id) ?? {}),
               inventory_consumed_at_fire: it.inventory_consumed_at_fire,
               item_type: it.item_type,
+              notes: it.notes ?? null,
               is_takeaway: it.is_takeaway,
               delivered_at: it.delivered_at,
               delivered_by_user_id: it.delivered_by_user_id,
