@@ -1,0 +1,3 @@
+apps/backend/src/common/errors/error-codes.ts:5729:  POS_TABLE_SESSION_PROJECTION_FAILED_001: {
+apps/backend/src/common/errors/error-codes.ts:5730:    code: 'POS_TABLE_SESSION_PROJECTION_FAILED_001',
+apps/frontend/src/app/core/utils/error-messages.ts:1102:  POS_TABLE_SESSION_PROJECTION_FAILED_001:
