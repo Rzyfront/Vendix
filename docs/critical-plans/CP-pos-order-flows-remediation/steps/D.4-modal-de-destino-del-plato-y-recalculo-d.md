@@ -40,4 +40,4 @@ skills: [vendix-frontend-modal, vendix-zoneless-signals, vendix-currency-formatt
   - [ ] Sobre una orden ya cobrada la acción no se ofrece, y forzada por API responde con el rechazo que deriva al reembolso.
   - [ ] El modal es operable con teclado y no queda tapado por el shell en el detalle de orden ni en la mesa.
   - [ ] F-001 — AUDIT F-031 - propina porcentual sobre un plato cancelado (major)
-- **Status:** in-progress — modal/frontend `6131c702a`, tests 8/8. Reversa entregada ofrece ambos destinos; cancelación ordinaria oculta reuso hasta que D.3 acepte `after_fire_reused`. Faltan preview de total/propina, recálculo backend y Playwright.
+- **Status:** in-progress — modal/frontend `6131c702a`, tests 8/8. Reversa entregada ofrece ambos destinos; cancelación ordinaria oculta reuso hasta que D.3 acepte `after_fire_reused`. Faltan preview de total/propina, recálculo backend y Playwright. F-007 contratado aquí (ERR-42 400-vs-422, boss).
