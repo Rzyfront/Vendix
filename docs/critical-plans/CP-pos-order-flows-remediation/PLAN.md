@@ -107,7 +107,7 @@ _Closed: 4 fixed · 0 accepted · 0 rejected_
 | Registry | Rows | Verified |
 |----------|------|----------|
 | FB | 67 | 28 |
-| DB | 45 | 17 |
+| DB | 45 | 18 |
 | ERR | 43 | 16 |
 <!-- index:end -->
 
