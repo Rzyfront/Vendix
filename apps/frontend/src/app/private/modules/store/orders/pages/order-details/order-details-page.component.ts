@@ -1100,7 +1100,7 @@ export class OrderDetailsPageComponent {
           if (delivery === 'home_delivery') {
             actions.push({ id: 'deliver', label: 'Marcar como Entregado', icon: 'package-check', variant: 'primary' });
           } else if (isPickup) {
-            actions.push({ id: 'deliver', label: 'Confirmar recogida', icon: 'user-check', variant: 'primary' });
+            actions.push({ id: 'deliver', label: 'Confirmar recogida en tienda', icon: 'user-check', variant: 'primary' });
           } else {
             actions.push({ id: 'deliver', label: 'Confirmar Entrega', icon: 'check-circle', variant: 'primary' });
           }

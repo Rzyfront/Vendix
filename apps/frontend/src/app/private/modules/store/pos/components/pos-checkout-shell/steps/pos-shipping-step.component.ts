@@ -762,7 +762,7 @@ export class PosShippingStepComponent {
   private buildShippingAddress(): PosShippingAddress {
     if (this.isPickupMethod()) {
       return {
-        address_line1: 'Recoger en tienda',
+        address_line1: 'Recogida en tienda',
         city: '',
         state_province: '',
         country_code: 'CO',
