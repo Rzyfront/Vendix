@@ -244,6 +244,8 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         : TestBed.runInInjectionContext(() => new EntregaStub()),
     );
     // Envío solo se monta en delivery: si no está, stub suelto para el slot.
+    // Se publica con `.set()` sobre la misma señal para que los computeds
+    // del shell se invaliden al re-enlazar (un closure nuevo no avisa).
     const shipEl = fixture.debugElement.query(By.directive(ShippingStub));
     bindSlot(
       'shippingStep',

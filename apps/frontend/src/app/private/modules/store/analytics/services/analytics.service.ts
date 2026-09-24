@@ -72,6 +72,11 @@ import {
   DispatchFulfillmentEnvelope,
   DispatchCollectionsEnvelope,
 } from '../interfaces/dispatch-analytics.interface';
+import {
+  PayableAgingRow,
+  PayableAgingTotals,
+  PayableAgingQuery,
+} from '../interfaces/purchases-analytics.interface';
 
 // Purchases interfaces
 export interface PurchasesSummary {
@@ -1056,6 +1061,25 @@ export class AnalyticsService {
         { params: this.buildParams(query) },
       ),
     );
+  }
+
+  getPayableAging(
+    query: PayableAgingQuery = {},
+  ): Observable<PaginatedResponse<PayableAgingRow>> {
+    const cacheKey = `purchases-payable-aging-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<PaginatedResponse<PayableAgingRow>>(
+        this.getApiUrl('purchases/payable-aging'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  exportPayableAging(query: PayableAgingQuery = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('purchases/payable-aging/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
   }
 
   // ==================== REVIEWS ANALYTICS ====================
