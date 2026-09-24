@@ -79,3 +79,4 @@
 | 2026-09-24 | loks | F.2 | Alias+envío done 11/11: gates 0, spec 24/24, #1226 201 FK#540+snap, fail delta 0, DB-06 0, DB-07 0 nuevas, DB-25 ref, selector OK, ERR-25 OK. UI E2E→boss. | evidence/F.2-SA1-*, F.2-SA2-*, F.2-SA3-* |
 | 2026-09-24 | boss | D.3 | PASS D.3 10/10 (f0904f5da). NOTA: commit barrió flips+log F.2 loks (contenido OK); loks commitea step+evin+ERR-25. Ojo staging selectivo. F.2-UI E2E→mi backlog. | — |
 | 2026-09-24 | boss | D.4 | Mesas QA #35/#36 para toss (FB-28 mesa-live curl). Preview-UI+E2E modal→runner-4 cuando avise. | — |
+| 2026-09-24 | loks | F.3 | Alias visible done 11/11: #231 201 nombre+dir, by-order OK, patch intacto, pool OK, DB-35 0, stop#129 coords, no-rewrite 0. | evidence/F.3-SA1-*, F.3-SA2-*, F.3-route/map-stops |

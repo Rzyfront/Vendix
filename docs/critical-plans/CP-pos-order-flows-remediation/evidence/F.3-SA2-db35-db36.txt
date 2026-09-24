@@ -1,0 +1,90 @@
+F.3 SA2 — SQL remisión/ruta SIN login: DB-35/DB-36 + no-rewrite
+Fecha: 2026-09-24 (UTC). DB: vendix_postgres/vendix_db (SOLO SELECT).
+Baseline: evidence/F3-historical-baseline-20260923.md
+  - dispatch_notes customer_id NULL + nombre vacío (global): 41
+  - remisiones alias sin nombre copiado: 2
+  - DB-35 (alias + customer_address NULL): 0
+  - DB-36 global (paradas cuya remisión tiene address NULL): 57
+
+NOTA ESQUEMA (verificado vía information_schema, solo lectura):
+  - dispatch_route_stops NO tiene columnas de dirección/coordenadas; la parada
+    hereda dirección vía JOIN dispatch_notes.customer_address (jsonb).
+    DB-36 sobre paradas alias = JOIN stops->notes->orders(alias).
+
+SA1 creó la remisión de #1226 en paralelo:
+  - Corrida 1: 2026-09-24 02:27:40 UTC — order 1226 (POS-2026-0361,
+    alias 'Portería torre B', creada 02:23:13) aún SIN remisión (n1226_notes=0).
+    La corrida 1 NO incluye #1226.
+  - Corrida 2: 2026-09-24 02:32:08/02:32:13 UTC — n1226_notes=1.
+    Nueva remisión note_id=231 REM2609240001 creada 2026-09-24 02:28:04 UTC
+    (entre ambas corridas). La corrida 2 SÍ la incluye.
+
+----------------------------------------------------------------
+1) DB-35: remisiones de orden con alias y customer_address IS NULL → 0
+----------------------------------------------------------------
+SELECT count(*) FROM dispatch_notes d JOIN orders o ON o.id=d.order_id
+ WHERE o.customer_alias IS NOT NULL AND d.customer_address IS NULL;
+  Corrida 1 (02:27:40, sin #1226): 0
+  Corrida 2 (02:32:13, CON #1226): 0  → PASS
+
+Detalle remisiones alias (corrida 2):
+  note_id=231 REM2609240001 order 1226 POS-2026-0361 'Portería torre B'
+    addr_null=f customer_id=NULL customer_name='Portería torre B'
+    customer_address={"city":"Bogotá","postal_code":null,"country_code":null,
+      "phone_number":null,"address_line1":"Cra 7 # 1-3","address_line2":null,
+      "state_province":null}  (SIN claves latitude/longitude)
+    created 2026-09-24 02:28:04
+  note_id=227 REM2609230002 order 1167 (legacy, 2026-09-23) addr_null=f
+  note_id=226 REM2609230001 order 1119 (legacy, 2026-09-23) addr_null=f
+
+OBSERVACIÓN (no bloquea DB-35): la dirección snapshot de la remisión 231
+('Cra 7 # 1-3', sin lat/lng) difiere del shipping_address_snapshot del order
+1226 ('Calle 45 # 12-30 Apto 501', lat 4.6486, lng -74.0628). Si DB-36 exige
+coordenadas en paradas nuevas, esta remisión hoy NO las porta.
+
+----------------------------------------------------------------
+2) DB-36: paradas de remisiones alias (JOIN por order alias)
+----------------------------------------------------------------
+SELECT count(*) FROM dispatch_route_stops s
+ JOIN dispatch_notes d ON d.id=s.dispatch_note_id
+ WHERE d.customer_address IS NULL;   -- global, baseline 57, NO se exige 0
+  Corrida 1: 57 | Corrida 2: 57 → legado intacto, PASS (sin cambio)
+
+SELECT s.* ... WHERE o.customer_alias IS NOT NULL;  -- paradas alias
+  Corrida 1: 0 filas | Corrida 2: 0 filas
+  → Ninguna remisión alias (226/227/231) está en ruta todavía.
+  → "Nuevas OK" vacuo: no hay paradas alias nuevas que validar; la
+    propagación de dirección/coordenadas a paradas queda SIN PROBAR.
+    Ver observación de lat/lng arriba antes de agregar 231 a una ruta.
+
+----------------------------------------------------------------
+3) No-rewrite: remisiones sin nombre vs baseline → delta 0
+----------------------------------------------------------------
+Alias sin nombre (baseline 2):
+SELECT count(*) FROM dispatch_notes d JOIN orders o ON o.id=d.order_id
+ WHERE o.customer_alias IS NOT NULL AND d.customer_id IS NULL
+   AND coalesce(d.customer_name,'')='';
+  Corrida 1: 2 | Corrida 2: 2 → delta 0, PASS
+  (las 2 siguen siendo 226 y 227 legacy; la nueva 231 nació CON nombre)
+
+Global sin nombre (baseline 41):
+SELECT count(*) FROM dispatch_notes
+ WHERE customer_id IS NULL AND coalesce(customer_name,'')='';
+  Corrida 1: 41 | Corrida 2: 41 → delta 0, PASS
+
+----------------------------------------------------------------
+4) customer_id de remisiones alias nuevas sigue NULL (sin ficha inventada)
+----------------------------------------------------------------
+  note_id=231 (nueva, order 1226): customer_id=NULL, customer_name='Portería torre B'
+  → PASS (nombre copiado del alias, sin customer fabricado)
+
+----------------------------------------------------------------
+VEREDICTO
+----------------------------------------------------------------
+  DB-35 = 0 (con #1226 incluida): SÍ
+  DB-36 nuevas OK: SÍ (vacuo — 0 paradas alias; global 57 sin cambio)
+  No-rewrite delta 0: SÍ (alias 2=2, global 41=41; 231 nació con nombre)
+  customer_id NULL en alias nueva: SÍ
+LIMITACIÓN: SA1 no agregó la remisión 231 a ninguna ruta durante la ventana
+observada (02:27–02:32 UTC), por lo que DB-36 sobre paradas nuevas no pudo
+ejercitarse con filas reales; además 231 no porta lat/lng en customer_address.

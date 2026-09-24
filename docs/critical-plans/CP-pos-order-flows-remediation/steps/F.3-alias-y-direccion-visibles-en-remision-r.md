@@ -2,9 +2,9 @@
 id: F.3
 title: "Alias y dirección visibles en remisión, ruta y documento impreso"
 phase: F
-status: in-progress
+status: done
 owner: loks
-updated: 2026-09-20
+updated: 2026-09-24
 contracts: [FB-60, FB-61, FB-62, FB-63, DB-35, DB-36, ERR-21]
 adrs: [ADR-05]
 skills: [vendix-dispatch-routes, vendix-address-geocoding, vendix-backend, how-to-test]
@@ -34,12 +34,12 @@ skills: [vendix-dispatch-routes, vendix-address-geocoding, vendix-backend, how-t
   - [x] Existe un test que falla antes del arreglo: la remisión de una venta con alias nacía sin nombre.
   - [x] La remisión copia el nombre de referencia al crearse y no lo resuelve en cada lectura.
   - [x] La remisión de una venta con alias deja el cliente nulo, sin inventar ninguna ficha.
-  - [ ] El rechazo por falta de dirección no se dispara en una venta con alias.
+  - [x] El rechazo por falta de dirección no se dispara en una venta con alias.
   - [x] La lista de paradas de la ruta muestra el nombre de referencia (spec).
   - [x] La parada resuelve coordenadas por la copia o por la clave foránea, sin depender del cliente (spec).
   - [x] El PDF de ruta imprime el nombre de referencia en vez del guión (spec).
   - [x] El documento impreso de la remisión declara el campo de nombre de referencia en el catálogo (spec).
-  - [ ] Una venta con alias entra al pool de despacho con nombre y dirección legibles.
-  - [ ] Ninguna remisión existente se reescribe durante el paso.
+  - [x] Una venta con alias entra al pool de despacho con nombre y dirección legibles.
+  - [x] Ninguna remisión existente se reescribe durante el paso.
   - [x] El conteo de remisiones históricas sin nombre queda registrado en `evidence/F3-historical-baseline-20260923.md`.
-- **Status:** in-progress — escritor + lectores/catálogo `4549a0a28`, 6 suites Jest/39 tests. SQL de solo lectura: 2 remisiones alias sin nombre y 57 paradas sin dirección históricas; ver `evidence/F3-historical-baseline-20260923.md`. Falta API/UI nueva, PDF y ruta; Colima recuperado tras presión de pruebas.
+- **Status:** done — loks 2026-09-24, 11/11. #231 alias 201 nombre+dir; by-order OK; patch nombre intacto; pool OK; DB-35 0; stop#129 coords; no-rewrite delta 0.
