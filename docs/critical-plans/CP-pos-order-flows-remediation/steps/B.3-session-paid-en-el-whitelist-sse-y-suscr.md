@@ -40,5 +40,5 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-frontend, vendix-zoneless
   - [x] La sesión activa del mapa de salón incluye la marca de pago
   - [x] Abrir la pantalla después del cobro muestra el mismo estado que verla en vivo
   - [x] Hay un test del whitelist que falla si el evento se quita de la lista
-  - [x] FB-42/FB-43/FB-45 verificados; DB-17 global sigue abierto por sesiones históricas sin `paid_at`
+  - [x] FB-42/FB-43/FB-45 verificados; DB-17 global cerrado por decisión sin backfill
 - **Status:** done · fox (cierre 2026-09-24; impl Fabio `1316bfae5`/`86138fbd5`). `evidence/B3-live-paid.md`: Playwright página sesión #113 muestra Pagada sin reload tras POST 201/pago #828 y sigue pagada tras reload; stream emitió `session_paid`. Backend whitelist 1/1, frontend SSE 2/2, watcher OK. DB-17: fox 2026-09-24 cierra — 33 legacy clasificadas (31 cerradas + 2 stale-abiertas pre-corte Sep16/19), 0 violaciones post-corte, sin backfill (`B3-legacy-paid-at-decision-20260924.md`); snapshot live propio #1059 paid (`B.3-sse.txt`, evento en vivo perdido por timing s3, cubierto por #113). done.
