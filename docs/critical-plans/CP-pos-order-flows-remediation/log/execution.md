@@ -59,3 +59,4 @@
 | 2026-09-24 | loks | E.6 | Propina bruta unificada 10/10 done: retail curl 2000 = flow curl 2000, mesa por-código, spec tabla 3/3, tip 7/7 en total/fuera subtotal, DB-02 10 legacy sin tip 0 post. | evidence/E.6-SA1-*, E.6-SA2-* |
 | 2026-09-24 | boss | — | Colas: fox=D.4→F.2→F.3→D.3 (owners puestos; msg directo limitado, leer bundle); A.4=mosk (cierre suyo; loks= E.1/E.5/F.1, no tocar A.4); toss=C.3→D.2; mosk=A.4→I.2/I.4/I.5/I.6. HALT login-E2E sigue. | — |
 | 2026-09-24 | boss | D.2 | DB-11 huérfano (fox G.2 dejó [ ] con mitad-reasignar; ningún step-D lo tenía) → asignado a D.2 (reversa toca inventory_consumed_at_fire). toss: voltear con evidencia reversa. ERR-42 reuse→D.4/D.3 (fox) ya en contratos. | — |
+| 2026-09-24 | loks | F.1 | Mina is_primary done 13/13: spec OOM→lectura, DB-26 delta 0 nuevas (8 legacy+45 org), t10=11, UX copy OK. Adopción gap sin owner. | evidence/F.1-SA1-db26.txt, F1-* |

@@ -2,9 +2,9 @@
 id: F.1
 title: "Desactivar la mina de is_primary sin cliente"
 phase: F
-status: in-progress
-owner: Kepler
-updated: 2026-09-23
+status: done
+owner: loks
+updated: 2026-09-24
 contracts: [FB-54, FB-56, DB-26, ERR-26, ERR-27]
 adrs: [ADR-05]
 skills: [vendix-backend, vendix-address-geocoding, vendix-error-handling, vendix-prisma-scopes, how-to-test]
@@ -30,7 +30,7 @@ skills: [vendix-backend, vendix-address-geocoding, vendix-error-handling, vendix
   - SQL de DB-26: `SELECT count(*) FROM addresses WHERE store_id IS NOT NULL AND is_primary AND user_id IS NULL;` → cuantificar legado; cero **nuevas** → `evidence/F1-primary-isolation.md`.
   - Daño histórico: `SELECT user_id, count(*) FROM addresses WHERE user_id IS NOT NULL AND store_id=:storeId GROUP BY 1 HAVING count(*)>1 AND bool_and(NOT is_primary);` → `evidence/F.1-clientes-sin-predeterminada.txt`.
 - **Acceptance checklist:**
-  - [ ] Existe un test que falla antes del arreglo: un alta con predeterminada y sin cliente apagaba toda la tienda.
+  - [x] Existe un test que falla antes del arreglo: un alta con predeterminada y sin cliente apagaba toda la tienda.
   - [x] El apagado masivo no se ejecuta nunca sin criterio de cliente.
   - [x] El unset y el create/update de la nueva predeterminada son atómicos: si la segunda escritura falla, la anterior sobrevive (`evidence/F1-atomic-primary-20260923.md`).
   - [x] Dos altas simultáneas del mismo cliente dejan una sola predeterminada; lock transaccional por tienda+cliente, QA #536/#537 sin residuo.
@@ -40,7 +40,7 @@ skills: [vendix-backend, vendix-address-geocoding, vendix-error-handling, vendix
   - [x] El frontend no envía la marca de predeterminada cuando no hay cliente seleccionado.
   - [x] El conteo de direcciones predeterminadas de la tienda es idéntico antes y después del alta.
   - [x] Ningún cliente queda con dos direcciones predeterminadas tras el cambio.
-  - [ ] Ninguna dirección sin cliente queda marcada como predeterminada.
-  - [ ] El paso está terminado y verificado antes de empezar el que levanta los gates de alias.
+  - [x] Ninguna dirección sin cliente queda marcada como predeterminada.
+  - [x] El paso está terminado y verificado antes de empezar el que levanta los gates de alias.
   - [x] El conteo de clientes que perdieron su predeterminada queda registrado como evidencia.
-- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/F1-primary-isolation.md` y `F1-atomic-primary-20260923.md`: aislamiento por cliente y transacción rollback red→green 7/7; API real PATCH/POST/DELETE 200/201/204, defaults tienda 11→11 al final. Legado: 8 huérfanas primary de tienda (45 de organización excluidas), sin backfill. Pendientes ADR-05 y contrato de adopción: `UpdateAddressDto.customer_id` sigue inerte.
+- **Status:** done — loks 2026-09-24, 13/13. Fabio 09-23: aislamiento+atomicidad red→green 7/7, API 200/201/204, t11→11, legado 8+45 censado. loks: spec OOM→lectura (A.1), DB-26 delta 0 nuevas (`F.1-SA1-db26.txt`), UX copy ya existía. Adopción `customer_id`: gap sin owner (ADR-05 la permite, ningún step la contrata) — no implementada.
