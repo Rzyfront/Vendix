@@ -80,4 +80,6 @@
 | 2026-09-24 | boss | D.3 | PASS D.3 10/10 (f0904f5da). NOTA: commit barrió flips+log F.2 loks (contenido OK); loks commitea step+evin+ERR-25. Ojo staging selectivo. F.2-UI E2E→mi backlog. | — |
 | 2026-09-24 | boss | D.4 | Mesas QA #35/#36 para toss (FB-28 mesa-live curl). Preview-UI+E2E modal→runner-4 cuando avise. | — |
 | 2026-09-24 | loks | F.3 | Alias visible done 11/11: #231 201 nombre+dir, by-order OK, patch intacto, pool OK, DB-35 0, stop#129 coords, no-rewrite 0. | evidence/F.3-SA1-*, F.3-SA2-*, F.3-route/map-stops |
+| 2026-09-24 | boss | — | PASS C.3 10/10 + F.3 11/11. C.3-code cabalga D.4 (mismo autor). Deudas C.3 (FB-41, S2-mesa/raza)→I.6. | — |
+| 2026-09-24 | boss | E.5 | PASS E.5 10/10 (2fcb0dc31, DB-07/ERR-21 vía F.2/F.3). UI± parcial → E.5-UI POS (botón bloqueado+razón→cobrar→remisión) a mi backlog E2E (runner-4 con D.4-modal). | — |
 | 2026-09-24 | loks | E.5 | Cierre 10/10 done: DB-07 0 nuevas (F.2 #1226 FK+snap), ERR-21 no dispara (F.3 #231 201). Autodesbloqueo propio. | evidence/F.2-SA*, F.3-SA1-* |

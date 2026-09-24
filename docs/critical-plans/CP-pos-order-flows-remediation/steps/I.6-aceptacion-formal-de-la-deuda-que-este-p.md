@@ -5,7 +5,7 @@ phase: I
 status: pending
 owner: none
 updated: 2026-09-20
-contracts: [FB-06, ERR-40, DB-41]
+contracts: [FB-06, ERR-40, DB-41, FB-41]
 adrs: []
 skills: [vendix-business-analysis, vendix-fiscal-scope, vendix-payment-processors, vendix-accounting-rules]
 ---
@@ -35,4 +35,5 @@ skills: [vendix-business-analysis, vendix-fiscal-scope, vendix-payment-processor
   - [ ] Las seis fichas de origen quedan con dueño, razón y condición escritas: ninguna queda abierta sin dueño
   - [ ] Ninguna línea de código, configuración o esquema cambió en este paso
   - [ ] F-009 — deep-link /admin/orders/sales/:id muerto: aceptar deuda o planear fix (minor)
+  - [ ] Deudas C.3: FB-41 force-take + raza S2-mesa/ready→revert: aceptar con dueño/razón o planear fix
 - **Status:** pending
