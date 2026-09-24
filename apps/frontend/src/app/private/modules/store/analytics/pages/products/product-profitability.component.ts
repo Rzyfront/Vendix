@@ -243,9 +243,11 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
-    const profitable = products.filter((p) => p.margin > 0).length;
-    const unprofitable = products.filter((p) => p.margin <= 0).length;
-    const zeroMargin = products.filter((p) => p.margin === 0).length;
+    // QUI-623: `margin` es null sin base (producto sin costo); `?? 0` conserva
+    // el conteo previo: un sin-costo no cuenta como rentable.
+    const profitable = products.filter((p) => (p.margin ?? 0) > 0).length;
+    const unprofitable = products.filter((p) => (p.margin ?? 0) <= 0).length;
+    const zeroMargin = products.filter((p) => (p.margin ?? 0) === 0).length;
     const colors = ['#22c55e', '#ef4444', '#f59e0b'];
 
     this.marginDistributionChartOptions.set({
