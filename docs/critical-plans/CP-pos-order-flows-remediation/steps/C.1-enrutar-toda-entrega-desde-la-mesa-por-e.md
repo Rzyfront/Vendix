@@ -2,9 +2,9 @@
 id: C.1
 title: "Enrutar toda entrega desde la mesa por el seam de orden"
 phase: C
-status: in-progress
-owner: none
-updated: 2026-09-20
+status: done
+owner: toss
+updated: 2026-09-23
 contracts: [FB-31, FB-32, FB-33, DB-08, DB-23, DB-24, ERR-07, ERR-08, ERR-12]
 adrs: [ADR-06]
 skills: [vendix-restaurant-ops, vendix-zoneless-signals, how-to-test]
@@ -36,4 +36,4 @@ skills: [vendix-restaurant-ops, vendix-zoneless-signals, how-to-test]
   - [x] El tablero KDS conserva su botón «Entregar» y su comportamiento takeaway-only sin cambios de contrato.
   - [x] `is_takeaway` de ambas líneas permanece true/false tras la entrega; no se reinterpreta por el endpoint (el conteo global aumenta por la creación de dos líneas QA, no por mutación).
   - [x] Evidencia de los dos roles y del conteo SQL guardada en `evidence/C1-mixed-ticket-other-cook-20260923.md`.
-- **Status:** in-progress — carril funcional E2E de dos roles, ticket mixto y SQL una sola línea verificados en `evidence/C1-mixed-ticket-other-cook-20260923.md`; UI de badge KDS obsoleto corregida con red→green Angular 6/6. Queda ADR-06 `proposed` y barrido global DB-08/DB-23 antes de cierre formal.
+- **Status:** done — toss 2026-09-23. ADR-06 accepted. Barrido global: DB-08 18 legacy + 0 postcut (`C.1-db08-global.txt`, `C.1-db08-legacy-list.txt`); DB-23 1 legado #1692 + postcut 0 (`C.1-db23-sweep.txt`). Código: 0 hits mesa / KDS conserva; shim 77/77; order-flow 146/148 con 2 rojos preexistentes en base (cancelDelivered restock/waste, área D.2, asumidos en D.2). Cierre en `C.1-closeout-20260923.md`. ERR-07/ERR-12 quedan para C.3 (toasts).

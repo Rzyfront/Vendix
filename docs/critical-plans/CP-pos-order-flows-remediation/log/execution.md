@@ -45,3 +45,4 @@
 | 2026-09-23 | Sagan/Fabio | E.4 | Clic UI mesa #26→orden #1175 cobró 200, un pago/sesión pagada; cierre UI 201. Paso E.4 cerrado; semántica de delivery queda transversal. | evidence/E4-clickpay-ui-20260923.md |
 | 2026-09-23 | Hypatia | I.3 | COD mostrador deja orden/pago pendientes, saldo 10000 y 0 stock; processor genérico queda registrado. | 88235b0e2; evidence/I3-cod-counter.* |
 | 2026-09-23 | Fabio | I.3 | COD domicilio deja saldo vivo y permite remisión; método POS ajeno/inexistente/omitido rechaza 400 sin orden. Paso cerrado. | evidence/I3-cod-home-20260923.md; 4ef91b0e7 |
+| 2026-09-23 | toss | C.1 | Barrido global DB-08 (18 legacy, 0 postcut) y DB-23 (#1692 legacy, 0 postcut); grep 0 hits mesa/KDS conserva; shim 77/77; order-flow 146/148 con 2 rojos preexistentes cancelDelivered asumidos en D.2. Paso cerrado, ADR-06 accepted. | evidence/C.1-closeout-20260923.md; C.1-db08-global.txt; C.1-db23-sweep.txt; C.1-jest-shim.txt; C.1-jest-orderflow.txt |

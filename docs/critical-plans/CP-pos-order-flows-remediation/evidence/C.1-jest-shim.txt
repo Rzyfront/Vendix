@@ -1,0 +1,95 @@
+[0m[7m[1m[32m PASS [39m[22m[27m[0m [2msrc/domains/store/tables/[22m[1mtable-sessions.service.spec.ts[22m ([0m[1m[41m6.284 s[49m[22m[0m)
+  TableSessionsService — open + addItems (Fase E smoke)
+    projectOrderPaymentToTableSession (B.1)
+      [32m✓[39m [2mdoes nothing when the order has no table session (3 ms)[22m
+      [32m✓[39m [2mmarks the open session inside its own transaction and emits only after commit (1 ms)[22m
+      [32m✓[39m [2mrejects only-closed sessions with the typed projection code[22m
+      [32m✓[39m [2mis idempotent on a second projection: no new paid_at or event[22m
+      [32m✓[39m [2mstale concurrent read loses the paid_at claim and emits no duplicate session_paid (1 ms)[22m
+      [32m✓[39m [2muses a supplied transaction and defers the event to its owner[22m
+    confirmPayment — paid table projection (B.2)
+      [32m✓[39m [2mprojects a settled check only after the payment transaction commits (1 ms)[22m
+      [32m✓[39m [2mdoes not project a partial payment[22m
+      [32m✓[39m [2mcuenta dividida: payment.received lleva la porción del pago (D=C) y el último el remanente (1 ms)[22m
+      [32m✓[39m [2mrepairs a succeeded retry once, without repeating the payment transition[22m
+      [32m✓[39m [2mexpone ERR-33 tipado al final sin perder SSE/caja cuando la proyección falla (12 ms)[22m
+      [32m✓[39m [2mcan retry a projection failure after the payment already committed[22m
+      [32m✓[39m [2mdoes not project a failed payment or a succeeded partial retry[22m
+    openSession
+      [32m✓[39m [2mcreates a draft order + table_session, flips table to occupied (1 ms)[22m
+      [32m✓[39m [2mopens a cleaning table and returns its prior status without blocking[22m
+      [32m✓[39m [2mrejects when the table already has an open session (1 ms)[22m
+    addItems
+      [32m✓[39m [2mrejects adding items to a closed session[22m
+      [32m✓[39m [2mrechaza agregar líneas a una cuenta con split activo antes de escribir ítems o totales[22m
+      [32m✓[39m [2mappends lines and re-derives totals in a single transaction (1 ms)[22m
+      [32m✓[39m [2mrejects a line without variant on ANY product with variants (not just prepared)[22m
+      [32m✓[39m [2mprices the line with the VARIANT value (override), not the base price (1 ms)[22m
+      [32m✓[39m [2mcon impuesto: persiste unit_price=BASE, tax_amount_item POR UNIDAD y final_unit_price=BRUTO (ADR-08)[22m
+      [32m✓[39m [2mQUI-INC: una categoría INC persiste tax_type="inc" en order_item_taxes, no "iva" (1 ms)[22m
+      [32m✓[39m [2mQUI-INC: el default IVA de una categoría sin tipar lo pone el RESOLVER, no el create[22m
+      P2-2 — oferta del producto en la cuenta de mesa
+        [32m✓[39m [2mcobra el sale_price de un producto sin variantes en oferta[22m
+        [32m✓[39m [2mignora sale_price cuando is_on_sale=false[22m
+        [32m✓[39m [2mel override de la variante gana sobre la oferta del producto (1 ms)[22m
+        [32m✓[39m [2mla oferta del producto aplica a una variante sin override ni oferta propia[22m
+    openTableSessionPublic (QR-por-mesa, Fase 7)
+      [32m✓[39m [2mcreates an anonymous session with opened_by=null and dine_in/ecommerce order[22m
+      [32m✓[39m [2mdoes NOT throw STORE_CONTEXT_001 when user_id is absent[22m
+      [32m✓[39m [2mis idempotent: a second call returns the existing active session[22m
+    closeSession (FIX/ table-close-order — option 2)
+      [32m✓[39m [2mdoes NOT touch the order state when the order is in "draft" (option 2)[22m
+      [32m✓[39m [2mdoes NOT touch the order state when the order is in "created" (option 2)[22m
+      [32m✓[39m [2mdoes NOT touch the order state when the order is in "pending_payment" (option 2)[22m
+      [32m✓[39m [2mdoes NOT touch the order state when the order is in "processing" (KDS in flight)[22m
+      [32m✓[39m [2mdoes NOT touch the order state when it is already "finished" (idempotency) (1 ms)[22m
+      [32m✓[39m [2mdoes NOT fail when the session has no order_id[22m
+      [32m✓[39m [2mthe order remains payable AFTER closeSession (regression guard)[22m
+      [32m✓[39m [2mis idempotent: a second close on the same session is a no-op[22m
+    transferSession (cambio de mesa)
+      [32m✓[39m [2mmoves the session to an empty target (transfer) (1 ms)[22m
+      [32m✓[39m [2mswaps both sessions when the target is occupied (swap) (1 ms)[22m
+      [32m✓[39m [2mrejects when the source has no open session[22m
+      [32m✓[39m [2mrejects a reserved target[22m
+      [32m✓[39m [2mrejects when source and target are the same table[22m
+      [32m✓[39m [2mrejects when the target is taken mid-flight (race guard)[22m
+      [32m✓[39m [2mtransfer: rejects when the source check was closed mid-flight (TOCTOU) (1 ms)[22m
+      [32m✓[39m [2mtransfer: rejects when the source check already moved to another table (TOCTOU)[22m
+      [32m✓[39m [2mtransfer: rejects when the source session row is gone mid-flight (TOCTOU)[22m
+      [32m✓[39m [2mtransfer: keeps the source table occupied when another open check landed on it[22m
+      [32m✓[39m [2mtransfer: announces `cleaning` for the source table over SSE (F3)[22m
+      [32m✓[39m [2mmaps the partial-unique P2002 to TABLE_SESSION_ALREADY_OPEN instead of a raw 500 (1 ms)[22m
+      [32m✓[39m [2mmaps a Prisma write-conflict/deadlock (P2034) to a retryable 409[22m
+      [32m✓[39m [2mrethrows unrelated Prisma errors untouched (no blanket swallow)[22m
+    reassignSessionToTable (G.2 / ADR-07)
+      [32m✓[39m [2mlocks, re-reads scoped eligibility, creates only a new session and re-stamps kitchen in one tx (1 ms)[22m
+      [32m✓[39m [2mrejects an order from another store before opening a transaction[22m
+      [32m✓[39m [2mrejects order state cancelled before writes[22m
+      [32m✓[39m [2mrejects order state refunded before writes (1 ms)[22m
+      [32m✓[39m [2mrejects an order without table history with typed 404[22m
+      [32m✓[39m [2mrejects an order already holding an open table session (5 ms)[22m
+      [32m✓[39m [2mrejects payment financial evidence with details.reason[22m
+      [32m✓[39m [2mrejects split financial evidence with details.reason (1 ms)[22m
+      [32m✓[39m [2mrejects invoice financial evidence with details.reason[22m
+      [32m✓[39m [2mrejects target table status reserved with TABLE_INVALID_STATUS[22m
+      [32m✓[39m [2mrejects target table status cleaning with TABLE_INVALID_STATUS[22m
+      [32m✓[39m [2mrejects target table status occupied with TABLE_SESSION_ALREADY_OPEN (1 ms)[22m
+      [32m✓[39m [2mrolls back and returns typed conflict when target loses available-status CAS[22m
+      [32m✓[39m [2mrejects a target table from another store with typed 404[22m
+      [32m✓[39m [2mrejects a raced target session before creating a new row[22m
+      [32m✓[39m [2mmaps Prisma P2002 to TABLE_SESSION_ALREADY_OPEN without post-commit event (1 ms)[22m
+      [32m✓[39m [2mmaps Prisma P2034 to SYS_CONFLICT_001 without post-commit event[22m
+    cancelOrderItem — proyección del soft cancel (carril D / D2)
+      [32m✓[39m [2mfindOne proyecta table.waiter desde opener, no desde table_waiters[22m
+      [32m✓[39m [2mfindOne deja waiter en null cuando la sesión no tiene opener (1 ms)[22m
+      [32m✓[39m [2mfindOne expone cancelled_at / cancellation_reason / cancellation_type[22m
+      [32m✓[39m [2mfindOne agrega final_unit_price / final_total_price (agregado 19%)[22m
+      [32m✓[39m [2mfindOne inclusivo closest-below: unit 10000 + INC 19% → 9999.99 (residuo declarado)[22m
+      [32m✓[39m [2mfindOne cocina NO recibe finales y no dispara el batch (ADR-10) (1 ms)[22m
+      [32m✓[39m [2mcancelOrderItem es idempotente: el segundo llamado ve cancelled_at y no reescribe[22m
+
+[1mTest Suites: [22m[1m[32m1 passed[39m[22m, 1 total
+[1mTests:       [22m[1m[32m77 passed[39m[22m, 77 total
+[1mSnapshots:   [22m0 total
+[1mTime:[22m        6.613 s, estimated 8 s
+[2mRan all test suites[22m[2m matching [22m/src\/domains\/store\/tables\/table-sessions.service.spec.ts/i[2m.[22m
