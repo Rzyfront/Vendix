@@ -52,3 +52,4 @@
 | 2026-09-24 | mosk | A.3 | Guardas muertas done: mutación→10 rojo, vivo 10/10+policy 46/46; DB-37 0 filas; 2 rojos D.2 intactos. | evidence/A3-guard-specs-20260924.md; A3-db37-closure-20260924.md |
 | 2026-09-24 | fox | B.2 | Verificación-only: 4 escritores+2 confirms delegan; live #1133 200, ERR-33/05 409 tipados; specs 118+27+146/148. Cerrado. | evidence/B.2-cutover-verification-20260924.md |
 | 2026-09-24 | loks | E.1 | Llevar=direct_delivery 9/10: enum 3 cajones, labels F-011 unificadas, specs 42+30+9+24, editor PUT 200, DB-05 0 implicit, DB-10 f1021/t32, serial pre-cobro OK. E2E boss. | evidence/E.1-SA1-*, E.1-SA2-*, E.1-SA3-*, E.1-pos-directo.json, E.1-regression-* |
+| 2026-09-24 | fox | B.3 | Legacy 33 clasificadas, 0 post-corte, sin backfill; snapshot live #1059 paid. Cerrado. | evidence/B3-legacy-paid-at-decision-20260924.md; B.3-sse.txt |
