@@ -2,8 +2,8 @@
 id: F.1
 title: "Desactivar la mina de is_primary sin cliente"
 phase: F
-status: pending
-owner: none
+status: in-progress
+owner: Kepler
 updated: 2026-09-20
 contracts: [FB-54, FB-56, DB-26, ERR-26, ERR-27]
 adrs: [ADR-05]
@@ -41,4 +41,4 @@ skills: [vendix-backend, vendix-address-geocoding, vendix-error-handling, vendix
   - [ ] Ninguna dirección sin cliente queda marcada como predeterminada.
   - [ ] El paso está terminado y verificado antes de empezar el que levanta los gates de alias.
   - [ ] El conteo de clientes que perdieron su predeterminada queda registrado como evidencia.
-- **Status:** pending
+- **Status:** in-progress — guardas en 5a97f2399; 5 tests; falta curl y conciliación histórica.

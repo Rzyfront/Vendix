@@ -420,16 +420,7 @@ export class PosSettingsDto {
   @IsBoolean()
   allow_alias_sales?: boolean;
 
-  /**
-   * F-127 — severidad de la compuerta fiscal por linea del carril de cobro
-   * (`POS_TABLE_LINE_TAX_UNRESOLVABLE_001`, `payments.service.ts`). Ausente o
-   * `'block'` = comportamiento de siempre (lanza y revierte). `'warn'` deja
-   * pasar la linea normalizando el impuesto a cero y registra el detalle;
-   * `'off'` deja pasar en silencio. Bajarla es una valvula de emergencia por
-   * tienda para no dejar la caja parada mientras se corrige el catalogo: toda
-   * venta que pasa por `'warn'`/`'off'` lleva IVA potencialmente
-   * sub-declarado a la DIAN (F-065).
-   */
+  /** @deprecated ADR-10: aceptar JSON histórico sin afectar el cobro. */
   @ApiProperty({ example: 'block', required: false, enum: ['block', 'warn', 'off'] })
   @IsOptional()
   @IsIn(['block', 'warn', 'off'], {

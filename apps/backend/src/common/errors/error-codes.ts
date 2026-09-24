@@ -760,6 +760,16 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Store context required',
   },
+  ADDR_PRIMARY_REQUIRES_CUSTOMER_001: {
+    code: 'ADDR_PRIMARY_REQUIRES_CUSTOMER_001',
+    httpStatus: 400,
+    devMessage: 'A primary address requires a customer',
+  },
+  ADDR_CUSTOMER_NOT_IN_STORE_001: {
+    code: 'ADDR_CUSTOMER_NOT_IN_STORE_001',
+    httpStatus: 400,
+    devMessage: 'Customer does not belong to this store',
+  },
 
   // Marketing
   MKT_AD_STORAGE_001: {
@@ -1070,6 +1080,16 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Invalid order status',
   },
+  ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001: {
+    code: 'ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'A user-provided reason is required to return a delivered order to processing',
+  },
+  ORD_DELIVERED_REVERSAL_OWNER_001: {
+    code: 'ORD_DELIVERED_REVERSAL_OWNER_001',
+    httpStatus: 400,
+    devMessage: 'Only the kitchen reversal bridge may use delivered to processing as a legal transition',
+  },
   ORD_CANCEL_STOCK_COMMITTED_001: {
     code: 'ORD_CANCEL_STOCK_COMMITTED_001',
     httpStatus: 409,
@@ -1079,6 +1099,11 @@ export const ErrorCodes = {
     code: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001',
     httpStatus: 409,
     devMessage: 'Confirmed payment requires a processor reversal or reconciliation, not local cancellation',
+  },
+  ORD_CANCEL_OPEN_TABLE_001: {
+    code: 'ORD_CANCEL_OPEN_TABLE_001',
+    httpStatus: 409,
+    devMessage: 'La orden pertenece a una mesa abierta; cierra la cuenta desde Mesas antes de cancelarla.',
   },
   ORD_STOCK_COMMIT_STATE_001: {
     code: 'ORD_STOCK_COMMIT_STATE_001',
@@ -1291,6 +1316,11 @@ export const ErrorCodes = {
     devMessage:
       'A draft (is_draft=true) cannot be combined with requires_payment=true; save the order first, then charge it via flow/pay',
   },
+  POS_DRAFT_DUPLICATE_ORDER_001: {
+    code: 'POS_DRAFT_DUPLICATE_ORDER_001',
+    httpStatus: 409,
+    devMessage: 'The referenced POS order has already been paid or cannot be charged',
+  },
   // CP-POS-SVC-PERF-001 / C.4 hardening — atomic booking requires a
   // customer. `bookings.customer_id` is NOT NULL in the schema; an
   // anonymous order carrying a `booking` block would violate FK and
@@ -1393,6 +1423,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'Order payment could not be processed; the order remains ready-to-pay',
+  },
+  ORD_PAY_ALREADY_PAID_001: {
+    code: 'ORD_PAY_ALREADY_PAID_001',
+    httpStatus: 409,
+    devMessage: 'Order is already fully paid',
   },
   // CP-POS-MODAL-SCOPE-001 / Phase C.4 — edit→pay sin cliente cuando el escape
   // hatch está apagado. 409: el cashier debe seleccionar cliente (vía
@@ -5529,9 +5564,7 @@ export const ErrorCodes = {
     devMessage:
       'La estación está siendo gestionada por otro operador. Solo el dueño del turno o un administrador pueden actuar sobre sus tickets.',
   },
-  // QUI-652 — la entrega es un hecho de servicio y aplica a todo item, pero un
-  // plato preparado sigue exigiendo estado 'ready' en cocina: dejar que el
-  // mesero marque entregado un plato sin cocinar haria mentir al KDS.
+  /** @deprecated Sin lanzadores; usar ORDER_ITEM_NOT_DELIVERABLE para la entrega por ítem. */
   TABLE_SESSION_ITEM_NOT_DELIVERABLE: {
     code: 'TABLE_SESSION_ITEM_NOT_DELIVERABLE',
     httpStatus: 409,
@@ -5604,6 +5637,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La mesa ya tiene una sesión abierta',
   },
+  // B.5 / ERR-39 — aviso de una apertura exitosa, nunca se lanza como excepción.
+  TABLE_REOPENED_FROM_CLEANING_001: {
+    code: 'TABLE_REOPENED_FROM_CLEANING_001',
+    httpStatus: 200,
+    devMessage: 'La mesa estaba en limpieza antes de abrir la cuenta',
+  },
   TABLE_SESSION_CLOSED: {
     code: 'TABLE_SESSION_CLOSED',
     httpStatus: 409,
@@ -5634,6 +5673,16 @@ export const ErrorCodes = {
     devMessage:
       'Cannot remove an item already being prepared in the kitchen',
   },
+  ORD_ITEM_CANCEL_PAID_001: {
+    code: 'ORD_ITEM_CANCEL_PAID_001',
+    httpStatus: 409,
+    devMessage: 'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
+  },
+  ORD_ITEM_CANCEL_STATE_001: {
+    code: 'ORD_ITEM_CANCEL_STATE_001',
+    httpStatus: 409,
+    devMessage: 'No se puede cancelar un plato de una orden en estado terminal.',
+  },
   TABLE_GUEST_COUNT_EXCEEDS_CAPACITY: {
     code: 'TABLE_GUEST_COUNT_EXCEEDS_CAPACITY',
     httpStatus: 422,
@@ -5650,6 +5699,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'La sesión de mesa ya fue cobrada; no se puede cobrar dos veces',
+  },
+  POS_TABLE_SESSION_PROJECTION_FAILED_001: {
+    code: 'POS_TABLE_SESSION_PROJECTION_FAILED_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden tiene sesiones de mesa, pero ninguna permanece abierta para proyectar el cobro',
   },
   // ── Split Order (Restaurant Suite Fase E) ────────────────────
   SPLIT_ORDER_NOT_FOUND: {
@@ -5689,6 +5744,13 @@ export const ErrorCodes = {
     code: 'KITCHEN_TICKET_INVALID_STATE',
     httpStatus: 409,
     devMessage: 'Transición de estado del ticket no permitida',
+  },
+  // La entrega desde cocina solo acepta tickets enteramente para llevar.
+  KITCHEN_TICKET_NOT_TAKEAWAY: {
+    code: 'KITCHEN_TICKET_NOT_TAKEAWAY',
+    httpStatus: 422,
+    devMessage:
+      'El ticket contiene platos que no son para llevar; en cocina solo se entregan pedidos takeaway',
   },
   // Restaurant Suite — Fase K audit jun-2026: explicit operator-friendly
   // codes for the common invalid transitions surfaced by the table-session
@@ -6035,17 +6097,8 @@ export const ErrorCodes = {
       'total_price de la línea no cuadra con unit_price × line_units fuera de tolerancia (I-1).',
   },
 
-  // B.3 (plan CP-pos-exclusive-tax-double-charge, QUI-832) — F-065 / ERR-23
-  // del registro del plan. `TaxesService.calculateProductTaxes` ahora expone
-  // `has_tax_assignment` para que el llamador distinga «producto sin
-  // impuestos asignados» de «producto con impuestos resueltos a cero»; este
-  // código es lo que ese llamador debe lanzar cuando `has_tax_assignment ===
-  // false` en un contexto donde la línea ya tenía impuesto (p. ej. al cerrar
-  // una cuenta de mesa cuyo producto perdió su `product_tax_assignments`
-  // — caso real: purga de Roma Motos). Sitio de lanzamiento identificado
-  // (`payments.service.ts`, fuera del alcance de este cambio — ver BLOCKER
-  // REPORT del paso B.3 en evidence/B3-taxes-ejecucion.md): aún no está
-  // cableado.
+  // ADR-10: código legado reservado, sin lanzador. La falta de una asignación
+  // fiscal ACTUAL no demuestra que una línea nueva perdió un impuesto.
   POS_TABLE_LINE_TAX_UNRESOLVABLE_001: {
     code: 'POS_TABLE_LINE_TAX_UNRESOLVABLE_001',
     httpStatus: 422,
@@ -6060,11 +6113,8 @@ export const ErrorCodes = {
   // `fixed_base: undefined` en esta ruta (F-021, `tax-inclusive-math.ts:133`),
   // así que una tasa AIU que llegara acá perdería su carve-out EN SILENCIO y
   // la base declarada a la DIAN saldría mal, sin compuerta que lo note. Se
-  // rechaza en vez de resolver mal. No entra bajo la válvula
-  // `settings.pos.tax_line_gate` (F-127) a propósito: aquella baja una
-  // compuerta de DATOS del catálogo para no dejar la caja parada; ésta
-  // protege de una aritmética fiscal incorrecta, que es lo que la válvula
-  // nunca debe poder apagar.
+  // rechaza en vez de resolver mal. La antigua `tax_line_gate` fue retirada
+  // por ADR-10; esta compuerta de aritmética fiscal permanece activa.
   POS_DECLARED_GROSS_FIXED_BASE_001: {
     code: 'POS_DECLARED_GROSS_FIXED_BASE_001',
     httpStatus: 422,

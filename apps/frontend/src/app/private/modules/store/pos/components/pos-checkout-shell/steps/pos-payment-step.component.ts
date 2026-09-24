@@ -13,7 +13,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Subscription, firstValueFrom } from 'rxjs';
+import { Observable, Subscription, firstValueFrom } from 'rxjs';
 
 import {
   SpinnerComponent,
@@ -30,6 +30,7 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 import {
   PosPaymentService,
   PaymentMethod,
+  PosSalePaymentResponse,
 } from '../../../services/pos-payment.service';
 import { PaymentMethodType } from '../../../../../../../shared/models/payment-method.model';
 import { FulfillmentType } from '../../pos-fulfillment-selector.component';
@@ -46,6 +47,7 @@ import { extractApiError } from '../../../../../../../shared/utils/http-error.ut
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import type { BusinessHours } from '../../../../../../../core/models/store-settings.interface';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
+import { ERROR_MESSAGES } from '../../../../../../../core/utils/error-messages';
 
 /**
  * Fase 5·B1 — `app-pos-payment-step`.
@@ -704,7 +706,7 @@ export class PosPaymentStepComponent implements OnInit {
     // atomically promotes the draft and charges it), NOT processSaleWithPayment
     // (which would create a SECOND order).
     const editingId = this.editingOrderId();
-    const obs = editingId
+    const obs: Observable<PosSalePaymentResponse> = editingId
       ? this.ordersService.flowPayOrder(String(editingId), {
           store_payment_method_id: method.id,
           payment_type: 'direct',
@@ -739,6 +741,17 @@ export class PosPaymentStepComponent implements OnInit {
             }
 
             this.processing.set(false);
+            if (
+              !editingId &&
+              response.order?.payment_status === 'succeeded' &&
+              response.previous_table_status === 'cleaning'
+            ) {
+              this.toastService.warning(
+                ERROR_MESSAGES['TABLE_REOPENED_FROM_CLEANING_001'],
+                undefined,
+                5000,
+              );
+            }
             this.paymentCompleted.emit({
               success: true,
               order: response.order,

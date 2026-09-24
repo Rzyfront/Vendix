@@ -394,6 +394,29 @@ describe('SplitOrderService financial ledger', () => {
     ).rejects.toThrow('desglose fiscal');
   });
 
+  it('rechaza dividir una orden cuyo envío lleva impuesto; sin copia se divide como hoy', async () => {
+    // Fixture base: envío 5 sin copia de impuesto ⇒ se divide.
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).resolves.toMatchObject({ original_total: '130.00' });
+
+    // Mismo envío con copia INC 8 % congelada en la orden.
+    source.shipping_tax_rate_id = 68;
+    source.shipping_tax_name = 'INC 8%';
+    source.shipping_tax_type = 'inc';
+    source.shipping_tax_rate = '0.08000';
+    source.shipping_tax_amount = '0.37';
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).rejects.toThrow('envío con impuesto');
+
+    // Copia vacía (default de la columna) ⇒ vuelve a dividirse.
+    source.shipping_tax_amount = '0.00';
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).resolves.toMatchObject({ original_total: '130.00' });
+  });
+
   it('supports items and custom remainder, rejecting duplicate/omitted items', async () => {
     expect(
       (

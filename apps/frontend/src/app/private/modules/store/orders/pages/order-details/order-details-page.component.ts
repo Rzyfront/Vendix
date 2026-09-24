@@ -127,11 +127,50 @@ import {
   type FiscalAlertEntry,
 } from '../../utils/fiscal-alert-dictionary';
 
+// Misma política de cobro que SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES en
+// order-flow.service.ts: estas entregas no necesitan método de envío.
+const SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES = new Set<string>([
+  'pickup',
+  'direct_delivery',
+  'dine_in',
+]);
+
 export interface LifecycleStep {
   key: string;
   label: string;
   status: 'completed' | 'current' | 'upcoming' | 'terminal';
 }
+
+export const ORDER_DELIVERY_STEP_LABELS: Record<DeliveryType, Record<string, string>> = {
+  home_delivery: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Procesando',
+    shipped: 'Enviada', delivered: 'Entregada', finished: 'Finalizada',
+  },
+  pickup: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Preparando',
+    shipped: 'Lista para recogida', delivered: 'Recogida en tienda', finished: 'Finalizada',
+  },
+  direct_delivery: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Procesando',
+    shipped: 'Entregada en mostrador', delivered: 'Entregada en mostrador', finished: 'Finalizada',
+  },
+  dine_in: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Preparando',
+    shipped: 'Servida en mesa', delivered: 'Servida en mesa', finished: 'Finalizada',
+  },
+  other: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Procesando',
+    shipped: 'Despachada', delivered: 'Entregada', finished: 'Finalizada',
+  },
+};
+
+export const ORDER_DELIVERY_CONFIG: Record<DeliveryType, { label: string; icon: string }> = {
+  home_delivery: { label: 'Envío a domicilio', icon: 'truck' },
+  pickup: { label: 'Recogida en tienda', icon: 'map-pin' },
+  direct_delivery: { label: 'Entrega directa en mostrador', icon: 'package' },
+  dine_in: { label: 'Consumo en mesa', icon: 'store' },
+  other: { label: 'Otro', icon: 'box' },
+};
 
 type PaymentReceiptPreviewKind = 'image' | 'pdf';
 
@@ -376,6 +415,18 @@ export class OrderDetailsPageComponent {
     return this.authFacade.printsVatBreakdown() && tax > 0;
   });
   /**
+   * Impuesto del envío (copia congelada de la tarifa al vender). Va SIEMPRE
+   * incluido en `shipping_cost`, así que es una nota informativa: no suma al
+   * total. 0 = envío sin impuesto (tarifa sin impuesto o costo manual).
+   */
+  readonly shippingTaxAmount = computed<number>(() => {
+    const amount = Number(this.order()?.shipping_tax_amount ?? 0);
+    return Number.isFinite(amount) && amount > 0 ? amount : 0;
+  });
+  readonly shippingTaxLabel = computed<string>(
+    () => this.order()?.shipping_tax_name?.trim() || 'impuesto',
+  );
+  /**
    * Plan KDS fire-flows (F3): show the per-plate kitchen dispatch UI only
    * for restaurant stores, when there is at least one pending prepared
    * item, and the order is not in a terminal state (cancelled/refunded).
@@ -550,43 +601,7 @@ export class OrderDetailsPageComponent {
 
   readonly stepLabels = computed<Record<string, string>>(() => {
     const delivery = this.order()?.delivery_type || 'direct_delivery';
-
-    const labels: Record<DeliveryType, Record<string, string>> = {
-      home_delivery: {
-        created: 'Creada',
-        pending_payment: 'Pago Pendiente',
-        processing: 'Procesando',
-        shipped: 'Enviada',
-        delivered: 'Entregada',
-        finished: 'Finalizada',
-      },
-      pickup: {
-        created: 'Creada',
-        pending_payment: 'Pago Pendiente',
-        processing: 'Preparando',
-        shipped: 'Lista para Recoger',
-        delivered: 'Recogida',
-        finished: 'Finalizada',
-      },
-      direct_delivery: {
-        created: 'Creada',
-        pending_payment: 'Pago Pendiente',
-        processing: 'Procesando',
-        shipped: 'Despachada',
-        delivered: 'Entregada',
-        finished: 'Finalizada',
-      },
-      other: {
-        created: 'Creada',
-        pending_payment: 'Pago Pendiente',
-        processing: 'Procesando',
-        shipped: 'Despachada',
-        delivered: 'Entregada',
-        finished: 'Finalizada',
-      },
-    };
-
-    return labels[delivery] || labels.direct_delivery;
+    return ORDER_DELIVERY_STEP_LABELS[delivery] || ORDER_DELIVERY_STEP_LABELS.direct_delivery;
   });
 
   readonly lifecycleSteps = computed<LifecycleStep[]>(() => {
@@ -640,18 +655,13 @@ export class OrderDetailsPageComponent {
 
   readonly deliveryConfig = computed(() => {
     const delivery = this.order()?.delivery_type || 'direct_delivery';
-    const configs: Record<string, { label: string; icon: string }> = {
-      home_delivery: { label: 'Envio a domicilio', icon: 'truck' },
-      pickup: { label: 'Retiro en tienda', icon: 'map-pin' },
-      direct_delivery: { label: 'Entrega directa', icon: 'package' },
-      other: { label: 'Otro', icon: 'box' },
-    };
-    return configs[delivery] || configs['direct_delivery'];
+    return ORDER_DELIVERY_CONFIG[delivery] || ORDER_DELIVERY_CONFIG.direct_delivery;
   });
 
   readonly showShippingAssignment = computed(() => {
     const order = this.order();
     if (!order) return false;
+    if (order.delivery_type === 'dine_in') return false;
     const terminalStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
     if (terminalStates.includes(order.state as OrderState)) return false;
     if (order.delivery_type === 'direct_delivery') return false;
@@ -677,6 +687,7 @@ export class OrderDetailsPageComponent {
   readonly canEditShipping = computed(() => {
     const order = this.order();
     if (!order) return false;
+    if (order.delivery_type === 'dine_in') return false;
     const lockedStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
     return !lockedStates.includes(order.state as OrderState) && order.delivery_type !== 'direct_delivery';
   });
@@ -708,7 +719,8 @@ export class OrderDetailsPageComponent {
   readonly blockedByMissingShipping = computed(() => {
     const o = this.order();
     if (!o) return false;
-    const needsShipping = o.delivery_type !== 'direct_delivery' && o.delivery_type !== 'other';
+    const needsShipping = !o.delivery_type ||
+      !SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES.has(o.delivery_type);
     const terminal = ['cancelled', 'refunded', 'finished'].includes(o.state);
     return needsShipping && !o.shipping_method_id && !terminal;
   });
@@ -973,7 +985,7 @@ export class OrderDetailsPageComponent {
           // Pickup: can mark "ready to pick up" without payment (confirm dialog)
           actions.push({
             id: 'manual-ready-pickup',
-            label: 'Listo para Recoger',
+            label: 'Lista para recogida',
             icon: 'package',
             variant: 'primary',
           });
@@ -1061,7 +1073,7 @@ export class OrderDetailsPageComponent {
           if (delivery === 'home_delivery') {
             actions.push({ id: 'deliver', label: 'Marcar como Entregado', icon: 'package-check', variant: 'primary' });
           } else if (isPickup) {
-            actions.push({ id: 'deliver', label: 'Confirmar Recogida', icon: 'user-check', variant: 'primary' });
+            actions.push({ id: 'deliver', label: 'Confirmar recogida', icon: 'user-check', variant: 'primary' });
           } else {
             actions.push({ id: 'deliver', label: 'Confirmar Entrega', icon: 'check-circle', variant: 'primary' });
           }
@@ -1127,9 +1139,12 @@ export class OrderDetailsPageComponent {
 
   private cancellationPolicyMessage(order: Order | null): string {
     const code = order?.cancellation_policy?.reason_code;
-    return code
-      ? ERROR_MESSAGES[code]
-      : 'No se puede anular esta orden o su pago. Recarga el detalle para consultar las acciones disponibles.';
+    if (code) {
+      return ERROR_MESSAGES[code] ?? 'No se puede cancelar esta orden. Recarga el detalle para consultar el motivo.';
+    }
+    return order
+      ? `La orden en estado ${this.formatStatus(order.state)} no admite cancelación. Recarga el detalle para consultar las acciones disponibles.`
+      : 'Recarga el detalle para consultar las acciones disponibles.';
   }
 
   // ── Ship Modal Config (delivery-type aware) ────────────────
@@ -1151,7 +1166,7 @@ export class OrderDetailsPageComponent {
         };
       case 'pickup':
         return {
-          title: 'Marcar Listo para Recoger',
+          title: 'Marcar lista para recogida',
           showTracking: false,
           showCarrier: false,
           showNotes: true,
@@ -1748,7 +1763,7 @@ export class OrderDetailsPageComponent {
           this.isLoading.set(false);
 
           // Load payment methods if order can accept payment
-          const needsPayment = orderData.state === 'created' ||
+          const needsPayment = orderData.state === 'draft' || orderData.state === 'created' ||
             orderData.payment_form === '2' ||
             (orderData.state === 'shipped' && !(orderData.payments || []).some((p: any) => p.state === 'succeeded'));
           if (needsPayment) {
@@ -2565,7 +2580,16 @@ export class OrderDetailsPageComponent {
             },
             error: (err) => {
               this.isProcessingAction.set(false);
-              this.toastService.error(err.message || 'Error al finalizar la orden');
+              const pendingKitchen = (err as { errorCode?: string | null })?.errorCode ===
+                'ORDER_HAS_PENDING_KITCHEN_ITEMS';
+              const dishes = pendingKitchen
+                ? this.undeliveredKitchenItems().map((item) => item.product_name)
+                : [];
+              this.toastService.error(
+                dishes.length > 0
+                  ? `Entrega o cancela estos platos antes de finalizar: ${dishes.join(', ')}`
+                  : (err as Error)?.message || 'Error al finalizar la orden',
+              );
             },
           });
       });
@@ -2576,8 +2600,8 @@ export class OrderDetailsPageComponent {
 
     this.dialogService
       .confirm({
-        title: 'Listo para recoger sin pago',
-        message: '¿Marcar esta orden como lista para recoger sin confirmar el pago? El pago deberá confirmarse antes de entregar al cliente.',
+        title: 'Lista para recogida sin pago',
+        message: '¿Marcar esta orden como lista para recogida sin confirmar el pago? El pago deberá confirmarse antes de entregar al cliente.',
         confirmText: 'Marcar como lista',
         cancelText: 'Cancelar',
         confirmVariant: 'primary',
@@ -2592,7 +2616,7 @@ export class OrderDetailsPageComponent {
           .subscribe({
             next: () => {
               this.isProcessingAction.set(false);
-              this.toastService.success('Orden marcada como lista para recoger');
+              this.toastService.success('Orden marcada como lista para recogida');
               this.loadData();
             },
             error: (err) => {
@@ -2733,7 +2757,7 @@ export class OrderDetailsPageComponent {
           this.toastService.error(
             forbidden
               ? 'Requiere permiso de cancelar comandas (owner/admin)'
-              : parsed.userMessage || 'Error al cancelar la orden',
+              : (err as Error)?.message || parsed.userMessage || 'Error al cancelar la orden',
           );
         },
       });

@@ -406,6 +406,8 @@ export class OrdersController {
         'Orden actualizada exitosamente',
       );
     } catch (error) {
+      // Dejar pasar el código tipado (y el HTTP 400 real) al filtro global.
+      if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al actualizar la orden',
         error.response?.message || error.message,
@@ -511,15 +513,7 @@ export class OrdersController {
   @Delete(':id')
   @Permissions('store:orders:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
-    try {
-      await this.ordersService.remove(id);
-      return this.responseService.deleted('Orden eliminada exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar la orden',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    await this.ordersService.remove(id);
+    return this.responseService.deleted('Orden eliminada exitosamente');
   }
 }

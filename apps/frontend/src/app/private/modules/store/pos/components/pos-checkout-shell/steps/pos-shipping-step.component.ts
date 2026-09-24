@@ -96,6 +96,7 @@ export class PosShippingStepComponent {
 
   // ── Inputs / two-way ──────────────────────────────────────────────────────
   readonly cartState = input<CartState | null>(null);
+  readonly editingOrderId = input<number | null>(null);
   // ── Address capture (owned by shipping step according to method type) ───
   readonly address = signal<AddressPayload | null>(null);
   readonly addressValid = signal<boolean>(false);
@@ -165,6 +166,14 @@ export class PosShippingStepComponent {
     const m = this.selectedShippingMethod();
     return !!m && m.type !== 'pickup';
   });
+
+  /** Keep the missing-method reason visible for a delivery address, not only
+   * during the short validation flash shown after an attempted charge. */
+  readonly missingShippingMethodReason = computed<string | null>(() =>
+    this.address()?.address_line1 && !this.selectedShippingMethod()
+      ? 'Selecciona un método de envío antes de guardar o cobrar esta entrega a domicilio.'
+      : null,
+  );
 
   readonly addressSummary = computed<string>(() => {
     const a = this.address();
@@ -635,7 +644,7 @@ export class PosShippingStepComponent {
     const method = this.selectedShippingMethod();
     if (!method || method.is_active === false || (this.methodsLoaded() &&
       !this.shippingMethods().some((m) => m.id === method.id && m.is_active !== false))) {
-      return { section: 'shipping-method', message: 'Selecciona un método de envío activo' };
+      return { section: 'shipping-method', message: this.missingShippingMethodReason() ?? 'Selecciona un método de envío activo' };
     }
     if (this.isCalculatingShipping()) {
       return { section: 'shipping-method', message: 'Espera a que termine el cálculo del envío' };
@@ -796,6 +805,9 @@ export class PosShippingStepComponent {
       shippingAddress: this.buildShippingAddress(),
       deliveryNotes: this.notesControl.value || undefined,
       shippingAddressId: this.isPickupMethod() ? undefined : (this.addressId() ?? undefined),
+      // El borrador aplica `posShippingRateIdForPayload`; el editor lee
+      // `shippingRateId` crudo (su backend ya rechaza costo manual vs tarifa).
+      manualCostOverride: this.manualCostOverride(),
     };
   }
 
@@ -820,10 +832,14 @@ export class PosShippingStepComponent {
     creditConfig?: ShippingCreditConfig,
   ): void {
     const customer = this.cartState()?.customer;
+    const customerId = Number(customer?.id);
     const existingId = this.addressId();
 
-    // Recoger en tienda, sin cliente o dirección incompleta → procesa sin persistir dirección.
-    if (this.isPickupMethod() || !customer || !a?.address_line1 || !a?.city) {
+    // Sin un cliente válido no se persiste ni se envía is_primary.
+    if (
+      this.isPickupMethod() || !Number.isInteger(customerId) || customerId <= 0 ||
+      !a?.address_line1 || !a?.city
+    ) {
       this.processOrder(
         shippingAddress,
         deliveryType,
@@ -834,13 +850,13 @@ export class PosShippingStepComponent {
       return;
     }
 
-    const dto = this.mapAddressToDto(a, Number(customer.id));
+    const dto = this.mapAddressToDto(a, customerId);
 
     // Caso 1: sin dirección guardada → CREAR y usar el nuevo id.
     if (!existingId) {
       const createDto: CustomerAddressPayload = {
         ...dto,
-        is_primary: !customer.addresses?.length,
+        is_primary: !customer?.addresses?.length,
       };
       this.customersService
         .createCustomerAddress(createDto)
@@ -950,10 +966,13 @@ export class PosShippingStepComponent {
           shippingAddress,
           deliveryNotes: this.notesControl.value || undefined,
           shippingAddressId: addressId,
+          shippingRateId: this.shippingRateId(),
+          manualCostOverride: this.manualCostOverride(),
         },
         paymentRequest,
         'current_user',
         creditConfig,
+        this.editingOrderId(),
       )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

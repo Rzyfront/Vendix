@@ -5,7 +5,8 @@
       'Sesión #' +
       (session()?.id ?? '') +
       ' — ' +
-      (isClosed() ? 'Cerrada' : 'Cuenta abierta')
+      (isClosed() ? 'Cerrada' : 'Cuenta abierta') +
+      (waiterName() ? ' — Mesero: ' + waiterName() : '')
     "
     icon="receipt"
     variant="glass"
@@ -561,12 +562,7 @@
                               variant="success"
                               size="sm"
                               customClasses="!h-11"
-                              [loading]="
-                                deliveringItemId() === item.id ||
-                                (deliveringTicketId() != null &&
-                                  needsKitchen(item) &&
-                                  kitchenStatusFor(item) !== 'delivered')
-                              "
+                              [loading]="deliveringItemId() === item.id"
                               [attr.title]="deliverHint(item)"
                               (clicked)="markDelivered(item)"
                             >

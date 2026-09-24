@@ -1,0 +1,12 @@
+2026-09-23 — base local, consulta de solo lectura
+SELECT resource_id, count(*) FROM fiscal_operation_events
+WHERE event_type = 'pos_sale_without_fiscal_document'
+GROUP BY 1 HAVING count(*) <> 1 ORDER BY 1;
+
+Resultado: 0 filas.
+Esto verifica la foto actual, NO garantiza idempotencia futura. El productor
+recordUncoveredSale todavía puede crear una segunda fila para el mismo pedido.
+
+SELECT count(*) FROM invoice_retry_queue;
+Resultado: 2 filas (snapshot único; no se ejecutó una venta descubierta para
+comparar antes/después, por lo que no se afirma que la cola no creciera).

@@ -1,0 +1,6 @@
+{
+  "statusCode": 403,
+  "error_code": "AUTH_PERM_001",
+  "message": "Access denied",
+  "details": null
+}

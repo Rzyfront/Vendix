@@ -299,6 +299,7 @@ export class WeeklyReportService {
             subtotal_amount: true,
             discount_amount: true,
             shipping_cost: true,
+            shipping_tax_amount: true,
           },
           _count: { id: true },
         }),
@@ -325,6 +326,7 @@ export class WeeklyReportService {
             subtotal_amount: true,
             discount_amount: true,
             shipping_cost: true,
+            shipping_tax_amount: true,
           },
           _count: { id: true },
         }),
@@ -340,6 +342,7 @@ export class WeeklyReportService {
             subtotal_amount: true,
             discount_amount: true,
             shipping_cost: true,
+            shipping_tax_amount: true,
           },
           _count: { id: true },
         }),
@@ -401,6 +404,7 @@ export class WeeklyReportService {
           subtotal: Number(row._sum.subtotal_amount || 0),
           discounts: Number(row._sum.discount_amount || 0),
           shipping: Number(row._sum.shipping_cost || 0),
+          shipping_tax: Number(row._sum.shipping_tax_amount || 0),
           tax: 0,
         });
         prev.orders += row._count.id;
@@ -441,6 +445,7 @@ export class WeeklyReportService {
         subtotal: Number(c._sum.subtotal_amount || 0),
         discounts: Number(c._sum.discount_amount || 0),
         shipping: Number(c._sum.shipping_cost || 0),
+        shipping_tax: Number(c._sum.shipping_tax_amount || 0),
         tax: 0,
       }),
     }));
@@ -478,6 +483,7 @@ export class WeeklyReportService {
       subtotal: Number(ordersAgg._sum!.subtotal_amount || 0),
       discounts: Number(ordersAgg._sum!.discount_amount || 0),
       shipping: Number(ordersAgg._sum!.shipping_cost || 0),
+      shipping_tax: Number(ordersAgg._sum!.shipping_tax_amount || 0),
       tax: 0,
     });
     const totalOrders = ordersAgg._count!.id || 0;
@@ -522,6 +528,7 @@ export class WeeklyReportService {
         subtotal_amount: true,
         discount_amount: true,
         shipping_cost: true,
+        shipping_tax_amount: true,
       },
       _count: { id: true },
     });
@@ -530,6 +537,7 @@ export class WeeklyReportService {
       subtotal: Number(orders._sum!.subtotal_amount || 0),
       discounts: Number(orders._sum!.discount_amount || 0),
       shipping: Number(orders._sum!.shipping_cost || 0),
+      shipping_tax: Number(orders._sum!.shipping_tax_amount || 0),
       tax: 0,
     });
     const totalOrders = orders._count!.id || 0;

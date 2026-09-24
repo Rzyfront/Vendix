@@ -27,7 +27,7 @@ import {
   isPresentialPosSale,
 } from '../../invoicing/pos/presential-pos-sale';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
-import { buildTaxBreakdown } from '@common/interfaces/tax-breakdown.interface';
+import { buildOrderSaleTaxPayload } from '../utils/order-sale-tax-payload.util';
 
 interface WebhookPaymentTransition {
   paymentId: number | null;
@@ -59,8 +59,7 @@ export class WebhookHandlerService {
     private readonly storeContextRunner: StoreContextRunner,
     @Inject(forwardRef(() => OrderFlowService))
     private orderFlowService: OrderFlowService,
-    // Restaurant Suite (Obj 6): reconcile a deferred table close when a POS
-    // digital payment (wompi/wallet) is confirmed by the gateway webhook.
+    // Restaurant payment projection after gateway confirmation.
     private readonly tableSessionsService: TableSessionsService,
     // A.3 CP-facturacion-fixes: web auto-send on payment confirmation (ADR-03).
     // InvoicingModule exports both; PaymentsModule imports it (no cycle: the
@@ -320,7 +319,7 @@ export class WebhookHandlerService {
       await this.emitPaymentReceivedAccounting(result.paymentId);
     }
     if (result.orderId && result.shouldConfirmOrder) {
-      await this.confirmOrderPaid(result.orderId);
+      await this.confirmOrderPaid(result.orderId, result.paymentId!);
     } else if (result.transitioned && result.orderId && ['failed', 'cancelled'].includes(status)) {
       await this.cancelOrderIfOpen(result.orderId, status, gatewayResponse);
     }
@@ -457,6 +456,11 @@ export class WebhookHandlerService {
         where: { order_id: order.id },
         select: {
           total_price: true,
+          // Descuento de orden: ver `buildOrderSaleTaxPayload`.
+          quantity: true,
+          tax_amount_item: true,
+          weight: true,
+          price_unit_quantity: true,
           // `is_inclusive` no se lee: `total_price` ya es el NETO en
           // ambas ramas del escritor. Ver el comentario extenso en
           // `payments.service.ts`.
@@ -465,8 +469,12 @@ export class WebhookHandlerService {
           },
         },
       });
-      const tax_breakdown = buildTaxBreakdown(
-        orderItemsWithTaxes.flatMap((item) =>
+      // Impuesto del envío (copia congelada en la orden): el helper
+      // compartido con el POS separa el flete NETO (414505) del impuesto
+      // (2408/2436) y lo suma al desglose. Antes este emisor omitía
+      // `shipping_amount`: el asiento de una orden con envío no cuadraba.
+      const sale_tax = buildOrderSaleTaxPayload({
+        product_tax_rows: orderItemsWithTaxes.flatMap((item) =>
           (item.order_item_taxes || []).map((tax) => ({
             ...tax,
             // F-111 — misma regla documentada en `payments.service.ts`: la
@@ -475,7 +483,9 @@ export class WebhookHandlerService {
             taxable_amount: Number(item.total_price || 0),
           })),
         ),
-      );
+        order,
+        order_items: orderItemsWithTaxes,
+      });
 
       const systemPaymentMethod =
         payment.store_payment_method?.system_payment_method;
@@ -494,14 +504,16 @@ export class WebhookHandlerService {
         order_number: order.order_number,
         amount: Number(payment.amount),
         subtotal_amount: Number(order.subtotal_amount || 0),
-        tax_amount: Number(order.tax_amount || 0),
-        tax_breakdown,
+        tax_amount: sale_tax.tax_amount,
+        shipping_amount: sale_tax.shipping_amount,
+        tax_breakdown: sale_tax.tax_breakdown,
         // Webhooks do not compute suffered withholding on the fly (the POS
         // path resolves it via `WithholdingFlow.resolveSuffered` inside its
         // transaction). Leave the breakdown empty; the listener + auto-entry
         // handle `undefined` / `[]` as "no withholding lines".
         withholding_breakdown: [],
-        discount_amount: Number(order.discount_amount || 0),
+        // Parte de BASE del descuento de orden (impuesto neto proyectado).
+        discount_amount: sale_tax.discount_amount,
         tip_amount: Number(order.tip_amount || 0),
         currency: payment.currency || order.currency || 'COP',
         payment_method: paymentMethodLabel,
@@ -602,7 +614,7 @@ export class WebhookHandlerService {
    * Invokes OrderFlowService.confirmPayment in store context. Used after
    * the payment-update tx commits so we don't nest transactions.
    */
-  private async confirmOrderPaid(orderId: number): Promise<void> {
+  private async confirmOrderPaid(orderId: number, paymentId?: number): Promise<void> {
     try {
       const client = this.prisma.withoutScope();
       const order = await client.orders.findUnique({ where: { id: orderId } });
@@ -615,6 +627,24 @@ export class WebhookHandlerService {
           const confirmed = await this.orderFlowService.confirmPayment(orderId);
           if (!confirmed || !['processing', 'shipped'].includes(confirmed.state)) return;
 
+          // El pago y la confirmación ya hicieron commit. Una mesa pagada
+          // permanece abierta y ocupada hasta que el mesero la cierre.
+          if (paymentId != null) {
+            try {
+              await this.tableSessionsService.projectOrderPaymentToTableSession(
+                orderId,
+                paymentId,
+              );
+            } catch (projectionError) {
+              // El webhook no debe deshacer ni reintentar un cobro confirmado.
+              // La proyección tipada queda registrada para conciliación.
+              this.logger.error(
+                `POS_TABLE_SESSION_PROJECTION_FAILED_001 order=${orderId} payment=${paymentId}: ${(projectionError as Error)?.message ?? String(projectionError)}`,
+                projectionError instanceof Error ? projectionError.stack : undefined,
+              );
+            }
+          }
+
           // El dinero acaba de ENTRAR: éste es el punto donde el inventario
           // del carril digital diferido puede salir. Ver
           // `commitConfirmedPosStock`. Va inmediatamente después de
@@ -623,23 +653,6 @@ export class WebhookHandlerService {
           // porque el movimiento de stock es el hecho económico y esos dos son
           // consecuencias. Un fallo de entrega no deshace el dinero recibido.
           await this.commitConfirmedPosStock(orderId);
-
-          // Restaurant Suite (Obj 6): if this order backs a still-open table
-          // session, the POS deferred its close for a digital payment
-          // (wompi/wallet). Now that the gateway confirmed the charge, close
-          // the session — `closeSession` flips the table to `cleaning` and
-          // emits `session_closed` to staff + comensal streams. No-op for
-          // non-restaurant / non-table orders (findFirst returns null).
-          const openSession = await this.prisma.table_sessions.findFirst({
-            where: { order_id: orderId, closed_at: null },
-            select: { id: true },
-          });
-          if (openSession) {
-            await this.tableSessionsService.closeSession(openSession.id);
-            this.logger.log(
-              `Table session ${openSession.id} closed after digital payment confirmation of order ${orderId}`,
-            );
-          }
 
           // Venta presencial (POS o mesa QR `dine_in`, ver `isPresentialPosSale`)
           // con confirmación aplicada: `confirmPayment` ya disparó

@@ -72,16 +72,18 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
       );
     }
 
-    // CP-POLLO-ARABE-727 A.7 — la sesión ABIERTA (closed_at IS NULL) se resuelve
+    // CP-POLLO-ARABE-727 A.7 — la última sesión de la orden se resuelve
     // con un `findFirst` top-level en vez del include anidado. El `$extends` de
     // `StorePrismaService` es por modelo/operación top-level y NO recorre
     // `include`/`select`, así que el tramo anidado no recibía `store_id` y ningún
     // índice lo servía. Este `findFirst` sí pasa por el scoping e inyecta
     // `store_id`, haciendo innecesario el índice DB-16. `ticket.order?.id` es la
     // única clave que tenemos: la relación vive al revés (table_sessions.order_id).
+    // Incluye sesiones cerradas para que una reimpresión conserve la mesa y
+    // su opener histórico; una transferencia crea la nueva sesión más tarde.
     const session = ticket.order?.id
       ? await this.prisma.table_sessions.findFirst({
-          where: { order_id: ticket.order.id, closed_at: null },
+          where: { order_id: ticket.order.id },
           orderBy: { opened_at: 'desc' },
           take: 1,
           include: {
@@ -90,13 +92,6 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
                 id: true,
                 name: true,
                 zone: true,
-                // C.3 — meseros asignados a la mesa (table_waiters).
-                // Al resolver el mesero tienen prioridad sobre el opener.
-                table_waiters: {
-                  select: {
-                    user: { select: { first_name: true, last_name: true } },
-                  },
-                },
               },
             },
             opener: { select: { first_name: true, last_name: true } },
@@ -105,15 +100,11 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
       : undefined;
     const opener = session?.opener;
     const table = session?.table;
-    // C.3 — el mesero asignado (table_waiters) manda sobre el opener.
-    const assignedWaiter = table?.table_waiters?.[0]?.user;
-
-    const waiterName =
-      assignedWaiter && (assignedWaiter.first_name || assignedWaiter.last_name)
-        ? `${assignedWaiter.first_name || ''} ${assignedWaiter.last_name || ''}`.trim()
-        : opener
-        ? `${opener.first_name || ''} ${opener.last_name || ''}`.trim()
-        : '';
+    // ADR-04: el mesero de la mesa es quien abrió su sesión, no la asignación
+    // estática de table_waiters (que puede cambiar después del servicio).
+    const waiterName = opener
+      ? `${opener.first_name || ''} ${opener.last_name || ''}`.trim()
+      : '';
     const tableName = table?.name
       ? `Mesa ${table.name}`
       : '';

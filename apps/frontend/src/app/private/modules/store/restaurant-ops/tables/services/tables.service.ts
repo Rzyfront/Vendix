@@ -289,7 +289,7 @@ export class TablesService {
    *
    * La entrega es un hecho de SERVICIO, no de cocina, así que este endpoint
    * aplica a cualquier tipo de producto. Un plato preparado sigue exigiendo
-   * estado `ready` en cocina (409 `TABLE_SESSION_ITEM_NOT_DELIVERABLE`); una
+   * estado `ready` en cocina (409 `ORDER_ITEM_NOT_DELIVERABLE`); una
    * cerveza en botella se entrega directo, porque nunca pasa por cocina y por
    * eso nunca tuvo un estado de entrega alcanzable.
    *

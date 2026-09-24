@@ -1,4 +1,6 @@
+import { Logger } from '@nestjs/common';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { differsByAtLeastCents } from '@common/money-kernel';
 import { resolveLineUnits } from '../../taxes/utils/final-price.util';
 
 /**
@@ -33,6 +35,19 @@ import { resolveLineUnits } from '../../taxes/utils/final-price.util';
  * cableado real es trabajo de código nuevo y va en su propio paso/ticket,
  * después de G2.
  *
+ * P2-4 (reactivación en modo log + métrica, 2026-09-22): la comparación ya
+ * NO es en floats — se mide en centavos enteros con `differsByAtLeastCents`
+ * (el `Math.abs(a − b) <= 0.02` fallaba en el borde según la magnitud:
+ * `10000.02 − 10000 = 0.020000000000436557`). Con la bandera OFF la
+ * violación deja un `warn` estructurado (`orders.line_total_invariant_violation`,
+ * apto para una métrica basada en logs) y suma al contador de proceso
+ * `getOrderLineInvariantViolationCount()`; NUNCA lanza. El primer escritor
+ * cableado es `PaymentsService.buildOrderItemSnapshot` (POS), donde
+ * `total_price = round(unit_price × line_units)` se cumple por construcción:
+ * es la línea base de la métrica, sin riesgo para el cobro. Encender el
+ * bloqueo (`ORDER_ARITHMETIC_GUARD_ENABLED=true`) sigue condicionado a la
+ * evidencia de abajo (G2 / 30 días) y a cablear el resto de escritores.
+ *
  * REVISAR: no antes de 30 días corridos de G2 en verde en producción. G2 no
  * existe aún — ver el ticket de G2 en `evidence/P3-tickets-vigilancia.md`.
  * Dueño natural: P1, junto a este archivo (ver ADR-09 propuesto en
@@ -55,8 +70,17 @@ export interface OrderLineTotalInvariantInput {
 }
 
 // Misma tolerancia que el resto del plan usa para I-1 (registry/db.md DB-01:
-// `ABS(tax_amount_item×units − unit_price×tax_rate) > 0,02` ⇒ violación).
-const DEFAULT_TOLERANCE = 0.02;
+// `ABS(tax_amount_item×units − unit_price×tax_rate) > 0,02` ⇒ violación),
+// expresada en centavos enteros: tolera 2 ¢, viola desde 3 ¢.
+const DEFAULT_TOLERANCE_CENTS = 3;
+
+const logger = new Logger('OrderArithmeticGuard');
+let violationCount = 0;
+
+/** Métrica de proceso: violaciones de I-1 vistas desde el arranque. */
+export function getOrderLineInvariantViolationCount(): number {
+  return violationCount;
+}
 
 /**
  * Afirma I-1 para una línea. Con la bandera en `false` (default HOY) NUNCA
@@ -67,9 +91,15 @@ const DEFAULT_TOLERANCE = 0.02;
  */
 export function assertOrderLineTotalInvariant(
   line: OrderLineTotalInvariantInput,
-  options: { tolerance?: number; enabled?: boolean } = {},
+  options: {
+    /** Umbral de violación en centavos enteros (default 3: tolera 2 ¢). */
+    tolerance_cents?: number;
+    enabled?: boolean;
+    /** Contexto para el log (tienda, escritor). */
+    context?: Record<string, unknown>;
+  } = {},
 ): void {
-  const tolerance = options.tolerance ?? DEFAULT_TOLERANCE;
+  const tolerance_cents = options.tolerance_cents ?? DEFAULT_TOLERANCE_CENTS;
   const enabled = options.enabled ?? ORDER_ARITHMETIC_GUARD_ENABLED;
 
   const unit_price = Number(line.unit_price);
@@ -86,24 +116,35 @@ export function assertOrderLineTotalInvariant(
     return;
   }
 
-  const expected_total = unit_price * line_units;
-  const residual = Math.abs(total_price - expected_total);
-
-  if (residual <= tolerance) {
+  const expected_total = Math.round(unit_price * line_units * 100) / 100;
+  if (!differsByAtLeastCents(total_price, expected_total, tolerance_cents)) {
     return;
   }
+  const residual =
+    Math.abs(Math.round(total_price * 100) - Math.round(expected_total * 100)) /
+    100;
 
+  violationCount += 1;
   if (!enabled) {
     // nunca bloquea. Ver docblock del archivo (fecha de revisión).
-    console.debug(
-      `[G3/order-arithmetic.guard] I-1 violado (bandera OFF, no bloquea): order_item_id=${line.order_item_id ?? 'n/a'} total_price=${total_price} esperado=${expected_total} residual=${residual}`,
-    );
+    logger.warn({
+      event: 'orders.line_total_invariant_violation',
+      blocking: false,
+      order_item_id: line.order_item_id ?? null,
+      unit_price,
+      total_price,
+      line_units,
+      expected_total,
+      residual,
+      tolerance_cents,
+      ...(options.context ?? {}),
+    });
     return;
   }
 
   throw new VendixHttpException(
     ErrorCodes.ORD_LINE_TOTAL_MISMATCH_001,
-    `La línea no cuadra: total_price (${total_price}) se aparta de unit_price × line_units (${expected_total}) por ${residual}, fuera de tolerancia ${tolerance}.`,
+    `La línea no cuadra: total_price (${total_price}) se aparta de unit_price × line_units (${expected_total}) por ${residual}, fuera de tolerancia (${tolerance_cents} ¢).`,
     {
       order_item_id: line.order_item_id ?? null,
       unit_price,

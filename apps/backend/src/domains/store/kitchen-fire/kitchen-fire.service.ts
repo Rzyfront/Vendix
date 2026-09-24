@@ -22,6 +22,7 @@ const KITCHEN_TICKET_INCLUDE = {
   order: {
     select: {
       order_number: true,
+      delivery_type: true,
       customer_alias: true,
       users: { select: { first_name: true, last_name: true } },
     },
@@ -70,19 +71,6 @@ const KITCHEN_TICKET_INCLUDE = {
     },
   },
 } satisfies Prisma.kitchen_ticketsInclude;
-
-/**
- * Paso 3 (takeaway-only KDS): `markDelivered` solo entrega tickets 100 %
- * para llevar. Entrada local —no en `error-codes.ts`— por scope del paso
- * (solo este archivo + su spec); promoverla al catálogo central si otro
- * dominio la necesita.
- */
-const KITCHEN_TICKET_NOT_TAKEAWAY_ENTRY = {
-  code: 'KITCHEN_TICKET_NOT_TAKEAWAY',
-  httpStatus: 422,
-  devMessage:
-    'El ticket contiene platos que no son para llevar; en cocina solo se entregan pedidos takeaway',
-};
 
 /**
  * Result of {@link KitchenFireService.fireOrderItems}. Returned to the
@@ -2586,6 +2574,9 @@ export class KitchenFireService {
    * kitchen handoff is complete. Items are NOT marked
    * `inventory_consumed_at_fire` here (that flag is flipped in
    * fireOrderItems).
+   * KDS delivery is ticket-wide: every order item linked to this ticket is
+   * stamped. For a single line (including table service), use
+   * `OrderFlowService.deliverOrderItem` instead of this ticket action.
    *
    * Restaurant Suite — Fase K audit jun-2026: emits SPECIFIC error codes
    * for the common UX bug "Marcar entregado cuando el plato está
@@ -2658,7 +2649,7 @@ export class KitchenFireService {
     );
     if (nonTakeaway.length > 0) {
       throw new VendixHttpException(
-        KITCHEN_TICKET_NOT_TAKEAWAY_ENTRY,
+        ErrorCodes.KITCHEN_TICKET_NOT_TAKEAWAY,
         undefined,
         {
           from: ticket.status,
@@ -2967,7 +2958,8 @@ export class KitchenFireService {
    *
    * Inventario: NO se toca. Los insumos se consumen en el fire (no en las
    * transiciones del ticket), así que reactivar un ticket NUNCA re-consume ni
-   * devuelve stock. La reversa es puramente de estado (ticket + sus items).
+   * devuelve stock. Al revertir delivered → ready también se limpian las
+   * marcas de entrega de las líneas de ESTE ticket, en la misma transacción.
    *
    * Bloqueo SÍNCRONO antes de mutar: cuando el ticket es terminal
    * (delivered/cancelled) y tiene orden asociada, revertirlo implica reabrir
@@ -3032,6 +3024,19 @@ export class KitchenFireService {
         where: { kitchen_ticket_id: ticketId },
         data: { status: target as any, updated_at: new Date() },
       });
+      if (ticket.status === 'delivered') {
+        await tx.order_items.updateMany({
+          where: {
+            kitchen_ticket_items: { some: { kitchen_ticket_id: ticketId } },
+            delivered_at: { not: null },
+          },
+          data: {
+            delivered_at: null,
+            delivered_by_user_id: null,
+            updated_at: new Date(),
+          },
+        });
+      }
     });
 
     const full = await this.getTicketForStore(ticketId);

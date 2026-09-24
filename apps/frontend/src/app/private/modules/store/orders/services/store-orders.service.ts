@@ -529,7 +529,7 @@ export class StoreOrdersService {
       dto,
     ).pipe(
       map((response: any) => response.data || response),
-      catchError((error) => throwError(() => error)),
+      catchError((error) => throwError(() => this.buildApiError(error))),
     );
   }
 

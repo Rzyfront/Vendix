@@ -1,0 +1,23 @@
+  id  |   state    | grand_total | total_paid | succeeded_payments | active_reservations
+------+------------+-------------+------------+--------------------+---------------------
+ 1140 | processing |     5000.00 |    5000.00 |                  1 |                   1
+ 1142 | processing |     5000.00 |    5000.00 |                  1 |                   1
+(2 rows)
+
+  id  | quantity_on_hand | quantity_reserved | quantity_available
+------+------------------+-------------------+--------------------
+ 1481 |             3995 |                 2 |               3993
+ 1482 |                0 |                 0 |                  0
+(2 rows)
+
+ resource_id |          action           | reservation_count
+-------------+---------------------------+-------------------
+        1140 | order.promoted_to_created | 1
+        1142 | order.promoted_to_created | 1
+(2 rows)
+
+ order_id | negative_inventory_transactions
+----------+---------------------------------
+     1140 |                               0
+     1142 |                               0
+(2 rows)

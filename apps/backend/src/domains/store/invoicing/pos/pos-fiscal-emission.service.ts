@@ -725,21 +725,41 @@ export class PosFiscalEmissionService {
       return;
     }
 
-    await this.prisma.fiscal_operation_events.create({
-      data: {
+    // La lectura y la escritura deben compartir transacción Y lock: dos
+    // listeners pueden fallar a la vez antes de que exista la primera fila.
+    // Sin índice único, este lock serializa sólo a los productores que usan
+    // esta ruta; una escritura ajena aún podría duplicar la constancia.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        `pos_uncovered_sale:${organization_id}:${store_id ?? 'none'}:${order_id}`,
+      );
+
+      const where = {
         organization_id,
         store_id,
         accounting_entity_id,
         event_type: UNCOVERED_SALE_EVENT_TYPE,
         resource_type: UNCOVERED_SALE_RESOURCE_TYPE,
         resource_id: order_id,
-        new_status: 'failed',
-        actor_user_id: RequestContextService.getUserId() ?? null,
-        metadata: {
-          error_code: ErrorCodes.INVOICING_FISCAL_COVERAGE_001.code,
-          error: message,
+      };
+      const existing = await tx.fiscal_operation_events.findFirst({
+        where,
+        select: { id: true },
+      });
+      if (existing) return;
+
+      await tx.fiscal_operation_events.create({
+        data: {
+          ...where,
+          new_status: 'failed',
+          actor_user_id: RequestContextService.getUserId() ?? null,
+          metadata: {
+            error_code: ErrorCodes.INVOICING_FISCAL_COVERAGE_001.code,
+            error: message,
+          },
         },
-      },
+      });
     });
   }
 

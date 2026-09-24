@@ -1007,8 +1007,8 @@ private authFacade = inject(AuthFacade);
 
   /**
    * Decisión del usuario 2026-08-31: opt-in por admin para que el tiquete
-   * de despacho funcione como tiquete de reclamo en ventas de mostrador
-   * (`direct_delivery`) y para llevar (`pickup`). Enmienda al ADR-6;
+   * de despacho funcione como tiquete de reclamo en ventas de mostrador,
+   * incluido Para llevar (`direct_delivery`), y en recogida diferida (`pickup`). Enmienda al ADR-6;
    * default false. Pasado al predicado compartido en
    * `shouldAutoPrintDispatchTicket`.
    */
@@ -1939,8 +1939,8 @@ private authFacade = inject(AuthFacade);
    *
    * Con `trigger === 'automatic'`, exige además `print_dispatch_ticket_auto_with_pos`
    * (opt-in por admin). Con `trigger === 'explicit'`, sólo exige el switch
-   * global. `direct_delivery` se salta siempre. Sin envío no hay a quién
-   * despachar.
+   * global. Sin el opt-in de mostrador, `direct_delivery` no autoimprime;
+   * con él, Para llevar sí puede generar el tiquete de reclamo.
    */
   private async printDispatchTicketIfNeeded(
     trigger: 'automatic' | 'explicit',
@@ -1954,8 +1954,8 @@ private authFacade = inject(AuthFacade);
       printDispatchTicketEnabled: this.printDispatchTicketEnabled(),
       printDispatchTicketAuto:
         trigger === 'automatic' ? this.printDispatchTicketAutoWithPos() : undefined,
-      // Decisión del usuario 2026-08-31: tiquete de reclamo en mostrador
-      // y para llevar. Mismo flag, mismo origen que el detalle de orden.
+      // Decisión del usuario 2026-08-31: tiquete de reclamo para mostrador
+      // (incluido Para llevar) y pickup real. Mismo flag que el detalle.
       counterEnabled: this.printDispatchTicketOnCounter(),
       deliveryType: order.delivery_type,
       isShippingSale: order.isShippingSale,

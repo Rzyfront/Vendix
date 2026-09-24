@@ -1,0 +1,11 @@
+{
+  "success": null,
+  "message": "Confirmed payment requires a processor reversal or reconciliation, not local cancellation",
+  "error_code": "ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001",
+  "order": {
+    "id": null,
+    "state": null,
+    "total_paid": null,
+    "remaining_balance": null
+  }
+}

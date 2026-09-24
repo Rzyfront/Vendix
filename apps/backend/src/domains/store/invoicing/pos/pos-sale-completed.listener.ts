@@ -102,8 +102,8 @@ export class PosSaleCompletedListener {
       );
 
       if (status.state === 'failed') {
-        this.logger.warn(
-          `POS: la venta ${event.order_number ?? `#${event.order_id}`} quedó sin documento fiscal — ${status.message}`,
+        this.logger.error(
+          `POS: la venta ${event.order_number ?? `#${event.order_id}`} quedó sin documento fiscal. Pedido: /admin/orders/${event.order_id}. Motivo: ${status.message}`,
         );
         return;
       }

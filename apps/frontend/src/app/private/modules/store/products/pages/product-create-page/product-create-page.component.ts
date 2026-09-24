@@ -76,6 +76,7 @@ import {
   PreselectedProduct,
 } from '../../../inventory/interfaces';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { taxCategoryBlockReason } from '../../utils/product-tax-combination.util';
 import {
   buildTaxInclusivePayload,
   catalogInclusiveDefault,
@@ -1011,20 +1012,26 @@ export class ProductCreatePageComponent {
   readonly taxCategoryOptions = computed<MultiSelectorOption[]>(() => {
     const blocked = this.isVatBlocked();
     const ivaIds = this.ivaTaxCategoryIdSet();
-    return this.taxCategoriesSig().map((cat) => {
+    const all = this.taxCategoriesSig();
+    // P1-4 — combinación legal (espejo del 400 PROD_TAX_COMBO_001): lo que
+    // chocaría con la selección actual se muestra deshabilitado con el motivo.
+    const selectedIds = new Set(this.selectedTaxCategoryIds() || []);
+    const selected = all.filter((c) => selectedIds.has(c.id));
+    return all.map((cat) => {
       const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
       const rate = parseFloat(String(rawRate));
       const finalRate = isNaN(rate) ? 0 : rate;
       const isIva = ivaIds.has(cat.id);
       const lock = blocked && isIva;
+      const comboReason = lock ? null : taxCategoryBlockReason(cat, selected);
       return {
         value: cat.id,
         label: `${cat.name} (${(finalRate * 100).toFixed(0)}%)`,
         description: lock
           ? 'Requiere ser responsable de IVA ante la DIAN'
-          : cat.description,
-        disabled: lock,
-        icon: lock ? 'lock' : undefined,
+          : (comboReason ?? cat.description),
+        disabled: lock || !!comboReason,
+        icon: lock ? 'lock' : comboReason ? 'ban' : undefined,
       };
     });
   });

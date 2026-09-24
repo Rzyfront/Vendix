@@ -15,6 +15,9 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
 import { PaymentCollectorComponent } from '../../../../../../shared/components/payment-collector/payment-collector.component';
 import { PaymentMethodsCatalogService } from '../../../../../../shared/services/payment-methods-catalog.service';
 import type { PaymentMethod } from '../../../../../../shared/models/payment-method.model';
+import { deliveryTypeToEntregaChoice } from '../../models/cart.model';
+import { shouldAutoPrintDispatchTicket } from '../../../../../../shared/services/print/dispatch-ticket-autoprint';
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 
 /**
  * CP-POS-CHECKOUT-KEYBOARD — matriz teclado × paso del modal de pago.
@@ -124,6 +127,7 @@ class PaymentStub {
 @Component({ selector: 'app-pos-shipping-step', standalone: true, template: `` })
 class ShippingStub {
   readonly cartState = input<unknown>(null);
+  readonly editingOrderId = input<number | null>(null);
   readonly shippingCompleted = output<unknown>();
   readonly shippingCost = signal(0);
   readonly shipSubStep = signal(0);
@@ -287,7 +291,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         { provide: PosCartService, useValue: {} },
         { provide: PosPaymentService, useValue: {} },
         { provide: PosRestaurantIntegrationService, useValue: integrationMock },
-        { provide: StoreOrdersService, useValue: {} },
+        { provide: StoreOrdersService, useValue: { getOrderById: (id: string) => of({ id: Number(id) }) } },
         { provide: ToastService, useValue: {} },
         { provide: CurrencyFormatService, useValue: { loadCurrency: () => {} } },
       ],
@@ -704,6 +708,83 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     return { state, update, error, ship };
   };
 
+  it('no guarda un borrador de envío como venta de mostrador cuando falta el método', () => {
+    const saveDraft = jasmine.createSpy('saveDraft');
+    const warning = jasmine.createSpy('warning');
+    Object.assign(TestBed.inject(PosPaymentService), { saveDraft });
+    Object.assign(TestBed.inject(ToastService), { warning });
+    fixture.componentRef.setInput('cartState', {
+      items: [{ product: { id: '7', name: 'Producto' }, quantity: 1,
+        unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 }],
+      customer: { id: 99, first_name: 'Cliente' }, summary: { total: 1000 },
+      appliedDiscounts: [],
+    });
+    component.entregaChoice.set('enviar');
+    fixture.detectChanges();
+    wireStubs();
+    const ship = (component as any).shippingStep() as ShippingStub;
+    ship.shippingContext.set(null);
+    component.currentStep.set(component.stepKeys().indexOf('envio'));
+    fixture.detectChanges();
+
+    expect(component.draftDeliveryBlocked()).toBeTrue();
+    component.onSaveDraft();
+    expect(saveDraft).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(jasmine.stringMatching(/método de envío/));
+    expect(component.currentStepKey()).toBe('envio');
+    expect(component.submittingDraft()).toBeFalse();
+  });
+
+  for (const previousStatus of ['cleaning', 'available'] as const) {
+    it(`al guardar borrador sobre mesa ${previousStatus} avisa solo si venía de limpieza`, () => {
+      const warning = jasmine.createSpy('warning');
+      const opened = {
+        previous_table_status: previousStatus,
+        session: { id: 108, order_id: 1125, table_id: 15 },
+        order: { id: 1125, state: 'draft', grand_total: 0 },
+      };
+      const openTableSession = jasmine.createSpy('openTableSession').and.returnValue(of(opened));
+      Object.assign(TestBed.inject(PosRestaurantIntegrationService), { openTableSession });
+      Object.assign(TestBed.inject(ToastService), { warning });
+      const append = spyOn<any>(component, 'appendToTableAndFire').and.stub();
+      const state = { items: [{ product: { id: '302' }, quantity: 1 }] } as any;
+
+      (component as any).openPickedTableThenAppend(15, state);
+
+      expect(openTableSession).toHaveBeenCalledTimes(1);
+      expect(append).toHaveBeenCalledOnceWith(state, opened.session);
+      if (previousStatus === 'cleaning') {
+        expect(warning).toHaveBeenCalledOnceWith(
+          ERROR_MESSAGES['TABLE_REOPENED_FROM_CLEANING_001'],
+          undefined,
+          5000,
+        );
+      } else {
+        expect(warning).not.toHaveBeenCalled();
+      }
+    });
+  }
+
+  it('la confirmación del borrador usa el snapshot completo releído, no solo el id', () => {
+    const persisted = {
+      id: 1132,
+      order_number: 'T-1132',
+      customer_alias: 'Mesa de Ana',
+      subtotal_amount: '38000',
+      tax_amount: '0',
+      grand_total: '38000',
+      order_items: [{ id: 1, product_name: 'Coca-Cola 400ml', quantity: 1 }],
+    };
+    const getOrderById = jasmine.createSpy('getOrderById').and.returnValue(of(persisted));
+    Object.assign(TestBed.inject(StoreOrdersService), { getOrderById });
+    const finish = spyOn<any>(component, 'finishDraft').and.stub();
+
+    (component as any).finishPersistedDraft(1132, [1], false, { id: 1132 });
+
+    expect(getOrderById).toHaveBeenCalledOnceWith('1132');
+    expect(finish).toHaveBeenCalledOnceWith(persisted, [1], false);
+  });
+
   it('visitar Envío y Actualizar omite todas las claves y conserva el total original', () => {
     const { update } = prepareShippingEdit();
     expect(component.totalToPay()).toBe(13500.5);
@@ -728,6 +809,52 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       shipping_address_id: 1, shipping_rate_id: 2, shipping_cost: 100,
     }));
     expect(component.totalToPay()).toBe(1100);
+  });
+
+  for (const [choice, deliveryType] of [
+    ['llevar', 'direct_delivery'],
+    ['mesa', 'dine_in'],
+  ] as const) {
+    it(`edición explícita de ${choice} estampa ${deliveryType} sin flete`, () => {
+      const { update } = prepareShippingEdit();
+      component.entregaChoice.set(choice);
+      fixture.detectChanges();
+      component.onPrimaryConfirm();
+      expect(update.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+        delivery_type: deliveryType, shipping_cost: 0,
+      }));
+    });
+  }
+
+  it('reabre direct_delivery sin flete como Para llevar y pickup real como Enviar', () => {
+    const context = {
+      deliveryType: 'direct_delivery', shippingMethodId: null, shippingCost: 0,
+    };
+    expect(deliveryTypeToEntregaChoice(context as any)).toBe('llevar');
+    expect(deliveryTypeToEntregaChoice({ ...context, deliveryType: 'pickup', shippingMethodId: 7 } as any)).toBe('enviar');
+  });
+
+  it('preserva pickup histórico sin método al editar sin tocar Envío', () => {
+    const { state, ship } = prepareShippingEdit();
+    component.entregaChoice.set('enviar');
+    ship.shippingContext.set(null);
+    ship.editorValidationError.set('Selecciona un método de envío');
+    const result = (component as any).buildEditorShippingPayload({
+      ...state,
+      shippingContext: {
+        ...state.shippingContext, deliveryType: 'pickup',
+        shippingAddressId: null, shippingMethodId: null, shippingRateId: null, shippingCost: null,
+      },
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.payload).toEqual({});
+  });
+
+  it('autoimprime Para llevar con opt-in de mostrador sin cambiar pickup real', () => {
+    const context = { printDispatchTicketEnabled: true, printDispatchTicketAuto: true, counterEnabled: true };
+    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'direct_delivery' })).toBeTrue();
+    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'pickup' })).toBeTrue();
+    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'dine_in' })).toBeFalse();
   });
 
   for (const message of ['Espera a que termine el cálculo del envío', 'Selecciona una dirección del nuevo cliente', 'Guarda la dirección en la ficha del cliente']) {

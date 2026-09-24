@@ -1,0 +1,9 @@
+  id  |   state   | order_number  | grand_total | payment_count | active_reservations | open_sessions
+------+-----------+---------------+-------------+---------------+---------------------+---------------
+ 1135 | cancelled | POS-2026-0329 |    38000.00 |             0 |                   0 |             0
+(1 row)
+
+ open_sessions_to_cancelled_orders
+-----------------------------------
+                                 0
+(1 row)

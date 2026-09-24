@@ -66,21 +66,26 @@ export class FiscalAuditService {
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
+    if (contexts.length === 0) return { data: [], total: 0, page, limit };
     const where: Prisma.fiscal_operation_eventsWhereInput = {
-      ...this.whereForContexts(contexts),
-      ...(query.event_type ? { event_type: query.event_type } : {}),
-      ...(query.resource_type ? { resource_type: query.resource_type } : {}),
-      ...(query.resource_id ? { resource_id: query.resource_id } : {}),
-      ...(query.obligation_id ? { obligation_id: query.obligation_id } : {}),
-      ...(query.declaration_id ? { declaration_id: query.declaration_id } : {}),
-      ...(query.close_session_id
-        ? { close_session_id: query.close_session_id }
-        : {}),
-      ...(query.evidence_id ? { evidence_id: query.evidence_id } : {}),
-      ...(query.store_id ? { store_id: query.store_id } : {}),
-      ...(query.accounting_entity_id
-        ? { accounting_entity_id: query.accounting_entity_id }
-        : {}),
+      AND: [
+        this.whereForContexts(contexts),
+        {
+          ...(query.event_type ? { event_type: query.event_type } : {}),
+          ...(query.resource_type ? { resource_type: query.resource_type } : {}),
+          ...(query.resource_id ? { resource_id: query.resource_id } : {}),
+          ...(query.obligation_id ? { obligation_id: query.obligation_id } : {}),
+          ...(query.declaration_id ? { declaration_id: query.declaration_id } : {}),
+          ...(query.close_session_id
+            ? { close_session_id: query.close_session_id }
+            : {}),
+          ...(query.evidence_id ? { evidence_id: query.evidence_id } : {}),
+          ...(query.store_id ? { store_id: query.store_id } : {}),
+          ...(query.accounting_entity_id
+            ? { accounting_entity_id: query.accounting_entity_id }
+            : {}),
+        },
+      ],
     };
 
     const [data, total] = await Promise.all([
@@ -164,6 +169,9 @@ export class FiscalAuditService {
       return {
         organization_id: contexts[0].organization_id,
         accounting_entity_id: contexts[0].accounting_entity_id,
+        ...(contexts[0].store_id !== null
+          ? { store_id: contexts[0].store_id }
+          : {}),
       };
     }
 

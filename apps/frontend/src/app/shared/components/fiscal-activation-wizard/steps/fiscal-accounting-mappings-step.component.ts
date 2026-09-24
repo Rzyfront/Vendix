@@ -109,6 +109,7 @@ const MAPPING_KEYS_FALLBACK: MappingKeyDef[] = [
   { key: 'credit_note.accepted.inc_payable', label: 'Nota crédito aceptada · Impuesto al Consumo por Pagar (reversa nota crédito)' },
   { key: 'credit_note.accepted.ica_payable', label: 'Nota crédito aceptada · ICA por Pagar (reversa nota crédito)' },
   { key: 'credit_note.accepted.accounts_receivable', label: 'Nota crédito aceptada · Cuentas por Cobrar (reversa nota crédito)' },
+  { key: 'credit_note.accepted.customer_refund_payable', label: 'Nota crédito aceptada · Saldo a favor del cliente (nota crédito POS)' },
   { key: 'payment.received.sales_discount', label: 'Pago recibido · Descuentos en Ventas (POS)' },
   { key: 'credit_sale.created.sales_discount', label: 'Venta a crédito · Descuentos en Ventas (Crédito)' },
   { key: 'layaway.payment.cash', label: 'Pago plan separe · Caja (pago cuota separé)' },

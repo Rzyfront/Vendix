@@ -9,7 +9,11 @@ import { PosShippingService } from '../../../services/pos-shipping.service';
 import { PosPaymentService } from '../../../services/pos-payment.service';
 import { CustomersService } from '../../../../customers/services/customers.service';
 import { CartState } from '../../../models/cart.model';
-import { PosShippingMethod, PosShippingOption } from '../../../models/shipping.model';
+import {
+  PosShippingMethod,
+  PosShippingOption,
+  posShippingRateIdForPayload,
+} from '../../../models/shipping.model';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { CountryService } from '../../../../../../../core/services/country.service';
@@ -279,5 +283,100 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     const cards = fixture.debugElement.queryAll(By.css('.method-card'));
     expect(cards.length).toBe(1);
     expect(cards[0].nativeElement.textContent).toContain('Mensajero');
+  });
+
+  it('keeps a declared delivery address visibly invalid without a shipping method and does not charge', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    mount(state);
+    component.shippingMethods.set([]);
+    component.selectedShippingMethod.set(null);
+    fixture.detectChanges();
+
+    expect(component.missingShippingMethodReason()).toContain('antes de guardar o cobrar');
+    expect(fixture.nativeElement.textContent).toContain('Selecciona un método de envío antes de guardar o cobrar');
+    expect(component.canConfirm()).toBeFalse();
+    expect(component.buildShippingContext()).toBeNull();
+    component.execute({ mode: 'contado' } as any);
+    expect(component.isProcessing()).toBeFalse();
+  });
+
+  it('does not require a delivery address for an explicitly selected pickup method', () => {
+    mount();
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger', type: 'pickup', is_active: true };
+    component.shippingMethods.set([...component.shippingMethods(), pickup]);
+    component.selectShippingMethod(pickup);
+    component.address.set(null);
+    component.addressValid.set(false);
+    fixture.detectChanges();
+
+    expect(component.missingShippingMethodReason()).toBeNull();
+    expect(component.canConfirm()).toBeTrue();
+    expect(component.buildShippingContext()?.deliveryType).toBe('pickup');
+  });
+
+  it('rate-sourced cost: the context carries the rate and the payload keeps shipping_rate_id', () => {
+    mount();
+    component.selectSavedAddress(1);
+    fixture.detectChanges();
+    latestQuote().next([quote(7, 9000, 93)]);
+    fixture.detectChanges();
+    const context = component.buildShippingContext()!;
+    expect(context.manualCostOverride).toBeFalse();
+    expect(posShippingRateIdForPayload(context)).toBe(93);
+  });
+
+  it('manual cost override: the payload drops shipping_rate_id (no tax snapshot)', () => {
+    mount();
+    component.selectSavedAddress(1);
+    fixture.detectChanges();
+    latestQuote().next([quote(7, 9000, 93)]);
+    fixture.detectChanges();
+    component.shippingCost.set(5000);
+    component.onShippingCostChange();
+    const context = component.buildShippingContext()!;
+    expect(context.manualCostOverride).toBeTrue();
+    // El editor sigue leyendo la tarifa cruda; la venta/borrador no la manda.
+    expect(context.shippingRateId).toBe(93);
+    expect(posShippingRateIdForPayload(context)).toBeUndefined();
+  });
+
+  it('passes the reopened order id to the shipping charge', () => {
+    const payment = TestBed.inject(PosPaymentService) as any;
+    payment.processShippingSale = jasmine.createSpy('processShippingSale').and.returnValue(
+      of({ success: true, order: { id: 700 } }),
+    );
+    fixture.componentRef.setInput('editingOrderId', 700);
+    mount();
+
+    (component as any).processOrder(
+      component.buildShippingContext()!.shippingAddress,
+      'home_delivery', null, 33,
+    );
+
+    expect(payment.processShippingSale.calls.mostRecent().args[5]).toBe(700);
+  });
+
+  it('does not save a primary address without a valid customer id', () => {
+    const state = cart();
+    state.customer = { ...state.customer!, id: null as any, addresses: [] };
+    mount(state);
+    const process = spyOn<any>(component, 'processOrder');
+
+    (component as any).persistAddressThenProcess(originalAddress, originalAddress, 'direct_delivery', null);
+
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(process).toHaveBeenCalled();
+  });
+});
+
+describe('posShippingRateIdForPayload', () => {
+  it('sends the rate only when there is one and the cost is not manual', () => {
+    expect(posShippingRateIdForPayload({ shippingRateId: 5, manualCostOverride: false })).toBe(5);
+    expect(posShippingRateIdForPayload({ shippingRateId: 5 })).toBe(5);
+    expect(posShippingRateIdForPayload({ shippingRateId: 5, manualCostOverride: true })).toBeUndefined();
+    expect(posShippingRateIdForPayload({ shippingRateId: null })).toBeUndefined();
+    expect(posShippingRateIdForPayload(null)).toBeUndefined();
   });
 });

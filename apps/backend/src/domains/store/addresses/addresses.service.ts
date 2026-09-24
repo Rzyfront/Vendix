@@ -87,7 +87,8 @@ export class AddressesService {
         select: { id: true },
       });
       if (!customer) {
-        throw new BadRequestException(
+        throw new VendixHttpException(
+          ErrorCodes.ADDR_CUSTOMER_NOT_IN_STORE_001,
           `El cliente #${createAddressDto.customer_id} no pertenece a esta tienda, así que no se le puede registrar una dirección aquí. Verifica el cliente en Clientes o crea primero su ficha en esta tienda.`,
         );
       }
@@ -95,13 +96,13 @@ export class AddressesService {
     }
 
     if (createAddressDto.is_primary) {
-      const unsetCriteria: { store_id?: number; user_id?: number } = {
-        store_id: store_id,
-      };
-      if (resolvedUserId) {
-        unsetCriteria.user_id = resolvedUserId;
+      if (!resolvedUserId) {
+        throw new VendixHttpException(
+          ErrorCodes.ADDR_PRIMARY_REQUIRES_CUSTOMER_001,
+          'Selecciona un cliente antes de marcar esta dirección como predeterminada.',
+        );
       }
-      await this.unsetOtherDefaults(unsetCriteria);
+      await this.unsetOtherDefaults(store_id, resolvedUserId);
     }
 
     const address_data: Prisma.addressesUncheckedCreateInput = {
@@ -227,12 +228,13 @@ export class AddressesService {
     const address = await this.findOne(id, user);
 
     if (updateAddressDto.is_primary) {
-      await this.unsetOtherDefaults(
-        {
-          store_id: address.store_id!,
-        },
-        id,
-      );
+      if (!address.user_id) {
+        throw new VendixHttpException(
+          ErrorCodes.ADDR_PRIMARY_REQUIRES_CUSTOMER_001,
+          'Selecciona un cliente antes de marcar esta dirección como predeterminada.',
+        );
+      }
+      await this.unsetOtherDefaults(address.store_id!, address.user_id, id);
     }
 
     const update_data: Prisma.addressesUpdateInput = {};
@@ -302,17 +304,22 @@ export class AddressesService {
   }
 
   private async unsetOtherDefaults(
-    criteria: { store_id?: number; organization_id?: number; user_id?: number },
+    storeId: number,
+    userId: number,
     excludeId?: number,
   ) {
+    if (!userId) {
+      throw new VendixHttpException(
+        ErrorCodes.ADDR_PRIMARY_REQUIRES_CUSTOMER_001,
+        'Selecciona un cliente antes de marcar esta dirección como predeterminada.',
+      );
+    }
     const where: Prisma.addressesWhereInput = {
       is_primary: true,
+      store_id: storeId,
+      user_id: userId,
     };
 
-    if (criteria.store_id) where.store_id = criteria.store_id;
-    if (criteria.organization_id)
-      where.organization_id = criteria.organization_id;
-    if (criteria.user_id) where.user_id = criteria.user_id;
     if (excludeId) where.id = { not: excludeId };
 
     await this.prisma.addresses.updateMany({

@@ -594,4 +594,184 @@ describe('Financial event failure delivery — actual Nest event wrappers', () =
       }),
     ).resolves.toBeDefined();
   });
+
+  describe('descuento de orden: impuestos = proyección de la factura (projectOrderDiscountedTaxes)', () => {
+    // Caso de invoicing.service.order-discount.spec.ts en una sola cuenta:
+    // Camisa 100.000 + IVA 19 % · Licor 100.000 + INC 8 % · Libro exento
+    // 20.000 · envío 5.000 · descuento 10.000 ⇒ 242.000, pagado 142.000 + 100.000.
+    const discounted = (h: ReturnType<typeof harness>) => {
+      h.payments[0].amount = new Prisma.Decimal(142000);
+      h.payments[1].amount = new Prisma.Decimal(100000);
+      Object.assign(h.account, {
+        subtotal_amount: '220000.00',
+        discount_amount: '10000.00',
+        tax_amount: '27000.00',
+        shipping_cost: '5000.00',
+        tip_amount: '0.00',
+        grand_total: '242000.00',
+        lines: [
+          {
+            id: 1,
+            kind: 'item',
+            subtotal_amount: '100000.00',
+            discount_amount: '4545.45',
+            tax_amount: '19000.00',
+            taxes: [
+              { id: 1, tax_type: 'iva', tax_rate: '0.19000', tax_amount: '19000.00', is_compound: false },
+            ],
+          },
+          {
+            id: 2,
+            kind: 'item',
+            subtotal_amount: '100000.00',
+            discount_amount: '4545.46',
+            tax_amount: '8000.00',
+            taxes: [
+              { id: 2, tax_type: 'inc', tax_rate: '0.08000', tax_amount: '8000.00', is_compound: false },
+            ],
+          },
+          {
+            id: 3,
+            kind: 'item',
+            subtotal_amount: '20000.00',
+            discount_amount: '909.09',
+            tax_amount: '0.00',
+            taxes: [],
+          },
+          {
+            id: 4,
+            kind: 'shipping',
+            subtotal_amount: '5000.00',
+            discount_amount: '0.00',
+            tax_amount: '0.00',
+            taxes: [],
+          },
+        ],
+      });
+      return h;
+    };
+    const balanced = (h: ReturnType<typeof harness>) => {
+      const debit = h.journalLines.reduce(
+        (sum, row) => sum.plus(row.debit_amount),
+        new Prisma.Decimal(0),
+      );
+      const credit = h.journalLines.reduce(
+        (sum, row) => sum.plus(row.credit_amount),
+        new Prisma.Decimal(0),
+      );
+      expect(debit.toFixed(2)).toBe(credit.toFixed(2));
+    };
+
+    it('dos pagos: cada asiento cuadra y Σ IVA/INC = los de la factura; 4175 sólo la parte de base', async () => {
+      const h = discounted(harness());
+      await h.service.onPaymentReceived(paymentEvent(100));
+      balanced(h);
+      await h.service.onPaymentReceived(paymentEvent(101));
+      balanced(h);
+      expect(h.amountFor('1105', 'debit_amount')).toBe('242000.00');
+      expect(h.amountFor('4135', 'credit_amount')).toBe('220000.00');
+      expect(h.amountFor('4175', 'debit_amount')).toBe('8906.87');
+      expect(h.amountFor('2408', 'credit_amount')).toBe('18230.76');
+      expect(h.amountFor('2436', 'credit_amount')).toBe('7676.11');
+      // Envío sin descuento.
+      expect(h.amountFor('414505', 'credit_amount')).toBe('5000.00');
+    });
+
+    it('pago parcial + factura de la cuenta: el remanente sale de los mismos componentes proyectados', async () => {
+      const h = discounted(harness());
+      await h.service.onPaymentReceived(paymentEvent(100));
+      h.addInvoice();
+      await h.service.onInvoiceValidated(invoiceEvent());
+      balanced(h);
+      expect(h.amountFor('4135', 'credit_amount')).toBe('220000.00');
+      expect(h.amountFor('4175', 'debit_amount')).toBe('8906.87');
+      expect(h.amountFor('2408', 'credit_amount')).toBe('18230.76');
+      expect(h.amountFor('2436', 'credit_amount')).toBe('7676.11');
+      expect(h.amountFor('1305', 'debit_amount')).toBe('100000.00');
+    });
+
+    describe('envío con impuesto incluido (copia congelada de la orden)', () => {
+      const withShippingTax = (
+        h: ReturnType<typeof harness>,
+        accounts: Array<{ id: number; shipping_cost: string }>,
+      ) => {
+        Object.assign(h.account, {
+          discount_amount: '0.00',
+          grand_total: '252000.00',
+        });
+        h.payments[1].amount = new Prisma.Decimal(110000);
+        (h.account as any).split = {
+          ...h.account.split,
+          source_order: {
+            shipping_cost: '5000.00',
+            shipping_tax_type: 'iva',
+            shipping_tax_rate: '0.19000',
+            shipping_tax_amount: '798.31',
+          },
+          accounts,
+        };
+        return h;
+      };
+
+      it('cuenta con todo el envío: 414505 por la base y el IVA del envío tipado; cuadra', async () => {
+        const h = withShippingTax(discounted(harness()), [
+          { id: 20, shipping_cost: '5000.00' },
+        ]);
+        await h.service.onPaymentReceived(paymentEvent(100));
+        balanced(h);
+        await h.service.onPaymentReceived(paymentEvent(101));
+        balanced(h);
+        expect(h.amountFor('1105', 'debit_amount')).toBe('252000.00');
+        expect(h.amountFor('4135', 'credit_amount')).toBe('220000.00');
+        expect(h.amountFor('414505', 'credit_amount')).toBe('4201.69');
+        expect(h.amountFor('2408', 'credit_amount')).toBe('19798.31');
+        expect(h.amountFor('2436', 'credit_amount')).toBe('8000.00');
+      });
+
+      it('envío repartido entre cuentas: cada una toma su parte del impuesto por mayor residuo', async () => {
+        const h = withShippingTax(discounted(harness()), [
+          { id: 20, shipping_cost: '3000.00' },
+          { id: 21, shipping_cost: '2000.00' },
+        ]);
+        Object.assign(h.account, {
+          shipping_cost: '3000.00',
+          grand_total: '250000.00',
+        });
+        h.payments[1].amount = new Prisma.Decimal(108000);
+        await h.service.onPaymentReceived(paymentEvent(100));
+        balanced(h);
+        await h.service.onPaymentReceived(paymentEvent(101));
+        balanced(h);
+        // 798,31 × 3/5 = 478,986 ⇒ 478,99 (la otra cuenta toma 319,32).
+        expect(h.amountFor('414505', 'credit_amount')).toBe('2521.01');
+        expect(h.amountFor('2408', 'credit_amount')).toBe('19478.99');
+        expect(h.amountFor('1105', 'debit_amount')).toBe('250000.00');
+      });
+
+      it('factura tras pago parcial: el remanente conserva la separación base/impuesto del envío', async () => {
+        const h = withShippingTax(discounted(harness()), [
+          { id: 20, shipping_cost: '5000.00' },
+        ]);
+        await h.service.onPaymentReceived(paymentEvent(100));
+        h.addInvoice();
+        await h.service.onInvoiceValidated(invoiceEvent());
+        balanced(h);
+        expect(h.amountFor('414505', 'credit_amount')).toBe('4201.69');
+        expect(h.amountFor('2408', 'credit_amount')).toBe('19798.31');
+        expect(h.amountFor('1305', 'debit_amount')).toBe('110000.00');
+      });
+    });
+
+    it('sin descuento: componentes históricos intactos', async () => {
+      const h = discounted(harness());
+      Object.assign(h.account, { discount_amount: '0.00', grand_total: '252000.00' });
+      h.payments[1].amount = new Prisma.Decimal(110000);
+      await h.service.onPaymentReceived(paymentEvent(100));
+      await h.service.onPaymentReceived(paymentEvent(101));
+      balanced(h);
+      expect(h.amountFor('4175', 'debit_amount')).toBe('0.00');
+      expect(h.amountFor('2408', 'credit_amount')).toBe('19000.00');
+      expect(h.amountFor('2436', 'credit_amount')).toBe('8000.00');
+    });
+  });
 });

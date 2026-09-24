@@ -2,8 +2,8 @@
 id: E.4
 title: "Cobrar y finalizar desde el detalle sin callejones"
 phase: E
-status: pending
-owner: none
+status: in-progress
+owner: Fabio
 updated: 2026-09-20
 contracts: [FB-04, FB-05, FB-20, FB-22, ERR-03, ERR-18, ERR-36]
 adrs: [ADR-01]
@@ -39,4 +39,4 @@ skills: [vendix-backend, vendix-error-handling, vendix-frontend, vendix-zoneless
   - [ ] Finalizar con platos pendientes devuelve la lista de platos en el detalle del error.
   - [ ] Cada test de rechazo fija el código del error, no solo el tipo de excepción.
   - [ ] Los cuatro carriles de cobro verificados sobre esta pantalla, con evidencia por carril.
-- **Status:** pending
+- **Status:** in-progress — UI adf8bddd0; backend 26a7d7205; 220 tests, DELETE pagado rechazado en API; falta E2E.

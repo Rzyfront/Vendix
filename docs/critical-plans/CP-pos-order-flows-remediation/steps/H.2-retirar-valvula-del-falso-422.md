@@ -2,9 +2,9 @@
 id: H.2
 title: "Retirar la válvula del falso 422 sin exponerla al comerciante"
 phase: H
-status: pending
-owner: none
-updated: 2026-09-22
+status: done
+owner: Fabio
+updated: 2026-09-23
 contracts: [FB-64, FB-65, DB-42, ERR-01]
 adrs: [ADR-10]
 skills: [vendix-backend, vendix-settings-system, vendix-error-handling, how-to-test]
@@ -26,9 +26,9 @@ skills: [vendix-backend, vendix-settings-system, vendix-error-handling, how-to-t
   - `curl -sS -X PATCH "$API/store/settings" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"pos":{"tax_line_gate":"block"}}'` en dataset local con clave legacy → respuesta exitosa; `GET` conserva la clave, pero H.1 cobra la línea sin impuesto. Guardar respuesta en `evidence/H2-settings-legacy.json`.
   - `rg -n 'POS_TABLE_LINE_TAX_UNRESOLVABLE_001' apps/backend/src/domains/store/payments apps/frontend/src/app/core/utils/error-messages.ts` → cero lanzadores y cero CTA incorrectos.
 - **Acceptance checklist:**
-  - [ ] La severidad `block/warn/off` ya no cambia el cobro de una línea nueva sin impuesto.
-  - [ ] No se expone un interruptor fiscal para esquivar el falso 422 ni un CTA «asignar impuesto» para ese caso.
-  - [ ] Un JSON histórico con `tax_line_gate` sigue siendo aceptable al guardar settings y no se borra masivamente.
-  - [ ] La clave no aparece en defaults de tiendas nuevas y el código legado no tiene lanzador activo.
-  - [ ] Evidencia de grep, Jest y PATCH/GET local guardada bajo `evidence/`.
-- **Status:** pending
+  - [x] La severidad `block/warn/off` ya no cambia el cobro de una línea nueva sin impuesto.
+  - [x] No se expone un interruptor fiscal para esquivar el falso 422 ni un CTA «asignar impuesto» para ese caso.
+  - [x] Un JSON histórico con `tax_line_gate` sigue siendo aceptable al guardar settings y no se borra masivamente.
+  - [x] La clave no aparece en defaults de tiendas nuevas y el código legado no tiene lanzador activo.
+  - [x] Evidencia de grep, Jest y PATCH/GET local guardada bajo `evidence/`.
+- **Status:** done · Fabio · 2026-09-23 · `evidence/H2-legacy-settings.md`, `evidence/H2-settings-pos-no-tax-gate.png`, `evidence/H3-ui-pos-table-taxless.md`. Clave `block` preservada tras PATCH/GET de la sección POS completa sin alterar settings; venta real 201/IVA 0; Jest block/warn/off/ausente 104/104, sin lectura/log falso. Sin control UI ni lanzador del código legado.

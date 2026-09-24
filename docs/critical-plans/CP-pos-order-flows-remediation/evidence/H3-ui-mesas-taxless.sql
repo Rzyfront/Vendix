@@ -1,0 +1,4 @@
+select o.id,o.channel,o.delivery_type,o.state,o.subtotal_amount,o.tax_amount,o.grand_total,o.total_paid,o.remaining_balance,ts.id as session_id,ts.table_id,ts.paid_at,ts.closed_at,t.status as table_status from orders o join table_sessions ts on ts.order_id=o.id join tables t on t.id=ts.table_id where o.id in (1124,1125) order by o.id;
+select oi.order_id,oi.product_id,oi.product_name,oi.quantity,oi.tax_amount_item,(select count(*) from order_item_taxes oit where oit.order_item_id=oi.id) as tax_rows from order_items oi where oi.order_id in (1124,1125) order by oi.order_id;
+select order_id,count(*),sum(amount) from payments where order_id in (1124,1125) and state='succeeded' group by order_id order by order_id;
+select settings->'restaurant'->>'enable_table_checkout' from store_settings where store_id=10;

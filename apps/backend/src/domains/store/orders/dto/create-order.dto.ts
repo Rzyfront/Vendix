@@ -15,7 +15,12 @@ import {
   IsDateString,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import { order_state_enum, payments_state_enum } from '@prisma/client';
+import {
+  order_channel_enum,
+  order_delivery_type_enum,
+  order_state_enum,
+  payments_state_enum,
+} from '@prisma/client';
 
 export class CreateOrderItemDto {
   @IsOptional()
@@ -231,12 +236,17 @@ export class CreateOrderDto {
   /**
    * Bug 7 — Tipo de entrega de la orden. Necesario para que
    * `resolveInitialOrderState` decida si la orden va a `pending_delivery`
-   * cuando además incluye un item `product_type='prepared'`. Default histórico
-   * (no enviado) se trata como `pickup`.
+   * cuando además incluye un item `product_type='prepared'`. Si se omite,
+   * `orders.create` persiste `direct_delivery`, igual que el default del schema.
    */
   @IsOptional()
-  @IsIn(['pickup', 'home_delivery', 'direct_delivery', 'other', 'dine_in'])
-  delivery_type?: 'pickup' | 'home_delivery' | 'direct_delivery' | 'other' | 'dine_in';
+  @IsEnum(order_delivery_type_enum)
+  delivery_type?: order_delivery_type_enum;
+
+  /** Canal de origen; si se omite, `orders.create` persiste `pos`. */
+  @IsOptional()
+  @IsEnum(order_channel_enum)
+  channel?: order_channel_enum;
 
   @IsOptional()
   @IsEnum(payments_state_enum)
