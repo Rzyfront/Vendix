@@ -29,8 +29,16 @@ describe('OrderDetailsPageComponent — destino de cancelación', () => {
     });
   });
 
-  it('fails closed instead of sending after_fire_reused to the current cancel DTO', () => {
-    expect(() => cancellationBody('cancel', 'Reutilizar plato', 'reuse', true)).toThrow();
+  it('does not label an unfired item as reused even if the modal retains that choice', () => {
+    expect(cancellationBody('cancel', 'Error de comanda', 'reuse', false)).toEqual({
+      reason: 'Error de comanda',
+    });
+  });
+
+  it('sends the canonical reuse type for a fired dish', () => {
+    expect(cancellationBody('cancel', 'Reutilizar plato', 'reuse', true)).toEqual({
+      reason: 'Reutilizar plato', cancellation_type: 'after_fire_reused',
+    });
   });
 
   it('maps the modal choice to the delivered-reversal destination contract', () => {

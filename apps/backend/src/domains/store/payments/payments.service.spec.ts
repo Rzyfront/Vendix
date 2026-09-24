@@ -3349,7 +3349,7 @@ describe('PaymentsService', () => {
      *   `isDeferredDigitalMethod`: `wompi`/`wallet` difieren al webhook,
      *   `cash`/`card`/`bank_transfer` liquidan en banda.
      */
-    const arrangePosSale = (methodType: string) => {
+    const arrangePosSale = (methodType: string, serialized = false) => {
       // `RequestContextService.getContext` es estático: el espía que instala
       // este helper lo retira el `jest.restoreAllMocks()` del afterEach.
       mockRequestContext({ store_id: 1, organization_id: 1 });
@@ -3393,7 +3393,7 @@ describe('PaymentsService', () => {
         .spyOn(service as any, 'createOrUpdateOrderFromPos')
         .mockResolvedValue({
           order,
-          hasSerialized: false,
+          hasSerialized: serialized,
           promotionsSnapshot: [],
           appliedPromotions: [],
           couponInfo: {
@@ -3478,6 +3478,52 @@ describe('PaymentsService', () => {
         }),
         expect.anything(),
       );
+    });
+
+    it('E.1 serializado para llevar conserva direct_delivery y consume seriales dentro del tx', async () => {
+      const { order } = arrangePosSale('cash', true);
+      const selections = [{ product_id: 77, quantity: 1, serial_ids: [501] }];
+      const preflight = jest.spyOn(service as any, 'assertImmediatePosSerials').mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'processPosPaymentTransaction')
+        .mockResolvedValue({ id: 7, state: 'succeeded' });
+      jest.spyOn(service as any, 'hasPendingKitchenItemsTx').mockResolvedValue(false);
+
+      await expect(service.processPosPayment(buildPosDto({ items: selections }), posUser))
+        .rejects.toThrow(STOP_AFTER_INVENTORY);
+
+      expect(preflight).toHaveBeenCalledWith(expect.anything(), order, selections);
+      expect(commitOrderDeliveryMock).toHaveBeenCalledWith(
+        order.id,
+        expect.objectContaining({ consumeSerials: true, posSelection: selections }),
+        expect.anything(),
+      );
+    });
+
+    it.each(['wompi', 'wallet'])('E.1 rechaza %s diferido antes de cobrar/consumir seriales', async (type) => {
+      arrangePosSale(type, true);
+      await expect(service.processPosPayment(buildPosDto({
+        items: [{ product_id: 77, quantity: 1, serial_ids: [501] }],
+      }), posUser)).rejects.toMatchObject({ errorCode: 'SERIAL_REQUIRED_001' });
+      expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+    });
+
+    it('E.1 rechaza crédito sin pago inmediato para Para llevar serializado', async () => {
+      arrangePosSale('cash', true);
+      await expect(service.processPosPayment(buildPosDto({
+        requires_payment: false,
+        items: [{ product_id: 77, quantity: 1, serial_ids: [501] }],
+      }), posUser)).rejects.toMatchObject({ errorCode: 'SERIAL_REQUIRED_001' });
+      expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+    });
+
+    it('E.1 no declara entregado un borrador serial sin pago', async () => {
+      const { order } = arrangePosSale('cash', true);
+      order.state = 'draft';
+      await expect(service.processPosPayment(buildPosDto({
+        is_draft: true, requires_payment: false,
+      }), posUser)).rejects.toThrow();
+      expect(order.state).toBe('draft');
+      expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
     });
   });
 

@@ -12,6 +12,25 @@ import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities
 import { KdsSessionsService } from '../kds/sessions/kds-sessions.service';
 import { roundMoney2 } from '../taxes/utils/final-price.util';
 
+/** Historical delivered_* values are read-only aliases of the canonical decisions. */
+const POST_CANCEL_REMAKE_TYPES = new Set([
+  'after_fire_reused', 'after_fire_waste',
+  'delivered_restock', 'delivered_waste',
+]);
+
+export function isPostCancelRemake(
+  state: string | null | undefined,
+  reason: string,
+  items: ReadonlyArray<{ cancellation_type: string | null }>,
+): boolean {
+  return state === 'cancelled' && reason === 'remake_dish' &&
+    items.length > 0 && items.every((it) => POST_CANCEL_REMAKE_TYPES.has(it.cancellation_type ?? ''));
+}
+
+export function isWasteRemakeType(type: string | null): boolean {
+  return type === 'after_fire_waste' || type === 'delivered_waste';
+}
+
 /**
  * Single source of truth for the kitchen-ticket payload shape returned to
  * the KDS / POS. Exposes the parent order code (`order.order_number`) plus
@@ -1243,19 +1262,12 @@ export class KitchenFireService {
       where: { id: order.id },
       select: { state: true },
     });
-    // Decisiones que habilitan el remake post-cancelación (las escribe el
-    // flujo de cancelación en `order_items.cancellation_type`).
-    const POST_CANCEL_REMAKE_TYPES = ['after_fire_reused', 'after_fire_waste'];
-    const isPostCancelRemake =
-      orderState?.state === 'cancelled' &&
-      dto.reason === 'remake_dish' &&
-      order.order_items.length > 0 &&
-      order.order_items.every((it) =>
-        POST_CANCEL_REMAKE_TYPES.includes(it.cancellation_type ?? ''),
-      );
+    const postCancelRemake = isPostCancelRemake(
+      orderState?.state, dto.reason, order.order_items,
+    );
     if (
       orderState?.state === 'refunded' ||
-      (orderState?.state === 'cancelled' && !isPostCancelRemake)
+      (orderState?.state === 'cancelled' && !postCancelRemake)
     ) {
       throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_NOT_RESENDABLE);
     }
@@ -1281,7 +1293,7 @@ export class KitchenFireService {
     //    Se levanta SOLO en el remake post-cancelación: la orden cancelada ya
     //    entregó (o desechó) esos platos y el remake los cocina de nuevo por
     //    decisión explícita del operador.
-    if (!isPostCancelRemake) {
+    if (!postCancelRemake) {
       const deliveredRows = await this.prisma.kitchen_ticket_items.findMany({
         where: {
           order_item_id: { in: order.order_items.map((it) => it.id) },
@@ -1335,7 +1347,7 @@ export class KitchenFireService {
     //    - `after_fire_reused` (o sin decisión): el plato se reimprime SIN
     //      tocar stock: camino original sin consumo (paso 6c).
     const wasteItems = order.order_items.filter(
-      (it) => it.cancellation_type === 'after_fire_waste',
+      (it) => isWasteRemakeType(it.cancellation_type),
     );
 
     // 6a. Tickets viejos candidatos a cancelacion (solo en `lost_command`).
@@ -1436,7 +1448,7 @@ export class KitchenFireService {
     //     distintas.
     const plainItems = order.order_items.filter(
       (it) =>
-        it.cancellation_type !== 'after_fire_waste' ||
+        !isWasteRemakeType(it.cancellation_type) ||
         fallbackReuseIds.includes(it.id),
     );
     const snapshotsByKds = new Map<

@@ -22,6 +22,8 @@ import {
 import { StockLevelManager } from '../../../inventory/shared/services/stock-level-manager.service';
 import { resolveRefundStockUnits } from '../../../products/services/packaging.util';
 import { CreateRefundDto } from '../dto/create-refund.dto';
+import { RefundPayoutChannel } from '../dto/resolve-refund.dto';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { SettingsService } from '../../../settings/settings.service';
 import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../../cash-registers/movements/movements.service';
@@ -30,6 +32,12 @@ import { InventorySerialNumbersService } from '../../../inventory/serial-numbers
 import { WalletService } from '../../../wallet/wallet.service';
 import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
 import { PaymentGatewayService } from '../../../payments/services/payment-gateway.service';
+import {
+  ManualRefundDeliveryService,
+  MANUAL_REFUND_DELIVERY_KEY,
+  MANUAL_REFUND_DELIVERY_SOURCE,
+  type ManualRefundDeliveryPayload,
+} from '../../../accounting/auto-entries/manual-refund-delivery.service';
 import {
   resolveEffectiveRefundChannel,
   awaitsExternalReversal,
@@ -65,6 +73,7 @@ export class RefundFlowService {
     // cycle (see order-flow.module.ts:39).
     @Inject(forwardRef(() => PaymentGatewayService))
     private readonly paymentGatewayService: PaymentGatewayService,
+    private readonly manualRefundDelivery: ManualRefundDeliveryService,
   ) {}
 
   /** Cash cancellation uses the same refund document and ceiling as returns,
@@ -80,6 +89,7 @@ export class RefundFlowService {
       shipping_cost: Prisma.Decimal;
       shipping_tax_amount: Prisma.Decimal;
       shipping_tax_type: string | null;
+      tip_amount?: Prisma.Decimal | null;
       currency: string | null;
       payments: { id: number; state: string }[];
     },
@@ -1052,11 +1062,9 @@ export class RefundFlowService {
     targetState: 'completed' | 'failed',
     resolutionNotes: string,
     userId: number,
+    payoutReference?: string,
+    payoutChannel?: RefundPayoutChannel,
   ) {
-    // (3) Re-verificación defensiva de la nota — el DTO ya exige
-    // `@IsNotEmpty()`, pero esta función puede llamarse desde otros
-    // call-sites en el futuro. Trim explícito para no aceptar
-    // `"   "` como nota válida.
     const trimmedNotes =
       typeof resolutionNotes === 'string' ? resolutionNotes.trim() : '';
     if (!trimmedNotes) {
@@ -1064,152 +1072,259 @@ export class RefundFlowService {
         'resolution_notes is required for manual refund resolution',
       );
     }
+    const reference = typeof payoutReference === 'string' ? payoutReference.trim() : '';
+    if (
+      targetState === 'completed' &&
+      (!reference || reference.length > 255 ||
+        !Object.values(RefundPayoutChannel).includes(payoutChannel as RefundPayoutChannel))
+    ) {
+      throw new VendixHttpException(ErrorCodes.REF_PAYOUT_REQUIRED_001);
+    }
 
-    // (1) Scoped lookup (el Store scope del `StorePrismaService` filtra
-    // cross-tenant). Traemos `order_id` junto con `state` y
-    // `processed_at` para validar pertenencia y construir el update
-    // en la misma lectura.
-    const refund = await this.prisma.refunds.findFirst({
-      where: { id: refundId },
+    // refunds has no `stores` relation. The scoped order read establishes the
+    // real store and organization; the refund lookup remains bound to orderId.
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId },
       select: {
         id: true,
-        order_id: true,
-        state: true,
-        processed_at: true,
-        amount: true,
-        subtotal_refund: true,
-        tax_refund: true,
-        shipping_refund: true,
-        refund_method: true,
+        store_id: true,
+        grand_total: true,
+        shipping_cost: true,
+        shipping_tax_amount: true,
+        shipping_tax_type: true,
         stores: { select: { organization_id: true } },
+        order_items: {
+          select: {
+            order_item_taxes: { select: { tax_type: true, tax_amount: true } },
+          },
+        },
+        refunds: {
+          where: { state: 'completed' },
+          select: { id: true, amount: true, shipping_refund: true },
+        },
       },
     });
-    if (!refund || refund.order_id !== orderId) {
-      // ERR-02: 404 con código explícito. No distinguimos "no existe"
-      // de "no pertenece a esta orden / tienda" para no leakear la
-      // existencia de refunds de otras tiendas vía respuesta
-      // diferenciada.
-      throw new NotFoundException(`Refund #${refundId} not found`);
+    if (!order?.stores?.organization_id) {
+      throw new NotFoundException(`Order #${orderId} not found`);
     }
-
-    // (2) Guarda de estado no-terminal. `completed | failed | cancelled`
-    // son terminales: reescribir uno corrompería el histórico contable.
-    // El plan declara este caso ERR-01 (409) — aquí usamos
-    // BadRequestException porque ya es el patrón del archivo (línea
-    // 870 y siguientes); el filtro global del módulo contable acepta
-    // códigos 4xx indistintamente para mapeo cliente.
-    const terminalStates: refunds_state_enum[] = [
-      refunds_state_enum.completed,
-      refunds_state_enum.failed,
-      refunds_state_enum.cancelled,
-    ];
-    if (terminalStates.includes(refund.state)) {
-      throw new BadRequestException(
-        `Refund #${refundId} is already in terminal state '${refund.state}' and cannot be resolved again`,
-      );
-    }
-
-    const newState =
-      targetState === 'completed'
-        ? refunds_state_enum.completed
-        : refunds_state_enum.failed;
-
-    // `processed_at` se setea cuando el refund termina EXITOSAMENTE.
-    // Si va a `failed` y ya tenía valor (poco probable, pero por si
-    // el processor lo había marcado y luego queremos forzar `failed`
-    // vía manual), preservamos ese valor histórico. Si era null,
-    // sigue null — un `failed` no es una "ejecución completada".
-    const processedAt =
-      newState === refunds_state_enum.completed
-        ? new Date()
-        : refund.processed_at ?? null;
-
-    const updatedRefund = await this.prisma.refunds.update({
-      where: { id: refundId },
-      data: {
-        state: newState,
-        resolved_by_user_id: userId,
-        resolution_notes: trimmedNotes,
-        processed_at: processedAt,
-        updated_at: new Date(),
-      },
-    });
-
-    // (4) Emit canónico — exactamente el mismo shape que usa
-    // `createRefund` en líneas 485-509. Los listeners de contabilidad
-    // y de invalidación de caché consumen este evento.
-    if (newState === refunds_state_enum.completed) {
-      // Lookup del canal efectivo para que la contabilidad enrute a la
-      // PUC correcta (1105/1110/2335). Se calcula contra el método de
-      // pago ORIGINAL — el operador que cerró el refund no lo cambió,
-      // sólo cerró la fila. Re-llamamos al resolver con el input
-      // `paymentType` que la orden llevaba cuando se creó el refund.
-      //
-      // Esta consulta extra es aceptable: el resolve endpoint es
-      // operator-driven (1-2 clicks), no high-throughput. Si el
-      // resolver requiere `payments` que la fila no carga, devolvemos
-      // `null` y el listener cae al fallback `cash` — mismo
-      // comportamiento que el emit original cuando no hay pagos. El
-      // log warning deja rastro para diagnóstico.
-      const refundWithPayment = await this.prisma.refunds.findFirst({
-        where: { id: refundId },
-        include: {
-          payments: {
-            select: {
-              store_payment_method: {
-                select: { system_payment_method: { select: { type: true } } },
+    const refund = await this.prisma.refunds.findFirst({
+      where: { id: refundId, order_id: orderId },
+      include: {
+        refund_items: {
+          select: {
+            tax_amount: true,
+            order_items: {
+              select: {
+                order_item_taxes: { select: { tax_type: true, tax_amount: true } },
               },
             },
           },
         },
-      });
-      let paymentType: string | null = null;
-      if (
-        refundWithPayment?.payments?.store_payment_method?.system_payment_method
-          ?.type
-      ) {
-        paymentType =
-          refundWithPayment.payments.store_payment_method
-            .system_payment_method.type;
-      }
-      const effectiveChannel = resolveEffectiveRefundChannel(
-        refund.refund_method ?? 'original_payment',
-        paymentType,
-      );
-
-      this.eventEmitter.emit('refund.completed', {
-        refund_id: updatedRefund.id,
-        order_id: orderId,
-        organization_id: refund.stores?.organization_id,
-        store_id: undefined, // El refund row no carga store_id directamente;
-        //   el listener de cache lo usa opcionalmente. Lo dejamos
-        //   undefined para no inventar el id — si el listener lo
-        //   necesita, la organización ya está en el payload.
-        amount: Number(updatedRefund.amount),
-        subtotal: refund.subtotal_refund ? Number(refund.subtotal_refund) : undefined,
-        tax: refund.tax_refund ? Number(refund.tax_refund) : undefined,
-        tax_amount: refund.tax_refund ? Number(refund.tax_refund) : undefined,
-        shipping: refund.shipping_refund
-          ? Number(refund.shipping_refund)
-          : undefined,
-        is_full_refund: false, // El manual resolve NO es por flujo completo —
-        //   la UX permite ambos. Sin este dato en la URL no podemos
-        //   inferir; lo marcamos false para que contabilidad no
-        //   aplique lógica de refund total.
-        user_id: userId,
-        refund_method: refund.refund_method ?? undefined,
-        effective_channel: effectiveChannel,
-        resolution_notes: trimmedNotes,
-      });
+      },
+    });
+    if (!refund || refund.order_id !== orderId) {
+      throw new NotFoundException(`Refund #${refundId} not found`);
     }
 
-    // Log diagnóstico — el caller sólo necesita la fila actualizada, pero
-    // el equipo de soporte revisa el log para auditar quién cerró qué.
+    const nonterminalStates: refunds_state_enum[] = [
+      refunds_state_enum.requested,
+      refunds_state_enum.pending_approval,
+      refunds_state_enum.approved,
+      refunds_state_enum.processing,
+    ];
+    if (!nonterminalStates.includes(refund.state)) {
+      throw new VendixHttpException(
+        ErrorCodes.REF_RESOLUTION_CONFLICT_001,
+        `Refund #${refundId} is already in terminal state '${refund.state}' and cannot be resolved again`,
+      );
+    }
+    if (
+      targetState === 'completed' &&
+      refund.refund_transaction_id &&
+      refund.refund_transaction_id !== reference
+    ) {
+      // A gateway refund ID may already occupy this unique column. Never
+      // overwrite it with a different manual payout reference.
+      throw new VendixHttpException(ErrorCodes.REF_RESOLUTION_CONFLICT_001);
+    }
+
+    const newState = targetState === 'completed'
+      ? refunds_state_enum.completed
+      : refunds_state_enum.failed;
+    const processedAt = newState === refunds_state_enum.completed
+      ? new Date()
+      : refund.processed_at ?? null;
+    const updateData = {
+      state: newState,
+      resolved_by_user_id: userId,
+      resolution_notes: trimmedNotes,
+      processed_at: processedAt,
+      updated_at: new Date(),
+      ...(targetState === 'completed' ? {
+        refund_transaction_id: reference,
+        refund_method: payoutChannel!,
+      } : {}),
+    };
+    let deliveryId: number | null = null;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Serialize two manual completions for the same order, so the prior
+        // shipping/tip allocation snapshot has a deterministic predecessor.
+        await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND store_id = ${order.store_id} FOR UPDATE`;
+        const prior = await tx.refunds.findMany({
+          where: { order_id: orderId, state: 'completed' }, select: { id: true },
+        });
+        const claim = await tx.refunds.updateMany({
+          where: {
+            id: refundId, order_id: orderId,
+            state: { in: nonterminalStates },
+          },
+          data: updateData,
+        });
+        if (claim.count !== 1) throw new VendixHttpException(ErrorCodes.REF_RESOLUTION_CONFLICT_001);
+        if (targetState === 'completed') {
+          const payload: ManualRefundDeliveryPayload = {
+            version: 1, refund_id: refundId, order_id: orderId,
+            organization_id: order.stores.organization_id,
+            store_id: order.store_id, user_id: userId,
+            payout_channel: payoutChannel!,
+            prior_refund_ids: prior.map((row) => row.id),
+          };
+          const delivery = await tx.accounting_entry_failures.create({ data: {
+            organization_id: payload.organization_id,
+            store_id: payload.store_id,
+            handler_key: MANUAL_REFUND_DELIVERY_KEY,
+            source_type: MANUAL_REFUND_DELIVERY_SOURCE,
+            source_id: refundId,
+            event_payload: payload as unknown as Prisma.InputJsonValue,
+            error_message: 'PENDING_DELIVERY: manual refund accounting not yet posted',
+          } });
+          deliveryId = delivery.id;
+        }
+      });
+    } catch (error) {
+      if ((error as { code?: string })?.code === 'P2002') {
+        throw new VendixHttpException(ErrorCodes.REF_RESOLUTION_CONFLICT_001);
+      }
+      throw error;
+    }
+    const updatedRefund = { ...refund, ...updateData };
+    if (deliveryId !== null) {
+      // The row survives a process crash here; the retry worker also sweeps
+      // stranded rows. A journal failure cannot undo a real-world payout.
+      try { await this.manualRefundDelivery.deliver(deliveryId); }
+      catch (error) {
+        this.logger.error(`Refund #${refundId} accounting delivery #${deliveryId} remains unresolved: ${error}`);
+        try { await this.manualRefundDelivery.enqueue(deliveryId); }
+        catch (queueError) { this.logger.error(`Refund #${refundId} delivery retry could not be queued: ${queueError}`); }
+      }
+      try {
+        this.eventEmitter.emit('refund.completed', {
+          refund_id: refundId, order_id: orderId,
+          organization_id: order.stores.organization_id, store_id: order.store_id,
+          accounting_delivery: 'manual_durable',
+        });
+      } catch (error) {
+        this.logger.error(`Refund #${refundId} cache invalidation event failed: ${error}`);
+      }
+    }
     this.logger.log(
       `Refund #${refundId} (order #${orderId}) manually resolved to '${newState}' by user #${userId}: "${trimmedNotes.slice(0, 80)}${trimmedNotes.length > 80 ? '…' : ''}"`,
     );
-
     return updatedRefund;
+  }
+
+  private buildManualRefundCompletion(
+    order: {
+      grand_total: Prisma.Decimal;
+      shipping_cost: Prisma.Decimal;
+      shipping_tax_amount: Prisma.Decimal;
+      shipping_tax_type: string | null;
+      order_items: { order_item_taxes: { tax_type: string | null; tax_amount: Prisma.Decimal }[] }[];
+      refunds: { id: number; amount: Prisma.Decimal; shipping_refund: Prisma.Decimal | null }[];
+    },
+    refund: {
+      id: number;
+      amount: Prisma.Decimal;
+      subtotal_refund: Prisma.Decimal | null;
+      tax_refund: Prisma.Decimal | null;
+      shipping_refund: Prisma.Decimal | null;
+      refund_items: {
+        tax_amount: Prisma.Decimal | null;
+        order_items: { order_item_taxes: { tax_type: string | null; tax_amount: Prisma.Decimal }[] };
+      }[];
+    },
+  ): { taxAmount: number; taxBreakdown: TaxBreakdownItem[]; isFullRefund: boolean } {
+    const productTax = new Prisma.Decimal(refund.tax_refund ?? 0);
+    const shipping = new Prisma.Decimal(refund.shipping_refund ?? 0);
+    const subtotal = new Prisma.Decimal(refund.subtotal_refund ?? 0);
+    const amount = new Prisma.Decimal(refund.amount);
+    if (
+      amount.lessThanOrEqualTo(0) ||
+      subtotal.lessThan(0) || productTax.lessThan(0) || shipping.lessThan(0) ||
+      !subtotal.plus(productTax).plus(shipping).equals(amount)
+    ) {
+      throw new VendixHttpException(ErrorCodes.REF_TAX_BREAKDOWN_MISSING_001);
+    }
+
+    // Item refunds use only their refunded lines. Payment-scoped cancellation
+    // refunds have no items and use the whole order's original fiscal mix.
+    const productRows = refund.refund_items.length > 0
+      ? refund.refund_items.flatMap((item) =>
+          scaleBreakdownToTotal(
+            buildTaxBreakdown(item.order_items.order_item_taxes),
+            Number(item.tax_amount ?? 0),
+          ),
+        )
+      : scaleBreakdownToTotal(
+          buildTaxBreakdown(order.order_items.flatMap((item) => item.order_item_taxes)),
+          Number(productTax),
+        );
+    const taxBreakdown = buildTaxBreakdown(productRows);
+    const typedProductTax = taxBreakdown.reduce(
+      (sum, row) => sum.plus(row.tax_amount), new Prisma.Decimal(0),
+    );
+    if (!typedProductTax.equals(productTax)) {
+      throw new VendixHttpException(ErrorCodes.REF_TAX_BREAKDOWN_MISSING_001);
+    }
+
+    let shippingTaxCents = 0;
+    const shippingTaxTotal = new Prisma.Decimal(order.shipping_tax_amount);
+    if (shipping.greaterThan(0) && shippingTaxTotal.greaterThan(0)) {
+      const shippingCostCents = new Prisma.Decimal(order.shipping_cost).times(100).toNumber();
+      if (shippingCostCents <= 0 || !order.shipping_tax_type) {
+        throw new VendixHttpException(ErrorCodes.REF_TAX_BREAKDOWN_MISSING_001);
+      }
+      const totalTaxCents = shippingTaxTotal.times(100).toNumber();
+      const currentCents = shipping.times(100).toNumber();
+      const prior = order.refunds.filter((row) => row.id !== refund.id);
+      const priorShippingCents = prior.reduce(
+        (sum, row) => sum + new Prisma.Decimal(row.shipping_refund ?? 0).times(100).toNumber(), 0,
+      );
+      const proportional = (cents: number) => Math.round(totalTaxCents * cents / shippingCostCents);
+      const priorTaxCents = prior.reduce(
+        (sum, row) => sum + proportional(new Prisma.Decimal(row.shipping_refund ?? 0).times(100).toNumber()), 0,
+      );
+      if (priorShippingCents + currentCents > shippingCostCents || priorTaxCents > totalTaxCents) {
+        throw new VendixHttpException(ErrorCodes.REF_TAX_BREAKDOWN_MISSING_001);
+      }
+      shippingTaxCents = priorShippingCents + currentCents >= shippingCostCents
+        ? totalTaxCents - priorTaxCents
+        : Math.min(totalTaxCents - priorTaxCents, proportional(currentCents));
+      taxBreakdown.push({
+        tax_type: order.shipping_tax_type as TaxBreakdownItem['tax_type'],
+        tax_amount: shippingTaxCents / 100,
+      });
+    }
+    const taxAmount = productTax.plus(new Prisma.Decimal(shippingTaxCents).div(100)).toNumber();
+    const completedTotal = order.refunds.reduce(
+      (sum, row) => sum.plus(row.amount), new Prisma.Decimal(0),
+    );
+    return {
+      taxAmount,
+      taxBreakdown,
+      isFullRefund: completedTotal.plus(amount).greaterThanOrEqualTo(order.grand_total),
+    };
   }
 
   /**

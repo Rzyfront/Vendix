@@ -3009,7 +3009,7 @@ export class OrderFlowService {
 
     const trimmedReason = reason.trim();
     const cancellationType =
-      destination === 'restock' ? 'delivered_restock' : 'delivered_waste';
+      destination === 'restock' ? 'after_fire_reused' : 'after_fire_waste';
     const userId = RequestContextService.getUserId() ?? null;
     // A prepared product is never restocked as the sold dish, even when its
     // historical fire flag/consumption is absent (recipe-less or legacy row).

@@ -2133,10 +2133,8 @@ export class PosProductSelectionComponent {
       return;
     }
 
-    // QUI-431: serialized products NO longer capture serials at the POS.
-    // The serial numbers are now registered when the dispatch remission is
-    // confirmed, so the add proceeds directly without opening the (kept, but
-    // unused-here) serial-selection modal and without aborting on cancel.
+    // E.1: add to cart without committing serials yet; Para llevar captures
+    // them in the Cobro step immediately before the payment transaction.
     this.addingToCart.add(product.id);
 
     this.cartService
@@ -2535,10 +2533,8 @@ export class PosProductSelectionComponent {
       skipKds = choice === 'stock';
     }
 
-    // QUI-431: serialized products NO longer capture serials at the POS.
-    // The serial numbers are now registered when the dispatch remission is
-    // confirmed, so the add proceeds directly without opening the (kept, but
-    // unused-here) serial-selection modal and without aborting on cancel.
+    // E.1: add to cart without committing serials yet; Para llevar captures
+    // them in the Cobro step immediately before the payment transaction.
 
     // Regular unit product
     this.addingToCart.add(product.id);

@@ -85,6 +85,29 @@ describe('PosPaymentService.processShippingSale — adopted order reference', ()
     expect(payload.shipping_address_id).toBeUndefined();
     expect(payload.shipping_address_snapshot).toEqual(shipping.shippingAddress);
   });
+
+  it('routes a serialized adopted takeaway through POS tx with exact serial selection', async () => {
+    const serializedCart = {
+      ...cart(41),
+      items: [{
+        id: 'line-1', itemType: 'product',
+        product: { id: '77', name: 'Teléfono', requires_serial_numbers: true },
+        quantity: 2, unitPrice: 500, finalPrice: 500, totalPrice: 1000, taxAmount: 0,
+        serial_ids: [10], serial_numbers: ['IMEI-2'],
+      }],
+    } as unknown as CartState;
+    await firstValueFrom(service.processSaleWithPayment(
+      serializedCart,
+      { paymentMethod: { id: '1', type: 'cash' }, isAnonymousSale: false } as any,
+      'current_user', null, null, true, true,
+    ));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.order_id).toBe(41);
+    expect(payload.delivery_type).toBe('direct_delivery');
+    expect(payload.items[0]).toEqual(jasmine.objectContaining({
+      serial_ids: [10], serial_numbers: ['IMEI-2'],
+    }));
+  });
 });
 
 describe('PosPaymentService.processSaleWithPayment — prior table status', () => {

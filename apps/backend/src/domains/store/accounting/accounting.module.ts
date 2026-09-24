@@ -46,6 +46,7 @@ import {
   ACCOUNTING_ENTRY_RETRY_QUEUE,
 } from './auto-entries/accounting-entry-failure.service';
 import { AccountingEntryRetryProcessor } from './auto-entries/processors/accounting-entry-retry.processor';
+import { ManualRefundDeliveryService } from './auto-entries/manual-refund-delivery.service';
 import { EntryFailuresController } from './auto-entries/entry-failures.controller';
 import { PlatformOrgService } from '../../../common/services/platform-org.service';
 
@@ -122,6 +123,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     AutoEntryService,
     AccountingEventsListener,
     AccountingEntryFailureService,
+    ManualRefundDeliveryService,
     DispatchSettlementListener,
     AccountingEntryRetryProcessor,
     PlatformOrgService,
@@ -153,6 +155,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     AccountingReportsService,
     AccountMappingService,
     AutoEntryService,
+    ManualRefundDeliveryService,
     BankAccountsService,
     BankTransactionsService,
     ReconciliationService,

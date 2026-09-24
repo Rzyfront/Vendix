@@ -229,6 +229,9 @@ export class PosPaymentService {
       price_override_reason: item.isPriceOverridden
         ? item.priceOverrideReason
         : undefined,
+      // E.1: exact cashier-confirmed units reach the transactional stock/serial seam.
+      ...(!isCustomItem && item.serial_ids?.length ? { serial_ids: item.serial_ids } : {}),
+      ...(!isCustomItem && item.serial_numbers?.length ? { serial_numbers: item.serial_numbers } : {}),
       // Plan KDS fire-flows (F1): forward the cashier's "usar stock" intent
       // from the cart so the backend can persist it on order_items and
       // route the line through the payment-side inventory decrement
@@ -393,6 +396,8 @@ export class PosPaymentService {
     // QUI-653 — decisión "Para llevar" de la orden (el shell la computa como
     // `isTakeawayOrder`). Se estampa en las líneas sin mutar el carrito.
     takeawayOrder?: boolean | null,
+    /** Route a serialized adopted draft through the POS order transaction, not flow/pay. */
+    usePosOrderTransaction = false,
   ): Observable<PosSalePaymentResponse> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
@@ -407,7 +412,7 @@ export class PosPaymentService {
     // QUI-649 — bifurcar al processor de orden adoptada: carga el
     // `linkedOrderId` directamente, con table session + restaurant table
     // propagados al backend para que el cierre de mesa refleje el cobro.
-    if (cartState.linkedOrderId != null) {
+    if (cartState.linkedOrderId != null && !usePosOrderTransaction) {
       return this.chargeAdoptedOrder(
         cartState,
         paymentRequest,
@@ -442,6 +447,12 @@ export class PosPaymentService {
     //   calculation.
     const sale_data: any = {
       store_id: this.getStoreId(),
+      ...(usePosOrderTransaction && cartState.linkedOrderId != null
+        ? { order_id: cartState.linkedOrderId }
+        : {}),
+      ...(tableSessionId == null && tableId == null
+        ? { delivery_type: 'direct_delivery' }
+        : {}),
       // QUI-653 — 'Para llevar' de la orden estampado por línea.
       items: this.mapCartItemsForPos(cartState, takeawayOrder === true),
       subtotal: Number(

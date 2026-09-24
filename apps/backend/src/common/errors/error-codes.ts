@@ -1786,6 +1786,21 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Refund validation failed',
   },
+  REF_PAYOUT_REQUIRED_001: {
+    code: 'REF_PAYOUT_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'Completed manual refund requires payout reference and channel',
+  },
+  REF_RESOLUTION_CONFLICT_001: {
+    code: 'REF_RESOLUTION_CONFLICT_001',
+    httpStatus: 409,
+    devMessage: 'Refund resolution conflicts with its current state or payout reference',
+  },
+  REF_TAX_BREAKDOWN_MISSING_001: {
+    code: 'REF_TAX_BREAKDOWN_MISSING_001',
+    httpStatus: 409,
+    devMessage: 'Refund tax breakdown cannot be reconstructed safely',
+  },
 
   // Superadmin
   SUP_ADMIN_USER_001: {

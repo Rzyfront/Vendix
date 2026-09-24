@@ -212,15 +212,13 @@ export function cancellationBody(
   reason: string,
   destination: ItemCancellationDestination,
   preparedFired: boolean,
-): { reason: string; cancellation_type?: 'after_fire_waste'; destination?: 'waste' | 'restock' } {
+): { reason: string; cancellation_type?: 'after_fire_reused' | 'after_fire_waste'; destination?: 'waste' | 'restock' } {
   if (mode === 'reverse') {
     return { reason, destination: destination === 'reuse' ? 'restock' : 'waste' };
   }
-  // The current CancelOrderItemDto does not accept after_fire_reused.
-  if (preparedFired && destination === 'reuse') {
-    throw new Error('El contrato de cancelación aún no admite reutilizar este plato.');
-  }
-  return preparedFired ? { reason, cancellation_type: 'after_fire_waste' } : { reason };
+  return preparedFired
+    ? { reason, cancellation_type: destination === 'reuse' ? 'after_fire_reused' : 'after_fire_waste' }
+    : { reason };
 }
 
 /**
@@ -4061,7 +4059,7 @@ export class OrderDetailsPageComponent {
   });
 
   readonly canReuseCancellation = computed(() =>
-    this.cancellationTarget()?.mode === 'reverse',
+    this.cancellationTarget()?.mode === 'reverse' || this.cancellationPreparedFired(),
   );
 
   private cancellationBlockedByPayment(): boolean {

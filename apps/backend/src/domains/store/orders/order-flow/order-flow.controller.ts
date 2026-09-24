@@ -527,6 +527,8 @@ export class OrderFlowController {
    * cierra a mano como `completed` (la plata ya se movió por otro canal,
    * p.ej. transferencia bancaria) o `failed` (el processor devolvió
    * algo que no levantó error pero la operación no se completó).
+   * `completed` exige referencia de egreso y canal real; `failed` conserva
+   * el contrato anterior de solo motivo de resolución.
    *
    * Permisos: misma política que `cancel-payment` y `forgive-installment`
    * (reuso `store:orders:order_flow:create` + `@Roles('owner', 'admin')`).
@@ -553,6 +555,8 @@ export class OrderFlowController {
       dto.target_state,
       dto.resolution_notes,
       userId,
+      dto.payout_reference,
+      dto.payout_channel,
     );
     return this.responseService.success(
       refund,

@@ -141,6 +141,63 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
     expect(result.committedItemCount).toBe(1);
   });
 
+  it.each([undefined, [{ product_id: 100, product_variant_id: null, serial_ids: [], serial_numbers: [] }]])(
+    'direct_delivery serial exige selección explícita aun si flow/pay omite flags FE (%s)',
+    async (posSelection) => {
+      const direct = buildOrder();
+      direct.order_items[0].products = {
+        ...direct.order_items[0].products,
+        product_type: 'physical',
+        requires_serial_numbers: true,
+      } as any;
+      txMock.orders.findUnique.mockResolvedValue({ ...direct, delivery_type: 'direct_delivery' });
+      serialEnforcementMock.isSerialized.mockResolvedValue(true);
+      await expect(service.commitOrderDelivery(1, {
+        ...OPTS, consumeSerials: true, posSelection,
+      }, txMock)).rejects.toMatchObject({ errorCode: 'SERIAL_REQUIRED_001' });
+      expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+      expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('direct_delivery serial rejects a selection for a different product', async () => {
+    const direct = buildOrder();
+    direct.order_items[0].products = {
+      ...direct.order_items[0].products, product_type: 'physical',
+      requires_serial_numbers: true,
+    } as any;
+    txMock.orders.findUnique.mockResolvedValue({ ...direct, delivery_type: 'direct_delivery' });
+    await expect(service.commitOrderDelivery(1, {
+      ...OPTS, consumeSerials: true,
+      posSelection: [{ product_id: 999, serial_ids: [1] }],
+    }, txMock)).rejects.toMatchObject({ errorCode: 'SERIAL_REQUIRED_001' });
+    expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('direct_delivery serial with confirmed selection still commits and links the line', async () => {
+    const direct = buildOrder();
+    direct.order_items[0].products = {
+      ...direct.order_items[0].products, product_type: 'physical',
+      requires_serial_numbers: true,
+    } as any;
+    txMock.orders.findUnique.mockResolvedValue({ ...direct, delivery_type: 'direct_delivery' });
+    txMock.order_items.updateMany.mockResolvedValue({ count: 1 });
+    serialEnforcementMock.isSerialized.mockResolvedValue(true);
+    serialEnforcementMock.resolveOrCreateFromFreeText = jest.fn().mockResolvedValue([]);
+    serialEnforcementMock.requireConfirmedSerials = jest.fn().mockResolvedValue(undefined);
+    serialNumbersMock.transition = jest.fn().mockResolvedValue({ serial_number: 'IMEI-1' });
+    serialNumbersMock.linkToDocument = jest.fn().mockResolvedValue(undefined);
+
+    const result = await service.commitOrderDelivery(1, {
+      ...OPTS, consumeSerials: true,
+      posSelection: [{ product_id: 100, product_variant_id: null, serial_ids: [1] }],
+    }, txMock);
+
+    expect(result.committedItemCount).toBe(1);
+    expect(serialNumbersMock.linkToDocument).toHaveBeenCalledWith(1, 'order_item', 10, txMock);
+    expect(stockLevelManagerMock.updateStock).toHaveBeenCalledTimes(1);
+  });
+
   it('no vuelve a consumir un plato cuyo BOM ya se descontó al disparar a cocina', async () => {
     const firedOrder: any = buildOrder();
     firedOrder.stores.industries = ['restaurant'];

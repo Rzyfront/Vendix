@@ -142,7 +142,7 @@ export interface TableSessionView {
       // texto/datetime, no afectan el reporte que cocina lee.
       cancelled_at: Date | null;
       cancellation_reason: string | null;
-      cancellation_type: 'before_fire' | 'after_fire_waste' | null;
+      cancellation_type: 'before_fire' | 'after_fire_reused' | 'after_fire_waste' | 'delivered_restock' | 'delivered_waste' | null;
       // KDS state per dish (Restaurant Suite — Gap 2 pattern, mirrors
       // orders.service.findOne). Ordered desc by id so the most recent
       // ticket-item wins; empty for items never fired to the kitchen.
@@ -2318,7 +2318,10 @@ export class TableSessionsService {
               cancellation_reason: it.cancellation_reason,
               cancellation_type: it.cancellation_type as
                 | 'before_fire'
+                | 'after_fire_reused'
                 | 'after_fire_waste'
+                | 'delivered_restock'
+                | 'delivered_waste'
                 | null,
               kitchen_ticket_items: it.kitchen_ticket_items.map((kti) => ({
                 id: kti.id,

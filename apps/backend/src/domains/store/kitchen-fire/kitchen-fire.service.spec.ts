@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { KitchenFireService } from './kitchen-fire.service';
+import { KitchenFireService, isPostCancelRemake, isWasteRemakeType } from './kitchen-fire.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RecipesService } from '../recipes/recipes.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
@@ -18,6 +18,113 @@ interface FakeStockLevel {
   quantity_available: number;
   cost_per_unit: any;
 }
+
+describe('KitchenFireService — post-cancel remake vocabulary', () => {
+  const item = (cancellation_type: string | null) => ({ cancellation_type });
+
+  it.each(['after_fire_reused', 'after_fire_waste', 'delivered_restock', 'delivered_waste'])(
+    'accepts %s on a cancelled order only for remake_dish', (type) => {
+      expect(isPostCancelRemake('cancelled', 'remake_dish', [item(type)])).toBe(true);
+      expect(isPostCancelRemake('cancelled', 'lost_command', [item(type)])).toBe(false);
+      expect(isPostCancelRemake('refunded', 'remake_dish', [item(type)])).toBe(false);
+    },
+  );
+
+  it('rejects before_fire, unknown, empty, and mixed undecided selections', () => {
+    expect(isPostCancelRemake('cancelled', 'remake_dish', [item('before_fire')])).toBe(false);
+    expect(isPostCancelRemake('cancelled', 'remake_dish', [item('inventado')])).toBe(false);
+    expect(isPostCancelRemake('cancelled', 'remake_dish', [])).toBe(false);
+    expect(isPostCancelRemake('cancelled', 'remake_dish', [item('after_fire_reused'), item(null)])).toBe(false);
+  });
+
+  it('reconsumes waste aliases but not reuse aliases', () => {
+    expect(isWasteRemakeType('after_fire_waste')).toBe(true);
+    expect(isWasteRemakeType('delivered_waste')).toBe(true);
+    expect(isWasteRemakeType('after_fire_reused')).toBe(false);
+    expect(isWasteRemakeType('delivered_restock')).toBe(false);
+  });
+});
+
+describe('KitchenFireService — remake consumption after D2 reuse', () => {
+  const orderItem = (id: number, cancellation_type: string) => ({
+    id, product_id: id + 100, product_name: `Plato ${id}`, quantity: 1,
+    product_variant_id: null, notes: null, inventory_consumed_at_fire: true,
+    cancellation_type, cancelled_at: new Date('2026-09-23T10:00:00Z'),
+    products: { id: id + 100, kds_id: null }, product_variants: null,
+  });
+
+  const harness = (items = [orderItem(7, 'after_fire_reused')]) => {
+    const order = { id: 100, store_id: 1, order_number: 'ORD-100', table_sessions: [], order_items: items };
+    const tx: any = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 100 }]),
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      orders: { findFirst: jest.fn().mockResolvedValue({ id: 100, state: 'cancelled' }) },
+      order_items: { findMany: jest.fn().mockResolvedValue(items), updateMany: jest.fn().mockResolvedValue({ count: items.length }) },
+      kitchen_ticket_items: { findFirst: jest.fn().mockResolvedValue(null) },
+      kitchen_tickets: { count: jest.fn().mockResolvedValue(0), create: jest.fn().mockResolvedValue({ id: 55, items: [] }) },
+    };
+    const prisma: any = {
+      stores: { findUnique: jest.fn().mockResolvedValue({ industries: ['restaurant'] }) },
+      orders: { findFirst: jest.fn().mockResolvedValue(order), findUnique: jest.fn().mockResolvedValue({ state: 'cancelled' }) },
+      kds: { findFirst: jest.fn().mockResolvedValue({ id: 5 }) },
+      kitchen_tickets: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn((fn: (tx: any) => Promise<unknown>) => fn(tx)),
+    };
+    const events = { emit: jest.fn() };
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, organization_id: 2, user_id: 3 } as any);
+    const service = new KitchenFireService(prisma, {} as any, {} as any, events as any, {} as any, {} as any);
+    jest.spyOn(service as any, 'getBusinessDate').mockResolvedValue('2026-09-23');
+    const fireContext = { firedItemIds: items.map((it) => it.id), skippedItemIds: [] };
+    const prepare = jest.spyOn(service, 'prepareFireContext').mockResolvedValue(fireContext as any);
+    const fire = jest.spyOn(service, 'fireOrderItemsInTx').mockResolvedValue({
+      ticketId: 55, ticketIds: [55], firedItemSnapshots: items.map((it) => ({ orderItemId: it.id })),
+      cogsTotal: 29, consumedLineCount: 3,
+    } as any);
+    return { service, prisma, tx, events, prepare, fire };
+  };
+
+  it('reconsumes a reused dish via canonical fire and emits one COGS event', async () => {
+    const { service, tx, events, prepare, fire } = harness();
+    const result = await service.resendOrderItems({ order_id: 100, order_item_ids: [7], reason: 'remake_dish' });
+    expect(prepare).toHaveBeenCalledWith(100, [7], tx);
+    expect(fire).toHaveBeenCalledTimes(1);
+    expect(fire).toHaveBeenCalledWith(tx, 1, expect.any(Object));
+    expect(tx.kitchen_tickets.create).not.toHaveBeenCalled();
+    expect(events.emit).toHaveBeenCalledTimes(1);
+    expect(events.emit).toHaveBeenCalledWith('kitchen.fired', expect.objectContaining({
+      order_id: 100, total_cost: 29, consumed_line_count: 3,
+    }));
+    expect(result.ticketIds).toEqual([55]);
+  });
+
+  it('consumes mixed reuse+waste once each, not through two fire passes', async () => {
+    const { service, prepare, fire, events, tx } = harness([
+      orderItem(7, 'after_fire_reused'), orderItem(8, 'after_fire_waste'),
+    ]);
+    await service.resendOrderItems({ order_id: 100, order_item_ids: [7, 8], reason: 'remake_dish' });
+    expect(prepare).toHaveBeenCalledWith(100, [7, 8], tx);
+    expect(fire).toHaveBeenCalledTimes(1);
+    expect(events.emit).toHaveBeenCalledTimes(1);
+  });
+
+  it('rolls back a failed canonical fire without COGS event or plain ticket', async () => {
+    const { service, fire, tx, events } = harness();
+    fire.mockRejectedValueOnce(new Error('stock unavailable'));
+    await expect(service.resendOrderItems({ order_id: 100, order_item_ids: [7], reason: 'remake_dish' }))
+      .rejects.toThrow('stock unavailable');
+    expect(tx.kitchen_tickets.create).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
+  });
+
+  it('rejects a replay after a post-cancel remake ticket without a second stock exit', async () => {
+    const { service, tx, fire, events } = harness();
+    tx.kitchen_ticket_items.findFirst.mockResolvedValueOnce({ id: 901 });
+    await expect(service.resendOrderItems({ order_id: 100, order_item_ids: [7], reason: 'remake_dish' }))
+      .rejects.toMatchObject({ errorCode: 'KITCHEN_FIRE_NOT_RESENDABLE' });
+    expect(fire).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
+  });
+});
 
 /**
  * Targeted unit tests for `KitchenFireService.fireOrderItems()`.
@@ -265,6 +372,19 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       { push: jest.fn() } as any,
       { attributeOpenSessionToTicketConsumption: jest.fn() } as any,
     );
+  });
+
+  it('rejects an undecided cancelled-order remake with KITCHEN_FIRE_NOT_RESENDABLE', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 100,
+      store_id: 1,
+      order_items: [{ id: 7, inventory_consumed_at_fire: true, cancellation_type: 'before_fire' }],
+    });
+    prismaMock.orders.findUnique = jest.fn().mockResolvedValue({ state: 'cancelled' });
+
+    await expect(service.resendOrderItems({
+      order_id: 100, order_item_ids: [7], reason: 'remake_dish',
+    })).rejects.toMatchObject({ errorCode: 'KITCHEN_FIRE_NOT_RESENDABLE' });
   });
 
   it('C.4 — snapshot and ticket list select order delivery_type without changing takeaway selection', async () => {

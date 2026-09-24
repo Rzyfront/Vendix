@@ -443,8 +443,10 @@
                             >
                               <app-icon name="ban" [size]="11"></app-icon>
                               Cancelado
-                              @if (item.cancellation_type === 'after_fire_waste') {
+                              @if (item.cancellation_type === 'after_fire_waste' || item.cancellation_type === 'delivered_waste') {
                                 · merma
+                              } @else if (item.cancellation_type === 'after_fire_reused' || item.cancellation_type === 'delivered_restock') {
+                                · reuso
                               }
                             </span>
                           }

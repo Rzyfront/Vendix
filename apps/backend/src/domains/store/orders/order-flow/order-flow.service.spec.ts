@@ -2405,7 +2405,7 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
       where: { id: ITEM_ID },
       data: expect.objectContaining({
         cancellation_reason: 'el cliente devolvió el plato intacto',
-        cancellation_type: 'delivered_restock',
+        cancellation_type: 'before_fire',
         updated_at: expect.any(Date),
       }),
     });
@@ -2443,7 +2443,7 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
     ).not.toHaveBeenCalled();
     expect(txMock.order_items.update).toHaveBeenCalledWith({
       where: { id: ITEM_ID },
-      data: expect.objectContaining({ cancellation_type: 'delivered_waste' }),
+      data: expect.objectContaining({ cancellation_type: 'before_fire' }),
     });
     expect(auditService.logCustom).toHaveBeenCalledTimes(1);
     expect(auditService.logCustom.mock.calls[0][3]).toEqual(

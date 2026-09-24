@@ -276,7 +276,7 @@ export class TablesService {
   cancelOrderItem(
     sessionId: number,
     orderItemId: number,
-    body: { reason: string; cancellation_type?: 'before_fire' | 'after_fire_waste' },
+    body: { reason: string; cancellation_type?: 'before_fire' | 'after_fire_reused' | 'after_fire_waste' },
   ): Observable<TableSession> {
     return this.http
       .post<ApiResponse<TableSession>>(
