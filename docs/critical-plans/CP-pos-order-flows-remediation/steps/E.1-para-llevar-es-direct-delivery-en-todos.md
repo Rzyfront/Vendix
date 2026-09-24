@@ -2,7 +2,7 @@
 id: E.1
 title: "«Para llevar» es direct_delivery en todos los carriles"
 phase: E
-status: in-progress
+status: done
 owner: loks
 updated: 2026-09-24
 contracts: [FB-19, DB-05, DB-10, ERR-19, ERR-20]
@@ -38,5 +38,5 @@ skills: [vendix-frontend, vendix-zoneless-signals, vendix-backend, vendix-restau
   - [x] Las cuatro etiquetas divergentes de recogida quedan en una sola redacción.
   - [x] `resolveDeliveryType` del paso Envío sigue produciendo `pickup` para un método de envío tipo `pickup`.
   - [x] `order_items.is_takeaway` no cambia de valor ni de reglas: conteo por valor idéntico antes y después.
-  - [ ] Los cuatro carriles de cobro verificados: POS directo, borrador reabierto, detalle de orden, orden adoptada.
-- **Status:** in-progress — loks 2026-09-24: 9/10 (specs shell 42/42 + cart 30/30 + order-details 9/9 + shipping-step 24/24; editor PUT 200 direct_delivery; DB-05 0 implícitas; DB-10 f1021/t32; serial pre-cobro implementado). Falta E2E 4 carriles.
+  - [x] Los cuatro carriles de cobro verificados: POS directo, borrador reabierto, detalle de orden, orden adoptada.
+- **Status:** done — loks 2026-09-24, 10/10. Specs 42+30+9+24; editor PUT 200; DB-05 0 implícitas; DB-10 inv; serial pre-cobro OK. E2E boss runner-2 4/4 direct_delivery (`E.1-lanes-runner2-20260924.md`).
