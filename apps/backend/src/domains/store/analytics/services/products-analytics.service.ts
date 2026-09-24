@@ -17,7 +17,16 @@ import {
   resolveStoreTimezone,
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
-import { COMPLETED_SALE_STATES } from '../analytics-metrics.contract';
+import {
+  COMPLETED_SALE_STATES,
+  buildCostCoverage,
+  computeProductProfit,
+  productMarginPct,
+  productMarkupPct,
+  productProfitRounded,
+  round2,
+  sqlStateList,
+} from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   formatAggregateQuantity,
@@ -792,26 +801,50 @@ export class ProductsAnalyticsService {
   async getProductProfitability(query: ProductsAnalyticsQueryDto) {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new ForbiddenException(
+        'store context missing: products/profitability requires a tenant',
+      );
+    }
+    const states = sqlStateList(COMPLETED_SALE_STATES);
 
-    const items = await this.prisma.order_items.groupBy({
-      by: ['product_id'],
-      where: {
-        orders: {
-          state: { in: this.COMPLETED_STATES },
-          created_at: { gte: startDate, lte: endDate },
-        },
-        product_id: undefined,
-      },
-      _sum: {
-        quantity: true,
-        total_price: true,
-        cost_price: true,
-      },
-    });
+    // QUI-623: the aggregate lives in SQL because `SUM(a) * SUM(b) != SUM(a*b)`.
+    // COGS uses the HISTORICAL snapshot per line (`oi.cost_price`), never the
+    // current `products.cost_price` — editing a catalog cost today must not
+    // rewrite closed periods nor contradict the Estado de Resultados, which
+    // already sums `order_items.cost_price`. `units_without_cost` travels with
+    // the figure so a missing snapshot is not mistaken for a 100 % margin
+    // (buildCostCoverage downstream). Window is on the INSTANT `orders.created_at`.
+    // ORDER BY is applied here (whitelisted in `profitabilityOrderBy`) so the
+    // ranking is decided in DB, not by an in-memory sort of the page.
+    const rows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        product_id: number;
+        units: bigint;
+        revenue: unknown;
+        cogs: unknown;
+        units_without_cost: bigint;
+      }>
+    >`
+      SELECT oi.product_id,
+             SUM(oi.quantity)                              AS units,
+             SUM(oi.total_price)                           AS revenue,
+             SUM(oi.quantity * COALESCE(oi.cost_price, 0)) AS cogs,
+             SUM(CASE WHEN oi.cost_price IS NULL
+                      THEN oi.quantity ELSE 0 END)         AS units_without_cost
+      FROM order_items oi
+      INNER JOIN orders o ON o.id = oi.order_id
+      WHERE o.store_id = ${storeId}
+        AND o.state IN (${states})
+        AND o.created_at >= ${startDate}
+        AND o.created_at <= ${endDate}
+      GROUP BY oi.product_id
+      ORDER BY ${this.profitabilityOrderBy(query)}
+    `;
 
-    const productIds = items
-      .map((r) => r.product_id)
-      .filter((id): id is number => id !== null);
+    const productIds = rows.map((r) => r.product_id);
 
     const products = (await this.prisma.products.findMany({
       where: { id: { in: productIds } },
@@ -837,86 +870,87 @@ export class ProductsAnalyticsService {
     }[];
     const productMap = new Map(products.map((p) => [p.id, p]));
 
-    // Restaurant Suite Fase G — recipe-driven cost (MÍNIMO).
-    // For each product with an active recipe, compute the per-unit cost
-    // from recipe items (Fase B). Sub-recipes (1 hop deep) are resolved
-    // recursively; deeper levels fall back to product.cost_price. Products
-    // without a recipe keep the legacy `product.cost_price` path.
+    // Costo de receta (products preparados, vendix-restaurant-ops) como columna
+    // COMPARATIVA (no reemplaza el snapshot con el que se contabilizó la venta).
     const recipeCosts = await this.computeRecipeUnitCostMap(productIds);
-    const productCostPrice = (productId: number): number => {
-      const r = recipeCosts.get(productId);
-      if (r !== undefined && r !== null) return r;
-      const product = productMap.get(productId);
-      return product ? Number(product.cost_price || 0) : 0;
-    };
 
-    const results = items
-      .filter((r) => r.product_id !== null)
-      .map((r) => {
-        const product = productMap.get(r.product_id);
-        const revenue = Number(r._sum.total_price || 0);
-        const unitsSold = Number(r._sum.quantity || 0);
-        // Recipe-driven unit cost (Fase G) overrides order_items.cost_price
-        // when an active recipe exists for this product. The order_items
-        // snapshot is preserved as `snapshot_cost_price` for traceability.
-        const unitCost = productCostPrice(r.product_id as number);
-        const totalCost = unitCost * unitsSold;
-        const snapshotUnitCost = Number(r._sum.cost_price || 0);
-        const profit = revenue - totalCost;
-        const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
-        const markup = totalCost > 0 ? (profit / totalCost) * 100 : 0;
-        const basePrice = product ? Number(product.base_price || 0) : 0;
-        // El par catálogo (`catalog_base_price` / `catalog_cost_price`) se
-        // publica en la escala comercial, la única en la que restarlos tiene
-        // sentido (ver `costInPriceScale`). `unit_cost` de arriba NO se toca:
-        // multiplica `units_sold`, que está en unidades de stock, y llevarlo a
-        // la escala comercial descuadraría `total_cost`, `profit` y `margin`.
-        const catalogCostPrice = product
-          ? this.costInPriceScale(
-              Number(product.cost_price || 0),
-              product.price_unit_quantity,
-            )
-          : 0;
-        const catalogMargin =
-          catalogCostPrice > 0 && basePrice > 0
-            ? ((basePrice - catalogCostPrice) / basePrice) * 100
-            : null;
+    const results = rows.map((r) => {
+      const product = productMap.get(r.product_id);
+      const revenue = Number(r.revenue || 0);
+      const cogs = Number(r.cogs || 0);
+      const units = Number(r.units || 0);
+      const unitsWithoutCost = Number(r.units_without_cost || 0);
+      const profit = computeProductProfit(revenue, cogs);
+      // `unit_cost` es el costo unitario del SNAPSHOT (cogs ÷ unidades): el
+      // costo promedio al que se vendio realmente, no el de catalogo hoy.
+      const unitCost = units > 0 ? cogs / units : 0;
+      const recipeUnitCost = recipeCosts.get(r.product_id);
+      const basePrice = product ? Number(product.base_price || 0) : 0;
+      // El par catálogo (`catalog_base_price` / `catalog_cost_price`) se
+      // publica en la escala comercial, la única en la que restarlos tiene
+      // sentido (ver `costInPriceScale`). `unit_cost` (snapshot) NO se toca:
+      // multiplica `units_sold`, que está en unidades de stock, y llevarlo a
+      // la escala comercial descuadraría `total_cost`, `profit` y `margin`.
+      const catalogCostPrice = product
+        ? this.costInPriceScale(
+            Number(product.cost_price || 0),
+            product.price_unit_quantity,
+          )
+        : 0;
+      const catalogMargin =
+        catalogCostPrice > 0 && basePrice > 0
+          ? ((basePrice - catalogCostPrice) / basePrice) * 100
+          : null;
 
-        return {
-          product_id: r.product_id,
-          product_name: product?.name || 'Desconocido',
-          sku: product?.sku || '',
-          category: product?.product_categories?.[0]?.categories?.name || null,
-          revenue,
-          total_cost: Number(totalCost.toFixed(2)),
-          profit: Number(profit.toFixed(2)),
-          margin: Number(margin.toFixed(2)),
-          markup: Number(markup.toFixed(2)),
-          units_sold: unitsSold,
-          avg_selling_price: unitsSold > 0 ? revenue / unitsSold : 0,
-          unit_cost: Number(unitCost.toFixed(4)),
-          snapshot_unit_cost: Number(snapshotUnitCost.toFixed(4)),
-          catalog_base_price: basePrice,
-          catalog_cost_price: catalogCostPrice,
-          catalog_margin:
-            catalogMargin !== null ? Number(catalogMargin.toFixed(2)) : null,
-        };
-      })
-      .sort((a, b) => b.profit - a.profit);
+      return {
+        product_id: r.product_id,
+        product_name: product?.name || 'Desconocido',
+        sku: product?.sku || '',
+        category: product?.product_categories?.[0]?.categories?.name || null,
+        // Emitir crudo; `round2` solo en la salida (contrato QUI-623).
+        revenue,
+        total_cost: round2(cogs),
+        profit: productProfitRounded(revenue, cogs),
+        margin: productMarginPct(revenue, profit),
+        markup: productMarkupPct(cogs, profit),
+        units_sold: units,
+        units_without_cost: unitsWithoutCost,
+        avg_selling_price: units > 0 ? revenue / units : 0,
+        unit_cost: round2(unitCost),
+        recipe_unit_cost:
+          recipeUnitCost !== undefined && recipeUnitCost !== null
+            ? round2(recipeUnitCost)
+            : null,
+        catalog_base_price: basePrice,
+        catalog_cost_price: catalogCostPrice,
+        catalog_margin:
+          catalogMargin !== null ? round2(catalogMargin) : null,
+      };
+    });
 
-    const totalRevenue = results.reduce((sum, r) => sum + r.revenue, 0);
-    const totalProfit = results.reduce((sum, r) => sum + r.profit, 0);
-    const totalCost = results.reduce((sum, r) => sum + r.total_cost, 0);
+    // Summary DEL PÉRÍODO COMPLETO en DB (no sobre la página): se suma crudo
+    // y se redondea una sola vez, igual que profit-loss. `total_cost` debe
+    // cuadrar con `financial/profit-loss.costs.cost_of_goods_sold` del mismo
+    // período (regresión bloqueante de QUI-623).
+    const totalRevenue = rows.reduce(
+      (sum, r) => sum + Number(r.revenue || 0),
+      0,
+    );
+    const totalCogs = rows.reduce((sum, r) => sum + Number(r.cogs || 0), 0);
+    const totalUnits = rows.reduce((sum, r) => sum + Number(r.units || 0), 0);
+    const totalUnitsWithoutCost = rows.reduce(
+      (sum, r) => sum + Number(r.units_without_cost || 0),
+      0,
+    );
+    const totalProfit = computeProductProfit(totalRevenue, totalCogs);
 
     const summary = {
       total_products: results.length,
       total_revenue: totalRevenue,
-      total_cost: totalCost,
-      total_profit: totalProfit,
-      overall_margin:
-        totalRevenue > 0
-          ? Number(((totalProfit / totalRevenue) * 100).toFixed(2))
-          : 0,
+      total_cost: round2(totalCogs),
+      total_profit: productProfitRounded(totalRevenue, totalCogs),
+      overall_margin: productMarginPct(totalRevenue, totalProfit),
+      cost_coverage: buildCostCoverage(totalUnits, totalUnitsWithoutCost),
     };
 
     const isPaginated = query.page !== undefined && query.limit !== undefined;
@@ -944,6 +978,45 @@ export class ProductsAnalyticsService {
       products: results.slice(0, query.limit || 50),
       summary,
     };
+  }
+
+  /**
+   * ORDER BY expression for {@link getProductProfitability}. Whitelisted columns
+   * only — `query.sort_by`/`query.sort_order` never interpolate raw user input.
+   * `margin`/`markup` order on the raw ratio so `profit`-first places a product
+   * with no base last instead of ranking it by a phantom 100 %.
+   */
+  private profitabilityOrderBy(
+    query: ProductsAnalyticsQueryDto,
+  ): Prisma.Sql {
+    const dir = query.sort_order === 'asc' ? 'ASC' : 'DESC';
+    switch (query.sort_by ?? 'profit') {
+      case 'units_sold':
+        return Prisma.raw(`SUM(oi.quantity) ${dir}`);
+      case 'revenue':
+        return Prisma.raw(`SUM(oi.total_price) ${dir}`);
+      case 'total_cost':
+        return Prisma.raw(
+          `SUM(oi.quantity * COALESCE(oi.cost_price, 0)) ${dir}`,
+        );
+      case 'margin':
+        return Prisma.raw(
+          `CASE WHEN SUM(oi.total_price) > 0
+            THEN (SUM(oi.total_price) - SUM(oi.quantity * COALESCE(oi.cost_price, 0))) / SUM(oi.total_price)
+            ELSE -1 END ${dir}`,
+        );
+      case 'markup':
+        return Prisma.raw(
+          `CASE WHEN SUM(oi.quantity * COALESCE(oi.cost_price, 0)) > 0
+            THEN (SUM(oi.total_price) - SUM(oi.quantity * COALESCE(oi.cost_price, 0))) / SUM(oi.quantity * COALESCE(oi.cost_price, 0))
+            ELSE -1 END ${dir}`,
+        );
+      case 'profit':
+      default:
+        return Prisma.raw(
+          `(SUM(oi.total_price) - SUM(oi.quantity * COALESCE(oi.cost_price, 0))) ${dir}`,
+        );
+    }
   }
 
   async getProductPerformanceForExport(query: ProductsAnalyticsQueryDto) {
@@ -989,11 +1062,17 @@ export class ProductsAnalyticsService {
       // 3 m, el costo tiene que ser por metro o `Costo Total` deja de ser el
       // producto de sus dos vecinos. `Costo Total`, `Ganancia`, `Margen` y
       // `Markup` no se tocan: son agregados y no dependen de la escala.
+      // QUI-623: `unit_cost` es el SNAPSHOT (cogs ÷ unidades); `recipe_unit_cost`
+      // es la columna comparativa de receta (null = sin receta activa).
       const factor = saleUnitScaleFactor(info);
-      const unitCost =
-        factor > 1
-          ? Number((Number(r.unit_cost ?? 0) * factor).toFixed(4))
-          : r.unit_cost;
+      const scaled = (v: number | null | undefined): number | null =>
+        v == null
+          ? null
+          : factor > 1
+            ? Number((Number(v) * factor).toFixed(4))
+            : v;
+      const unitCost = scaled(r.unit_cost);
+      const recipeUnitCost = scaled(r.recipe_unit_cost);
       return {
         Producto: r.product_name,
         SKU: r.sku,
@@ -1001,7 +1080,8 @@ export class ProductsAnalyticsService {
         'Unidades Vendidas': sold.value,
         Unidad: sold.suffix,
         Ingresos: r.revenue,
-        'Costo Unitario (Receta)': unitCost,
+        'Costo Unitario (Snapshot)': unitCost,
+        'Costo Unitario (Receta)': recipeUnitCost,
         'Costo Total': r.total_cost,
         Ganancia: r.profit,
         'Margen (%)': r.margin,
@@ -1014,11 +1094,12 @@ export class ProductsAnalyticsService {
 
   /**
    * For each product id, returns the per-unit cost derived from the
-   * product's active recipe (Fase B). Sub-recipes are resolved one level
-   * deep — the cost of a sub-recipe is itself looked up via its own recipe
-   * (Fase B cycle detection already prevents recursion). Products with
-   * no recipe resolve to `null` so the caller can fall back to
-   * `product.cost_price`.
+   * product's active recipe (Fase B). One-hop approximation: each component
+   * contributes its catalog `cost_price`; sub-recipes are NOT exploded here
+   * (that is `RecipesService.explodeBom`). The result feeds ONLY the
+   * comparative `recipe_unit_cost` column — the authoritative cost of a sale
+   * is the historical `order_items.cost_price` snapshot (QUI-623). Products
+   * with no recipe resolve to `null` so the caller renders "sin receta".
    *
    * Recetas-por-variante: un producto puede tener varias recetas activas (la
    * BASE y una por variante). Este mapa esta indexado por `product_id`, asi
@@ -1092,48 +1173,12 @@ export class ProductsAnalyticsService {
     }
     const canonicalRecipes = Array.from(canonicalByProduct.values());
 
-    // 2. Identify component products that may themselves own a sub-recipe
-    //    so we can resolve their cost recursively in a second pass.
-    const componentIds = new Set<number>();
-    for (const r of canonicalRecipes) {
-      for (const it of r.items) {
-        if (it.component_product) componentIds.add(it.component_product.id);
-      }
-    }
-    const subRecipes =
-      componentIds.size > 0
-        ? await this.prisma.recipes.findMany({
-            where: {
-              product_id: { in: Array.from(componentIds) },
-              // Una sub-receta es SIEMPRE la receta base del insumo: un insumo
-              // no puede tener variantes (`RECIPE_COMPONENT_HAS_VARIANTS`) y
-              // `recipe_items` no guarda variante. Sin este filtro, un producto
-              // que se variantizo despues de usarse como insumo marcaba
-              // `hasSubRecipe` por una receta que la explosion nunca recorre.
-              product_variant_id: null,
-              is_active: true,
-            },
-            select: { product_id: true },
-          })
-        : [];
-    const hasSubRecipe = new Set(subRecipes.map((sr) => sr.product_id));
-
-    // 3. Map sub-recipe cost = sum(component cost) for any component that
-    //    owns a sub-recipe. For one-hop resolution we approximate using the
-    //    product's own cost_price when no sub-recipe exists. (Full deep
-    //    recursion is the job of RecipesService.explodeBom; here we only
-    //    need a per-line cost hint.)
-    const componentCost = (productId: number, fallback: number): number => {
-      if (hasSubRecipe.has(productId)) {
-        // Sub-recipe present — the component's own catalog cost_price is
-        // a reasonable proxy for Fase G analytics. This intentionally
-        // differs from the strict BOM explosion used by production.
-        return fallback;
-      }
-      return fallback;
-    };
-
-    // 4. Compute per-recipe unit cost (una receta canonica por producto).
+    // 2. Per-recipe unit cost (una receta canonica por producto). El costo de
+    //    cada insumo usa el `cost_price` de CATALOGO del componente como
+    //    aproximacion de UN salto. Las sub-recetas NO se explotan aqui: eso es
+    //    trabajo de `RecipesService.explodeBom`, y no se pretende hacerlo.
+    //    Esta cifra es SOLO una columna comparativa (`recipe_unit_cost`) junto
+    //    al snapshot historico (`order_items.cost_price`) que manda en la vista.
     for (const recipe of canonicalRecipes) {
       const yieldQty = Number(recipe.yield_quantity);
       if (yieldQty <= 0) {
@@ -1151,10 +1196,7 @@ export class ProductsAnalyticsService {
         const qty = Number(item.quantity);
         const waste = Number(item.waste_percent ?? 0);
         const unitCost = Number(item.component_product?.cost_price ?? 0);
-        const effective =
-          qty * (1 + waste / 100) *
-          componentCost(item.component_product?.id ?? -1, unitCost);
-        totalCost += effective;
+        totalCost += qty * (1 + waste / 100) * unitCost;
       }
       result.set(recipe.product_id, totalCost / effectiveYield);
     }

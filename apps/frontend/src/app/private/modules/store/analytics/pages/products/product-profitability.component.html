@@ -15,7 +15,7 @@
     >
       <app-stats
         title="Margen Promedio"
-        [value]="((summary()?.overall_margin || 0) | number:'1.1-1') + '%'"
+        [value]="averageMarginLabel()"
         iconName="percent"
         iconBgColor="bg-green-100"
         iconColor="text-green-600"
@@ -47,6 +47,15 @@
       ></app-stats>
     </div>
   }
+
+    @if (costCoverageNotice(); as notice) {
+      <div
+        class="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+      >
+        <app-icon name="alert-triangle" [size]="18" class="shrink-0 mt-0.5"></app-icon>
+        <span>{{ notice }}</span>
+      </div>
+    }
 
     <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
     <div slot="header" class="results-header flex items-center justify-between gap-3 flex-wrap">
