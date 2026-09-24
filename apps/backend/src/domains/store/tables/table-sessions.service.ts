@@ -32,6 +32,7 @@ import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.ut
 import { TaxFiscalType } from '../taxes/dto';
 import { resolvePriceUnitScale } from '../products/services/price-unit.util';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
+import type { CancellationType } from './dto';
 import { ReassignTableSessionDto } from './dto/table-session.dto';
 
 /**
@@ -1117,7 +1118,7 @@ export class TableSessionsService {
     sessionId: number,
     orderItemId: number,
     reason: string,
-    cancellationType?: 'before_fire' | 'after_fire_waste',
+    cancellationType?: CancellationType,
   ): Promise<TableSessionView> {
     // Mirror addItems: only store context is required (the POS controller path
     // is already gated by @Permissions('store:table_sessions:update')).

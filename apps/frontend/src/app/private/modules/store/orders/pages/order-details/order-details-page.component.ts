@@ -1573,7 +1573,15 @@ export class OrderDetailsPageComponent {
       // submit button stays disabled while the user types nothing (and stops
       // obsessing about the 2000-char backend cap by warning client-side).
       resolution_notes: ['', [Validators.required, Validators.maxLength(2000)]],
+      // PR #843 finding 1: backend requires payout reference + channel for
+      // 'completed' (REF_PAYOUT_REQUIRED_001). Validators toggle below.
+      payout_reference: [''],
+      payout_channel: [''],
     });
+    this.resolveRefundForm
+      .get('target_state')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((state) => this.syncResolvePayoutValidators(state));
 
     this.fastTrackForm = this.fb.group({
       payment: this.fb.group({
@@ -2811,12 +2819,40 @@ export class OrderDetailsPageComponent {
    * method only seeds the context (which refund is being resolved) and
    * resets the form to its default state.
    */
+  /**
+   * Mirror of ResolveRefundDto's `@ValidateIf(completed)`: payout fields are
+   * required only when resolving as completed; optional (and cleared) for
+   * 'failed', which closes without money movement.
+   */
+  private syncResolvePayoutValidators(state: unknown): void {
+    const reference = this.resolveRefundForm.get('payout_reference');
+    const channel = this.resolveRefundForm.get('payout_channel');
+    if (!reference || !channel) return;
+    if (state === 'completed') {
+      reference.setValidators([Validators.required, Validators.maxLength(255)]);
+      channel.setValidators([Validators.required]);
+    } else {
+      reference.clearValidators();
+      channel.clearValidators();
+    }
+    reference.updateValueAndValidity({ emitEvent: false });
+    channel.updateValueAndValidity({ emitEvent: false });
+  }
+
+  /** Payout section visibility for the resolve modal (completed only). */
+  resolveNeedsPayout(): boolean {
+    return this.resolveRefundForm.get('target_state')?.value === 'completed';
+  }
+
   openResolveRefundModal(refund: RefundRecord): void {
     if (!refund) return;
     this.resolveRefundForm.reset({
       target_state: 'completed',
       resolution_notes: '',
+      payout_reference: '',
+      payout_channel: '',
     });
+    this.syncResolvePayoutValidators('completed');
     this.resolveRefundContext.set(refund);
     this.showResolveRefundModal.set(true);
   }
@@ -2851,11 +2887,18 @@ export class OrderDetailsPageComponent {
     const formValue = this.resolveRefundForm.value as {
       target_state?: 'completed' | 'failed' | null;
       resolution_notes?: string | null;
+      payout_reference?: string | null;
+      payout_channel?: string | null;
     };
+    const targetState = (formValue.target_state ?? 'completed') as 'completed' | 'failed';
     const payload: ResolveRefundPayload = {
-      target_state: (formValue.target_state ?? 'completed') as 'completed' | 'failed',
+      target_state: targetState,
       resolution_notes: (formValue.resolution_notes ?? '').trim(),
     };
+    if (targetState === 'completed') {
+      payload.payout_reference = (formValue.payout_reference ?? '').trim();
+      payload.payout_channel = formValue.payout_channel as ResolveRefundPayload['payout_channel'];
+    }
 
     this.ordersFlowService
       .resolveRefund(orderId, String(refund.id), payload)

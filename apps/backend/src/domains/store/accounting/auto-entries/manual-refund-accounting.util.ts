@@ -39,6 +39,10 @@ export class UnexplainedRefundAmountError extends Error {
 const cents = (value: Money | number | null | undefined) =>
   new Prisma.Decimal(value ?? 0).times(100).toDecimalPlaces(0).toNumber();
 
+/** Cancellation-evidence markers: legacy (`Cancelación;…`) + ADR-12 legs (`Cancelación ADR-12;…`). */
+const hasCancellationMarker = (notes: string | null | undefined): boolean =>
+  !!notes && (notes.startsWith('Cancelación;') || notes.startsWith('Cancelación ADR-12;'));
+
 /** Rebuilds the fiscal meaning of a paid refund; never treats a residual fee as revenue. */
 export function buildManualRefundFiscalPayload(
   order: ManualRefundFiscalOrder,
@@ -63,7 +67,7 @@ export function buildManualRefundFiscalPayload(
       throw new UnexplainedRefundAmountError(`refund #${row.id} has unexplained amount`);
     }
     if (residual > 0) {
-      if (!row.notes?.startsWith('Cancelación;')) {
+      if (!hasCancellationMarker(row.notes)) {
         throw new UnexplainedRefundAmountError(`refund #${row.id} has an unproven residual fee`);
       }
       return residual;
@@ -72,7 +76,7 @@ export function buildManualRefundFiscalPayload(
     // Legacy cancellation rows embedded tip in subtotal. Only the system's
     // payment-scoped cancellation marker PLUS matching tax/shipping proration
     // justify extracting it. Without both, a fee and a tip are indistinguishable.
-    if (!row.notes?.startsWith('Cancelación;')) {
+    if (!hasCancellationMarker(row.notes)) {
       throw new UnexplainedRefundAmountError(`refund #${row.id} tip allocation lacks cancellation evidence`);
     }
     const ratio = paid / cents(order.grand_total);

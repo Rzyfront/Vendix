@@ -1030,6 +1030,8 @@ export interface RefundItemRecord {
 export interface ResolveRefundPayload {
   target_state: 'completed' | 'failed';
   resolution_notes: string;
+  payout_reference?: string;
+  payout_channel?: 'cash' | 'bank_transfer' | 'store_credit' | 'gateway';
 }
 
 /**

@@ -361,6 +361,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   REF_FIND_001: 'Reembolso no encontrado.',
   REF_CREATE_001: 'Error al crear el reembolso.',
   REF_VALIDATE_001: 'La validacion del reembolso fallo.',
+  REF_PAYOUT_REQUIRED_001: 'Para completar se exigen referencia y canal del desembolso.',
+  REF_RESOLUTION_CONFLICT_001: 'El reembolso cambió de estado; recarga e inténtalo de nuevo.',
 
   // Superadmin
   SUP_ADMIN_USER_001: 'Usuario de superadministrador no encontrado.',

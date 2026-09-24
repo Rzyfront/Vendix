@@ -58,4 +58,10 @@ describe('manual refund fiscal reconstruction', () => {
     const prior = refund({ id: 2, amount: D(5), subtotal_refund: D(0), tax_refund: D(0), shipping_refund: D(0) });
     expect(() => buildManualRefundFiscalPayload(order(), refund(), [prior])).toThrow(/available tip/);
   });
+
+  it('accepts the ADR-12 leg marker as cancellation evidence (PR #843 finding 2)', () => {
+    const adr12 = refund({ subtotal_refund: D(110), notes: 'Cancelación ADR-12; pierna pago #7 (tarjeta)' });
+    const result = buildManualRefundFiscalPayload(order(), adr12, []);
+    expect(result).toEqual(expect.objectContaining({ subtotal: 100, tip_amount: 10 }));
+  });
 });
