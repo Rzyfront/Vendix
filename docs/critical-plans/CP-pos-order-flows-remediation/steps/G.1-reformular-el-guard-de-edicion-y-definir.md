@@ -2,9 +2,9 @@
 id: G.1
 title: "Reformular el guard de edición y definir la elegibilidad"
 phase: G
-status: in-progress
-owner: none
-updated: 2026-09-23
+status: done
+owner: fox
+updated: 2026-09-24
 contracts: [FB-18, FB-50, DB-19, DB-20, ERR-06, ERR-29, ERR-30, ERR-31]
 adrs: [ADR-07]
 skills: [vendix-backend, vendix-restaurant-ops, vendix-prisma-scopes, vendix-error-handling, how-to-test]
@@ -27,11 +27,11 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-prisma-scopes, vendix-err
   - mismo `curl` sobre una orden con sesión abierta → 200, evidencia en `evidence/G1-items-sesion-abierta.json`
   - SQL de solo lectura: `SELECT order_id, count(*) FILTER (WHERE closed_at IS NULL) AS abiertas, count(*) AS total FROM table_sessions GROUP BY 1 HAVING count(*) > 1;` → `evidence/G1-sesiones-por-orden.txt`
 - **Acceptance checklist:**
-  - [ ] El guard pregunta por sesión ABIERTA y sigue siendo idempotente cuando la orden nunca tuvo mesa (lookup nulo no es error)
-  - [ ] Orden con sesión cerrada y ninguna abierta: `PUT items` sigue devolviendo 409 `ORD_EDIT_NOT_ALLOWED_001`
-  - [ ] Orden con sesión cerrada MÁS una abierta: `PUT items` y `add-items` devuelven 200
-  - [ ] El util rechaza orden `cancelled`, `refunded`, con pago liquidado, con split activo o con factura emitida, y devuelve el motivo
-  - [ ] Los tres códigos están en `error-codes.ts` con HTTP real y con `details.state` / `details.reason` poblados
-  - [ ] Todo test de rechazo fija el `errorCode`; ninguno se conforma con `toBeInstanceOf(VendixHttpException)`
-  - [ ] Evidencia de los curl y del SQL guardada bajo `evidence/`
-- **Status:** in-progress — guard/editor + PUT items y elegibilidad pura en `evidence/G1-edit-eligibility-code-20260923.md` (Jest 126/126); `evidence/G2-reassign-runtime-20260923.md` probó add-items sobre sesión nueva. Faltan curl cerrado-solo y barrido SQL dedicado.
+  - [x] El guard pregunta por sesión ABIERTA y sigue siendo idempotente cuando la orden nunca tuvo mesa (lookup nulo no es error)
+  - [x] Orden con sesión cerrada y ninguna abierta: `PUT items` sigue devolviendo 409 `ORD_EDIT_NOT_ALLOWED_001`
+  - [x] Orden con sesión cerrada MÁS una abierta: `PUT items` y `add-items` devuelven 200
+  - [x] El util rechaza orden `cancelled`, `refunded`, con pago liquidado, con split activo o con factura emitida, y devuelve el motivo
+  - [x] Los tres códigos están en `error-codes.ts` con HTTP real y con `details.state` / `details.reason` poblados
+  - [x] Todo test de rechazo fija el `errorCode`; ninguno se conforma con `toBeInstanceOf(VendixHttpException)`
+  - [x] Evidencia de los curl y del SQL guardada bajo `evidence/`
+- **Status:** done · fox · 2026-09-24 · guard `:1570` + util puro + 409s verificados (107/107 + 19/19, `errorCode` fijo). Live: PUT #1184 cerrada-solo 409 `ORD_EDIT_NOT_ALLOWED_001`, PUT #1189 abierta 200; barrido 1 multi-sesión (#1192). Cerrada+abierta live difiere a G.2 (sin API pre-G.2 que cree ese estado). `G1-guard-live-20260924.md`.
