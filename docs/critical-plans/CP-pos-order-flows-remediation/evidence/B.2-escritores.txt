@@ -1,0 +1,33 @@
+B.2 escritores evidence — CP-pos-order-flows-remediation
+UTC: 2026-09-24T01:08:34Z
+git HEAD: 5f6cf70fb284ef0674d159665e59954d3d4609bc
+
+=== GREP 1 ===
+command: grep -rn "markSessionPaid\|emitSessionPaid" apps/backend/src
+exit: 0 (matches found)
+--- full output ---
+apps/backend/src/domains/store/tables/table-sessions.service.ts:1786:      const marked = await this.markSessionPaid(openSession.id, paymentId, client);
+apps/backend/src/domains/store/tables/table-sessions.service.ts:1793:            this.emitSessionPaid(storeId, openSession.id, orderId, paymentId);
+apps/backend/src/domains/store/tables/table-sessions.service.ts:1823:  async markSessionPaid(
+apps/backend/src/domains/store/tables/table-sessions.service.ts:1906:  emitSessionPaid(
+apps/backend/src/domains/store/payments/payments.service.ts:903:      let emitSessionPaidAfterCommit: (() => void) | undefined;
+apps/backend/src/domains/store/payments/payments.service.ts:1390:            emitSessionPaidAfterCommit = projection?.emitAfterCommit;
+apps/backend/src/domains/store/payments/payments.service.ts:2043:      emitSessionPaidAfterCommit?.();
+--- end output ---
+
+=== GREP 2 ===
+command: grep -n "closeSession" apps/backend/src/domains/store/payments/services/webhook-handler.service.ts
+exit: 1 (no match)
+--- full output ---
+(empty — no matches)
+--- end output ---
+path check: apps/backend/src/domains/store/payments/services/webhook-handler.service.ts EXISTS (find confirms single file at stated path; no move).
+
+=== VERDICTS ===
+ONLY canonical+specs: NOT (literal) — see nuance below.
+  - Definitions of markSessionPaid/emitSessionPaid exist ONLY in table-sessions.service.ts (canonical, lines 1823/1906) with internal call sites at lines 1786/1793.
+  - The only other production references are payments.service.ts lines 903/1390/2043: a local deferred variable (emitSessionPaidAfterCommit) assigned from projection.emitAfterCommit and invoked post-commit — sanctioned deferred-emit plumbing, not a rogue writer or second definition.
+  - Zero matches in any *.spec.ts under apps/backend/src (no spec references these symbols).
+  - Zero matches in webhook-handler or any other writer candidate.
+  - No rogue writers found.
+closeSession-in-webhook: NO (grep exit 1, file at stated path, no move).

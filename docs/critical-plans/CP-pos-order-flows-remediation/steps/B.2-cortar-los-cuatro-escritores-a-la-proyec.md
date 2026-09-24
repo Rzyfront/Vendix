@@ -2,9 +2,9 @@
 id: B.2
 title: "Cortar los cuatro escritores a la proyección canónica"
 phase: B
-status: in-progress
-owner: Fabio
-updated: 2026-09-20
+status: done
+owner: fox
+updated: 2026-09-24
 contracts: [FB-03, FB-04, FB-11, FB-12, FB-53, DB-17, DB-18, DB-21, ERR-05, ERR-33]
 adrs: [ADR-03]
 skills: [vendix-backend, vendix-restaurant-ops, vendix-payment-processors, vendix-error-handling, how-to-test]
@@ -31,17 +31,18 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-payment-processors, vendi
   - `npm --prefix apps/backend run test:path -- src/domains/store/tables/split-account-payment.service.spec.ts`
   - `npm --prefix apps/backend run test:path -- src/domains/store/orders/order-flow/order-flow.service.spec.ts`
 - **Acceptance checklist:**
-  - [ ] Los cuatro escritores llaman a la función canónica y ninguno escribe la sesión por su cuenta
-  - [ ] Una búsqueda de la primitiva y del emisor no encuentra llamadores fuera de la función canónica
-  - [ ] El webhook de pasarela ya no cierra la sesión ni mueve la mesa a limpieza
-  - [ ] El webhook sí marca la cuenta como pagada, que antes no hacía
-  - [ ] La proyección de `flow/pay` corre después del commit del pago
-  - [ ] Un fallo de proyección no revierte ni altera el pago ya cometido
-  - [ ] Un fallo de proyección se expone con el código tipado y nunca como 500
-  - [ ] Los confirmadores de pago de sesión y de cuenta de split quedan auditados y cortados si escribían la sesión
-  - [ ] Cobrar la misma orden dos veces no produce un segundo efecto sobre la sesión
-  - [ ] Ninguna fila queda con sesión pagada y mesa liberada por el solo hecho de cobrar
-  - [ ] Hay spec por escritor que verifica que delega y no escribe directo
-  - [ ] Queda registrado como deuda que las sesiones cerradas de más por el webhook no se reabren
-  - [ ] Las filas FB-03, FB-04, FB-11, FB-12, FB-53, DB-17, DB-18, DB-21, ERR-05 y ERR-33 quedan marcadas
-- **Status:** in-progress — cuatro escritores y confirmación staff en 5848a2a24, 086ba3133, 497042873. `evidence/B2-split-table-projection-20260923.md`: primera cuenta parcial deja `paid_at=NULL`, última cuenta marca `paid_at`, mesa sigue ocupada hasta cierre; `3e53d4f16` congela líneas de la fuente bajo lock (antes la orden pagada con split seguía `draft`/editable). POS mesa y detalle probados en E2/E4. Faltan webhook/confirmadores con evidencia runtime propia; el dueño eligió que la fuente split pagada quede `processing` hasta entrega/cierre. T5 (2026-09-23): crédito corta a canónica (`:4442`, solo al saldar; ERR-33 sin `finished` falso) + `confirmPayment` aísla fallo (SSE/caja intactos, ERR-33 al final); Jest 135/135 + 59/59; `evidence/B2-credit-confirm-projection-20260923.md`. T6 confirmación order/webhook replay + CAS sesión: `evidence/B2-confirm-order-webhook-replay-20260923.md`, `B2-session-paid-cas-20260923.md`, Jest 166+31+60.
+  - [x] Los cuatro escritores llaman a la función canónica y ninguno escribe la sesión por su cuenta
+  - [x] Una búsqueda de la primitiva y del emisor no encuentra llamadores fuera de la función canónica
+  - [x] El webhook de pasarela ya no cierra la sesión ni mueve la mesa a limpieza
+  - [x] El webhook sí marca la cuenta como pagada, que antes no hacía
+  - [x] La proyección de `flow/pay` corre después del commit del pago
+  - [x] Un fallo de proyección no revierte ni altera el pago ya cometido
+  - [x] Un fallo de proyección se expone con el código tipado y nunca como 500
+  - [x] Los confirmadores de pago de sesión y de cuenta de split quedan auditados y cortados si escribían la sesión
+  - [x] Cobrar la misma orden dos veces no produce un segundo efecto sobre la sesión
+  - [x] Ninguna fila queda con sesión pagada y mesa liberada por el solo hecho de cobrar
+  - [x] Hay spec por escritor que verifica que delega y no escribe directo
+  - [x] Queda registrado como deuda que las sesiones cerradas de más por el webhook no se reabren
+  - [x] Las filas FB-03, FB-04, FB-11, FB-12, FB-53, DB-17, DB-18, DB-21, ERR-05 y ERR-33 quedan marcadas
+  - [x] DB-17 y DB-18 voltean a [x] con evidencia B.2 (obligación B.1/boss 2026-09-24)
+- **Status:** done · fox · 2026-09-24 · verificación-only: 4 escritores + 2 confirmadores delegan (código leído, `B.2-cutover-verification-20260924.md`). Live roku: flow/pay #1133 200 paid+open 15→16; redoble 409 sin 2º efecto; #1132 409 ERR-33 con pago #856 persistido; POS redoble 409 ERR-05 tipado; invariante global 0. Specs 118/118 + 27/27 + 146/148 (2 rojos D.2 preexistentes). Webhook 0 closeSession. Volteos: FB-11/12/53, DB-17/18, ERR-05/33.
