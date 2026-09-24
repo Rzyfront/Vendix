@@ -2,9 +2,9 @@
 id: E.6
 title: "Base de la propina coherente entre carriles"
 phase: E
-status: in-progress
-owner: none
-updated: 2026-09-20
+status: done
+owner: loks
+updated: 2026-09-24
 contracts: [FB-01, FB-03, FB-04, DB-02]
 adrs: [ADR-11]
 skills: [vendix-backend, vendix-currency-formatting, vendix-accounting-rules, how-to-test]
@@ -29,13 +29,13 @@ skills: [vendix-backend, vendix-currency-formatting, vendix-accounting-rules, ho
   - SQL de DB-02: `SELECT p.order_id FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.state IN ('succeeded','captured') GROUP BY p.order_id, o.grand_total HAVING SUM(p.amount) > o.grand_total + .01;` → 0 filas → `evidence/E.6-db02.txt`.
 - **Acceptance checklist:**
   - [x] El dueño eligió la base y la elección está escrita en ADR-11 antes de tocar código.
-  - [ ] Los tres carriles calculan la misma propina para los mismos números de entrada.
-  - [ ] El carril de POS retail llama a la utilidad compartida y no reimplementa la regla.
-  - [ ] Existe un único llamador del redondeo de propina y es el mismo en los tres carriles.
-  - [ ] El docblock de la utilidad describe la base que el código realmente usa.
-  - [ ] Hay un test de tabla que falla si un carril vuelve a divergir.
-  - [ ] La propina sigue sumando al total sin entrar en el subtotal ni en el impuesto.
-  - [ ] Ninguna venta queda con pagos por encima de su total tras el cambio.
-  - [ ] Ninguna propina histórica se reliquida ni se reescribe.
-  - [ ] Un cobro con propina de cero se comporta igual que antes en los tres carriles.
-- **Status:** in-progress — ADR-11 aceptado por elección delegada del dueño; código unificado en `evidence/E6-tip-base-code-20260923.md`, Jest 249/249; falta curl/SQL de los tres carriles.
+  - [x] Los tres carriles calculan la misma propina para los mismos números de entrada.
+  - [x] El carril de POS retail llama a la utilidad compartida y no reimplementa la regla.
+  - [x] Existe un único llamador del redondeo de propina y es el mismo en los tres carriles.
+  - [x] El docblock de la utilidad describe la base que el código realmente usa.
+  - [x] Hay un test de tabla que falla si un carril vuelve a divergir.
+  - [x] La propina sigue sumando al total sin entrar en el subtotal ni en el impuesto.
+  - [x] Ninguna venta queda con pagos por encima de su total tras el cambio.
+  - [x] Ninguna propina histórica se reliquida ni se reescribe.
+  - [x] Un cobro con propina de cero se comporta igual que antes en los tres carriles.
+- **Status:** done — loks 2026-09-24, 10/10. Retail curl 2000 = flow/pay curl 2000 (#1199/#1200); mesa por-código idéntico (fixtures A2/A3 intactos). Spec tabla 3/3. Tip 7/7 dentro de grand_total, fuera de subtotal/tax. DB-02: 10 legacy pre-E.6 sin tip, 0 post-E.6.

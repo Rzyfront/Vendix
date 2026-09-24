@@ -56,3 +56,4 @@
 | 2026-09-24 | loks | E.5 | Freno envío-sin-método 9/10: UX copy 3 códigos (spec 23/23), gate+mensajes ES verificados (backend OOM→lectura A.1), huérfanas 0. FB-19 trim 395. DB-07 abierto→F.2. | evidence/E.5-SA1-*, E.5-SA2-*, E5-* |
 | 2026-09-24 | fox | G.1 | Guard ABIERTA + util 107/107+19/19; live PUT cerrada 409, abierta 200; barrido #1192. Cerrado. | evidence/G1-guard-live-20260924.md |
 | 2026-09-24 | fox | G.2 | Reasignar live #1189→27 201, KDS re-estampado, rechazos 409×5/404/400; spec 77/77. Cerrado. | evidence/G2-reassign-fox-20260924.md |
+| 2026-09-24 | loks | E.6 | Propina bruta unificada 10/10 done: retail curl 2000 = flow curl 2000, mesa por-código, spec tabla 3/3, tip 7/7 en total/fuera subtotal, DB-02 10 legacy sin tip 0 post. | evidence/E.6-SA1-*, E.6-SA2-* |

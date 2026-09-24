@@ -1,0 +1,32 @@
+apps/backend/src/domains/store/payments/payments.service.spec.ts:1603:    it('E.6 retail: delegates 10% of gross products to resolveTip without taxing the tip', async () => {
+apps/backend/src/domains/store/payments/payments.service.spec.ts:1605:      const resolveTipSpy = jest.spyOn(tipUtil, 'resolveTip');
+apps/backend/src/domains/store/payments/payments.service.spec.ts:1622:      expect(resolveTipSpy).toHaveBeenCalledWith(
+apps/backend/src/domains/store/payments/payments.service.spec.ts:1922:      const resolveTipSpy = jest.spyOn(tipUtil, 'resolveTip');
+apps/backend/src/domains/store/payments/payments.service.spec.ts:1936:      expect(resolveTipSpy).toHaveBeenCalledWith(
+apps/backend/src/domains/store/payments/payments.service.ts:83:import { resolveTip } from '../../../common/utils/tip.util';
+apps/backend/src/domains/store/payments/payments.service.ts:3835:    // de subtotal_amount y tax_amount; resolveTip ancla el monto pactado.
+apps/backend/src/domains/store/payments/payments.service.ts:3836:    const resolvedTip = resolveTip(dto, newSubtotalGross, (v) =>
+apps/backend/src/domains/store/payments/payments.service.ts:4605:        const resolvedTip = resolveTip(dto, calculatedSubtotalGross, (v) =>
+apps/backend/src/domains/store/orders/order-flow/dto/pay-order.dto.ts:49:  // La resolución (porcentaje → monto anclado) la hace `resolveTip`
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:23:import { resolveTip } from '@common/utils/tip.util';
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:1181:    // cierre de mesa. La resolucion vive en `resolveTip`
+apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:1205:      const incomingTip = resolveTip(
+apps/backend/src/common/utils/tip.util.ts:49:export function resolveTip(
+apps/backend/src/common/utils/tip.util.spec.ts:1:import { resolveTip } from './tip.util';
+apps/backend/src/common/utils/tip.util.spec.ts:3:describe('resolveTip — E.6 gross product base', () => {
+apps/backend/src/common/utils/tip.util.spec.ts:27:    expect(resolveTip(input, grossProducts, round)).toEqual(expected);
+
+--- APPENDIX E.6-SA1 (manual verification, NOT grep output) ---
+Productive callers: exactly 3
+ 1) payments.service.ts:3836 (mesa/table close) — resolveTip(dto, newSubtotalGross, (v) => this.roundMoney(v))
+ 2) payments.service.ts:4605 (retail POS)       — resolveTip(dto, calculatedSubtotalGross, (v) => this.roundMoney(v))
+ 3) order-flow.service.ts:1205 (flow/pay)       — resolveTip(dto, grossProductsBase, roundTipMoney)
+Non-productive matches: 1 definition (tip.util.ts:49), 1 DTO comment (pay-order.dto.ts:49),
+ 2 import lines, 2 code comments, spec matches (payments.service.spec.ts spies + tip.util.spec.ts).
+Rounding (all three half-up 2dp with Number.EPSILON — byte-identical formula):
+ - roundMoney (payments.service.ts:2380-2382):
+     Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100
+ - roundTipMoney (order-flow.service.ts:1197-1198):
+     Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100
+ - spec round (tip.util.spec.ts:4-5): identical formula.
+Verdict: ROUNDING IDENTICAL in all 3 callers.
