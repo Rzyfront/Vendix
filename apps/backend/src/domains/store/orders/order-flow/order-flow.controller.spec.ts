@@ -22,6 +22,7 @@ describe('OrderFlowController.payOrder — fully-paid preflight', () => {
       service as any,
       {} as any,
       {} as any,
+      {} as any,
       new ResponseService(),
       audit as any,
       { orders: { findFirst: jest.fn() } } as any,
@@ -58,6 +59,7 @@ describe('OrderFlowController.resolveRefund — payout contract', () => {
   const controller = new OrderFlowController(
     {} as any,
     refundFlow as any,
+    {} as any,
     {} as any,
     new ResponseService(),
     {} as any,
