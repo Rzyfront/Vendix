@@ -214,7 +214,6 @@ import { map, distinctUntilChanged, skip, switchMap, filter, startWith } from 'r
           [class.md:px-4]="!isPosRoute()"
           [class.overflow-hidden]="isPosRoute()"
           [class.p-0]="isPosRoute()"
-          [style.padding-top]="isPosRoute() ? '0' : 'var(--admin-header-gap)'"
           style="background-color: var(--background);"
         >
           <div
