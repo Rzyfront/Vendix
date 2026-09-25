@@ -3303,6 +3303,26 @@ export const ErrorCodes = {
     devMessage:
       'Commerce is not VAT responsible (DIAN): cannot assign or charge IVA',
   },
+  // B4 — Gate "no responsable de INC". El comercio NO declara O-33 en su RUT
+  // (casilla 53): no puede asignar INC a una tarifa de envío ni cobrarlo en
+  // una venta. `details` incluye `context: 'shipping'`,
+  // `cta: '/admin/fiscal/wizard'` y `reason`.
+  FISCAL_INC_NOT_RESPONSIBLE_001: {
+    code: 'FISCAL_INC_NOT_RESPONSIBLE_001',
+    httpStatus: 412,
+    devMessage:
+      'Commerce is not INC responsible (DIAN): cannot assign or charge INC',
+  },
+  // B5 — Reparación de la copia del impuesto del envío bloqueada: la orden
+  // está cancelada/devuelta, la copia no se puede completar desde su tarifa,
+  // o `clear` choca con un asiento de venta ya contabilizado. `details`
+  // lleva `order_id` y el motivo (`state`, `reason` o `entry_number`).
+  ORD_SHIPPING_TAX_REPAIR_BLOCKED_001: {
+    code: 'ORD_SHIPPING_TAX_REPAIR_BLOCKED_001',
+    httpStatus: 409,
+    devMessage:
+      'Shipping tax copy cannot be repaired in this state (cancelled/refunded order, unresolvable rate, or posted sale entry)',
+  },
   /**
    * Art. 616-1 ET / Res. 000165 de 2023: the POS electronic equivalent document
    * only supports sales up to 5 UVT. Above that the electronic sales invoice is
@@ -6259,23 +6279,3 @@ export type FiscalScopeBlockerCode =
   (typeof FiscalScopeBlockerCodes)[keyof typeof FiscalScopeBlockerCodes];
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;
-  // B4 — Gate "no responsable de INC". El comercio NO declara O-33 en su RUT
-  // (casilla 53): no puede asignar INC a una tarifa de envío ni cobrarlo en
-  // una venta. `details` incluye `context: 'shipping'`,
-  // `cta: '/admin/fiscal/wizard'` y `reason`.
-  FISCAL_INC_NOT_RESPONSIBLE_001: {
-    code: 'FISCAL_INC_NOT_RESPONSIBLE_001',
-    httpStatus: 412,
-    devMessage:
-      'Commerce is not INC responsible (DIAN): cannot assign or charge INC',
-  },
-  // B5 — Reparación de la copia del impuesto del envío bloqueada: la orden
-  // está cancelada/devuelta, la copia no se puede completar desde su tarifa,
-  // o `clear` choca con un asiento de venta ya contabilizado. `details`
-  // lleva `order_id` y el motivo (`state`, `reason` o `entry_number`).
-  ORD_SHIPPING_TAX_REPAIR_BLOCKED_001: {
-    code: 'ORD_SHIPPING_TAX_REPAIR_BLOCKED_001',
-    httpStatus: 409,
-    devMessage:
-      'Shipping tax copy cannot be repaired in this state (cancelled/refunded order, unresolvable rate, or posted sale entry)',
-  },
