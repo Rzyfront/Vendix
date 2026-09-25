@@ -1360,6 +1360,23 @@ export class RefundFlowService {
    *   `refund.completed` — cambiar el shape los rompería en silencio.
    *   Por eso este método REPLICA el bloque de emit existente, sólo
    *   intercambiando el `result` por el update manual.
+   *
+   * CP-REFUND-FLOW-REDESIGN paso 5 — normalización al contrato ordinario:
+   *   un `completed` manual aplica los mismos side-effects que un
+   *   `completed` ordinario (pagos con semántica multi-pago del paso 2,
+   *   orden a `refunded` al cubrir el acumulado, wallet vía
+   *   `creditForRefund`, caja vía `recordRefundCashRegisterMovement`
+   *   durable del paso 4) y emite `refund.completed` con los campos
+   *   canónicos (montos, `tax_breakdown`, `refund_method`,
+   *   `effective_channel`). Dos lados quedan explícitamente manuales
+   *   (escape hatch de la Business decision): (1) el asiento contable
+   *   sigue en el carril durable `manual_refund_delivery_v1` — el
+   *   listener ordinario lo salta por el marcador `manual_durable`, así
+   *   que el carril único anti-doble-reversa refund-vs-NC queda intacto
+   *   y ningún consumidor recibe un doble post; (2) inventario y caché
+   *   de cobertura NO se re-aplican porque ya se escribieron en la
+   *   creación del refund (re-mover stock duplicaría unidades) y los
+   *   refunds sin ítems (cancelación) no tienen nada que aplicar.
    */
   async manuallyResolveRefund(
     orderId: number,
@@ -1393,6 +1410,13 @@ export class RefundFlowService {
       select: {
         id: true,
         store_id: true,
+        // Paso 5: estado + cliente + piernas de pago para los side-effects
+        // ordinarios (promoción de orden/pagos, wallet). `order_number`
+        // alimenta `order.status_changed` como en `createRefund`.
+        state: true,
+        customer_id: true,
+        order_number: true,
+        payments: { select: { id: true, state: true } },
         grand_total: true,
         shipping_cost: true,
         shipping_tax_amount: true,
@@ -1457,6 +1481,35 @@ export class RefundFlowService {
       throw new VendixHttpException(ErrorCodes.REF_RESOLUTION_CONFLICT_001);
     }
 
+    // Paso 5 — cobertura acumulada en decimales exactos: lo ya completado
+    // (cargado en el select de arriba) más este refund cubre el total de la
+    // orden con tolerancia de 1¢, igual que el techo del paso 1.
+    const orderGrandTotal = new Prisma.Decimal(order.grand_total as any);
+    const priorCompletedTotal = (order.refunds ?? []).reduce(
+      (acc, row) => acc.plus(new Prisma.Decimal(row.amount as any)),
+      new Prisma.Decimal(0),
+    );
+    const isFullRefund = priorCompletedTotal
+      .plus(new Prisma.Decimal(refund.amount as any))
+      .greaterThanOrEqualTo(orderGrandTotal.minus(0.01));
+    // La orden sólo se promueve desde estados reembolsables: una orden
+    // `cancelled` (cancelación ADR-12/efectivo) conserva su estado — el
+    // `refunded` ordinario nunca pisa una cancelación.
+    const willPromoteOrder =
+      targetState === 'completed' &&
+      isFullRefund &&
+      REFUNDABLE_STATES.includes(order.state);
+    // Piernas liquidadas con el mismo predicado del paso 2: una pierna
+    // `partially_refunded` sigue en juego para promoverse a `refunded`.
+    const settledLegs = (order.payments ?? [])
+      .filter(
+        (leg) =>
+          leg.state === 'succeeded' ||
+          leg.state === 'pending' ||
+          leg.state === 'partially_refunded',
+      )
+      .sort((a, b) => a.id - b.id);
+
     const newState = targetState === 'completed'
       ? refunds_state_enum.completed
       : refunds_state_enum.failed;
@@ -1509,6 +1562,38 @@ export class RefundFlowService {
             error_message: 'PENDING_DELIVERY: manual refund accounting not yet posted',
           } });
           deliveryId = delivery.id;
+
+          // Paso 5 — side-effects ordinarios de pago/orden, atómicos con el
+          // claim. Idempotentes para refunds atascados (la creación ya los
+          // aplicó con los mismos valores) y correctivos para piernas de
+          // cancelación (ADR-12), que nacen sin tocar pagos. Un parcial sin
+          // `payment_id` vinculado no atribuye pierna: se salta antes que
+          // marcar un pago ajeno.
+          if (isFullRefund) {
+            for (const leg of settledLegs) {
+              await tx.payments.update({
+                where: { id: leg.id },
+                data: { state: 'refunded', updated_at: new Date() },
+              });
+            }
+          } else {
+            const linkedPaymentId = refund.payment_id;
+            if (
+              linkedPaymentId != null &&
+              settledLegs.some((leg) => leg.id === linkedPaymentId)
+            ) {
+              await tx.payments.update({
+                where: { id: linkedPaymentId },
+                data: { state: 'partially_refunded', updated_at: new Date() },
+              });
+            }
+          }
+          if (willPromoteOrder) {
+            await tx.orders.update({
+              where: { id: orderId },
+              data: { state: 'refunded', updated_at: new Date() },
+            });
+          }
         }
       });
     } catch (error) {
@@ -1518,6 +1603,14 @@ export class RefundFlowService {
       throw error;
     }
     const updatedRefund = { ...refund, ...updateData };
+    // Paso 5 — `payoutChannel` es un canal directo (cash/bank_transfer/
+    // store_credit/gateway): el resolver lo mapea uno-a-uno sin necesitar
+    // el tipo del pago original.
+    const effectiveChannel =
+      deliveryId !== null
+        ? resolveEffectiveRefundChannel(payoutChannel!, null)
+        : null;
+    let cash_movement: RefundCashMovementNotice | undefined;
     if (deliveryId !== null) {
       // The row survives a process crash here; the retry worker also sweeps
       // stranded rows. A journal failure cannot undo a real-world payout.
@@ -1527,20 +1620,198 @@ export class RefundFlowService {
         try { await this.manualRefundDelivery.enqueue(deliveryId); }
         catch (queueError) { this.logger.error(`Refund #${refundId} delivery retry could not be queued: ${queueError}`); }
       }
+      // Paso 5 — emit canónico: los mismos campos que `createRefund`
+      // (montos, desglose, método, canal efectivo) reconstruidos de la fila
+      // persistida. El marcador `manual_durable` se conserva para que el
+      // listener ordinario NO postee un segundo asiento: el carril único
+      // sigue siendo la delivery durable de arriba.
+      const fiscal = this.buildManualResolveFiscalPayload(order, refund);
       try {
         this.eventEmitter.emit('refund.completed', {
           refund_id: refundId, order_id: orderId,
           organization_id: order.stores.organization_id, store_id: order.store_id,
+          amount: fiscal.amount,
+          subtotal: fiscal.subtotal,
+          tax: fiscal.tax,
+          tax_amount: fiscal.tax_amount,
+          tax_breakdown: fiscal.tax_breakdown,
+          shipping: fiscal.shipping,
+          is_full_refund: isFullRefund,
+          user_id: userId,
+          refund_method: payoutChannel!,
+          effective_channel: effectiveChannel!,
           accounting_delivery: 'manual_durable',
         });
       } catch (error) {
         this.logger.error(`Refund #${refundId} cache invalidation event failed: ${error}`);
       }
+
+      if (willPromoteOrder) {
+        try {
+          this.eventEmitter.emit('order.status_changed', {
+            store_id: order.store_id,
+            organization_id: order.stores.organization_id,
+            order_id: orderId,
+            order_number: order.order_number,
+            old_state: order.state,
+            new_state: 'refunded',
+          });
+        } catch (error) {
+          this.logger.error(`Refund #${refundId} order status event failed: ${error}`);
+        }
+      }
+
+      // Paso 5 — wallet vía el mismo `creditForRefund` durable del paso 4.
+      // Non-blocking como en el ordinario: el refund ya está committed.
+      if (payoutChannel === RefundPayoutChannel.STORE_CREDIT && order.customer_id) {
+        try {
+          await this.walletService.creditForRefund(
+            order.customer_id,
+            fiscal.amount,
+            { refund_id: refundId, order_id: orderId, user_id: userId },
+          );
+          this.logger.log(
+            `Wallet credited: customer=${order.customer_id} amount=${fiscal.amount} refund=#${refundId} (manual resolve)`,
+          );
+        } catch (e) {
+          this.logger.error(
+            `Failed to credit wallet for manually resolved refund #${refundId} (customer=${order.customer_id}): ${e?.message ?? e}`,
+          );
+        }
+      }
+
+      // Paso 5 — caja vía el helper durable compartido del paso 4. Sólo
+      // cuando el canal efectivo es `cash` (misma compuerta del ordinario);
+      // la respuesta lleva el aviso explícito igual que `createRefund`.
+      if (userId && effectiveChannel === 'cash') {
+        cash_movement = await this.recordRefundCashRegisterMovement({
+          organization_id: order.stores.organization_id,
+          store_id: order.store_id,
+          user_id: userId,
+          refund_id: refundId,
+          order_id: orderId,
+          payment_id: refund.payment_id ?? null,
+          amount: fiscal.amount,
+          channel: effectiveChannel,
+        });
+      }
     }
     this.logger.log(
       `Refund #${refundId} (order #${orderId}) manually resolved to '${newState}' by user #${userId}: "${trimmedNotes.slice(0, 80)}${trimmedNotes.length > 80 ? '…' : ''}"`,
     );
-    return updatedRefund;
+    return cash_movement === undefined
+      ? updatedRefund
+      : { ...updatedRefund, cash_movement };
+  }
+
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 5 — reconstruye los montos canónicos del
+   * emit `refund.completed` desde la fila persistida del refund (misma
+   * derivación que el bloque de emit de `createRefund`, sin re-consultar:
+   * todo viene de los selects ya cargados). Las filas tipadas se toman de
+   * los ítems del refund cuando existen y de la orden en caso contrario
+   * (refunds de cancelación sin ítems). El impuesto del envío usa la misma
+   * fórmula determinista de `RefundCalculationService.calculate` sobre la
+   * copia congelada de la orden (`shipping_refund` es BRUTO).
+   */
+  private buildManualResolveFiscalPayload(
+    order: {
+      shipping_cost: Prisma.Decimal | number;
+      shipping_tax_amount: Prisma.Decimal | number;
+      shipping_tax_type: string | null;
+      order_items?: {
+        order_item_taxes?: {
+          tax_type?: string | null;
+          tax_amount?: Prisma.Decimal | number | null;
+        }[] | null;
+      }[] | null;
+      refunds?: {
+        shipping_refund?: Prisma.Decimal | number | null;
+      }[] | null;
+    },
+    refund: {
+      amount: Prisma.Decimal | number;
+      subtotal_refund?: Prisma.Decimal | number | null;
+      tax_refund?: Prisma.Decimal | number | null;
+      shipping_refund?: Prisma.Decimal | number | null;
+      refund_items?: {
+        order_items?: {
+          order_item_taxes?: {
+            tax_type?: string | null;
+            tax_amount?: Prisma.Decimal | number | null;
+          }[] | null;
+        } | null;
+      }[] | null;
+    },
+  ): {
+    amount: number;
+    subtotal: number;
+    tax: number;
+    tax_amount: number;
+    tax_breakdown: TaxBreakdownItem[];
+    shipping: number;
+  } {
+    const productTax = Number(refund.tax_refund ?? 0);
+    const itemTaxRows = (refund.refund_items ?? []).flatMap(
+      (item) => item.order_items?.order_item_taxes ?? [],
+    );
+    const orderTaxRows = (order.order_items ?? []).flatMap(
+      (item) => item.order_item_taxes ?? [],
+    );
+    const tax_breakdown = scaleBreakdownToTotal(
+      buildTaxBreakdown(itemTaxRows.length > 0 ? itemTaxRows : orderTaxRows),
+      productTax,
+    );
+    const shippingRefundCents = Math.round(
+      Number(refund.shipping_refund ?? 0) * 100,
+    );
+    const shippingCostCents = Math.round(Number(order.shipping_cost ?? 0) * 100);
+    const shippingTaxCents = Math.round(
+      Number(order.shipping_tax_amount ?? 0) * 100,
+    );
+    let shippingTaxRefund = 0;
+    if (
+      shippingRefundCents > 0 &&
+      shippingCostCents > 0 &&
+      shippingTaxCents > 0
+    ) {
+      const proportional = (cents: number) =>
+        Math.round((shippingTaxCents * cents) / shippingCostCents);
+      let priorCents = 0;
+      let priorTaxCents = 0;
+      for (const row of order.refunds ?? []) {
+        const cents = Math.round(Number(row.shipping_refund ?? 0) * 100);
+        if (cents <= 0) continue;
+        priorCents += cents;
+        priorTaxCents += proportional(cents);
+      }
+      const remaining = Math.max(0, shippingTaxCents - priorTaxCents);
+      shippingTaxRefund =
+        (priorCents + shippingRefundCents >= shippingCostCents
+          ? remaining
+          : Math.min(remaining, proportional(shippingRefundCents))) / 100;
+    }
+    const shippingTaxType =
+      shippingTaxRefund > 0 ? (order.shipping_tax_type ?? null) : null;
+    if (shippingTaxRefund > 0 && shippingTaxType) {
+      if (tax_breakdown.length === 0 && productTax > 0) {
+        tax_breakdown.push({ tax_type: 'iva', tax_amount: productTax });
+      }
+      tax_breakdown.push({
+        tax_type: shippingTaxType as TaxBreakdownItem['tax_type'],
+        tax_amount: shippingTaxRefund,
+      });
+    }
+    const tax =
+      Math.round(productTax * 100 + shippingTaxRefund * 100) / 100;
+    return {
+      amount: Number(refund.amount ?? 0),
+      subtotal: Number(refund.subtotal_refund ?? 0),
+      tax,
+      tax_amount: tax,
+      tax_breakdown,
+      shipping: Number(refund.shipping_refund ?? 0),
+    };
   }
 
   /**
