@@ -1954,7 +1954,22 @@ export class OrderFlowService {
             'La orden ya tiene un cobro: el costo de la tarifa elegida no coincide con el envío cobrado',
             {
               order_id: orderId,
+        // Paso 14 — la tarifa cobra el BRUTO del cálculo único (agregado ⇒
+        // base + impuesto, igual que el cotizador); `free` ⇒ 0. Sin
+        // `chargeForRate` (dobles viejos de specs) ⇒ `base_cost`.
               charged_shipping_cost: chargedShippingCents / 100,
+        if (rate.type === 'free') {
+          shippingCost = 0;
+        } else if (
+          this.shippingTaxService &&
+          typeof this.shippingTaxService.chargeForRate === 'function'
+        ) {
+          shippingCost = (
+            await this.shippingTaxService.chargeForRate(null, rate.id, shippingCost, {
+              store_id: order.store_id,
+            })
+          ).gross;
+        }
               rate_shipping_cost: shippingCost,
             },
           );
@@ -1969,10 +1984,11 @@ export class OrderFlowService {
           },
         });
       } else {
-        // Impuesto del envío: copia congelada de la tarifa (incluido en su
-        // precio). Sin tarifa ⇒ copia vacía. El `grand_total` se recalcula
-        // cambiando el costo anterior por el nuevo: el impuesto va DENTRO del
-        // costo, así que no se suma aparte (orders.tax_amount no lo incluye).
+        // Impuesto del envío: copia congelada de la tarifa (bruto, incluido
+        // o agregado). Sin tarifa ⇒ copia vacía. El `grand_total` se
+        // recalcula cambiando el costo anterior por el nuevo: el impuesto va
+        // DENTRO del costo, así que no se suma aparte (orders.tax_amount no
+        // lo incluye).
         const shippingTax: ShippingTaxSnapshot =
           dto.shipping_rate_id && this.shippingTaxService
             ? await this.shippingTaxService.snapshotForRate(
@@ -2008,6 +2024,26 @@ export class OrderFlowService {
     if (!force) {
       this.validateTransition(order.state as OrderState, 'shipped');
     }
+        // Paso 14 — el modo viaja con la copia (modo de la tarifa cuando hay
+        // impuesto, null si no). Se evalúa sobre el costo cobrado: el modo
+        // vive en la fila de la tarifa, así que el precio no lo mueve.
+        let shipTaxIsInclusive: boolean | null = null;
+        if (shippingTax.shipping_tax_amount > 0 && dto.shipping_rate_id) {
+          const mode_charge =
+            this.shippingTaxService &&
+            typeof this.shippingTaxService.chargeForRate === 'function'
+              ? await this.shippingTaxService.chargeForRate(
+                  null,
+                  dto.shipping_rate_id,
+                  shippingCost,
+                  { store_id: order.store_id },
+                )
+              : null;
+          shipTaxIsInclusive =
+            mode_charge && mode_charge.applies
+              ? mode_charge.reason === 'inclusive'
+              : null;
+        }
     const updatedOrder = await this.updateOrderState(orderId, 'shipped', {
       shipped_at: new Date(),
       tracking_number: dto.tracking_number,
@@ -2024,6 +2060,7 @@ export class OrderFlowService {
       select: {
         id: true,
         store_id: true,
+            shipping_tax_is_inclusive: shipTaxIsInclusive,
         stores: { select: { organization_id: true } },
       },
     });
