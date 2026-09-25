@@ -358,6 +358,9 @@ export class EcommerceInvoiceDataController {
         items: rawItems.map((it) => {
           const product = (it.product ?? {}) as Record<string, unknown>;
           return {
+            // CP-853-fix (paso 5): clave por línea (siempre presente en
+            // `kitchen_ticket_items.order_item_id`, columna NOT NULL).
+            order_item_id: it.order_item_id ?? null,
             product_name: product.name ?? null,
             quantity: it.quantity ?? null,
             status: it.status ?? null,
@@ -389,6 +392,8 @@ export class EcommerceInvoiceDataController {
       estimated_delivered_at: order.estimated_delivered_at,
       prep_minutes_max: order.prep_minutes_max,
       items: order.items.map((it) => ({
+        // CP-853-fix (paso 5): clave por línea, misma que el resumen REST.
+        order_item_id: it.order_item_id,
         product_name: it.product_name,
         quantity: it.quantity,
         kitchen_status: it.kitchen_status,

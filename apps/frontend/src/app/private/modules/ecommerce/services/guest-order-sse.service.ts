@@ -41,9 +41,26 @@ interface GuestSseEvent {
 }
 
 interface GuestSseTicketItem {
+  order_item_id?: unknown;
   product_name?: unknown;
   quantity?: unknown;
   status?: unknown;
+}
+
+/**
+ * CP-853-fix (paso 5) — clave de cocina por línea de orden: dos líneas del
+ * mismo producto ya no comparten estado. `product_name` solo cuando el id
+ * falta (payload viejo); null si no hay ninguna clave usable.
+ */
+function kitchenItemKey(raw: {
+  order_item_id?: unknown;
+  product_name?: unknown;
+}): number | string | null {
+  if (typeof raw?.order_item_id === 'number') return raw.order_item_id;
+  if (typeof raw?.product_name === 'string' && raw.product_name) {
+    return raw.product_name;
+  }
+  return null;
 }
 
 /**
@@ -140,7 +157,10 @@ export class GuestOrderSseService {
   readonly orderState = signal<string | null>(null);
   /** `delivery_type` from `snapshot` + `order.shipping_assigned`. */
   readonly deliveryType = signal<string | null>(null);
-  /** Per-dish kitchen status keyed by `product_name` (immutable writes). */
+  /**
+   * Per-dish kitchen status keyed by `order_item_id` (fallback
+   * `product_name` when the id is missing). Immutable writes.
+   */
   readonly kitchenByProduct = signal<Readonly<Record<string, string>>>({});
   /** Payment rows from `snapshot` + `order.payment_updated`. */
   readonly paymentsLive = signal<GuestSsePayment[]>([]);
@@ -236,7 +256,9 @@ export class GuestOrderSseService {
     this.eventSource = es;
 
     es.onopen = () => {
-      this.reconnectAttempt = 0;
+      // CP-853-fix (paso 5): el backoff NO se resetea aquí — un stream
+      // denegado abre y corta sin datos, y resetear en open lo deja
+      // reintentando cada 1s. Se resetea al primer mensaje válido.
       this.connectionState.set('open');
     };
 
@@ -266,6 +288,9 @@ export class GuestOrderSseService {
       return;
     }
     if (typeof parsed.type !== 'string' || !parsed.type) return;
+    // CP-853-fix (paso 5): el primer mensaje válido prueba que el stream
+    // vive — ahí se reinicia el backoff, no en `onopen`.
+    this.reconnectAttempt = 0;
     this.lastEventAt.set(Date.now());
 
     // `parsed` es `Record`-ish: `noPropertyAccessFromIndexSignature`
@@ -365,15 +390,17 @@ export class GuestOrderSseService {
     if (Array.isArray(order['items'])) {
       const next: Record<string, string> = {};
       for (const raw of order['items'] as Array<Record<string, unknown>>) {
-        const name = raw?.['product_name'];
+        const key = kitchenItemKey({
+          order_item_id: raw?.['order_item_id'],
+          product_name: raw?.['product_name'],
+        });
         const status = raw?.['kitchen_status'];
         if (
-          typeof name === 'string' &&
-          name &&
+          key != null &&
           typeof status === 'string' &&
           KNOWN_KITCHEN_STATUSES.has(status)
         ) {
-          next[name] = status;
+          next[key] = status;
         }
       }
       this.kitchenByProduct.set(next);
@@ -424,11 +451,10 @@ export class GuestOrderSseService {
   }
 
   /**
-   * Funde un evento `kitchen.*` en `kitchenByProduct` por `product_name`
-   * (misma fuente que el summary: `products.name`). Cada ítem trae su propio
-   * `status`; si falta o no es vocabulario conocido, se usa el estado que
-   * implica el tipo de evento. Escritura inmutable para que zoneless
-   * reaccione.
+   * Funde un evento `kitchen.*` en `kitchenByProduct` por `order_item_id`
+   * (fallback `product_name`). Cada ítem trae su propio `status`; si falta
+   * o no es vocabulario conocido, se usa el estado que implica el tipo de
+   * evento. Escritura inmutable para que zoneless reaccione.
    */
   private applyKitchenEvent(
     type: GuestKitchenEventType,
@@ -440,22 +466,38 @@ export class GuestOrderSseService {
     const next: Record<string, string> = { ...this.kitchenByProduct() };
     let changed = false;
     for (const raw of rawItems as GuestSseTicketItem[]) {
-      const name = raw?.product_name;
-      if (typeof name !== 'string' || !name) continue;
+      const key = kitchenItemKey(raw ?? {});
+      if (key == null) continue;
       const itemStatus = raw?.status;
       const status =
         typeof itemStatus === 'string' &&
         KNOWN_KITCHEN_STATUSES.has(itemStatus)
           ? itemStatus
           : fallback;
-      if (next[name] !== status) {
-        next[name] = status;
+      if (next[key] !== status) {
+        next[key] = status;
         changed = true;
       }
     }
     if (changed) {
       this.kitchenByProduct.set(next);
     }
+  }
+
+  /**
+   * CP-853-fix (paso 5) — una subida de comprobante confirmada por el
+   * servidor gana sobre el SSE: se refleja en `paymentsLive` para que un
+   * evento rancio no la revierta al fusionar. Sin cambios no hay `set`.
+   */
+  markReceiptUploaded(paymentId: number, hasReceipt: boolean): void {
+    const current = this.paymentsLive();
+    const idx = current.findIndex((p) => p.payment_id === paymentId);
+    if (idx < 0 || current[idx].has_receipt === hasReceipt) return;
+    this.paymentsLive.set(
+      current.map((p, i) =>
+        i === idx ? { ...p, has_receipt: hasReceipt } : p,
+      ),
+    );
   }
 
   private scheduleReconnect(): void {
@@ -472,7 +514,7 @@ export class GuestOrderSseService {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       // Reapertura = re-resolución server-side del binding + `snapshot`
-      // fresco; el backoff se resetea en `onopen`.
+      // fresco; el backoff se resetea al primer mensaje válido.
       this.openEventSource(token, this.currentStoreId);
     }, delay);
   }

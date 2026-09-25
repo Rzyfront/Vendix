@@ -109,9 +109,32 @@ describe('PrintFiscalValidatorService', () => {
     ).not.toThrow();
   });
 
+  // CP-853-fix (paso 2) — la regla de la leyenda no fiscal del tiquete POS
+  // salió de `assertFiscalCompliance` (impresión): un override guardado antes
+  // de que la regla existiera NUNCA debe bloquear la impresión con 422.
+  // Sigue viviendo en `assertSaveCompliance` (guardado en Hub / biblioteca).
+  it('should NOT reject pos_sale_ticket without f_disclaimer when printing (assertFiscalCompliance)', () => {
+    const def: PrintFormatDefinition = {
+      paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1 },
+      sections: [
+        {
+          id: 'sec_footer', type: 'footer', title: 'Pie', enabled: true, order: 6,
+          fields: [
+            { id: 'f_msg', key: 'receipts.receipt_footer', label: 'Mensaje', enabled: true, position: 'center' },
+          ],
+        },
+      ],
+    };
+
+    expect(() =>
+      service.assertFiscalCompliance('pos_sale_ticket', def),
+    ).not.toThrow();
+  });
+
   // Paridad FE — el tiquete POS exige leyenda no fiscal con código propio
-  // (el invariante B.6 reserva PRINT_FISCAL_STRUCTURE_VIOLATION_001 a fiscales).
-  it('should reject pos_sale_ticket structured without enabled f_disclaimer', () => {
+  // (el invariante B.6 reserva PRINT_FISCAL_STRUCTURE_VIOLATION_001 a fiscales),
+  // pero SOLO al guardar (`assertSaveCompliance`).
+  it('should reject pos_sale_ticket structured without enabled f_disclaimer when saving (assertSaveCompliance)', () => {
     const def: PrintFormatDefinition = {
       paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1 },
       sections: [
@@ -126,7 +149,7 @@ describe('PrintFiscalValidatorService', () => {
 
     let err: any;
     try {
-      service.assertFiscalCompliance('pos_sale_ticket', def);
+      service.assertSaveCompliance('pos_sale_ticket', def);
     } catch (e) {
       err = e;
     }
@@ -134,7 +157,7 @@ describe('PrintFiscalValidatorService', () => {
     expect(err.errorCode).toBe('PRINT_TICKET_DISCLAIMER_REQUIRED_001');
   });
 
-  it('should reject pos_sale_ticket custom without the disclaimer token', () => {
+  it('should reject pos_sale_ticket custom without the disclaimer token when saving (assertSaveCompliance)', () => {
     const def: PrintFormatDefinition = {
       paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1 },
       sections: [],
@@ -143,7 +166,7 @@ describe('PrintFiscalValidatorService', () => {
 
     let err: any;
     try {
-      service.assertFiscalCompliance('pos_sale_ticket', def);
+      service.assertSaveCompliance('pos_sale_ticket', def);
     } catch (e) {
       err = e;
     }
@@ -151,7 +174,7 @@ describe('PrintFiscalValidatorService', () => {
     expect(err.errorCode).toBe('PRINT_TICKET_DISCLAIMER_REQUIRED_001');
   });
 
-  it('should accept pos_sale_ticket structured with enabled f_disclaimer', () => {
+  it('should accept pos_sale_ticket structured with enabled f_disclaimer when saving (assertSaveCompliance)', () => {
     const def: PrintFormatDefinition = {
       paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1 },
       sections: [
@@ -165,11 +188,11 @@ describe('PrintFiscalValidatorService', () => {
     };
 
     expect(() =>
-      service.assertFiscalCompliance('pos_sale_ticket', def),
+      service.assertSaveCompliance('pos_sale_ticket', def),
     ).not.toThrow();
   });
 
-  it('should accept pos_sale_ticket custom containing the disclaimer token', () => {
+  it('should accept pos_sale_ticket custom containing the disclaimer token when saving (assertSaveCompliance)', () => {
     const def: PrintFormatDefinition = {
       paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1 },
       sections: [],
@@ -177,7 +200,20 @@ describe('PrintFiscalValidatorService', () => {
     };
 
     expect(() =>
-      service.assertFiscalCompliance('pos_sale_ticket', def),
+      service.assertSaveCompliance('pos_sale_ticket', def),
     ).not.toThrow();
+  });
+
+  it('should still enforce fiscal DIAN rules inside assertSaveCompliance', () => {
+    const invalidFiscalDef: PrintFormatDefinition = {
+      paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 0, copies: 1 },
+      sections: [
+        { id: '1', type: 'header', title: 'Header', enabled: true, order: 1 },
+      ],
+    };
+
+    expect(() =>
+      service.assertSaveCompliance('fiscal_electronic_invoice', invalidFiscalDef),
+    ).toThrow(VendixHttpException);
   });
 });

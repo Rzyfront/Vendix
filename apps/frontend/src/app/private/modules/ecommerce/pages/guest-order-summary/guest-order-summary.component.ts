@@ -38,6 +38,8 @@ import { GuestOrderPrintService } from '../../services/guest-order-print.service
 // ============================================================================
 
 interface GuestOrderItem {
+  // CP-853-fix (paso 5): clave por línea para la cocina en vivo (aditivo).
+  order_item_id?: number | null;
   product_name: string;
   variant_sku?: string | null;
   variant_attributes?: string | null;
@@ -304,11 +306,15 @@ interface GuestOrderSummary {
 
           <!-- SEGUIMIENTO (paso 10: tras hide_tracking_progress) -->
           @if (trackingShown()) {
+            <!-- CP-853-fix (paso 4): el ritmo lo da el backend
+                 (prep_minutes_max, con fallback a Logística); el guest no
+                 inventa un 15. La exclamación es solo para el tipo: null cae
+                 en la guarda interna del componente (Number.isFinite). -->
             <app-order-tracking-progress
               [orderState]="data.order.state"
               [hasShippingAddress]="data.order.shipping_address != null"
               [animateFromZero]="justPurchased()"
-              [baseMinutes]="data.order.prep_minutes_max ?? 15"
+              [baseMinutes]="etaMinutes(data.order)!"
               [reducedMotion]="sse.prefersReducedMotion()"
             />
           }
@@ -432,7 +438,7 @@ interface GuestOrderSummary {
                           size="xs"
                         >
                           <app-icon name="flame" [size]="10" />
-                          Cocina: {{ kitchenStateLabel(ks) }}
+                          Preparación: {{ kitchenStateLabel(ks) }}
                         </app-badge>
                       </span>
                     }
@@ -1440,7 +1446,15 @@ export class GuestOrderSummaryComponent implements OnInit {
   print(): void {
     const summary = this.summary();
     if (!summary) return;
-    this.voucherPrint.printVoucher(summary);
+    // CP-853-fix (paso 4): el voucher respeta los mismos opt-outs que la
+    // vista (etaVisible / trackingShown).
+    const orders =
+      this.tenantFacade.getCurrentDomainConfig()?.customConfig?.ecommerce
+        ?.orders;
+    this.voucherPrint.printVoucher(summary, {
+      hidePrepEta: orders?.hide_prep_eta === true,
+      hideTracking: orders?.hide_tracking_progress === true,
+    });
   }
 
   whatsappEnabled(): boolean {
@@ -1647,7 +1661,13 @@ export class GuestOrderSummaryComponent implements OnInit {
     return this.summary() != null;
   }
 
-  private etaMinutes(order: GuestOrderData): number | null {
+  /**
+   * CP-853-fix (paso 4): público porque el template lo usa en `baseMinutes`.
+   * MAX de preparación por ítem, ya resuelto por el backend (variante, luego
+   * producto, luego `operations.default_preparation_time_minutes`); null si
+   * la tienda no configuró ninguna fuente.
+   */
+  etaMinutes(order: GuestOrderData): number | null {
     const m = order.prep_minutes_max;
     return typeof m === 'number' && Number.isFinite(m) ? m : null;
   }
@@ -1812,17 +1832,22 @@ export class GuestOrderSummaryComponent implements OnInit {
     const order: GuestOrderData = {
       ...current.order,
       items: current.order.items.map((item) => {
-        const live = liveKitchen[item.product_name];
+        // CP-853-fix (paso 5): cocina por línea de orden — product_name
+        // solo cuando el id falta.
+        const live = liveKitchen[item.order_item_id ?? item.product_name];
         if (live == null || live === item.kitchen_status) return item;
         return { ...item, kitchen_status: live };
       }),
       payments: (current.order.payments ?? []).map((p) => {
         const live = livePayments.find((l) => l.payment_id === p.payment_id);
         if (!live) return p;
-        if (live.state === p.state && live.has_receipt === !!p.has_receipt) {
+        // CP-853-fix (paso 5): el live solo ENCIENDE has_receipt — un false
+        // rancio del snapshot/evento nunca apaga una subida confirmada.
+        const hasReceipt = live.has_receipt === true ? true : p.has_receipt;
+        if (live.state === p.state && hasReceipt === p.has_receipt) {
           return p;
         }
-        return { ...p, state: live.state, has_receipt: live.has_receipt };
+        return { ...p, state: live.state, has_receipt: hasReceipt };
       }),
     };
     if (liveState) order.state = liveState;
@@ -1978,6 +2003,9 @@ export class GuestOrderSummaryComponent implements OnInit {
         res.data.has_receipt,
         res.data.receipt_content_type,
       );
+      // CP-853-fix (paso 5): la subida confirmada gana sobre el SSE — se
+      // refleja también en el estado vivo para que la fusión no la revierta.
+      this.sse.markReceiptUploaded(paymentId, res.data.has_receipt);
       this.toast.success(
         res.message ??
           'Comprobante recibido. La tienda lo revisará para confirmar tu pago.',
