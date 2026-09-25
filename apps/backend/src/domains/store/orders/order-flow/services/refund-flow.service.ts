@@ -1044,8 +1044,14 @@ export class RefundFlowService {
     completedRefund: any,
     amount: number,
   ): Promise<{ status: 'completed' | 'failed' | 'processing'; message?: string }> {
+    // Step 2 follow-up: `partially_refunded` stays in play so a second
+    // `original_payment` gateway refund still auto-dispatches instead of
+    // parking as manual `processing`.
     const activePayment = order.payments?.find(
-      (p: any) => p.state === 'succeeded' || p.state === 'pending',
+      (p: any) =>
+        p.state === 'succeeded' ||
+        p.state === 'pending' ||
+        p.state === 'partially_refunded',
     );
 
     if (!activePayment) {
