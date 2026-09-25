@@ -2,12 +2,14 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ShippingCalculatorService } from './shipping-calculator.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { SettingsService } from '../settings/settings.service';
+import { ShippingTaxService } from './services/shipping-tax.service';
 import { shipping_rate_type_enum } from '@prisma/client';
 
 describe('ShippingCalculatorService', () => {
   let service: ShippingCalculatorService;
   let mockPrisma: any;
   let mockSettings: any;
+  let mockShippingTax: any;
 
   beforeEach(async () => {
     mockPrisma = {
@@ -26,11 +28,18 @@ describe('ShippingCalculatorService', () => {
       getStoreCurrency: jest.fn().mockResolvedValue('COP'),
     };
 
+    // Default: ninguna tarifa con contexto fiscal ⇒ costo tal cual, sin
+    // campos de comerciante (comportamiento pre-lote-C).
+    mockShippingTax = {
+      loadRateTaxContext: jest.fn().mockResolvedValue(new Map()),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ShippingCalculatorService,
         { provide: StorePrismaService, useValue: mockPrisma },
         { provide: SettingsService, useValue: mockSettings },
+        { provide: ShippingTaxService, useValue: mockShippingTax },
       ],
     }).compile();
 
@@ -464,6 +473,182 @@ describe('ShippingCalculatorService', () => {
       const above = await quote(100000, 150000);
       expect(above).toHaveLength(1);
       expect(above[0].cost).toBe(0);
+    });
+  });
+
+  describe('cotización emite el bruto (lote C, paso 13)', () => {
+    const riohachaZone = {
+      id: 10,
+      store_id: 1,
+      name: 'Riohacha Local',
+      countries: ['CO'],
+      regions: ['La Guajira'],
+      cities: ['Riohacha'],
+      zip_codes: [],
+      is_active: true,
+    };
+
+    const address = {
+      country_code: 'CO',
+      state_province: 'La Guajira',
+      city: 'Riohacha',
+    };
+
+    const iva19 = {
+      id: 92,
+      name: 'IVA 19%',
+      tax_type: 'iva',
+      tax_rates: [{ id: 7, name: 'IVA 19%', rate: 0.19 }],
+    };
+    const inc8 = {
+      id: 93,
+      name: 'INC 8%',
+      tax_type: 'inc',
+      tax_rates: [{ id: 8, name: 'INC 8%', rate: 0.08 }],
+    };
+
+    const ctxFor = (
+      rate_id: number,
+      tax_is_inclusive: boolean,
+      category: any,
+    ) =>
+      new Map([
+        [
+          rate_id,
+          {
+            rate_id,
+            tax_is_inclusive,
+            category,
+            vat_responsible: true,
+            inc_responsible: true,
+          },
+        ],
+      ]);
+
+    const flatRate = (overrides: any = {}) => ({
+      id: 101,
+      shipping_zone_id: 10,
+      shipping_method_id: 5,
+      name: 'Envío a domicilio',
+      type: shipping_rate_type_enum.flat,
+      base_cost: 10000,
+      free_shipping_threshold: null,
+      is_active: true,
+      shipping_method: {
+        id: 5,
+        name: 'Envío a domicilio',
+        type: 'own_fleet',
+        is_active: true,
+        display_order: 1,
+      },
+      ...overrides,
+    });
+
+    const quote = (rate: any, cartPrice = 50000) => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([riohachaZone]);
+      mockPrisma.shipping_rates.findMany.mockResolvedValue([rate]);
+      return service.calculateRates(
+        1,
+        [{ product_id: 1, quantity: 1, price: cartPrice }],
+        address,
+      );
+    };
+
+    it('tarifa AGREGADA 10.000 IVA 19 % ⇒ cost 11900 + desglose de comerciante', async () => {
+      mockShippingTax.loadRateTaxContext.mockResolvedValue(
+        ctxFor(101, false, iva19),
+      );
+
+      const options = await quote(flatRate());
+
+      expect(options).toHaveLength(1);
+      expect(options[0].cost).toBe(11900);
+      expect(options[0].base).toBe(10000);
+      expect(options[0].shipping_tax_amount).toBe(1900);
+      expect(options[0].tax_is_inclusive).toBe(false);
+    });
+
+    it('una sola lectura fiscal por cotización, con store_id explícito', async () => {
+      mockShippingTax.loadRateTaxContext.mockResolvedValue(
+        ctxFor(101, false, iva19),
+      );
+
+      await quote(flatRate());
+
+      expect(mockShippingTax.loadRateTaxContext).toHaveBeenCalledTimes(1);
+      expect(mockShippingTax.loadRateTaxContext).toHaveBeenCalledWith([101], {
+        store_id: 1,
+      });
+    });
+
+    it('tarifa INCLUIDA 15.000 INC 8 % ⇒ cost 15000 y el impuesto se despeja', async () => {
+      mockShippingTax.loadRateTaxContext.mockResolvedValue(
+        ctxFor(101, true, inc8),
+      );
+
+      const options = await quote(flatRate({ base_cost: 15000 }));
+
+      expect(options).toHaveLength(1);
+      expect(options[0].cost).toBe(15000);
+      expect(options[0].base).toBeCloseTo(13888.89, 2);
+      expect(options[0].shipping_tax_amount).toBeCloseTo(1111.11, 2);
+      expect(options[0].tax_is_inclusive).toBe(true);
+    });
+
+    it('umbral alcanzado con tarifa agregada ⇒ envío 0 sin impuesto', async () => {
+      mockShippingTax.loadRateTaxContext.mockResolvedValue(
+        ctxFor(101, false, iva19),
+      );
+
+      const options = await quote(
+        flatRate({ free_shipping_threshold: 50000 }),
+        50000,
+      );
+
+      expect(options).toHaveLength(1);
+      expect(options[0].cost).toBe(0);
+      expect(options[0].shipping_tax_amount).toBe(0);
+      expect(options[0].tax_is_inclusive).toBe(false);
+    });
+
+    it('tarifa free con categoría agregada ⇒ 0 sin impuesto', async () => {
+      mockShippingTax.loadRateTaxContext.mockResolvedValue(
+        ctxFor(101, false, iva19),
+      );
+
+      const options = await quote(
+        flatRate({ type: shipping_rate_type_enum.free, base_cost: 0 }),
+      );
+
+      expect(options).toHaveLength(1);
+      expect(options[0].cost).toBe(0);
+      expect(options[0].shipping_tax_amount).toBe(0);
+    });
+
+    it('tarifa sin contexto fiscal ⇒ costo tal cual, sin campos de comerciante', async () => {
+      mockShippingTax.loadRateTaxContext.mockResolvedValue(new Map());
+
+      const options = await quote(flatRate());
+
+      expect(options).toHaveLength(1);
+      expect(options[0].cost).toBe(10000);
+      expect(options[0].base).toBeUndefined();
+      expect(options[0].shipping_tax_amount).toBeUndefined();
+      expect(options[0].tax_is_inclusive).toBeUndefined();
+    });
+
+    it('tarifa sin categoría (category null) ⇒ bruto = precio, impuesto 0', async () => {
+      mockShippingTax.loadRateTaxContext.mockResolvedValue(
+        ctxFor(101, true, null),
+      );
+
+      const options = await quote(flatRate());
+
+      expect(options).toHaveLength(1);
+      expect(options[0].cost).toBe(10000);
+      expect(options[0].base).toBe(10000);
+      expect(options[0].shipping_tax_amount).toBe(0);
+      expect(options[0].tax_is_inclusive).toBe(true);
     });
   });
 });
