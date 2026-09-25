@@ -901,10 +901,11 @@ export class CustomersAnalyticsService {
     const storeId = context.store_id;
 
     // QUI-628 v3 — export alineado con la pantalla: solo carritos realmente
-    // abandonados, ordenados por `last_activity_at`. `abandonment_reason` se
-    // deja como `null` (antes era hardcoded "No especificada", lo cual
-    // invitaba a leerlo como dato). El XLSX debe mostrar la columna con un
-    // placeholder honesto tipo "Sin causa capturada" (ver UI del reporte).
+    // abandonados, ordenados por `last_activity_at`. La causa de abandono no se
+    // captura hoy, así que la columna del XLSX responde el placeholder honesto
+    // «Sin causa capturada» en vez de una celda vacía que pareciera un dato
+    // omitido (antes incluso se hardcodeaba "No especificada" como si fuera
+    // un valor real).
     const cartsData = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
         id: number;
@@ -943,9 +944,9 @@ export class CustomersAnalyticsService {
           ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
           : 'Cliente invitado',
         email: customer?.email || '',
-        // Antes: 'No especificada' hardcoded. Ahora: null — la causa no se
-        // captura hoy y mentirla es peor que un campo vacío.
-        abandonment_reason: null,
+        // Placeholder honesto: la causa no se captura hoy; el XLSX muestra
+        // "Sin causa capturada" en lugar de una celda vacía.
+        abandonment_reason: 'Sin causa capturada',
         value: Number(cart.subtotal || 0),
         created_at: cart.last_activity_at ?? null,
         abandoned_at: cart.last_activity_at ?? null,
