@@ -4,6 +4,7 @@ import {
   evaluateShippingTaxCategory,
   prorateShippingTaxRefundCents,
   proportionalShippingTaxCents,
+  resolveShippingCharge,
   resolveShippingTaxSnapshot,
   shippingNetBase,
 } from './shipping-tax.util';
@@ -184,6 +185,172 @@ describe('shipping-tax.util', () => {
         // FAX07 (Anexo 1.9 §5.2.1.1): |impuesto − base × r| ≤ 2,00.
         expect(Math.abs(r.snapshot.shipping_tax_amount - r.base * rate)).toBeLessThanOrEqual(2);
       });
+    });
+  });
+
+  describe('resolveShippingCharge', () => {
+    it('agregado: 10.000 IVA 19 % ⇒ bruto 11.900 = base 10.000 + IVA 1.900', () => {
+      expect(
+        resolveShippingCharge({
+          rate_price: 10000,
+          category: iva19,
+          tax_is_inclusive: false,
+          vat_responsible: true,
+        }),
+      ).toEqual({ applies: true, gross: 11900, base: 10000, tax: 1900, reason: 'exclusive' });
+    });
+
+    it('agregado: 15.000 INC 8 % ⇒ bruto 16.200 = base 15.000 + INC 1.200', () => {
+      expect(
+        resolveShippingCharge({
+          rate_price: 15000,
+          category: inc8,
+          tax_is_inclusive: false,
+          inc_responsible: true,
+        }),
+      ).toEqual({ applies: true, gross: 16200, base: 15000, tax: 1200, reason: 'exclusive' });
+    });
+
+    it('agregado trunca la cuota (no redondea): 10.005 IVA 19 % ⇒ 1.900,95', () => {
+      // 10.005 × 0,19 = 1.900,95 exacto; con polvo float daría 1.900,94999…:
+      // el kernel Decimal trunca a 1.900,95.
+      const c = resolveShippingCharge({
+        rate_price: 10005,
+        category: iva19,
+        tax_is_inclusive: false,
+      });
+      expect(c).toEqual({ applies: true, gross: 11905.95, base: 10005, tax: 1900.95, reason: 'exclusive' });
+    });
+
+    it('incluido: 15.000 INC 8 % ⇒ bruto = precio (base 13.888,89 + INC 1.111,11)', () => {
+      expect(
+        resolveShippingCharge({
+          rate_price: 15000,
+          category: inc8,
+          tax_is_inclusive: true,
+        }),
+      ).toEqual({ applies: true, gross: 15000, base: 13888.89, tax: 1111.11, reason: 'inclusive' });
+    });
+
+    it.each([
+      [0, 0, 0],
+      [null, 0, 0],
+      [-5, 0, 0],
+      ['abc', 0, 0],
+    ])('precio %p ⇒ sin cargo (%s/%s), bruto 0', (price, gross, base) => {
+      expect(
+        resolveShippingCharge({ rate_price: price, category: iva19, tax_is_inclusive: false }),
+      ).toEqual({ applies: false, gross, base, tax: 0, reason: 'no_price' });
+    });
+
+    it('sin categoría ⇒ bruto = precio, sin recargo', () => {
+      expect(
+        resolveShippingCharge({ rate_price: 10000, category: null, tax_is_inclusive: false }),
+      ).toEqual({ applies: false, gross: 10000, base: 10000, tax: 0, reason: 'no_category' });
+    });
+
+    it('categoría no elegible (ICA) ⇒ bruto = precio, sin recargo', () => {
+      expect(
+        resolveShippingCharge({
+          rate_price: 10000,
+          category: { ...iva19, tax_type: 'ica' },
+          tax_is_inclusive: false,
+        }),
+      ).toEqual({ applies: false, gross: 10000, base: 10000, tax: 0, reason: 'unsupported_tax_type' });
+    });
+
+    it('IVA sin O-48 (emisor no responsable) ⇒ bruto = precio, sin recargo', () => {
+      expect(
+        resolveShippingCharge({
+          rate_price: 10000,
+          category: iva19,
+          tax_is_inclusive: false,
+          vat_responsible: false,
+        }),
+      ).toEqual({ applies: false, gross: 10000, base: 10000, tax: 0, reason: 'vat_not_responsible' });
+    });
+
+    it('INC sin O-33 (emisor no responsable) ⇒ bruto = precio, sin recargo', () => {
+      expect(
+        resolveShippingCharge({
+          rate_price: 15000,
+          category: inc8,
+          tax_is_inclusive: false,
+          inc_responsible: false,
+        }),
+      ).toEqual({ applies: false, gross: 15000, base: 15000, tax: 0, reason: 'inc_not_responsible' });
+    });
+
+    it('IVA e INC son ejes independientes: INC no consulta O-48, IVA no consulta O-33', () => {
+      const inc = resolveShippingCharge({
+        rate_price: 15000,
+        category: inc8,
+        tax_is_inclusive: false,
+        vat_responsible: false,
+        inc_responsible: true,
+      });
+      expect(inc).toMatchObject({ applies: true, gross: 16200, reason: 'exclusive' });
+      const iva = resolveShippingCharge({
+        rate_price: 10000,
+        category: iva19,
+        tax_is_inclusive: false,
+        vat_responsible: true,
+        inc_responsible: false,
+      });
+      expect(iva).toMatchObject({ applies: true, gross: 11900, reason: 'exclusive' });
+    });
+
+    it('responsabilidad omitida ⇒ no se evalúa (el llamador ya la resolvió)', () => {
+      const c = resolveShippingCharge({
+        rate_price: 10000,
+        category: iva19,
+        tax_is_inclusive: false,
+      });
+      expect(c).toMatchObject({ applies: true, gross: 11900 });
+    });
+
+    it('base de un centavo: la cuota trunca a cero ⇒ bruto = precio, sin recargo', () => {
+      expect(
+        resolveShippingCharge({ rate_price: 0.01, category: iva19, tax_is_inclusive: false }),
+      ).toEqual({ applies: false, gross: 0.01, base: 0.01, tax: 0, reason: 'clearing_unclosed' });
+    });
+
+    describe.each([
+      ['IVA 19 %', iva19, 0.19, 19],
+      ['INC 8 %', inc8, 0.08, 8],
+    ])('propiedad f(B) = B + trunc(B·r) · %s', (_label, cat, _rate, percent) => {
+      it(
+        'bases 1…100.000: snapshot(f(B)).tax === trunc(B·r) === charge.tax, y base + impuesto = bruto',
+        () => {
+          for (let b = 1; b <= 100000; b++) {
+            const charge = resolveShippingCharge({
+              rate_price: b,
+              category: cat,
+              tax_is_inclusive: false,
+            });
+            expect(charge.applies).toBe(true);
+            if (!charge.applies) continue;
+            // B entero ⇒ B·r es exacto a centavos: trunc es identidad y la
+            // cuota esperada en centavos es el entero exacto B × percent.
+            const expected_tax_cents = b * percent;
+            expect(Math.round(charge.tax * 100)).toBe(expected_tax_cents);
+            expect(Math.round(charge.base * 100) + Math.round(charge.tax * 100)).toBe(
+              Math.round(charge.gross * 100),
+            );
+            const snapshot = resolveShippingTaxSnapshot({
+              shipping_cost: charge.gross,
+              category: cat,
+            });
+            expect(snapshot.applies).toBe(true);
+            if (!snapshot.applies) continue;
+            expect(snapshot.snapshot.shipping_tax_amount).toBe(charge.tax);
+            expect(Math.round(snapshot.snapshot.shipping_tax_amount * 100)).toBe(
+              expected_tax_cents,
+            );
+          }
+        },
+        120000,
+      );
     });
   });
 
