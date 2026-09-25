@@ -21,10 +21,12 @@ import { RequestContextService } from '@common/context/request-context.service';
  * este paso). `source_id` es el `refund_id`: un SELECT por refund muestra
  * si su movimiento de caja quedó pendiente.
  *
- * El reintento NO va por la cola BullMQ `accounting-entry-retry`: su
- * processor solo sabe enrutar `manual_refund_delivery_v1` o re-postear
- * asientos vía `postAutoEntry`, y tocarlo está fuera del scope del paso.
- * El reintento vive acá (`sweepStrandedRefundCashMovements`, cada 60 s).
+ * El reintento vive acá (`sweepStrandedRefundCashMovements`, cada 60 s)
+ * y en la cola BullMQ `accounting-entry-retry`: su processor enruta
+ * `REFUND_CASH_MOVEMENT_KEY` a `deliverRefundCashMovement` (release-853,
+ * paso 6 — nunca a `postAutoEntry`, que postearía un asiento contable en
+ * vez del movimiento de caja). Ambas vías comparten el lock de fila de
+ * `deliverRefundCashMovement`, así que nunca entregan dos veces.
  */
 export const REFUND_CASH_MOVEMENT_KEY = 'refund_cash_movement_v1';
 export const REFUND_CASH_MOVEMENT_SOURCE = 'refund.cash_movement';
@@ -367,14 +369,23 @@ export class MovementsService {
           });
           return;
         }
+        // Business rule: un reembolso en efectivo afecta solo el arqueo de
+        // quien lo hizo. Filtrar por `opened_by = payload.user_id` evita que
+        // caiga en la caja de otro usuario que también tenga sesión abierta
+        // en la misma tienda. Si el usuario dueño del refund no tiene una
+        // sesión abierta, la fila sigue pendiente — nunca se reasigna a otra.
         const session = await tx.cash_register_sessions.findFirst({
-          where: { store_id: payload.store_id, status: 'open' },
+          where: {
+            store_id: payload.store_id,
+            status: 'open',
+            opened_by: payload.user_id,
+          },
           orderBy: { opened_at: 'desc' },
           select: { id: true },
         });
         if (!session) {
           throw new Error(
-            `NO_OPEN_SESSION: no open cash session in store #${payload.store_id} for refund #${payload.refund_id}`,
+            `NO_OPEN_SESSION: no open cash session owned by user #${payload.user_id} in store #${payload.store_id} for refund #${payload.refund_id}`,
           );
         }
         const movement = await tx.cash_register_movements.create({

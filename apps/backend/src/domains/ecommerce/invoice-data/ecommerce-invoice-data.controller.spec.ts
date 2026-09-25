@@ -244,6 +244,80 @@ describe('EcommerceInvoiceDataController (paso 6: stream SSE guest)', () => {
     });
   });
 
+  it('matchesGuest acepta order.payment_updated de SU orden y niega cross-order', () => {
+    expect(
+      controller.matchesGuest(
+        {
+          type: 'order.payment_updated',
+          data: {
+            order_id: 42,
+            payments: [{ payment_id: 1, state: 'succeeded', has_receipt: true }],
+          },
+        },
+        BINDING,
+      ),
+    ).toBe(true);
+    // Cross-order: otra orden de la misma tienda ⇒ deny.
+    expect(
+      controller.matchesGuest(
+        {
+          type: 'order.payment_updated',
+          data: {
+            order_id: 43,
+            payments: [{ payment_id: 9, state: 'succeeded', has_receipt: false }],
+          },
+        },
+        BINDING,
+      ),
+    ).toBe(false);
+    // Token inválido/ajeno ⇒ el stream nunca llega aquí con binding, pero
+    // un evento sin order_id tampoco debe pasar (default-deny).
+    expect(
+      controller.matchesGuest(
+        { type: 'order.payment_updated', data: { payments: [] } },
+        BINDING,
+      ),
+    ).toBe(false);
+    expect(
+      controller.matchesGuest({ type: 'order.payment_updated' }, BINDING),
+    ).toBe(false);
+  });
+
+  it('projectForGuest blanquea order.payment_updated (shape whitelist, sin fugas)', () => {
+    const projected = controller.projectForGuest({
+      type: 'order.payment_updated',
+      title: 'order.payment_updated',
+      body: 'order.payment_updated',
+      data: {
+        order_id: 42,
+        kind: 'order.payment_updated',
+        payments: [
+          {
+            payment_id: 1,
+            state: 'succeeded',
+            has_receipt: true,
+            amount: 120000,
+            method: 'bank_transfer',
+            receipt_s3_key: 'privado/recibo.png',
+            device_id: 'dev-123',
+            customer_email: 'ana@x.co',
+          },
+        ],
+        internal_cost: 5000,
+        settings: { receipt_format: 'pdf' },
+      },
+      created_at: '2026-09-25T10:00:00.000Z',
+    });
+    expect(projected).toEqual({
+      type: 'order.payment_updated',
+      order_id: 42,
+      payments: [{ payment_id: 1, state: 'succeeded', has_receipt: true }],
+      ts: expect.any(Number),
+    });
+    const blob = JSON.stringify(projected);
+    expect(blob).not.toMatch(/cost|settings|email|device_id|amount|method|s3_key|kind/);
+  });
+
   it('projectGuestSnapshot expone solo el subconjunto vivo (sin customer/totales)', () => {
     const projected = controller.projectGuestSnapshot({
       token: 'tok',

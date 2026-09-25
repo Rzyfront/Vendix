@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma, shipping_rate_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import {
@@ -47,12 +48,15 @@ function withTaxCategoryView<T extends { tax_category?: unknown }>(
 
 /**
  * Normaliza la escala del DTO a JSON plano para Prisma. `null` (quitar la
- * escala) se persiste como NULL de columna, no como `JsonNull`.
+ * escala) se persiste como NULL de columna (`Prisma.DbNull`): el `null`
+ * plano en un campo Json lo rechaza Prisma con error de validación (500).
  */
 function toDistanceTiersJson(
   tiers: Array<{ from_km: number; to_km?: number | null; price: number }> | null,
-): Array<{ from_km: number; to_km: number | null; price: number }> | null {
-  if (tiers == null) return null;
+):
+  | Array<{ from_km: number; to_km: number | null; price: number }>
+  | typeof Prisma.DbNull {
+  if (tiers == null) return Prisma.DbNull;
   return tiers.map((tier) => ({
     from_km: tier.from_km,
     to_km: tier.to_km ?? null,
@@ -293,8 +297,16 @@ export class StoreShippingZonesService {
         free_shipping_threshold: dto.free_shipping_threshold,
         is_active: dto.is_active ?? true,
         // Escala de km: ausente ⇒ precio plano; se persiste como JSON plano.
-        ...(dto.distance_tiers !== undefined
-          ? { distance_tiers: toDistanceTiersJson(dto.distance_tiers) }
+        // Release-853 paso 11 — `free` no lleva escala: se limpia aunque el
+        // DTO traiga una (el wizard manda `[]` al pasar a `free`).
+        ...(dto.distance_tiers !== undefined ||
+        dto.type === shipping_rate_type_enum.free
+          ? {
+              distance_tiers:
+                dto.type === shipping_rate_type_enum.free
+                  ? Prisma.DbNull
+                  : toDistanceTiersJson(dto.distance_tiers ?? null),
+            }
           : {}),
       },
       include: RATE_INCLUDE,
@@ -358,14 +370,25 @@ export class StoreShippingZonesService {
       await this.shippingTax.assertCategoryAssignable(tax_category_id);
     }
 
+    // Release-853 paso 11 — tipo efectivo: `free` limpia la escala aunque
+    // el DTO no la toque (pasar a gratis no debe dejar tramos huérfanos).
+    const effective_type = dto.type ?? rate.type;
+
     const updated = await this.prisma.shipping_rates.update({
       where: { id },
       data: {
         ...update_data,
         ...(tax_category_changes ? { tax_category_id } : {}),
-        // `undefined` ⇒ no se toca; `null`/vacía ⇒ se quita la escala (zona).
-        ...(distance_tiers !== undefined
-          ? { distance_tiers: toDistanceTiersJson(distance_tiers) }
+        // `undefined` ⇒ no se toca; `null` ⇒ se quita la escala (DbNull, no
+        // `null` plano: Prisma rechaza el `null` plano en Json con 500).
+        ...(distance_tiers !== undefined ||
+        effective_type === shipping_rate_type_enum.free
+          ? {
+              distance_tiers:
+                effective_type === shipping_rate_type_enum.free
+                  ? Prisma.DbNull
+                  : toDistanceTiersJson(distance_tiers ?? null),
+            }
           : {}),
       },
       include: RATE_INCLUDE,

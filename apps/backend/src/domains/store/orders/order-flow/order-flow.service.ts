@@ -6,6 +6,7 @@ import {
   SETTLED_PAYMENT_STATES,
   CANCELABLE_ORDER_STATES,
 } from './order-cancellation-policy.util';
+import { OrderSseService } from '../services/order-sse.service';
 import {
   Injectable,
   NotFoundException,
@@ -190,6 +191,11 @@ export class OrderFlowService {
     private readonly moduleRef?: ModuleRef,
     @Optional() private readonly refundFlowService?: RefundFlowService,
     @Optional() private readonly autoEntryService?: AutoEntryService,
+    // SSE `order.payment_updated` en `confirmPayment` (pago en vivo guest).
+    // `@Optional()` por la misma razón que arriba (specs con construcción
+    // manual). En prod siempre resuelve vía `forwardRef(() => OrdersModule)`
+    // en `order-flow.module.ts` — mismo patrón que los listeners KDS.
+    @Optional() private readonly orderSse?: OrderSseService,
   ) {}
 
   /** The fire transaction is the source of truth; never restock the sold dish. */
@@ -1754,6 +1760,43 @@ export class OrderFlowService {
         order_number: result.order.order_number,
         old_state: 'pending_payment', new_state: 'processing',
       });
+    }
+    // Pago en vivo guest (`/pedido/:token`): tras el commit, y sólo si se
+    // aplicó — un no-op no cambió ningún pago y sería ruido. Va antes del
+    // `throw projectionError`: el pago commiteó y el SSE no debe perderse
+    // por un fallo de proyección de mesa.
+    if (result.applied) {
+      const payments = result.order.payments.map((payment) => ({
+        payment_id: payment.id,
+        state: payment.state,
+        has_receipt: payment.receipt_s3_key != null,
+      }));
+      if (this.orderSse) {
+        try {
+          this.orderSse.pushOrderEvent(
+            result.order.store_id,
+            orderId,
+            'order.payment_updated',
+            { payments },
+          );
+          this.logger.debug(
+            `[flow/confirmPayment payment_updated] order=${orderId} payments=${payments.length}`,
+          );
+        } catch (error) {
+          // Post-commit: el pago ya commiteó; un fallo del bus SSE jamás
+          // debe convertirse en 500. Warn, nunca throw (simétrico a la
+          // rama else).
+          this.logger.warn(
+            `[flow/confirmPayment payment_updated] SSE falló; omitido order=${orderId} err=${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      } else {
+        // Sólo en specs con construcción manual; en prod siempre resuelve.
+        // Warn, nunca throw: el pago ya commiteó y un 500 aquí mentiría.
+        this.logger.warn(
+          `[flow/confirmPayment payment_updated] OrderSseService sin resolver; SSE omitido order=${orderId}`,
+        );
+      }
     }
     if (projectionError) throw projectionError;
     // Explicit result for callbacks: a no-op on a cancelled order is NOT a
@@ -5502,6 +5545,11 @@ export class OrderFlowService {
               products: {
                 select: { preparation_time_minutes: true },
               },
+              // R8-F2 — `computeEta` resuelve variante ?? producto ??
+              // default: sin este include la variante nunca llegaba.
+              product_variants: {
+                select: { preparation_time_minutes: true },
+              },
             },
           },
           shipping_method: {
@@ -5518,6 +5566,8 @@ export class OrderFlowService {
         orderWithItems.order_items.map((item) => ({
           preparation_time_minutes:
             item.products?.preparation_time_minutes ?? null,
+          variant_preparation_time_minutes:
+            item.product_variants?.preparation_time_minutes ?? null,
         })),
         orderWithItems.shipping_method?.transit_time_minutes ?? 0,
         (settings as any)?.operations,

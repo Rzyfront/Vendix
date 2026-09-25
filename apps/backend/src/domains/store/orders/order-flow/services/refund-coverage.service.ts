@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import {
   buildRefundCoverageLedger,
@@ -67,6 +68,52 @@ export interface RefundCoverageResult {
 @Injectable()
 export class RefundCoverageService {
   constructor(private readonly prisma: StorePrismaService) {}
+
+  /**
+   * Release-853 (paso 7) — re-agregación ABSOLUTA del caché de cobertura
+   * por línea (`order_items.refunded_qty` / `refunded_amount`) contra el
+   * ledger unificado en `REFUND_LEDGER_STATES`. Las líneas de la orden SIN
+   * filas en el ledger vuelven a 0 explícitamente: un refund que cae a
+   * `failed` deja de contar y su cobertura previa debe desaparecer del
+   * caché, no quedar congelada (de lo contrario las guardas reportan que
+   * no hay saldo mientras el backend sí lo permitiría).
+   *
+   * Idempotente y auto-reparable bajo el lock de la orden. La invocan la
+   * creación (mismo tx que inserta los `refund_items`) y cada transición
+   * a `failed` (dispatch de pasarela y resolución manual). Nunca un
+   * incremento: el valor escrito es siempre la agregación completa.
+   */
+  async recomputeLineCache(
+    client: Prisma.TransactionClient | StorePrismaService,
+    orderId: number,
+  ): Promise<void> {
+    const [refunds, lines] = await Promise.all([
+      client.refunds.findMany({
+        where: { order_id: orderId, state: { in: [...REFUND_LEDGER_STATES] } },
+        select: {
+          state: true,
+          refund_items: {
+            select: { order_item_id: true, quantity: true, refund_amount: true },
+          },
+        },
+      }),
+      client.order_items.findMany({
+        where: { order_id: orderId },
+        select: { id: true },
+      }),
+    ]);
+    const ledger = buildRefundCoverageLedger(refunds);
+    for (const line of lines) {
+      const cov = ledger.get(line.id);
+      await client.order_items.updateMany({
+        where: { id: line.id, order_id: orderId },
+        data: {
+          refunded_qty: cov?.refunded_qty ?? 0,
+          refunded_amount: cov?.refunded_amount ?? 0,
+        },
+      });
+    }
+  }
 
   async getCoverage(order_id: number): Promise<RefundCoverageResult> {
     // Mismo contrato que `getOrderRefunds`: orden ajena = 404, no 403.

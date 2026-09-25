@@ -313,6 +313,19 @@ export class OrderDetailsPageComponent {
     }
     return Array.from(groups.values());
   });
+  /**
+   * Release-853 paso 10 — Subtotal BRUTO del Resumen de Pago: Σ de las
+   * líneas en bruto (`final_total_price ?? total_price`). El IVA va
+   * incluido, no suma; el persistido `subtotal_amount` puede traer otra
+   * base según el canal que creó la orden.
+   */
+  readonly grossSubtotal = computed(() =>
+    (this.order()?.order_items ?? []).reduce(
+      (sum, item) =>
+        sum + Number(item.final_total_price ?? item.total_price ?? 0),
+      0,
+    ),
+  );
 
   // ── Discount snapshots (read-only from order; never recalculated) ──
   readonly appliedPromotions = computed(() =>
@@ -4129,6 +4142,9 @@ export class OrderDetailsPageComponent {
    * `orders.service.ts`): el titular cambia en created/draft/pending_payment/
    * processing/pending_delivery. En shipped/delivered/finished/cancelled/
    * refunded se muestra el dialog informativo y no se abre ningún modal.
+   * Release-853 paso 10: también se bloquea si la orden tiene una
+   * `sales_invoice` vigente (espejo de `ORD_TITULAR_INVOICED_001`); el
+   * borrador sí deja pasar porque el backend le propaga el titular.
    * En estado editable se abre el buscar-primero; el `app-customer-modal`
    * en modo crear solo aparece vía "Crear cliente nuevo".
    */
@@ -4146,8 +4162,29 @@ export class OrderDetailsPageComponent {
       await this.notifyTitularLocked();
       return;
     }
+    if (this.hasActiveSalesInvoice()) {
+      await this.notifyTitularLocked();
+      return;
+    }
     this.pendingChangeCustomerAddress.set(null);
     this.showTitularSearchModal.set(true);
+  }
+
+  /**
+   * Release-853 paso 10 — espejo local del gate backend
+   * `ORD_TITULAR_INVOICED_001`: la orden tiene `sales_invoice` con estado
+   * fuera de draft/voided/cancelled. Tipo o estado ausentes se tratan como
+   * factura vigente (falla cerrado: el backend es el guard real).
+   */
+  private hasActiveSalesInvoice(): boolean {
+    const invoice = this.orderInvoice();
+    if (!invoice) return false;
+    const isSalesInvoice =
+      invoice.invoice_type === undefined ||
+      invoice.invoice_type === 'sales_invoice';
+    if (!isSalesInvoice) return false;
+    const status = invoice.status;
+    return status !== 'draft' && status !== 'voided' && status !== 'cancelled';
   }
 
   /**
@@ -4166,24 +4203,20 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * `true` cuando el error del PATCH titular es el bloqueo de estado (409
-   * `ORD_EDIT_NOT_ALLOWED_001`) o de tienda ajena (403
-   * `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`). `updateOrderCustomer` envuelve
-   * el fallo con `buildApiError` (`errorCode` + `cause` = HttpErrorResponse
-   * original), así que se revisan ambas vías.
+   * `true` cuando el error del PATCH titular es uno de los tres bloqueos de
+   * titular: estado (409 `ORD_EDIT_NOT_ALLOWED_001`), tienda ajena (403
+   * `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`) o factura vigente (409
+   * `ORD_TITULAR_INVOICED_001`). Release-853 paso 10: decide SOLO por
+   * `errorCode` — el fallback por status HTTP metía en el dialog de bloqueo
+   * cualquier 409/403 ajeno al titular (p. ej. un split financiero activo).
    */
   private isTitularLockedError(error: unknown): boolean {
     const parsed = parseApiError(error);
-    if (
+    return (
       parsed.errorCode === 'ORD_EDIT_NOT_ALLOWED_001' ||
-      parsed.errorCode === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001'
-    ) {
-      return true;
-    }
-    const status =
-      (error as { cause?: { status?: number } } | null)?.cause?.status ??
-      (error as { status?: number } | null)?.status;
-    return status === 409 || status === 403;
+      parsed.errorCode === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001' ||
+      parsed.errorCode === 'ORD_TITULAR_INVOICED_001'
+    );
   }
 
   /** Error del PATCH titular: bloqueo → dialog español; resto → toast. */

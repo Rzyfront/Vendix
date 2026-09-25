@@ -1172,3 +1172,104 @@ describe('PrintLayoutComposerService — show_sku por sección (térmicos)', () 
     expect(html).toContain('CAM-OXF-AZ-M');
   });
 });
+
+/**
+ * CP-853-fix (paso 2) — la leyenda no fiscal del tiquete POS se pinta como
+ * máximo UNA vez, y CERO veces si el comercio deshabilita `f_disclaimer`.
+ *
+ * El defecto: `renderFooterSection` pintaba `f_disclaimer` en las filas
+ * genéricas de `renderExtraSectionFields` Y en su bloque dedicado
+ * (`legendLine`), así que la leyenda salía duplicada en todas las tiendas.
+ * El fix excluye `f_disclaimer` de las filas genéricas y pinta la línea
+ * solo si `isFieldActive(section, 'f_disclaimer')`.
+ *
+ * El texto es copia fiel de `NON_FISCAL_DISCLAIMER` en
+ * `providers/pos-sale-ticket.provider.ts`, y el footer es copia fiel del
+ * `sec_footer` de `pos_sale_ticket` en
+ * `prisma/seeds/print-templates.seed.ts` (fuera del rootDir de Jest, igual
+ * que en los describes anteriores).
+ */
+describe('PrintLayoutComposerService — leyenda no fiscal una sola vez', () => {
+  const composer = new PrintLayoutComposerService(new PrintTemplateCompilerService());
+
+  const LEGEND = 'Este documento no es factura electrónica de venta.';
+
+  const countOf = (html: string, needle: string): number =>
+    html.split(needle).length - 1;
+
+  const ticketData = (): StandardPrintDataModel =>
+    ({
+      store: { name: 'Mi Tienda' },
+      document: {
+        id: 1,
+        number: 'T-1',
+        date: '2026-09-25',
+        date_formatted: '2026-09-25',
+        state: 'paid',
+        state_label: 'Pagado',
+        non_fiscal_disclaimer: LEGEND,
+      },
+      items: [],
+      taxes: [],
+      totals: {
+        subtotal: 100000,
+        subtotal_formatted: '$100.000',
+        discount_total: 0,
+        discount_total_formatted: '$0',
+        shipping_total: 0,
+        shipping_total_formatted: '$0',
+        tax_total: 0,
+        tax_total_formatted: '$0',
+        grand_total: 100000,
+        grand_total_formatted: '$100.000',
+      },
+    }) as unknown as StandardPrintDataModel;
+
+  const footerDef = (footerFields: any[] | undefined): PrintFormatDefinition =>
+    ({
+      v: 2,
+      paper: { format: 'thermal_80', width_mm: 80, is_roll: true, margin_mm: 1.5, copies: 1 },
+      sections: [
+        {
+          id: 'sec_footer',
+          type: 'footer',
+          title: 'Pie de Ticket',
+          enabled: true,
+          order: 6,
+          ...(footerFields === undefined ? {} : { fields: footerFields }),
+        },
+      ],
+    }) as unknown as PrintFormatDefinition;
+
+  const systemFooterFields = (): any[] => [
+    { id: 'f_msg', key: 'receipts.receipt_footer', label: 'Mensaje de Despedida', enabled: true, position: 'center' },
+    { id: 'f_disclaimer', key: 'document.non_fiscal_disclaimer', label: 'Leyenda No Fiscal', enabled: true, position: 'center' },
+    { id: 'f_powered', key: 'system.powered_by', label: 'Firma del Sistema', enabled: true, position: 'center' },
+  ];
+
+  it('1. plantilla de sistema: la leyenda aparece exactamente 1 vez', () => {
+    const html = composer.compose(footerDef(systemFooterFields()), ticketData());
+    expect(countOf(html, LEGEND)).toBe(1);
+    expect(countOf(html, '<div class="footer-disclaimer"')).toBe(1);
+    // El elemento dedicado existe una sola vez: sin fila genérica duplicada.
+    expect(countOf(html, 'data-element-id="f_disclaimer"')).toBe(1);
+  });
+
+  it('2. f_disclaimer deshabilitado: la leyenda no aparece (0 veces)', () => {
+    const fields = systemFooterFields();
+    fields[1].enabled = false;
+    const html = composer.compose(footerDef(fields), ticketData());
+    expect(countOf(html, LEGEND)).toBe(0);
+    expect(html).not.toContain('<div class="footer-disclaimer"');
+    expect(html).not.toContain('data-element-id="f_disclaimer"');
+  });
+
+  it('3. override viejo sin fields: el composer igual pinta la leyenda 1 vez', () => {
+    // Sin `fields`, isFieldActive devuelve true por defecto: la impresión de
+    // un override guardado antes de que la regla existiera nunca se queda
+    // sin leyenda (y nunca lanza 422 — ver el spec del validador).
+    const html = composer.compose(footerDef(undefined), ticketData());
+    expect(countOf(html, LEGEND)).toBe(1);
+    expect(countOf(html, '<div class="footer-disclaimer"')).toBe(1);
+  });
+});

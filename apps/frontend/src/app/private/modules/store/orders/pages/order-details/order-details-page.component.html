@@ -2260,11 +2260,11 @@
 
             <div class="space-y-2.5">
               <!-- Desglose completo: valores persistidos tal cual (base gross).
-                   Subtotal = suma de líneas en bruto; IVA va incluido, no suma. -->
+                   Subtotal = suma de líneas en bruto (grossSubtotal); IVA va incluido, no suma. -->
               <div class="flex justify-between items-center text-sm">
                 <span class="text-text-secondary">Subtotal</span>
                 <span class="font-semibold text-gray-900">{{
-                  orderData.subtotal_amount || 0 | currency
+                  grossSubtotal() | currency
                 }}</span>
               </div>
 

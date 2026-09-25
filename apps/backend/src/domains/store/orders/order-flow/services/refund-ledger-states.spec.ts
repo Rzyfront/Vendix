@@ -102,8 +102,9 @@ describe('RefundCoverageLedger — estados LEDGER (M2 fix-forward)', () => {
     });
   });
 
-  describe('§2b re-agrega con filtro de estado', () => {
-    it('el UPDATE del caché joinea refunds y filtra estados LEDGER', async () => {
+  describe('§2b re-agrega vía recomputeLineCache (release-853, paso 7)', () => {
+    it('la creación re-agrega el caché en la misma tx (sin SQL inline)', async () => {
+      const mockCoverage = { recomputeLineCache: jest.fn().mockResolvedValue(undefined) };
       const mockPrisma: any = {
         orders: {
           findFirst: jest.fn().mockImplementation((args: any) =>
@@ -188,6 +189,7 @@ describe('RefundCoverageLedger — estados LEDGER (M2 fix-forward)', () => {
             provide: ManualRefundDeliveryService,
             useValue: { deliver: jest.fn(), enqueue: jest.fn() },
           },
+          { provide: RefundCoverageService, useValue: mockCoverage },
         ],
       }).compile();
 
@@ -198,20 +200,105 @@ describe('RefundCoverageLedger — estados LEDGER (M2 fix-forward)', () => {
         reason: 'M2 §2b',
       } as any);
 
+      // El SQL inline murió: la agregación vive en el helper y corre en la
+      // misma tx que inserta los refund_items (el cliente es la tx).
+      expect(mockCoverage.recomputeLineCache).toHaveBeenCalledWith(mockPrisma, 1);
       const statements = mockPrisma.$queryRaw.mock.calls.map((c: any[]) =>
         Array.isArray(c[0]) ? (c[0] as string[]).join('') : String(c[0]),
       );
-      const cacheUpdates = statements.filter((s: string) =>
-        s.includes('UPDATE "order_items"'),
+      expect(statements.some((s: string) => s.includes('UPDATE "order_items"'))).toBe(false);
+    });
+  });
+
+  describe('recomputeLineCache agrega con LEDGER y resetea a 0', () => {
+    const line = (id: number) => ({ id });
+
+    async function runWith(refunds: any[], lines: any[]) {
+      const mockClient: any = {
+        refunds: { findMany: jest.fn().mockResolvedValue(refunds) },
+        order_items: {
+          findMany: jest.fn().mockResolvedValue(lines),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+      };
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          RefundCoverageService,
+          { provide: StorePrismaService, useValue: {} },
+        ],
+      }).compile();
+
+      await module
+        .get(RefundCoverageService)
+        .recomputeLineCache(mockClient, 1);
+      return mockClient;
+    }
+
+    it('re-agrega valores absolutos y filtra estados LEDGER en el query', async () => {
+      const mockClient = await runWith(
+        [
+          {
+            state: 'completed',
+            refund_items: [
+              {
+                order_item_id: 11,
+                quantity: 2,
+                refund_amount: new Prisma.Decimal(5000),
+              },
+            ],
+          },
+        ],
+        [line(11)],
       );
-      expect(cacheUpdates.length).toBeGreaterThan(0);
-      for (const sql of cacheUpdates) {
-        expect(sql).toContain('JOIN "refunds"');
-        expect(sql).toContain(`r."state" IN`);
-        expect(sql).toContain('completed');
-        expect(sql).toContain('pending_approval');
-        expect(sql).toContain('processing');
-      }
+
+      expect(mockClient.refunds.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { order_id: 1, state: { in: [...REFUND_LEDGER_STATES] } },
+        }),
+      );
+      expect(mockClient.order_items.updateMany).toHaveBeenCalledWith({
+        where: { id: 11, order_id: 1 },
+        data: { refunded_qty: 2, refunded_amount: new Prisma.Decimal(5000) },
+      });
+    });
+
+    it('líneas sin ledger vuelven a 0 (caso a: failed previo no congela cobertura)', async () => {
+      // La BD ya excluyó al failed por el filtro de estado: el helper ve
+      // ledger vacío y resetea. Así una línea que un refund fallido tocó
+      // queda en 0 en vez de congelar su cobertura vieja.
+      const mockClient = await runWith([], [line(11), line(12)]);
+
+      expect(mockClient.order_items.updateMany).toHaveBeenCalledWith({
+        where: { id: 11, order_id: 1 },
+        data: { refunded_qty: 0, refunded_amount: 0 },
+      });
+      expect(mockClient.order_items.updateMany).toHaveBeenCalledWith({
+        where: { id: 12, order_id: 1 },
+        data: { refunded_qty: 0, refunded_amount: 0 },
+      });
+    });
+
+    it('ignora filas failed aunque vengan en el resultado (doble filtro del builder)', async () => {
+      const mockClient = await runWith(
+        [
+          {
+            state: 'failed',
+            refund_items: [
+              {
+                order_item_id: 11,
+                quantity: 9,
+                refund_amount: new Prisma.Decimal(9000),
+              },
+            ],
+          },
+        ],
+        [line(11)],
+      );
+
+      expect(mockClient.order_items.updateMany).toHaveBeenCalledWith({
+        where: { id: 11, order_id: 1 },
+        data: { refunded_qty: 0, refunded_amount: 0 },
+      });
     });
   });
 });

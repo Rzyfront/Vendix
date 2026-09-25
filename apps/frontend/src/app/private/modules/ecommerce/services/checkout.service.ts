@@ -204,6 +204,28 @@ export interface CheckoutEligibility {
   invoicing_enabled: boolean;
 }
 
+/**
+ * Paso 9 (roku-shop-checkout-tarifa-detalle-orden) — lectura firmada del
+ * comprobante guest. Clon de la respuesta admin: URL TTL 5 min + content-type
+ * del HEAD (el visor distingue PDF/imagen con él).
+ */
+export interface GuestPaymentReceiptUrl {
+  url: string;
+  expires_at: string;
+  content_type: string | null;
+}
+
+/**
+ * Paso 9 — resultado de la subida tardía del comprobante desde la vista
+ * guest. La página refresca `has_receipt` con esto sin refetch.
+ */
+export interface GuestReceiptUploadResult {
+  payment_id: number;
+  has_receipt: boolean;
+  receipt_content_type: string | null;
+  receipt_uploaded_at: string;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -387,6 +409,48 @@ export class CheckoutService {
   ): Observable<{ success: boolean; data: any }> {
     return this.http.get<{ success: boolean; data: any }>(
       `${environment.apiUrl}/ecommerce/invoice-data/${token}/order-summary`,
+      { headers: this.getHeaders() },
+    );
+  }
+
+  /**
+   * Paso 9 (roku-shop-checkout-tarifa-detalle-orden) — URL firmada TTL 5 min
+   * al comprobante de un pago guest. 404 ciego si el token no vincula al
+   * pago (el token viaja en path, nunca en query).
+   */
+  getGuestPaymentReceiptUrl(
+    token: string,
+    paymentId: number,
+  ): Observable<{ success: boolean; data: GuestPaymentReceiptUrl }> {
+    return this.http.get<{ success: boolean; data: GuestPaymentReceiptUrl }>(
+      `${environment.apiUrl}/ecommerce/invoice-data/${token}/payments/${paymentId}/receipt-url`,
+      { headers: this.getHeaders() },
+    );
+  }
+
+  /**
+   * Paso 9 — subida tardía del comprobante desde la vista guest. Mismo
+   * contrato que el checkout: `multipart/form-data` con clave `file`
+   * (sin Content-Type manual: el navegador pone el boundary).
+   */
+  uploadGuestPaymentReceipt(
+    token: string,
+    paymentId: number,
+    file: File,
+  ): Observable<{
+    success: boolean;
+    data: GuestReceiptUploadResult;
+    message?: string;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http.post<{
+      success: boolean;
+      data: GuestReceiptUploadResult;
+      message?: string;
+    }>(
+      `${environment.apiUrl}/ecommerce/invoice-data/${token}/payments/${paymentId}/receipt`,
+      formData,
       { headers: this.getHeaders() },
     );
   }

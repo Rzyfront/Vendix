@@ -2,14 +2,19 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  effect,
   inject,
   OnInit,
   signal,
+  untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
 import { CheckoutService } from '../../services/checkout.service';
+import { GuestOrderSseService } from '../../services/guest-order-sse.service';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import {
   CurrencyPipe,
@@ -21,8 +26,11 @@ import {
   BadgeComponent,
   BadgeVariant,
 } from '../../../../../shared/components/badge/badge.component';
+import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
+import { FileUploadDropzoneComponent } from '../../../../../shared/components/file-upload-dropzone/file-upload-dropzone.component';
 import { IconName } from '../../../../../shared/components/icon/icons.registry';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { OrderTrackingProgressComponent } from '../../../../../shared/components/order-tracking-progress/order-tracking-progress.component';
 import { GuestOrderPrintService } from '../../services/guest-order-print.service';
 
 // ============================================================================
@@ -30,6 +38,8 @@ import { GuestOrderPrintService } from '../../services/guest-order-print.service
 // ============================================================================
 
 interface GuestOrderItem {
+  // CP-853-fix (paso 5): clave por línea para la cocina en vivo (aditivo).
+  order_item_id?: number | null;
   product_name: string;
   variant_sku?: string | null;
   variant_attributes?: string | null;
@@ -39,6 +49,11 @@ interface GuestOrderItem {
   tax_amount_item?: number | null;
   image_url?: string | null;
   variant_image_url?: string | null;
+  // Paso 3/8 (roku-shop-checkout): `kitchen_status` ya viene resuelto por el
+  // backend con la regla in-flight (`kitchenStatusFor`); null = nunca disparado.
+  // `preparation_time_minutes` = variante ?? producto (null si ninguno).
+  kitchen_status?: string | null;
+  preparation_time_minutes?: number | null;
   // E2 (Carril B) — fecha de cancelación y motivo del soft-cancel D2.
   // Nullable: el grueso de líneas no están canceladas.
   cancelled_at?: string | null;
@@ -73,10 +88,16 @@ interface GuestOrderAddress {
 }
 
 interface GuestOrderPayment {
+  // Paso 3 (roku-shop-checkout): `payment_id` identifica el pago para los
+  // endpoints guest de comprobante (paso 9); `has_receipt` + content-type
+  // alimentan el visor de comprobante.
+  payment_id?: number | null;
   state: string;
   amount?: number | null;
   paid_at?: string | null;
   method?: string | null;
+  has_receipt?: boolean;
+  receipt_content_type?: string | null;
 }
 
 interface GuestOrderInvoice {
@@ -91,6 +112,11 @@ interface GuestOrderData {
   created_at?: string | null;
   placed_at?: string | null;
   currency?: string | null;
+  // Paso 3/8 (roku-shop-checkout): ETA persistido + MAX en vivo + entrega.
+  estimated_ready_at?: string | null;
+  estimated_delivered_at?: string | null;
+  prep_minutes_max?: number | null;
+  delivery_type?: string | null;
   items: GuestOrderItem[];
   applied_promotions?: GuestOrderPromotion[];
   applied_coupons?: GuestOrderCoupon[];
@@ -119,6 +145,17 @@ interface GuestOrderStore {
   logo_url?: string;
 }
 
+/**
+ * Paso 9 (roku-shop-checkout-tarifa-detalle-orden) — visor de comprobante.
+ * Mismo patrón que el admin (`order-details-page`): `kind` distingue
+ * imagen (tag `img`) de PDF (`iframe` con URL sanitizada).
+ */
+interface GuestReceiptPreview {
+  url: string;
+  safeUrl: SafeResourceUrl;
+  kind: 'image' | 'pdf';
+}
+
 interface GuestOrderSummary {
   token: string;
   order: GuestOrderData;
@@ -144,6 +181,9 @@ interface GuestOrderSummary {
     ButtonComponent,
     IconComponent,
     BadgeComponent,
+    ModalComponent,
+    FileUploadDropzoneComponent,
+    OrderTrackingProgressComponent,
   ],
   template: `
     <div class="guest-order-page">
@@ -167,6 +207,7 @@ interface GuestOrderSummary {
         <div
           class="guest-order-card printable-order"
           [attr.data-currency]="currencyCode()"
+          [class.card-enter]="justPurchased()"
         >
           <!-- HERO HEADER (mirror del checkout, estado completado) -->
           <div class="order-header-hero is-complete" [style.--fill]="'100%'">
@@ -199,6 +240,21 @@ interface GuestOrderSummary {
             </div>
           }
 
+          <!-- LIVE PILL (paso 9: estado del stream SSE guest) -->
+          @if (sseLiveVisible()) {
+            <div
+              class="live-pill"
+              [class.live-pill--reduced]="sse.prefersReducedMotion()"
+              [attr.data-state]="sse.connectionState()"
+            >
+              <span
+                class="live-dot"
+                [class.is-open]="sse.connectionState() === 'open'"
+              ></span>
+              {{ sseLiveLabel() }}
+            </div>
+          }
+
           <!-- META GRID -->
           <div class="meta-grid">
             <div class="meta-cell">
@@ -213,18 +269,14 @@ interface GuestOrderSummary {
                 data.order.channel === 'whatsapp' ? 'WhatsApp' : 'E-commerce'
               }}</strong>
             </div>
-            @if (data.order.payments?.length) {
+            @if (worstPaymentState(data.order.payments); as payState) {
               <div class="meta-cell">
                 <span class="meta-label">Estado de pago</span>
                 <app-badge
-                  [variant]="
-                    getPaymentStateVariant(data.order.payments![0].state)
-                  "
+                  [variant]="getPaymentStateVariant(payState)"
                   size="xs"
                   badgeStyle="outline"
-                  >{{
-                    getPaymentStateLabel(data.order.payments![0].state)
-                  }}</app-badge
+                  >{{ getPaymentStateLabel(payState) }}</app-badge
                 >
               </div>
             }
@@ -235,6 +287,37 @@ interface GuestOrderSummary {
               }}</strong>
             </div>
           </div>
+
+          <!-- ETA DE PREPARACIÓN (paso 8: tras hide_prep_eta) -->
+          @if (etaVisible()) {
+            <div class="eta-banner">
+              <app-icon name="timer" [size]="20" />
+              <div class="eta-text">
+                <strong class="eta-line">{{ etaLabel(data.order) }}</strong>
+                @if (isPaymentPending(data.order)) {
+                  <span class="eta-note"
+                    >Tu pago está pendiente de confirmación; la preparación inicia al
+                    confirmarse y el tiempo puede variar.</span
+                  >
+                }
+              </div>
+            </div>
+          }
+
+          <!-- SEGUIMIENTO (paso 10: tras hide_tracking_progress) -->
+          @if (trackingShown()) {
+            <!-- CP-853-fix (paso 4): el ritmo lo da el backend
+                 (prep_minutes_max, con fallback a Logística); el guest no
+                 inventa un 15. La exclamación es solo para el tipo: null cae
+                 en la guarda interna del componente (Number.isFinite). -->
+            <app-order-tracking-progress
+              [orderState]="data.order.state"
+              [hasShippingAddress]="data.order.shipping_address != null"
+              [animateFromZero]="justPurchased()"
+              [baseMinutes]="etaMinutes(data.order)!"
+              [reducedMotion]="sse.prefersReducedMotion()"
+            />
+          }
 
           <!-- ENTREGA -->
           @if (data.order.shipping_address; as addr) {
@@ -343,6 +426,22 @@ interface GuestOrderSummary {
                         {{ item.cancellation_reason }}
                       </span>
                     }
+                    @if (kitchenStateFor(item); as ks) {
+                      <span
+                        class="kitchen-line"
+                        [class.kitchen-line--flash]="
+                          isKitchenFlashing(item.product_name)
+                        "
+                      >
+                        <app-badge
+                          [variant]="kitchenBadgeVariant(ks)"
+                          size="xs"
+                        >
+                          <app-icon name="flame" [size]="10" />
+                          Preparación: {{ kitchenStateLabel(ks) }}
+                        </app-badge>
+                      </span>
+                    }
                   </div>
                   @if (!isItemCancelled(item)) {
                     <strong class="item-total">{{
@@ -354,29 +453,82 @@ interface GuestOrderSummary {
             </div>
           </section>
 
-          <!-- MÉTODO DE PAGO -->
-          @if (data.order.payments?.length) {
-            <section class="order-section">
-              <div class="section-header">
-                <app-icon name="credit-card" [size]="18" />
-                <h2>Método de pago</h2>
-              </div>
-              <div class="payment-block">
-                <span class="payment-method">{{
-                  data.order.payments![0].method || 'Pago'
-                }}</span>
-                <app-badge
-                  [variant]="
-                    getPaymentStateVariant(data.order.payments![0].state)
-                  "
-                  size="sm"
-                  badgeStyle="outline"
-                  >{{
-                    getPaymentStateLabel(data.order.payments![0].state)
-                  }}</app-badge
-                >
-              </div>
-            </section>
+          <!-- MÉTODO DE PAGO (multipago ordenado peor-primero) -->
+          @if (paymentsWorstFirst(data.order.payments); as payments) {
+            @if (payments.length) {
+              <section class="order-section">
+                <div class="section-header">
+                  <app-icon name="credit-card" [size]="18" />
+                  <h2>Método de pago</h2>
+                </div>
+                <div class="payment-list">
+                  @for (p of payments; track p.payment_id ?? p.method ?? $index) {
+                    <div class="payment-block">
+                      <div class="payment-head">
+                        <span class="payment-method">{{
+                          p.method || 'Pago'
+                        }}</span>
+                        <app-badge
+                          [variant]="getPaymentStateVariant(p.state)"
+                          size="sm"
+                          badgeStyle="outline"
+                          >{{ getPaymentStateLabel(p.state) }}</app-badge
+                        >
+                      </div>
+                      <!-- COMPROBANTE (paso 9): ver si has_receipt, cargar si falta -->
+                      @if (p.payment_id != null) {
+                        <div class="payment-receipt">
+                          @if (p.has_receipt) {
+                            <app-button
+                              variant="outline"
+                              size="sm"
+                              (clicked)="viewReceipt(p)"
+                              [disabled]="
+                                loadingReceiptId() === p.payment_id
+                              "
+                              [loading]="loadingReceiptId() === p.payment_id"
+                            >
+                              <app-icon
+                                slot="icon"
+                                name="receipt"
+                                [size]="14"
+                              />
+                              {{
+                                loadingReceiptId() === p.payment_id
+                                  ? 'Cargando...'
+                                  : 'Ver comprobante'
+                              }}
+                            </app-button>
+                          } @else if (
+                            receiptUploadAllowed(data.order.state, p)
+                          ) {
+                            <div class="receipt-upload">
+                              <span class="receipt-upload-label">
+                                ¿Pagaste por transferencia? Adjunta tu
+                                comprobante para acelerar la confirmación:
+                              </span>
+                              <app-file-upload-dropzone
+                                label="Toca aquí o arrastra tu comprobante"
+                                helperText="JPG, PNG, WebP o PDF · máximo 5 MB"
+                                accept=".jpg,.jpeg,.png,.webp,.pdf"
+                                icon="upload-cloud"
+                                [disabled]="uploadingReceiptId() !== null"
+                                (fileSelected)="onReceiptFile(p, $event)"
+                              />
+                              @if (uploadingReceiptId() === p.payment_id) {
+                                <span class="receipt-uploading"
+                                  >Subiendo comprobante…</span
+                                >
+                              }
+                            </div>
+                          }
+                        </div>
+                      }
+                    </div>
+                  }
+                </div>
+              </section>
+            }
           }
 
           <!-- TOTALES -->
@@ -464,11 +616,49 @@ interface GuestOrderSummary {
             @if (whatsappEnabled()) {
               <app-button variant="primary" (clicked)="sendToWhatsApp(data)">
                 <app-icon name="message-circle" [size]="16" slot="icon" />
-                Consultar por WhatsApp
+                Preguntar por mi pedido
               </app-button>
             }
           </div>
         </div>
+
+        <!-- VISOR DE COMPROBANTE (paso 9, patrón admin order-details) -->
+        <app-modal
+          [isOpen]="showReceiptModal()"
+          (closed)="closeReceiptModal()"
+          title="Comprobante de pago"
+          size="xl"
+          customClasses="guest-receipt-preview-modal"
+        >
+          @if (receiptPreview(); as receipt) {
+            <div class="guest-receipt-preview-shell">
+              @if (receipt.kind === 'image') {
+                <img
+                  [src]="receipt.url"
+                  alt="Comprobante de pago adjunto"
+                  class="guest-receipt-image"
+                />
+              } @else {
+                <iframe
+                  [src]="receipt.safeUrl"
+                  title="Comprobante de pago adjunto"
+                  class="guest-receipt-frame"
+                ></iframe>
+              }
+            </div>
+          } @else {
+            <div class="guest-receipt-empty">
+              <app-icon name="file-text" [size]="28" />
+              <p>No hay un comprobante cargado para previsualizar.</p>
+            </div>
+          }
+
+          <div slot="footer" class="guest-receipt-footer">
+            <app-button variant="outline" (clicked)="closeReceiptModal()">
+              Cerrar
+            </app-button>
+          </div>
+        </app-modal>
       }
     </div>
   `,
@@ -830,11 +1020,47 @@ interface GuestOrderSummary {
         white-space: nowrap;
       }
 
+      /* ---- Live pill (paso 9: estado del stream SSE) ---- */
+      .live-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        align-self: flex-start;
+        padding: 0.3rem 0.75rem;
+        border: 1px solid var(--color-border);
+        border-radius: 999px;
+        background: var(--color-background);
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-semibold);
+        color: var(--color-text-secondary);
+      }
+
+      .live-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--color-warning);
+        animation: live-pulse 1.6s ease-in-out infinite;
+      }
+
+      .live-dot.is-open {
+        background: var(--color-success);
+      }
+
+      @keyframes live-pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.35;
+        }
+      }
+
       /* ---- Payment ---- */
       .payment-block {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
+        flex-direction: column;
         gap: 0.75rem;
         padding: 0.875rem 1rem;
         border: 1px solid var(--color-border);
@@ -842,9 +1068,143 @@ interface GuestOrderSummary {
         background: var(--color-background);
       }
 
+      .payment-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+
       .payment-method {
         font-weight: var(--fw-medium);
         color: var(--color-text-primary);
+      }
+
+      .payment-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      /* ---- Comprobante (paso 9) ---- */
+      .payment-receipt {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        padding-top: 0.75rem;
+        border-top: 1px dashed var(--color-border);
+      }
+
+      .receipt-upload {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .receipt-upload-label {
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
+      }
+
+      .receipt-uploading {
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-semibold);
+        color: var(--color-primary);
+      }
+
+      .guest-receipt-preview-shell {
+        display: flex;
+        justify-content: center;
+        max-height: 70vh;
+        overflow: auto;
+      }
+
+      .guest-receipt-image {
+        max-width: 100%;
+        max-height: 70vh;
+        object-fit: contain;
+        border-radius: var(--radius-md);
+      }
+
+      .guest-receipt-frame {
+        width: 100%;
+        min-height: 70vh;
+        border: 0;
+        border-radius: var(--radius-md);
+      }
+
+      .guest-receipt-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 2rem 1rem;
+        color: var(--color-text-secondary);
+        font-size: var(--fs-sm);
+        text-align: center;
+      }
+
+      .guest-receipt-footer {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.5rem;
+      }
+
+      /* ---- ETA banner (paso 8) ---- */
+      .eta-banner {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.6rem;
+        padding: 0.75rem 1rem;
+        border: 1px solid var(--color-primary);
+        border-radius: var(--radius-md);
+        background: var(--color-primary-light);
+        color: var(--color-text-primary);
+        font-size: var(--fs-sm);
+      }
+
+      .eta-banner app-icon {
+        color: var(--color-primary);
+        flex-shrink: 0;
+        margin-top: 0.1rem;
+      }
+
+      .eta-text {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+
+      .eta-line {
+        font-weight: var(--fw-semibold);
+      }
+
+      .eta-note {
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
+      }
+
+      /* ---- Kitchen badge per dish (paso 8, paleta KDS vía app-badge) ---- */
+      .kitchen-line {
+        display: flex;
+        margin-top: 0.2rem;
+      }
+
+      /* Paso 9: pulso breve cuando el SSE cambia el estado del plato. Se
+         apaga vía clase (signal prefersReducedMotion) y vía media query. */
+      .kitchen-line--flash {
+        animation: kitchen-flash 2.4s ease-out 1;
+        border-radius: var(--radius-sm);
+      }
+
+      @keyframes kitchen-flash {
+        0% {
+          background: rgba(var(--color-warning-rgb), 0.35);
+        }
+        100% {
+          background: transparent;
+        }
       }
 
       /* ---- Totals ---- */
@@ -911,6 +1271,36 @@ interface GuestOrderSummary {
         }
       }
 
+      /* Paso 10: entrada de la tarjeta solo en compra recién
+         confirmada ('justPurchased'). Curva tw-card-in de
+         table-welcome-wizard, con keyframes propios porque los estilos de
+         aquel componente no cargan en esta ruta. */
+      .card-enter {
+        animation: guest-card-in 0.35s ease-out;
+      }
+
+      @keyframes guest-card-in {
+        from {
+          opacity: 0;
+          transform: translateY(12px) scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+      /* Paso 9: respeta prefers-reduced-motion en spinner y pulsos en
+         vivo (el flash de cocina además no se marca vía signal). */
+      @media (prefers-reduced-motion: reduce) {
+        .spinner,
+        .live-dot,
+        .card-enter,
+        .kitchen-line--flash {
+          animation: none !important;
+        }
+      }
+
       /* ---- Responsive ---- */
       @media (max-width: 720px) {
         .meta-grid {
@@ -955,15 +1345,58 @@ export class GuestOrderSummaryComponent implements OnInit {
   private readonly toast = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly voucherPrint = inject(GuestOrderPrintService);
+  private readonly sanitizer = inject(DomSanitizer);
+  /** Público: el template lee `connectionState()` / `prefersReducedMotion()`. */
+  readonly sse = inject(GuestOrderSseService);
 
   readonly loading = signal(true);
   readonly error = signal(false);
   readonly summary = signal<GuestOrderSummary | null>(null);
   readonly justPurchased = signal(false);
 
+  // Paso 9 — visor de comprobante (patrón admin order-details).
+  readonly receiptPreview = signal<GuestReceiptPreview | null>(null);
+  readonly showReceiptModal = signal(false);
+  readonly loadingReceiptId = signal<number | null>(null);
+  // Paso 9 — subida tardía (un pago a la vez).
+  readonly uploadingReceiptId = signal<number | null>(null);
+  // Paso 9 — platos con pulso "actualizado" (product_name → visible).
+  readonly kitchenFlash = signal<Readonly<Record<string, boolean>>>({});
+
+  /**
+   * Contrato de archivo idéntico al checkout (`payment-instructions-modal`):
+   * JPEG/PNG/WebP/PDF, 5 MB. El backend re-valida (413/422); esto es UX
+   * temprana con los mismos mensajes.
+   */
+  private readonly RECEIPT_ALLOWED_MIME = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/pdf',
+  ];
+  private readonly RECEIPT_MAX_SIZE = 5 * 1024 * 1024;
+
+  private token = '';
+  private flashTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Signal de moneda: forzamos change detection en el card (data-currency)
   // para que el pipe impuro `| currency` no se quede pegado en el fallback `$`.
   readonly currencyCode = this.currencyService.currencyCode;
+
+  constructor() {
+    // Paso 9 — fusión SSE→summary. El effect solo depende de los signals
+    // vivos del servicio; `summary` se lee/escribe vía `untracked` para no
+    // crear un loop (escribir summary no re-dispara el effect).
+    effect(() => {
+      // Deps deliberadas: cualquier evento vivo re-ejecuta la fusión.
+      this.sse.orderState();
+      this.sse.deliveryType();
+      this.sse.kitchenByProduct();
+      this.sse.paymentsLive();
+      this.sse.eta();
+      untracked(() => this.fuseLiveState());
+    });
+  }
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -977,6 +1410,16 @@ export class GuestOrderSummaryComponent implements OnInit {
       this.loading.set(false);
       return;
     }
+    this.token = token;
+
+    // Sin token válido no hay suscripción (el servicio también lo exige).
+    const storeId =
+      this.tenantFacade.getCurrentDomainConfig()?.store_id ?? null;
+    this.sse.connect(token, storeId);
+    this.destroyRef.onDestroy(() => {
+      this.sse.disconnect();
+      this.clearFlashTimer();
+    });
 
     this.checkoutService
       .getGuestOrderSummary(token)
@@ -984,9 +1427,16 @@ export class GuestOrderSummaryComponent implements OnInit {
       .subscribe({
         next: (response) => {
           this.summary.set(response.data);
+          // El snapshot SSE pudo llegar ANTES que el REST: la fusión del
+          // effect ya se saltó ese caso (summary null), así que se re-aplica
+          // explícitamente sobre el summary recién llegado.
+          this.fuseLiveState();
           this.loading.set(false);
         },
         error: () => {
+          // R8-F3 — sin summary (token 404) el stream nunca rendirá: se
+          // cierra para no quemar reconexiones contra un token inválido.
+          this.sse.disconnect();
           this.error.set(true);
           this.loading.set(false);
         },
@@ -996,7 +1446,15 @@ export class GuestOrderSummaryComponent implements OnInit {
   print(): void {
     const summary = this.summary();
     if (!summary) return;
-    this.voucherPrint.printVoucher(summary);
+    // CP-853-fix (paso 4): el voucher respeta los mismos opt-outs que la
+    // vista (etaVisible / trackingShown).
+    const orders =
+      this.tenantFacade.getCurrentDomainConfig()?.customConfig?.ecommerce
+        ?.orders;
+    this.voucherPrint.printVoucher(summary, {
+      hidePrepEta: orders?.hide_prep_eta === true,
+      hideTracking: orders?.hide_tracking_progress === true,
+    });
   }
 
   whatsappEnabled(): boolean {
@@ -1029,7 +1487,7 @@ export class GuestOrderSummaryComponent implements OnInit {
         `*Pedido:* #${data.order.order_number}\n` +
         `*Estado:* ${this.getStateLabel(data.order.state)}\n` +
         (itemLines ? `\n*Productos:*\n${itemLines}\n` : '') +
-        `\n*Total:* ${data.order.grand_total}\n\n¡Muchas gracias!`,
+        `\n*Total:* ${this.currencyService.format(Number(data.order.grand_total || 0))}\n\n¡Muchas gracias!`,
     );
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
   }
@@ -1045,6 +1503,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       pending_payment: 'Pendiente de pago',
       processing: 'En proceso',
       shipped: 'Enviada',
+      pending_delivery: 'Pendiente de entrega',
       delivered: 'Entregada',
       finished: 'Finalizada',
       cancelled: 'Cancelada',
@@ -1059,6 +1518,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       finished: 'success',
       processing: 'primary',
       shipped: 'primary',
+      pending_delivery: 'primary',
       pending_payment: 'warning',
       created: 'warning',
       draft: 'warning',
@@ -1075,6 +1535,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       pending_payment: 'clock',
       processing: 'loader-2',
       shipped: 'truck',
+      pending_delivery: 'truck',
       delivered: 'check-circle',
       finished: 'check-circle',
       cancelled: 'circle-x',
@@ -1083,26 +1544,211 @@ export class GuestOrderSummaryComponent implements OnInit {
     return icons[state] || 'clock';
   }
 
+  // ==========================================================================
+  // PAGO — mapa completo de 8 estados + multipago peor-primero (paso 8)
+  // ==========================================================================
+
   getPaymentStateLabel(state: string): string {
     const labels: Record<string, string> = {
+      pending: 'Pendiente de confirmación',
+      authorized: 'Autorizado',
+      succeeded: 'Pagado',
+      captured: 'Pagado',
       paid: 'Pagado',
-      pending: 'Pendiente',
-      partial: 'Parcial',
       failed: 'Fallido',
+      partially_refunded: 'Reembolso parcial',
       refunded: 'Reembolsado',
+      cancelled: 'Cancelado',
+      // Alias legacy: el enum anterior usaba `partial`.
+      partial: 'Parcial',
     };
     return labels[state] || state;
   }
 
   getPaymentStateVariant(state: string): BadgeVariant {
     const variants: Record<string, BadgeVariant> = {
+      succeeded: 'success',
+      captured: 'success',
       paid: 'success',
       pending: 'warning',
+      authorized: 'primary',
+      partially_refunded: 'info',
+      refunded: 'info',
       partial: 'info',
       failed: 'error',
-      refunded: 'info',
+      cancelled: 'neutral',
     };
     return variants[state] || 'neutral';
+  }
+
+  /**
+   * Severidad peor-primero para multipago. `captured`/`paid`/`partial` no
+   * están en la lista del plan: se rankean junto a `succeeded` (pagado) y
+   * `partially_refunded` respectivamente para que ningún estado quede sin
+   * ranking y el badge agregado nunca elija al azar.
+   */
+  private paymentSeverity(state: string): number {
+    const order = [
+      'failed',
+      'pending',
+      'authorized',
+      'partially_refunded',
+      'cancelled',
+      'refunded',
+      'succeeded',
+    ];
+    const legacyAlias: Record<string, string> = {
+      captured: 'succeeded',
+      paid: 'succeeded',
+      partial: 'partially_refunded',
+    };
+    const idx = order.indexOf(legacyAlias[state] ?? state);
+    return idx === -1 ? order.length : idx;
+  }
+
+  /** Pagos ordenados peor-primero (copia; no muta el summary). */
+  paymentsWorstFirst(
+    payments?: GuestOrderPayment[] | null,
+  ): GuestOrderPayment[] {
+    return [...(payments ?? [])].sort(
+      (a, b) => this.paymentSeverity(a.state) - this.paymentSeverity(b.state),
+    );
+  }
+
+  /** Estado agregado del pago: el peor de todos (o null sin pagos). */
+  worstPaymentState(payments?: GuestOrderPayment[] | null): string | null {
+    const sorted = this.paymentsWorstFirst(payments);
+    return sorted.length ? sorted[0].state : null;
+  }
+
+  /** True si el pago sigue pendiente (dispara la nota del ETA). */
+  isPaymentPending(order: GuestOrderData): boolean {
+    const worst = this.worstPaymentState(order.payments);
+    if (worst) return worst === 'pending';
+    // Sin filas de pago (p.ej. canal WhatsApp): el estado de la orden manda.
+    return order.state === 'pending_payment';
+  }
+
+  // ==========================================================================
+  // ETA — persistido o prep_minutes_max, tras hide_prep_eta (paso 8)
+  // ==========================================================================
+
+  /**
+   * Opt-out `ecommerce.orders.hide_prep_eta` (paso 7): ausente ⇒ visible,
+   * se lee con `!== true`. Además exige al menos una fuente de ETA.
+   */
+  etaVisible(): boolean {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    if (config?.customConfig?.ecommerce?.orders?.hide_prep_eta === true) {
+      return false;
+    }
+    const order = this.summary()?.order;
+    if (!order) return false;
+    return order.estimated_ready_at != null || this.etaMinutes(order) != null;
+  }
+
+  /**
+   * Paso 10 — opt-out `ecommerce.orders.hide_tracking_progress` (paso 7):
+   * ausente ⇒ la barra se muestra, se lee con `!== true`.
+   */
+  trackingShown(): boolean {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    if (
+      config?.customConfig?.ecommerce?.orders?.hide_tracking_progress === true
+    ) {
+      return false;
+    }
+    return this.summary() != null;
+  }
+
+  /**
+   * CP-853-fix (paso 4): público porque el template lo usa en `baseMinutes`.
+   * MAX de preparación por ítem, ya resuelto por el backend (variante, luego
+   * producto, luego `operations.default_preparation_time_minutes`); null si
+   * la tienda no configuró ninguna fuente.
+   */
+  etaMinutes(order: GuestOrderData): number | null {
+    const m = order.prep_minutes_max;
+    return typeof m === 'number' && Number.isFinite(m) ? m : null;
+  }
+
+  /** "Tiempo estimado: ~X min" + hora persistida si existe. */
+  etaLabel(order: GuestOrderData): string {
+    const parts: string[] = [];
+    const minutes = this.etaMinutes(order);
+    if (minutes != null) parts.push(`~${minutes} min`);
+    const readyAt = this.formatReadyTime(order.estimated_ready_at);
+    if (readyAt) parts.push(`listo aprox. ${readyAt}`);
+    return `Tiempo estimado: ${parts.join(' · ') || '—'}`;
+  }
+
+  /**
+   * `estimated_ready_at` es un instante: se muestra en la hora local del
+   * lector (quien consulta su pedido), igual que el voucher impreso.
+   */
+  private formatReadyTime(iso?: string | null): string {
+    if (!iso) return '';
+    try {
+      return new Date(iso).toLocaleTimeString('es-CO', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
+  }
+
+  // ==========================================================================
+  // COCINA — port del admin order-details (kitchenStateFor/Label/Badge) (paso 8)
+  // ==========================================================================
+
+  /**
+   * El backend ya resolvió la regla in-flight (`kitchenStatusFor`, paso 3),
+   * así que aquí solo se desempaqueta: null/ausente = plato no disparado,
+   * sin badge. Sin deep-link al KDS: el guest no ve nada interno.
+   */
+  kitchenStateFor(item: GuestOrderItem): string | null {
+    return item.kitchen_status ?? null;
+  }
+
+  /** 5 labels ES, idénticos al admin. */
+  kitchenStateLabel(status: string): string {
+    switch (status) {
+      case 'pending':
+        return 'Pendiente';
+      case 'in_preparation':
+        return 'En preparación';
+      case 'ready':
+        return 'Listo';
+      case 'delivered':
+        return 'Entregado';
+      case 'cancelled':
+        return 'Cancelado';
+      default:
+        return status;
+    }
+  }
+
+  /**
+   * Paleta KDS del admin mapeada a variantes de `app-badge`:
+   * pending→neutral, in_preparation→warning, ready→success,
+   * delivered→info, cancelled→error.
+   */
+  kitchenBadgeVariant(status: string): BadgeVariant {
+    switch (status) {
+      case 'pending':
+        return 'neutral';
+      case 'in_preparation':
+        return 'warning';
+      case 'ready':
+        return 'success';
+      case 'delivered':
+        return 'info';
+      case 'cancelled':
+        return 'error';
+      default:
+        return 'neutral';
+    }
   }
 
   // === E2 — helpers de cancelación de línea =================================
@@ -1129,5 +1775,281 @@ export class GuestOrderSummaryComponent implements OnInit {
     if (!reason) return false;
     if (reason.startsWith('legacy:')) return false;
     return true;
+  }
+
+  // ==========================================================================
+  // PASO 9 — SSE en vivo: fusión de signals + pill + flash de cocina
+  // ==========================================================================
+
+  /** La pill solo existe mientras el stream está activo o reintentando. */
+  sseLiveVisible(): boolean {
+    const state = this.sse.connectionState();
+    return (
+      state === 'open' ||
+      state === 'connecting' ||
+      state === 'reconnecting' ||
+      state === 'error'
+    );
+  }
+
+  sseLiveLabel(): string {
+    switch (this.sse.connectionState()) {
+      case 'open':
+        return 'En vivo';
+      case 'connecting':
+        return 'Conectando…';
+      case 'reconnecting':
+      case 'error':
+        return 'Reconectando…';
+      default:
+        return '';
+    }
+  }
+
+  isKitchenFlashing(productName: string): boolean {
+    if (this.sse.prefersReducedMotion()) return false;
+    return this.kitchenFlash()[productName] === true;
+  }
+
+  /**
+   * Funde los signals vivos del SSE en una COPIA del summary (nunca muta en
+   * sitio: zoneless reacciona al `set`). Sin summary aún (REST pendiente) no
+   * hay nada que fusionar — el `ngOnInit` re-aplica al llegar el REST.
+   *
+   * Solo toca estado vivo: `order.state`, `delivery_type`, ETA, cocina por
+   * plato y pagos. Totales/cliente/tienda/factura son inmutables del REST.
+   */
+  private fuseLiveState(): void {
+    const current = untracked(() => this.summary());
+    if (!current) return;
+
+    const liveState = this.sse.orderState();
+    const liveDelivery = this.sse.deliveryType();
+    const liveKitchen = this.sse.kitchenByProduct();
+    const livePayments = this.sse.paymentsLive();
+    const liveEta = this.sse.eta();
+
+    const order: GuestOrderData = {
+      ...current.order,
+      items: current.order.items.map((item) => {
+        // CP-853-fix (paso 5): cocina por línea de orden — product_name
+        // solo cuando el id falta.
+        const live = liveKitchen[item.order_item_id ?? item.product_name];
+        if (live == null || live === item.kitchen_status) return item;
+        return { ...item, kitchen_status: live };
+      }),
+      payments: (current.order.payments ?? []).map((p) => {
+        const live = livePayments.find((l) => l.payment_id === p.payment_id);
+        if (!live) return p;
+        // CP-853-fix (paso 5): el live solo ENCIENDE has_receipt — un false
+        // rancio del snapshot/evento nunca apaga una subida confirmada.
+        const hasReceipt = live.has_receipt === true ? true : p.has_receipt;
+        if (live.state === p.state && hasReceipt === p.has_receipt) {
+          return p;
+        }
+        return { ...p, state: live.state, has_receipt: hasReceipt };
+      }),
+    };
+    if (liveState) order.state = liveState;
+    if (liveDelivery) order.delivery_type = liveDelivery;
+    if (liveEta) {
+      order.estimated_ready_at = liveEta.estimated_ready_at;
+      order.estimated_delivered_at = liveEta.estimated_delivered_at;
+      order.prep_minutes_max = liveEta.prep_minutes_max;
+    }
+
+    // Pulso "actualizado" en los platos cuyo estado SÍ cambió (no en el
+    // primer snapshot: ahí REST y SSE coinciden y no hay nada que anunciar).
+    const changed = order.items
+      .filter((item, i) => {
+        const prev = current.order.items[i];
+        return (
+          prev &&
+          prev.product_name === item.product_name &&
+          prev.kitchen_status !== item.kitchen_status
+        );
+      })
+      .map((item) => item.product_name);
+    if (changed.length > 0) {
+      this.markKitchenFlash(changed);
+    }
+
+    this.summary.set({ ...current, order });
+  }
+
+  private markKitchenFlash(productNames: string[]): void {
+    if (this.sse.prefersReducedMotion()) return;
+    const next: Record<string, boolean> = { ...this.kitchenFlash() };
+    for (const name of productNames) next[name] = true;
+    this.kitchenFlash.set(next);
+    this.clearFlashTimer();
+    this.flashTimer = setTimeout(() => {
+      this.flashTimer = null;
+      this.kitchenFlash.set({});
+    }, 2500);
+  }
+
+  private clearFlashTimer(): void {
+    if (this.flashTimer) {
+      clearTimeout(this.flashTimer);
+      this.flashTimer = null;
+    }
+  }
+
+  // ==========================================================================
+  // PASO 9 — Comprobante: visor (URL firmada) + carga tardía
+  // ==========================================================================
+
+  /**
+   * Abre el visor con URL firmada fresca (TTL 5 min — se pide en cada
+   * apertura, igual que el admin). `kind` por content-type del HEAD.
+   */
+  async viewReceipt(payment: GuestOrderPayment): Promise<void> {
+    const paymentId = payment.payment_id;
+    if (paymentId == null || !this.token) return;
+
+    this.loadingReceiptId.set(paymentId);
+    try {
+      const res = await firstValueFrom(
+        this.checkoutService.getGuestPaymentReceiptUrl(this.token, paymentId),
+      );
+      this.receiptPreview.set({
+        url: res.data.url,
+        safeUrl: this.sanitizer.bypassSecurityTrustResourceUrl(res.data.url),
+        kind: this.receiptPreviewKind(res.data.content_type, res.data.url),
+      });
+      this.showReceiptModal.set(true);
+    } catch {
+      this.toast.error(
+        'No se pudo abrir el comprobante. Inténtalo de nuevo.',
+        'Error',
+      );
+    } finally {
+      this.loadingReceiptId.set(null);
+    }
+  }
+
+  closeReceiptModal(): void {
+    this.showReceiptModal.set(false);
+    this.receiptPreview.set(null);
+  }
+
+  private receiptPreviewKind(
+    contentType: string | null,
+    url: string,
+  ): 'image' | 'pdf' {
+    const ct = (contentType ?? '').toLowerCase();
+    if (ct.startsWith('image/')) return 'image';
+    if (ct.includes('pdf')) return 'pdf';
+    // Fallback por extensión (misma regla del admin).
+    const source = url.split('?')[0].toLowerCase();
+    if (/\.(jpe?g|png|webp)$/.test(source)) return 'image';
+    return 'pdf';
+  }
+
+  /**
+   * R8-F1 — espejo frontend del gate de `uploadGuestPaymentReceipt`: el
+   * dropzone solo existe cuando NI la orden NI el pago están en estado
+   * terminal. El backend re-valida (la fuente de verdad es el 400); esto
+   * evita mostrar una subida que siempre fallaría.
+   */
+  receiptUploadAllowed(
+    orderState: string,
+    payment: GuestOrderPayment,
+  ): boolean {
+    const terminalOrder = ['cancelled', 'refunded', 'finished', 'delivered'];
+    const terminalPayment = ['succeeded', 'captured', 'refunded', 'cancelled'];
+    if (terminalOrder.includes(orderState)) return false;
+    if (terminalPayment.includes(payment.state)) return false;
+    return true;
+  }
+
+  /**
+   * Carga tardía desde el dropzone inline. Valida el mismo contrato del
+   * checkout (MIME/5MB, mismos mensajes) antes de subir; al éxito refresca
+   * `has_receipt` en el summary sin refetch y el botón "Ver comprobante"
+   * reemplaza al dropzone.
+   */
+  async onReceiptFile(
+    payment: GuestOrderPayment,
+    file: File,
+  ): Promise<void> {
+    const paymentId = payment.payment_id;
+    if (paymentId == null || !this.token) return;
+
+    if (file.size > this.RECEIPT_MAX_SIZE) {
+      this.toast.error('El archivo supera los 5 MB permitidos.', 'Error');
+      return;
+    }
+    if (!this.RECEIPT_ALLOWED_MIME.includes(file.type)) {
+      this.toast.error(
+        'Formato no admitido. Usa JPG, PNG, WebP o PDF.',
+        'Error',
+      );
+      return;
+    }
+
+    this.uploadingReceiptId.set(paymentId);
+    try {
+      const res = await firstValueFrom(
+        this.checkoutService.uploadGuestPaymentReceipt(
+          this.token,
+          paymentId,
+          file,
+        ),
+      );
+      this.refreshPaymentReceipt(
+        paymentId,
+        res.data.has_receipt,
+        res.data.receipt_content_type,
+      );
+      // CP-853-fix (paso 5): la subida confirmada gana sobre el SSE — se
+      // refleja también en el estado vivo para que la fusión no la revierta.
+      this.sse.markReceiptUploaded(paymentId, res.data.has_receipt);
+      this.toast.success(
+        res.message ??
+          'Comprobante recibido. La tienda lo revisará para confirmar tu pago.',
+        'Comprobante adjunto',
+      );
+    } catch (err: unknown) {
+      this.toast.error(this.uploadErrorMessage(err), 'Error');
+    } finally {
+      this.uploadingReceiptId.set(null);
+    }
+  }
+
+  /**
+   * Refresca `has_receipt` del pago en una copia del summary (inmutable).
+   * El template reacciona: el dropzone se reemplaza por "Ver comprobante".
+   */
+  private refreshPaymentReceipt(
+    paymentId: number,
+    hasReceipt: boolean,
+    contentType: string | null,
+  ): void {
+    const current = this.summary();
+    if (!current) return;
+    this.summary.set({
+      ...current,
+      order: {
+        ...current.order,
+        payments: (current.order.payments ?? []).map((p) =>
+          p.payment_id === paymentId
+            ? { ...p, has_receipt: hasReceipt, receipt_content_type: contentType }
+            : p,
+        ),
+      },
+    });
+  }
+
+  /**
+   * El backend habla claro (400 "Este medio de pago no recibe comprobante",
+   * 413/422 de tamaño/MIME): se propaga su mensaje cuando existe.
+   */
+  private uploadErrorMessage(err: unknown): string {
+    const message = (err as { error?: { message?: unknown } })?.error?.message;
+    if (typeof message === 'string' && message.trim()) return message;
+    if (err instanceof Error && err.message) return err.message;
+    return 'No se pudo subir el comprobante. Inténtalo de nuevo.';
   }
 }
