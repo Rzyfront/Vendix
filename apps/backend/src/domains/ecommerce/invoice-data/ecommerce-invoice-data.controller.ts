@@ -41,7 +41,7 @@ import { ResponseService } from '@common/responses/response.service';
  * que `KitchenFireService` empuja al subject por tienda se renombran al
  * vocabulario presentacional. Copia local a propósito: el mapa comensal es
  * privado de su controller y cruzar dominios para 4 líneas no compensa.
- * Cualquier tipo fuera de este mapa (y de los dos eventos `order.*`
+ * Cualquier tipo fuera de este mapa (y de los tres eventos `order.*`
  * allowlist) lo niega `matchesGuest` por defecto.
  */
 const GUEST_KDS_MAP: Record<string, string> = {
@@ -123,7 +123,8 @@ export class EcommerceInvoiceDataController {
    *   2) Eventos vivos allowlist filtrados por la orden del binding:
    *      `kitchen.fired|preparing|ready|delivered` (match
    *      `ticket.order_id`) y `order.status_changed` /
-   *      `order.shipping_assigned` (match `data.order_id`).
+   *      `order.shipping_assigned` / `order.payment_updated`
+   *      (match `data.order_id`).
    *   3) Heartbeat `: heartbeat` cada 30s.
    *
    * Seguridad (default-deny): `@OptionalAuth` con token en path (nunca JWT
@@ -250,8 +251,8 @@ export class EcommerceInvoiceDataController {
    * Default-deny para el stream guest. Acepta SOLO:
    *   - Eventos KDS allowlist (`GUEST_KDS_MAP`) con
    *     `ticket.order_id === binding.order_id`.
-   *   - `order.status_changed` / `order.shipping_assigned` con
-   *     `data.order_id === binding.order_id`.
+   *   - `order.status_changed` / `order.shipping_assigned` /
+   *     `order.payment_updated` con `data.order_id === binding.order_id`.
    * Todo lo demás — otros tipos, otras órdenes — se descarta: el guest
    * nunca observa actividad ajena de la tienda.
    */
@@ -266,7 +267,11 @@ export class EcommerceInvoiceDataController {
       const ticket = ev.ticket as { order_id?: number } | undefined;
       return ticket?.order_id === binding.order_id;
     }
-    if (type === 'order.status_changed' || type === 'order.shipping_assigned') {
+    if (
+      type === 'order.status_changed' ||
+      type === 'order.shipping_assigned' ||
+      type === 'order.payment_updated'
+    ) {
       const data = ev.data as { order_id?: number } | undefined;
       return data?.order_id === binding.order_id;
     }
@@ -308,6 +313,28 @@ export class EcommerceInvoiceDataController {
           projected[key] = raw[key];
         }
       }
+      projected.ts = Date.now();
+      return projected;
+    }
+
+    // Pago en vivo guest (`/pedido/:token`): emitido por
+    // `OrderFlowService.confirmPayment` tras commit. Mismo shape por pago
+    // que el snapshot (`payment_id, state, has_receipt`): el frontend ya
+    // fusiona por `payment_id` en `paymentsLive`.
+    if (type === 'order.payment_updated') {
+      const raw = (ev.data ?? {}) as Record<string, unknown>;
+      const rawPayments = Array.isArray(raw.payments)
+        ? (raw.payments as Array<Record<string, unknown>>)
+        : [];
+      const projected: Record<string, unknown> = { type };
+      if (raw.order_id !== undefined) {
+        projected.order_id = raw.order_id;
+      }
+      projected.payments = rawPayments.map((p) => ({
+        payment_id: p.payment_id ?? null,
+        state: p.state ?? null,
+        has_receipt: p.has_receipt ?? null,
+      }));
       projected.ts = Date.now();
       return projected;
     }
