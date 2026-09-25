@@ -120,7 +120,7 @@ export class GuestOrderSseService {
   readonly deliveryType = signal<string | null>(null);
   /** Per-dish kitchen status keyed by `product_name` (immutable writes). */
   readonly kitchenByProduct = signal<Readonly<Record<string, string>>>({});
-  /** Payment rows from `snapshot` (state + has_receipt refresh). */
+  /** Payment rows from `snapshot` + `order.payment_updated`. */
   readonly paymentsLive = signal<GuestSsePayment[]>([]);
   /** ETA fields from `snapshot`. */
   readonly eta = signal<GuestSseEta | null>(null);
@@ -283,6 +283,11 @@ export class GuestOrderSseService {
         return;
       }
 
+      case 'order.payment_updated': {
+        this.applyPaymentUpdated(parsed['payments'] as unknown);
+        return;
+      }
+
       case 'link_expired': {
         // Tipo de cierre RESERVADO (dependencia F2 del plan — hoy el token
         // guest no expira, así que nunca se emite). Si algún día llega, el
@@ -366,6 +371,46 @@ export class GuestOrderSseService {
         });
       }
       this.paymentsLive.set(payments);
+    }
+  }
+
+  /**
+   * Funde un evento `order.payment_updated` en `paymentsLive` por
+   * `payment_id` (mismo shape por pago que el snapshot: `payment_id`,
+   * `state`, `has_receipt`). Escritura inmutable para que zoneless
+   * reaccione; sin cambios no hay `set`.
+   */
+  private applyPaymentUpdated(rawPayments: unknown): void {
+    if (!Array.isArray(rawPayments) || rawPayments.length === 0) return;
+    const next: GuestSsePayment[] = this.paymentsLive().map((p) => ({ ...p }));
+    let changed = false;
+    for (const raw of rawPayments as Array<Record<string, unknown>>) {
+      if (typeof raw?.['state'] !== 'string') continue;
+      const incoming: GuestSsePayment = {
+        payment_id:
+          typeof raw['payment_id'] === 'number'
+            ? (raw['payment_id'] as number)
+            : null,
+        state: raw['state'] as string,
+        has_receipt: raw['has_receipt'] === true,
+      };
+      const idx =
+        incoming.payment_id == null
+          ? -1
+          : next.findIndex((p) => p.payment_id === incoming.payment_id);
+      if (idx < 0) {
+        next.push(incoming);
+        changed = true;
+      } else if (
+        next[idx].state !== incoming.state ||
+        next[idx].has_receipt !== incoming.has_receipt
+      ) {
+        next[idx] = incoming;
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.paymentsLive.set(next);
     }
   }
 
