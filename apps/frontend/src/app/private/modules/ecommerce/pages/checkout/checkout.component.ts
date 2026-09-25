@@ -1706,6 +1706,12 @@ export class CheckoutComponent implements OnInit {
       );
       return null;
     }
+    // Paso 5 shipping-distance-pricing: el form trae latitude/longitude del
+    // map picker (null sin pin); se omiten sin pin para cotizar por zona.
+    if (value.latitude == null || value.longitude == null) {
+      delete value.latitude;
+      delete value.longitude;
+    }
     return value;
   }
 
@@ -1960,12 +1966,18 @@ export class CheckoutComponent implements OnInit {
   }
 
   mapAddressToCalc(addr: Address) {
-    const raw = {
+    const raw: any = {
       country_code: addr.country_code,
       state_province: addr.state_province,
       city: addr.city,
       postal_code: addr.postal_code || undefined,
     };
+    // Paso 5 shipping-distance-pricing: con pin se cotiza por distancia;
+    // sin coords se omiten y rige la tarifa de zona, sin error visible.
+    if (addr.latitude != null && addr.longitude != null) {
+      raw.latitude = addr.latitude;
+      raw.longitude = addr.longitude;
+    }
     const { value } = this.resolveGeoNames(raw);
     return value;
   }
