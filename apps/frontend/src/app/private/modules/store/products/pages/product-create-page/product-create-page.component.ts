@@ -526,6 +526,21 @@ export class ProductCreatePageComponent {
   private inventoryService = inject(InventoryService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  /**
+   * Release-853 paso 12 — el back del header conserva `?page=` de origen
+   * con la misma fuente que `navigateAfterSave` (`fromPage`, que el
+   * listado manda al abrir el alta/edición). Sin `fromPage` no se mandan
+   * queryParams y el back queda como antes. Estático: el snapshot no
+   * cambia mientras la página vive, así que no necesita signal.
+   */
+  readonly listBackQueryParams: Params | undefined = (() => {
+    // `route` ya está inicializado (los fields corren en orden de
+    // declaración): se reutiliza en vez de inyectar dos veces.
+    const fromPage = this.route.snapshot.queryParams['fromPage'];
+    return fromPage === undefined || fromPage === null || fromPage === ''
+      ? undefined
+      : { page: fromPage };
+  })();
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
   private promotionsService = inject(PromotionsService);

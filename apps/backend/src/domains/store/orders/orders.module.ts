@@ -42,6 +42,11 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 // con un payload tipado para el dominio `orders`.
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OrderSseService } from './services/order-sse.service';
+// Release-853 paso 10 — el cambio de titular se propaga al borrador de la
+// factura con `InvoicingService.update`. `forwardRef` defensivo: facturación
+// no importa este módulo hoy, pero ambos dominios se referencian vía eventos
+// y seeds, y el ciclo rompería el arranque en silencio.
+import { InvoicingModule } from '../invoicing/invoicing.module';
 
 @Module({
   imports: [
@@ -65,6 +70,8 @@ import { OrderSseService } from './services/order-sse.service';
     CouponsModule,
     // Carril B - B3: necesario para inyectar NotificationsSseService.
     NotificationsModule,
+    // Release-853 paso 10: propagación del titular al borrador de factura.
+    forwardRef(() => InvoicingModule),
   ],
   controllers: [OrdersController, OrdersBulkController],
   providers: [

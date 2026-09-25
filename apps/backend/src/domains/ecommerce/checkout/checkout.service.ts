@@ -17,7 +17,11 @@ import {
 import { CheckoutDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { Prisma, payment_processing_mode_enum } from '@prisma/client';
+import {
+  Prisma,
+  payment_processing_mode_enum,
+  shipping_rate_type_enum,
+} from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -242,6 +246,7 @@ export class CheckoutService {
    */
   private async resolveConfirmShippingCost(
     rate: {
+      type?: shipping_rate_type_enum | string | null;
       distance_tiers?: unknown;
       shipping_method?: {
         distance_pricing_enabled?: boolean | null;
@@ -255,6 +260,9 @@ export class CheckoutService {
     } | null,
     zone_cost: number,
   ): Promise<number> {
+    // Release-853 paso 11 — tarifa `free` cobra 0 al confirmar, con o sin
+    // escala (misma regla del cotizador: `shipping-calculator.service.ts`).
+    if (rate.type === shipping_rate_type_enum.free) return 0;
     const distance = this.shippingDistance;
     const method = rate.shipping_method;
     if (!distance || !method?.distance_pricing_enabled) return zone_cost;
@@ -1515,7 +1523,12 @@ export class CheckoutService {
         throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_003);
       }
 
-      shipping_cost = Number(rate.base_cost);
+      // Release-853 paso 11 — tarifa `free`: base 0 aunque el `base_cost`
+      // persistido traiga otro valor (el cotizador ya la ofrece en 0).
+      shipping_cost =
+        rate.type === shipping_rate_type_enum.free
+          ? 0
+          : Number(rate.base_cost);
       shipping_method_id = rate.shipping_method_id;
       shipping_rate_id = rate.id;
 

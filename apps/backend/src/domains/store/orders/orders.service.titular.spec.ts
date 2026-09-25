@@ -23,8 +23,11 @@ describe('OrdersService — contrato titular (BE-2)', () => {
       count: jest.fn(),
     },
     store_users: { findFirst: jest.fn() },
+    // Release-853 paso 10 — gate titular vs factura.
+    invoices: { findFirst: jest.fn() },
   };
   const orderFlow = { forceOrderState: jest.fn(), cancelOrder: jest.fn() };
+  const invoicing = { update: jest.fn() };
 
   const service = new OrdersService(
     prisma,
@@ -40,10 +43,14 @@ describe('OrdersService — contrato titular (BE-2)', () => {
     {} as any,
     {} as any,
     {} as any,
+    {} as any,
+    invoicing as any,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // Default: orden sin factura (los casos con factura lo sobrescriben).
+    prisma.invoices.findFirst.mockResolvedValue(null);
   });
 
   const draftOrder = {
@@ -156,6 +163,92 @@ describe('OrdersService — contrato titular (BE-2)', () => {
           data: expect.objectContaining({ customer_id: 217 }),
         }),
       );
+    });
+  });
+
+  describe('PATCH titular — gate de factura (release-853 paso 10)', () => {
+    it('factura sent → 409 ORD_TITULAR_INVOICED_001 y la orden no se toca', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      prisma.invoices.findFirst.mockResolvedValue({ id: 77, status: 'sent' });
+      await expect(
+        service.update(924, { customer_id: 217 } as any),
+      ).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_TITULAR_INVOICED_001.code,
+      });
+      expect(prisma.invoices.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            order_id: 924,
+            invoice_type: 'sales_invoice',
+          }),
+        }),
+      );
+      expect(invoicing.update).not.toHaveBeenCalled();
+      expect(prisma.orders.update).not.toHaveBeenCalled();
+    });
+
+    it.each(['validated', 'accepted'])(
+      'factura %s → 409 (solo draft propaga)',
+      async (status) => {
+        prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+        prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+        prisma.invoices.findFirst.mockResolvedValue({ id: 78, status });
+        await expect(
+          service.update(924, { customer_id: 217 } as any),
+        ).rejects.toMatchObject({
+          errorCode: ErrorCodes.ORD_TITULAR_INVOICED_001.code,
+        });
+        expect(prisma.orders.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it('factura draft → aplica a la orden y propaga con InvoicingService.update', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      prisma.invoices.findFirst.mockResolvedValue({ id: 79, status: 'draft' });
+      prisma.orders.update.mockResolvedValue({ ...draftOrder, customer_id: 217 });
+      const result = await service.update(924, { customer_id: 217 } as any);
+      expect(result.customer_id).toBe(217);
+      expect(invoicing.update).toHaveBeenCalledWith(79, { customer_id: 217 });
+      expect(prisma.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 924 },
+          data: expect.objectContaining({ customer_id: 217 }),
+        }),
+      );
+    });
+
+    it('si la propagación falla, la orden no se cambia', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      prisma.invoices.findFirst.mockResolvedValue({ id: 79, status: 'draft' });
+      invoicing.update.mockRejectedValueOnce(new Error('draft roto'));
+      await expect(
+        service.update(924, { customer_id: 217 } as any),
+      ).rejects.toThrow('draft roto');
+      expect(prisma.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('sin factura → igual que antes (no propaga, aplica directo)', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      prisma.orders.update.mockResolvedValue({ ...draftOrder, customer_id: 217 });
+      const result = await service.update(924, { customer_id: 217 } as any);
+      expect(result.customer_id).toBe(217);
+      expect(invoicing.update).not.toHaveBeenCalled();
+      expect(prisma.orders.update).toHaveBeenCalled();
+    });
+
+    it('cambio solo de alias no consulta facturas (no es titular fiscal)', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.orders.update.mockResolvedValue({
+        ...draftOrder,
+        customer_alias: 'Mesa 5',
+      });
+      await service.update(924, { customer_alias: 'Mesa 5' } as any);
+      expect(prisma.invoices.findFirst).not.toHaveBeenCalled();
+      expect(prisma.orders.update).toHaveBeenCalled();
     });
   });
 

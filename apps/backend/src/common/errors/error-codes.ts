@@ -1396,6 +1396,16 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'The selected customer does not belong to the current store',
   },
+  // Release-853 paso 10 — la orden ya tiene factura `sales_invoice` vigente
+  // (cualquier estado fuera de draft/voided/cancelled) y su adquiriente es
+  // inmutable; la vía de corrección es la nota crédito. 409 porque la
+  // petición está bien formada; lo que cambió es el estado fiscal del recurso.
+  ORD_TITULAR_INVOICED_001: {
+    code: 'ORD_TITULAR_INVOICED_001',
+    httpStatus: 409,
+    devMessage:
+      'This order already has an issued sales invoice and its holder cannot be changed',
+  },
   // CP-POS-CREAR-EDITAR-COBRAR-001 — dirección/método/rate de envío inválidos,
   // método inactivo, rate no pertenece al método, o costo negativo.
   ORD_EDIT_INVALID_SHIPPING_001: {
