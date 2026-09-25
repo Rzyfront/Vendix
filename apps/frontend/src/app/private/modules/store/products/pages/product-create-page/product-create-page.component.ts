@@ -1291,6 +1291,7 @@ export class ProductCreatePageComponent {
   isBrandCreateOpen = false;
   isTaxCategoryCreateOpen = false;
   isImageSourceModalOpen = signal(false);
+  private pendingImagesScroll = false;
   readonly imageModalMode = signal<'add' | 'edit'>('add');
   readonly imageEditSourceUrl = signal<string | null>(null);
   readonly editingImageIndex = signal<number | null>(null);
@@ -1330,10 +1331,10 @@ export class ProductCreatePageComponent {
     this.formUpdateTrigger(); // Dependency
     return [
       {
-        id: 'cancel',
-        label: 'Cancelar',
-        icon: 'x',
-        variant: 'outline',
+        id: 'photos',
+        label: 'Fotos',
+        icon: 'image-plus',
+        variant: 'secondary',
       },
       {
         id: 'save',
@@ -3373,6 +3374,16 @@ export class ProductCreatePageComponent {
     this.isImageSourceModalOpen.set(true);
   }
 
+  onProductImageModalOpenChange(open: boolean): void {
+    this.isImageSourceModalOpen.set(open);
+    if (!open && this.pendingImagesScroll) {
+      this.pendingImagesScroll = false;
+      const el = document.querySelector('#product-images-mobile') as HTMLElement | null;
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el?.focus?.({ preventScroll: true });
+    }
+  }
+
   openImageEditor(index = this.activeImageIndex): void {
     const sourceUrl = this.imageUrls[index];
     if (!sourceUrl) {
@@ -3718,16 +3729,13 @@ export class ProductCreatePageComponent {
     }
   }
 
-  onCancel(): void {
-    const returnPage = this.route.snapshot.queryParams['fromPage'] || 1;
-    this.router.navigate(['/admin/products'], {
-      queryParams: { page: returnPage },
-    });
-  }
-
   onHeaderAction(actionId: string): void {
-    if (actionId === 'cancel') this.onCancel();
-    else if (actionId === 'save') this.onSubmit();
+    if (actionId === 'photos') {
+      this.pendingImagesScroll =
+        this.imageUrls.length < 5 &&
+        window.matchMedia('(max-width: 1023.98px)').matches;
+      this.openImageSourceModal();
+    } else if (actionId === 'save') this.onSubmit();
   }
 
   preventNativeFormSubmit(event: SubmitEvent): void {
