@@ -301,6 +301,11 @@ export interface ReceivePurchaseOrderItemDto {
   // QUI-431: real serial numbers captured during reception (manual/bulk).
   // Optional: backend auto-generates placeholders for any missing serials.
   serial_numbers?: string[];
+  /**
+   * QUI-855 — motivo de faltante/avería de esta línea (p. ej. "3 unidades
+   * averiadas"). Se persiste en `purchase_order_reception_items.note`.
+   */
+  note?: string;
   // ===== QUI-425 (D2) margin UX =====
   // Optional pricing overrides captured in the confirmation modal. When
   // omitted the backend applies the cost-anchor rule (keeps base_price,

@@ -1781,6 +1781,97 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
   });
 
   /**
+   * QUI-855 — línea de regalo (precio 0, bonificación del proveedor) +
+   * multi-impuesto. El regalo no mueve el total, no absorbe flete ni
+   * descuento de cabecera (ni siquiera el centavo de redondeo), entra a
+   * costo 0 y no rompe el margen con una división por cero.
+   */
+  describe('QUI-855: regalo y multi-impuesto', () => {
+    const buildGiftService = () =>
+      buildPreviewService({
+        taxResponsibilities: ['O-48'], // responsable: neto al costo
+        isIngredient: false,
+        purchaseToStockFactor: null,
+        scopedAggregate: { quantity: 0, cost_per_unit: 0 },
+      });
+
+    it('el regalo al final no absorbe flete: residuo a la última línea que paga', async () => {
+      const service = await buildGiftService();
+      const result: any = await service.getCostPreview({
+        location_id: LOCATION_ID,
+        prices_include_tax: false,
+        shipping_cost: 100,
+        shipping_cost_allocation: 'prorate',
+        items: [
+          { product_id: PRODUCT_ID, quantity: 1, unit_cost: 100 },
+          { product_id: PRODUCT_ID, quantity: 1, unit_cost: 100 },
+          { product_id: PRODUCT_ID, quantity: 1, unit_cost: 100 },
+          { product_id: PRODUCT_ID, quantity: 2, unit_cost: 0 },
+        ],
+      } as any);
+
+      // Idéntico a la orden sin regalo ([33.33, 33.33, 33.34]) y el regalo
+      // en 0: antes el residuo caía en la última línea a ciegas ([33.33,
+      // 33.33, 33.33, 0.01]) y el regalo le robaba el centavo a la tercera.
+      expect(
+        result.items.map((i: any) => i.allocated_shipping_amount),
+      ).toEqual([33.33, 33.33, 33.34, 0]);
+      expect(result.items[0].new_cost_per_unit).toBe(133.33);
+      expect(result.items[2].new_cost_per_unit).toBe(133.34);
+      // El regalo entra a costo 0 y el margen es nulo (no Infinity/NaN).
+      expect(result.items[3].new_cost_per_unit).toBe(0);
+      expect(result.items[3].incoming_tax_amount).toBe(0);
+      expect(result.items[3].resulting_margin).toBeNull();
+    });
+
+    it('el regalo no absorbe descuento de cabecera ni se lo resta a las que pagan', async () => {
+      const service = await buildGiftService();
+      const result: any = await service.getCostPreview({
+        location_id: LOCATION_ID,
+        prices_include_tax: false,
+        discount_amount: 100,
+        items: [
+          { product_id: PRODUCT_ID, quantity: 1, unit_cost: 100 },
+          { product_id: PRODUCT_ID, quantity: 1, unit_cost: 100 },
+          { product_id: PRODUCT_ID, quantity: 1, unit_cost: 100 },
+          { product_id: PRODUCT_ID, quantity: 2, unit_cost: 0 },
+        ],
+      } as any);
+
+      expect(
+        result.items.map((i: any) => i.header_discount_share),
+      ).toEqual([33.33, 33.33, 33.34, 0]);
+      expect(result.items[3].discount_amount).toBe(0);
+    });
+
+    it('add_to_cost capitaliza aun con O-48 y el resto queda descontable', async () => {
+      const service = await buildGiftService();
+      const result: any = await service.getCostPreview({
+        location_id: LOCATION_ID,
+        prices_include_tax: false,
+        items: [
+          {
+            product_id: PRODUCT_ID,
+            quantity: 5,
+            unit_cost: 1000,
+            taxes: [
+              { tax_rate: 19, tax_type: 'iva' },
+              { tax_rate: 8, tax_type: 'inc', add_to_cost: true },
+            ],
+          },
+        ],
+      } as any);
+
+      const line = result.items[0];
+      // Costo = neto 1000 + INC 80 (el IVA 190 queda descontable).
+      expect(line.new_cost_per_unit).toBe(1080);
+      expect(line.incoming_tax_amount).toBe(1350);
+      expect(line.deductible_tax_amount).toBe(950);
+      expect(line.capitalized_tax_amount).toBe(400);
+    });
+  });
+
+  /**
    * QUI-648 — el margen del preview se mide contra el costo llevado a la escala
    * del precio. `new_cost_per_unit` es el costo de la unidad MÍNIMA de stock;
    * `current_base_price` cubre `price_unit_quantity` de esas unidades.

@@ -249,6 +249,137 @@ export class PurchaseOrdersService {
   }
 
   /**
+   * QUI-855 — N taxes per line. Same discount/base contract as
+   * `deriveLineTax`, but loops over `item.taxes` when non-empty; otherwise it
+   * normalizes the legacy `tax_rate`/`tax_type` pair into a single entry, so
+   * legacy lines derive BYTE-IDENTICAL numbers (same net, same total tax).
+   *
+   * Per-tax math on the discounted gross `g`, with per-tax include override:
+   * - include  → portion = g − g/(1+r)   (tax stripped out of the price)
+   * - exclude  → portion = g·r            (tax added on top)
+   * - net      = g − Σ(inclusive portions)
+   *
+   * `add_to_cost` taxes ALWAYS capitalize into inventory cost (IBUA/ICUI
+   * style), regardless of fiscal responsibility; the O-48/O-49 split continues
+   * to govern only the remaining (deductible-family) portion at receive time.
+   */
+  private deriveLineTaxes(
+    item: {
+      unit_price?: number | null;
+      unit_cost?: number | null;
+      quantity?: number | null;
+      tax_rate?: number | null;
+      tax_type?: string | null;
+      prices_include_tax?: boolean | null;
+      discount_percentage?: number | null;
+      discount_amount?: number | null;
+      taxes?: Array<{
+        tax_rate?: number | null;
+        tax_type?: string | null;
+        is_inclusive?: boolean | null;
+        add_to_cost?: boolean | null;
+        tax_rate_id?: number | null;
+        tax_name?: string | null;
+      }> | null;
+    },
+    header: { prices_include_tax?: boolean | null },
+    proratedHeaderDiscount = 0,
+  ): {
+    unit_price_net: number;
+    tax_amount: number;
+    effective_include: boolean;
+    discount_total: number;
+    taxes: Array<{
+      tax_rate: number;
+      tax_type: string;
+      is_inclusive: boolean;
+      add_to_cost: boolean;
+      tax_rate_id: number | null;
+      tax_name: string | null;
+      taxable_amount: number;
+      tax_amount: number;
+    }>;
+    /** Per-unit tax capitalized into cost (add_to_cost rows only). */
+    capitalized_per_unit: number;
+    /** Per-unit tax of the deductible family (everything else). */
+    deductible_per_unit: number;
+    /** Total tax per unit (all rows) — legacy `tax_amount_per_unit` compat. */
+    tax_amount_per_unit: number;
+  } {
+    const gross = Number(item.unit_price ?? item.unit_cost ?? 0);
+    const quantity = Number(item.quantity ?? 0);
+    const effective_include =
+      item.prices_include_tax ?? header.prices_include_tax ?? false;
+
+    // Same QUI-661 discount contract as deriveLineTax: amount wins over %,
+    // subtracted from GROSS before any tax split, floored at zero per unit.
+    const ownDiscount =
+      item.discount_amount != null && Number(item.discount_amount) > 0
+        ? Number(item.discount_amount)
+        : gross * quantity * (Number(item.discount_percentage ?? 0) / 100);
+    const discount_total = Math.max(
+      0,
+      ownDiscount + Number(proratedHeaderDiscount || 0),
+    );
+    const discountPerUnit =
+      quantity > 0 ? Math.min(discount_total / quantity, gross) : 0;
+    const grossAfterDiscount = gross - discountPerUnit;
+
+    const entries =
+      item.taxes && item.taxes.length > 0
+        ? item.taxes
+        : [
+            {
+              tax_rate: item.tax_rate ?? 0,
+              tax_type: item.tax_type ?? 'iva',
+              is_inclusive: undefined,
+              add_to_cost: false,
+            },
+          ];
+
+    let inclusivePortions = 0;
+    let taxTotal = 0;
+    let capitalizedPerUnit = 0;
+    let deductiblePerUnit = 0;
+    const taxes = entries.map((t) => {
+      const r = Number(t.tax_rate ?? 0) / 100;
+      const include = t.is_inclusive ?? effective_include;
+      const portion =
+        r > 0
+          ? include
+            ? grossAfterDiscount - grossAfterDiscount / (1 + r)
+            : grossAfterDiscount * r
+          : 0;
+      if (include) inclusivePortions += portion;
+      const amount = portion * quantity;
+      taxTotal += amount;
+      if (t.add_to_cost) capitalizedPerUnit += portion;
+      else deductiblePerUnit += portion;
+      return {
+        tax_rate: Number(t.tax_rate ?? 0),
+        tax_type: t.tax_type ?? 'iva',
+        is_inclusive: include,
+        add_to_cost: !!t.add_to_cost,
+        tax_rate_id: t.tax_rate_id ?? null,
+        tax_name: t.tax_name ?? null,
+        taxable_amount: grossAfterDiscount * quantity,
+        tax_amount: amount,
+      };
+    });
+
+    return {
+      unit_price_net: grossAfterDiscount - inclusivePortions,
+      tax_amount: taxTotal,
+      effective_include,
+      discount_total: discountPerUnit * quantity,
+      taxes,
+      capitalized_per_unit: capitalizedPerUnit,
+      deductible_per_unit: deductiblePerUnit,
+      tax_amount_per_unit: quantity > 0 ? taxTotal / quantity : 0,
+    };
+  }
+
+  /**
    * QUI-661 — splits a HEADER discount across the lines, proportionally to each
    * line's weight in the gross subtotal.
    *
@@ -287,12 +418,18 @@ export class PurchaseOrdersService {
     const effective = Math.min(discount, grossTotal);
     const round2 = (n: number) => Math.round(n * 100) / 100;
 
+    // QUI-855 (regalo): igual que `prorateShipping` — el residuo va a la
+    // última línea con bruto > 0 para que una bonificación (precio 0) nunca
+    // absorba descuento ni se lo reste a las líneas que sí pagan.
+    let lastPaying = items.length - 1;
+    while (lastPaying > 0 && !(grossPerLine[lastPaying] > 0)) lastPaying--;
     let assigned = 0;
-    for (let i = 0; i < items.length - 1; i++) {
+    for (let i = 0; i < items.length; i++) {
+      if (i === lastPaying) continue;
       shares[i] = round2((grossPerLine[i] / grossTotal) * effective);
       assigned += shares[i];
     }
-    shares[items.length - 1] = round2(effective - assigned);
+    shares[lastPaying] = round2(effective - assigned);
     return shares;
   }
 
@@ -352,12 +489,19 @@ export class PurchaseOrdersService {
     const weightTotal = weights.reduce((s, v) => s + v, 0);
     const round2 = (n: number) => Math.round(n * 100) / 100;
 
+    // QUI-855 (regalo): el residuo del redondeo va a la última línea con
+    // peso > 0, nunca a una línea de peso 0 (precio 0/bonificación). Antes
+    // caía en la última línea a ciegas: un regalo al final absorbía el
+    // centavo y se lo quitaba a la última línea que sí paga.
+    let lastPaying = weights.length - 1;
+    while (lastPaying > 0 && !(weights[lastPaying] > 0)) lastPaying--;
     let assigned = 0;
-    for (let i = 0; i < weights.length - 1; i++) {
+    for (let i = 0; i < weights.length; i++) {
+      if (i === lastPaying) continue;
       shares[i] = round2((weights[i] / weightTotal) * freight);
       assigned += shares[i];
     }
-    shares[weights.length - 1] = round2(freight - assigned);
+    shares[lastPaying] = round2(freight - assigned);
     return { shares, basis };
   }
 
@@ -1196,7 +1340,7 @@ export class PurchaseOrdersService {
           // honour the line's own discount and the include/added VAT mode,
           // which is what `deriveLineTax` owns.
           let basePrice = item.base_price || 0;
-          const cost = this.deriveLineTax(
+          const cost = this.deriveLineTaxes(
             item,
             createPurchaseOrderDto,
           ).unit_price_net;
@@ -1594,7 +1738,7 @@ export class PurchaseOrdersService {
       const netPerLine: number[] = [];
       const quantitiesPerLine: number[] = [];
       for (let i = 0; i < processedItems.length; i++) {
-        const d = this.deriveLineTax(
+        const d = this.deriveLineTaxes(
           processedItems[i],
           createPurchaseOrderDto,
           headerShares[i],
@@ -1885,23 +2029,49 @@ export class PurchaseOrdersService {
               // the FIFO engine capitalizes at reception — already carries the
               // commercial discount. This is what closes the old gap where the
               // CxP was rebated but the inventory was not.
-              const derived = this.deriveLineTax(
+              const derived = this.deriveLineTaxes(
                 item,
                 createPurchaseOrderDto,
                 headerShares[index],
               );
+              // QUI-855 — legacy single-tax columns mirror the FIRST tax so
+              // legacy readers (receive fallback, reports) keep working; the
+              // per-tax truth lives in the nested rows below.
+              const firstTax =
+                item.taxes && item.taxes.length > 0 ? item.taxes[0] : null;
               return {
                 product_id: item.product_id,
                 product_variant_id: item.product_variant_id,
                 quantity_ordered: item.quantity,
                 unit_cost: derived.unit_price_net,
                 unit_price_net: derived.unit_price_net,
-                tax_rate: item.tax_rate ?? null,
+                tax_rate: firstTax
+                  ? Number(firstTax.tax_rate ?? 0)
+                  : (item.tax_rate ?? null),
                 tax_type:
+                  (firstTax?.tax_type as tax_type_enum | undefined) ??
                   (item.tax_type as tax_type_enum | undefined) ??
                   tax_type_enum.iva,
                 prices_include_tax: item.prices_include_tax ?? null,
                 tax_amount: derived.tax_amount,
+                // QUI-855 — per-tax snapshot rows (absent ⇒ legacy path).
+                purchase_order_item_taxes: firstTax
+                  ? {
+                      create: derived.taxes.map((t) => ({
+                        tax_rate_id: t.tax_rate_id,
+                        tax_name:
+                          t.tax_name ??
+                          `${t.tax_type.toUpperCase()} ${t.tax_rate}%`,
+                        tax_rate: t.tax_rate,
+                        tax_type:
+                          (t.tax_type as tax_type_enum) ?? tax_type_enum.iva,
+                        taxable_amount: t.taxable_amount,
+                        tax_amount: t.tax_amount,
+                        is_inclusive: t.is_inclusive,
+                        add_to_cost: t.add_to_cost,
+                      })),
+                    }
+                  : undefined,
                 // Total discount actually applied (own + prorated header), and
                 // the percentage the user typed to get there. The amount is the
                 // source of truth; the percentage is provenance only.
@@ -2583,11 +2753,14 @@ export class PurchaseOrdersService {
         });
         for (let i = 0; i < items.length; i++) {
           const item = items[i];
-          const derived = this.deriveLineTax(
+          const derived = this.deriveLineTaxes(
             item,
             updatePurchaseOrderDto,
             headerShares[i],
           );
+          // QUI-855 — legacy columns mirror the FIRST tax (see create()).
+          const firstTax =
+            item.taxes && item.taxes.length > 0 ? item.taxes[0] : null;
           await tx.purchase_order_items.create({
             data: {
               purchase_order_id: id,
@@ -2599,12 +2772,34 @@ export class PurchaseOrdersService {
               discount_amount: derived.discount_total,
               discount_percentage: item.discount_percentage ?? 0,
               allocated_shipping_amount: freightForItems?.shares[i] ?? 0,
-              tax_rate: item.tax_rate ?? null,
+              tax_rate: firstTax
+                ? Number(firstTax.tax_rate ?? 0)
+                : (item.tax_rate ?? null),
               tax_type:
+                (firstTax?.tax_type as tax_type_enum | undefined) ??
                 (item.tax_type as tax_type_enum | undefined) ??
                 tax_type_enum.iva,
               prices_include_tax: item.prices_include_tax ?? null,
               tax_amount: derived.tax_amount,
+              // QUI-855 — per-tax snapshot rows (deleteMany above cascaded
+              // the previous rows, so create is a clean replacement).
+              purchase_order_item_taxes: firstTax
+                ? {
+                    create: derived.taxes.map((t) => ({
+                      tax_rate_id: t.tax_rate_id,
+                      tax_name:
+                        t.tax_name ??
+                        `${t.tax_type.toUpperCase()} ${t.tax_rate}%`,
+                      tax_rate: t.tax_rate,
+                      tax_type:
+                        (t.tax_type as tax_type_enum) ?? tax_type_enum.iva,
+                      taxable_amount: t.taxable_amount,
+                      tax_amount: t.tax_amount,
+                      is_inclusive: t.is_inclusive,
+                      add_to_cost: t.add_to_cost,
+                    })),
+                  }
+                : undefined,
               notes: item.notes,
               batch_number: item.batch_number,
               manufacturing_date:
@@ -3390,12 +3585,13 @@ export class PurchaseOrdersService {
       for (const item of dto.items) {
         if (item.quantity_received <= 0) continue;
 
-        // Create reception item record
+        // Create reception item record (QUI-855: per-line motive).
         await tx.purchase_order_reception_items.create({
           data: {
             reception_id: reception.id,
             purchase_order_item_id: item.id,
             quantity_received: item.quantity_received,
+            note: item.note ?? null,
           },
         });
 
@@ -3412,7 +3608,11 @@ export class PurchaseOrdersService {
       const purchaseOrder = await tx.purchase_orders.findUnique({
         where: { id },
         include: {
-          purchase_order_items: true,
+          // QUI-855 — per-tax rows drive the add_to_cost split below. Absent
+          // rows ⇒ legacy single-tax path (byte-identical numbers).
+          purchase_order_items: {
+            include: { purchase_order_item_taxes: true },
+          },
           location: true,
         },
       });
@@ -3480,6 +3680,10 @@ export class PurchaseOrdersService {
           // ===== F1 IVA lifecycle: cost treatment by fiscal responsibility =====
           // Per-unit IVA sealed on the line at create (tax_amount / qty_ordered),
           // with a recompute fallback for legacy lines that predate F1.
+          // QUI-855: when per-tax rows exist, the `add_to_cost` rows
+          // (IBUA/ICUI style) split out of the deductible family and capitalize
+          // into cost REGARDLESS of responsibility. No rows ⇒ legacy path,
+          // byte-identical to before (all tax in the deductible family).
           const qtyOrdered = orderItem?.quantity_ordered ?? 0;
           const lineTaxAmount =
             orderItem?.tax_amount != null ? Number(orderItem.tax_amount) : null;
@@ -3487,6 +3691,27 @@ export class PurchaseOrdersService {
             lineTaxAmount != null && qtyOrdered > 0
               ? lineTaxAmount / qtyOrdered
               : netUnitCost * (Number(orderItem?.tax_rate ?? 0) / 100);
+          const taxRows =
+            (orderItem as unknown as {
+              purchase_order_item_taxes?: Array<{
+                tax_amount: unknown;
+                add_to_cost: boolean | null;
+              }>;
+            } | undefined)?.purchase_order_item_taxes ?? [];
+          let capitalizedPerUnit = 0;
+          let totalPerUnit = ivaPerUnit;
+          if (taxRows.length > 0 && qtyOrdered > 0) {
+            const capTotal = taxRows
+              .filter((r) => r.add_to_cost)
+              .reduce((sum, r) => sum + Number(r.tax_amount ?? 0), 0);
+            const allTotal = taxRows.reduce(
+              (sum, r) => sum + Number(r.tax_amount ?? 0),
+              0,
+            );
+            capitalizedPerUnit = capTotal / qtyOrdered;
+            totalPerUnit = allTotal / qtyOrdered;
+          }
+          const deductiblePerUnit = totalPerUnit - capitalizedPerUnit;
 
           // C.2 — porción del flete que aterrizó en ESTA línea, llevada a
           // unidad de compra. Se divide por `quantity_ordered` (no por lo
@@ -3512,24 +3737,36 @@ export class PurchaseOrdersService {
           // error es de un orden de magnitud y queda sellado en la capa FIFO,
           // irreversible sin un ajuste manual.
           const costUnit =
-            (vatResponsible ? netUnitCost : netUnitCost + ivaPerUnit) +
-            freightPerUnit;
+            (vatResponsible
+              ? netUnitCost + capitalizedPerUnit
+              : netUnitCost + totalPerUnit) + freightPerUnit;
 
           // Seal the VAT attributable to the units received in THIS batch,
           // proportional to quantity_received (purchase units), accumulating
           // across partial receptions. O-48 → deductible (descontable);
-          // O-49 → capitalized into inventory cost.
-          const sealedTaxNow = ivaPerUnit * item.quantity_received;
-          const prevSealed = vatResponsible
-            ? Number(orderItem?.deductible_tax_amount ?? 0)
-            : Number(orderItem?.capitalized_tax_amount ?? 0);
-          const newSealed =
-            Math.round((prevSealed + sealedTaxNow) * 100) / 100;
+          // O-49 → capitalized into inventory cost. QUI-855: the add_to_cost
+          // portion ALWAYS seals as capitalized, even for a responsible buyer.
+          const sealedCapNow =
+            capitalizedPerUnit * item.quantity_received;
+          const sealedDedNow = vatResponsible
+            ? deductiblePerUnit * item.quantity_received
+            : (totalPerUnit - capitalizedPerUnit) * item.quantity_received;
+          const prevDed = Number(orderItem?.deductible_tax_amount ?? 0);
+          const prevCap = Number(orderItem?.capitalized_tax_amount ?? 0);
+          const newDed =
+            Math.round((prevDed + (vatResponsible ? sealedDedNow : 0)) * 100) /
+            100;
+          const newCap =
+            Math.round(
+              (prevCap + sealedCapNow + (vatResponsible ? 0 : sealedDedNow)) *
+                100,
+            ) / 100;
           await tx.purchase_order_items.update({
             where: { id: item.id },
-            data: vatResponsible
-              ? { deductible_tax_amount: newSealed }
-              : { capitalized_tax_amount: newSealed },
+            data: {
+              deductible_tax_amount: newDed,
+              capitalized_tax_amount: newCap,
+            },
           });
 
           // F2 — sellar la config de UoM del producto ANTES de convertir.
@@ -5448,7 +5685,7 @@ export class PurchaseOrdersService {
     // unit_cost + tax_rate + effective include-tax mode. The NET is the cost
     // basis for CPP/FIFO — mirrors what create/receive persist.
     const derivedByLine = dto.items.map((item, index) =>
-      this.deriveLineTax(
+      this.deriveLineTaxes(
         {
           unit_cost: item.unit_cost,
           quantity: item.quantity,
@@ -5456,6 +5693,7 @@ export class PurchaseOrdersService {
           prices_include_tax: item.prices_include_tax,
           discount_percentage: item.discount_percentage,
           discount_amount: item.discount_amount,
+          taxes: (item as { taxes?: Array<any> }).taxes,
         },
         dto,
         headerShares[index],
@@ -5576,15 +5814,19 @@ export class PurchaseOrdersService {
       // calculan acá.
       //
       // (1) IVA: O-48 responsible → NET; O-49 non-responsible → capitalize IVA.
+      // QUI-855: `add_to_cost` rows (IBUA/ICUI style) capitalize ALWAYS, even
+      // for a responsible buyer — they are cost, never deductible VAT.
       const ivaPerUnit = derivedTax.tax_amount_per_unit;
+      const capitalizedPerUnit = derivedTax.capitalized_per_unit;
       // (2) Flete: solo en modo `prorate`, y en unidad de COMPRA — sumarlo
       // después de la conversión de unidad de medida lo desviaría exactamente
       // por `purchase_to_stock_factor`.
       const lineFreight = freightCapitalized ? (freight.shares[index] ?? 0) : 0;
       const freightPerUnit = quantity > 0 ? lineFreight / quantity : 0;
       const costUnit =
-        (vatResponsible ? netUnitCost : netUnitCost + ivaPerUnit) +
-        freightPerUnit;
+        (vatResponsible
+          ? netUnitCost + capitalizedPerUnit
+          : netUnitCost + ivaPerUnit) + freightPerUnit;
 
       // (3) UoM: convert the incoming purchase-unit quantity + capitalized cost
       // to MINIMUM stock units via the SAME arithmetic receive() uses. The CPP
@@ -5705,8 +5947,20 @@ export class PurchaseOrdersService {
         incoming_tax_amount: lineTaxTotal,
         effective_include: derivedTax.effective_include,
         // Mutuamente excluyentes, igual que las columnas que sella `receive()`.
-        deductible_tax_amount: vatResponsible ? lineTaxTotal : 0,
-        capitalized_tax_amount: vatResponsible ? 0 : lineTaxTotal,
+        // QUI-855: la porción `add_to_cost` siempre capitaliza, aun con
+        // responsable de IVA; solo el resto es descontable.
+        deductible_tax_amount: vatResponsible
+          ? Math.round(
+              (derivedTax.tax_amount -
+                derivedTax.capitalized_per_unit * quantity) *
+                100,
+            ) / 100
+          : 0,
+        capitalized_tax_amount: vatResponsible
+          ? Math.round(
+              derivedTax.capitalized_per_unit * quantity * 100,
+            ) / 100
+          : lineTaxTotal,
         discount_amount: Math.round(derivedTax.discount_total * 100) / 100,
         header_discount_share: Math.round((headerShares[index] ?? 0) * 100) / 100,
         allocated_shipping_amount: freight.shares[index] ?? 0,

@@ -9,6 +9,7 @@ import {
   PopCartItem,
   PopCartSummary,
 } from '../services/pop-cart.service';
+import type { PopLineTax } from '../interfaces/pop-cart.interface';
 import { deriveLineTax } from '../utils/purchase-line-tax.util';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -521,6 +522,75 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                       ></app-toggle>
                     </div>
                   </div>
+                  <!-- QUI-855: filas multi-impuesto (IVA + INC/IBUA al costo).
+                       Vacío ⇒ la línea usa el par tasa/tipo de arriba. -->
+                  @for (tax of itemTaxes(item); track $index) {
+                    <div
+                      class="flex flex-wrap items-center gap-2 pt-1.5 text-[10px]"
+                    >
+                      <span
+                        class="uppercase tracking-wider font-bold text-text-secondary/60"
+                      >
+                        Impuesto {{ $index + 2 }}
+                      </span>
+                      <div class="flex items-center gap-1">
+                        <app-input
+                          type="number"
+                          size="sm"
+                          [ngModel]="tax.tax_rate"
+                          (ngModelChange)="
+                            updateItemTaxRate(item, $index, $event)
+                          "
+                          customInputClass="text-right !h-7 !py-0 !w-14"
+                          customWrapperClass="!mt-0"
+                          min="0"
+                          step="1"
+                        ></app-input>
+                        <span class="text-text-secondary">%</span>
+                      </div>
+                      <select
+                        class="h-7 text-[10px] px-1.5 py-0 border border-border rounded bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+                        [value]="tax.tax_type || 'iva'"
+                        (change)="onItemTaxTypeChange(item, $index, $event)"
+                      >
+                        <option value="iva">IVA</option>
+                        <option value="inc">INC</option>
+                        <option value="ica">ICA</option>
+                      </select>
+                      <label class="flex items-center gap-1 text-text-secondary">
+                        <input
+                          type="checkbox"
+                          class="h-3.5 w-3.5 accent-primary"
+                          [checked]="tax.add_to_cost"
+                          (change)="
+                            onItemTaxAddToCostToggle(
+                              item,
+                              $index,
+                              $any($event.target).checked
+                            )
+                          "
+                        >
+                        Al costo
+                      </label>
+                      <button
+                        type="button"
+                        class="ml-auto text-text-secondary hover:text-danger"
+                        (click)="removeItemTax(item, $index)"
+                        aria-label="Quitar impuesto"
+                      >
+                        <app-icon name="trash" [size]="12"></app-icon>
+                      </button>
+                    </div>
+                  }
+                  @if (hasVat() && itemTaxes(item).length < 4) {
+                    <button
+                      type="button"
+                      class="pt-1 text-[10px] font-medium text-primary hover:underline"
+                      (click)="addItemTax(item)"
+                    >
+                      + Agregar impuesto
+                    </button>
+                  }
                 }
                 <!-- Config Trigger (Variants / Lot / Unit) -->
                 <div
@@ -697,6 +767,70 @@ export class PopCartComponent {
     this.cartService.setItemPricesIncludeTax(
       item.id,
       value === header ? undefined : value,
+    );
+  }
+
+  // ============================================================
+  // QUI-855: multi-impuesto por línea (IVA + INC/IBUA al costo…)
+  // ============================================================
+
+  /** Filas multi-impuesto de la línea (vacío ⇒ par legacy tasa/tipo). */
+  itemTaxes(item: PopCartItem): PopLineTax[] {
+    return item.taxes ?? [];
+  }
+
+  /** Agrega una fila (máx. 4, como el backend). Arranca en INC al costo. */
+  addItemTax(item: PopCartItem): void {
+    if ((item.taxes?.length ?? 0) >= 4) return;
+    this.cartService.setItemTaxes(item.id, [
+      ...(item.taxes ?? []),
+      { tax_rate: 0, tax_type: 'inc', add_to_cost: true },
+    ]);
+  }
+
+  /** Quita la fila i; sin filas la línea vuelve al par legacy. */
+  removeItemTax(item: PopCartItem, index: number): void {
+    this.cartService.setItemTaxes(
+      item.id,
+      (item.taxes ?? []).filter((_, i) => i !== index),
+    );
+  }
+
+  /** Tasa (%) de la fila i. */
+  updateItemTaxRate(
+    item: PopCartItem,
+    index: number,
+    rate: number | string,
+  ): void {
+    const parsed = Number(rate);
+    this.patchItemTax(item, index, {
+      tax_rate: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0,
+    });
+  }
+
+  /** Clasificación fiscal de la fila i desde el <select> nativo. */
+  onItemTaxTypeChange(item: PopCartItem, index: number, event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    this.patchItemTax(item, index, { tax_type: value || 'iva' });
+  }
+
+  /** "Al costo": ese impuesto capitaliza al inventario (IBUA/ICUI). */
+  onItemTaxAddToCostToggle(
+    item: PopCartItem,
+    index: number,
+    value: boolean,
+  ): void {
+    this.patchItemTax(item, index, { add_to_cost: value });
+  }
+
+  private patchItemTax(
+    item: PopCartItem,
+    index: number,
+    patch: Partial<PopLineTax>,
+  ): void {
+    this.cartService.setItemTaxes(
+      item.id,
+      (item.taxes ?? []).map((t, i) => (i === index ? { ...t, ...patch } : t)),
     );
   }
 
