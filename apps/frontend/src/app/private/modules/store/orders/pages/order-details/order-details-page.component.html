@@ -2259,8 +2259,14 @@
             </h2>
 
             <div class="space-y-2.5">
-              <!-- C.7 (§5.3, base gross): sin fila Subtotal — las líneas ya
-                   van en bruto y un Subtotal en base quedaría huérfano. -->
+              <!-- Desglose completo: valores persistidos tal cual (base gross).
+                   Subtotal = suma de líneas en bruto; IVA va incluido, no suma. -->
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-text-secondary">Subtotal</span>
+                <span class="font-semibold text-gray-900">{{
+                  orderData.subtotal_amount || 0 | currency
+                }}</span>
+              </div>
 
               <!-- Applied promotions (persisted snapshot) -->
               @if (appliedPromotions().length > 0) {
@@ -2350,8 +2356,15 @@
                   }}</span>
                 </div>
               }
-              <!-- C.7 (§5.3, base gross): sin fila de impuesto que sume; con
-                   desglose respaldado, nota informativa fuera de la aritmética. -->
+              @if (orderData.tip_amount && orderData.tip_amount > 0) {
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Propina</span>
+                  <span class="font-semibold text-gray-900">{{
+                    orderData.tip_amount | currency
+                  }}</span>
+                </div>
+              }
+              <!-- IVA incluido: informativo, fuera de la aritmética (base gross). -->
               @if (showDetailVatNote()) {
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">IVA incluido</span>

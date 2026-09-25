@@ -548,12 +548,17 @@ export class OrderDetailsPageComponent {
    * de impuesto que sume; sólo TOTAL y, con desglose respaldado, la nota
    * informativa fuera de la aritmética.
    */
+  /**
+   * Nota informativa de IVA (fuera de la aritmética, base gross). Se muestra
+   * siempre que la orden trae impuesto, sin el gate de impresión: esta es
+   * una pantalla de operador, no un documento fiscal.
+   */
   readonly showDetailVatNote = computed(() => {
     const order = this.order();
     const tax = Number(
       (order as unknown as { tax_amount?: unknown } | null)?.tax_amount ?? 0,
     );
-    return this.authFacade.printsVatBreakdown() && tax > 0;
+    return tax > 0;
   });
   /**
    * Impuesto del envío (copia congelada de la tarifa al vender). Va SIEMPRE
@@ -1880,6 +1885,7 @@ export class OrderDetailsPageComponent {
             tax_amount: Number(orderData.tax_amount),
             shipping_cost: Number(orderData.shipping_cost),
             discount_amount: Number(orderData.discount_amount),
+            tip_amount: Number(orderData.tip_amount ?? 0),
             total_paid: Number(orderData.total_paid) || 0,
             remaining_balance: Number(orderData.remaining_balance) || 0,
             total_with_interest: orderData.total_with_interest ? Number(orderData.total_with_interest) : undefined,
