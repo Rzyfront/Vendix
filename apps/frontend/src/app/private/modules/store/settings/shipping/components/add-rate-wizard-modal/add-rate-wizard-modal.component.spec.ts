@@ -194,5 +194,15 @@ describe('AddRateWizardModalComponent — impuesto del envío', () => {
         label: 'IVA 19%',
       });
     });
+
+    it('computeShippingTaxPreview trunca como el backend (10.000 al 19 % ⇒ 1.596,63)', () => {
+      // B6 — el mismo kernel que `resolveShippingTaxSnapshot`: truncado DIAN,
+      // no redondeo hacia arriba (que daría 1.596,64).
+      expect(computeShippingTaxPreview(10000, 19, 'IVA 19%')).toEqual({
+        cost: 10000,
+        tax: 1596.63,
+        label: 'IVA 19%',
+      });
+    });
   });
 });
