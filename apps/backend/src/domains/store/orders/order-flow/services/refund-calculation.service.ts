@@ -4,8 +4,17 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { Prisma } from '@prisma/client';
+import { Prisma, refunds_state_enum } from '@prisma/client';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
+
+/** Step 1 (CP-REFUND-FLOW-REDESIGN): states that reserve ceiling once the
+ * caller opts into a pending-aware ceiling. `failed` never reserves;
+ * `requested`/`approved` stay out until the plan assigns them. */
+const CEILING_RESERVING_STATES: refunds_state_enum[] = [
+  refunds_state_enum.completed,
+  refunds_state_enum.pending_approval,
+  refunds_state_enum.processing,
+];
 
 export interface RefundItemRequest {
   order_item_id: number;
@@ -58,6 +67,14 @@ export interface CalculateRefundParams {
   order_id: number;
   items: RefundItemRequest[];
   include_shipping: boolean;
+  /**
+   * Step 1 (CP-REFUND-FLOW-REDESIGN): count `pending_approval`/`processing`
+   * refunds against the ceiling, not just `completed`. Opt-in so
+   * cancellation callers keep the legacy completed-only ceiling: their
+   * `processing` cash leg is already tracked via `alreadyPlanned` and
+   * counting it again would double-book the ceiling. Defaults to false.
+   */
+  include_pending_states?: boolean;
 }
 
 @Injectable()
@@ -68,13 +85,17 @@ export class RefundCalculationService {
     params: CalculateRefundParams,
     client: Prisma.TransactionClient | StorePrismaService = this.prisma,
   ): Promise<RefundCalculationResult> {
-    const { order_id, items, include_shipping } = params;
+    const { order_id, items, include_shipping, include_pending_states } = params;
 
     // Load order with items, taxes, and previous refunds
     const order = await client.orders.findFirst({
       where: { id: order_id },
       include: {
         order_items: {
+          // Step 1: same exclusion as the creation read in
+          // `RefundFlowService.createRefund` — cancelled lines never were a
+          // purchase, so they are not a refund base either.
+          where: { cancelled_at: null },
           include: {
             order_item_taxes: true,
             products: {
@@ -91,7 +112,9 @@ export class RefundCalculationService {
           },
         },
         refunds: {
-          where: { state: 'completed' },
+          where: include_pending_states
+            ? { state: { in: CEILING_RESERVING_STATES } }
+            : { state: 'completed' },
           include: { refund_items: true },
         },
       },
@@ -281,12 +304,17 @@ export class RefundCalculationService {
 
     // Coverage is per original line. Excess historical units of one product
     // must never stand in for units still outstanding on another product.
-    const is_full_refund = order.order_items.every(
-      (item) =>
-        (refundedQtyMap.get(item.id) || 0) +
-          (requestedQtyMap.get(item.id) || 0) >=
-        item.quantity,
-    );
+    // The non-empty guard closes the vacuous-truth promotion: once cancelled
+    // lines are excluded, the set can be empty, and an empty request must not
+    // read as a full refund.
+    const is_full_refund =
+      order.order_items.length > 0 &&
+      order.order_items.every(
+        (item) =>
+          (refundedQtyMap.get(item.id) || 0) +
+            (requestedQtyMap.get(item.id) || 0) >=
+          item.quantity,
+      );
 
     return {
       items: calculatedItems,

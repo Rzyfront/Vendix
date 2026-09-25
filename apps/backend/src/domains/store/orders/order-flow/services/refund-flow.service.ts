@@ -375,11 +375,13 @@ export class RefundFlowService {
       );
     }
 
-    // Calculate the refund breakdown
+    // Calculate the refund breakdown. Step 1: pending-aware ceiling, so an
+    // in-flight partial already reserves its share before this one is sized.
     const calculation = await this.calculationService.calculate({
       order_id: orderId,
       items: dto.items,
       include_shipping: dto.include_shipping,
+      include_pending_states: true,
     });
 
     // REFUND OVERHAUL — resolve missing location_id for `restock` and `write_off`
@@ -431,6 +433,38 @@ export class RefundFlowService {
     // Execute everything in a transaction
     return this.prisma
       .$transaction(async (tx) => {
+        // Step 1 (CP-REFUND-FLOW-REDESIGN) — atomic lifecycle claim. The
+        // pre-tx reads above raced: two concurrent partials could both pass
+        // the ceiling and jointly over-refund. Serializing on the order row
+        // (same `FOR UPDATE` shape as `manuallyResolveRefund`) plus a fresh
+        // state check and a ceiling re-validation under the lock closes both
+        // the double-partial race and the refund-vs-cancel TOCTOU. There is
+        // no flippable row to `updateMany`-claim on a creation path, so the
+        // re-reads under the lock are the claim; P2002 still maps to a
+        // creation conflict in the rejection handler below.
+        await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND store_id = ${order.store_id} FOR UPDATE`;
+        const fresh = await tx.orders.findFirst({
+          where: { id: orderId },
+          select: { state: true },
+        });
+        if (!fresh || !REFUNDABLE_STATES.includes(fresh.state)) {
+          throw new BadRequestException(
+            `Cannot refund order in state '${fresh?.state}'. Refunds are only allowed from: [${REFUNDABLE_STATES.join(', ')}]`,
+          );
+        }
+        // Re-validate the same request against the pending-aware ceiling.
+        // Throws on breach; the persisted amounts stay the deterministic
+        // outer breakdown (order lines are immutable once sold).
+        await this.calculationService.calculate(
+          {
+            order_id: orderId,
+            items: dto.items,
+            include_shipping: dto.include_shipping,
+            include_pending_states: true,
+          },
+          tx,
+        );
+
         // 1. Create refund record
         const refund = await tx.refunds.create({
           data: {
@@ -846,7 +880,21 @@ export class RefundFlowService {
         }
 
         return completedRefund;
-      });
+      },
+      // Step 1: the two-arg form only handles the TRANSACTION rejection —
+      // post-commit behavior (resilience guards above) is untouched. A unique
+      // violation inside the claim window surfaces as a creation conflict
+      // instead of a generic 500.
+      (error: unknown) => {
+        if ((error as { code?: string })?.code === 'P2002') {
+          throw new VendixHttpException(
+            ErrorCodes.REF_CREATE_001,
+            `Concurrent refund creation conflict on order #${orderId}`,
+          );
+        }
+        throw error;
+      },
+    );
   }
 
   /**
