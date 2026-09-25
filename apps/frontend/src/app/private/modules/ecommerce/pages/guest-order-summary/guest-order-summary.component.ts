@@ -30,6 +30,7 @@ import { ModalComponent } from '../../../../../shared/components/modal/modal.com
 import { FileUploadDropzoneComponent } from '../../../../../shared/components/file-upload-dropzone/file-upload-dropzone.component';
 import { IconName } from '../../../../../shared/components/icon/icons.registry';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { OrderTrackingProgressComponent } from '../../../../../shared/components/order-tracking-progress/order-tracking-progress.component';
 import { GuestOrderPrintService } from '../../services/guest-order-print.service';
 
 // ============================================================================
@@ -180,6 +181,7 @@ interface GuestOrderSummary {
     BadgeComponent,
     ModalComponent,
     FileUploadDropzoneComponent,
+    OrderTrackingProgressComponent,
   ],
   template: `
     <div class="guest-order-page">
@@ -203,6 +205,7 @@ interface GuestOrderSummary {
         <div
           class="guest-order-card printable-order"
           [attr.data-currency]="currencyCode()"
+          [class.card-enter]="justPurchased()"
         >
           <!-- HERO HEADER (mirror del checkout, estado completado) -->
           <div class="order-header-hero is-complete" [style.--fill]="'100%'">
@@ -297,6 +300,17 @@ interface GuestOrderSummary {
                 }
               </div>
             </div>
+          }
+
+          <!-- SEGUIMIENTO (paso 10: tras hide_tracking_progress) -->
+          @if (trackingShown()) {
+            <app-order-tracking-progress
+              [orderState]="data.order.state"
+              [hasShippingAddress]="data.order.shipping_address != null"
+              [animateFromZero]="justPurchased()"
+              [baseMinutes]="data.order.prep_minutes_max ?? 15"
+              [reducedMotion]="sse.prefersReducedMotion()"
+            />
           }
 
           <!-- ENTREGA -->
@@ -1249,11 +1263,31 @@ interface GuestOrderSummary {
         }
       }
 
+      /* Paso 10: entrada de la tarjeta solo en compra recién
+         confirmada ('justPurchased'). Curva tw-card-in de
+         table-welcome-wizard, con keyframes propios porque los estilos de
+         aquel componente no cargan en esta ruta. */
+      .card-enter {
+        animation: guest-card-in 0.35s ease-out;
+      }
+
+      @keyframes guest-card-in {
+        from {
+          opacity: 0;
+          transform: translateY(12px) scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
       /* Paso 9: respeta prefers-reduced-motion en spinner y pulsos en
          vivo (el flash de cocina además no se marca vía signal). */
       @media (prefers-reduced-motion: reduce) {
         .spinner,
         .live-dot,
+        .card-enter,
         .kitchen-line--flash {
           animation: none !important;
         }
@@ -1592,6 +1626,20 @@ export class GuestOrderSummaryComponent implements OnInit {
     const order = this.summary()?.order;
     if (!order) return false;
     return order.estimated_ready_at != null || this.etaMinutes(order) != null;
+  }
+
+  /**
+   * Paso 10 — opt-out `ecommerce.orders.hide_tracking_progress` (paso 7):
+   * ausente ⇒ la barra se muestra, se lee con `!== true`.
+   */
+  trackingShown(): boolean {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    if (
+      config?.customConfig?.ecommerce?.orders?.hide_tracking_progress === true
+    ) {
+      return false;
+    }
+    return this.summary() != null;
   }
 
   private etaMinutes(order: GuestOrderData): number | null {
