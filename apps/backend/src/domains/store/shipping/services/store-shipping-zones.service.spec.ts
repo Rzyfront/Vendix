@@ -1,3 +1,4 @@
+import { RequestContextService } from '../../../../common/context/request-context.service';
 import { StoreShippingZonesService } from './store-shipping-zones.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
@@ -56,6 +57,18 @@ describe('StoreShippingZonesService — impuesto de tarifa', () => {
     expect(out.tax_category).toBeNull();
   });
 
+  it('create persiste tax_is_inclusive:false cuando se pide modo agregado', async () => {
+    prisma.shipping_rates.create.mockResolvedValue({ id: 5, tax_category: incCategoryRow });
+    await service.createStoreRate({ ...createDto, tax_category_id: 7, tax_is_inclusive: false });
+    expect(prisma.shipping_rates.create.mock.calls[0][0].data.tax_is_inclusive).toBe(false);
+  });
+
+  it('create usa incluido por defecto cuando se omite el modo', async () => {
+    prisma.shipping_rates.create.mockResolvedValue({ id: 5, tax_category: incCategoryRow });
+    await service.createStoreRate({ ...createDto, tax_category_id: 7 });
+    expect(prisma.shipping_rates.create.mock.calls[0][0].data.tax_is_inclusive).toBe(true);
+  });
+
   it('create no persiste si la validación falla', async () => {
     shippingTax.assertCategoryAssignable.mockRejectedValue(
       new VendixHttpException(ErrorCodes.FISCAL_VAT_NOT_RESPONSIBLE_001),
@@ -94,6 +107,15 @@ describe('StoreShippingZonesService — impuesto de tarifa', () => {
       await service.updateStoreRate(5, { tax_category_id: 9 } as any);
       expect(shippingTax.assertCategoryAssignable).toHaveBeenCalledWith(9);
       expect(prisma.shipping_rates.update.mock.calls[0][0].data).toEqual({ tax_category_id: 9 });
+    });
+
+    it('persiste tax_is_inclusive por el spread (PATCH con categoría + modo agregado)', async () => {
+      await service.updateStoreRate(5, { tax_category_id: 9, tax_is_inclusive: false } as any);
+      expect(shippingTax.assertCategoryAssignable).toHaveBeenCalledWith(9);
+      expect(prisma.shipping_rates.update.mock.calls[0][0].data).toEqual({
+        tax_is_inclusive: false,
+        tax_category_id: 9,
+      });
     });
 
     it('categoría distinta no elegible ⇒ propaga el rechazo y no escribe', async () => {
@@ -141,5 +163,74 @@ describe('StoreShippingZonesService — impuesto de tarifa', () => {
 
   it('getRateTaxOptions delega en ShippingTaxService', async () => {
     await expect(service.getRateTaxOptions()).resolves.toEqual({ categories: [] });
+  });
+
+  describe('clonado de tarifas de sistema', () => {
+    beforeEach(() => {
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 1, organization_id: 10 } as any);
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('duplicateSystemRate copia el modo agregado (false)', async () => {
+      const baseClient = prisma.withoutScope();
+      baseClient.shipping_rates = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 90,
+          shipping_method_id: 2,
+          name: 'System Express',
+          type: 'flat',
+          base_cost: 10000,
+          per_unit_cost: null,
+          min_val: null,
+          max_val: null,
+          free_shipping_threshold: null,
+          tax_is_inclusive: false,
+          shipping_zone: { is_system: true },
+        }),
+      };
+      prisma.shipping_rates.create.mockResolvedValue({ id: 50, tax_category: null });
+
+      await service.duplicateSystemRate(90, 11);
+
+      expect(prisma.shipping_rates.create.mock.calls[0][0].data).toMatchObject({
+        shipping_zone_id: 11,
+        tax_is_inclusive: false,
+        source_type: 'custom',
+        copied_from_system_rate_id: 90,
+      });
+    });
+
+    it('duplicateSystemZone copia el modo de cada tarifa', async () => {
+      const tx = {
+        shipping_zones: { create: jest.fn().mockResolvedValue({ id: 20 }) },
+        shipping_rates: { create: jest.fn().mockResolvedValue({ id: 51 }) },
+      };
+      const baseClient = prisma.withoutScope();
+      baseClient.shipping_zones = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 9,
+          name: 'System Zone',
+          display_name: null,
+          countries: [],
+          regions: [],
+          cities: [],
+          zip_codes: [],
+          shipping_rates: [
+            { id: 90, shipping_method_id: 2, name: 'A', type: 'flat', base_cost: 10000, per_unit_cost: null, min_val: null, max_val: null, free_shipping_threshold: null, tax_is_inclusive: false },
+            { id: 91, shipping_method_id: 2, name: 'B', type: 'flat', base_cost: 5000, per_unit_cost: null, min_val: null, max_val: null, free_shipping_threshold: null, tax_is_inclusive: true },
+          ],
+        }),
+      };
+      baseClient.$transaction = jest.fn((cb: (tx: unknown) => unknown) => cb(tx));
+
+      await service.duplicateSystemZone(9);
+
+      expect(tx.shipping_rates.create).toHaveBeenCalledTimes(2);
+      expect(tx.shipping_rates.create.mock.calls[0][0].data.tax_is_inclusive).toBe(false);
+      expect(tx.shipping_rates.create.mock.calls[1][0].data.tax_is_inclusive).toBe(true);
+    });
   });
 });
