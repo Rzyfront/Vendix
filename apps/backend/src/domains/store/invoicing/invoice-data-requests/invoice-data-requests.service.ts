@@ -35,6 +35,16 @@ interface InvoiceDataRequestCustomerData {
   phone?: string | null;
 }
 
+/**
+ * Paso 6 (roku-shop-checkout-tarifa-detalle-orden) — binding liviano
+ * token→orden para el stream SSE guest. Ambos ids se derivan SERVER-SIDE
+ * del token; el controller los usa como clave default-deny del filtro.
+ */
+export interface GuestStreamBinding {
+  order_id: number;
+  store_id: number;
+}
+
 type NominativeConversionStrategy =
   | 'updated_in_place'
   | 'credit_note_reissue'
@@ -600,6 +610,29 @@ export class InvoiceDataRequestsService {
     }
 
     return { request, payment };
+  }
+
+  /**
+   * Paso 6 — binding server-side token→`{order_id, store_id}` para el
+   * stream SSE guest. UNA lectura mínima por `token` (global por diseño,
+   * igual que `resolveGuestPayment`), sin joins ni throws: `null` = token
+   * desconocido y el controller cierra la conexión sin emitir datos
+   * (404 ciego, sin distinguir de "tienda ajena").
+   */
+  async resolveGuestStreamBinding(
+    token: string,
+  ): Promise<GuestStreamBinding | null> {
+    if (!token || typeof token !== 'string') {
+      return null;
+    }
+    const request = await this.prisma.invoice_data_requests.findUnique({
+      where: { token },
+      select: { order_id: true, store_id: true },
+    });
+    if (!request) {
+      return null;
+    }
+    return { order_id: request.order_id, store_id: request.store_id };
   }
 
   /**
