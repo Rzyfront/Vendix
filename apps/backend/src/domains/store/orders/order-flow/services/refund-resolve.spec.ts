@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client';
 import { RefundFlowService, CANCELLATION_REFUND_TX_PREFIX } from './refund-flow.service';
 import { RefundPayoutChannel } from '../dto/resolve-refund.dto';
 import { RefundCalculationService } from './refund-calculation.service';
+import { RefundCoverageService } from './refund-coverage.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StockLevelManager } from '../../../inventory/shared/services/stock-level-manager.service';
@@ -37,6 +38,7 @@ describe('RefundFlowService — gate de resolve canónico (paso 5, CP-REFUND-FLO
   let manualRefundDelivery: { deliver: jest.Mock; enqueue: jest.Mock };
   let walletService: { creditForRefund: jest.Mock };
   let movementsService: { recordRefundCashMovementDurable: jest.Mock };
+  let mockCoverageService: { recomputeLineCache: jest.Mock };
 
   const orderRow = (over: any = {}) => ({
     id: 1,
@@ -81,6 +83,9 @@ describe('RefundFlowService — gate de resolve canónico (paso 5, CP-REFUND-FLO
     movementsService = {
       recordRefundCashMovementDurable: jest.fn().mockResolvedValue({ status: 'recorded', movement_id: 9 }),
     };
+    mockCoverageService = {
+      recomputeLineCache: jest.fn().mockResolvedValue(undefined),
+    };
     mockPrisma = {
       orders: {
         findFirst: jest.fn().mockResolvedValue(orderRow()),
@@ -120,6 +125,7 @@ describe('RefundFlowService — gate de resolve canónico (paso 5, CP-REFUND-FLO
         { provide: WalletBalanceService, useValue: {} },
         { provide: PaymentGatewayService, useValue: {} },
         { provide: ManualRefundDeliveryService, useValue: manualRefundDelivery },
+        { provide: RefundCoverageService, useValue: mockCoverageService },
       ],
     }).compile();
 
@@ -303,6 +309,44 @@ describe('RefundFlowService — gate de resolve canónico (paso 5, CP-REFUND-FLO
       expect(eventEmitter.emit.mock.calls.some(([n]) => n === 'refund.completed')).toBe(false);
       expect(mockPrisma.payments.update).not.toHaveBeenCalled();
       expect(result.cash_movement).toBeUndefined();
+    });
+  });
+
+  describe('release-853 paso 7: caché tras failed + is_full_refund bajo lock', () => {
+    it('rama failed: re-agrega el caché en la misma tx del claim', async () => {
+      await service.manuallyResolveRefund(1, 55, 'failed', 'pasarela rechazó', 7);
+
+      expect(mockCoverageService.recomputeLineCache).toHaveBeenCalledWith(mockPrisma, 1);
+    });
+
+    it('rama completed: NO re-agrega (el caché ya se escribió en la creación)', async () => {
+      await service.manuallyResolveRefund(1, 55, 'completed', 'verificado', 7, 'MAN-001', RefundPayoutChannel.CASH);
+
+      expect(mockCoverageService.recomputeLineCache).not.toHaveBeenCalled();
+    });
+
+    it('is_full_refund se recalcula bajo el lock: un completado concurrente que el pre-tx no vio sí promueve', async () => {
+      // Pre-tx: sin completados previos y un parcial de 3000 ⇒ parcial.
+      mockPrisma.refunds.findFirst.mockResolvedValue(
+        refundRow({ amount: new Prisma.Decimal(3000), subtotal_refund: new Prisma.Decimal(3000) }),
+      );
+      // Bajo el lock: otro parcial de 7000 completó en el medio.
+      mockPrisma.refunds.findMany.mockResolvedValue([
+        { id: 2, amount: new Prisma.Decimal(7000) },
+      ]);
+
+      await service.manuallyResolveRefund(1, 55, 'completed', 'verificado', 7, 'MAN-001', RefundPayoutChannel.CASH);
+
+      // 7000 + 3000 cubre los 10000: promueve con el valor bajo lock.
+      expect(mockPrisma.payments.update).toHaveBeenCalledWith({
+        where: { id: 100 },
+        data: { state: 'refunded', updated_at: expect.any(Date) },
+      });
+      expect(mockPrisma.orders.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: { state: 'refunded', updated_at: expect.any(Date) },
+      });
+      expect(completedEmit()).toMatchObject({ is_full_refund: true });
     });
   });
 });

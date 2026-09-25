@@ -20,7 +20,9 @@ import {
 import {
   RefundCalculationService,
   RefundCalculationResult,
+  REFUND_LEDGER_STATES,
 } from './refund-calculation.service';
+import { RefundCoverageService } from './refund-coverage.service';
 import { StockLevelManager } from '../../../inventory/shared/services/stock-level-manager.service';
 import { resolveRefundStockUnits } from '../../../products/services/packaging.util';
 import { CreateRefundDto } from '../dto/create-refund.dto';
@@ -151,6 +153,12 @@ export class RefundFlowService {
     // (the refund is already committed by then).
     @Optional() private readonly kitchenFireService?: KitchenFireService,
     @Optional() private readonly autoEntryService?: AutoEntryService,
+    // Release-853 (paso 7) — re-agregación del caché de cobertura por línea
+    // (`recomputeLineCache`). `@Optional()` por la misma razón que los dos
+    // de arriba: los specs históricos construyen sin él; en prod siempre
+    // resuelve (mismo módulo, sin ciclo). Donde falta, el caché no se
+    // re-agrega — todos los llamados van con `?.` por eso.
+    @Optional() private readonly coverageService?: RefundCoverageService,
   ) {}
 
   /** Cash cancellation uses the same refund document and ceiling as returns,
@@ -378,10 +386,14 @@ export class RefundFlowService {
       );
     }
 
+    // Release-853 (paso 7): el preview usa el MISMO techo que la creación
+    // (`include_pending_states: true`) — un `max_refundable` calculado con
+    // otro techo que el que valida la creación es una promesa rota.
     return this.calculationService.calculate({
       order_id: orderId,
       items: dto.items,
       include_shipping: dto.include_shipping,
+      include_pending_states: true,
     });
   }
 
@@ -621,44 +633,15 @@ export class RefundFlowService {
           refundItemIdByOrderItem.set(item.order_item_id, refundItem.id);
         }
 
-        // 2b. Step 3 (CP-REFUND-FLOW-REDESIGN) — per-line coverage cache.
-        // Same tx that inserts the `refund_items` above: absolute
-        // re-aggregation of the ledger (LEDGER states only — M2
-        // fix-forward: `failed`/`cancelled` rows keep their
-        // `refund_items` but must NOT mark line coverage, otherwise a
-        // failed refund permanently overstates badges/guards and the
-        // retry path loses its UI), never an increment, so the write is
-        // idempotent and self-healing under the order lock. Item-less
-        // refunds (cancellation/legacy) carry no lines: the non-empty
-        // guard skips them and they count order-level only (see
-        // `already_refunded`). Raw SQL via the already-used `$queryRaw`
-        // (same primitive as the §1 claim above): the `oi.order_id`
-        // predicate keeps the write pinned to the locked order.
-        const coveredItemIds = [
-          ...new Set(
-            calculation.items
-              .map((item) => item.order_item_id)
-              .filter((id): id is number => typeof id === 'number'),
-          ),
-        ];
-        if (coveredItemIds.length > 0) {
-          await tx.$queryRaw`
-            UPDATE "order_items" oi
-            SET "refunded_qty" = s.qty,
-                "refunded_amount" = s.amt
-            FROM (
-              SELECT ri."order_item_id",
-                     SUM(ri."quantity")::int AS qty,
-                     COALESCE(SUM(ri."refund_amount"), 0) AS amt
-              FROM "refund_items" ri
-              JOIN "refunds" r ON r."id" = ri."refund_id"
-              WHERE ri."order_item_id" IN (${Prisma.join(coveredItemIds)})
-                AND r."state" IN ('completed', 'pending_approval', 'processing')
-              GROUP BY ri."order_item_id"
-            ) s
-            WHERE oi."id" = s."order_item_id"
-              AND oi."order_id" = ${orderId}`;
-        }
+        // 2b. Step 3 (CP-REFUND-FLOW-REDESIGN) — per-line coverage cache,
+        // same tx that inserts the `refund_items` above. Release-853 (paso
+        // 7): el SQL inline se extrajo a `recomputeLineCache` (una sola
+        // agregación para creación, caídas a `failed` y resolve manual) y
+        // además resetea a 0 las líneas sin ledger — el SQL viejo sólo
+        // tocaba las líneas cubiertas y congelaba el resto. Incondicional
+        // (también item-less): re-escribir valores idénticos es barato y
+        // mantiene el caché auto-reparable en cada creación.
+        await this.coverageService?.recomputeLineCache(tx, orderId);
 
         // 3. Process inventory per item
         //
@@ -1257,10 +1240,16 @@ export class RefundFlowService {
 
     // 3. Cumulative line coverage from the ledger (this refund's rows were
     // inserted in step 2 of this same tx, so they are already included).
+    // Release-853 (paso 7): filtrado por `REFUND_LEDGER_STATES` — sin el
+    // filtro, un refund `failed` previo inflaba `cumAfter` y el prorrateo
+    // reponía insumos de más (o encolaba un reclass indebido).
     let cumAfter = refundQty;
     if (soldQuantity > 0 && refundQty > 0) {
       const ledger = await tx.refund_items.findMany({
-        where: { order_item_id: orderItemId },
+        where: {
+          order_item_id: orderItemId,
+          refunds: { state: { in: [...REFUND_LEDGER_STATES] } },
+        },
         select: { quantity: true },
       });
       cumAfter = ledger.reduce(
@@ -1583,6 +1572,10 @@ export class RefundFlowService {
           updated_at: new Date(),
         },
       });
+      // Release-853 (paso 7): al caer a `failed` el refund sale del ledger
+      // — el caché por línea se re-agrega sin él (best-effort post-commit:
+      // el dinero ya se movió y el caché nunca revienta la respuesta).
+      await this.refreshLineCacheBestEffort(order.id, completedRefund.id);
       return { status: 'failed', message };
     }
 
@@ -1616,6 +1609,9 @@ export class RefundFlowService {
         updated_at: new Date(),
       },
     });
+    if (newState === refunds_state_enum.failed) {
+      await this.refreshLineCacheBestEffort(order.id, completedRefund.id);
+    }
 
     this.logger.log(
       `Refund #${completedRefund.id}: processor returned status=${result.status}, persisted state=${newState}`,
@@ -1632,6 +1628,26 @@ export class RefundFlowService {
       status: terminal[result.status],
       message: result.message,
     };
+  }
+
+  /**
+   * Release-853 (paso 7) — re-agregación best-effort del caché de cobertura
+   * tras una caída a `failed` fuera de tx (dispatch de pasarela). El refund
+   * ya cambió de estado y el dinero ya se movió: si el re-agregado falla
+   * se loguea para reconciliación del operador y la próxima creación o
+   * resolve lo repara (el helper es idempotente). Nunca lanza.
+   */
+  private async refreshLineCacheBestEffort(
+    orderId: number,
+    refundId: number,
+  ): Promise<void> {
+    try {
+      await this.coverageService?.recomputeLineCache(this.prisma, orderId);
+    } catch (error) {
+      this.logger.error(
+        `Refund #${refundId} (order #${orderId}): line-cache recompute after failed transition failed, reconcile from refund_items ledger: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   /**
@@ -1897,13 +1913,16 @@ export class RefundFlowService {
       (acc, row) => acc.plus(new Prisma.Decimal(row.amount as any)),
       new Prisma.Decimal(0),
     );
-    const isFullRefund = priorCompletedTotal
+    // Valor pre-tx (lectura sin lock): se RECALCULA bajo el lock dentro de
+    // la tx de abajo (release-853, paso 7) — un resolve concurrente puede
+    // completar otro parcial entre ambas lecturas y dejarlo viejo.
+    let isFullRefund = priorCompletedTotal
       .plus(new Prisma.Decimal(refund.amount as any))
       .greaterThanOrEqualTo(orderGrandTotal.minus(0.01));
     // La orden sólo se promueve desde estados reembolsables: una orden
     // `cancelled` (cancelación ADR-12/efectivo) conserva su estado — el
     // `refunded` ordinario nunca pisa una cancelación.
-    const willPromoteOrder =
+    let willPromoteOrder =
       targetState === 'completed' &&
       isFullRefund &&
       REFUNDABLE_STATES.includes(order.state);
@@ -1942,8 +1961,24 @@ export class RefundFlowService {
         // shipping/tip allocation snapshot has a deterministic predecessor.
         await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND store_id = ${order.store_id} FOR UPDATE`;
         const prior = await tx.refunds.findMany({
-          where: { order_id: orderId, state: 'completed' }, select: { id: true },
+          where: { order_id: orderId, state: 'completed' },
+          select: { id: true, amount: true },
         });
+        // Release-853 (paso 7) — `is_full_refund` bajo el lock: la lectura
+        // pre-tx pudo quedar vieja si otro resolve concurrente completó un
+        // parcial en el medio. Sólo `completed` cubre (un `failed`/`pending`
+        // no movió dinero y no promueve pagos ni orden a `refunded`).
+        isFullRefund = prior
+          .reduce(
+            (acc, row) => acc.plus(new Prisma.Decimal((row.amount as any) ?? 0)),
+            new Prisma.Decimal(0),
+          )
+          .plus(new Prisma.Decimal(refund.amount as any))
+          .greaterThanOrEqualTo(orderGrandTotal.minus(0.01));
+        willPromoteOrder =
+          targetState === 'completed' &&
+          isFullRefund &&
+          REFUNDABLE_STATES.includes(order.state);
         const claim = await tx.refunds.updateMany({
           where: {
             id: refundId, order_id: orderId,
@@ -2002,6 +2037,13 @@ export class RefundFlowService {
               data: { state: 'refunded', updated_at: new Date() },
             });
           }
+        } else {
+          // Release-853 (paso 7) — rama `failed`: el refund sale del ledger
+          // en este mismo claim, así que el caché por línea se re-agrega
+          // sin él (las líneas que quedan sin ledger vuelven a 0). En-tx
+          // bajo el lock de la orden: si el re-agregado falla, el resolve
+          // entero revierte en vez de dejar caché y ledger descuadrados.
+          await this.coverageService?.recomputeLineCache(tx, orderId);
         }
       });
     } catch (error) {

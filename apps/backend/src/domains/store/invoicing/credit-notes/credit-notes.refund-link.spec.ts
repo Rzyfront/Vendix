@@ -27,6 +27,7 @@ describe('CreditNotesService — gate de NC guiada + puente refund↔NC (paso 7,
   const refundRow = (over: any = {}) => ({
     id: 55,
     order_id: 1,
+    state: 'completed',
     reason: 'cliente devolvió',
     shipping_refund: new Prisma.Decimal(0),
     refund_items: [refundItem()],
@@ -239,6 +240,113 @@ describe('CreditNotesService — gate de NC guiada + puente refund↔NC (paso 7,
       await expect(resolve(service, guidedDto(), 'credit_note', invoiceOf(1))).rejects.toMatchObject({
         errorCode: 'INVOICING_CALC_001',
       });
+    });
+  });
+
+  describe('release-853 paso 8: estado válido, unicidad y envío (casos a, b y c)', () => {
+    it('(a) refund failed ⇒ INVOICING_CALC_001 (no 404: el refund existe pero no acredita)', async () => {
+      const { service } = createService({
+        prisma: {
+          refunds: {
+            findFirst: jest.fn().mockResolvedValue(refundRow({ state: 'failed' })),
+          },
+          invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+          order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
+        },
+      });
+
+      await expect(resolve(service, guidedDto(), 'credit_note', invoiceOf(1))).rejects.toMatchObject({
+        errorCode: 'INVOICING_CALC_001',
+      });
+    });
+
+    it('(a) refund cancelled ⇒ INVOICING_CALC_001', async () => {
+      const { service } = createService({
+        prisma: {
+          refunds: {
+            findFirst: jest.fn().mockResolvedValue(refundRow({ state: 'cancelled' })),
+          },
+          invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+          order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
+        },
+      });
+
+      await expect(resolve(service, guidedDto(), 'credit_note', invoiceOf(1))).rejects.toMatchObject({
+        errorCode: 'INVOICING_CALC_001',
+      });
+    });
+
+    it('(b) P2002 con vínculo vivo ⇒ "refund ya vinculado" (carrera doble-clic, nunca 500)', async () => {
+      const { service, prisma } = createService({
+        prisma: {
+          refunds: { findFirst: jest.fn().mockResolvedValue(refundRow()) },
+          invoices: {
+            findFirst: jest.fn().mockResolvedValue({ id: 12, invoice_number: 'NC-1', status: 'draft' }),
+          },
+          order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
+        },
+      });
+      const p2002 = Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+
+      await expect(
+        (service as any).throwIfDuplicateRefundLink(p2002, { refund: { id: 55, order_id: 1 } }),
+      ).rejects.toMatchObject({ errorCode: 'INVOICING_CALC_001' });
+      expect(prisma.invoices.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ refund_id: 55, invoice_type: 'credit_note' }),
+        }),
+      );
+    });
+
+    it('(b) P2002 sin vínculo vivo relanza el original (no era el índice de refund)', async () => {
+      const { service } = createService();
+      const p2002 = Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+
+      await expect(
+        (service as any).throwIfDuplicateRefundLink(p2002, { refund: { id: 55, order_id: 1 } }),
+      ).rejects.toBe(p2002);
+    });
+
+    it('(b) error no-P2002 o NC manual relanza intacto', async () => {
+      const { service } = createService();
+      const other = new Error('db caída');
+
+      await expect(
+        (service as any).throwIfDuplicateRefundLink(other, { refund: { id: 55, order_id: 1 } }),
+      ).rejects.toBe(other);
+      const p2002 = Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+      await expect((service as any).throwIfDuplicateRefundLink(p2002, null)).rejects.toBe(p2002);
+    });
+
+    it('(c) refund con líneas + envío: la NC incluye la línea de envío (sin puente)', async () => {
+      const { service } = createService({
+        prisma: {
+          refunds: {
+            findFirst: jest
+              .fn()
+              .mockResolvedValue(refundRow({ shipping_refund: new Prisma.Decimal(3000) })),
+          },
+          invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+          order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
+        },
+      });
+
+      const link = await resolve(service, guidedDto(), 'credit_note', invoiceOf(1));
+
+      expect(link.derived_items).toEqual([
+        expect.objectContaining({ description: 'Café', quantity: 2 }),
+        {
+          description: 'Reembolso de envío — orden #1',
+          quantity: 1,
+          unit_price: 3000,
+          discount_amount: 0,
+          tax_amount: 0,
+        },
+      ]);
+      // El envío no toca el puente: solo la línea de producto lo hace.
+      expect(link.bridge_rows).toEqual([
+        expect.objectContaining({ refund_item_id: 201, covered_qty: 2 }),
+      ]);
     });
   });
 });
