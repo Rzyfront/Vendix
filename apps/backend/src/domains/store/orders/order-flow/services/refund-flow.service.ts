@@ -465,10 +465,29 @@ export class RefundFlowService {
           tx,
         );
 
+        // Step 2 (CP-REFUND-FLOW-REDESIGN) — settled legs under the claim.
+        // `partially_refunded` belongs to the search: after a first partial
+        // the leg stays in play, and a second partial that covers the
+        // accumulated total must still find it to promote it to `refunded`
+        // (evidence 7384: payment stuck at `partially_refunded` with the
+        // order already `refunded`). The refund links to the first settled
+        // leg by id — deterministic for single-payment orders; scalar
+        // `payment_id` cannot split-link a multi-payment distribution.
+        const settledPayments = (order.payments ?? [])
+          .filter((p) =>
+            p.state === 'succeeded' ||
+            p.state === 'pending' ||
+            p.state === 'partially_refunded',
+          )
+          .sort((a, b) => a.id - b.id);
+        const linkedPaymentId =
+          settledPayments.length > 0 ? settledPayments[0].id : null;
+
         // 1. Create refund record
         const refund = await tx.refunds.create({
           data: {
             order_id: orderId,
+            payment_id: linkedPaymentId,
             amount: calculation.total_refund,
             subtotal_refund: calculation.subtotal_refund,
             tax_refund: calculation.tax_refund,
@@ -614,19 +633,22 @@ export class RefundFlowService {
           }
         }
 
-        // 4. Update payment state
-        const activePayment = order.payments.find(
-          (p) => p.state === 'succeeded' || p.state === 'pending',
-        );
-        if (activePayment) {
+        // 4. Update payment state across every settled leg. A full-coverage
+        // refund promotes ALL settled legs to `refunded` (the accumulated
+        // refunds covered the order); a partial marks the linked leg
+        // `partially_refunded` and leaves sibling legs untouched. Re-marking
+        // an already `partially_refunded` leg is idempotent.
+        if (calculation.is_full_refund) {
+          for (const leg of settledPayments) {
+            await tx.payments.update({
+              where: { id: leg.id },
+              data: { state: 'refunded', updated_at: new Date() },
+            });
+          }
+        } else if (linkedPaymentId != null) {
           await tx.payments.update({
-            where: { id: activePayment.id },
-            data: {
-              state: calculation.is_full_refund
-                ? 'refunded'
-                : 'partially_refunded',
-              updated_at: new Date(),
-            },
+            where: { id: linkedPaymentId },
+            data: { state: 'partially_refunded', updated_at: new Date() },
           });
         }
 

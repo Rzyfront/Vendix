@@ -25,7 +25,10 @@ export interface AvailableRefundMethods {
  * y solo 1 cuenta bancaria habilitaba `bank_transfer`):
  *
  *   - `original_payment`: la orden debe tener al menos un pago activo
- *     (state in ['succeeded', 'pending']). El processor es responsabilidad
+ *     (state in ['succeeded', 'pending', 'partially_refunded']). Un parcial
+ *     previo deja la pata en `partially_refunded` con saldo por devolver —
+ *     excluirla ocultaba el método tras el primer parcial (paso 2
+ *     CP-REFUND-FLOW-REDESIGN). El processor es responsabilidad
  *     del gateway — no exigimos `is_active` ni `state='enabled'` aquí
  *     porque ese chequeo ya lo hace `RefundFlowService` al ejecutar el
  *     refund, y negarlo a nivel UI ocultaba el 100% de los pagos reales.
@@ -53,7 +56,9 @@ export class RefundMethodsService {
         store_id: true,
         customer_id: true,
         payments: {
-          where: { state: { in: ['succeeded', 'pending'] } },
+          where: {
+            state: { in: ['succeeded', 'pending', 'partially_refunded'] },
+          },
           select: { id: true },
           take: 1,
         },
