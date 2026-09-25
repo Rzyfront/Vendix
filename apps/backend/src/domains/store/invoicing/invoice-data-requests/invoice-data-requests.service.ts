@@ -203,6 +203,26 @@ export class InvoiceDataRequestsService {
   }
 
   /**
+   * Paso 3 — espejo backend de `kitchenStateFor` (order-details-page):
+   * prefiere una fila in-flight (`pending`/`in_preparation`/`ready`) sobre
+   * la más reciente terminal; las filas ya vienen `orderBy: { id: 'desc' }`.
+   * `null` = el ítem nunca se disparó a cocina (sin badge).
+   */
+  private kitchenStatusFor(
+    ticketItems: { id: number; status: string }[] | null | undefined,
+  ): string | null {
+    if (!ticketItems || ticketItems.length === 0) return null;
+    const inFlight = ticketItems.find(
+      (k) =>
+        k.status === 'pending' ||
+        k.status === 'in_preparation' ||
+        k.status === 'ready',
+    );
+    if (inFlight) return inFlight.status;
+    return ticketItems[0].status;
+  }
+
+  /**
    * Public read-only order summary for anonymous ecommerce checkouts.
    * Unlike getByToken(), this endpoint must keep working after the invoice
    * data request is submitted/completed so guests retain purchase support.
@@ -234,8 +254,19 @@ export class InvoiceDataRequestsService {
                 // necesita para el mismo cálculo.
                 final_unit_price: true,
                 price_unit_quantity: true,
+                // Paso 3 (roku-shop-checkout-tarifa-detalle-orden): cocina en
+                // vivo por plato + ETA variant-aware. Solo estado e id del
+                // ticket-item: nada de notas internas ni joins a tickets.
+                kitchen_ticket_items: {
+                  orderBy: { id: 'desc' },
+                  select: { id: true, status: true },
+                },
+                product_variants: {
+                  select: { preparation_time_minutes: true },
+                },
                 products: {
                   select: {
+                    preparation_time_minutes: true,
                     product_images: {
                       where: { is_main: true },
                       take: 1,
@@ -247,9 +278,13 @@ export class InvoiceDataRequestsService {
             },
             payments: {
               select: {
+                id: true,
                 state: true,
                 amount: true,
                 paid_at: true,
+                // Paso 3: presencia de comprobante. La key NUNCA sale en el
+                // payload — solo `has_receipt` + content-type del HEAD.
+                receipt_s3_key: true,
                 store_payment_method: {
                   select: {
                     display_name: true,
@@ -340,6 +375,13 @@ export class InvoiceDataRequestsService {
       );
     }
 
+    // Paso 3: mismo default que `OrderEtaService.computeEta` (paso 5):
+    // `operations.default_preparation_time_minutes` de la tienda, 15 si ausente.
+    // Los settings ya vienen cargados para el gate fiscal (C.7) — sin query extra.
+    const defaultPrep =
+      (request.store?.store_settings?.settings as any)?.operations
+        ?.default_preparation_time_minutes ?? 15;
+
     // Sign image URLs per item (mirrors account.service getOrderDetail).
     const items = await Promise.all(
       request.order.order_items.map(async (item) => ({
@@ -351,6 +393,13 @@ export class InvoiceDataRequestsService {
         total_price: item.total_price,
         tax_amount_item: item.tax_amount_item,
         ...this.deriveLineGross(item as any),
+        // Paso 3: cocina en vivo + prep resuelto variante→producto (null si
+        // ninguno lo define; el default solo aplica al MAX agregado).
+        kitchen_status: this.kitchenStatusFor(item.kitchen_ticket_items),
+        preparation_time_minutes:
+          item.product_variants?.preparation_time_minutes ??
+          item.products?.preparation_time_minutes ??
+          null,
         image_url: item.products?.product_images?.[0]?.image_url
           ? await this.s3Service.signUrl(item.products.product_images[0].image_url)
           : null,
@@ -358,6 +407,41 @@ export class InvoiceDataRequestsService {
           ? await this.s3Service.signUrl(item.variant_image_url)
           : null,
       })),
+    );
+
+    // Paso 3: MAX por ítem con la regla exacta de `computeEta`
+    // (variante ?? producto ?? default tienda) — coherente con el paso 5.
+    const prep_minutes_max = items.length
+      ? Math.max(
+          ...items.map(
+            (item) => item.preparation_time_minutes ?? defaultPrep,
+          ),
+        )
+      : defaultPrep;
+
+    // Paso 3: comprobante por pago. `receipt_content_type` no se persiste
+    // (igual que `getPaymentReceiptUrl`): HEAD del objeto S3 por lectura,
+    // fail-soft a null si el objeto no existe.
+    const payments = await Promise.all(
+      request.order.payments.map(async (payment) => {
+        const hasReceipt = !!payment.receipt_s3_key;
+        const head = hasReceipt
+          ? await this.s3Service.headObject(payment.receipt_s3_key)
+          : null;
+        return {
+          payment_id: payment.id,
+          state: payment.state,
+          amount: payment.amount,
+          paid_at: payment.paid_at,
+          method:
+            payment.store_payment_method?.display_name ||
+            payment.store_payment_method?.system_payment_method?.display_name ||
+            payment.store_payment_method?.system_payment_method?.type ||
+            null,
+          has_receipt: hasReceipt,
+          receipt_content_type: head?.contentType ?? null,
+        };
+      }),
     );
 
     // C.7 (ADR-12) — mismo gate fiscal que el gateway de impresión, resuelto
@@ -400,6 +484,11 @@ export class InvoiceDataRequestsService {
         currency: request.order.currency,
         created_at: request.order.created_at,
         placed_at: request.order.placed_at,
+        // Paso 3: ETA persistido + MAX en vivo + tipo de entrega.
+        estimated_ready_at: request.order.estimated_ready_at,
+        estimated_delivered_at: request.order.estimated_delivered_at,
+        prep_minutes_max,
+        delivery_type: request.order.delivery_type,
         shipping_address: request.order.shipping_address_snapshot,
         items,
         // Historical discount snapshots persisted on the order.
@@ -424,16 +513,7 @@ export class InvoiceDataRequestsService {
           discount_applied: cu.discount_applied,
           used_at: cu.used_at,
         })),
-        payments: request.order.payments.map((payment) => ({
-          state: payment.state,
-          amount: payment.amount,
-          paid_at: payment.paid_at,
-          method:
-            payment.store_payment_method?.display_name ||
-            payment.store_payment_method?.system_payment_method?.display_name ||
-            payment.store_payment_method?.system_payment_method?.type ||
-            null,
-        })),
+        payments,
         invoice: request.order.invoices[0] || null,
       },
     };
