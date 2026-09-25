@@ -561,6 +561,11 @@ export class OrderDetailsPageComponent {
     return tax > 0;
   });
   /**
+   * Propina como número. El API la trae `number|string|null` y el template
+   * estricto no admite `>` ni `currency` sobre la unión.
+   */
+  readonly tipAmount = computed(() => Number(this.order()?.tip_amount ?? 0));
+  /**
    * Impuesto del envío (copia congelada de la tarifa al vender). Va SIEMPRE
    * incluido en `shipping_cost`, así que es una nota informativa: no suma al
    * total. 0 = envío sin impuesto (tarifa sin impuesto o costo manual).

@@ -2356,11 +2356,11 @@
                   }}</span>
                 </div>
               }
-              @if (orderData.tip_amount && orderData.tip_amount > 0) {
+              @if (tipAmount() > 0) {
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Propina</span>
                   <span class="font-semibold text-gray-900">{{
-                    orderData.tip_amount | currency
+                    tipAmount() | currency
                   }}</span>
                 </div>
               }
