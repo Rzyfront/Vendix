@@ -1338,10 +1338,13 @@ export class PrintLayoutComposerService {
   }
 
   private renderDispatchTicketSection(
-    _section: any,
+    section: any,
     data: StandardPrintDataModel,
     mode: 'dummy' | 'tokenized' = 'dummy',
   ): string {
+    // Paridad térmica: el SKU se apaga por bandera (`show_sku: false` en la
+    // sección), igual que el renderer genérico; ausente = visible.
+    const showSku = section?.show_sku !== false;
     const store = data.store || ({} as any);
     const customer = data.customer || ({} as any);
     const doc = data.document || ({} as any);
@@ -1394,7 +1397,7 @@ export class PrintLayoutComposerService {
               <tr>
                 <td class="col-idx">${this.compiler.escapeHtml(String(it.index ?? ''))}</td>
                 <td class="col-desc">
-                  ${it.variant_sku ? `<div class="dt-sku">${this.compiler.escapeHtml(it.variant_sku)}</div>` : ''}
+                  ${it.variant_sku && showSku ? `<div class="dt-sku">${this.compiler.escapeHtml(it.variant_sku)}</div>` : ''}
                   <div>${this.compiler.escapeHtml(it.product_name || '')}</div>
                 </td>
                 <td class="col-qty">${this.compiler.escapeHtml(String(it.quantity ?? 0))}</td>
