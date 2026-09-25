@@ -3035,6 +3035,83 @@ export class KitchenFireService {
   }
 
   /**
+   * CP-REFUND-FLOW-REDESIGN paso 6 — item-level KDS cancel for refunded dish
+   * lines, inside the caller's transaction (no nested $transaction, no SSE).
+   *
+   * Unlike `cancelTicketInTx` (whole ticket), this cancels ONLY the ticket
+   * items of the given `order_item_ids`: a ticket groups every dish of a
+   * station, so cancelling the whole ticket for one refunded line would nuke
+   * sibling lines that are still being cooked/served. `delivered` rows are
+   * never touched (fact already consumed); `cancelled` rows are idempotent
+   * no-ops. The ticket flips to `cancelled` only when EVERY item on it ends
+   * up `cancelled` — a partially delivered ticket keeps its status.
+   *
+   * Tenancy: items are pinned to `orderId` through the ticket relation, so a
+   * wrong id can never cancel another order's ticket. skipKds lines carry no
+   * ticket items by construction (POS/auto-fire filter them out); the caller
+   * (refund-flow) filters them before calling and this method simply no-ops
+   * for ids without ticket rows.
+   *
+   * No station-lock guard (mirrors `cancelTicketInTx`): this is an order-side
+   * operation like `OrderFlowService.cancelOrderItem`, not a cook action. No
+   * `maybeEmitOrderAllDelivered` either: a refund must never move order state
+   * (order state belongs to the refund claim, steps 1–2/5).
+   *
+   * The caller MUST push SSE post-commit: `emitTicketCancelledEvent` for
+   * `cancelledTicketIds`, `emitTicketUpdatedEvent` for `updatedTicketIds`.
+   */
+  async cancelTicketItemsForRefund(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    orderItemIds: number[],
+  ): Promise<{ cancelledTicketIds: number[]; updatedTicketIds: number[] }> {
+    const empty = { cancelledTicketIds: [], updatedTicketIds: [] };
+    const ids = [...new Set(orderItemIds.filter((id) => Number.isInteger(id)))];
+    if (ids.length === 0) {
+      return empty;
+    }
+    const affected = await tx.kitchen_ticket_items.findMany({
+      where: {
+        order_item_id: { in: ids },
+        kitchen_ticket: { order_id: orderId },
+      },
+      select: { kitchen_ticket_id: true },
+    });
+    const ticketIds = [...new Set(affected.map((row) => row.kitchen_ticket_id))];
+    if (ticketIds.length === 0) {
+      return empty;
+    }
+    await tx.kitchen_ticket_items.updateMany({
+      where: {
+        order_item_id: { in: ids },
+        kitchen_ticket: { order_id: orderId },
+        status: { notIn: ['delivered', 'cancelled'] as any },
+      },
+      data: { status: 'cancelled', updated_at: new Date() },
+    });
+    const cancelledTicketIds: number[] = [];
+    const updatedTicketIds: number[] = [];
+    for (const ticketId of ticketIds) {
+      const remaining = await tx.kitchen_ticket_items.count({
+        where: {
+          kitchen_ticket_id: ticketId,
+          status: { not: 'cancelled' } as any,
+        },
+      });
+      if (remaining === 0) {
+        await tx.kitchen_tickets.update({
+          where: { id: ticketId },
+          data: { status: 'cancelled', updated_at: new Date() },
+        });
+        cancelledTicketIds.push(ticketId);
+      } else {
+        updatedTicketIds.push(ticketId);
+      }
+    }
+    return { cancelledTicketIds, updatedTicketIds };
+  }
+
+  /**
    * Order-side item delivery changes the latest KDS row without necessarily
    * delivering the whole ticket. Push the full ticket after commit so an open
    * board updates immediately; `ticket.delivered` would be a false event name

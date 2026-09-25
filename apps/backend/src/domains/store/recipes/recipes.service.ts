@@ -36,6 +36,22 @@ export interface BomExplosionLine {
 }
 
 /**
+ * BomRestockLine
+ *
+ * Public return shape of {@link RecipesService.explodeBomReverse}. Each line
+ * is a leaf ingredient to RESTOCK (sign +) in its integer minimum stock unit —
+ * the symmetric inverse of what the fire consumed for the same recipe and
+ * dish quantity (same `Math.round` convention as
+ * `KitchenFireService.fireOrderItemsInTx`).
+ */
+export interface BomRestockLine {
+  /** The leaf component product id. */
+  component_product_id: number;
+  /** Total quantity to restock (positive integer, in the leaf's stock_unit). */
+  quantity: number;
+}
+
+/**
  * RecipesService
  *
  * Store-scoped CRUD for the Recipes / BOM (Bill of Materials) domain of the
@@ -1051,6 +1067,40 @@ export class RecipesService {
       MAX_DEPTH,
       tx,
     );
+  }
+
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 6 — symmetric inverse of {@link explodeBom}
+   * for the dish-restock path: explodes the CURRENT active recipe, scales by
+   * the refunded dish quantity and rounds to integer minimal units with the
+   * same `Math.round(line.quantity * orderQty)` convention the fire uses, so
+   * the restock mirrors the consumption 1:1 when the recipe is unchanged.
+   *
+   * No traversal of its own: delegates to `explodeBom` (the single BOM entry
+   * point) and only maps the sign/rounding. Zero/invalid lines are dropped,
+   * same as the fire's skip.
+   */
+  async explodeBomReverse(
+    recipeId: number,
+    dishQuantity: number,
+    tx?: Prisma.TransactionClient,
+  ): Promise<BomRestockLine[]> {
+    if (!Number.isFinite(dishQuantity) || dishQuantity <= 0) {
+      return [];
+    }
+    const bomLines = await this.explodeBom(recipeId, { [recipeId]: 1 }, tx);
+    const restock: BomRestockLine[] = [];
+    for (const line of bomLines) {
+      const quantity = Math.round(line.quantity * dishQuantity);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        continue;
+      }
+      restock.push({
+        component_product_id: line.component_product_id,
+        quantity,
+      });
+    }
+    return restock;
   }
 
   private async explodeBomRecursive(

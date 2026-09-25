@@ -4,6 +4,8 @@ import {
   forwardRef,
   NotFoundException,
   BadRequestException,
+  InternalServerErrorException,
+  Optional,
   Logger,
 } from '@nestjs/common';
 import { Prisma, refunds_state_enum } from '@prisma/client';
@@ -32,6 +34,9 @@ import {
 } from '../../../cash-registers/movements/movements.service';
 import { SerialNumberEnforcementService } from '../../../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../../inventory/serial-numbers/inventory-serial-numbers.service';
+import { KitchenFireService } from '../../../kitchen-fire/kitchen-fire.service';
+import { AutoEntryService } from '../../../accounting/auto-entries/auto-entry.service';
+import { AuditResource } from '@common/audit/audit.service';
 import { WalletService } from '../../../wallet/wallet.service';
 import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
 import { PaymentGatewayService } from '../../../payments/services/payment-gateway.service';
@@ -78,6 +83,26 @@ export type RefundCashMovementNotice =
   | RefundCashMovementOutcome
   | { status: 'skipped'; reason: string };
 
+/**
+ * CP-REFUND-FLOW-REDESIGN paso 6 — post-commit work collected in-tx by the
+ * dish branch (`processDishRefundLine`). SSE pushes and the COGS reclass run
+ * only after the refund commits (same rule as every other post-commit effect:
+ * accounting/KDS failures must never roll back money already returned).
+ */
+export interface DishRefundPostCommit {
+  /** Tickets fully cancelled in-tx → `emitTicketCancelledEvent` each. */
+  cancelledTicketIds: number[];
+  /** Tickets partially cancelled in-tx → `emitTicketUpdatedEvent` each. */
+  updatedTicketIds: number[];
+  /** One reclass per fully-covered dish line with known cost > 0. */
+  reclassJobs: Array<{
+    order_item_id: number;
+    organization_id: number;
+    disposition: 'reuse' | 'waste';
+    total_cost: number;
+  }>;
+}
+
 /** One settled leg to return: either a `payments` row (`payment_id`) or a
  * real CxC abono (`ar_payment_id`) — never both, never neither.
  */
@@ -116,6 +141,16 @@ export class RefundFlowService {
     @Inject(forwardRef(() => PaymentGatewayService))
     private readonly paymentGatewayService: PaymentGatewayService,
     private readonly manualRefundDelivery: ManualRefundDeliveryService,
+    // CP-REFUND-FLOW-REDESIGN paso 6 — dish branch (KDS cancel + COGS
+    // reclass). `@Optional()` so the historic spec constructions keep
+    // working (same pattern as OrderFlowService:kitchenFireService); in
+    // prod both providers always resolve via KitchenFireModule /
+    // AccountingModule (see order-flow.module.ts). A dish line with no
+    // KitchenFireService fails LOUD in-tx (never skips the KDS silently);
+    // a missing AutoEntryService degrades to a logged error post-commit
+    // (the refund is already committed by then).
+    @Optional() private readonly kitchenFireService?: KitchenFireService,
+    @Optional() private readonly autoEntryService?: AutoEntryService,
   ) {}
 
   /** Cash cancellation uses the same refund document and ceiling as returns,
@@ -363,7 +398,11 @@ export class RefundFlowService {
         order_items: {
           where: { cancelled_at: null },
           include: {
-            products: { select: { id: true, track_inventory: true } },
+            // Paso 6 — `product_type` routes dish lines to the KDS-aware
+            // branch (`inventory_consumed_at_fire`/`skip_kds` already travel
+            // on the row); the authoritative flag read happens in-tx under
+            // the order lock (see the inventory loop below).
+            products: { select: { id: true, track_inventory: true, product_type: true } },
             product_variants: { select: { id: true } },
           },
         },
@@ -443,6 +482,15 @@ export class RefundFlowService {
     // tipos de pago desconocidos, y en esos no existe processor ni endpoint de
     // aprobación, así que aparcarlos los atasca para siempre.
     const awaitsReversal = awaitsExternalReversal(dto.refund_method, paymentType);
+
+    // Paso 6 — dish post-commit collector (KDS SSE + COGS reclass). Filled
+    // in-tx by `processDishRefundLine`, drained in the `.then()` below.
+    // Empty for non-dish refunds: the drain is a guarded no-op.
+    const dishPostCommit: DishRefundPostCommit = {
+      cancelledTicketIds: [],
+      updatedTicketIds: [],
+      reclassJobs: [],
+    };
 
     // Execute everything in a transaction
     return this.prisma
@@ -609,6 +657,38 @@ export class RefundFlowService {
         }
 
         // 3. Process inventory per item
+        //
+        // Paso 6 — dish lines (`product_type='prepared'`, stock-mode
+        // `skip_kds` excluded) take the KDS-aware branch below; every other
+        // line keeps the retail path byte-identical. The fire flag is
+        // re-read fresh here, under the order lock: a fire concurrent with
+        // this refund must not slip a restock past the fired⇒write_off
+        // validation (TOCTOU).
+        const dishItemIds = calculation.items
+          .filter((item) => {
+            if (item.inventory_action === 'no_return') return false;
+            const oi = order.order_items.find(
+              (o) => o.id === item.order_item_id,
+            );
+            return (
+              oi?.products?.product_type === 'prepared' &&
+              oi.skip_kds !== true
+            );
+          })
+          .map((item) => item.order_item_id);
+        const firedByOrderItem = new Map<number, boolean>();
+        if (dishItemIds.length > 0) {
+          const freshDishFlags = await tx.order_items.findMany({
+            where: { id: { in: dishItemIds }, order_id: orderId },
+            select: { id: true, inventory_consumed_at_fire: true },
+          });
+          for (const row of freshDishFlags) {
+            firedByOrderItem.set(
+              row.id,
+              row.inventory_consumed_at_fire === true,
+            );
+          }
+        }
         for (const item of calculation.items) {
           if (item.inventory_action === 'no_return') continue;
 
@@ -616,6 +696,33 @@ export class RefundFlowService {
             (oi) => oi.id === item.order_item_id,
           );
           if (!orderItem?.products) continue;
+
+          // Paso 6 — dish branch: state-guided disposition (fired⇒write_off
+          // only), leaf-level reversal at historical cost (never the sold
+          // dish), KDS item cancel in-tx, audit + COGS reclass post-commit.
+          // Retail lines (incl. stock-mode `skip_kds` dishes, whose own
+          // stock the payment consumed as a regular sale) fall through
+          // untouched.
+          if (
+            orderItem.products.product_type === 'prepared' &&
+            orderItem.skip_kds !== true
+          ) {
+            await this.processDishRefundLine(tx, {
+              orderId,
+              storeId: order.store_id,
+              organizationId: order.stores?.organization_id,
+              refundId: refund.id,
+              orderReason: dto.reason,
+              item,
+              soldQuantity: Number(orderItem.quantity ?? 0),
+              fired:
+                firedByOrderItem.get(item.order_item_id) ??
+                orderItem.inventory_consumed_at_fire === true,
+              userId,
+              postCommit: dishPostCommit,
+            });
+            continue;
+          }
 
           const stockUnits =
             stockUnitsByOrderItem.get(item.order_item_id) ?? item.quantity;
@@ -891,6 +998,64 @@ export class RefundFlowService {
           );
         }
 
+        // Paso 6 — dish post-commit drain: KDS SSE + COGS reclass collected
+        // in-tx by `processDishRefundLine`. Best-effort per job (the refund
+        // already committed): each failure is logged with the refund id for
+        // operator reconciliation, never thrown. Guarded no-op for refunds
+        // without dish lines.
+        if (
+          dishPostCommit.cancelledTicketIds.length > 0 ||
+          dishPostCommit.updatedTicketIds.length > 0 ||
+          dishPostCommit.reclassJobs.length > 0
+        ) {
+          const kds = this.kitchenFireService;
+          for (const ticketId of dishPostCommit.cancelledTicketIds) {
+            try {
+              await kds?.emitTicketCancelledEvent(ticketId);
+            } catch (error) {
+              this.logger.error(
+                `Refund #${completedRefund.id}: post-commit ticket.cancelled SSE for ticket #${ticketId} failed: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+          for (const ticketId of dishPostCommit.updatedTicketIds) {
+            try {
+              await kds?.emitTicketUpdatedEvent(ticketId);
+            } catch (error) {
+              this.logger.error(
+                `Refund #${completedRefund.id}: post-commit ticket.updated SSE for ticket #${ticketId} failed: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+          for (const job of dishPostCommit.reclassJobs) {
+            if (!this.autoEntryService) {
+              this.logger.error(
+                `AutoEntryService no disponible: reclass ${job.disposition} de ` +
+                  `ítem #${job.order_item_id} (refund #${completedRefund.id}, costo ${job.total_cost}) ` +
+                  `requiere conciliación desde audit_logs`,
+              );
+              continue;
+            }
+            try {
+              await this.autoEntryService.onPreparedDishDisposition({
+                order_id: orderId,
+                order_item_id: job.order_item_id,
+                organization_id: job.organization_id,
+                store_id: order.store_id,
+                disposition: job.disposition,
+                total_cost: job.total_cost,
+                user_id: userId ?? undefined,
+              });
+            } catch (error) {
+              this.logger.error(
+                `Refund #${completedRefund.id}: COGS reclass (${job.disposition}) ` +
+                  `for item #${job.order_item_id} failed, reconcile from audit_logs ` +
+                  `order_item.refund_dish_disposition: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+        }
+
         this.logger.log(
           `Refund #${completedRefund.id} processed for order #${orderId}: ` +
             `${calculation.total_refund.toFixed(2)} (${calculation.is_full_refund ? 'full' : 'partial'})`,
@@ -976,6 +1141,243 @@ export class RefundFlowService {
         throw error;
       },
     );
+  }
+
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 6 — dish branch of `createRefund`, in-tx.
+   *
+   * State-guided disposition for one `prepared` line (stock-mode `skip_kds`
+   * lines never reach here — the retail path owns them):
+   *   - fired (`inventory_consumed_at_fire=true`) ⇒ `write_off` ONLY, with
+   *     motivo. The cooked ingredients are gone: no stock movement at all
+   *     (a leaf `damage` move would subtract twice — the fire already
+   *     consumed them); the booked COGS is reclassed to loss post-commit
+   *     (DR 5295 / CR 6135) with full traceability in `audit_logs`.
+   *   - not fired ⇒ `restock` reverses EXACTLY the recorded consumption
+   *     transactions for this line (sign +, historical unit cost, cost
+   *     layer recreated) — the fire/payment transaction is the source of
+   *     truth (same canon as `OrderFlowService.disposeConsumedPreparedLeaves`:
+   *     never restock the sold dish). Re-exploding the CURRENT recipe here
+   *     would restock QUI-655 exclusions and post-fire recipe edits as
+   *     phantom stock, and would fabricate leaves for recipe-less fires, so
+   *     the reversal is sourcing-ledger, not re-derivation. `write_off` on a
+   *     non-fired line keeps the consumption standing (waste reclass).
+   *   - partial quantities converge exactly across cumulative partials: this
+   *     refund reverses `round(consumed × cumAfter/sold) − round(consumed ×
+   *     cumBefore/sold)` per leaf, where the cumulative counts come from the
+   *     `refund_items` ledger (which already includes this refund's rows).
+   *   - KDS: this line's ticket items cancel in-tx (item-level — sibling
+   *     lines on the same ticket keep cooking); SSE (`ticket.cancelled` /
+   *     `ticket.updated`) and the COGS reclass (`onPreparedDishDisposition`,
+   *     existing lane, no new mapping keys) run post-commit via `postCommit`.
+   *     The reclass posts only when the line is FULLY covered, because the
+   *     lane's idempotency key is the order_item (a second post would be
+   *     skipped as duplicate): stock converges in-tx per partial, the single
+   *     reclass lands when the line closes.
+   *
+   * Never touches the anti-double-discount invariant: no flag is flipped
+   * here, so a later payment still skips fired lines (`flag=true`) and
+   * committed lines exactly as before.
+   */
+  private async processDishRefundLine(
+    tx: Prisma.TransactionClient,
+    input: {
+      orderId: number;
+      storeId: number;
+      organizationId: number | null | undefined;
+      refundId: number;
+      orderReason: string;
+      item: RefundCalculationResult['items'][number];
+      soldQuantity: number;
+      fired: boolean;
+      userId: number | null | undefined;
+      postCommit: DishRefundPostCommit;
+    },
+  ): Promise<void> {
+    const {
+      orderId, storeId, organizationId, refundId, item, soldQuantity, fired,
+      userId, postCommit,
+    } = input;
+    const orderItemId = item.order_item_id;
+    const refundQty = Number(item.quantity ?? 0);
+    const disposition: 'reuse' | 'waste' =
+      item.inventory_action === 'restock' ? 'reuse' : 'waste';
+
+    // 1. State-guided validation (authoritative flags: read in-tx under the
+    // order lock by the caller). Plain BadRequest messages — no new error
+    // codes (step 6 owns no error-code surface).
+    if (fired && disposition === 'reuse') {
+      throw new BadRequestException(
+        `Order item #${orderItemId} is a dish already fired to the kitchen: ` +
+          `it only admits write_off (the cooked ingredients cannot return to stock).`,
+      );
+    }
+    const motivo = (item.reason?.trim() || input.orderReason?.trim() || '');
+    if (disposition === 'waste' && !motivo) {
+      throw new BadRequestException(
+        `Order item #${orderItemId} is a dish write-off: a reason (motivo) is required.`,
+      );
+    }
+    if (organizationId == null) {
+      throw new InternalServerErrorException(
+        `Refund #${refundId}: organization unknown, dish disposition for ` +
+          `item #${orderItemId} cannot be audited`,
+      );
+    }
+    const kds = this.kitchenFireService;
+    if (!kds) {
+      throw new InternalServerErrorException(
+        'KitchenFireService no disponible en RefundFlowService (revisar imports de OrderFlowModule)',
+      );
+    }
+
+    // 2. Recorded consumption for this line (fire leaves, or the own-stock
+    // sale for non-restaurant/legacy paths). Empty for recipe-less fires
+    // and never-consumed lines: both correctly reverse to nothing.
+    const consumed = await tx.inventory_transactions.findMany({
+      where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
+      select: {
+        product_id: true,
+        product_variant_id: true,
+        quantity_change: true,
+        unit_cost: true,
+        total_cost: true,
+      },
+    });
+    const fullConsumedCost = consumed.reduce(
+      (sum, ct) => sum + Math.abs(Number(ct.total_cost ?? 0)),
+      0,
+    );
+
+    // 3. Cumulative line coverage from the ledger (this refund's rows were
+    // inserted in step 2 of this same tx, so they are already included).
+    let cumAfter = refundQty;
+    if (soldQuantity > 0 && refundQty > 0) {
+      const ledger = await tx.refund_items.findMany({
+        where: { order_item_id: orderItemId },
+        select: { quantity: true },
+      });
+      cumAfter = ledger.reduce(
+        (sum, row) => sum + Number(row.quantity ?? 0),
+        0,
+      );
+    }
+    const cumBefore = Math.max(0, cumAfter - refundQty);
+    const fullCovered = soldQuantity > 0 && cumAfter >= soldQuantity;
+
+    // 4. Reuse: reverse the recorded consumption at historical cost,
+    // pro-rated to this refund's incremental share. No order_item_id on the
+    // reversal (same Restrict reason as cancelOrderItem); cumulative
+    // partials converge through the ledger math above, not through tags.
+    const reversedLeaves: Array<{
+      product_id: number;
+      quantity: number;
+      unit_cost: number;
+    }> = [];
+    if (disposition === 'reuse' && soldQuantity > 0 && refundQty > 0) {
+      for (const ct of consumed) {
+        const consumedQty = Math.abs(ct.quantity_change);
+        const targetNow = Math.round((consumedQty * cumAfter) / soldQuantity);
+        const targetBefore = Math.round((consumedQty * cumBefore) / soldQuantity);
+        const reverseQty = Math.max(0, targetNow - targetBefore);
+        if (reverseQty <= 0) continue;
+        const historicalTotal = Math.abs(Number(ct.total_cost ?? 0));
+        const unitCost = Number(
+          ct.unit_cost ?? (consumedQty > 0 ? historicalTotal / consumedQty : 0),
+        );
+        const locationId =
+          await this.stockLevelManager.getDefaultLocationForProduct(
+            ct.product_id,
+            ct.product_variant_id ?? undefined,
+          );
+        await this.stockLevelManager.updateStock(
+          {
+            product_id: ct.product_id,
+            variant_id: ct.product_variant_id ?? undefined,
+            location_id: locationId,
+            quantity_change: reverseQty,
+            movement_type: 'return',
+            movement_unit_cost: unitCost > 0 ? unitCost : undefined,
+            reason:
+              `Refund #${refundId} restock plato (orden #${orderId} ítem #${orderItemId})` +
+              (motivo ? `: ${motivo}` : ''),
+            source_module: 'dish_refund',
+            create_movement: true,
+            validate_availability: false,
+          },
+          tx,
+        );
+        // updateStock(return) restores quantity/value snapshots but no cost
+        // layer — recreate it at the historical cost (cancelOrderItem canon).
+        await tx.inventory_cost_layers.create({
+          data: {
+            organization_id: organizationId,
+            product_id: ct.product_id,
+            product_variant_id: ct.product_variant_id,
+            location_id: locationId,
+            quantity_remaining: reverseQty,
+            unit_cost: new Prisma.Decimal(unitCost),
+            received_at: new Date(),
+          },
+        });
+        reversedLeaves.push({
+          product_id: ct.product_id,
+          quantity: reverseQty,
+          unit_cost: unitCost,
+        });
+      }
+    }
+
+    // 5. KDS cancel in-tx (item-level; SSE post-commit via `postCommit`).
+    const { cancelledTicketIds, updatedTicketIds } =
+      await kds.cancelTicketItemsForRefund(tx, orderId, [orderItemId]);
+    for (const id of cancelledTicketIds) {
+      if (!postCommit.cancelledTicketIds.includes(id)) {
+        postCommit.cancelledTicketIds.push(id);
+      }
+    }
+    for (const id of updatedTicketIds) {
+      if (!postCommit.updatedTicketIds.includes(id)) {
+        postCommit.updatedTicketIds.push(id);
+      }
+    }
+
+    // 6. Audit (same family as cancelOrderItem's prepared_disposition).
+    const requestId = RequestContextService.getRequestId();
+    await tx.audit_logs.create({
+      data: {
+        user_id: userId ?? null,
+        organization_id: organizationId,
+        store_id: storeId,
+        action: 'order_item.refund_dish_disposition',
+        resource: AuditResource.ORDERS,
+        resource_id: orderId,
+        request_id: requestId && requestId.length <= 100 ? requestId : null,
+        metadata: {
+          order_id: orderId,
+          order_item_id: orderItemId,
+          refund_id: refundId,
+          reason: motivo || null,
+          destination: disposition,
+          fired,
+          refunded_qty: refundQty,
+          cumulative_refunded_qty: cumAfter,
+          consumed_cost: fullConsumedCost,
+          reversed_leaves: reversedLeaves,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    // 7. COGS reclass on full line coverage (reuse: DR 1435 / CR 6135
+    // symmetric reversal; waste: DR 5295 / CR 6135, COGS a pérdida).
+    if (fullCovered && fullConsumedCost > 0) {
+      postCommit.reclassJobs.push({
+        order_item_id: orderItemId,
+        organization_id: organizationId,
+        disposition,
+        total_cost: Math.round(fullConsumedCost * 100) / 100,
+      });
+    }
   }
 
   /**
