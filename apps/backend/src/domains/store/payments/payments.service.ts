@@ -4144,9 +4144,19 @@ export class PaymentsService {
     store_id: number,
     shipping_cost: number,
     order_items: ReadonlyArray<any> = [],
-  ): Promise<{ snapshot: ShippingTaxSnapshot; rate_id: number | null }> {
+  ): Promise<{
+    snapshot: ShippingTaxSnapshot;
+    rate_id: number | null;
+    is_inclusive: boolean | null;
+  }> {
     const rate_id = dto.shipping_rate_id ?? null;
-    if (!rate_id) return { snapshot: { ...EMPTY_SHIPPING_TAX }, rate_id: null };
+    if (!rate_id) {
+      return {
+        snapshot: { ...EMPTY_SHIPPING_TAX },
+        rate_id: null,
+        is_inclusive: null,
+      };
+    }
 
     const rate = await tx.shipping_rates.findFirst({
       where: {
@@ -4186,7 +4196,9 @@ export class PaymentsService {
     //    calculador no devuelva.
     const expected_cost =
       rate.type === 'flat'
-        ? Number(rate.base_cost ?? 0)
+        ? flat_charge
+          ? flat_charge.gross
+          : Number(rate.base_cost ?? 0)
         : await this.recalculatePosRateCost(tx, dto, store_id, rate.id, order_items);
     const isManualCost =
       expected_cost == null ||
@@ -4198,7 +4210,26 @@ export class PaymentsService {
             store_id,
           })
         : { ...EMPTY_SHIPPING_TAX };
-    return { snapshot, rate_id: rate.id };
+    // Paso 14 — el modo viaja con la copia (modo de la tarifa cuando hay
+    // impuesto, null si no). `flat` reutiliza el cobro de arriba; las
+    // calculadas lo evalúan sobre el costo cobrado (el modo vive en la
+    // fila de la tarifa, así que el precio de entrada no lo mueve).
+    let is_inclusive: boolean | null = null;
+    if (snapshot.shipping_tax_amount > 0) {
+      const mode_charge =
+        flat_charge ??
+        (this.shippingTaxService &&
+        typeof this.shippingTaxService.chargeForRate === 'function'
+          ? await this.shippingTaxService.chargeForRate(tx, rate.id, shipping_cost, {
+              store_id,
+            })
+          : null);
+      is_inclusive =
+        mode_charge && mode_charge.applies
+          ? mode_charge.reason === 'inclusive'
+          : null;
+    }
+    return { snapshot, rate_id: rate.id, is_inclusive };
   }
 
   /**
@@ -4343,6 +4374,19 @@ export class PaymentsService {
     }
     const municipalityCode = optional('municipality_code', 10);
     if (municipalityCode && !findDianMunicipality(municipalityCode)) {
+    // Sin `chargeForRate` (dobles viejos de specs) ⇒ `base_cost`, el
+    // comportamiento previo al paso.
+    const flat_charge =
+      rate.type === 'flat' &&
+      this.shippingTaxService &&
+      typeof this.shippingTaxService.chargeForRate === 'function'
+        ? await this.shippingTaxService.chargeForRate(
+            tx,
+            rate.id,
+            Number(rate.base_cost ?? 0),
+            { store_id },
+          )
+        : null;
       throw new VendixHttpException(
         ErrorCodes.PAY_VALIDATE_001,
         'El municipio DANE de la dirección no es válido.',
@@ -4827,6 +4871,9 @@ export class PaymentsService {
             tx,
             (order.order_items ?? []).map((item: any) => ({ product_id: item.product_id })),
           ),
+          // Paso 14 — modo de la tarifa que produjo la copia (null = sin
+          // impuesto o histórico).
+          shipping_tax_is_inclusive: shippingTax.is_inclusive,
           promotionsSnapshot: promotionQuote.order_promotions_snapshot,
           appliedPromotions: promotionQuote.applied_promotions,
           couponInfo,
