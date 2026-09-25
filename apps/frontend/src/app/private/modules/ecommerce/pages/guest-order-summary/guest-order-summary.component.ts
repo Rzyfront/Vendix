@@ -438,7 +438,7 @@ interface GuestOrderSummary {
                           size="xs"
                         >
                           <app-icon name="flame" [size]="10" />
-                          Preparación: {{ kitchenStateLabel(ks) }}
+                          {{ kitchenPrepLine(ks) }}
                         </app-badge>
                       </span>
                     }
@@ -1727,6 +1727,20 @@ export class GuestOrderSummaryComponent implements OnInit {
       default:
         return status;
     }
+  }
+
+  /**
+   * Release-853 regresión (paso 3): el badge del ítem anteponía siempre
+   * "Preparación: " a `kitchenStateLabel`, y para `in_preparation` eso
+   * quedaba "Preparación: En preparación" — el label ya dice lo mismo que
+   * el prefijo. Se omite el prefijo solo en ese caso; el resto de estados
+   * (Pendiente/Listo/Entregado/Cancelado) sí lo necesita para dar contexto
+   * de que es el estado de cocina del plato. El voucher impreso
+   * (`guest-order-print.service.ts`) replica esta misma regla.
+   */
+  kitchenPrepLine(status: string): string {
+    const label = this.kitchenStateLabel(status);
+    return status === 'in_preparation' ? label : `Preparación: ${label}`;
   }
 
   /**
