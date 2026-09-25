@@ -458,17 +458,27 @@ export class CheckoutComponent implements OnInit {
     // debounce para detectar cobertura en el paso 1; la elección explícita
     // vive en el paso Pago junto al total. Lee como deps reactivas
     // solo signals; el valor del formulario se lee untracked vía la clave.
+    // H2 (paso 2): `coords_version` es dep para que el pin movido y el
+    // forward-geocode tardío invaliden la cotización sellada sin coords.
     effect(() => {
       const mode = this.selected_delivery();
       const valid = this.addressFormValid();
       const savedId = this.selected_address_id();
       const fresh = this.use_new_address();
       const onStep1 = this.step() === 1;
+      const coordsV = this.coords_version();
       untracked(() => {
         if (mode !== 'home' || this.cartHasOnlyServices || !onStep1) return;
         void valid;
         void savedId;
         void fresh;
+        void coordsV;
+        // H2: la guardada sin coords dispara su geocode; al resolver, el bump
+        // re-ejecuta este effect con la clave ya versionada por coords.
+        const activeSavedId = this.selected_address_id();
+        if (!this.use_new_address() && activeSavedId != null) {
+          this.ensureSavedAddressCoords(activeSavedId);
+        }
         const key = this.currentAddressKey();
         if (!key || key === this.shipping_quote_key) return;
         // Anti-carrera A→B→A (auditoría D.3): solo la última clave programa;
@@ -807,6 +817,9 @@ export class CheckoutComponent implements OnInit {
           this.address_form
             .get('longitude')
             ?.setValue(coords.lng, { emitEvent: false });
+          // H2: el forward-geocode tardío invalida la cotización sellada sin
+          // coords (el setValue silencioso no dispara el effect por sí solo).
+          this.bumpCoordsVersion();
         },
         error: () => {
           // Forward-geocode failed → leave the map as-is; manual form works.
@@ -1019,6 +1032,10 @@ export class CheckoutComponent implements OnInit {
   private applyReverseGeocode(coords: { lat: number; lng: number }): void {
     this.address_form.get('latitude')?.setValue(coords.lat);
     this.address_form.get('longitude')?.setValue(coords.lng);
+    // H2: mover el pin / aceptar GPS invalida la cotización sellada (las
+    // coords entran a la clave; si el form aún no es válido, la recotización
+    // espera a que el reverse complete los campos de texto).
+    this.bumpCoordsVersion();
 
     this.geocoding
       .reverse(coords.lat, coords.lng)
@@ -1428,16 +1445,92 @@ export class CheckoutComponent implements OnInit {
   private shipping_fetch_promise: Promise<void> | null = null;
   private shipping_fetch_timer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * H2 (paso 2): versión reactiva de las coordenadas de la dirección activa.
+   * Se incrementa cada vez que se resuelven coords (pin movido, GPS aceptado,
+   * forward-geocode completado u override de guardada). El effect de
+   * recotización la lee como dep para que la llegada tardía de coords
+   * invalide la cotización sellada sin ellas.
+   */
+  readonly coords_version = signal(0);
+
+  /**
+   * H2: coords resueltas por forward-geocode para direcciones GUARDADAS sin
+   * pin (`address_id → {lat,lng}`). La guardada se cotiza primero por zona y,
+   * al resolver el geocode, el override entra a la clave y dispara la
+   * recotización por distancia. Nunca se persiste: solo vive en la sesión.
+   */
+  private savedCoordsOverride = signal<
+    Record<number, { lat: number; lng: number }>
+  >({});
+  /** Guard single-flight por dirección mientras su forward-geocode vuela. */
+  private savedGeocodeInFlight = new Set<number>();
+
   /** Identidad de la dirección activa de domicilio, o null si no hay. */
   private currentAddressKey(): string | null {
     if (this.selected_delivery() !== 'home') return null;
     if (this.use_new_address()) {
       if (!this.address_form.valid) return null;
       const v = this.address_form.getRawValue();
-      return `new:${v.country_code}|${v.state_province}|${v.city}|${v.address_line1}|${v.postal_code}`;
+      const lat = v.latitude ?? 'x';
+      const lng = v.longitude ?? 'x';
+      return `new:${v.country_code}|${v.state_province}|${v.city}|${v.address_line1}|${v.postal_code}|${lat},${lng}`;
     }
     const id = this.selected_address_id();
-    return id != null ? `saved:${id}` : null;
+    if (id == null) return null;
+    const saved = this.addresses().find((a) => a.id === id);
+    const override = this.savedCoordsOverride()[id];
+    const lat = override?.lat ?? saved?.latitude ?? 'x';
+    const lng = override?.lng ?? saved?.longitude ?? 'x';
+    return `saved:${id}@${lat},${lng}`;
+  }
+
+  /** H2: invalida la cotización sellada al resolverse nuevas coordenadas. */
+  private bumpCoordsVersion(): void {
+    this.coords_version.update((v) => v + 1);
+  }
+
+  /**
+   * H2: si la dirección guardada no trae coords (ni override resuelto),
+   * dispara un forward-geocode no-bloqueante; al resolver, guarda el override
+   * y sube `coords_version` para que el effect recotice con lat/lng. La
+   * cotización por zona ya sellada sigue vigente hasta entonces.
+   */
+  private ensureSavedAddressCoords(id: number): void {
+    if (this.savedCoordsOverride()[id]) return;
+    const saved = this.addresses().find((a) => a.id === id);
+    if (!saved) return;
+    if (saved.latitude != null && saved.longitude != null) return;
+    if (this.savedGeocodeInFlight.has(id)) return;
+    const query = [
+      saved.address_line1,
+      saved.city,
+      saved.state_province,
+      saved.country_code,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    if (query.trim().length < 5) return;
+    this.savedGeocodeInFlight.add(id);
+    this.geocoding
+      .forward(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.savedGeocodeInFlight.delete(id);
+          if (res?.lat == null || res?.lng == null) return;
+          this.savedCoordsOverride.update((m) => ({
+            ...m,
+            [id]: { lat: res.lat, lng: res.lng },
+          }));
+          this.bumpCoordsVersion();
+        },
+        error: () => {
+          // Sin coords se conserva la cotización por zona; el form manual
+          // sigue funcionando (warning no-bloqueante por diseño).
+          this.savedGeocodeInFlight.delete(id);
+        },
+      });
   }
 
   /** Elige el modo de entrega. Recoger limpia la dirección del comprador. */
@@ -1974,9 +2067,13 @@ export class CheckoutComponent implements OnInit {
     };
     // Paso 5 shipping-distance-pricing: con pin se cotiza por distancia;
     // sin coords se omiten y rige la tarifa de zona, sin error visible.
-    if (addr.latitude != null && addr.longitude != null) {
-      raw.latitude = addr.latitude;
-      raw.longitude = addr.longitude;
+    // H2: el override del forward-geocode de guardadas gana sobre la fila.
+    const override = this.savedCoordsOverride()[addr.id];
+    const lat = override?.lat ?? addr.latitude;
+    const lng = override?.lng ?? addr.longitude;
+    if (lat != null && lng != null) {
+      raw.latitude = lat;
+      raw.longitude = lng;
     }
     const { value } = this.resolveGeoNames(raw);
     return value;
