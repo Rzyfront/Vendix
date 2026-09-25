@@ -674,6 +674,32 @@ export class CheckoutService {
     return Object.values(normalized).some(Boolean) ? normalized : null;
   }
 
+  /**
+   * Alias de cliente para la venta guest sin identidad resuelta.
+   *
+   * Cuando `resolved_customer_id` es null (invitado solo-nombre: sin email ni
+   * teléfono que permitan resolver/crear el `users` vía
+   * `resolveGuestCustomerForCheckout`) y hay nombre, la orden se persiste con
+   * `customer_id = null` + `customer_alias = trim(nombre)` truncado a 100
+   * caracteres (límite del `VARCHAR(100)` de `orders.customer_alias`). Con
+   * cliente resuelto el alias queda en null (XOR `orders_customer_xor_alias`).
+   */
+  private static resolveGuestCustomerAlias(
+    guest: {
+      first_name?: string | null;
+      last_name?: string | null;
+    } | null,
+    resolved_customer_id: number | null,
+  ): string | null {
+    if (resolved_customer_id != null || !guest) return null;
+    const alias = [guest.first_name, guest.last_name]
+      .filter((part) => typeof part === 'string' && part.trim().length > 0)
+      .join(' ')
+      .trim()
+      .slice(0, 100);
+    return alias.length > 0 ? alias : null;
+  }
+
   private async createInvoiceIfConfigured(
     orderId: number,
   ): Promise<number | null> {
@@ -1718,11 +1744,17 @@ export class CheckoutService {
       dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
       delivery_type,
     );
+    // Guest solo-nombre: sin cliente resuelto el nombre viaja como alias.
+    const guest_customer_alias = CheckoutService.resolveGuestCustomerAlias(
+      guest_customer,
+      resolved_customer_id,
+    );
     // store_id y customer_id (user_id) se inyectan automáticamente
     const order = await this.prisma.orders.create({
       data: {
         order_number,
         customer_id: resolved_customer_id,
+        customer_alias: guest_customer_alias,
         // Canal unificado CP-tienda-checkout-whatsapp: "Finalizar por
         // WhatsApp" recorre este mismo núcleo con channel='whatsapp'; el
         // endpoint legacy POST /whatsapp sigue creando channel='whatsapp'
@@ -1979,6 +2011,9 @@ export class CheckoutService {
     return {
       order_id: order.id,
       order_number: order.order_number,
+      customer_id: (order as any).customer_id ?? resolved_customer_id ?? null,
+      customer_alias:
+        (order as any).customer_alias ?? guest_customer_alias ?? null,
       // Contrato numérico: Prisma devuelve Decimal (serializa como string);
       // el storefront tipa `total: number` (auditoría D.3).
       total: this.roundMoney(Number(order.grand_total)),
@@ -2542,10 +2577,16 @@ export class CheckoutService {
       'whatsapp',
       wa_delivery_type,
     );
+    // Mismo alias guest que el núcleo web (endpoint legacy, mismo contrato).
+    const wa_guest_customer_alias = CheckoutService.resolveGuestCustomerAlias(
+      guest_customer,
+      resolved_customer_id,
+    );
     const order = await this.prisma.orders.create({
       data: {
         order_number,
         customer_id: resolved_customer_id,
+        customer_alias: wa_guest_customer_alias,
         channel: 'whatsapp',
         currency: cart_currency,
         subtotal_amount: subtotal,
@@ -2692,6 +2733,9 @@ export class CheckoutService {
     return {
       order_id: order.id,
       order_number: order.order_number,
+      customer_id: (order as any).customer_id ?? resolved_customer_id ?? null,
+      customer_alias:
+        (order as any).customer_alias ?? wa_guest_customer_alias ?? null,
       total: order.grand_total,
       public_order_token: guestArtifacts?.invoice_data_token ?? null,
       invoice_data_token: guestArtifacts?.invoice_data_token ?? null,
