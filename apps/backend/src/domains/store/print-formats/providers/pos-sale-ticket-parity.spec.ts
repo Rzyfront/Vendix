@@ -312,3 +312,76 @@ describe('pos-sale-ticket — envío con factura: subtotal sin envío, envío = 
     }
   });
 });
+/**
+ * B6 — el ticket NO fiscal incluye la fila del impuesto del envío
+ * («INC (incl. envío)») cuando la orden trae copia con
+ * `shipping_tax_amount > 0`. Fila PROPIA, no fusionada con el grupo de
+ * productos: `aggregateTaxes` solo lee `order_item_taxes`, así que sin
+ * `buildShippingTaxBreakdownRow` el tributo del domicilio no salía aunque
+ * el total sí lo cobró. Sin copia ⇒ sin fila (modelo byte-idéntico).
+ */
+describe('pos-sale-ticket — B6: fila del impuesto del envío en el ticket no fiscal', () => {
+  const store = {
+    name: 'Tienda Test',
+    organizations: { tax_id: '900.000.000-1' },
+    addresses: [],
+  };
+
+  const order = (over: any = {}) => ({
+    id: 41,
+    order_number: 'POS-0041',
+    created_at: new Date('2026-09-25T16:00:00.000Z'),
+    state: 'finished',
+    order_items: [],
+    users: null,
+    stores: store,
+    table_sessions: [],
+    ...over,
+  });
+
+  const makeProvider = (orderRow: any) =>
+    new PosSaleTicketDataProvider({
+      orders: { findFirst: jest.fn().mockResolvedValue(orderRow) },
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as any);
+
+  it('orden con envío gravado (INC 8 % incluido): el bloque taxes trae la fila «INC (incl. envío)»', async () => {
+    // Domicilio $15.000 con INC 8 % incluido: base 13888.89 + impuesto
+    // 1111.11. La copia guarda fracción (Decimal(6,5) ⇒ 0.08).
+    const orderRow = order({
+      subtotal_amount: 46296.3,
+      discount_amount: 0,
+      tax_amount: 3703.7,
+      shipping_cost: 15000,
+      shipping_tax_type: 'inc',
+      shipping_tax_rate: 0.08,
+      shipping_tax_amount: 1111.11,
+      grand_total: 65000,
+    });
+
+    const { taxes } = await makeProvider(orderRow).fetchDocumentData(10, 41);
+
+    expect(taxes).toEqual([
+      expect.objectContaining({
+        name: 'INC (incl. envío)',
+        rate: 8,
+        base_amount: 13888.89,
+        tax_amount: 1111.11,
+      }),
+    ]);
+  });
+
+  it('orden sin copia del impuesto del envío: sin fila extra (modelo intacto)', async () => {
+    const orderRow = order({
+      subtotal_amount: 10000,
+      discount_amount: 0,
+      tax_amount: 1900,
+      shipping_cost: 5000,
+      grand_total: 16900,
+    });
+
+    const { taxes } = await makeProvider(orderRow).fetchDocumentData(10, 41);
+
+    expect(taxes).toEqual([]);
+  });
+});
