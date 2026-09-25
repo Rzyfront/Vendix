@@ -143,10 +143,10 @@ export type { PopProductConfigResult };
                 <div class="max-w-[14rem]">
                   <app-input
                     type="number"
-                    [min]="0"
-                    [step]="1"
-                    [value]="configureMinStockLevel() ?? ''"
-                    (valueChange)="onConfigureMinStockChange($event)"
+                    min="0"
+                    step="1"
+                    [ngModel]="configureMinStockLevel()"
+                    (ngModelChange)="onConfigureMinStockChange($event)"
                     [placeholder]="defaultLowStockPlaceholder()"
                   ></app-input>
                 </div>
@@ -246,7 +246,7 @@ export type { PopProductConfigResult };
                       type="number"
                       formControlName="min_stock_level"
                       [min]="0"
-                      [step]="1"
+                      step="1"
                       [placeholder]="defaultLowStockPlaceholder()"
                       tooltipText="Cantidad mínima antes de alertar stock bajo. Si se deja vacío, usa el valor por defecto de la tienda."
                     ></app-input>
