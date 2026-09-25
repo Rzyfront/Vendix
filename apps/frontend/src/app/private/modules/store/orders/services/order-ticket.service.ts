@@ -9,22 +9,6 @@ import { TicketData, TicketItem } from '../../pos/models/ticket.model';
 const DEFAULT_CASHIER_NAME = 'Administrador';
 
 /**
- * CP-REFUND-FLOW-REDESIGN paso 9 — caché de cobertura por línea que el
- * backend publica en cada `order_items` (columnas aditivas `refunded_qty` /
- * `refunded_amount` del paso 3, seleccionadas por defecto en `findOne`).
- *
- * Vive acá —y no en `order.interface.ts`— porque esa interfaz es territorio
- * del paso 8: este servicio lee el caché con un cast estructural local (`as
- * OrderItem & OrderItemRefundCache`) en vez de exigir las columnas en el
- * tipo compartido. Cuando el paso 8 las declare, el cast sigue compilando
- * (intersección redundante pero válida) y puede retirarse.
- */
-interface OrderItemRefundCache {
-  refunded_qty?: number | null;
-  refunded_amount?: number | string | null;
-}
-
-/**
  * CP-REFUND-FLOW-REDESIGN paso 9 — una línea reembolsada de la sección
  * Reembolsos/NC. Espejo del `lines[]` que los providers backend
  * (`pos-sale-ticket`, `sales-order-invoice`) publican en
@@ -174,12 +158,11 @@ export class OrderTicketService {
     const total = Number(order.grand_total) || 0;
     const refundLines: TicketRefundLine[] = (order.order_items || [])
       .map((item) => {
-        const cached = item as OrderItem & OrderItemRefundCache;
         return {
           order_item_id: item.id,
           product_name: item.product_name || 'Producto',
-          refunded_qty: Number(cached.refunded_qty || 0),
-          refunded_amount: Number(cached.refunded_amount || 0),
+          refunded_qty: Number(item.refunded_qty || 0),
+          refunded_amount: Number(item.refunded_amount || 0),
         };
       })
       .filter((line) => line.refunded_qty > 0);
