@@ -240,15 +240,131 @@ describe('OrdersService — contrato titular (BE-2)', () => {
       expect(prisma.orders.update).toHaveBeenCalled();
     });
 
-    it('cambio solo de alias no consulta facturas (no es titular fiscal)', async () => {
+    it('cambio solo de alias no consulta la guarda (la única lectura es active_sales_invoice de findOne)', async () => {
       prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
       prisma.orders.update.mockResolvedValue({
         ...draftOrder,
         customer_alias: 'Mesa 5',
       });
       await service.update(924, { customer_alias: 'Mesa 5' } as any);
-      expect(prisma.invoices.findFirst).not.toHaveBeenCalled();
+      // Release-854 paso 2: findOne() siempre resuelve active_sales_invoice
+      // (1 lectura). La guarda de titular no corre para alias, así que no
+      // hay segunda lectura ni propagación.
+      expect(prisma.invoices.findFirst).toHaveBeenCalledTimes(1);
+      expect(invoicing.update).not.toHaveBeenCalled();
       expect(prisma.orders.update).toHaveBeenCalled();
+    });
+  });
+
+  describe('PATCH titular — compensación (release-854 paso 1)', () => {
+    it('si orders.update falla tras propagar, revierte el borrador al customer_id previo y relanza el error original', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      prisma.invoices.findFirst.mockResolvedValue({
+        id: 79,
+        status: 'draft',
+        customer_id: 12,
+      });
+      const original = new Error('boom de BD');
+      prisma.orders.update.mockRejectedValueOnce(original);
+
+      const caught = await service
+        .update(924, { customer_id: 217 } as any)
+        .catch((e: unknown) => e);
+
+      expect(caught).toBe(original);
+      expect(invoicing.update).toHaveBeenCalledTimes(2);
+      expect(invoicing.update).toHaveBeenNthCalledWith(1, 79, {
+        customer_id: 217,
+      });
+      expect(invoicing.update).toHaveBeenNthCalledWith(2, 79, {
+        customer_id: 12,
+      });
+    });
+
+    it('si la reversión también falla, registra order_id e invoice_id y relanza el error original', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      prisma.invoices.findFirst.mockResolvedValue({
+        id: 79,
+        status: 'draft',
+        customer_id: 12,
+      });
+      const original = new Error('boom de BD');
+      prisma.orders.update.mockRejectedValueOnce(original);
+      // 1.ª llamada (propagación) OK, 2.ª (reversión) falla.
+      invoicing.update
+        .mockResolvedValueOnce(undefined as any)
+        .mockRejectedValueOnce(new Error('reversión rota'));
+      const loggerError = jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined);
+
+      const caught = await service
+        .update(924, { customer_id: 217 } as any)
+        .catch((e: unknown) => e);
+
+      try {
+        expect(caught).toBe(original);
+        expect(invoicing.update).toHaveBeenCalledTimes(2);
+        expect(loggerError).toHaveBeenCalledTimes(1);
+        expect(String(loggerError.mock.calls[0][0])).toContain('order_id=924');
+        expect(String(loggerError.mock.calls[0][0])).toContain('invoice_id=79');
+      } finally {
+        loggerError.mockRestore();
+      }
+    });
+
+    it('sin propagación (sin factura) el fallo de orders.update no toca facturación', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      const original = new Error('boom de BD');
+      prisma.orders.update.mockRejectedValueOnce(original);
+
+      const caught = await service
+        .update(924, { customer_id: 217 } as any)
+        .catch((e: unknown) => e);
+
+      expect(caught).toBe(original);
+      expect(invoicing.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findOne — active_sales_invoice (release-854 paso 2)', () => {
+    it('NC como última factura + sales_invoice aceptada → active_sales_invoice.status === accepted', async () => {
+      prisma.orders.findFirst.mockResolvedValue({
+        ...draftOrder,
+        invoices: [{ id: 90, invoice_type: 'credit_note', status: 'accepted' }],
+      });
+      prisma.invoices.findFirst.mockResolvedValue({
+        id: 77,
+        status: 'accepted',
+        customer_id: 12,
+      });
+
+      const result = await service.findOne(924);
+
+      expect(result.active_sales_invoice).toEqual({
+        id: 77,
+        status: 'accepted',
+      });
+      expect(prisma.invoices.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            order_id: 924,
+            invoice_type: 'sales_invoice',
+            status: { notIn: ['voided', 'cancelled'] },
+          }),
+        }),
+      );
+    });
+
+    it('sin factura vigente → active_sales_invoice es null', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+
+      const result = await service.findOne(924);
+
+      expect(result.active_sales_invoice).toBeNull();
     });
   });
 
