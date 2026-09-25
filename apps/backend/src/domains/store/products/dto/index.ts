@@ -806,6 +806,34 @@ export class UpdateProductDto {
 
   @ApiPropertyOptional({
     description:
+      'Umbral de stock bajo por producto. null o 0 activa el fallback a la configuración de la tienda.',
+  })
+  @IsOptional()
+  @IsInt({ message: 'El stock mínimo debe ser un número entero' })
+  @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
+  @Min(0, { message: 'El stock mínimo no puede ser negativo' })
+  min_stock_level?: number | null;
+
+  @IsOptional()
+  @IsInt({ message: 'El stock máximo debe ser un número entero' })
+  @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
+  @Min(0, { message: 'El stock máximo no puede ser negativo' })
+  max_stock_level?: number | null;
+
+  @IsOptional()
+  @IsInt({ message: 'El punto de reorden debe ser un número entero' })
+  @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
+  @Min(0, { message: 'El punto de reorden no puede ser negativo' })
+  reorder_point?: number | null;
+
+  @IsOptional()
+  @IsInt({ message: 'La cantidad de reorden debe ser un número entero' })
+  @Transform(({ value }) => (value === null || value === '' || value === undefined ? null : Number(value)))
+  @Min(0, { message: 'La cantidad de reorden no puede ser negativa' })
+  reorder_quantity?: number | null;
+
+  @ApiPropertyOptional({
+    description:
       'Alias histórico de base_price. Si mandas los dos, manda el mismo valor; para editar el precio usa base_price.',
   })
   @IsOptional()
