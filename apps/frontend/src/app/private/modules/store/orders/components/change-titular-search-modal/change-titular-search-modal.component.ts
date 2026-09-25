@@ -50,7 +50,8 @@ type TitularSearchStep = 'search' | 'create';
       size="md"
     >
       <!-- Tab Navigation -->
-      <div class="flex border-b border-[var(--color-border)] -mx-6 -mt-6 px-6 mb-6" role="tablist" aria-label="Modo de titular">
+      <!-- full-bleed calibrado al padding del body de app-modal (px-3 py-2.5 md:px-5 md:py-4): evita scroll horizontal -->
+      <div class="flex border-b border-[var(--color-border)] -mx-3 -mt-2.5 px-3 md:-mx-5 md:-mt-4 md:px-5 mb-6" role="tablist" aria-label="Modo de titular">
         <button
           type="button"
           role="tab"
