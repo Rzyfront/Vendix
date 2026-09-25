@@ -4171,20 +4171,18 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * Release-853 paso 10 — espejo local del gate backend
-   * `ORD_TITULAR_INVOICED_001`: la orden tiene `sales_invoice` con estado
-   * fuera de draft/voided/cancelled. Tipo o estado ausentes se tratan como
-   * factura vigente (falla cerrado: el backend es el guard real).
+   * Release-854 follow-up — espejo local del gate backend
+   * `ORD_TITULAR_INVOICED_001`: decide con `active_sales_invoice` (calculado
+   * por el backend con el filtro de la guarda) en lugar de `invoices[0]`,
+   * que puede ser una NC aunque exista una `sales_invoice` aceptada. El
+   * borrador sí deja pasar porque el backend le propaga el titular.
+   * `orderInvoice` y la tarjeta de factura no cambian: siguen mostrando
+   * `invoices[0]`.
    */
   private hasActiveSalesInvoice(): boolean {
-    const invoice = this.orderInvoice();
-    if (!invoice) return false;
-    const isSalesInvoice =
-      invoice.invoice_type === undefined ||
-      invoice.invoice_type === 'sales_invoice';
-    if (!isSalesInvoice) return false;
-    const status = invoice.status;
-    return status !== 'draft' && status !== 'voided' && status !== 'cancelled';
+    const active = this.order()?.active_sales_invoice;
+    if (!active) return false;
+    return active.status !== 'draft';
   }
 
   /**

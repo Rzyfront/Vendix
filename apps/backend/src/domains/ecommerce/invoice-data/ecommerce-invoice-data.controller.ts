@@ -339,8 +339,9 @@ export class EcommerceInvoiceDataController {
       return projected;
     }
 
-    // Rama KDS — misma proyección comensal: sin COGS/costos/receta/sku ni
-    // ids internos; solo estado presentacional del plato.
+    // Rama KDS — misma proyección comensal: se emite `order_item_id`
+    // como clave de agrupación por línea; sin costos, PII ni staff, solo
+    // estado presentacional del plato.
     const guestType = GUEST_KDS_MAP[type] ?? 'kitchen.update';
     const ticket = (ev.ticket ?? {}) as Record<string, unknown>;
     const rawItems = Array.isArray(ticket.items)

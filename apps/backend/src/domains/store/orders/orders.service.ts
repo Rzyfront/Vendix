@@ -1329,9 +1329,18 @@ export class OrdersService {
       }
     }
 
+    // Release-854 follow-up paso 2 — campo aditivo para el pre-chequeo
+    // del frontend. El `invoices[0]` del include sigue siendo la última
+    // factura de CUALQUIER tipo (lo necesita la tarjeta del detalle); este
+    // campo responde otra pregunta: ¿hay una `sales_invoice` vigente?
+    const activeSalesInvoice = await this.findActiveSalesInvoice(id);
+
     return {
       ...order,
       cancellation_policy: getOrderCancellationPolicy(order),
+      active_sales_invoice: activeSalesInvoice
+        ? { id: activeSalesInvoice.id, status: activeSalesInvoice.status }
+        : null,
     };
   }
 
@@ -1462,17 +1471,13 @@ export class OrdersService {
     const titularCustomerChanged =
       Object.prototype.hasOwnProperty.call(updateOrderDto, 'customer_id') &&
       updateOrderDto.customer_id !== order.customer_id;
-    let draftInvoiceToPropagate: { id: number } | null = null;
+    let draftInvoiceToPropagate: {
+      id: number;
+      status: string;
+      customer_id: number | null;
+    } | null = null;
     if (titularCustomerChanged) {
-      const titularInvoice = await this.prisma.invoices.findFirst({
-        where: {
-          order_id: id,
-          invoice_type: 'sales_invoice',
-          status: { notIn: ['voided', 'cancelled'] },
-        },
-        select: { id: true, status: true },
-        orderBy: { id: 'desc' },
-      });
+      const titularInvoice = await this.findActiveSalesInvoice(id);
       if (titularInvoice && titularInvoice.status !== 'draft') {
         throw new VendixHttpException(
           ErrorCodes.ORD_TITULAR_INVOICED_001,
@@ -1596,6 +1601,15 @@ export class OrdersService {
     // orden): si falla, la orden queda intacta; y nada entre ambas
     // escrituras puede lanzar salvo un fallo de BD. `InvoicingService.update`
     // reconstruye el `titular_snapshot` desde la ficha del nuevo cliente.
+    //
+    // Release-854 follow-up paso 1 — compensación: se captura el
+    // `customer_id` previo del borrador antes de propagar. Si el write de
+    // la orden falla después, el `catch` de abajo lo restaura y relanza el
+    // error original. El `?? order.customer_id` cubre el borrador sin
+    // titular cargado: restaurar el titular vigente de la orden deja a
+    // ambas filas consistentes, que es la invariante que importa.
+    let propagatedDraft: { id: number; previousCustomerId: number } | null =
+      null;
     if (draftInvoiceToPropagate) {
       if (!this.invoicingService) {
         throw new VendixHttpException(
@@ -1604,66 +1618,93 @@ export class OrdersService {
           { invoice_id: draftInvoiceToPropagate.id, order_id: id },
         );
       }
+      const previousCustomerId =
+        draftInvoiceToPropagate.customer_id ?? order.customer_id;
       await this.invoicingService.update(draftInvoiceToPropagate.id, {
         customer_id: updateOrderDto.customer_id,
       });
+      propagatedDraft = { id: draftInvoiceToPropagate.id, previousCustomerId };
     }
 
-    const updatedOrder = await this.prisma.orders.update({
-      where: { id },
-      data: { ...updateOrderDto, updated_at: new Date() },
-      include: {
-        stores: { select: { id: true, name: true, store_code: true } },
-        order_items: {
-          include: {
-            products: {
-              include: {
-                product_images: {
-                  where: { is_main: true },
-                  take: 1,
+    let updatedOrder;
+    try {
+      updatedOrder = await this.prisma.orders.update({
+        where: { id },
+        data: { ...updateOrderDto, updated_at: new Date() },
+        include: {
+          stores: { select: { id: true, name: true, store_code: true } },
+          order_items: {
+            include: {
+              products: {
+                include: {
+                  product_images: {
+                    where: { is_main: true },
+                    take: 1,
+                  },
                 },
               },
-            },
-            product_variants: true,
-          },
-        },
-        addresses_orders_billing_address_idToaddresses: true,
-        addresses_orders_shipping_address_idToaddresses: true,
-        payments: true,
-        shipping_method: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-            provider_name: true,
-            min_days: true,
-            max_days: true,
-            logo_url: true,
-          },
-        },
-        shipping_rate: {
-          include: {
-            shipping_zone: {
-              select: { id: true, name: true, display_name: true },
+              product_variants: true,
             },
           },
-        },
-        users: {
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            email: true,
-            phone: true,
-            avatar_url: true,
-            legal_name: true,
-            document_type: true,
-            document_number: true,
-            person_type: true,
+          addresses_orders_billing_address_idToaddresses: true,
+          addresses_orders_shipping_address_idToaddresses: true,
+          payments: true,
+          shipping_method: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              provider_name: true,
+              min_days: true,
+              max_days: true,
+              logo_url: true,
+            },
+          },
+          shipping_rate: {
+            include: {
+              shipping_zone: {
+                select: { id: true, name: true, display_name: true },
+              },
+            },
+          },
+          users: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+              phone: true,
+              avatar_url: true,
+              legal_name: true,
+              document_type: true,
+              document_number: true,
+              person_type: true,
+            },
           },
         },
-      },
-    });
+      });
+    } catch (error) {
+      // Release-854 follow-up paso 1 — compensación: el borrador ya tiene
+      // el titular nuevo pero la orden no se escribió. Se restaura el
+      // `customer_id` previo del borrador y se relanza SIEMPRE el error
+      // original, nunca el de la compensación. Si la reversión también
+      // falla, queda en el log con los ids para reparación manual.
+      if (propagatedDraft && this.invoicingService) {
+        try {
+          await this.invoicingService.update(propagatedDraft.id, {
+            customer_id: propagatedDraft.previousCustomerId,
+          });
+        } catch (compensationError) {
+          this.logger.error(
+            `Orden ${id}: no se pudo revertir el titular del borrador ${propagatedDraft.id} ` +
+              `a customer_id=${propagatedDraft.previousCustomerId} tras fallar el write de la orden ` +
+              `(order_id=${id}, invoice_id=${propagatedDraft.id}): ` +
+              `${compensationError instanceof Error ? compensationError.message : String(compensationError)}`,
+          );
+        }
+      }
+      throw error;
+    }
 
     /**
      * El estado va DESPUÉS de la metadata, y el orden NO es cosmético.
@@ -1688,6 +1729,32 @@ export class OrdersService {
     }
 
     return updatedOrder;
+  }
+
+  /**
+   * Release-854 follow-up paso 2 — factura de venta vigente de la orden.
+   *
+   * El filtro es el de la guarda de titular de `update()` (espejo de
+   * `assertNotAlreadyInvoiced` de `InvoicingService`): `sales_invoice` no
+   * anulada ni cancelada, la más reciente. Se comparte entre la guarda y
+   * `findOne()` para que la regla viva en un solo lugar. `customer_id`
+   * viaja solo para la compensación del paso 1; el campo público
+   * `active_sales_invoice` proyecta únicamente `{ id, status }`.
+   */
+  private async findActiveSalesInvoice(orderId: number): Promise<{
+    id: number;
+    status: string;
+    customer_id: number | null;
+  } | null> {
+    return this.prisma.invoices.findFirst({
+      where: {
+        order_id: orderId,
+        invoice_type: 'sales_invoice',
+        status: { notIn: ['voided', 'cancelled'] },
+      },
+      select: { id: true, status: true, customer_id: true },
+      orderBy: { id: 'desc' },
+    });
   }
 
   private async assertTableOrderEditable(orderId: number, storeId: number): Promise<void> {

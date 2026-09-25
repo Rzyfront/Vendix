@@ -162,6 +162,14 @@ export interface Order {
    * detalle: ¿qué chips de estado fiscal pinto?).
    */
   invoices?: OrderInvoiceSnapshot[];
+  /**
+   * Release-854 follow-up: `sales_invoice` vigente de la orden, calculada
+   * por el backend con el mismo filtro que la guarda de `update()`
+   * (`orders.service.ts`, helper `findActiveSalesInvoice`). `null` = sin
+   * factura de venta vigente. Aditivo: `invoices[0]` sigue mostrando la
+   * última factura de cualquier tipo para la tarjeta.
+   */
+  active_sales_invoice?: { id: number; status: string } | null;
   /** Table session if order was placed at a restaurant table */
   table_sessions?: OrderTableSession[];
 }
