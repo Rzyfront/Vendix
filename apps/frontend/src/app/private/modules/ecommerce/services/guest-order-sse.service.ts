@@ -73,6 +73,28 @@ const KITCHEN_EVENT_STATUS: Record<GuestKitchenEventType, string> = {
 };
 
 /**
+ * Mapeo defensivo de una fila cruda de pago al shape vivo
+ * (`GuestSsePayment`). Compartido por `applySnapshot` y
+ * `applyPaymentUpdated`: `null` si no hay `state` usable; `payment_id`
+ * sólo cuando es número (`null` en otro caso) y `has_receipt` sólo con
+ * `true` estricto. Cada llamador decide qué hacer con un `payment_id`
+ * nulo (el snapshot lo conserva, el evento en vivo descarta la fila).
+ */
+function toGuestPayment(
+  raw: Record<string, unknown>,
+): GuestSsePayment | null {
+  if (typeof raw?.['state'] !== 'string') return null;
+  return {
+    payment_id:
+      typeof raw['payment_id'] === 'number'
+        ? (raw['payment_id'] as number)
+        : null,
+    state: raw['state'] as string,
+    has_receipt: raw['has_receipt'] === true,
+  };
+}
+
+/**
  * Anonymous SSE client for the public guest order page (`/pedido/:token`).
  *
  * Clon de `TableSessionSseService` sin dispositivos ni sesiones: el guest es
@@ -360,15 +382,8 @@ export class GuestOrderSseService {
     if (Array.isArray(order['payments'])) {
       const payments: GuestSsePayment[] = [];
       for (const raw of order['payments'] as Array<Record<string, unknown>>) {
-        if (typeof raw?.['state'] !== 'string') continue;
-        payments.push({
-          payment_id:
-            typeof raw['payment_id'] === 'number'
-              ? (raw['payment_id'] as number)
-              : null,
-          state: raw['state'] as string,
-          has_receipt: raw['has_receipt'] === true,
-        });
+        const mapped = toGuestPayment(raw);
+        if (mapped) payments.push(mapped);
       }
       this.paymentsLive.set(payments);
     }
@@ -385,19 +400,13 @@ export class GuestOrderSseService {
     const next: GuestSsePayment[] = this.paymentsLive().map((p) => ({ ...p }));
     let changed = false;
     for (const raw of rawPayments as Array<Record<string, unknown>>) {
-      if (typeof raw?.['state'] !== 'string') continue;
-      const incoming: GuestSsePayment = {
-        payment_id:
-          typeof raw['payment_id'] === 'number'
-            ? (raw['payment_id'] as number)
-            : null,
-        state: raw['state'] as string,
-        has_receipt: raw['has_receipt'] === true,
-      };
-      const idx =
-        incoming.payment_id == null
-          ? -1
-          : next.findIndex((p) => p.payment_id === incoming.payment_id);
+      const incoming = toGuestPayment(raw);
+      // Sin `payment_id` numérico no hay clave de fusión: se descarta la
+      // fila en vez de duplicarla con push (el idx -1 forzado de antes).
+      if (!incoming || incoming.payment_id == null) continue;
+      const idx = next.findIndex(
+        (p) => p.payment_id === incoming.payment_id,
+      );
       if (idx < 0) {
         next.push(incoming);
         changed = true;

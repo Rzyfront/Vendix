@@ -6,7 +6,7 @@ import {
   SETTLED_PAYMENT_STATES,
   CANCELABLE_ORDER_STATES,
 } from './order-cancellation-policy.util';
-import { OrderSseService, type OrderSseKind } from '../services/order-sse.service';
+import { OrderSseService } from '../services/order-sse.service';
 import {
   Injectable,
   NotFoundException,
@@ -1765,9 +1765,6 @@ export class OrderFlowService {
     // aplicó — un no-op no cambió ningún pago y sería ruido. Va antes del
     // `throw projectionError`: el pago commiteó y el SSE no debe perderse
     // por un fallo de proyección de mesa.
-    // `OrderSseKind` aún no incluye el tipo (order-sse.service.ts es lectura
-    // en este paso); el bus lo trata como string opaco. Follow-up: sumarlo
-    // al union.
     if (result.applied) {
       const payments = result.order.payments.map((payment) => ({
         payment_id: payment.id,
@@ -1775,15 +1772,24 @@ export class OrderFlowService {
         has_receipt: payment.receipt_s3_key != null,
       }));
       if (this.orderSse) {
-        this.orderSse.pushOrderEvent(
-          result.order.store_id,
-          orderId,
-          'order.payment_updated' as unknown as OrderSseKind,
-          { payments },
-        );
-        this.logger.debug(
-          `[flow/confirmPayment payment_updated] order=${orderId} payments=${payments.length}`,
-        );
+        try {
+          this.orderSse.pushOrderEvent(
+            result.order.store_id,
+            orderId,
+            'order.payment_updated',
+            { payments },
+          );
+          this.logger.debug(
+            `[flow/confirmPayment payment_updated] order=${orderId} payments=${payments.length}`,
+          );
+        } catch (error) {
+          // Post-commit: el pago ya commiteó; un fallo del bus SSE jamás
+          // debe convertirse en 500. Warn, nunca throw (simétrico a la
+          // rama else).
+          this.logger.warn(
+            `[flow/confirmPayment payment_updated] SSE falló; omitido order=${orderId} err=${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       } else {
         // Sólo en specs con construcción manual; en prod siempre resuelve.
         // Warn, nunca throw: el pago ya commiteó y un 500 aquí mentiría.
