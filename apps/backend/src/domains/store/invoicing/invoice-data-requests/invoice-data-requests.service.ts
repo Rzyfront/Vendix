@@ -1,9 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { S3Service } from '@common/services/s3.service';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { v4 as uuidv4 } from 'uuid';
+import * as crypto from 'crypto';
 import { Prisma } from '@prisma/client';
 import { SubmitInvoiceDataDto } from './dto/submit-invoice-data.dto';
 import {
@@ -58,6 +60,13 @@ export class InvoiceDataRequestsService {
     private readonly s3Service: S3Service,
   ) {}
 
+  // `S3PathHelper` es stateless (sin constructor): se instancia directo en
+  // vez de inyectarlo para NO cambiar la aridad del constructor — el spec
+  // existente construye el servicio con 6 args y `buildcheck:types` (CI)
+  // tipa los specs. La key sigue centralizada en el helper (skill
+  // vendix-s3-storage), solo cambia cómo se obtiene.
+  private readonly receiptPaths = new S3PathHelper();
+
   /**
    * Create a new invoice data request when a CF sale is completed.
    * Called internally by the POS payment flow.
@@ -97,8 +106,11 @@ export class InvoiceDataRequestsService {
       status: 'pending',
     } as InvoiceDataRequestEvent);
 
+    // F3 (roku-shop-checkout-tarifa-detalle-orden) — el token es la
+    // capability guest: jamás se loguea (antes iba en claro en esta línea).
+    // El `request.id` basta para correlacionar en los logs.
     this.logger.log(
-      `Invoice data request created for order #${orderId}, token: ${token}`,
+      `Invoice data request #${request.id} created for order #${orderId}`,
     );
 
     return request;
@@ -517,6 +529,233 @@ export class InvoiceDataRequestsService {
         invoice: request.order.invoices[0] || null,
       },
     };
+  }
+
+  /**
+   * Paso 4 (roku-shop-checkout-tarifa-detalle-orden) — mismo contrato de
+   * archivo que el checkout (`CheckoutService.RECEIPT_ALLOWED_MIME_TYPES` +
+   * `FileInterceptor` 5MB): el guest puede releer y cargar tardíamente el
+   * comprobante de transferencia/voucher de SU pedido.
+   */
+  private static readonly RECEIPT_ALLOWED_MIME_TYPES: readonly string[] = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/pdf',
+  ];
+  private static readonly RECEIPT_MAX_BYTES = 5 * 1024 * 1024;
+  private static readonly RECEIPT_URL_TTL_SECONDS = 300;
+
+  /**
+   * Paso 4 — binding server-side token→orden→pago para los endpoints guest
+   * de comprobante. La query es UNA sola lectura relacional desde
+   * `invoice_data_requests` (getter SIN scope: el token es global por
+   * diseño, paso 3) y el vínculo pago↔orden lo impone la propia relación
+   * (`payments.where.order_id`), no un parámetro del cliente. No depende
+   * del `store_id` del contexto: funciona con host resuelto, `?store_id=` o
+   * sin ninguno.
+   *
+   * 404 ciego: token ajeno/inexistente y pago de otra orden responden el
+   * mismo shape de "no existe" sin distinguirlos.
+   */
+  private async resolveGuestPayment(token: string, paymentId: number) {
+    const request = await this.prisma.invoice_data_requests.findUnique({
+      where: { token },
+      select: {
+        id: true,
+        store_id: true,
+        order_id: true,
+        order: {
+          select: {
+            id: true,
+            payments: {
+              where: { id: paymentId },
+              select: {
+                id: true,
+                order_id: true,
+                receipt_s3_key: true,
+                receipt_uploaded_at: true,
+                store_payment_method: {
+                  select: {
+                    system_payment_method: { select: { type: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DATA_REQUEST_002,
+        'El enlace para solicitar tu factura no es válido. Pídele a la tienda uno nuevo.',
+      );
+    }
+
+    const payment = request.order?.payments?.[0] ?? null;
+    if (!payment) {
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+    }
+
+    return { request, payment };
+  }
+
+  /**
+   * Paso 4 — clon guest de `CheckoutService.getPaymentReceiptUrl`: URL
+   * firmada TTL 5 min + HEAD de content-type. La autorización es el binding
+   * de arriba (capability = token uuid en path), no el scope de comprador.
+   */
+  async getGuestPaymentReceiptUrl(
+    token: string,
+    paymentId: number,
+  ): Promise<{ url: string; expires_at: string; content_type: string | null }> {
+    const { payment } = await this.resolveGuestPayment(token, paymentId);
+
+    if (!payment.receipt_s3_key) {
+      throw new VendixHttpException(ErrorCodes.PAY_RECEIPT_NOT_FOUND_001);
+    }
+
+    const TTL_SECONDS =
+      InvoiceDataRequestsService.RECEIPT_URL_TTL_SECONDS;
+    const [url, head] = await Promise.all([
+      this.s3Service.getPresignedUrl(payment.receipt_s3_key, TTL_SECONDS),
+      this.s3Service.headObject(payment.receipt_s3_key),
+    ]);
+    const expires_at = new Date(
+      Date.now() + TTL_SECONDS * 1000,
+    ).toISOString();
+
+    return { url, expires_at, content_type: head?.contentType ?? null };
+  }
+
+  /**
+   * Paso 4 — subida tardía del comprobante desde la vista guest. Mismo
+   * contrato que el checkout: solo métodos `bank_transfer`/`voucher`
+   * (el tipo ya es visible en el summary, así que el 400 no filtra nada
+   * nuevo), MIME imagen/PDF, 5MB (el `FileInterceptor` del controller
+   * corta con 413; la guarda de acá es defensa si la config deriva).
+   *
+   * Re-subir REEMPLAZA la key (mismo orphan-policy que el checkout: el
+   * objeto viejo se purga offline, sin rollback en el happy path).
+   */
+  async uploadGuestPaymentReceipt(
+    token: string,
+    paymentId: number,
+    file: Express.Multer.File | undefined,
+  ): Promise<{
+    payment_id: number;
+    has_receipt: boolean;
+    receipt_content_type: string | null;
+    receipt_uploaded_at: Date;
+  }> {
+    const { request, payment } = await this.resolveGuestPayment(
+      token,
+      paymentId,
+    );
+
+    const methodType =
+      payment.store_payment_method?.system_payment_method?.type ?? null;
+    if (methodType !== 'bank_transfer' && methodType !== 'voucher') {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Este medio de pago no recibe comprobante. Solo transferencia y voucher lo permiten.',
+      );
+    }
+
+    if (!file || !file.buffer?.length) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Adjunta el comprobante de tu transferencia (imagen o PDF, máximo 5 MB).',
+      );
+    }
+
+    if (
+      !file.mimetype ||
+      !InvoiceDataRequestsService.RECEIPT_ALLOWED_MIME_TYPES.includes(
+        file.mimetype,
+      )
+    ) {
+      throw new VendixHttpException(ErrorCodes.VALIDATION_FILE_TYPE);
+    }
+
+    if (file.size > InvoiceDataRequestsService.RECEIPT_MAX_BYTES) {
+      throw new PayloadTooLargeException(
+        'El comprobante supera los 5 MB. Comprime la imagen o el PDF e inténtalo de nuevo.',
+      );
+    }
+
+    const key = await this.uploadGuestReceipt(file, request.store_id);
+    const receipt_uploaded_at = new Date();
+    // `payments` SÍ está scopeado en `StorePrismaService`, pero el update va
+    // por PK + `order_id` del binding: aunque el scope aporte el filtro de
+    // tienda, el vínculo token→orden→pago ya quedó verificado arriba y la
+    // fila solo se toca si pertenece a esta orden.
+    await this.prisma.payments.updateMany({
+      where: { id: payment.id, order_id: request.order_id },
+      data: { receipt_s3_key: key, receipt_uploaded_at },
+    });
+
+    return {
+      payment_id: payment.id,
+      has_receipt: true,
+      receipt_content_type: file.mimetype,
+      receipt_uploaded_at,
+    };
+  }
+
+  /**
+   * Clon de `CheckoutService.uploadCheckoutReceipt` con la tienda tomada del
+   * binding (orden del token), no del contexto: el guest no tiene tienda en
+   * ALS. Misma key `.../receipts/{YYYY}/{MM}/{uuid}-{sanitized}`.
+   */
+  private async uploadGuestReceipt(
+    file: Express.Multer.File,
+    storeId: number,
+  ): Promise<string> {
+    // `stores`/`organizations` son getters globales (sin scope): el filtro
+    // por id tiene que ser explícito (misma nota que en checkout).
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { id: true, slug: true, organization_id: true },
+    });
+    if (!store) {
+      throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
+    }
+
+    const organization = await this.prisma.organizations.findUnique({
+      where: { id: store.organization_id },
+      select: { id: true, slug: true },
+    });
+    if (!organization) {
+      throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
+    }
+
+    const basePath = this.receiptPaths.buildReceiptPath(
+      { id: organization.id, slug: organization.slug },
+      { id: store.id, slug: store.slug },
+    );
+
+    const now = new Date();
+    const year = String(now.getUTCFullYear());
+    const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+
+    const safeFilename = this.sanitizeReceiptFilename(file.originalname);
+    const key = `${basePath}/${year}/${month}/${crypto.randomUUID()}-${safeFilename}`;
+
+    await this.s3Service.uploadFile(file.buffer, key, file.mimetype);
+    return key;
+  }
+
+  /**
+   * Clon de `CheckoutService.sanitizeReceiptFilename`: solo
+   * `[a-zA-Z0-9._-]`, resto a `_`; vacío ⇒ `receipt`.
+   */
+  private sanitizeReceiptFilename(name: string | undefined | null): string {
+    const base = (name ?? '').split(/[\\/]/).pop() ?? '';
+    const sanitized = base.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return sanitized.length > 0 ? sanitized : 'receipt';
   }
 
   /**
