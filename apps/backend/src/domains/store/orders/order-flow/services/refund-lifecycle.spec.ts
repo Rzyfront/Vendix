@@ -149,7 +149,11 @@ describe('RefundFlowService — gate de ciclo de vida (pasos 1+2, CP-REFUND-FLOW
     it('serializa la creación con FOR UPDATE sobre la orden', async () => {
       await service.createRefund(1, cashDto() as any);
 
-      const selects = mockPrisma.$queryRaw.mock.calls.map((c: any[]) => String(c[0][0]));
+      // $queryRaw es tag template: c[0] es el array de chunks, hay que unirlos
+      // todos ('FOR UPDATE' vive en el último chunk, no en el primero).
+      const selects = mockPrisma.$queryRaw.mock.calls.map((c: any[]) =>
+        Array.isArray(c[0]) ? (c[0] as string[]).join('') : String(c[0]),
+      );
       expect(selects.some((s: string) => s.includes('FOR UPDATE'))).toBe(true);
       expect(selects.some((s: string) => s.includes('FROM orders'))).toBe(true);
     });
@@ -191,8 +195,11 @@ describe('RefundFlowService — gate de ciclo de vida (pasos 1+2, CP-REFUND-FLOW
     });
 
     it('P2002 en la ventana del claim mapea a REF_CREATE_001 (conflicto, no 500)', async () => {
-      mockPrisma.$transaction.mockImplementationOnce(async (_cb: any, onReject: any) =>
-        onReject(Object.assign(new Error('Unique constraint'), { code: 'P2002' })),
+      // El mapeo vive en el rejection handler del `.then()` del servicio
+      // ($transaction recibe 1 arg): se provoca el P2002 dentro del cuerpo
+      // de la tx para ejercitar el camino real, no un onReject simulado.
+      mockPrisma.$queryRaw.mockRejectedValueOnce(
+        Object.assign(new Error('Unique constraint'), { code: 'P2002' }),
       );
 
       await expect(service.createRefund(1, cashDto() as any)).rejects.toMatchObject({

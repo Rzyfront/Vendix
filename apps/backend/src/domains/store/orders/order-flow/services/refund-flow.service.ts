@@ -2160,8 +2160,13 @@ export class RefundFlowService {
     const orderTaxRows = (order.order_items ?? []).flatMap(
       (item) => item.order_item_taxes ?? [],
     );
+    // B1 gate step 10: buildTaxBreakdown exige tax_amount presente; la
+    // normalización vive en el borde (filas ?? 0 se ignoran igual adentro).
+    const taxRows = (itemTaxRows.length > 0 ? itemTaxRows : orderTaxRows).map(
+      (row) => ({ ...row, tax_amount: row.tax_amount ?? 0 }),
+    );
     const tax_breakdown = scaleBreakdownToTotal(
-      buildTaxBreakdown(itemTaxRows.length > 0 ? itemTaxRows : orderTaxRows),
+      buildTaxBreakdown(taxRows),
       productTax,
     );
     const shippingRefundCents = Math.round(
