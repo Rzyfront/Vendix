@@ -4115,15 +4115,23 @@ export class OrderDetailsPageComponent {
    * Punto de entrada de "Cambiar cliente".
    *
    * PRE-CHECK (espejo del guard backend `ORD_EDIT_NOT_ALLOWED_001` en
-   * `orders.service.ts`): el titular solo cambia en `created`/`draft`. En
-   * cualquier otro estado se muestra el dialog informativo y no se abre
-   * ningún modal. En estado editable se abre el buscar-primero; el
-   * `app-customer-modal` en modo crear solo aparece vía "Crear cliente nuevo".
+   * `orders.service.ts`): el titular cambia en created/draft/pending_payment/
+   * processing/pending_delivery. En shipped/delivered/finished/cancelled/
+   * refunded se muestra el dialog informativo y no se abre ningún modal.
+   * En estado editable se abre el buscar-primero; el `app-customer-modal`
+   * en modo crear solo aparece vía "Crear cliente nuevo".
    */
   async openChangeCustomer(): Promise<void> {
     const order = this.order();
     if (!order) return;
-    if (order.state !== 'created' && order.state !== 'draft') {
+    const TITULAR_LOCKED_STATES: readonly OrderState[] = [
+      'shipped',
+      'delivered',
+      'finished',
+      'cancelled',
+      'refunded',
+    ];
+    if (TITULAR_LOCKED_STATES.includes(order.state)) {
       await this.notifyTitularLocked();
       return;
     }

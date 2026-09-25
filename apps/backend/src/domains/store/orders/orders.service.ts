@@ -1403,17 +1403,23 @@ export class OrdersService {
     if (economicFields.some((key) => Object.prototype.hasOwnProperty.call(updateOrderDto, key))) assertNoActiveFinancialSplit(order);
 
     // Contrato PATCH titular: el cambio de titular (customer_id/customer_alias)
-    // por esta vía exige el mismo estado editable que `updateOrderFromEditor`
-    // (created/draft). En cualquier otro estado el titular es inmutable y se
-    // responde 409 ORD_EDIT_NOT_ALLOWED_001, igual que el editor.
+    // se permite mientras la orden no haya salido ni esté cerrada
+    // (created/draft/pending_payment/processing/pending_delivery). Una vez
+    // enviada, entregada, finalizada, cancelada o reembolsada el titular es
+    // inmutable y se responde 409 ORD_EDIT_NOT_ALLOWED_001.
+    // Más laxo que `updateOrderFromEditor` (sigue en created/draft) porque el
+    // titular no recotiza ni mueve stock; el editor sí.
+    const TITULAR_LOCKED_STATES = [
+      'shipped',
+      'delivered',
+      'finished',
+      'cancelled',
+      'refunded',
+    ];
     const touchesTitular =
       Object.prototype.hasOwnProperty.call(updateOrderDto, 'customer_id') ||
       Object.prototype.hasOwnProperty.call(updateOrderDto, 'customer_alias');
-    if (
-      touchesTitular &&
-      order.state !== 'created' &&
-      order.state !== 'draft'
-    ) {
+    if (touchesTitular && TITULAR_LOCKED_STATES.includes(order.state)) {
       throw new VendixHttpException(ErrorCodes.ORD_EDIT_NOT_ALLOWED_001);
     }
     // Titular del store: un customer_id de otra tienda se rechaza con 403

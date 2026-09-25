@@ -8,8 +8,10 @@ import { ErrorCodes } from 'src/common/errors';
  * - findAll/findOne proyectan users{legal_name, document_type,
  *   document_number, person_type} y el OR de búsqueda matchea legal_name y
  *   phone case-insensitive con scope tenant.
- * - PATCH /store/orders/:id con cambio de titular exige created/draft
- *   (409 ORD_EDIT_NOT_ALLOWED_001 en el resto) y cliente del store
+ * - PATCH /store/orders/:id con cambio de titular permite
+ *   created/draft/pending_payment/processing/pending_delivery
+ *   (409 ORD_EDIT_NOT_ALLOWED_001 en shipped/delivered/finished/
+ *   cancelled/refunded) y exige cliente del store
  *   (403 ORD_EDIT_CUSTOMER_STORE_MISMATCH_001).
  */
 describe('OrdersService — contrato titular (BE-2)', () => {
@@ -62,7 +64,7 @@ describe('OrdersService — contrato titular (BE-2)', () => {
   };
 
   describe('PATCH titular — gate de estado', () => {
-    it.each(['finished', 'processing', 'cancelled', 'refunded', 'shipped'])(
+    it.each(['shipped', 'delivered', 'finished', 'cancelled', 'refunded'])(
       'rechaza cambio de titular en estado=%s con 409 ORD_EDIT_NOT_ALLOWED_001',
       async (state) => {
         prisma.orders.findFirst.mockResolvedValue({ ...draftOrder, state });
@@ -72,6 +74,33 @@ describe('OrdersService — contrato titular (BE-2)', () => {
           errorCode: ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code,
         });
         expect(prisma.orders.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      'created',
+      'draft',
+      'pending_payment',
+      'processing',
+      'pending_delivery',
+    ])(
+      'permite cambio de titular en estado=%s cuando el cliente es del store (200)',
+      async (state) => {
+        prisma.orders.findFirst.mockResolvedValue({ ...draftOrder, state });
+        prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+        prisma.orders.update.mockResolvedValue({
+          ...draftOrder,
+          state,
+          customer_id: 217,
+        });
+        const result = await service.update(924, { customer_id: 217 } as any);
+        expect(result.customer_id).toBe(217);
+        expect(prisma.orders.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: 924 },
+            data: expect.objectContaining({ customer_id: 217 }),
+          }),
+        );
       },
     );
 
