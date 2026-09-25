@@ -8,8 +8,8 @@ import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } 
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { forkJoin, firstValueFrom, Observable } from 'rxjs';
-import { switchMap } from 'rxjs/operators';
+import { forkJoin, firstValueFrom, Observable, of } from 'rxjs';
+import { switchMap, finalize } from 'rxjs/operators';
 import {
   StoreOrdersService,
   CreateAddressPayload,
@@ -99,6 +99,15 @@ import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pi
 import { ItemCancellationModalComponent, previewItemCancellation, type ItemCancellationSubmit } from '../../../../../../shared/components';
 import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
+// Paso 5: reutiliza el modal canónico de clientes (quick/advanced,
+// NATURAL/JURIDICA) para capturar el nuevo titular de la orden.
+import { CustomerModalComponent } from '../../../customers/components/customer-modal/customer-modal.component';
+import {
+  CustomersService,
+  ResolveCustomerRequest,
+  ResolveCustomerResult,
+} from '../../../customers/services/customers.service';
+import { CreateCustomerRequest } from '../../../customers/models/customer.model';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../../services/order-ticket.service';
@@ -260,6 +269,7 @@ type RefundState =
     ItemCancellationModalComponent,
     OrderPaymentModalComponent,
     OrderRefundModalComponent,
+    CustomerModalComponent,
     InvoiceDetailComponent,
     TimelineComponent,
     GenerateDispatchWizardComponent,
@@ -400,6 +410,19 @@ export class OrderDetailsPageComponent {
    * modo editar. `null` en modo crear.
    */
   editingInitialAddress = signal<AddressPayload | null>(null);
+  /**
+   * Paso 5 — cambio de titular: visibilidad del `app-customer-modal`
+   * (siempre en modo crear → arranca en quick, con advanced disponible) y
+   * bandera de guardado (lookup/resolve + PATCH en vuelo).
+   */
+  showChangeCustomerModal = signal(false);
+  changingCustomer = signal(false);
+  /**
+   * Dirección capturada en el modal (`addressData`, solo crear-mode). Se
+   * persiste contra el cliente resuelto antes del PATCH titular; se limpia
+   * en cada intento para no reutilizar una sesión anterior.
+   */
+  private pendingChangeCustomerAddress = signal<AddressPayload | null>(null);
 
   // Processing state
   isProcessingAction = signal(false);
@@ -583,16 +606,19 @@ export class OrderDetailsPageComponent {
   });
 
   /**
-   * Carril B - B1: nombre visible del cliente con prioridad al alias.
-   * Prioridad: alias (si existe y no esta vacio) > users.first+last > "Consumidor Final".
-   * `isConsumidorFinal` permite al template pintar el badge "CF" sin perder
-   * que la orden sigue siendo anonima fiscalmente.
+   * Paso 3 (extiende Carril B - B1): nombre visible del cliente.
+   * Prioridad: alias (si existe y no esta vacio) > users.legal_name >
+   * users.first+last > "Consumidor Final". `isConsumidorFinal` permite al
+   * template pintar el badge "CF" sin perder que la orden sigue siendo
+   * anonima fiscalmente.
    */
   readonly customerDisplayName = computed<string>(() => {
     const o = this.order();
     if (!o) return '';
     const alias = o.customer_alias?.trim();
     if (alias) return alias;
+    const legal = o.users?.legal_name?.trim();
+    if (legal) return legal;
     if (o.users?.first_name || o.users?.last_name) {
       return `${o.users.first_name || ''} ${o.users.last_name || ''}`.trim();
     }
@@ -603,7 +629,11 @@ export class OrderDetailsPageComponent {
     const o = this.order();
     if (!o) return false;
     if (o.customer_alias?.trim()) return false;
-    return !(o.users?.first_name || o.users?.last_name);
+    return !(
+      o.users?.legal_name?.trim() ||
+      o.users?.first_name ||
+      o.users?.last_name
+    );
   });
 
   readonly cleanInternalNotes = computed<string>(() => {
@@ -1487,6 +1517,7 @@ export class OrderDetailsPageComponent {
   private fb = inject(FormBuilder);
   private ordersService = inject(StoreOrdersService);
   private ordersFlowService = inject(OrdersService);
+  private customersService = inject(CustomersService);
   private http = inject(HttpClient);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
@@ -3334,16 +3365,19 @@ export class OrderDetailsPageComponent {
       null;
     const storeName = order.stores?.name || 'Vendix';
 
-    // Carril B - B1: prioridad alias > users.first+last > "Consumidor Final".
+    // Paso 3 (extiende Carril B - B1): alias > legal_name > first+last > CF.
     // Mismo orden que customerDisplayName en el detalle para que el ticket de
     // despacho refleje lo que el operador ve en pantalla. Cristian renderiza el
     // ticket impreso final en order-ticket.service.ts (fuera de mi scope).
     const alias = order.customer_alias?.trim();
-    const customerName = alias
-      ? alias
-      : order.users
-        ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
-        : 'Consumidor Final';
+    const legal = order.users?.legal_name?.trim();
+    const customerName =
+      alias ||
+      legal ||
+      (order.users
+        ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim() ||
+          'Consumidor Final'
+        : 'Consumidor Final');
 
     // Domiciliario de la entrega rápida: la remisión MÁS RECIENTE que
     // traiga nombre. `getByOrder` devuelve `orderBy: { created_at: 'desc' }`
@@ -3946,6 +3980,122 @@ export class OrderDetailsPageComponent {
    * the page already loaded from, no extra roundtrip beyond a
    * refetch.
    */
+  // ─── Paso 5 — cambiar titular de la orden ──────────────────────
+  /**
+   * Abre el `app-customer-modal` en modo crear (quick por defecto, advanced
+   * con DIAN completo + NATURAL/JURIDICA disponibles). El operador captura
+   * los datos del nuevo titular; `onChangeCustomerSave` resuelve y asigna.
+   */
+  openChangeCustomer(): void {
+    if (!this.order()) return;
+    this.pendingChangeCustomerAddress.set(null);
+    this.showChangeCustomerModal.set(true);
+  }
+
+  closeChangeCustomer(): void {
+    this.showChangeCustomerModal.set(false);
+    this.pendingChangeCustomerAddress.set(null);
+  }
+
+  /** Guarda la dirección del modal para persistirla tras el resolve. */
+  onChangeCustomerAddress(payload: AddressPayload): void {
+    this.pendingChangeCustomerAddress.set(payload);
+  }
+
+  /**
+   * Guarda el nuevo titular: `GET lookup` por documento (vía rápida sin
+   * escrituras) → `POST resolve` (encuentra o crea) → `PATCH` titular →
+   * `refreshOrder`. En error, toast + modal abierto para corregir.
+   */
+  onChangeCustomerSave(data: CreateCustomerRequest): void {
+    const id = this.order()?.id;
+    if (!id) return;
+    this.changingCustomer.set(true);
+    const doc = data.document_number?.trim();
+    const lookup$ = doc
+      ? this.customersService.lookupByDocument(
+          doc,
+          data.document_type ?? undefined,
+        )
+      : of(null);
+
+    lookup$
+      .pipe(
+        switchMap((found) =>
+          found
+            ? of({
+                customer: found,
+                was_created: false,
+                was_updated: false,
+                matched_by: 'document',
+                document_conflict: false,
+              } as ResolveCustomerResult)
+            : this.customersService.resolveCustomer(
+                data as ResolveCustomerRequest,
+              ),
+        ),
+        switchMap((resolved) =>
+          this.ordersService
+            .updateOrderCustomer(String(id), resolved.customer.id)
+            .pipe(
+              switchMap((order) => {
+                this.persistChangeCustomerAddress(resolved.customer.id);
+                return of(order);
+              }),
+            ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.changingCustomer.set(false)),
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success('Titular de la orden actualizado');
+          this.showChangeCustomerModal.set(false);
+          this.pendingChangeCustomerAddress.set(null);
+          this.refreshOrder();
+        },
+        error: (error: unknown) => {
+          this.toastService.error(extractApiErrorMessage(error));
+        },
+      });
+  }
+
+  /**
+   * Persiste la dirección capturada en el modal contra el cliente resuelto
+   * (`POST /store/addresses`). Best-effort y no bloqueante: el titular ya
+   * quedó asignado; un fallo aquí solo avisa por toast.
+   */
+  private persistChangeCustomerAddress(customerId: number): void {
+    const addr = this.pendingChangeCustomerAddress();
+    this.pendingChangeCustomerAddress.set(null);
+    if (!addr?.address_line1 || !addr.city) return;
+    this.customersService
+      .createCustomerAddress({
+        address_line_1: addr.address_line1,
+        address_line_2: addr.address_line2 ?? undefined,
+        city: addr.city,
+        state: addr.state_province ?? '',
+        country: addr.country_code ?? '',
+        postal_code: addr.postal_code ?? undefined,
+        municipality_code: addr.municipality_code ?? undefined,
+        type: 'shipping',
+        is_primary: true,
+        customer_id: customerId,
+        ...(addr.latitude != null ? { latitude: String(addr.latitude) } : {}),
+        ...(addr.longitude != null
+          ? { longitude: String(addr.longitude) }
+          : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        error: () => {
+          this.toastService.warning(
+            'Titular actualizado, pero no se pudo guardar su dirección.',
+          );
+        },
+      });
+  }
+
   private refreshOrder(): void {
     const id = this.order()?.id;
     if (!id) return;

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, catchError, throwError, map } from 'rxjs';
+import { Observable, catchError, throwError, map, of } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -9,6 +9,8 @@ import {
     UpdateCustomerRequest,
     CustomerStats,
     CustomerFilters,
+    PersonType,
+    TaxRegime,
 } from '../models/customer.model';
 
 /**
@@ -45,6 +47,37 @@ export interface PaginatedResponse<T> {
         limit: number;
         totalPages: number;
     };
+}
+
+/**
+ * Payload de `POST /store/customers/resolve` (espejo permisivo de
+ * `ResolveCustomerDto`: sin validación cruzada de formato de documento —
+ * el lookup normaliza antes de comparar). Todos opcionales; el servicio
+ * exige al menos email o documento.
+ */
+export interface ResolveCustomerRequest {
+    email?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
+    legal_name?: string | null;
+    phone?: string | null;
+    document_type?: string | null;
+    document_number?: string | null;
+    verification_digit?: string | null;
+    tax_regime?: TaxRegime | null;
+    person_type?: PersonType | null;
+    fiscal_responsibilities?: string[];
+    ciiu_code?: string | null;
+    is_withholding_agent?: boolean;
+}
+
+/** Respuesta desempaquetada de `POST /store/customers/resolve`. */
+export interface ResolveCustomerResult {
+    customer: Customer;
+    was_created: boolean;
+    was_updated: boolean;
+    matched_by: 'email' | 'document' | 'name' | null;
+    document_conflict: boolean;
 }
 
 // Caché estático global (persiste entre instancias del servicio)
@@ -118,6 +151,50 @@ export class CustomersService {
 
     getCustomer(id: number): Observable<Customer> {
         return this.http.get<Customer>(`${this.apiUrl}/${id}`);
+    }
+
+    /**
+     * Paso 5 — `GET /store/customers/lookup?document_number=&document_type=`.
+     * Busca el titular en la organización (el backend lo vincula al store si
+     * falta el link). `null` = sin coincidencia. Los errores resuelven a
+     * `null` para que el llamador caiga al `resolve` (mismo patrón que
+     * `PosCustomerService.lookupByDocument`).
+     */
+    lookupByDocument(documentNumber: string, documentType?: string): Observable<Customer | null> {
+        let params = new HttpParams().set('document_number', documentNumber);
+        if (documentType) {
+            params = params.set('document_type', documentType);
+        }
+
+        return this.http.get<any>(`${this.apiUrl}/lookup`, { params }).pipe(
+            map((response) => {
+                const data = response?.data;
+                if (!data) return null;
+                return (data.customer ?? null) as Customer | null;
+            }),
+            catchError(() => of(null)),
+        );
+    }
+
+    /**
+     * Paso 5 — `POST /store/customers/resolve`: encuentra (por email o
+     * documento, con update parcial de campos vacíos) o crea al cliente.
+     * Desempaqueta el envelope de `ResponseService`. Los errores propagan
+     * para que el llamador muestre el toast y conserve el modal abierto.
+     */
+    resolveCustomer(request: ResolveCustomerRequest): Observable<ResolveCustomerResult> {
+        return this.http.post<any>(`${this.apiUrl}/resolve`, request).pipe(
+            map((response) => {
+                const payload = response?.data ?? response;
+                return {
+                    customer: payload.customer as Customer,
+                    was_created: !!payload.was_created,
+                    was_updated: !!payload.was_updated,
+                    matched_by: (payload.matched_by ?? null) as ResolveCustomerResult['matched_by'],
+                    document_conflict: !!payload.document_conflict,
+                };
+            }),
+        );
     }
 
     createCustomer(data: CreateCustomerRequest): Observable<Customer> {

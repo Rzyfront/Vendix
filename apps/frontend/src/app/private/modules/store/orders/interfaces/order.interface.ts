@@ -41,6 +41,28 @@ export interface OrderCancellationPolicy {
 }
 
 // Core entities - Aligned with backend models
+/**
+ * Titular de la orden (fila `users`) tal como lo proyecta el backend.
+ * `legal_name`/`document_*`/`person_type` viajan cuando el backend los
+ * proyecta en `findAll`/`findOne` (paso 3 del plan); son opcionales para no
+ * romper lectores del contrato anterior. Precedencia de pintado, en detalle
+ * y listado: `customer_alias` > `legal_name` > `first_name+last_name` >
+ * "Consumidor Final".
+ */
+export interface OrderCustomer {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string;
+  avatar_url?: string;
+  legal_name?: string | null;
+  document_type?: string | null;
+  document_number?: string | null;
+  verification_digit?: string | null;
+  person_type?: 'NATURAL' | 'JURIDICA' | string | null;
+}
+
 export interface Order {
   id: number;
   customer_id: number;
@@ -121,14 +143,7 @@ export interface Order {
   addresses_orders_billing_address_idToaddresses?: Address;
   addresses_orders_shipping_address_idToaddresses?: Address;
   payments?: Payment[];
-  users?: {
-    id: number;
-    first_name: string;
-    last_name: string;
-    email: string;
-    phone?: string;
-    avatar_url?: string;
-  };
+  users?: OrderCustomer;
   // Persisted discount snapshots — read-only from backend, never recalculated.
   order_promotions?: OrderPromotionSnapshot[];
   coupon_uses?: CouponUseSnapshot[];
@@ -531,14 +546,7 @@ export interface Payment {
     bank_name: string;
     account_number: string;
   } | null;
-  users?: {
-    id: number;
-    first_name: string;
-    last_name: string;
-    email: string;
-    phone?: string;
-    avatar_url?: string;
-  };
+  users?: OrderCustomer;
 }
 
 export interface OrderInstallment {

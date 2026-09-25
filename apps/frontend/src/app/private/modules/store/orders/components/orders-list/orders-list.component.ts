@@ -8,7 +8,6 @@ import {Component,
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { catchError, forkJoin, of } from 'rxjs';
 
 import {
   TableColumn,
@@ -29,7 +28,6 @@ import {
   CardComponent,
 } from '../../../../../../shared/components/index';
 import { StoreOrdersService } from '../../services/store-orders.service';
-import { CustomersService } from '../../../../store/customers/services/customers.service';
 // Carril B - B2: el dropdown del filtro por mesa se llena con
 // GET /store/tables via TablesService. Si la tienda no tiene mesas,
 // el filtro no se pinta (mayoria de tiendas de Vendix no son restaurante).
@@ -70,7 +68,6 @@ export class OrdersListComponent {
   private currencyService = inject(CurrencyFormatService);
   private printService = inject(OrderPrintService);
   private ordersService = inject(StoreOrdersService);
-  private customersService = inject(CustomersService);
   private tablesService = inject(TablesService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
@@ -772,6 +769,9 @@ export class OrdersListComponent {
   }
 
   // Event handlers
+  // Paso 4: el template escucha `(searchChange)` (debounce 1000ms +
+  // distinctUntilChanged del inputsearch), NO `(ngModelChange)` inmediato —
+  // cada ráfaga de tecleo emite UN `?search=` y UN GET.
   onSearchChange(term: string): void {
     this.searchTerm.set(term);
     this._filters.search = term;
@@ -950,65 +950,17 @@ export class OrdersListComponent {
           };
           this.totalItems.set(paginationInfo.total || 0);
 
-          // Fetch customer details
-          const customerIds: number[] = [
-            ...new Set<number>(
-              normalizedOrders
-                .map((o: any) => o.customer_id)
-                .filter((id: number) => id),
-            ),
-          ];
-          if (customerIds.length > 0) {
-            forkJoin(
-              // F-210: un `customer_id` irresoluble — cliente borrado, fuera
-              // del alcance de la tienda, o usuario sin fila en `store_users`
-              // (404 `CUST_FIND_001`) — tumbaba el `forkJoin` COMPLETO y
-              // dejaba todas las filas en 'N/A', no sólo la suya. Aislado por
-              // id, un huérfano degrada únicamente su propia fila.
-              customerIds.map((id) =>
-                this.customersService
-                  .getCustomer(id)
-                  .pipe(catchError(() => of(null))),
-              ),
-            )
-              .pipe(takeUntilDestroyed(this.destroyRef))
-              .subscribe({
-                next: (customers) => {
-                  const customerMap = new Map(
-                    customers
-                      .filter((c): c is NonNullable<typeof c> => !!c)
-                      .map((c) => [c.id, c]),
-                  );
-                  this.orders.set(normalizedOrders.map((order: any) => ({
-                    ...order,
-                    // Carril B - B1: prioridad alias > customer.first+last > 'Consumidor Final'.
-                    // Mismo orden que el detalle y el ticket de despacho.
-                    customer_name: order.customer_alias?.trim()
-                      || (order.customer_id
-                        ? `${customerMap.get(order.customer_id)?.first_name || ''} ${customerMap.get(order.customer_id)?.last_name || ''}`.trim() ||
-                          'N/A'
-                        : 'Consumidor Final'),
-                  })));
-                  this.loading.set(false);
-                },
-                error: (error) => {
-                  console.error('Error loading customers:', error);
-                  this.orders.set(normalizedOrders.map((order: any) => ({
-                    ...order,
-                    customer_name: order.customer_alias?.trim()
-                      || (order.customer_id ? 'N/A' : 'Consumidor Final'),
-                  })));
-                  this.loading.set(false);
-                },
-              });
-          } else {
-            // Carril B - B1: sin customers a fetchear, la unica fuente es alias.
-            this.orders.set(normalizedOrders.map((order: any) => ({
+          // Paso 3: el nombre sale de `order.users` del propio findAll
+          // (alias > legal_name > first+last > CF) — sin N+1 por cliente.
+          // F-210 sigue cubierto: `customer_id` con `users` ausente degrada
+          // solo su fila a 'N/A' dentro de `resolveCustomerName`.
+          this.orders.set(
+            normalizedOrders.map((order: any) => ({
               ...order,
-              customer_name: order.customer_alias?.trim() || 'Consumidor Final',
-            })));
-            this.loading.set(false);
-          }
+              customer_name: this.resolveCustomerName(order),
+            })),
+          );
+          this.loading.set(false);
         },
         error: (error: any) => {
           console.error('Error loading orders:', error);
@@ -1075,10 +1027,34 @@ export class OrdersListComponent {
   }
 
   /**
+   * Paso 3 — nombre visible del cliente con la misma precedencia que el
+   * detalle y el tiquete: alias > legal_name > first+last > CF. Lee `users`
+   * del propio findAll (sin fetch por fila). `customer_id` con `users`
+   * ausente = titular huérfano → 'N/A' (no miente con CF fiscal).
+   */
+  private resolveCustomerName(order: {
+    customer_alias?: string | null;
+    customer_id?: number | null;
+    users?: {
+      legal_name?: string | null;
+      first_name?: string | null;
+      last_name?: string | null;
+    } | null;
+  }): string {
+    const alias = order.customer_alias?.trim();
+    if (alias) return alias;
+    const legal = order.users?.legal_name?.trim();
+    if (legal) return legal;
+    const full =
+      `${order.users?.first_name ?? ''} ${order.users?.last_name ?? ''}`.trim();
+    if (full) return full;
+    return order.customer_id ? 'N/A' : 'Consumidor Final';
+  }
+
+  /**
    * Normaliza una fila hidratada en vivo con las mismas reglas de
-   * `loadOrders`. El nombre del cliente se resuelve async cuando hay
-   * `customer_id`; mientras tanto se pinta alias o fallback, igual que
-   * la rama de error de `loadOrders`.
+   * `loadOrders` (mesa plana, números, `resolveCustomerName` sobre el
+   * `users` que trae el GET por id — sin fetch extra de cliente).
    */
   private normalizeLiveOrderRow(order: any): any {
     const ts = order?.table_sessions?.[0];
@@ -1101,33 +1077,10 @@ export class OrdersListComponent {
       tax_amount: toNum(order.tax_amount),
       shipping_cost: toNum(order.shipping_cost),
       discount_amount: toNum(order.discount_amount),
-      customer_name:
-        order.customer_alias?.trim() ||
-        (order.customer_id ? 'N/A' : 'Consumidor Final'),
+      customer_name: this.resolveCustomerName(order),
     };
     // La fila nueva no está en `seenOrderIds` y su `created_at` es reciente,
     // así que `isNewOrder`/`rowClassFn` la resaltan sin más wiring.
-    if (order.customer_id) {
-      this.customersService
-        .getCustomer(row.customer_id)
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: (c: any) => {
-            const name =
-              order.customer_alias?.trim() ||
-              `${c?.first_name || ''} ${c?.last_name || ''}`.trim() ||
-              'N/A';
-            this.orders.update((prev) =>
-              prev.map((o: any) =>
-                o.id === row.id ? { ...o, customer_name: name } : o,
-              ),
-            );
-          },
-          error: () => {
-            // Se conserva el fallback 'N/A'; no bloquea la inserción.
-          },
-        });
-    }
     return row;
   }
 

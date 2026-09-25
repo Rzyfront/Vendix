@@ -407,6 +407,26 @@ export class StoreOrdersService {
   }
 
   /**
+   * Paso 5 — cambia el titular de la orden vía el PATCH del backend.
+   * `UpdateOrderDto extends PartialType(CreateOrderDto)` expone `customer_id`
+   * y `customer_alias`; el XOR lo impone el CHECK de BD, así que al asignar
+   * un titular real se limpia el alias. Desempaqueta `ResponseService`.
+   */
+  updateOrderCustomer(orderId: string, customerId: number): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}`;
+
+    return this.http
+      .patch<any>(url, { customer_id: customerId, customer_alias: null })
+      .pipe(
+        map((r) => (r?.data ?? r) as Order),
+        catchError((error) => {
+          console.error('Error updating order customer:', error);
+          return throwError(() => this.buildApiError(error));
+        }),
+      );
+  }
+
+  /**
    * Eliminar una orden
    */
   deleteOrder(orderId: string): Observable<void> {

@@ -273,6 +273,18 @@
                   <p>Contacto, entrega y facturacion de esta orden</p>
                 </div>
               </div>
+              <div class="customer-card-header-actions">
+                <app-button
+                  variant="outline-secondary"
+                  size="sm"
+                  [loading]="changingCustomer()"
+                  (clicked)="openChangeCustomer()"
+                  ariaLabel="Cambiar titular de la orden"
+                >
+                  <app-icon slot="icon" name="repeat" size="13"></app-icon>
+                  Cambiar cliente
+                </app-button>
+              </div>
             </div>
 
             <div class="customer-card-content">
@@ -281,6 +293,7 @@
                   <div class="customer-avatar" aria-hidden="true">
                     {{
                       (
+                        orderData.users?.legal_name?.charAt(0) ||
                         orderData.users?.first_name?.charAt(0) ||
                         orderData.users?.last_name?.charAt(0) ||
                         "C"
@@ -294,7 +307,7 @@
                         <!-- si no hay alias ni nombre, customerDisplayName ya cae a "Consumidor Final"; el badge CF refuerza la marca fiscal -->
                       } @else if (
                         orderData.customer_alias?.trim() &&
-                        !(orderData.users?.first_name || orderData.users?.last_name)
+                        !(orderData.users?.legal_name?.trim() || orderData.users?.first_name || orderData.users?.last_name)
                       ) {
                         <span
                           class="cf-badge"
@@ -302,6 +315,11 @@
                         >CF</span>
                       }
                     </h2>
+                    @if (orderData.users?.document_number?.trim()) {
+                      <p class="customer-doc-line">
+                        {{ orderData.users?.document_type }} {{ orderData.users?.document_number }}@if (orderData.users?.person_type === 'JURIDICA') { · Jurídica }
+                      </p>
+                    }
                   </div>
                 </div>
 
@@ -2819,6 +2837,16 @@
         (submitEdit)="onShippingAddressEdit($event)"
       ></app-shipping-address-modal>
     }
+
+    <!-- Paso 5: CAMBIO DE TITULAR (reutiliza app-customer-modal en crear-mode) -->
+    <app-customer-modal
+      [isOpen]="showChangeCustomerModal()"
+      [customer]="null"
+      [loading]="changingCustomer()"
+      (closed)="closeChangeCustomer()"
+      (save)="onChangeCustomerSave($event)"
+      (addressData)="onChangeCustomerAddress($event)"
+    ></app-customer-modal>
 
     <!-- DELIVER MODAL -->
     <app-modal
