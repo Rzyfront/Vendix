@@ -131,6 +131,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     // A.3 (F-047): si la orden ya tiene factura, el desglose y los totales
     // salen del snapshot fiscal. Nunca lanza: ver el método.
     await this.overrideWithInvoiceSnapshot(storeId, orderId, model);
+    // CP-REFUND-FLOW-REDESIGN paso 9: sección Reembolsos/NC referenciada,
+    // ADITIVA en `custom_variables` — los totales originales quedan intactos.
+    // Nunca lanza: ver el método.
+    await this.attachRefundsSection(storeId, orderId, model);
     return model;
   }
 
@@ -233,6 +237,207 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       }
     } catch {
       // Ver docblock: la tirilla pre-fiscal con filas de orden es el fallback.
+    }
+  }
+
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 9 — sección Reembolsos/NC de la reimpresión.
+   *
+   * Los documentos ORIGINALES son inmutables: esta sección es ADITIVA y vive
+   * en `model.custom_variables.refunds` — jamás toca `model.totals`,
+   * `model.items` ni `model.taxes`. Sin refunds con dinero comprometido, el
+   * modelo sale byte-idéntico al de antes (cero regresión en el papel).
+   *
+   * Semántica compartida con `RefundCoverageService` (paso 7), re-derivada
+   * acá porque el provider no puede inyectar servicios de `order-flow` (el
+   * módulo es ajeno a este paso): por línea, `refunded_*` agrega
+   * `refund_items` de refunds con dinero comprometido
+   * (`completed`/`pending_approval`/`processing` — el mismo conjunto que el
+   * techo del paso 1 y las NC sugeribles del paso 7; `requested`/`approved`
+   * quedan fuera hasta que un plan los asigne, `failed`/`cancelled` no
+   * devolvieron nada); `nc_covered_*` suma el puente estructural
+   * `credit_note_refund_items` solo de NC `accepted`, y `notes` lista TODAS
+   * las NC del puente para trazabilidad. Ningún UPDATE toca documentos
+   * emitidos: lectura pura.
+   *
+   * Nunca lanza: si la lectura falla por lo que sea, la tirilla sale sin la
+   * sección como siempre. Un recibo sin sección vale más que ningún recibo.
+   */
+  private async attachRefundsSection(
+    storeId: number,
+    orderId: number,
+    model: StandardPrintDataModel,
+  ): Promise<void> {
+    try {
+      // `refunds` está registrado en `StorePrismaService` con scope
+      // relacional (`orders.store_id`), así que el `findMany` ya viene
+      // anclado al tenant; el `orderId` además salió de una orden verificada
+      // con `store_id` más arriba.
+      const refunds = await this.prisma.refunds.findMany({
+        where: {
+          order_id: orderId,
+          state: { in: ['completed', 'pending_approval', 'processing'] },
+        },
+        select: {
+          id: true,
+          state: true,
+          amount: true,
+          refund_method: true,
+          reason: true,
+          requested_at: true,
+          processed_at: true,
+          refund_items: {
+            select: {
+              id: true,
+              order_item_id: true,
+              quantity: true,
+              refund_amount: true,
+              order_items: { select: { product_name: true } },
+            },
+          },
+        },
+        orderBy: { id: 'asc' },
+      });
+      if (refunds.length === 0) return;
+
+      const refundItemIds = refunds.flatMap((r) =>
+        r.refund_items.map((ri) => ri.id),
+      );
+      // `withoutScope()` + ids ya verificados: el puente no está registrado
+      // en `StorePrismaService` y no necesita estarlo — los ids salen de
+      // lecturas scopeadas, así que la consulta va anclada al tenant por
+      // construcción (mismo criterio que `RefundCoverageService`).
+      const bridgeRows =
+        refundItemIds.length > 0
+          ? await this.prisma
+              .withoutScope()
+              .credit_note_refund_items.findMany({
+                where: { refund_item_id: { in: refundItemIds } },
+                include: {
+                  credit_note: {
+                    select: { id: true, invoice_number: true, status: true },
+                  },
+                },
+              })
+          : [];
+
+      const orderItemOf = new Map<number, number>();
+      for (const r of refunds) {
+        for (const ri of r.refund_items) {
+          orderItemOf.set(ri.id, ri.order_item_id);
+        }
+      }
+      const notesByLine = new Map<
+        number,
+        Array<{
+          credit_note_id: number;
+          invoice_number: string | null;
+          status: string;
+          covered_qty: number;
+          covered_amount: number;
+        }>
+      >();
+      const coveredByLine = new Map<number, { qty: number; amount: number }>();
+      for (const row of bridgeRows) {
+        const orderItemId = orderItemOf.get(row.refund_item_id);
+        if (orderItemId == null) continue;
+        const list = notesByLine.get(orderItemId) ?? [];
+        list.push({
+          credit_note_id: row.credit_note.id,
+          invoice_number: row.credit_note.invoice_number,
+          status: row.credit_note.status,
+          covered_qty: row.covered_qty,
+          covered_amount: Number(row.covered_amount ?? 0),
+        });
+        notesByLine.set(orderItemId, list);
+        // Solo la NC aceptada cubre: el resto se LISTA (trazabilidad) pero
+        // no suma (no acreditó nada todavía).
+        if (row.credit_note.status === 'accepted') {
+          const acc = coveredByLine.get(orderItemId) ?? { qty: 0, amount: 0 };
+          acc.qty += row.covered_qty;
+          acc.amount += Number(row.covered_amount ?? 0);
+          coveredByLine.set(orderItemId, acc);
+        }
+      }
+
+      const lines = new Map<
+        number,
+        {
+          order_item_id: number;
+          product_name: string | null;
+          refunded_qty: number;
+          refunded_amount: number;
+        }
+      >();
+      for (const r of refunds) {
+        for (const ri of r.refund_items) {
+          const line = lines.get(ri.order_item_id) ?? {
+            order_item_id: ri.order_item_id,
+            product_name: ri.order_items?.product_name ?? null,
+            refunded_qty: 0,
+            refunded_amount: 0,
+          };
+          line.refunded_qty += ri.quantity;
+          line.refunded_amount += Number(ri.refund_amount ?? 0);
+          lines.set(ri.order_item_id, line);
+        }
+      }
+      // Refunds sin ítems (patas de cancelación, filas legacy) aportan solo
+      // a nivel orden: sin líneas no hay sección que agregar.
+      if (lines.size === 0) return;
+
+      const sectionLines = Array.from(lines.values()).map((line) => {
+        const nc = coveredByLine.get(line.order_item_id) ?? {
+          qty: 0,
+          amount: 0,
+        };
+        return {
+          ...line,
+          refunded_amount_formatted: this.formatOrderMoney(
+            line.refunded_amount,
+          ),
+          nc_covered_qty: nc.qty,
+          nc_covered_amount: nc.amount,
+          notes: notesByLine.get(line.order_item_id) ?? [],
+        };
+      });
+      const refundedAmount = sectionLines.reduce(
+        (sum, line) => sum + line.refunded_amount,
+        0,
+      );
+      const ncCoveredAmount = sectionLines.reduce(
+        (sum, line) => sum + line.nc_covered_amount,
+        0,
+      );
+      model.custom_variables = {
+        ...(model.custom_variables ?? {}),
+        refunds: {
+          lines: sectionLines,
+          totals: {
+            refunded_amount: refundedAmount,
+            refunded_amount_formatted: this.formatOrderMoney(refundedAmount),
+            nc_covered_amount: ncCoveredAmount,
+            nc_covered_amount_formatted:
+              this.formatOrderMoney(ncCoveredAmount),
+          },
+          refunds: refunds.map((r) => ({
+            id: r.id,
+            state: r.state,
+            amount: Number(r.amount ?? 0),
+            amount_formatted: this.formatOrderMoney(Number(r.amount ?? 0)),
+            refund_method: r.refund_method,
+            reason: r.reason,
+            requested_at: r.requested_at
+              ? new Date(r.requested_at).toISOString()
+              : null,
+            processed_at: r.processed_at
+              ? new Date(r.processed_at).toISOString()
+              : null,
+          })),
+        },
+      };
+    } catch {
+      // Ver docblock: la tirilla sin sección es el fallback.
     }
   }
 
