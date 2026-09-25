@@ -1519,9 +1519,15 @@ export class CheckoutComponent implements OnInit {
         next: (res) => {
           this.savedGeocodeInFlight.delete(id);
           if (res?.lat == null || res?.lng == null) return;
+          // La reducción de tipos en propiedades (`res.lat`) no sobrevive al
+          // closure del `.update(...)`: TS re-ancha a `number | null` y el
+          // literal con key computada genera un index-union que rompe el build.
+          // Hoistear los valores congelados en const evita el TS2322.
+          const lat = res.lat;
+          const lng = res.lng;
           this.savedCoordsOverride.update((m) => ({
             ...m,
-            [id]: { lat: res.lat, lng: res.lng },
+            [id]: { lat, lng },
           }));
           this.bumpCoordsVersion();
         },

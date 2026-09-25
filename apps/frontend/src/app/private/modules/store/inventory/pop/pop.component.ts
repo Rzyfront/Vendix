@@ -2054,7 +2054,10 @@ export class PopComponent implements OnInit, OnDestroy {
 
   onNavigateToSettings(): void {
     this.showOrderConfirmModal.set(false);
-    this.router.navigate(['/store/settings/general']);
+    // QUI-859: la ruta `/store/settings/general` no existe en el admin y caía
+    // al catch-all (dashboard). La configuración logística real vive en
+    // `/admin/settings/general/logistica`.
+    this.router.navigate(['/admin/settings/general/logistica']);
   }
 
   /**
