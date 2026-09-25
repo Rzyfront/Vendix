@@ -1181,18 +1181,27 @@ export class MethodDetailComponent implements OnInit {
         }});
   }
 
+  /**
+   * Release-853 regresión (paso 5): confirmar SOLO cuando la zona tiene
+   * tarifas de OTROS métodos afectadas (`otherMethodRates`). El paso 11
+   * original pedía confirmación siempre, incluso sin ningún efecto cruzado
+   * de por medio — regresión frente al toggle directo que existía antes de
+   * esa auditoría para el caso sin tarifas ajenas.
+   */
   async toggleZoneActive(zr: ZoneWithRates): Promise<void> {
     const zone = zr.zone;
     const next_active = !zone.is_active;
     const others = await this.otherMethodRates(zone.id);
-    const action = next_active ? 'activar' : 'desactivar';
-    const confirmed = await this.dialogService.confirm({
-      title: `${next_active ? 'Activar' : 'Desactivar'} zona`,
-      message: `¿Estas seguro de ${action} la zona "${zone.name}"?${this.otherRatesSuffix(others)}`,
-      confirmText: next_active ? 'Activar' : 'Desactivar',
-      confirmVariant: next_active ? 'primary' : 'danger'});
+    if (others.length > 0) {
+      const action = next_active ? 'activar' : 'desactivar';
+      const confirmed = await this.dialogService.confirm({
+        title: `${next_active ? 'Activar' : 'Desactivar'} zona`,
+        message: `¿Estas seguro de ${action} la zona "${zone.name}"?${this.otherRatesSuffix(others)}`,
+        confirmText: next_active ? 'Activar' : 'Desactivar',
+        confirmVariant: next_active ? 'primary' : 'danger'});
 
-    if (!confirmed) return;
+      if (!confirmed) return;
+    }
 
     this.shippingService
       .updateZone(zone.id, { is_active: next_active })
