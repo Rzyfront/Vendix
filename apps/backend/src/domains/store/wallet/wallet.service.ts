@@ -124,9 +124,16 @@ export class WalletService {
 
   /**
    * CP-REFUND-FLOW-REDESIGN paso 4 — acredita un refund en la wallet del
-   * cliente y emite `wallet.credited` con `source_id=refund_id` para
-   * auditoría. El listener contable ignora los campos extra, así que el
-   * shape sigue siendo compatible con `topUp`/`adjust`.
+   * cliente. La fila de `wallet_balance` (`reference_type='refund'`,
+   * `reference_id=refund_id`) es la pista de auditoría durable.
+   *
+   * NO emite `wallet.credited` a propósito (corrección del orquestador):
+   * `onWalletCredited` postea con mapping de RECARGA (DR Caja/Banco) e
+   * idempotencia por `wallet_id`, lo cual es incorrecto para un refund
+   * (no entra caja) y colisionaría con recargas reales. El carril
+   * `refund.completed.store_credit` (2805/2335) ya cubre la contabilidad.
+   * Re-habilitar la emisión solo cuando el listener discrimine
+   * `reference_type='refund'` con mapping contable aprobado.
    */
   async creditForRefund(
     customerId: number,
@@ -140,18 +147,6 @@ export class WalletService {
       reference_id: params.refund_id,
       description: `Refund #${params.refund_id} for order #${params.order_id}`,
       created_by: params.user_id,
-    });
-
-    this.eventEmitter.emit('wallet.credited', {
-      wallet_id: wallet.id,
-      store_id: wallet.store_id,
-      organization_id: wallet.organization_id,
-      amount,
-      reference_type: 'refund',
-      source_id: params.refund_id,
-      refund_id: params.refund_id,
-      order_id: params.order_id,
-      user_id: params.user_id,
     });
 
     return { ...result, wallet_id: wallet.id };

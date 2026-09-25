@@ -900,8 +900,8 @@ export class RefundFlowService {
         // wallet so the refund value is actually available to them. Non-blocking
         // because the refund row is already committed — a credit failure only
         // means an operator alert via log; the sale refund is intact.
-        // Paso 4: vía `creditForRefund`, que además emite `wallet.credited`
-        // con `source_id=refund_id` para auditoría.
+        // Paso 4: vía `creditForRefund` (fila durable con reference refund;
+        // sin emisión `wallet.credited`: ver nota contable en WalletService).
         if (dto.refund_method === 'store_credit' && order.customer_id) {
           try {
             await this.walletService.creditForRefund(
