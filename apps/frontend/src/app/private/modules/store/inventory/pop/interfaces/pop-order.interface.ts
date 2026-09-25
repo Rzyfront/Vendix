@@ -51,6 +51,7 @@ export interface PurchaseOrderItemRequest {
   product_description?: string;
   product_type?: string;
   track_inventory?: boolean;
+  min_stock_level?: number | null;
   pricing_type?: string;
   tax_category_ids?: number[];
   state?: string;
@@ -204,6 +205,7 @@ export function cartToPurchaseOrderRequest(
         requestItem.product_description = item.prebulk_data.description;
         requestItem.product_type = item.prebulk_data.product_type;
         requestItem.track_inventory = item.prebulk_data.track_inventory;
+        requestItem.min_stock_level = item.prebulk_data.min_stock_level ?? undefined;
         requestItem.pricing_type = item.prebulk_data.pricing_type;
         requestItem.tax_category_ids = item.prebulk_data.tax_category_ids;
         requestItem.state = item.prebulk_data.state;

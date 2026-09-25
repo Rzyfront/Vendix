@@ -13,7 +13,10 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
 import { mergeStoreSettingsWithDefaults } from '../../../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../../../settings/interfaces/store-settings.interface';
-import { resolveStockLevelLowStockThreshold } from '../helpers/low-stock-threshold.helper';
+import {
+  resolveProductLowStockThreshold,
+  resolveStockLevelLowStockThreshold,
+} from '../helpers/low-stock-threshold.helper';
 import { sellableLocationsWhere } from '../helpers/pos-stock-scope.helper';
 import { syncDenormalizedProductStock } from '../helpers/sync-product-stock.helper';
 import { CostingService } from './costing.service';
@@ -165,6 +168,8 @@ export class StockLevelManager {
         store_id: true,
         name: true,
         cost_price: true,
+        min_stock_level: true,
+        reorder_point: true,
       },
     });
 
@@ -365,15 +370,21 @@ export class StockLevelManager {
       prisma,
       productForTracking.store_id,
     );
-    const low_threshold = resolveStockLevelLowStockThreshold(
+    const low_threshold = resolveProductLowStockThreshold(
       settings,
-      existing_stock_level,
+      {
+        reorder_point: existing_stock_level?.reorder_point ?? productForTracking.reorder_point,
+        min_stock_level: productForTracking.min_stock_level,
+      },
     );
     if (
       updated_stock.quantity_available <= low_threshold &&
       updated_stock.quantity_available >= 0
     ) {
-      if (productForTracking.store_id) {
+      if (
+        productForTracking.store_id &&
+        settings?.notifications?.low_stock_alerts !== false
+      ) {
         const publishLow = () => this.eventEmitter.emit('stock.low', {
           store_id: productForTracking.store_id,
           location_id: params.location_id,
@@ -1642,7 +1653,7 @@ export class StockLevelManager {
     const [product, stock_levels] = await Promise.all([
       this.prisma.products.findUnique({
         where: { id: product_id },
-        select: { store_id: true },
+        select: { store_id: true, min_stock_level: true, reorder_point: true },
       }),
       this.prisma.stock_levels.findMany({
         where: {
@@ -1665,9 +1676,12 @@ export class StockLevelManager {
       product?.store_id,
     );
     return stock_levels.filter((stockLevel) => {
-      const threshold = resolveStockLevelLowStockThreshold(
+      const threshold = resolveProductLowStockThreshold(
         settings,
-        stockLevel,
+        {
+          reorder_point: stockLevel.reorder_point ?? product?.reorder_point,
+          min_stock_level: product?.min_stock_level,
+        },
       );
       return Number(stockLevel.quantity_available ?? 0) <= threshold;
     });
