@@ -122,7 +122,6 @@ import {
   Invoice,
   RelatedNote,
   CreateCreditNoteDto,
-  CreateInvoiceItemDto,
 } from '../../../invoicing/interfaces/invoice.interface';
 import * as InvoicingActions from '../../../invoicing/state/actions/invoicing.actions';
 import { InvoiceDetailComponent } from '../../../invoicing/components/invoice-detail/invoice-detail.component';
@@ -5354,18 +5353,17 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * ¿Ya existe una NC viva que cubra este reembolso? Misma regla que el
-   * operador aplicaría a ojo: NC de tipo crédito, no anulada/rechazada, por
-   * al menos el monto devuelto y creada después del reembolso.
+   * ¿Ya existe una NC viva que cubra este reembolso? El vínculo lo pone el
+   * backend (`invoices.refund_id`, paso A2): basta comparar ids, sin la
+   * heurística anterior de montos/fechas que fallaba con devoluciones
+   * parciales y redondeos.
    */
   private refundCoveredByNote(refund: RefundRecord): boolean {
-    const since = refund.processed_at ?? refund.created_at;
     return this.invoiceNotes().some(
       (n) =>
         n.invoice_type === 'credit_note' &&
         !['cancelled', 'voided', 'rejected'].includes(n.status) &&
-        Number(n.total_amount) >= Number(refund.amount) - 0.5 &&
-        n.created_at >= since,
+        n.refund_id === refund.id,
     );
   }
 
@@ -5436,48 +5434,23 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * Mapea `refund_items` → líneas de NC con importes YA calculados (ADR-03):
-   * cantidad y montos del reembolso, precio y descripción de la línea de la
-   * orden. Nunca re-deriva impuestos. Sin líneas pero con envío → línea libre
-   * de envío. Sin detalle → se omite `items` (nota total).
+   * La NC de 1 clic NO arma líneas (paso A2): envía `{related_invoice_id,
+   * refund_id, reason, note_concept_code}` y el backend deriva las líneas del
+   * reembolso (`resolveRefundLink`, productos + envío). Enviar `items`
+   * explícitos junto a `refund_id` lo rechaza el backend con 422.
    */
   private buildRefundNoteDto(
     refund: RefundRecord,
     invoiceId: number,
   ): CreateCreditNoteDto {
-    const orderItems = this.order()?.order_items ?? [];
-    const items: CreateInvoiceItemDto[] = [];
-    for (const ri of refund.refund_items ?? []) {
-      if (!(Number(ri.quantity) > 0)) continue;
-      const oi = orderItems.find((o) => o.id === ri.order_item_id);
-      if (!oi) continue;
-      items.push({
-        ...(oi.product_id > 0 ? { product_id: oi.product_id } : {}),
-        ...(oi.product_variant_id ? { product_variant_id: oi.product_variant_id } : {}),
-        description: oi.product_name ?? `Ítem ${oi.id}`,
-        quantity: Number(ri.quantity),
-        unit_price: Number(oi.unit_price),
-        discount_amount: Number(ri.discount_amount ?? 0),
-        tax_amount: Number(ri.tax_amount ?? 0),
-      });
-    }
-    if (!items.length && Number(refund.shipping_refund ?? 0) > 0) {
-      items.push({
-        description: `Reembolso de envío — orden #${this.orderId}`,
-        quantity: 1,
-        unit_price: Number(refund.shipping_refund),
-        discount_amount: 0,
-        tax_amount: 0,
-      });
-    }
     const reason =
       `Reembolso #${refund.id} de la orden #${this.orderId}` +
       (refund.reason ? ` — ${refund.reason}` : '');
     return {
       related_invoice_id: invoiceId,
+      refund_id: refund.id,
       reason: reason.slice(0, 500),
       note_concept_code: this.refundCoversWholeOrder(refund) ? '2' : '1',
-      ...(items.length ? { items } : {}),
     };
   }
 
@@ -5564,6 +5537,17 @@ export class OrderDetailsPageComponent {
   isEmittingInvoice = signal(false);
 
   /**
+   * B5 — La guarda de facturación rechazó por copia incoherente del impuesto
+   * del envío (`INVOICING_CALC_006` + `details.detail = 'shipping_tax:*'`).
+   * Mientras esté en `true`, el operador ve la acción «Reparar impuesto del
+   * envío» (toast con acción al momento del rechazo; `repairShippingTax`
+   * queda público para bindear un botón persistente en la tarjeta de
+   * factura). Se apaga al reparar con éxito o al emitir la factura.
+   */
+  readonly shippingTaxRepairNeeded = signal(false);
+  readonly isRepairingShippingTax = signal(false);
+
+  /**
    * Emite la factura electrónica de venta a partir de ESTA orden.
    *
    * `createFromOrder`, no `createFromSalesOrder`: son endpoints distintos sobre
@@ -5595,6 +5579,7 @@ export class OrderDetailsPageComponent {
             return;
           }
           this.toastService.success('Factura de venta emitida');
+          this.shippingTaxRepairNeeded.set(false);
           this.loadData();
         },
         error: (err: unknown) => {
@@ -5604,12 +5589,85 @@ export class OrderDetailsPageComponent {
           // for …: 500 Internal Server Error"), nunca el mensaje del backend.
           const parsed = parseApiError(err);
           const invoiceNumber = parsed.details?.invoice_number;
+          // B5 — La guarda rechazó por copia incoherente del impuesto del
+          // envío: ofrecer la reparación. Solo este rechazo la muestra.
+          const guardDetail: unknown = parsed.details?.detail;
+          const shippingTaxRejected =
+            parsed.errorCode === 'INVOICING_CALC_006' &&
+            typeof guardDetail === 'string' &&
+            guardDetail.startsWith('shipping_tax:');
+          this.shippingTaxRepairNeeded.set(shippingTaxRejected);
+          if (shippingTaxRejected) {
+            this.toastService.show({
+              description: parsed.userMessage,
+              variant: 'error',
+              duration: 8000,
+              action: {
+                label: 'Reparar impuesto del envío',
+                onClick: () => this.repairShippingTax('complete_rate'),
+              },
+            });
+            return;
+          }
           this.toastService.error(
             invoiceNumber
               ? `Esta orden ya tiene la factura ${invoiceNumber}. Anúlala antes de emitir otra.`
               : parsed.userMessage,
           );
         },
+      });
+  }
+
+  /**
+   * B5 — Repara la copia del impuesto del envío de esta orden
+   * (`POST /store/orders/:id/shipping-tax/repair`).
+   *
+   * Pide el motivo (auditoría) con un prompt global y repara: por defecto
+   * `complete_rate` (completa desde la tarifa conservando el monto); `clear`
+   * vacía la copia y el backend la niega con 409 si el impuesto ya está
+   * contabilizado. Al terminar con éxito recarga el detalle para que el
+   * operador facture de nuevo.
+   */
+  repairShippingTax(action: 'complete_rate' | 'clear' = 'complete_rate'): void {
+    const orderId = this.orderId;
+    if (!orderId || this.isRepairingShippingTax()) return;
+    void this.dialogService
+      .prompt({
+        title: 'Reparar impuesto del envío',
+        message:
+          action === 'clear'
+            ? 'Vacía la copia del impuesto del envío de esta orden. Falla si el impuesto ya está contabilizado. Escribe el motivo:'
+            : 'Completa la copia del impuesto del envío desde su tarifa, conservando el monto cobrado. Escribe el motivo:',
+        placeholder: 'Motivo de la reparación',
+        confirmText: 'Reparar',
+      })
+      .then((reason) => {
+        const trimmed = (reason ?? '').trim();
+        if (trimmed.length < 3 || trimmed.length > 500) return;
+        this.isRepairingShippingTax.set(true);
+        this.http
+          .post(
+            `${environment.apiUrl}/store/orders/${orderId}/shipping-tax/repair`,
+            { action, reason: trimmed },
+          )
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: () => {
+              this.isRepairingShippingTax.set(false);
+              this.shippingTaxRepairNeeded.set(false);
+              this.toastService.success(
+                'Impuesto del envío reparado. Ya puedes facturar de nuevo.',
+              );
+              this.loadData();
+            },
+            error: (err: unknown) => {
+              this.isRepairingShippingTax.set(false);
+              this.toastService.error(
+                parseApiError(err).userMessage ||
+                  'No se pudo reparar el impuesto del envío',
+              );
+            },
+          });
       });
   }
 }
