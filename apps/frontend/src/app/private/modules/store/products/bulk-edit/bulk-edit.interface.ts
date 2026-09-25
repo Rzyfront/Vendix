@@ -105,6 +105,7 @@ export interface BulkEditableChanges {
 
   // ===== Inventario (solo flags: las cantidades quedan fuera) =====
   track_inventory?: boolean;
+  min_stock_level?: number | null;
   requires_serial_numbers?: boolean;
 
   // ===== Precios =====
