@@ -716,7 +716,7 @@ export class InvoiceDataRequestsService {
     if (methodType !== 'bank_transfer' && methodType !== 'voucher') {
       throw new VendixHttpException(
         ErrorCodes.PAY_VALIDATE_001,
-        'Este medio de pago no recibe comprobante. Solo transferencia y voucher lo permiten.',
+        'Este medio de pago no recibe comprobante. Solo transferencia y datáfono lo permiten.',
       );
     }
 
