@@ -2757,10 +2757,10 @@ export class InvoicingService {
     // `is_inclusive = false`, como las líneas de producto— y su total sigue
     // siendo el bruto que pagó el cliente: `total_amount` no se mueve. Sin
     // copia la línea sale EXACTAMENTE como antes (sin `is_inclusive`).
-    const shippingTax =
-      shippingCost > 0
-        ? resolveInvoiceShippingTax(order)
-        : ({ applies: false, reason: 'none' } as const);
+    // B7: la copia se resuelve SIEMPRE, incluso con `shipping_cost = 0`. Una
+    // copia con impuesto y envío 0 es incoherente y la guarda la rechaza
+    // (`amount_not_below_cost`); nunca se omite en silencio.
+    const shippingTax = resolveInvoiceShippingTax(order);
     // Copia incoherente (sin tarifa, tipo fuera de iva/inc, impuesto ≥ costo):
     // se RECHAZA. Facturar el envío sin tributo dejaría la factura
     // declarando menos impuesto del que la orden y la contabilidad registran,
