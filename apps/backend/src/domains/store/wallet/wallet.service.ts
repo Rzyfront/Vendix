@@ -123,6 +123,41 @@ export class WalletService {
   }
 
   /**
+   * CP-REFUND-FLOW-REDESIGN paso 4 — acredita un refund en la wallet del
+   * cliente y emite `wallet.credited` con `source_id=refund_id` para
+   * auditoría. El listener contable ignora los campos extra, así que el
+   * shape sigue siendo compatible con `topUp`/`adjust`.
+   */
+  async creditForRefund(
+    customerId: number,
+    amount: number,
+    params: { refund_id: number; order_id: number; user_id?: number },
+  ) {
+    const wallet = await this.getOrCreateWallet(customerId);
+
+    const result = await this.walletBalance.credit(wallet.id, amount, {
+      reference_type: 'refund',
+      reference_id: params.refund_id,
+      description: `Refund #${params.refund_id} for order #${params.order_id}`,
+      created_by: params.user_id,
+    });
+
+    this.eventEmitter.emit('wallet.credited', {
+      wallet_id: wallet.id,
+      store_id: wallet.store_id,
+      organization_id: wallet.organization_id,
+      amount,
+      reference_type: 'refund',
+      source_id: params.refund_id,
+      refund_id: params.refund_id,
+      order_id: params.order_id,
+      user_id: params.user_id,
+    });
+
+    return { ...result, wallet_id: wallet.id };
+  }
+
+  /**
    * Admin adjustment: credit or debit a customer's wallet.
    */
   async adjust(customerId: number, dto: AdjustWalletDto, userId: number) {

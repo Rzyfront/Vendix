@@ -26,7 +26,10 @@ import { RefundPayoutChannel } from '../dto/resolve-refund.dto';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { SettingsService } from '../../../settings/settings.service';
 import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
-import { MovementsService } from '../../../cash-registers/movements/movements.service';
+import {
+  MovementsService,
+  type RefundCashMovementOutcome,
+} from '../../../cash-registers/movements/movements.service';
 import { SerialNumberEnforcementService } from '../../../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { WalletService } from '../../../wallet/wallet.service';
@@ -63,6 +66,17 @@ export function isCancellationRefundPlaceholder(
 ): boolean {
   return !!txId && txId.startsWith(CANCELLATION_REFUND_TX_PREFIX);
 }
+
+/**
+ * CP-REFUND-FLOW-REDESIGN paso 4 — aviso explícito del movimiento de caja
+ * que viaja en la respuesta del refund (`cash_movement`). `skipped` solo
+ * cuando el módulo de caja está apagado (no hay nada que entregar);
+ * cualquier otro camino entrega durable (`recorded`) o deja fila en el
+ * outbox (`pending` + `failure_id` consultable).
+ */
+export type RefundCashMovementNotice =
+  | RefundCashMovementOutcome
+  | { status: 'skipped'; reason: string };
 
 /** One settled leg to return: either a `payments` row (`payment_id`) or a
  * real CxC abono (`ar_payment_id`) — never both, never neither.
@@ -886,18 +900,17 @@ export class RefundFlowService {
         // wallet so the refund value is actually available to them. Non-blocking
         // because the refund row is already committed — a credit failure only
         // means an operator alert via log; the sale refund is intact.
+        // Paso 4: vía `creditForRefund`, que además emite `wallet.credited`
+        // con `source_id=refund_id` para auditoría.
         if (dto.refund_method === 'store_credit' && order.customer_id) {
           try {
-            const customerWallet =
-              await this.walletService.getOrCreateWallet(order.customer_id);
-            await this.walletBalance.credit(
-              customerWallet.id,
+            await this.walletService.creditForRefund(
+              order.customer_id,
               Number(calculation.total_refund),
               {
-                reference_type: 'refund',
-                reference_id: completedRefund.id,
-                description: `Refund #${completedRefund.id} for order #${orderId}`,
-                created_by: userId,
+                refund_id: completedRefund.id,
+                order_id: orderId,
+                user_id: userId,
               },
             );
             this.logger.log(
@@ -927,16 +940,27 @@ export class RefundFlowService {
         // `bank_transfer` → el operador transfiere desde su app bancaria
         // manualmente; no hay integración API.
         const movesCash = effectiveChannel === 'cash';
+        // Paso 4: entrega durable y awaited — la respuesta lleva el aviso
+        // explícito (`recorded` / `pending` + fila del outbox) en vez de un
+        // éxito silencioso. El refund ya está committed: un `pending` no lo
+        // revierte, solo le dice al operador que la caja quedó por entregar.
+        let cash_movement: RefundCashMovementNotice | undefined;
         if (userId && movesCash) {
-          this.recordRefundCashRegisterMovement(
-            order.store_id,
-            userId,
-            calculation.total_refund,
-            orderId,
-          ).catch(() => {});
+          cash_movement = await this.recordRefundCashRegisterMovement({
+            organization_id: order.stores?.organization_id,
+            store_id: order.store_id,
+            user_id: userId,
+            refund_id: completedRefund.id,
+            order_id: orderId,
+            payment_id: completedRefund.payment_id ?? null,
+            amount: calculation.total_refund,
+            channel: effectiveChannel,
+          });
         }
 
-        return completedRefund;
+        return cash_movement === undefined
+          ? completedRefund
+          : { ...completedRefund, cash_movement };
       },
       // Step 1: the two-arg form only handles the TRANSACTION rejection —
       // post-commit behavior (resilience guards above) is untouched. A unique
@@ -1203,33 +1227,68 @@ export class RefundFlowService {
   }
 
   /**
-   * Record a refund movement in the cash register if the feature is enabled
-   * and the user has an active session. Non-blocking.
+   * CP-REFUND-FLOW-REDESIGN paso 4 — entrega durable del movimiento de caja
+   * del refund. Reemplaza al best-effort silencioso: cada camino devuelve
+   * un aviso explícito que viaja en la respuesta (`recorded` / `pending` /
+   * `skipped`), y `pending` siempre deja fila en el outbox. Non-blocking
+   * para el refund (ya committed): hasta el fallo del propio outbox se
+   * degrada a `pending` con log, nunca lanza.
    */
-  private async recordRefundCashRegisterMovement(
-    storeId: number,
-    userId: number,
-    amount: number,
-    orderId: number,
-  ): Promise<void> {
+  private async recordRefundCashRegisterMovement(input: {
+    organization_id: number | null | undefined;
+    store_id: number;
+    user_id: number;
+    refund_id: number;
+    order_id: number;
+    payment_id: number | null;
+    amount: number | Prisma.Decimal;
+    channel: string;
+  }): Promise<RefundCashMovementNotice> {
     try {
       const settings = await this.settingsService.getSettings();
       const cr_settings = (settings as any)?.pos?.cash_register;
-      if (!cr_settings?.enabled) return;
+      if (!cr_settings?.enabled) {
+        this.logger.warn(
+          `Refund #${input.refund_id} (order #${input.order_id}): cash register ` +
+            `module disabled — no cash movement to deliver (skipped).`,
+        );
+        return { status: 'skipped', reason: 'cash_register_disabled' };
+      }
+      if (input.organization_id == null) {
+        this.logger.error(
+          `Refund #${input.refund_id} (order #${input.order_id}): cannot ` +
+            `deliver cash movement — organization unknown, outbox row unwritable.`,
+        );
+        return { status: 'pending', failure_id: null, reason: 'unknown_organization' };
+      }
 
-      const session = await this.sessionsService.getActiveSession(userId);
-      if (!session) return;
+      // Sesión activa tal cual (`getActiveSession`); `null` = el durable
+      // escribe al outbox en vez de retornar en silencio.
+      const session = await this.sessionsService.getActiveSession(input.user_id);
 
-      await this.movementsService.recordRefundMovement(session.id, {
-        store_id: storeId,
-        user_id: userId,
-        amount,
-        payment_method: 'cash',
-        order_id: orderId,
-        reference: `Refund for order #${orderId}`,
+      return await this.movementsService.recordRefundCashMovementDurable({
+        organization_id: input.organization_id,
+        store_id: input.store_id,
+        user_id: input.user_id,
+        refund_id: input.refund_id,
+        order_id: input.order_id,
+        payment_id: input.payment_id,
+        amount: Number(input.amount),
+        channel: input.channel,
+        session_id: session?.id ?? null,
       });
-    } catch {
-      // Non-critical: don't fail the refund if movement recording fails
+    } catch (error) {
+      // Non-critical: don't fail the refund if movement recording fails —
+      // but say so explicitly instead of swallowing it.
+      this.logger.error(
+        `Refund #${input.refund_id} (order #${input.order_id}): cash movement ` +
+          `delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return {
+        status: 'pending',
+        failure_id: null,
+        reason: 'delivery_error',
+      };
     }
   }
 
