@@ -18,6 +18,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import { OrderEtaService } from './services/order-eta.service';
+import { OrderShippingTaxRepairService } from './services/order-shipping-tax-repair.service';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { CouponsModule } from '../coupons/coupons.module';
@@ -83,6 +84,8 @@ import { InvoicingModule } from '../invoicing/invoicing.module';
     OrderEtaService,
     // Carril B - B3: hub tipado de eventos de orden para SSE.
     OrderSseService,
+    // B5: reparación de la copia del impuesto del envío.
+    OrderShippingTaxRepairService,
   ],
   exports: [OrdersService, OrderFlowModule, OrderEtaService, OrderSseService],
 })

@@ -2772,7 +2772,7 @@ export class InvoicingService {
         `La orden #${order.id} tiene una copia del impuesto del envío incoherente ` +
           `(${describeShippingTaxIncoherence(shippingTax.reason)}): no se puede ` +
           'facturar sin inventar la tarifa ni omitir un impuesto que la orden ya cobró. ' +
-          'Revisa el envío de la orden (vuelve a asignar la tarifa o quita el impuesto) y factura de nuevo.',
+          'Corrige el impuesto del envío desde el detalle de la orden (Reparar impuesto del envío) y factura de nuevo.',
         { order_id: order.id, detail: `shipping_tax:${shippingTax.reason}` },
       );
     }
