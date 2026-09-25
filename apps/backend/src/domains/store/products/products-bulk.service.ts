@@ -955,7 +955,7 @@ export class ProductsBulkService {
 
     let fileBuffer: Buffer;
     try {
-      fileBuffer = await this.s3Service.downloadImage(s3Key);
+      fileBuffer = await this.s3Service.downloadFile(s3Key);
     } catch (error) {
       throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
     }

@@ -516,6 +516,11 @@ export class AnalyticsController {
       { key: 'Unidad', header: 'Unidad', type: 'text', width: 14 },
       { key: 'Ingresos', header: 'Ingresos', type: 'currency' },
       {
+        key: 'Costo Unitario (Snapshot)',
+        header: 'Costo Unitario (Snapshot)',
+        type: 'currency',
+      },
+      {
         key: 'Costo Unitario (Receta)',
         header: 'Costo Unitario (Receta)',
         type: 'currency',

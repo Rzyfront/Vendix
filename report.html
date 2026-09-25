@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Informe semanal · 5–13 sept 2026 · Vendix</title>
+<style>
+  @page { size: A4; margin: 1.4cm 1.2cm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #e5e7eb; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: #0f172a; font-size: 9pt; line-height: 1.4; }
+  .sheet { background: #fff; width: 210mm; min-height: 297mm; margin: 10px auto; box-shadow: 0 3px 12px rgba(0,0,0,.08); border-radius: 4px; overflow: hidden; }
+  .page { page-break-after: always; }
+  .page-inner { padding: 1.2cm 1.2cm; }
+  .page:last-child { page-break-after: avoid; }
+  h1, h2, h3, h4 { font-weight: 700; color: #0f172a; margin: 0; }
+  h1 { font-size: 24pt; line-height: 1.05; }
+  h2 { font-size: 12.5pt; margin-bottom: 3mm; padding-bottom: 2mm; border-bottom: 2px solid #0f172a; }
+  h3 { font-size: 10pt; margin-top: 4mm; margin-bottom: 1.5mm; color: #1e293b; }
+  p { margin: 0 0 2mm 0; }
+  .cover { padding: 3cm 1.4cm 0; }
+  .cover .top { display: flex; justify-content: space-between; align-items: center; color: #64748b; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 1.2px; padding-bottom: 1.2cm; border-bottom: 1.5px solid #cbd5e1; }
+  .cover h1 { font-size: 32pt; margin: 1.2cm 0 0.4cm; }
+  .cover h1 small { display: block; font-size: 11pt; color: #64748b; font-weight: 400; margin-top: 4mm; }
+  .cover .lede { font-size: 9.5pt; line-height: 1.5; color: #334155; margin-bottom: 0.8cm; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3mm; margin: 0.5cm 0 0.4cm; }
+  .kpi { background: linear-gradient(135deg, #f8fafc, #f1f5f9); border: 1px solid #e2e8f0; border-radius: 5px; padding: 4mm 5mm; text-align: center; }
+  .kpi .v { font-size: 20pt; font-weight: 800; color: #0f172a; line-height: 1; }
+  .kpi .l { font-size: 7pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.6px; margin-top: 1.5mm; }
+  .meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3mm; padding: 3mm 0; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; margin: 0.5cm 0; }
+  .meta div { font-size: 8pt; }
+  .meta .k { color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; font-size: 7pt; }
+  .meta .v { color: #0f172a; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; margin: 2mm 0; font-size: 8pt; }
+  th, td { text-align: left; padding: 1.8mm 2.2mm; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+  th { background: #f8fafc; font-weight: 700; font-size: 7pt; text-transform: uppercase; letter-spacing: 0.4px; color: #475569; border-bottom: 1.5px solid #cbd5e1; }
+  tr:nth-child(even) td { background: #fafbfc; }
+  .pill { display: inline-block; padding: 0.4mm 1.8mm; border-radius: 7px; font-size: 7pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; }
+  .p-merged { background: #1e40af; color: #fff; }
+  .p-closed { background: #6b7280; color: #fff; }
+  .p-open { background: #f59e0b; color: #fff; }
+  .p-fix { background: #ede9fe; color: #5b21b6; }
+  .code { font-family: "SF Mono", monospace; font-size: 7.5pt; background: #f1f5f9; padding: 0.3mm 1.2mm; border-radius: 3px; color: #1e293b; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; }
+  .card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 5px; padding: 3mm 4mm; }
+  .chart-row { display: flex; align-items: center; margin: 3mm 0; }
+  .chart-row .lbl { width: 14mm; font-size: 7.5pt; color: #475569; font-weight: 600; }
+  .chart-row .bar-wrap { flex: 1; background: #f1f5f9; height: 7mm; border-radius: 3px; position: relative; overflow: hidden; }
+  .chart-row .bar { height: 100%; display: flex; align-items: center; justify-content: flex-end; padding-right: 2mm; color: #fff; font-size: 7.5pt; font-weight: 700; }
+  .b1 { background: linear-gradient(90deg, #2563eb, #3b82f6); }
+  .b2 { background: linear-gradient(90deg, #059669, #10b981); }
+  .b3 { background: linear-gradient(90deg, #d97706, #f59e0b); }
+  .b4 { background: linear-gradient(90deg, #6b7280, #9ca3af); }
+  .timeline { position: relative; padding: 2mm 0 2mm 7mm; }
+  .timeline::before { content: ""; position: absolute; left: 2.5mm; top: 0; bottom: 0; width: 1.5px; background: linear-gradient(180deg, #1e40af, #ecfdf5); }
+  .tl-item { position: relative; margin-bottom: 2.5mm; padding-left: 3mm; font-size: 8.5pt; }
+  .tl-item::before { content: ""; position: absolute; left: -6mm; top: 1.5mm; width: 4mm; height: 4mm; border-radius: 50%; background: #1e40af; border: 1.5px solid #fff; box-shadow: 0 0 0 1px #1e40af; }
+  .tl-item .day { font-size: 7pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+  .footer { background: #0f172a; color: #94a3b8; font-size: 7pt; text-align: center; padding: 3mm; }
+  .footer b { color: #f8fafc; }
+  .small { font-size: 7pt; color: #64748b; }
+  @media print { body { background: #fff; } .sheet { box-shadow: none; margin: 0; border-radius: 0; } }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1: COVER + RESUMEN -->
+<div class="sheet"><div class="page"><div class="page-inner">
+  <div class="cover">
+    <div class="top">
+      <span>Informe Semanal Vendix</span>
+      <span>5 – 13 sept 2026</span>
+    </div>
+    <h1>Cierre técnico de la semana<small>5 issues creados · 10 PRs merged · 1 prospecto contactado</small></h1>
+    <p class="lede">Semana enfocada en cerrar el lote de fixes pendientes que llevaban semanas revertidos silenciosamente, más 2 issues nuevos reportados desde el admin/POS en producción. Sin brigada esta semana, pero se sostuvo conversación con un prospecto de fresas con crema.</p>
+
+    <div class="kpi-grid">
+      <div class="kpi"><div class="v">5</div><div class="l">Issues creados</div></div>
+      <div class="kpi"><div class="v">5</div><div class="l">Issues solucionados</div></div>
+      <div class="kpi"><div class="v">10/10</div><div class="l">PRs cerrados merged</div></div>
+      <div class="kpi"><div class="v">3</div><div class="l">PRs open (cleanup)</div></div>
+    </div>
+
+    <div class="meta">
+      <div><div class="k">Dev</div><div class="v">Adelin Toro</div></div>
+      <div><div class="k">Stack</div><div class="v">NestJS + Angular 20</div></div>
+      <div><div class="k">Rama</div><div class="v">develop</div></div>
+      <div><div class="k">Team Linear</div><div class="v">Quickss · Vendix</div></div>
+    </div>
+  </div>
+</div></div>
+
+<!-- PAGE 2: GRÁFICAS + ISSUES -->
+<div class="sheet"><div class="page"><div class="page-inner">
+  <h2>Trabajo de la semana</h2>
+
+  <h3>Issues creados (5) por t&iacute;tulo</h3>
+  <table>
+    <thead><tr><th>ID</th><th>T&iacute;tulo</th><th>Estado</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr><td><strong>QUI-800</strong></td><td>Bot&oacute;n + e input de Impuestos desalineados</td><td><span class="pill p-merged">M</span></td><td>PR #785</td></tr>
+      <tr><td><strong>QUI-801</strong></td><td>Toggles deshabilitados en rojo opaco</td><td><span class="pill p-merged">M</span></td><td>PR #786, #797</td></tr>
+      <tr><td><strong>QUI-806</strong></td><td>Eliminar &uacute;ltimo producto del carrito no vac&iacute;a</td><td><span class="pill p-merged">M</span></td><td>PR #791</td></tr>
+      <tr><td><strong>QUI-807</strong></td><td>Card "Resumen General" no navega</td><td><span class="pill p-closed">C</span></td><td>PR #792</td></tr>
+      <tr><td><strong>QUI-808</strong></td><td>Resumen del cliente no muestra datos</td><td><span class="pill p-merged">M</span></td><td>PR #798</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Issues solucionados (5 pre-existentes + 1 sin issue)</h3>
+  <table>
+    <thead><tr><th>ID</th><th>T&iacute;tulo</th><th>PR</th><th>Qu&eacute; resolvi&oacute;</th></tr></thead>
+    <tbody>
+      <tr><td><strong>QUI-784</strong></td><td>Cierre de caja muestra USD en lugar de COP</td><td>#768</td><td>Prompt IA ahora env&iacute;a la moneda real del tenant</td></tr>
+      <tr><td><strong>QUI-795</strong></td><td>Carrito invitado no se vac&iacute;a al expirar</td><td>#773</td><td>Purge en mount + visibilitychange</td></tr>
+      <tr><td><strong>QUI-628 v3</strong></td><td>M&eacute;trica de carritos abandonados fabricada</td><td>#776</td><td>Re-aplicaci&oacute;n del contrato de m&eacute;tricas</td></tr>
+      <tr><td><strong>QUI-794</strong></td><td>Rese&ntilde;as no muestran UI al estar habilitadas</td><td>#777</td><td>can-review pasa a @OptionalAuth, agrega reason 'unauthenticated'</td></tr>
+      <tr><td><strong>QUI-792</strong></td><td>FAQ guardado en admin no aparece en footer</td><td>#782</td><td>saveFooterOnly() PATCH independiente del main save</td></tr>
+      <tr><td><strong>(sin issue)</strong></td><td>Productos nuevos con state=inactive no aparecen</td><td>#783</td><td>Migraci&oacute;n aditiva: default 'inactive'→'active'</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Timeline</h3>
+  <div class="timeline">
+    <div class="tl-item"><div class="day">Mar 09</div><strong>#768</strong> &mdash; AI closing summary: real store currency (QUI-784)</div>
+    <div class="tl-item"><div class="day">Mi&eacute; 10</div><strong>6 PRs</strong> &mdash; #773, #776, #777, #782, #785, #786 merged. Tambi&eacute;n abr&iacute; QUI-800 y QUI-801</div>
+    <div class="tl-item"><div class="day">Jue 11</div><strong>3 PRs</strong> &mdash; #791 (QUI-806), #792 (QUI-807), #798 (QUI-808) merged. Abr&iacute; QUI-806/807/808. Backend ca&iacute;do por line endings &rarr; stashe&eacute; WIP del otro agente &rarr; recompil&eacute;.</div>
+  </div>
+</div></div>
+
+<!-- PAGE 3: GRÁFICAS DE PRs -->
+<div class="sheet"><div class="page"><div class="page-inner">
+  <h2>Distribuci&oacute;n de PRs (14 total)</h2>
+
+  <h3>Por estado</h3>
+  <div class="chart-row"><div class="lbl">Merged</div><div class="bar-wrap"><div class="bar b1" style="width:71%;">10 (71%)</div></div></div>
+  <div class="chart-row"><div class="lbl">Closed</div><div class="bar-wrap"><div class="bar b2" style="width:7%;">1 (7%)</div></div></div>
+  <div class="chart-row"><div class="lbl">Open</div><div class="bar-wrap"><div class="bar b3" style="width:21%;">3 (21%)</div></div></div>
+
+  <h3>Por d&iacute;a</h3>
+  <div class="chart-row"><div class="lbl">09-Sep</div><div class="bar-wrap"><div class="bar b1" style="width:7%;">1</div></div></div>
+  <div class="chart-row"><div class="lbl">10-Sep</div><div class="bar-wrap"><div class="bar b2" style="width:36%;">5</div></div></div>
+  <div class="chart-row"><div class="lbl">11-Sep</div><div class="bar-wrap"><div class="bar b3" style="width:29%;">4</div></div></div>
+
+  <h3>Issues creadas vs solucionadas por d&iacute;a</h3>
+  <div class="chart-row"><div class="lbl">09-Sep</div><div class="bar-wrap"><div class="bar b1" style="width:0%;"></div></div></div>
+  <div class="chart-row"><div class="lbl">10-Sep</div><div class="bar-wrap"><div class="bar b2" style="width:33%;">2 creadas</div></div></div>
+  <div class="chart-row"><div class="lbl">11-Sep</div><div class="bar-wrap"><div class="bar b3" style="width:50%;">3 creadas + 3 soluc</div></div></div>
+
+  <h2 style="margin-top:5mm;">Trabajo por &aacute;rea</h2>
+  <table>
+    <thead><tr><th>&Aacute;rea</th><th>Issues resueltos</th><th>PRs</th></tr></thead>
+    <tbody>
+      <tr><td><strong>POS / Caja</strong></td><td>QUI-784, QUI-806</td><td>#768, #791</td></tr>
+      <tr><td><strong>Storefront Ecommerce</strong></td><td>QUI-795, QUI-794</td><td>#773, #777</td></tr>
+      <tr><td><strong>Admin / Settings</strong></td><td>QUI-800, QUI-801, QUI-792, QUI-808, (products)</td><td>#782, #785, #786, #797, #798, #783</td></tr>
+      <tr><td><strong>Anal&iacute;tica</strong></td><td>QUI-628 v3</td><td>#776</td></tr>
+    </tbody>
+  </table>
+</div></div>
+
+<!-- PAGE 4: FLUJOS + COMERCIAL + CIERRE -->
+<div class="sheet"><div class="page"><div class="page-inner">
+  <h2>Revisi&oacute;n de los 3 flujos base</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h3>1. &Oacute;rdenes de compra (B2B)</h3>
+      <p><strong>draft → approved → recibida</strong>. La recepci&oacute;n crea <span class="code">stock_levels</span> en ubicaci&oacute;n destino y persiste <span class="code">order_items.cost_price</span> como snapshot. No afecta revenue (regla C7).</p>
+    </div>
+    <div class="card">
+      <h3>2. &Oacute;rdenes de venta (POS)</h3>
+      <p><strong>carrito → cobro → cierre</strong>. El cierre genera resumen IA (QUI-784 fixed). Carrito guest persiste en localStorage y respira correctamente (QUI-795 fixed).</p>
+    </div>
+  </div>
+  <div class="card" style="margin-top:3mm;">
+    <h3>3. Ventas desde ecommerce (storefront p&uacute;blico)</h3>
+    <p><strong>browse → checkout → post-compra</strong>. Orden con <span class="code">channel: 'ecommerce'</span>, reserva de stock, notificaci&oacute;n, elegibilidad para rese&ntilde;a (QUI-794 fixed). Las 3 fuentes de venta (POS, ecommerce, whatsapp futuro) comparten el mismo <span class="code">orders</span> y los mismos estados terminales para revenue.</p>
+  </div>
+
+  <h2 style="margin-top:6mm;">Comercial</h2>
+  <p><strong>No se realiz&oacute; brigada</strong> esta semana. Se sostuvo conversaci&oacute;n con un <strong>prospecto dedicado al negocio de fresas con crema</strong> (postre gourmet, volumen bajo-medio). Requiere POS + ecommerce + facturaci&oacute;n electr&oacute;nica DIAN. Implicaci&oacute;n t&eacute;cnica: el inventario actual no maneja lotes con expiry.</p>
+
+  <h2 style="margin-top:5mm;">Highlights t&eacute;cnicos reutilizables</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h4>1. Effect + dependencias impl&iacute;citas (QUI-806)</h4>
+      <p>Cualquier <span class="code">signal()</span> le&iacute;do dentro de <span class="code">effect()</span> es dependencia. Si es un guard, envolver en <span class="code">untracked()</span>.</p>
+    </div>
+    <div class="card">
+      <h4>2. PATCH parcial cuando dos forms son independientes (QUI-792)</h4>
+      <p>No juntar dos FormGroups en un <span class="code">onSubmit</span> con <span class="code">if (invalid) return</span>. Dos PATCH independientes, dos toasts.</p>
+    </div>
+    <div class="card">
+      <h4>3. Stats en el mismo endpoint (QUI-808)</h4>
+      <p>Si el frontend lee stats del user, agregalas en el <span class="code">findOne()</span> con un <span class="code">groupBy</span>. Sin N+1, sin endpoint extra.</p>
+    </div>
+    <div class="card">
+      <h4>4. Line endings mezclados rompen SWC</h4>
+      <p>SWC falla con "Expression expected" si un archivo mezcla CRLF+LF. Normalizar con <span class="code">tr -d '\r'</span> antes de compilar.</p>
+    </div>
+  </div>
+
+  <h2 style="margin-top:5mm;">Resumen final</h2>
+  <div class="kpi-grid">
+    <div class="kpi"><div class="v">10/10</div><div class="l">Cerrados merged</div></div>
+    <div class="kpi"><div class="v">7</div><div class="l">Memorias Engram</div></div>
+    <div class="kpi"><div class="v">3</div><div class="l">Issues omitidos</div></div>
+    <div class="kpi"><div class="v">2</div><div class="l">Tickets para hoy</div></div>
+  </div>
+  <p style="margin-top:3mm;"><strong>Conclusi&oacute;n:</strong> Semana de cierre t&eacute;cnico. Todos los fixes tienen tests. Pr&oacute;xima semana: merge de los 3 PRs de cleanup del otro agente (#795, #796, #797) y posible demo al prospecto de fresas.</p>
+</div>
+<div class="footer"><b>Informe semanal Vendix</b> &middot; 5-13 sept 2026 &middot; Adelin Toro &middot; generado el 2026-09-11</div>
+</div>
+
+</body>
+</html>
