@@ -8,7 +8,13 @@ import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
-import { resolveFiscalQualitiesLine } from '../services/fiscal-issuer-identity';
+import {
+  resolveFiscalIssuerForPrint,
+  resolveFiscalQualitiesLine,
+} from '../services/fiscal-issuer-identity';
+
+/** Descargo no fiscal del tiquete POS: texto único real + muestra (ADR-2). */
+const NON_FISCAL_DISCLAIMER = 'Este documento no es factura electrónica de venta.';
 import { mapUserAddress } from '../lib/customer-address';
 import { formatFiscalMoney } from './fiscal-document-print.mapper';
 import {
@@ -80,6 +86,19 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             organizations: {
               include: {
                 organization_settings: { select: { settings: true } },
+                // Paridad FE: `resolveFiscalIssuerForPrint` lee `org.addresses[0]`
+                // (mismo select que `FISCAL_DOCUMENT_PRINT_INCLUDE`).
+                addresses: {
+                  take: 1,
+                  select: {
+                    address_line1: true,
+                    city: true,
+                    state_province: true,
+                    municipality_code: true,
+                    postal_code: true,
+                    phone_number: true,
+                  },
+                },
               },
             },
           },
@@ -540,6 +559,8 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         amount_received_formatted: '$100.000',
         change_due: 12500,
         change_due_formatted: '$12.500',
+        // Paridad muestra/real (ADR-2): el mismo descargo, sin literales sueltos.
+        non_fiscal_disclaimer: NON_FISCAL_DISCLAIMER,
       },
       // C.2 (ADR-12) — muestra en `'gross'`, paridad con `fetchDocumentData`.
       money_basis: 'gross',
@@ -608,6 +629,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       { token: '{{customer.address}}', path: 'customer.address', description: 'Dirección del cliente', example: 'Carrera 15 # 88-64, Bogotá D.C.' },
       { token: '{{order.grand_total}}', path: 'totals.grand_total_formatted', description: 'Total a pagar con formato', example: '$87.500' },
       { token: '{{order.change_due}}', path: 'document.change_due_formatted', description: 'Cambio o vuelto entregado', example: '$12.500' },
+      { token: '{{document.non_fiscal_disclaimer}}', path: 'document.non_fiscal_disclaimer', description: 'Leyenda fija: no es factura electrónica', example: 'Este documento no es factura electrónica de venta.' },
     ];
   }
 
@@ -712,6 +734,9 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     const store = order.stores || {};
     const org = store.organizations || {};
     const addr = store.addresses?.[0] || {};
+    // Paridad FE: sin fila en `addresses`, la dirección cae a la identidad
+    // fiscal (modo permisivo: un ticket nunca falla 422 por datos fiscales).
+    const issuer = resolveFiscalIssuerForPrint(org, store, false);
     const user = order.users || {};
 
     // ADR-04 — mesa + mesero derivados de la última sesión, abierta o cerrada.
@@ -804,7 +829,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         tax_id: org.tax_id,
         phone: store.phone,
         email: store.email,
-        address: addr.address_line1 ? `${addr.address_line1} ${addr.address_line2 || ''}`.trim() : undefined,
+        address: addr.address_line1 ? `${addr.address_line1} ${addr.address_line2 || ''}`.trim() : issuer.address_line || issuer.fiscal_address || undefined,
         city: addr.city,
         logo_url: signedLogoUrl,
       },
@@ -851,6 +876,8 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
               change_due_formatted: this.formatOrderMoney(change_due),
             }
           : {}),
+        // Leyenda no fiscal fija (el validador la exige en `pos_sale_ticket`).
+        non_fiscal_disclaimer: NON_FISCAL_DISCLAIMER,
         // QUI-737 (B.4) — alias de venta rápida ("Mesa 5"). Va en la CABECERA
         // junto al número de orden, NO bajo el bloque "Datos del Cliente"
         // (`customer`): el alias no es un cliente formal y no debe leerse como

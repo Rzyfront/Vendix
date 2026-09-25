@@ -38,6 +38,34 @@ export class PrintFiscalValidatorService {
     formatType: print_format_type_enum,
     definition: PrintFormatDefinition,
   ): void {
+    // Tiquete POS: la leyenda no fiscal es obligatoria (espejo del requisito
+    // CUFE/QR en formatos fiscales). Estructurada: campo `f_disclaimer`
+    // habilitado en el footer; custom: substring del token. Cualquier otro
+    // formato no fiscal sigue pasando sin chequeos (B.6 intacto).
+    if ((formatType as string) === 'pos_sale_ticket') {
+      const hasField = (definition?.sections ?? []).some(
+        (s: any) =>
+          s?.type === 'footer' &&
+          (s.fields ?? []).some(
+            (f: any) => f?.id === 'f_disclaimer' && f?.enabled === true,
+          ),
+      );
+      const hasToken = (
+        (definition as any)?.custom_template ?? ''
+      ).includes('document.non_fiscal_disclaimer');
+      if (!hasField && !hasToken) {
+        throw new VendixHttpException(
+          // Código propio (no el 001 fiscal): el invariante B.6 reserva
+          // PRINT_FISCAL_STRUCTURE_VIOLATION_001 a formatos fiscales.
+          ErrorCodes.PRINT_TICKET_DISCLAIMER_REQUIRED_001,
+          'El Ticket de Venta POS debe declarar que no es factura electrónica: ' +
+            'incluya el campo "Leyenda No Fiscal" habilitado en el pie, o el token ' +
+            '{{document.non_fiscal_disclaimer}} en plantillas personalizadas.',
+        );
+      }
+      return;
+    }
+
     if (!FISCAL_FORMATS.has(formatType as string)) {
       // Los formatos no fiscales no tienen restricciones DIAN obligatorias.
       // Antes de B.6 había dos comparaciones explícitas

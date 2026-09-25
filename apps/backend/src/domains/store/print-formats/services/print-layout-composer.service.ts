@@ -1311,10 +1311,27 @@ export class PrintLayoutComposerService {
         ? `<div class="dt-dispatched-by" data-element-id="f_courier" data-section-id="sec_footer" data-token="custom_variables.courier_name">Despachado por:${courierHtml}</div>`
         : '';
 
+    // Leyenda no fiscal fija del tiquete POS (espejo `courier_name`): solo
+    // `pos_sale_ticket` publica `document.non_fiscal_disclaimer`, así que
+    // ningún otro formato cambia un byte; sin leyenda la salida queda idéntica.
+    const legendRaw = (data.document as any)?.non_fiscal_disclaimer;
+    const legendText =
+      typeof legendRaw === 'string' ? legendRaw.trim() : '';
+    const legendHtml =
+      mode === 'tokenized'
+        ? ' <span class="vendix-token-pill" data-token="document.non_fiscal_disclaimer">{{ non_fiscal_disclaimer }}</span>'
+        : legendText
+          ? ` ${this.compiler.escapeHtml(legendText)}`
+          : '';
+    const legendLine =
+      mode === 'tokenized' || legendText
+        ? `<div class="footer-disclaimer" data-element-id="f_disclaimer" data-section-id="sec_footer" data-token="document.non_fiscal_disclaimer">${legendHtml}</div>`
+        : '';
+
     return `
       <div class="print-section section-footer" data-section-id="sec_footer">
         ${showMsg ? `<div class="footer-msg" data-element-id="f_msg" data-section-id="sec_footer" data-token="receipts.receipt_footer">${msgVal}</div>` : ''}
-        ${extraFooter}${courierLine ? `\n        ${courierLine}` : ''}
+        ${extraFooter}${courierLine ? `\n        ${courierLine}` : ''}${legendLine ? `\n        ${legendLine}` : ''}
         ${showPowered ? `<div class="powered-by" data-element-id="f_powered" data-section-id="sec_footer" data-token="system.powered_by">${poweredVal}</div>` : ''}
       </div>
     `;

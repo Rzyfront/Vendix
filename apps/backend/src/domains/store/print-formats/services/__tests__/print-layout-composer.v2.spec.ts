@@ -428,7 +428,7 @@ describe('PrintLayoutComposerService — tirilla 80mm en negro absoluto', () => 
     pos_sale_ticket: {
       v: 2,
       paper: rollPaper,
-      styles: rollStyles(9),
+      styles: rollStyles(8.5),
       sections: [
         { id: 'sec_header', type: 'header', title: 'Encabezado', enabled: true, order: 1 },
         { id: 'sec_doc_info', type: 'document_info', title: 'Datos del Ticket', enabled: true, order: 2 },
@@ -440,8 +440,7 @@ describe('PrintLayoutComposerService — tirilla 80mm en negro absoluto', () => 
       columns: [
         { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 50, align: 'left' },
         { id: 'col_qty', key: 'quantity', label: 'Cant.', enabled: true, width_percent: 15, align: 'center' },
-        { id: 'col_price', key: 'unit_price', label: 'Precio', enabled: true, width_percent: 15, align: 'right' },
-        { id: 'col_tot', key: 'total_price', label: 'Total', enabled: true, width_percent: 20, align: 'right' },
+        { id: 'col_tot', key: 'total_price', label: 'Total', enabled: true, width_percent: 35, align: 'right' },
       ],
     },
     pos_electronic_invoice: {

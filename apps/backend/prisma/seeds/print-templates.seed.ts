@@ -64,7 +64,7 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
       },
       styles: {
         font_family: 'Arial, Helvetica, sans-serif',
-        font_size_base_pt: 9,
+        font_size_base_pt: 8.5,
         primary_color: '#000000',
         header_alignment: 'center',
         compact_mode: true,
@@ -140,6 +140,7 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
           order: 6,
           fields: [
             { id: 'f_msg', key: 'receipts.receipt_footer', label: 'Mensaje de Despedida', enabled: true, position: 'center' },
+            { id: 'f_disclaimer', key: 'document.non_fiscal_disclaimer', label: 'Leyenda No Fiscal', enabled: true, position: 'center' },
             { id: 'f_powered', key: 'system.powered_by', label: 'Firma del Sistema', enabled: true, position: 'center' },
           ],
         },
@@ -147,8 +148,7 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
       columns: [
         { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 50, align: 'left', format: 'text' },
         { id: 'col_qty', key: 'quantity', label: 'Cant.', enabled: true, width_percent: 15, align: 'center', format: 'number' },
-        { id: 'col_price', key: 'unit_price', label: 'Precio', enabled: true, width_percent: 15, align: 'right', format: 'currency' },
-        { id: 'col_tot', key: 'total_price', label: 'Total', enabled: true, width_percent: 20, align: 'right', format: 'currency' },
+        { id: 'col_tot', key: 'total_price', label: 'Total', enabled: true, width_percent: 35, align: 'right', format: 'currency' },
       ],
     },
   },

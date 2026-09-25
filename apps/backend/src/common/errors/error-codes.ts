@@ -276,6 +276,11 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'Fiscal electronic invoice template violates DIAN mandatory graphic representation requirements',
   },
+  PRINT_TICKET_DISCLAIMER_REQUIRED_001: {
+    code: 'PRINT_TICKET_DISCLAIMER_REQUIRED_001',
+    httpStatus: 422,
+    devMessage: 'POS sale ticket must declare it is not an electronic invoice (footer disclaimer field or custom token)',
+  },
   PRINT_GATEWAY_RENDER_FAILED_001: {
     code: 'PRINT_GATEWAY_RENDER_FAILED_001',
     httpStatus: 500,
