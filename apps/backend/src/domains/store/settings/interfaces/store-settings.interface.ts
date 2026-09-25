@@ -189,9 +189,23 @@ export interface EcommerceSettings {
     create_account_after_order: boolean;
     terms_required: boolean;
     guest_newsletter_opt_in: boolean;
+    // Opt-in: cierra el pedido por WhatsApp en vez del checkout web.
+    whatsapp_checkout?: boolean;
+    // Número destino del pedido por WhatsApp (formato libre E.164-ish).
+    whatsapp_number?: string;
+    // Pitch que encabeza el mensaje de pedido. Acepta {tienda} y {web}.
+    whatsapp_pitch?: string;
     // Opt-in: comprobante obligatorio para bank_transfer/voucher en el
     // checkout ecommerce. Ausente ⇒ opcional (default `false`).
     require_payment_receipt?: boolean;
+  };
+  orders?: {
+    // Opt-out: oculta la barra de progreso de seguimiento en la vista
+    // pública del pedido (/pedido/:token). Ausente ⇒ visible (`!== true`).
+    hide_tracking_progress?: boolean;
+    // Opt-out: oculta el ETA de preparación en la vista pública del pedido.
+    // Ausente ⇒ visible (`!== true`).
+    hide_prep_eta?: boolean;
   };
   shipping?: {
     free_shipping_threshold?: number;

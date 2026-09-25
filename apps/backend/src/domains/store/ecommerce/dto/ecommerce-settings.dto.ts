@@ -490,6 +490,29 @@ export class EcommerceCheckoutDto {
 }
 
 /**
+ * DTO para la configuración de la vista de pedidos (tracking guest /pedido/:token)
+ */
+export class EcommerceOrdersDto {
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Oculta la barra de progreso de seguimiento en la vista pública del pedido. Opt-out: ausente ⇒ visible.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  hide_tracking_progress?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Oculta el tiempo estimado de preparación en la vista pública del pedido. Opt-out: ausente ⇒ visible.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  hide_prep_eta?: boolean;
+}
+
+/**
  * DTO para la configuración de envíos
  */
 export class EcommerceShippingDto {
@@ -840,6 +863,16 @@ export class EcommerceSettingsDto {
   @ValidateNested()
   @Type(() => EcommerceCheckoutDto)
   checkout?: EcommerceCheckoutDto;
+
+  // Pedidos (tracking guest)
+  @ApiPropertyOptional({
+    description: 'Order tracking settings (guest /pedido/:token visibility)',
+    type: EcommerceOrdersDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EcommerceOrdersDto)
+  orders?: EcommerceOrdersDto;
 
   // Envíos
   @ApiPropertyOptional({
