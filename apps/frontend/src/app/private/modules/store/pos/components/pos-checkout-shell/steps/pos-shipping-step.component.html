@@ -159,6 +159,20 @@
               }
             </div>
 
+            <!-- Paso 15b — desglose fiscal de la cotización (solo comerciante).
+                 Base + impuesto coherentes con el modo de la tarifa. -->
+            @if (shippingTaxBreakdown(); as breakdown) {
+              <div class="cost-divider"></div>
+              <div class="cost-row cost-row--detail">
+                <span class="cost-row-label">Base envío</span>
+                <span class="cost-row-amount">{{ breakdown.base | currency }}</span>
+              </div>
+              <div class="cost-row cost-row--detail">
+                <span class="cost-row-label">Impuesto ({{ shippingTaxModeLabel() }})</span>
+                <span class="cost-row-amount">{{ breakdown.tax | currency }}</span>
+              </div>
+            }
+
             @if (!isPickupMethod() && calculatedShippingCost() !== null) {
               <div class="cost-divider"></div>
               <div class="cost-row cost-row--toggle">
@@ -183,6 +197,12 @@
                   />
                 </div>
               </div>
+            }
+
+            @if (manualCostLosesTax()) {
+              <p class="manual-tax-note" role="note">
+                El costo manual se registra sin impuesto de envío.
+              </p>
             }
           </div>
 
