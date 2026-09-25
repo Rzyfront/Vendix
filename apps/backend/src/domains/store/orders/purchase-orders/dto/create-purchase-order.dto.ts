@@ -342,6 +342,13 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   track_inventory?: any;
 
+  @ApiProperty({ description: 'Min stock level for alert (for new products)' })
+  @IsOptional()
+  @Transform(toOptionalNumber)
+  @IsInt()
+  @Min(0)
+  min_stock_level?: number;
+
   @ApiProperty({ description: 'Pricing type (for new products)' })
   @IsString()
   @IsOptional()

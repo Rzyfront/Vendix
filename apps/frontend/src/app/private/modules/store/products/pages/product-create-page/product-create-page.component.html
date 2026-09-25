@@ -1225,6 +1225,21 @@
             >
             </app-setting-toggle>
 
+            @if (productForm.get('track_inventory')?.value) {
+              <div class="pt-2">
+                <app-input
+                  formControlName="min_stock_level"
+                  label="Umbral de stock bajo"
+                  type="number"
+                  [min]="0"
+                  step="1"
+                  [placeholder]="defaultLowStockThresholdPlaceholder()"
+                  helperText="Cantidad mínima antes de alertar stock bajo. Si se deja vacío, usa el valor por defecto de la tienda."
+                >
+                </app-input>
+              </div>
+            }
+
             <app-setting-toggle
               formControlName="requires_serial_numbers"
               label="Requerir número de serie"
@@ -2348,6 +2363,18 @@
                       >Con stock activo</span
                     >
                   </div>
+                </div>
+                <div class="mt-2 p-2.5 bg-surface rounded-lg border border-border flex items-center justify-between text-xs">
+                  <div class="flex items-center gap-1.5 text-text-muted">
+                    <app-icon name="alert-triangle" size="14" class="text-amber-500"></app-icon>
+                    <span>Alerta de stock bajo:</span>
+                  </div>
+                  <span class="font-semibold text-text-primary">
+                    {{ effectiveProductLowStockThreshold() }} un.
+                    <span class="text-[10px] text-text-muted font-normal">
+                      ({{ isCustomLowStockThreshold() ? 'Producto' : 'Tienda' }})
+                    </span>
+                  </span>
                 </div>
               </div>
 
@@ -3716,7 +3743,7 @@
 >
   <div class="space-y-4 md:space-y-6">
     <!-- Summary Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
       <div class="p-4 bg-bg rounded-xl border border-border">
         <p
           class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1"
@@ -3765,6 +3792,21 @@
               }
             </button>
           }
+        </div>
+      </div>
+      <div class="p-4 bg-bg rounded-xl border border-border">
+        <p
+          class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1"
+        >
+          Umbral Stock Bajo
+        </p>
+        <div class="flex items-baseline gap-2">
+          <p class="text-2xl font-bold text-text-primary">
+            {{ effectiveProductLowStockThreshold() }}
+          </p>
+          <span class="text-[10px] font-medium text-text-muted">
+            ({{ isCustomLowStockThreshold() ? 'Producto' : 'Tienda' }})
+          </span>
         </div>
       </div>
     </div>

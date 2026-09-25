@@ -127,6 +127,30 @@ export type { PopProductConfigResult };
                   </div>
                 </div>
               </div>
+
+              <!-- Umbral de stock bajo (configure mode) -->
+              <div class="rounded-xl border border-border/50 bg-surface p-3 space-y-2">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-xs font-semibold text-text-primary">
+                      Stock mínimo para alerta
+                    </p>
+                    <p class="text-[11px] text-text-secondary">
+                      Cantidad mínima antes de alertar stock bajo. Si se deja vacío, usa el valor por defecto de la tienda.
+                    </p>
+                  </div>
+                </div>
+                <div class="max-w-[14rem]">
+                  <app-input
+                    type="number"
+                    min="0"
+                    step="1"
+                    [ngModel]="configureMinStockLevel()"
+                    (ngModelChange)="onConfigureMinStockChange($event)"
+                    [placeholder]="defaultLowStockPlaceholder()"
+                  ></app-input>
+                </div>
+              </div>
             }
 
             <!-- Identity form (create mode only) -->
@@ -209,13 +233,22 @@ export type { PopProductConfigResult };
                     ></app-input>
                   </div>
 
-                  <div class="md:max-w-[14rem]">
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <app-input
                       label="Cantidad"
                       type="number"
                       formControlName="quantity"
                       placeholder="1"
                       [required]="true"
+                    ></app-input>
+                    <app-input
+                      label="Stock mínimo para alerta"
+                      type="number"
+                      formControlName="min_stock_level"
+                      [min]="0"
+                      step="1"
+                      [placeholder]="defaultLowStockPlaceholder()"
+                      tooltipText="Cantidad mínima antes de alertar stock bajo. Si se deja vacío, usa el valor por defecto de la tienda."
                     ></app-input>
                   </div>
                   <app-textarea
@@ -842,8 +875,33 @@ export class PopProductConfigModalComponent {
     quantity: [1, [Validators.required, Validators.min(1)]],
     unitCost: [0, [Validators.required, Validators.min(0)]],
     basePrice: [0, [Validators.min(0)]],
+    min_stock_level: [null, [Validators.min(0)]],
     notes: [''],
   });
+
+  readonly configureMinStockLevel = signal<number | null>(null);
+
+  readonly defaultLowStockThreshold = computed<number>(() => {
+    const configured = Number(
+      this.storeSettingsFacade.settings()?.inventory?.low_stock_threshold,
+    );
+    return Number.isFinite(configured) && configured >= 0 ? configured : 10;
+  });
+
+  readonly defaultLowStockPlaceholder = computed<string>(() => {
+    return `Por defecto de la tienda (${this.defaultLowStockThreshold()})`;
+  });
+
+  onConfigureMinStockChange(val: any): void {
+    if (val === null || val === undefined || val === '') {
+      this.configureMinStockLevel.set(null);
+    } else {
+      const num = Number(val);
+      this.configureMinStockLevel.set(
+        Number.isFinite(num) && num >= 0 ? num : null,
+      );
+    }
+  }
 
   /** Create-mode ingredient classification (mirrors prebulk). */
   readonly isIngredient = signal(false);
@@ -1490,6 +1548,13 @@ export class PopProductConfigModalComponent {
         barcode: v.barcode ? v.barcode.trim() : undefined,
         description: v.description || undefined,
         base_price: Number(v.basePrice) || 0,
+        track_inventory: true,
+        min_stock_level:
+          v.min_stock_level !== null &&
+          v.min_stock_level !== undefined &&
+          v.min_stock_level !== ''
+            ? Number(v.min_stock_level)
+            : null,
         is_ingredient: ingredient,
         is_sellable: this.isSellable(),
         // UoM FKs only travel for ingredients; retail stays null.
@@ -1523,6 +1588,24 @@ export class PopProductConfigModalComponent {
     // ----------------------------------------------------------------
     // CONFIGURE mode — original flow (variants / lot / UoM).
     // ----------------------------------------------------------------
+    const currentProd = this.product();
+    const newMinStock = this.configureMinStockLevel();
+    const prevMinStock = currentProd?.min_stock_level ?? null;
+    if (currentProd?.id && newMinStock !== prevMinStock) {
+      this.productsService
+        .updateProduct(currentProd.id, {
+          min_stock_level: newMinStock,
+        })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: () => {
+            if (currentProd) {
+              currentProd.min_stock_level = newMinStock;
+            }
+          },
+          error: () => {},
+        });
+    }
 
     // Creating new variants mode
     if (
@@ -1813,8 +1896,10 @@ export class PopProductConfigModalComponent {
           ? suggestedNet
           : 0,
       basePrice: 0,
+      min_stock_level: null,
       notes: '',
     });
+    this.configureMinStockLevel.set(this.product()?.min_stock_level ?? null);
     this.isIngredient.set(false);
     this.isSellable.set(true);
     this.createQuantity.set(1);

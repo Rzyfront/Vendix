@@ -366,6 +366,7 @@ export interface CreateProductDto {
   barcode?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
+  min_stock_level?: number | null;
   requires_serial_numbers?: boolean;
   weight?: number;
   dimensions?: {
@@ -462,6 +463,7 @@ export interface UpdateProductDto {
   barcode?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
+  min_stock_level?: number | null;
   requires_serial_numbers?: boolean;
   is_sellable?: boolean;
   available_for_ecommerce?: boolean;

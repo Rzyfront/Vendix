@@ -450,6 +450,16 @@ export const BULK_EDITABLE_FIELDS = [
     productTypes: ALL_TYPES,
   },
   {
+    key: 'min_stock_level',
+    label: 'Umbral de stock bajo',
+    description:
+      'Cantidad mínima antes de alertar stock bajo. Si se deja vacío o en 0, usa el valor por defecto de la tienda.',
+    group: 'availability',
+    control: 'number',
+    min: 0,
+    productTypes: ALL_TYPES,
+  },
+  {
     // html:1044-1049.
     key: 'requires_serial_numbers',
     label: 'Requerir número de serie',

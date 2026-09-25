@@ -115,6 +115,9 @@ describe('OrdersService', () => {
       // vigente, y solo sin ella preguntan por historial de mesa.
       findFirst: jest.fn(),
     },
+    // Release-854 follow-up paso 2: findOne() consulta la sales_invoice
+    // vigente. Default null (sin factura) para no alterar specs existentes.
+    invoices: { findFirst: jest.fn() },
     audit_logs: {
       findMany: jest.fn(),
       // Round 3.5 · idempotency spec. The editor's idempotency
@@ -292,6 +295,7 @@ describe('OrdersService', () => {
 
     jest.clearAllMocks();
     mockPrismaService.table_sessions.findFirst.mockReset().mockResolvedValue(null);
+    mockPrismaService.invoices.findFirst.mockReset().mockResolvedValue(null);
   });
 
   afterEach(() => {

@@ -310,6 +310,13 @@ export class BulkConfirmModalComponent {
 
   /** Formatea un valor del diff según el tipo de control de su campo. */
   private describeValue(field: string, value: unknown): string {
+    if (field === 'min_stock_level') {
+      if (value === null || value === undefined || value === '' || Number(value) === 0) {
+        return 'Por defecto (tienda)';
+      }
+      return `${value} uds`;
+    }
+
     if (value === null || value === undefined || value === '') {
       return '—';
     }

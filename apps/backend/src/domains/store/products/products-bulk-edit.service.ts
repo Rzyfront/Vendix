@@ -91,7 +91,7 @@ interface ArchiveConstraints {
 const TERMINAL_ORDER_STATES = ['finished', 'cancelled', 'refunded'] as const;
 
 /**
- * Las 34 claves escalares de `BulkEditableChangesDto`, en el orden del DTO.
+ * Las 35 claves escalares de `BulkEditableChangesDto`, en el orden del DTO.
  *
  * El diff se calcula EXCLUSIVAMENTE sobre esta lista, no sobre las claves del
  * payload efectivo, porque `sanitizeIngredientPayload()` inyecta dos campos que
@@ -115,6 +115,7 @@ const BULK_EDITABLE_FIELDS: readonly string[] = [
   'is_combo',
   'is_batch_produced',
   'track_inventory',
+  'min_stock_level',
   'requires_serial_numbers',
   'base_price',
   'cost_price',
@@ -1149,9 +1150,11 @@ export class ProductsBulkEditService {
       throw new VendixHttpException(ErrorCodes.PROD_SVC_001);
     }
 
-    // Inventario forzado a off para servicios. `track_inventory: false` se
-    // PERSISTE aunque el usuario no lo haya pedido, así que entra al diff.
-    payload.track_inventory = false;
+    // Inventario forzado a off para servicios solo si no se activa explícitamente el control de inventario
+    if (!payload.track_inventory) {
+      payload.track_inventory = false;
+      payload.min_stock_level = undefined;
+    }
     payload.weight = undefined;
     payload.dimensions = undefined;
     payload.requires_serial_numbers = undefined;
