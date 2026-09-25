@@ -1150,12 +1150,13 @@ export class ProductsBulkEditService {
       throw new VendixHttpException(ErrorCodes.PROD_SVC_001);
     }
 
-    // Inventario forzado a off para servicios. `track_inventory: false` se
-    // PERSISTE aunque el usuario no lo haya pedido, así que entra al diff.
-    payload.track_inventory = false;
+    // Inventario forzado a off para servicios solo si no se activa explícitamente el control de inventario
+    if (!payload.track_inventory) {
+      payload.track_inventory = false;
+      payload.min_stock_level = undefined;
+    }
     payload.weight = undefined;
     payload.dimensions = undefined;
-    payload.min_stock_level = undefined;
     payload.requires_serial_numbers = undefined;
   }
 

@@ -4266,14 +4266,12 @@ export class ProductCreatePageComponent {
       allow_pos_price_override: !!neutral(formValue.allow_pos_price_override, false),
       sku: formValue.sku || undefined,
       barcode: formValue.barcode || undefined,
-      track_inventory: isServiceType ? false : !!formValue.track_inventory,
+      track_inventory: !!formValue.track_inventory,
       requires_serial_numbers: !!formValue.requires_serial_numbers,
-      stock_quantity: isServiceType
-        ? undefined
-        : formValue.track_inventory
-          ? Number(formValue.stock_quantity)
-          : undefined,
-      min_stock_level: isServiceType || !formValue.track_inventory
+      stock_quantity: formValue.track_inventory
+        ? Number(formValue.stock_quantity)
+        : undefined,
+      min_stock_level: !formValue.track_inventory
         ? undefined
         : formValue.min_stock_level !== null &&
           formValue.min_stock_level !== undefined &&

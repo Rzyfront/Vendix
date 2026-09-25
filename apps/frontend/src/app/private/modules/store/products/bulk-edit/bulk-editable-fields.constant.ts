@@ -457,7 +457,7 @@ export const BULK_EDITABLE_FIELDS = [
     group: 'availability',
     control: 'number',
     min: 0,
-    productTypes: STOCKABLE_TYPES,
+    productTypes: ALL_TYPES,
   },
   {
     // html:1044-1049.

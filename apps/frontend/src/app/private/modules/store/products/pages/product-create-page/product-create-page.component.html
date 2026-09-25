@@ -1225,7 +1225,7 @@
             >
             </app-setting-toggle>
 
-            @if (productForm.get('track_inventory')?.value && !isService) {
+            @if (productForm.get('track_inventory')?.value) {
               <div class="pt-2">
                 <app-input
                   formControlName="min_stock_level"

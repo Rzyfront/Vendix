@@ -808,15 +808,17 @@ export class ProductsService {
       throw new VendixHttpException(ErrorCodes.PROD_SVC_001);
     }
 
-    // Force inventory off for services
-    dto.track_inventory = false;
+    // Force inventory off for services only if inventory tracking is not explicitly enabled
+    if (!dto.track_inventory) {
+      dto.track_inventory = false;
+      dto.stock_quantity = undefined;
+      dto.min_stock_level = undefined;
+      dto.max_stock_level = undefined;
+      dto.reorder_point = undefined;
+      dto.reorder_quantity = undefined;
+    }
     dto.weight = undefined;
     dto.dimensions = undefined;
-    dto.stock_quantity = undefined;
-    dto.min_stock_level = undefined;
-    dto.max_stock_level = undefined;
-    dto.reorder_point = undefined;
-    dto.reorder_quantity = undefined;
     dto.requires_serial_numbers = undefined;
     dto.requires_batch_tracking = undefined;
   }
