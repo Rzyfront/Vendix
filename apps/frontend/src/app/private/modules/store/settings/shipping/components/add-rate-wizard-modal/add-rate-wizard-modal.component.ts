@@ -3,11 +3,15 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { startWith } from 'rxjs';
 
 import {
+  FormArray,
   FormBuilder,
+  FormControl,
+  FormGroup,
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
 import {
+  DistanceTier,
   ShippingZone,
   ShippingRate,
   ShippingRateType,
@@ -63,6 +67,99 @@ export function toTaxCategoryId(value: unknown): number | null {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
+/** Fila cruda del editor de tiers (los inputs number pueden entregar texto). */
+export interface DistanceTierRowInput {
+  from_km: unknown;
+  to_km: unknown;
+  price: unknown;
+}
+
+/**
+ * Parsea un campo de tier: número finito, `null` cuando está vacío y se
+ * permite (`to_km` abierto), o `undefined` cuando es inválido/ausente.
+ */
+function toTierNumber(
+  value: unknown,
+  allowEmpty = false,
+): number | null | undefined {
+  if (value === null || value === undefined || value === '') {
+    return allowEmpty ? null : undefined;
+  }
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Valida la escala de distancia: rangos crecientes, contiguos (sin huecos ni
+ * traslapes), primera escala desde 0 y `to_km` abierto solo al final.
+ * Pura para poder unit-testearla. Retorna el error en español o null.
+ */
+export function validateDistanceTiers(
+  rows: DistanceTierRowInput[],
+): string | null {
+  if (rows.length === 0) return null;
+  const tiers: DistanceTier[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const n = i + 1;
+    const from = toTierNumber(rows[i].from_km);
+    const to = toTierNumber(rows[i].to_km, true);
+    const price = toTierNumber(rows[i].price);
+    if (typeof from !== 'number' || from < 0) {
+      return `Escala ${n}: el "desde" debe ser un número mayor o igual a 0`;
+    }
+    if (to === undefined || (to !== null && typeof to !== 'number')) {
+      return `Escala ${n}: el "hasta" debe ser un número o quedar vacío (sin límite)`;
+    }
+    if (to !== null && to <= from) {
+      return `Escala ${n}: el "hasta" debe ser mayor que el "desde"`;
+    }
+    if (typeof price !== 'number' || price < 0) {
+      return `Escala ${n}: el precio debe ser un número mayor o igual a 0`;
+    }
+    tiers.push({ from_km: from, to_km: to, price });
+  }
+  const sorted = [...tiers].sort((a, b) => a.from_km - b.from_km);
+  if (sorted[0].from_km !== 0) {
+    return 'La primera escala debe empezar en 0 km';
+  }
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const curr = sorted[i];
+    if (prev.to_km === null) {
+      return 'Solo la última escala puede quedar sin límite';
+    }
+    if (curr.from_km < prev.to_km) {
+      return `Las escalas se traslapan en ${curr.from_km} km`;
+    }
+    if (curr.from_km > prev.to_km) {
+      return `Hay un hueco sin cubrir entre ${prev.to_km} y ${curr.from_km} km`;
+    }
+  }
+  return null;
+}
+
+/** Parsea filas ya validadas a `DistanceTier[]` ordenados por `from_km`. */
+export function parseDistanceTiers(
+  rows: DistanceTierRowInput[],
+): DistanceTier[] {
+  return rows
+    .map((r) => ({
+      from_km: Number(r.from_km),
+      to_km:
+        r.to_km === null || r.to_km === undefined || r.to_km === ''
+          ? null
+          : Number(r.to_km),
+      price: Number(r.price),
+    }))
+    .sort((a, b) => a.from_km - b.from_km);
+}
+
+interface DistanceTierFormControls {
+  from_km: FormControl<number | null>;
+  to_km: FormControl<number | null>;
+  price: FormControl<number | null>;
+}
+
 @Component({
   selector: 'app-add-rate-wizard-modal',
   standalone: true,
@@ -93,6 +190,8 @@ export class AddRateWizardModalComponent implements OnInit {
   method_id = input.required<number>();
   existing_zones = input<ShippingZone[]>([]);
   edit_rate = input<ShippingRate | null>(null);
+  /** El editor de tiers solo se muestra si el método cobra por distancia. */
+  method_distance_enabled = input<boolean>(false);
 
   // ─── Outputs ───
 
@@ -146,7 +245,15 @@ export class AddRateWizardModalComponent implements OnInit {
     is_active: [true],
     name: [''],
     tax_category_id: [null as number | null],
+    tiers: this.fb.array<FormGroup<DistanceTierFormControls>>([]),
   });
+
+  /** Filas del editor de escala por distancia. */
+  get tiersArray(): FormArray<FormGroup<DistanceTierFormControls>> {
+    return this.rate_form.get('tiers') as FormArray<
+      FormGroup<DistanceTierFormControls>
+    >;
+  }
 
   /** Puente zoneless del valor del formulario (los `computed` lo leen). */
   private readonly form_value = toSignal(
@@ -237,6 +344,14 @@ export class AddRateWizardModalComponent implements OnInit {
   tax_suggestion = computed(() => this.tax_options()?.suggestion?.message ?? null);
   tax_warnings = computed(() => this.tax_options()?.warnings ?? []);
 
+  /** Error vivo de la escala (null = válida o vacía). Gratis no usa escala. */
+  tiers_error = computed<string | null>(() => {
+    if (!this.method_distance_enabled() || this.is_free_type()) return null;
+    const rows = (this.form_value().tiers ??
+      []) as unknown as DistanceTierRowInput[];
+    return validateDistanceTiers(rows);
+  });
+
   // ─── Dynamic labels (extracted from rates-modal) ───
 
   get variableLabel(): string {
@@ -300,6 +415,16 @@ export class AddRateWizardModalComponent implements OnInit {
           : `. Además, será <strong>gratis</strong> si la compra supera los <strong>$${free}</strong>`;
     }
 
+    if (
+      this.method_distance_enabled() &&
+      type !== 'free' &&
+      this.tiersArray.length > 0 &&
+      !this.tiers_error()
+    ) {
+      const n = this.tiersArray.length;
+      text += `. Con cobro por distancia rige la escala de <strong>${n} tramo${n === 1 ? '' : 's'}</strong>`;
+    }
+
     return text + '.';
   }
 
@@ -326,6 +451,10 @@ export class AddRateWizardModalComponent implements OnInit {
         name: rate.name || '',
         tax_category_id: rate.tax_category?.id ?? rate.tax_category_id ?? null,
       });
+      this.tiersArray.clear();
+      for (const t of rate.distance_tiers ?? []) {
+        this.tiersArray.push(this.newTierGroup(t));
+      }
       this.current_step.set(1);
       // La lista del padre puede no traer la zona de la tarifa en edición.
       if (!this.zones_list().some((z) => z.id === rate.shipping_zone_id)) {
@@ -375,6 +504,65 @@ export class AddRateWizardModalComponent implements OnInit {
         free_shipping_threshold: null,
       });
     }
+  }
+
+  // ─── Escala por distancia ───
+
+  private newTierGroup(
+    tier?: {
+      from_km: number | null;
+      to_km: number | null;
+      price: number | null;
+    } | null,
+  ): FormGroup<DistanceTierFormControls> {
+    return this.fb.group<DistanceTierFormControls>({
+      from_km: new FormControl<number | null>(tier?.from_km ?? null),
+      to_km: new FormControl<number | null>(tier?.to_km ?? null),
+      price: new FormControl<number | null>(tier?.price ?? null),
+    });
+  }
+
+  /**
+   * Agrega una escala. El "desde" se prellena para mantener contigüidad: 0 si
+   * es la primera, o el "hasta" de la anterior.
+   */
+  addTier(): void {
+    let from: number | null = null;
+    if (this.tiersArray.length === 0) {
+      from = 0;
+    } else {
+      const prevTo = this.tiersArray.at(this.tiersArray.length - 1).get('to_km')
+        ?.value;
+      from =
+        prevTo !== null && prevTo !== undefined && (prevTo as unknown) !== ''
+          ? Number(prevTo)
+          : null;
+      if (from !== null && !Number.isFinite(from)) from = null;
+    }
+    this.tiersArray.push(
+      this.newTierGroup({ from_km: from, to_km: null, price: null }),
+    );
+  }
+
+  removeTier(index: number): void {
+    this.tiersArray.removeAt(index);
+  }
+
+  /**
+   * Tiers para el DTO: escala parseada si hay filas, `[]` para limpiar la
+   * escala previa en edición, u omitido (precio plano intacto).
+   */
+  private buildTiersDto(): { distance_tiers?: DistanceTier[] | null } {
+    const rows = this.tiersArray.getRawValue() as unknown as DistanceTierRowInput[];
+    const parsed = parseDistanceTiers(rows);
+    if (parsed.length > 0) return { distance_tiers: parsed };
+    if (
+      this.is_edit_mode() &&
+      (this.edit_rate()?.distance_tiers?.length ?? 0) > 0
+    ) {
+      return { distance_tiers: [] };
+    }
+    return {};
   }
 
   formatCountries(countries: string[] | undefined): string {
@@ -510,6 +698,23 @@ export class AddRateWizardModalComponent implements OnInit {
       return;
     }
 
+    // Escala por distancia: rangos crecientes, sin huecos ni traslapes.
+    // Gratis no cobra envío: no lleva escala (igual que el impuesto).
+    const useTiers =
+      this.method_distance_enabled() && values.type !== 'free';
+    // Validación directa del FormArray (no del computed) para no depender
+    // del timing del puente `form_value` en el momento del submit.
+    const tiersError = useTiers
+      ? validateDistanceTiers(
+          this.tiersArray.getRawValue() as unknown as DistanceTierRowInput[],
+        )
+      : null;
+    if (tiersError) {
+      this.toastService.show({ variant: 'error', description: tiersError });
+      this.is_saving.set(false);
+      return;
+    }
+
     const dto: CreateRateDto = {
       shipping_zone_id: this.selected_zone_id()!,
       shipping_method_id: this.method_id(),
@@ -524,6 +729,7 @@ export class AddRateWizardModalComponent implements OnInit {
       // Gratis no cobra envío: no hay impuesto que llevar.
       tax_category_id:
         values.type === 'free' ? null : toTaxCategoryId(values.tax_category_id),
+      ...(useTiers ? this.buildTiersDto() : {}),
     };
 
     const obs = this.is_edit_mode()

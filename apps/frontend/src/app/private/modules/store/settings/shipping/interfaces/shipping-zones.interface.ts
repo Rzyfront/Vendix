@@ -60,6 +60,17 @@ export interface ShippingRateTaxCategory {
   rate_percent: number;
 }
 
+/**
+ * Escala de cobro por distancia de una tarifa (shipping-distance-pricing plan).
+ * `to_km` null = escala abierta (solo válida como última). Sin escala rige el
+ * precio plano (`base_cost`) de la tarifa.
+ */
+export interface DistanceTier {
+  from_km: number;
+  to_km: number | null;
+  price: number;
+}
+
 export interface ShippingRate {
   id: number;
   shipping_zone_id: number;
@@ -67,6 +78,8 @@ export interface ShippingRate {
   name?: string;
   type: ShippingRateType;
   base_cost: number;
+  /** Escala de km; null/vacía = precio plano. Nombre exacto del backend. */
+  distance_tiers?: DistanceTier[] | null;
   per_unit_cost?: number;
   min_val?: number;
   max_val?: number;
@@ -173,6 +186,7 @@ export interface CreateRateDto {
   name?: string | null;
   type: ShippingRateType;
   base_cost: number;
+  distance_tiers?: DistanceTier[] | null;
   per_unit_cost?: number | null;
   min_val?: number | null;
   max_val?: number | null;

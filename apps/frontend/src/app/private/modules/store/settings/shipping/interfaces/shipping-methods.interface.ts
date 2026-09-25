@@ -71,6 +71,12 @@ export interface StoreShippingMethod {
   custom_config?: Record<string, any>;
   min_order_amount?: number;
   max_order_amount?: number;
+  // Cobro por distancia (shipping-distance-pricing plan paso 4).
+  // Nombres exactos del backend: distance_pricing_enabled, origin_latitude,
+  // origin_longitude. Apagado por defecto; sin origen no se puede activar.
+  distance_pricing_enabled?: boolean;
+  origin_latitude?: number | null;
+  origin_longitude?: number | null;
   // Plan Despacho Economía — FASE 2 paso 8.
   collects_payment?: boolean;
   payment_timing?: DispatchPaymentTiming;
@@ -117,6 +123,9 @@ export interface UpdateStoreShippingMethodDto {
   min_order_amount?: number;
   max_order_amount?: number;
   display_order?: number;
+  distance_pricing_enabled?: boolean;
+  origin_latitude?: number | null;
+  origin_longitude?: number | null;
   collects_payment?: boolean;
   payment_timing?: DispatchPaymentTiming;
   generates_transport_cost?: 'none' | 'per_delivery' | 'per_route';

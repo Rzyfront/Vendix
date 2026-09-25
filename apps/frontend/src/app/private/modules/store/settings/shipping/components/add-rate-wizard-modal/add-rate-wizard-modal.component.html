@@ -218,6 +218,60 @@
           </section>
         }
 
+        @if (method_distance_enabled() && !is_free_type()) {
+          <section class="tax-section" aria-labelledby="distance-tiers-title">
+            <div class="tax-section__header">
+              <app-icon name="map-pin" [size]="16" class="text-primary" />
+              <h4 id="distance-tiers-title" class="tax-section__title">Escala por distancia (opcional)</h4>
+            </div>
+            <p class="tax-section__hint">
+              Cobra según los km por calles desde tu origen. Sin escala rige el precio plano de arriba.
+            </p>
+
+            <div formArrayName="tiers" class="tiers-list">
+              @for (tier of tiersArray.controls; track $index) {
+                <div [formGroupName]="$index" class="tier-row">
+                  <div class="form-field">
+                    <label class="form-label">Desde (km)</label>
+                    <app-input type="number" formControlName="from_km" placeholder="0" />
+                  </div>
+                  <div class="form-field">
+                    <label class="form-label">Hasta (km)</label>
+                    <app-input type="number" formControlName="to_km" placeholder="Sin límite" />
+                  </div>
+                  <div class="form-field">
+                    <label class="form-label">Precio ($)</label>
+                    <app-input type="number" formControlName="price" placeholder="0" />
+                  </div>
+                  <button
+                    type="button"
+                    class="zone-card__edit tier-row__remove"
+                    [attr.aria-label]="'Quitar escala ' + ($index + 1)"
+                    title="Quitar escala"
+                    (click)="removeTier($index)"
+                  >
+                    <app-icon name="trash-2" [size]="16" />
+                  </button>
+                </div>
+              }
+            </div>
+
+            @if (tiers_error()) {
+              <div class="tax-note tax-note--warning" role="alert">
+                <app-icon name="alert-triangle" [size]="14" />
+                <span>{{ tiers_error() }}</span>
+              </div>
+            }
+
+            <div>
+              <app-button variant="outline" size="sm" (clicked)="addTier()">
+                <app-icon slot="icon" name="plus" [size]="16" />
+                Agregar escala
+              </app-button>
+            </div>
+          </section>
+        }
+
         <div class="strategy-summary">
           <app-icon name="info" [size]="16" class="text-primary" />
           <p class="strategy-summary__text" [innerHTML]="strategySummary"></p>

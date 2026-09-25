@@ -258,6 +258,29 @@
   color: var(--color-text-secondary);
 }
 
+// ─── Escala por distancia ───
+
+.tiers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tier-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 8px;
+  align-items: end;
+
+  @media (max-width: 480px) {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  &__remove {
+    margin-bottom: 2px;
+  }
+}
+
 // ─── Strategy Summary ───
 
 .strategy-summary {

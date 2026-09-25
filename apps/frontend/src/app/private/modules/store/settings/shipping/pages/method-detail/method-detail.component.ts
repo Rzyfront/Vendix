@@ -30,8 +30,10 @@ import {
   InputsearchComponent,
   BadgeComponent,
   ResponsiveDataViewComponent,
+  ToggleComponent,
   ToastService,
   DialogService} from '../../../../../../../shared/components/index';
+import { AddressMapPickerComponent } from '../../../../../ecommerce/components/address-map-picker/address-map-picker.component';
 import {
   TableColumn,
   TableAction} from '../../../../../../../shared/components/table/table.component';
@@ -53,6 +55,8 @@ import {
     InputsearchComponent,
     BadgeComponent,
     ResponsiveDataViewComponent,
+    ToggleComponent,
+    AddressMapPickerComponent,
     AddRateWizardModalComponent,
     ZoneModalComponent,
   ],
@@ -284,6 +288,83 @@ import {
         </div>
       </div>
 
+      <!--
+        Cobro por distancia (shipping-distance-pricing plan paso 4).
+        Toggle por método + pin de origen con el map picker existente.
+        Sin origen pineado no se puede activar (guard).
+      -->
+      @if (method()) {
+        <div class="mx-4 md:mx-0 mb-4">
+          <div class="bg-surface rounded-xl border border-border p-4">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <app-icon
+                  name="map-pin"
+                  [size]="18"
+                  class="text-text-secondary"
+                />
+                <h3
+                  class="text-sm md:text-base font-semibold text-text-primary"
+                >
+                  Cobro por distancia
+                </h3>
+              </div>
+              <app-button
+                size="sm"
+                variant="primary"
+                (clicked)="saveDistanceConfig()"
+                [disabled]="!distance_dirty() || saving_distance()"
+                [loading]="saving_distance()"
+              >
+                Guardar
+              </app-button>
+            </div>
+
+            <div
+              class="flex items-center justify-between gap-3 rounded-lg border border-border p-3"
+            >
+              <div>
+                <p class="text-sm font-medium text-text-primary">
+                  Cobrar por distancia real
+                </p>
+                <p class="text-xs text-text-secondary">
+                  Calcula el costo por los km recorridos por calles desde tu
+                  origen. Si falta algún dato, se cobra la tarifa de zona.
+                </p>
+              </div>
+              <app-toggle
+                [checked]="distance_enabled()"
+                [disabled]="!has_origin() && !distance_enabled()"
+                ariaLabel="Cobro por distancia"
+                (toggled)="onDistanceToggle($event)"
+              />
+            </div>
+
+            @if (!has_origin()) {
+              <p class="text-xs text-text-secondary mt-2">
+                Pinea el origen en el mapa para poder activar el cobro por
+                distancia.
+              </p>
+            }
+
+            <div class="mt-3">
+              <p class="block text-xs font-medium text-text-secondary mb-1">
+                Origen de los despachos
+              </p>
+              <app-address-map-picker
+                [center]="origin_center()"
+                (located)="onOriginLocated($event)"
+              />
+              @if (has_origin()) {
+                <p class="text-xs text-text-secondary mt-1">
+                  Origen pineado. Mueve el marcador si tu base cambia de lugar.
+                </p>
+              }
+            </div>
+          </div>
+        </div>
+      }
+
       <!-- Zones Table Card -->
       <div class="mx-4 md:mx-0 mb-6">
         <div class="bg-surface rounded-xl border border-border overflow-hidden">
@@ -343,6 +424,7 @@ import {
             [method_id]="method()!.id"
             [existing_zones]="available_zones()"
             [edit_rate]="edit_rate()"
+            [method_distance_enabled]="method()?.distance_pricing_enabled ?? false"
             (close)="closeRateWizard()"
             (saved)="onRateSaved()"
             (zones_changed)="onZonesChanged()"
@@ -424,6 +506,23 @@ export class MethodDetailComponent implements OnInit {
   available_drivers = signal<Array<{ id: number; first_name: string; last_name: string }>>([]);
   available_carriers = signal<Array<{ id: number; name: string }>>([]);
 
+  // Cobro por distancia (shipping-distance-pricing plan paso 4).
+  distance_enabled = signal<boolean>(false);
+  origin_latitude = signal<number | null>(null);
+  origin_longitude = signal<number | null>(null);
+  saving_distance = signal<boolean>(false);
+  distance_dirty = signal<boolean>(false);
+
+  has_origin = computed(
+    () => this.origin_latitude() !== null && this.origin_longitude() !== null,
+  );
+
+  origin_center = computed<{ lat: number; lng: number } | null>(() => {
+    const lat = this.origin_latitude();
+    const lng = this.origin_longitude();
+    return lat !== null && lng !== null ? { lat, lng } : null;
+  });
+
   /** Tipo de método: helpers para gating del ejecutor por defecto. */
   is_own_fleet = computed(() => this.method()?.type === ShippingMethodType.OWN_FLEET);
   is_carrier = computed(
@@ -456,12 +555,9 @@ export class MethodDetailComponent implements OnInit {
   header_actions = computed<StickyHeaderActionButton[]>(() => {
     const m = this.method();
     if (!m) return [];
+    // Sin acción "Configurar": la config vive inline (política + distancia) y
+    // el botón anterior estaba muerto (onHeaderAction nunca lo atendía).
     const actions: StickyHeaderActionButton[] = [
-      {
-        id: 'configure',
-        label: 'Configurar',
-        variant: 'outline' as const,
-        icon: 'settings'},
       {
         id: 'toggle',
         label: m.is_active ? 'Desactivar' : 'Activar',
@@ -619,6 +715,18 @@ export class MethodDetailComponent implements OnInit {
       .subscribe({
         next: (method) => {
           this.method.set(method);
+          this.distance_enabled.set(method.distance_pricing_enabled ?? false);
+          // El backend serializa DECIMAL como string: se coerciona a número
+          // para que el mapa y el PATCH reciban coordenadas numéricas.
+          this.origin_latitude.set(
+            method.origin_latitude != null ? Number(method.origin_latitude) : null,
+          );
+          this.origin_longitude.set(
+            method.origin_longitude != null
+              ? Number(method.origin_longitude)
+              : null,
+          );
+          this.distance_dirty.set(false);
           this.policy_collects_payment.set(method.collects_payment ?? false);
           this.policy_payment_timing.set(method.payment_timing ?? 'on_delivery');
           this.policy_generates_cost.set(method.generates_transport_cost ?? 'none');
@@ -769,6 +877,81 @@ export class MethodDetailComponent implements OnInit {
           this.toastService.show({
             variant: 'error',
             description: 'No se pudo guardar la política',
+          });
+        },
+      });
+  }
+
+  // ─── Cobro por distancia ───
+
+  /**
+   * Guard: sin origen pineado no se activa. El toggle además queda
+   * deshabilitado en ese caso; esto es defensa en profundidad.
+   */
+  onDistanceToggle(next: boolean): void {
+    if (next && !this.has_origin()) {
+      this.toastService.show({
+        variant: 'error',
+        description:
+          'Pinea el origen en el mapa antes de activar el cobro por distancia',
+      });
+      // Resincroniza el toggle (su estado interno ya cambió con el clic).
+      this.distance_enabled.set(true);
+      this.distance_enabled.set(false);
+      return;
+    }
+    this.distance_enabled.set(next);
+    this.distance_dirty.set(true);
+  }
+
+  onOriginLocated(coord: { lat: number; lng: number }): void {
+    this.origin_latitude.set(coord.lat);
+    this.origin_longitude.set(coord.lng);
+    this.distance_dirty.set(true);
+  }
+
+  /**
+   * PATCH /store/shipping-methods/:id con toggle + origen. El origen solo se
+   * envía cuando hay pin (sin pin y apagado no hay nada que persistir).
+   */
+  saveDistanceConfig(): void {
+    const method = this.method();
+    if (!method) return;
+    if (this.distance_enabled() && !this.has_origin()) {
+      this.toastService.show({
+        variant: 'error',
+        description:
+          'Pinea el origen en el mapa antes de activar el cobro por distancia',
+      });
+      return;
+    }
+    this.saving_distance.set(true);
+    this.shippingService
+      .updateStoreShippingMethod(method.id, {
+        distance_pricing_enabled: this.distance_enabled(),
+        ...(this.has_origin()
+          ? {
+              origin_latitude: this.origin_latitude(),
+              origin_longitude: this.origin_longitude(),
+            }
+          : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (m) => {
+          this.method.set(m);
+          this.distance_dirty.set(false);
+          this.saving_distance.set(false);
+          this.toastService.show({
+            variant: 'success',
+            description: 'Configuración de distancia guardada',
+          });
+        },
+        error: () => {
+          this.saving_distance.set(false);
+          this.toastService.show({
+            variant: 'error',
+            description: 'No se pudo guardar la configuración de distancia',
           });
         },
       });
