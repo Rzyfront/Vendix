@@ -104,6 +104,16 @@ describe('ShippingTaxService', () => {
       expect(data).toMatchObject({ shipping_tax_type: 'iva', shipping_tax_amount: 2394.95 });
     });
 
+    it('INC con emisor sin O-33 ⇒ vacía + warn', async () => {
+      base.shipping_rates.findFirst.mockResolvedValue({ id: 5, tax_category: inc8 });
+      base.stores.findFirst.mockResolvedValue(storeRow({ responsibilities: ['O-49'] }));
+      const data = await service.snapshotForRate(null, 5, 15000, { store_id: 1 });
+      expect(data).toEqual(EMPTY_SHIPPING_TAX);
+      expect((service as any).logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('inc_not_responsible'),
+      );
+    });
+
     it('sin tarifa, sin categoría o costo 0 ⇒ vacía sin leer al emisor', async () => {
       expect(await service.snapshotForRate(null, null, 15000, { store_id: 1 })).toEqual(EMPTY_SHIPPING_TAX);
       expect(await service.snapshotForRate(null, 5, 0, { store_id: 1 })).toEqual(EMPTY_SHIPPING_TAX);
@@ -128,7 +138,9 @@ describe('ShippingTaxService', () => {
         id: 5,
         tax_category: { ...inc8, store_id: null, organization_id: 10 },
       });
-      base.stores.findFirst.mockResolvedValue(storeRow({ fiscal_scope: 'ORGANIZATION' }));
+      base.stores.findFirst.mockResolvedValue(
+        storeRow({ fiscal_scope: 'ORGANIZATION', responsibilities: ['O-33'] }),
+      );
       const data = await service.snapshotForRate(null, 5, 15000, { store_id: 1 });
       expect(data.shipping_tax_amount).toBe(1111.11);
     });
@@ -155,7 +167,9 @@ describe('ShippingTaxService', () => {
     });
 
     it('bajo ORGANIZATION busca en la org', async () => {
-      base.stores.findFirst.mockResolvedValue(storeRow({ fiscal_scope: 'ORGANIZATION' }));
+      base.stores.findFirst.mockResolvedValue(
+        storeRow({ fiscal_scope: 'ORGANIZATION', responsibilities: ['O-33'] }),
+      );
       base.tax_categories.findFirst.mockResolvedValue({ ...inc8, store_id: null, organization_id: 10 });
       await service.assertCategoryAssignable(7);
       expect(base.tax_categories.findFirst.mock.calls[0][0].where).toEqual({
@@ -184,7 +198,19 @@ describe('ShippingTaxService', () => {
       });
     });
 
-    it('INC sin O-33 ⇒ permitido', async () => {
+    it('INC sin O-33 ⇒ 412 FISCAL_INC_NOT_RESPONSIBLE_001 con context shipping', async () => {
+      base.tax_categories.findFirst.mockResolvedValue(inc8);
+      await expect(service.assertCategoryAssignable(7)).rejects.toMatchObject({
+        status: 412,
+        response: expect.objectContaining({
+          error_code: 'FISCAL_INC_NOT_RESPONSIBLE_001',
+          details: expect.objectContaining({ context: 'shipping' }),
+        }),
+      });
+    });
+
+    it('INC con O-33 ⇒ permitido', async () => {
+      base.stores.findFirst.mockResolvedValue(storeRow({ responsibilities: ['O-33'] }));
       base.tax_categories.findFirst.mockResolvedValue(inc8);
       await expect(service.assertCategoryAssignable(7)).resolves.toBeUndefined();
     });
@@ -213,12 +239,21 @@ describe('ShippingTaxService', () => {
       expect(opts.warnings).toBeUndefined();
     });
 
-    it('INC elegible sin O-33 ⇒ warning y sin sugerencia', async () => {
+    it('INC sin O-33 ⇒ no elegible con motivo, sin warnings ni sugerencia', async () => {
       base.stores.findFirst.mockResolvedValue(storeRow({ responsibilities: ['O-48'] }));
       base.tax_categories.findMany.mockResolvedValue([inc8]);
       const opts = await service.getRateTaxOptions();
+      expect(opts.categories).toEqual([
+        expect.objectContaining({
+          id: 7,
+          tax_type: 'inc',
+          rate_percent: 8,
+          eligible: false,
+          reason: expect.stringContaining('O-33'),
+        }),
+      ]);
       expect(opts.suggestion).toBeUndefined();
-      expect(opts.warnings).toHaveLength(1);
+      expect(opts.warnings).toBeUndefined();
     });
   });
 
