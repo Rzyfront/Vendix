@@ -2930,6 +2930,14 @@
       ></app-shipping-address-modal>
     }
 
+    <!-- CAMBIO DE TITULAR: buscar-primero (existentes) antes de crear -->
+    <app-change-titular-search-modal
+      [isOpen]="showTitularSearchModal()"
+      (closed)="closeTitularSearch()"
+      (selected)="onTitularSearchSelected($event)"
+      (createNew)="onTitularSearchCreateNew()"
+    ></app-change-titular-search-modal>
+
     <!-- Paso 5: CAMBIO DE TITULAR (reutiliza app-customer-modal en crear-mode) -->
     <app-customer-modal
       [isOpen]="showChangeCustomerModal()"

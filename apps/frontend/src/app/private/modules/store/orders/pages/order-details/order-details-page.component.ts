@@ -104,12 +104,13 @@ import { OrderRefundModalComponent } from '../../components/order-refund-modal/o
 // Paso 5: reutiliza el modal canónico de clientes (quick/advanced,
 // NATURAL/JURIDICA) para capturar el nuevo titular de la orden.
 import { CustomerModalComponent } from '../../../customers/components/customer-modal/customer-modal.component';
+import { ChangeTitularSearchModalComponent } from '../../components/change-titular-search-modal/change-titular-search-modal.component';
 import {
   CustomersService,
   ResolveCustomerRequest,
   ResolveCustomerResult,
 } from '../../../customers/services/customers.service';
-import { CreateCustomerRequest } from '../../../customers/models/customer.model';
+import { CreateCustomerRequest, Customer } from '../../../customers/models/customer.model';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../../services/order-ticket.service';
@@ -272,6 +273,7 @@ type RefundState =
     OrderPaymentModalComponent,
     OrderRefundModalComponent,
     CustomerModalComponent,
+    ChangeTitularSearchModalComponent,
     InvoiceDetailComponent,
     TimelineComponent,
     GenerateDispatchWizardComponent,
@@ -485,6 +487,12 @@ export class OrderDetailsPageComponent {
    */
   showChangeCustomerModal = signal(false);
   changingCustomer = signal(false);
+  /**
+   * Buscar-primero: el botón "Cambiar cliente" abre este modal de búsqueda
+   * (clientes existentes) en vez del `app-customer-modal` directo. Desde ahí
+   * el operador elige un existente o salta al flujo crear actual.
+   */
+  showTitularSearchModal = signal(false);
   /**
    * Dirección capturada en el modal (`addressData`, solo crear-mode). Se
    * persiste contra el cliente resuelto antes del PATCH titular; se limpia
@@ -4104,14 +4112,106 @@ export class OrderDetailsPageComponent {
    */
   // ─── Paso 5 — cambiar titular de la orden ──────────────────────
   /**
-   * Abre el `app-customer-modal` en modo crear (quick por defecto, advanced
-   * con DIAN completo + NATURAL/JURIDICA disponibles). El operador captura
-   * los datos del nuevo titular; `onChangeCustomerSave` resuelve y asigna.
+   * Punto de entrada de "Cambiar cliente".
+   *
+   * PRE-CHECK (espejo del guard backend `ORD_EDIT_NOT_ALLOWED_001` en
+   * `orders.service.ts`): el titular solo cambia en `created`/`draft`. En
+   * cualquier otro estado se muestra el dialog informativo y no se abre
+   * ningún modal. En estado editable se abre el buscar-primero; el
+   * `app-customer-modal` en modo crear solo aparece vía "Crear cliente nuevo".
    */
-  openChangeCustomer(): void {
-    if (!this.order()) return;
+  async openChangeCustomer(): Promise<void> {
+    const order = this.order();
+    if (!order) return;
+    if (order.state !== 'created' && order.state !== 'draft') {
+      await this.notifyTitularLocked();
+      return;
+    }
+    this.pendingChangeCustomerAddress.set(null);
+    this.showTitularSearchModal.set(true);
+  }
+
+  /**
+   * Dialog informativo (español) del titular bloqueado. Se usa tanto en el
+   * pre-check local como al mapear 409/403 del PATCH titular.
+   */
+  private notifyTitularLocked(): Promise<boolean> {
+    return this.dialogService.confirm({
+      title: 'No se puede cambiar el titular',
+      message:
+        'Esta orden ya está en curso o finalizada, por lo que su titular no puede cambiarse. ' +
+        'El titular queda fijado al avanzar la orden y es inmutable por trazabilidad fiscal.',
+      confirmText: 'Entendido',
+      confirmVariant: 'primary',
+    });
+  }
+
+  /**
+   * `true` cuando el error del PATCH titular es el bloqueo de estado (409
+   * `ORD_EDIT_NOT_ALLOWED_001`) o de tienda ajena (403
+   * `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`). `updateOrderCustomer` envuelve
+   * el fallo con `buildApiError` (`errorCode` + `cause` = HttpErrorResponse
+   * original), así que se revisan ambas vías.
+   */
+  private isTitularLockedError(error: unknown): boolean {
+    const parsed = parseApiError(error);
+    if (
+      parsed.errorCode === 'ORD_EDIT_NOT_ALLOWED_001' ||
+      parsed.errorCode === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001'
+    ) {
+      return true;
+    }
+    const status =
+      (error as { cause?: { status?: number } } | null)?.cause?.status ??
+      (error as { status?: number } | null)?.status;
+    return status === 409 || status === 403;
+  }
+
+  /** Error del PATCH titular: bloqueo → dialog español; resto → toast. */
+  private handleChangeCustomerError(error: unknown): void {
+    if (this.isTitularLockedError(error)) {
+      void this.notifyTitularLocked();
+      return;
+    }
+    this.toastService.error(extractApiErrorMessage(error));
+  }
+
+  closeTitularSearch(): void {
+    this.showTitularSearchModal.set(false);
+  }
+
+  /**
+   * "Crear cliente nuevo" desde el buscar-primero: conserva el flujo actual
+   * (lookup → resolve → PATCH en `onChangeCustomerSave`).
+   */
+  onTitularSearchCreateNew(): void {
+    this.showTitularSearchModal.set(false);
     this.pendingChangeCustomerAddress.set(null);
     this.showChangeCustomerModal.set(true);
+  }
+
+  /**
+   * Titular existente elegido en el buscar-primero: PATCH directo
+   * (`updateOrderCustomer` ya envía `customer_alias: null`) → toast → refresh.
+   */
+  onTitularSearchSelected(customer: Customer): void {
+    const id = this.order()?.id;
+    if (!id) return;
+    this.showTitularSearchModal.set(false);
+    this.changingCustomer.set(true);
+    this.ordersService
+      .updateOrderCustomer(String(id), customer.id)
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.changingCustomer.set(false)),
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success('Titular de la orden actualizado');
+          this.refreshOrder();
+        },
+        error: (error: unknown) => this.handleChangeCustomerError(error),
+      });
   }
 
   closeChangeCustomer(): void {
@@ -4176,9 +4276,7 @@ export class OrderDetailsPageComponent {
           this.pendingChangeCustomerAddress.set(null);
           this.refreshOrder();
         },
-        error: (error: unknown) => {
-          this.toastService.error(extractApiErrorMessage(error));
-        },
+        error: (error: unknown) => this.handleChangeCustomerError(error),
       });
   }
 
