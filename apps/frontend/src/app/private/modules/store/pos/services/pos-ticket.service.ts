@@ -97,6 +97,32 @@ interface TicketSessionOverlay {
   organization?: TicketData['organization'];
 }
 
+/**
+ * CP-REFUND-FLOW-REDESIGN paso 9b — espejo estructural de
+ * `TicketRefundLine` / `TicketRefundsSection`
+ * (`orders/services/order-ticket.service.ts`, paso 9).
+ *
+ * Vive acá —y NO como import— porque la flecha de dependencias es
+ * `orders → pos` de una sola vía (ver docblock de `OrderTicketService`): el
+ * renderer del tiquete cliente no conoce el dominio `Order`. Tampoco va en
+ * `ticket.model.ts`: la sección es opcional y aditiva, y ese contrato lo
+ * consumen llamadores que nunca reembolsan. `readRefundsSection` la lee con
+ * un cast local + guardas de runtime; un payload parcial o malformado
+ * imprime el tiquete sin sección en vez de romper el papel.
+ */
+interface ClientTicketRefundLine {
+  order_item_id: number;
+  product_name: string;
+  refunded_qty: number;
+  refunded_amount: number;
+}
+
+interface ClientTicketRefundsSection {
+  lines: ClientTicketRefundLine[];
+  refunded_total: number;
+  net_total: number;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -175,6 +201,39 @@ export class PosTicketService {
   private shouldShowTaxes(ticketData: TicketData): boolean {
     if (ticketData.electronicInvoice) return false;
     return this.authFacade.printsVatBreakdown();
+  }
+
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 9b — lee la sección Reembolsos opcional que
+   * `OrderTicketService.toTicketData` adjunta (`RefundAwareTicketData`, paso
+   * 9) con un cast estructural local: importar ese tipo invertiría la flecha
+   * `orders → pos`.
+   *
+   * Solo líneas con cantidad devuelta > 0 (misma semántica del provider
+   * backend); sin ellas —o con un payload parcial— devuelve `undefined` y el
+   * tiquete sale idéntico al histórico. Nunca lanza: un tiquete sin sección
+   * vale más que ningún tiquete.
+   */
+  private readRefundsSection(
+    ticketData: TicketData,
+  ): ClientTicketRefundsSection | undefined {
+    const raw = (
+      ticketData as TicketData & { refunds?: Partial<ClientTicketRefundsSection> }
+    ).refunds;
+    if (!raw || !Array.isArray(raw.lines)) return undefined;
+    const lines = raw.lines.filter(
+      (line: ClientTicketRefundLine): line is ClientTicketRefundLine =>
+        !!line &&
+        Number(line.refunded_qty) > 0 &&
+        Number.isFinite(Number(line.refunded_amount)),
+    );
+    if (lines.length === 0) return undefined;
+    const refundedTotal = Number(raw.refunded_total);
+    if (!Number.isFinite(refundedTotal)) return undefined;
+    const netTotal = Number.isFinite(Number(raw.net_total))
+      ? Number(raw.net_total)
+      : ticketData.total - refundedTotal;
+    return { lines, refunded_total: refundedTotal, net_total: netTotal };
   }
 
   /**
@@ -655,6 +714,46 @@ export class PosTicketService {
         </table>
       </div>
     `;
+
+    // CP-REFUND-FLOW-REDESIGN paso 9b — sección Reembolsos ADITIVA del
+    // tiquete cliente. El TOTAL de arriba queda INTACTO (los documentos
+    // originales no se reescriben); sin sección `readRefundsSection`
+    // devuelve `undefined` y el render sale idéntico al de antes.
+    const refundsSection = this.readRefundsSection(ticketData);
+    if (refundsSection) {
+      const refundLineRows = refundsSection.lines
+        .map(
+          (line) => `
+          <tr>
+            <td style="padding: 2px; vertical-align: top;">${line.product_name}</td>
+            <td style="text-align: center; padding: 2px;">Devueltos: ${line.refunded_qty}</td>
+            <td style="text-align: right; padding: 2px;">-${this.currencyService.format(line.refunded_amount)}</td>
+          </tr>
+        `,
+        )
+        .join('');
+      html += `
+      <hr style="border: 1px dashed #000; margin: 10px 0;">
+      <div style="margin-bottom: 15px;">
+        <p style="margin: 2px 0; font-size: 12px; font-weight: bold;">REEMBOLSOS</p>
+        <table style="width: 100%; font-size: 11px; border-collapse: collapse;">
+          <tbody>
+            ${refundLineRows}
+          </tbody>
+        </table>
+        <table style="width: 100%; font-size: 12px; border-collapse: collapse; margin-top: 4px;">
+          <tr>
+            <td style="text-align: left; padding: 2px;">Reembolsado:</td>
+            <td style="text-align: right; padding: 2px;">-${this.currencyService.format(refundsSection.refunded_total)}</td>
+          </tr>
+          <tr style="font-weight: bold; border-top: 1px solid #000;">
+            <td style="text-align: left; padding: 2px;">Neto:</td>
+            <td style="text-align: right; padding: 2px;">${this.currencyService.format(refundsSection.net_total)}</td>
+          </tr>
+        </table>
+      </div>
+    `;
+    }
 
     html += `
       <div style="margin-bottom: 15px;">

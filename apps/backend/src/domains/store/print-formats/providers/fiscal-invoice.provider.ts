@@ -58,7 +58,7 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
     let qrBase64: string | undefined;
     if (invoice.qr_code) {
       try {
-        const qrBuffer = await this.qrService.generateBuffer(invoice.qr_code, 240);
+        const qrBuffer = await this.qrService.generateBuffer(invoice.qr_code, 480);
         qrBase64 = qrBuffer.toString('base64');
       } catch (e) {
         // QR rendering error fallback

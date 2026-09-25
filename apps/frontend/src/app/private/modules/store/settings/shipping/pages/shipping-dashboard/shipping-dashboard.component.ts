@@ -7,7 +7,7 @@ import {Component,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { RouterModule } from '@angular/router';
+import { RouterModule, Router } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { ShippingMethodsService } from '../../services/shipping-methods.service';
@@ -228,8 +228,17 @@ import {
 
                 <!-- Actions slot -->
                 <div slot="actions" class="flex items-center gap-2 shrink-0">
+                  <app-button
+                    size="sm"
+                    variant="outline"
+                    (clicked)="goToMethodDetail(method.id)"
+                  >
+                    <app-icon slot="icon" name="settings" [size]="16" />
+                    Gestionar
+                  </app-button>
                   <app-toggle
                     [checked]="method.is_active"
+                    [ariaLabel]="'Activar método ' + method.name"
                     (toggled)="toggleMethod(method)"
                   />
                 </div>
@@ -284,6 +293,7 @@ import {
           [method_id]="rate_wizard_method_id()!"
           [existing_zones]="store_zones()"
           [edit_rate]="rate_wizard_edit_rate()"
+          [method_distance_enabled]="rate_wizard_distance_enabled()"
           (close)="closeRateWizard()"
           (saved)="onRateSaved()"
           (zones_changed)="onZonesChanged()"
@@ -314,6 +324,7 @@ import {
   `})
 export class ShippingDashboardComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
+  private router = inject(Router);
   private shippingService = inject(ShippingMethodsService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
@@ -337,6 +348,7 @@ export class ShippingDashboardComponent implements OnInit {
   show_rate_wizard = signal<boolean>(false);
   rate_wizard_method_id = signal<number | null>(null);
   rate_wizard_edit_rate = signal<ShippingRate | null>(null);
+  rate_wizard_distance_enabled = signal<boolean>(false);
 
   // ===== COMPUTED =====
   filtered_methods = computed(() => {
@@ -692,6 +704,9 @@ export class ShippingDashboardComponent implements OnInit {
   onEditRate(rate: ShippingRate, methodId: number): void {
     this.rate_wizard_edit_rate.set(rate);
     this.rate_wizard_method_id.set(methodId);
+    this.rate_wizard_distance_enabled.set(
+      this.isDistanceEnabled(methodId),
+    );
     this.show_rate_wizard.set(true);
   }
 
@@ -753,6 +768,9 @@ export class ShippingDashboardComponent implements OnInit {
   openRateWizard(methodId: number): void {
     this.rate_wizard_edit_rate.set(null);
     this.rate_wizard_method_id.set(methodId);
+    this.rate_wizard_distance_enabled.set(
+      this.isDistanceEnabled(methodId),
+    );
     this.show_rate_wizard.set(true);
   }
 
@@ -834,6 +852,22 @@ export class ShippingDashboardComponent implements OnInit {
 
   onSearchChange(term: string): void {
     this.search_term.set(term);
+  }
+
+  /**
+   * Detalle del método por UI (shipping-distance-pricing plan paso 4).
+   * El detalle nunca se alcanza adivinando URLs: este botón es el acceso.
+   */
+  goToMethodDetail(methodId: number): void {
+    this.router.navigate(['/admin/settings/shipping', methodId]);
+  }
+
+  /** El wizard solo muestra el editor de tiers si el método cobra por distancia. */
+  private isDistanceEnabled(methodId: number): boolean {
+    return (
+      this.shipping_methods().find((m) => m.id === methodId)
+        ?.distance_pricing_enabled ?? false
+    );
   }
 
   private sortAvailableMethods(

@@ -11,8 +11,14 @@ export interface PosCustomerAddress {
   is_primary: boolean;
 }
 
-/** Régimen tributario del cliente (clasificación fiscal "el QUIEN"). */
-export type TaxRegime = 'COMUN' | 'SIMPLIFICADO' | 'GRAN_CONTRIBUYENTE';
+/** Régimen tributario del cliente (clasificación fiscal "el QUIEN"). Anexo 19. */
+export type TaxRegime =
+  | 'COMUN'
+  | 'SIMPLIFICADO'
+  | 'GRAN_CONTRIBUYENTE'
+  | 'AUTORRETENEDOR'
+  | 'ESPECIAL'
+  | 'NO_APLICA';
 
 /** Tipo de persona del cliente. */
 export type PersonType = 'NATURAL' | 'JURIDICA';
@@ -22,6 +28,8 @@ export interface PosCustomer {
   email: string;
   first_name: string;
   last_name?: string;
+  /** Razón social (JURIDICA). El backend la devuelve; se usa en tarjetas. */
+  legal_name?: string | null;
   name?: string; // For backward compatibility
   phone?: string;
   document_type?: string;
@@ -47,6 +55,11 @@ export interface CreatePosCustomerRequest {
   tax_regime?: TaxRegime | null;
   person_type?: PersonType | null;
   is_withholding_agent?: boolean;
+  /** Campos fiscales extra para el salto a creación completa (mismo endpoint). */
+  legal_name?: string | null;
+  verification_digit?: string | null;
+  ciiu_code?: string | null;
+  fiscal_responsibilities?: string[];
 
   password?: string;
   /**

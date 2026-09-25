@@ -921,27 +921,27 @@ export class PaymentInstructionsModalComponent {
   readonly isVoucher = computed(() => this.method()?.type === 'voucher');
 
   readonly heroIcon = computed(() =>
-    this.isVoucher() ? 'ticket' : 'landmark',
+    this.isVoucher() ? 'credit-card' : 'landmark',
   );
 
   readonly heroTitle = computed(() =>
     this.isVoucher()
-      ? 'Instrucciones del voucher'
+      ? 'Instrucciones del datáfono'
       : 'Transferencia bancaria',
   );
 
   readonly heroSubtitle = computed(() =>
     this.isVoucher()
-      ? 'Sigue las instrucciones para redimir tu voucher.'
+      ? 'Sigue las instrucciones para pagar con datáfono.'
       : 'Realiza la transferencia con los datos de la cuenta.',
   );
 
   readonly cardIcon = computed(() =>
-    this.isVoucher() ? 'ticket' : 'building-2',
+    this.isVoucher() ? 'credit-card' : 'building-2',
   );
 
   readonly cardTitle = computed(() =>
-    this.isVoucher() ? 'Datos del voucher' : 'Datos de la cuenta',
+    this.isVoucher() ? 'Datos del datáfono' : 'Datos de la cuenta',
   );
 
   /**
@@ -985,7 +985,7 @@ export class PaymentInstructionsModalComponent {
       const all: InstructionField[] = [
         {
           key: 'voucher_instructions',
-          label: 'Instrucciones del voucher',
+          label: 'Instrucciones del datáfono',
           value: i.voucher_instructions ?? '',
         },
         {

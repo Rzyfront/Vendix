@@ -8,8 +8,8 @@ import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } 
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { forkJoin, firstValueFrom, Observable } from 'rxjs';
-import { switchMap } from 'rxjs/operators';
+import { forkJoin, firstValueFrom, Observable, of } from 'rxjs';
+import { switchMap, finalize } from 'rxjs/operators';
 import {
   StoreOrdersService,
   CreateAddressPayload,
@@ -48,6 +48,8 @@ import {
   OrderActionConfig,
   PayOrderDto,
   RefundRecord,
+  RefundCoverageResult,
+  RefundCoverageLine,
   ResolveRefundPayload,
   FastTrackOrderDto,
   AssignShippingMethodDto,
@@ -99,6 +101,16 @@ import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pi
 import { ItemCancellationModalComponent, previewItemCancellation, type ItemCancellationSubmit } from '../../../../../../shared/components';
 import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
+// Paso 5: reutiliza el modal canónico de clientes (quick/advanced,
+// NATURAL/JURIDICA) para capturar el nuevo titular de la orden.
+import { CustomerModalComponent } from '../../../customers/components/customer-modal/customer-modal.component';
+import { ChangeTitularSearchModalComponent } from '../../components/change-titular-search-modal/change-titular-search-modal.component';
+import {
+  CustomersService,
+  ResolveCustomerRequest,
+  ResolveCustomerResult,
+} from '../../../customers/services/customers.service';
+import { CreateCustomerRequest, Customer } from '../../../customers/models/customer.model';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../../services/order-ticket.service';
@@ -260,6 +272,8 @@ type RefundState =
     ItemCancellationModalComponent,
     OrderPaymentModalComponent,
     OrderRefundModalComponent,
+    CustomerModalComponent,
+    ChangeTitularSearchModalComponent,
     InvoiceDetailComponent,
     TimelineComponent,
     GenerateDispatchWizardComponent,
@@ -326,7 +340,73 @@ export class OrderDetailsPageComponent {
   readonly hasDiscountSnapshot = computed(
     () => this.appliedPromotions().length > 0 || this.appliedCoupons().length > 0,
   );
+
+  // ── CP-REFUND-FLOW-REDESIGN paso 8: neto derivado + cobertura ──
+
+  /**
+   * Cruce `orderRefunds().refund_items` → qty comprometida por línea.
+   * Cuenta estados que reservan techo (`completed`/`pending_approval`/
+   * `processing`, mismo conjunto que el ledger del backend): es el fallback
+   * cuando `refundCoverage()` aún no cargó o el endpoint falló.
+   */
+  readonly refundedQtyByLine = computed(() => {
+    const byLine = new Map<number, number>();
+    for (const refund of this.orderRefunds()) {
+      if (!['completed', 'pending_approval', 'processing'].includes(refund.state)) continue;
+      for (const ri of refund.refund_items ?? []) {
+        byLine.set(
+          ri.order_item_id,
+          (byLine.get(ri.order_item_id) ?? 0) + (Number(ri.quantity) || 0),
+        );
+      }
+    }
+    return byLine;
+  });
+
+  readonly coverageByLine = computed(() => {
+    const byLine = new Map<number, RefundCoverageLine>();
+    for (const line of this.refundCoverage()?.lines ?? []) {
+      byLine.set(line.order_item_id, line);
+    }
+    return byLine;
+  });
+
+  /**
+   * Dinero efectivamente devuelto: solo refunds `completed` (los pendientes
+   * aún no movieron dinero, así que no restan del Neto). `grand_total` jamás
+   * se muta: el neto es derivado, no persistido.
+   */
+  readonly totalRefunded = computed(() => {
+    const sum = this.orderRefunds()
+      .filter((r) => r.state === 'completed')
+      .reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
+    return Math.round(sum * 100) / 100;
+  });
+
+  /** Neto derivado: lo facturado menos lo devuelto. Nunca negativo. */
+  readonly netTotal = computed(() => {
+    const gross = Number(this.order()?.grand_total) || 0;
+    return Math.max(Math.round((gross - this.totalRefunded()) * 100) / 100, 0);
+  });
+
+  /** ¿Queda al menos una línea con saldo reembolsable? Guarda del wizard. */
+  readonly hasRefundableBalance = computed(() => {
+    const order = this.order();
+    if (!order) return false;
+    if (!['delivered', 'finished'].includes(order.state)) return false;
+    return (order.order_items ?? []).some((item) => this.lineRefundRemaining(item) > 0);
+  });
+
+  /** Aviso obligatorio FE→NC del paso 7 (`null` = sin FE aceptada descubierta). */
+  readonly feNotice = computed(() => this.refundCoverage()?.fe_notice ?? null);
   orderRefunds = signal<RefundRecord[]>([]);
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 8 — cobertura refund↔NC por línea
+   * (`GET .../flow/refund/coverage`, paso 7). Fuente primaria de badges de
+   * línea, guardas de saldo y banner FE→NC. `null` = aún no cargada o el
+   * endpoint falló: todo degrada al cruce local `orderRefunds()`.
+   */
+  refundCoverage = signal<RefundCoverageResult | null>(null);
   /**
    * Bug 4 — dispatch notes (remisiones) generated from this order, loaded from
    * `GET /store/dispatch-notes/by-order/:orderId`. Drives the
@@ -400,6 +480,25 @@ export class OrderDetailsPageComponent {
    * modo editar. `null` en modo crear.
    */
   editingInitialAddress = signal<AddressPayload | null>(null);
+  /**
+   * Paso 5 — cambio de titular: visibilidad del `app-customer-modal`
+   * (siempre en modo crear → arranca en quick, con advanced disponible) y
+   * bandera de guardado (lookup/resolve + PATCH en vuelo).
+   */
+  showChangeCustomerModal = signal(false);
+  changingCustomer = signal(false);
+  /**
+   * Buscar-primero: el botón "Cambiar cliente" abre este modal de búsqueda
+   * (clientes existentes) en vez del `app-customer-modal` directo. Desde ahí
+   * el operador elige un existente o salta al flujo crear actual.
+   */
+  showTitularSearchModal = signal(false);
+  /**
+   * Dirección capturada en el modal (`addressData`, solo crear-mode). Se
+   * persiste contra el cliente resuelto antes del PATCH titular; se limpia
+   * en cada intento para no reutilizar una sesión anterior.
+   */
+  private pendingChangeCustomerAddress = signal<AddressPayload | null>(null);
 
   // Processing state
   isProcessingAction = signal(false);
@@ -449,13 +548,23 @@ export class OrderDetailsPageComponent {
    * de impuesto que sume; sólo TOTAL y, con desglose respaldado, la nota
    * informativa fuera de la aritmética.
    */
+  /**
+   * Nota informativa de IVA (fuera de la aritmética, base gross). Se muestra
+   * siempre que la orden trae impuesto, sin el gate de impresión: esta es
+   * una pantalla de operador, no un documento fiscal.
+   */
   readonly showDetailVatNote = computed(() => {
     const order = this.order();
     const tax = Number(
       (order as unknown as { tax_amount?: unknown } | null)?.tax_amount ?? 0,
     );
-    return this.authFacade.printsVatBreakdown() && tax > 0;
+    return tax > 0;
   });
+  /**
+   * Propina como número. El API la trae `number|string|null` y el template
+   * estricto no admite `>` ni `currency` sobre la unión.
+   */
+  readonly tipAmount = computed(() => Number(this.order()?.tip_amount ?? 0));
   /**
    * Impuesto del envío (copia congelada de la tarifa al vender). Va SIEMPRE
    * incluido en `shipping_cost`, así que es una nota informativa: no suma al
@@ -583,16 +692,19 @@ export class OrderDetailsPageComponent {
   });
 
   /**
-   * Carril B - B1: nombre visible del cliente con prioridad al alias.
-   * Prioridad: alias (si existe y no esta vacio) > users.first+last > "Consumidor Final".
-   * `isConsumidorFinal` permite al template pintar el badge "CF" sin perder
-   * que la orden sigue siendo anonima fiscalmente.
+   * Paso 3 (extiende Carril B - B1): nombre visible del cliente.
+   * Prioridad: alias (si existe y no esta vacio) > users.legal_name >
+   * users.first+last > "Consumidor Final". `isConsumidorFinal` permite al
+   * template pintar el badge "CF" sin perder que la orden sigue siendo
+   * anonima fiscalmente.
    */
   readonly customerDisplayName = computed<string>(() => {
     const o = this.order();
     if (!o) return '';
     const alias = o.customer_alias?.trim();
     if (alias) return alias;
+    const legal = o.users?.legal_name?.trim();
+    if (legal) return legal;
     if (o.users?.first_name || o.users?.last_name) {
       return `${o.users.first_name || ''} ${o.users.last_name || ''}`.trim();
     }
@@ -603,7 +715,11 @@ export class OrderDetailsPageComponent {
     const o = this.order();
     if (!o) return false;
     if (o.customer_alias?.trim()) return false;
-    return !(o.users?.first_name || o.users?.last_name);
+    return !(
+      o.users?.legal_name?.trim() ||
+      o.users?.first_name ||
+      o.users?.last_name
+    );
   });
 
   readonly cleanInternalNotes = computed<string>(() => {
@@ -1124,14 +1240,20 @@ export class OrderDetailsPageComponent {
 
       case 'delivered':
         actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
+        // Paso 8 — sin saldo reembolsable no se ofrece el reembolso.
+        if (this.hasRefundableBalance()) {
+          actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
+        }
         break;
 
       case 'finished':
         if (order.payment_form === '2' && Number(order.remaining_balance) > 0.01) {
           actions.push({ id: 'credit-payment', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
         }
-        actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
+        // Paso 8 — sin saldo reembolsable no se ofrece el reembolso.
+        if (this.hasRefundableBalance()) {
+          actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
+        }
         break;
 
       case 'cancelled':
@@ -1487,6 +1609,7 @@ export class OrderDetailsPageComponent {
   private fb = inject(FormBuilder);
   private ordersService = inject(StoreOrdersService);
   private ordersFlowService = inject(OrdersService);
+  private customersService = inject(CustomersService);
   private http = inject(HttpClient);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
@@ -1767,6 +1890,7 @@ export class OrderDetailsPageComponent {
             tax_amount: Number(orderData.tax_amount),
             shipping_cost: Number(orderData.shipping_cost),
             discount_amount: Number(orderData.discount_amount),
+            tip_amount: Number(orderData.tip_amount ?? 0),
             total_paid: Number(orderData.total_paid) || 0,
             remaining_balance: Number(orderData.remaining_balance) || 0,
             total_with_interest: orderData.total_with_interest ? Number(orderData.total_with_interest) : undefined,
@@ -1823,6 +1947,9 @@ export class OrderDetailsPageComponent {
           // Load refund history
           this.loadRefunds();
 
+          // Paso 8 — cobertura refund↔NC por línea (badges, guardas, banner FE→NC)
+          this.loadRefundCoverage();
+
           // B.2 — NC/ND de la factura para las cards (GET :id/notes).
           this.loadInvoiceNotes();
 
@@ -1868,6 +1995,23 @@ export class OrderDetailsPageComponent {
         },
         error: () => {
           this.orderRefunds.set([]);
+        },
+      });
+  }
+
+  loadRefundCoverage(): void {
+    if (!this.orderId) return;
+    this.ordersService
+      .getRefundCoverage(this.orderId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (coverage) => {
+          this.refundCoverage.set(coverage ?? null);
+        },
+        error: () => {
+          // Degradación explícita: badges y guardas usan el cruce local
+          // `refundedQtyByLine`; el banner FE→NC simplemente no aparece.
+          this.refundCoverage.set(null);
         },
       });
   }
@@ -3077,6 +3221,18 @@ export class OrderDetailsPageComponent {
   }
 
   openRefundModal(): void {
+    // Paso 8 — sin saldo reembolsable el wizard no abre (ni vacío ni
+    // parcial): la acción/botón ya se oculta, esta guarda cubre CTAs legacy
+    // (banner fiscal `open-refund`, link por línea) y llamadas directas.
+    const order = this.order();
+    if (!order || !['delivered', 'finished'].includes(order.state)) {
+      this.toastService.info('Solo se pueden reembolsar órdenes entregadas o finalizadas.');
+      return;
+    }
+    if (!this.hasRefundableBalance()) {
+      this.toastService.info('Esta orden no tiene saldo reembolsable.');
+      return;
+    }
     this.showRefundModal.set(true);
   }
 
@@ -3334,16 +3490,19 @@ export class OrderDetailsPageComponent {
       null;
     const storeName = order.stores?.name || 'Vendix';
 
-    // Carril B - B1: prioridad alias > users.first+last > "Consumidor Final".
+    // Paso 3 (extiende Carril B - B1): alias > legal_name > first+last > CF.
     // Mismo orden que customerDisplayName en el detalle para que el ticket de
     // despacho refleje lo que el operador ve en pantalla. Cristian renderiza el
     // ticket impreso final en order-ticket.service.ts (fuera de mi scope).
     const alias = order.customer_alias?.trim();
-    const customerName = alias
-      ? alias
-      : order.users
-        ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
-        : 'Consumidor Final';
+    const legal = order.users?.legal_name?.trim();
+    const customerName =
+      alias ||
+      legal ||
+      (order.users
+        ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim() ||
+          'Consumidor Final'
+        : 'Consumidor Final');
 
     // Domiciliario de la entrega rápida: la remisión MÁS RECIENTE que
     // traiga nombre. `getByOrder` devuelve `orderBy: { created_at: 'desc' }`
@@ -3791,6 +3950,14 @@ export class OrderDetailsPageComponent {
     const newState = log.new_values?.state;
     const oldState = log.old_values?.state;
 
+    // Paso 8 — los audits de refund comparten `resource: 'orders'`, así que
+    // sus estados (`completed`, ...) llegan a `new_values.state`. Sin esta
+    // rama el timeline mostraba "Nuevo estado: completed" en crudo.
+    if (newState && this.isRefundStateValue(newState)) {
+      const label = this.refundStateLabel(newState);
+      return `Reembolso ${label.charAt(0).toLowerCase()}${label.slice(1)}`;
+    }
+
     if (newState) {
       // Detect manual transitions (skip payment flow)
       if (oldState === 'pending_payment' && newState === 'shipped') {
@@ -3819,7 +3986,15 @@ export class OrderDetailsPageComponent {
       CREATE: 'Orden Creada',
       UPDATE: 'Orden Actualizada',
       DELETE: 'Orden Eliminada',
+      // Paso 6/8 — disposición de plato auditada dentro del refund.
+      'ORDER_ITEM.REFUND_DISH_DISPOSITION': 'Disposición de plato reembolsado',
+      'ORDER_ITEM.PREPARED_DISPOSITION': 'Disposición de plato',
     };
+    // Paso 8 — cualquier otra acción de la familia refund nombra el evento
+    // en vez de filtrar la clave cruda al timeline.
+    if (action?.includes('REFUND') && !actionLabels[action]) {
+      return 'Evento de reembolso';
+    }
     return actionLabels[action] || log.action || 'Evento';
   }
 
@@ -3946,6 +4121,220 @@ export class OrderDetailsPageComponent {
    * the page already loaded from, no extra roundtrip beyond a
    * refetch.
    */
+  // ─── Paso 5 — cambiar titular de la orden ──────────────────────
+  /**
+   * Punto de entrada de "Cambiar cliente".
+   *
+   * PRE-CHECK (espejo del guard backend `ORD_EDIT_NOT_ALLOWED_001` en
+   * `orders.service.ts`): el titular cambia en created/draft/pending_payment/
+   * processing/pending_delivery. En shipped/delivered/finished/cancelled/
+   * refunded se muestra el dialog informativo y no se abre ningún modal.
+   * En estado editable se abre el buscar-primero; el `app-customer-modal`
+   * en modo crear solo aparece vía "Crear cliente nuevo".
+   */
+  async openChangeCustomer(): Promise<void> {
+    const order = this.order();
+    if (!order) return;
+    const TITULAR_LOCKED_STATES: readonly OrderState[] = [
+      'shipped',
+      'delivered',
+      'finished',
+      'cancelled',
+      'refunded',
+    ];
+    if (TITULAR_LOCKED_STATES.includes(order.state)) {
+      await this.notifyTitularLocked();
+      return;
+    }
+    this.pendingChangeCustomerAddress.set(null);
+    this.showTitularSearchModal.set(true);
+  }
+
+  /**
+   * Dialog informativo (español) del titular bloqueado. Se usa tanto en el
+   * pre-check local como al mapear 409/403 del PATCH titular.
+   */
+  private notifyTitularLocked(): Promise<boolean> {
+    return this.dialogService.confirm({
+      title: 'No se puede cambiar el titular',
+      message:
+        'Esta orden ya está en curso o finalizada, por lo que su titular no puede cambiarse. ' +
+        'El titular queda fijado al avanzar la orden y es inmutable por trazabilidad fiscal.',
+      confirmText: 'Entendido',
+      confirmVariant: 'primary',
+    });
+  }
+
+  /**
+   * `true` cuando el error del PATCH titular es el bloqueo de estado (409
+   * `ORD_EDIT_NOT_ALLOWED_001`) o de tienda ajena (403
+   * `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`). `updateOrderCustomer` envuelve
+   * el fallo con `buildApiError` (`errorCode` + `cause` = HttpErrorResponse
+   * original), así que se revisan ambas vías.
+   */
+  private isTitularLockedError(error: unknown): boolean {
+    const parsed = parseApiError(error);
+    if (
+      parsed.errorCode === 'ORD_EDIT_NOT_ALLOWED_001' ||
+      parsed.errorCode === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001'
+    ) {
+      return true;
+    }
+    const status =
+      (error as { cause?: { status?: number } } | null)?.cause?.status ??
+      (error as { status?: number } | null)?.status;
+    return status === 409 || status === 403;
+  }
+
+  /** Error del PATCH titular: bloqueo → dialog español; resto → toast. */
+  private handleChangeCustomerError(error: unknown): void {
+    if (this.isTitularLockedError(error)) {
+      void this.notifyTitularLocked();
+      return;
+    }
+    this.toastService.error(extractApiErrorMessage(error));
+  }
+
+  closeTitularSearch(): void {
+    this.showTitularSearchModal.set(false);
+  }
+
+  /**
+   * "Crear cliente nuevo" desde el buscar-primero: conserva el flujo actual
+   * (lookup → resolve → PATCH en `onChangeCustomerSave`).
+   */
+  onTitularSearchCreateNew(): void {
+    this.showTitularSearchModal.set(false);
+    this.pendingChangeCustomerAddress.set(null);
+    this.showChangeCustomerModal.set(true);
+  }
+
+  /**
+   * Titular existente elegido en el buscar-primero: PATCH directo
+   * (`updateOrderCustomer` ya envía `customer_alias: null`) → toast → refresh.
+   */
+  onTitularSearchSelected(customer: Customer): void {
+    const id = this.order()?.id;
+    if (!id) return;
+    this.showTitularSearchModal.set(false);
+    this.changingCustomer.set(true);
+    this.ordersService
+      .updateOrderCustomer(String(id), customer.id)
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.changingCustomer.set(false)),
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success('Titular de la orden actualizado');
+          this.refreshOrder();
+        },
+        error: (error: unknown) => this.handleChangeCustomerError(error),
+      });
+  }
+
+  closeChangeCustomer(): void {
+    this.showChangeCustomerModal.set(false);
+    this.pendingChangeCustomerAddress.set(null);
+  }
+
+  /** Guarda la dirección del modal para persistirla tras el resolve. */
+  onChangeCustomerAddress(payload: AddressPayload): void {
+    this.pendingChangeCustomerAddress.set(payload);
+  }
+
+  /**
+   * Guarda el nuevo titular: `GET lookup` por documento (vía rápida sin
+   * escrituras) → `POST resolve` (encuentra o crea) → `PATCH` titular →
+   * `refreshOrder`. En error, toast + modal abierto para corregir.
+   */
+  onChangeCustomerSave(data: CreateCustomerRequest): void {
+    const id = this.order()?.id;
+    if (!id) return;
+    this.changingCustomer.set(true);
+    const doc = data.document_number?.trim();
+    const lookup$ = doc
+      ? this.customersService.lookupByDocument(
+          doc,
+          data.document_type ?? undefined,
+        )
+      : of(null);
+
+    lookup$
+      .pipe(
+        switchMap((found) =>
+          found
+            ? of({
+                customer: found,
+                was_created: false,
+                was_updated: false,
+                matched_by: 'document',
+                document_conflict: false,
+              } as ResolveCustomerResult)
+            : this.customersService.resolveCustomer(
+                data as ResolveCustomerRequest,
+              ),
+        ),
+        switchMap((resolved) =>
+          this.ordersService
+            .updateOrderCustomer(String(id), resolved.customer.id)
+            .pipe(
+              switchMap((order) => {
+                this.persistChangeCustomerAddress(resolved.customer.id);
+                return of(order);
+              }),
+            ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.changingCustomer.set(false)),
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success('Titular de la orden actualizado');
+          this.showChangeCustomerModal.set(false);
+          this.pendingChangeCustomerAddress.set(null);
+          this.refreshOrder();
+        },
+        error: (error: unknown) => this.handleChangeCustomerError(error),
+      });
+  }
+
+  /**
+   * Persiste la dirección capturada en el modal contra el cliente resuelto
+   * (`POST /store/addresses`). Best-effort y no bloqueante: el titular ya
+   * quedó asignado; un fallo aquí solo avisa por toast.
+   */
+  private persistChangeCustomerAddress(customerId: number): void {
+    const addr = this.pendingChangeCustomerAddress();
+    this.pendingChangeCustomerAddress.set(null);
+    if (!addr?.address_line1 || !addr.city) return;
+    this.customersService
+      .createCustomerAddress({
+        address_line_1: addr.address_line1,
+        address_line_2: addr.address_line2 ?? undefined,
+        city: addr.city,
+        state: addr.state_province ?? '',
+        country: addr.country_code ?? '',
+        postal_code: addr.postal_code ?? undefined,
+        municipality_code: addr.municipality_code ?? undefined,
+        type: 'shipping',
+        is_primary: true,
+        customer_id: customerId,
+        ...(addr.latitude != null ? { latitude: String(addr.latitude) } : {}),
+        ...(addr.longitude != null
+          ? { longitude: String(addr.longitude) }
+          : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        error: () => {
+          this.toastService.warning(
+            'Titular actualizado, pero no se pudo guardar su dirección.',
+          );
+        },
+      });
+  }
+
   private refreshOrder(): void {
     const id = this.order()?.id;
     if (!id) return;
@@ -4426,6 +4815,70 @@ export class OrderDetailsPageComponent {
       return this.REFUND_STATE_LABELS[state as RefundState];
     }
     return state ?? '';
+  }
+
+  /**
+   * Paso 8 — cobertura de una línea para el badge Reembolsado. Fuente
+   * primaria: el endpoint de cobertura (ledger unificado del backend, todos
+   * los estados que reservan techo); fallback: cruce local
+   * `refundedQtyByLine` + caché `item.refunded_qty` del paso 3.
+   */
+  lineRefundInfo(item: OrderItem): {
+    refundedQty: number;
+    quantity: number;
+    isFull: boolean;
+    ncCoveredQty: number;
+    isNcCovered: boolean;
+  } {
+    const quantity = Number(item.quantity) || 0;
+    const coverage = this.coverageByLine().get(item.id);
+    const refundedQty =
+      coverage != null
+        ? Number(coverage.refunded_qty) || 0
+        : Math.max(
+            this.refundedQtyByLine().get(item.id) ?? 0,
+            Number(item.refunded_qty) || 0,
+          );
+    const ncCoveredQty = coverage != null ? Number(coverage.nc_covered_qty) || 0 : 0;
+    return {
+      refundedQty,
+      quantity,
+      isFull: quantity > 0 && refundedQty >= quantity,
+      ncCoveredQty,
+      isNcCovered: refundedQty > 0 && ncCoveredQty >= refundedQty,
+    };
+  }
+
+  /** Unidades aún reembolsables de la línea (canceladas = 0, excluidas). */
+  lineRefundRemaining(item: OrderItem): number {
+    if (item.cancelled_at) return 0;
+    const info = this.lineRefundInfo(item);
+    return Math.max(info.quantity - info.refundedQty, 0);
+  }
+
+  lineHasRefundableBalance(item: OrderItem): boolean {
+    return this.lineRefundRemaining(item) > 0;
+  }
+
+  /** ¿Es `state` un estado de refund (no de orden)? Para timeline refund-aware. */
+  isRefundStateValue(state: string | undefined | null): boolean {
+    return !!state && state in this.REFUND_STATE_LABELS;
+  }
+
+  /**
+   * Paso 8 — 1 clic del banner FE→NC: emite la NC del primer reembolso
+   * sugerido por el backend que siga siendo candidato. Reutiliza el flujo
+   * B.3 (`startRefundNote`): nunca automática, siempre vía borrador +
+   * "¿Emitirla ahora?".
+   */
+  startFeNoticeNote(): void {
+    const notice = this.feNotice();
+    if (!notice || this.refundNoteState()) return;
+    const candidates = this.refundNoteCandidateIds();
+    const refund = (notice.suggested_refund_ids ?? [])
+      .map((id) => this.orderRefunds().find((r) => r.id === id))
+      .find((r) => r != null && candidates.has(r.id));
+    if (refund) this.startRefundNote(refund);
   }
 
   getAuditActionLabel(action: string): string {

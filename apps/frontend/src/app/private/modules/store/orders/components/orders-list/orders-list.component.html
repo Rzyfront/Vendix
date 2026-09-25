@@ -17,7 +17,7 @@
             placeholder="Buscar órdenes..."
             [debounceTime]="1000"
             [ngModel]="searchTerm()"
-            (ngModelChange)="onSearchChange($event)"
+            (searchChange)="onSearchChange($event)"
           ></app-inputsearch>
 
           <app-options-dropdown

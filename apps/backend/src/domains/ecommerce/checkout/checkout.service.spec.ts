@@ -1237,4 +1237,105 @@ describe('CheckoutService - promotions and coupons', () => {
       });
     });
   });
+
+  /**
+   * Guest solo-nombre: sin email/teléfono `resolveGuestCustomerForCheckout`
+   * devuelve null y la orden se persiste con `customer_id = null` +
+   * `customer_alias = trim(nombre)` (máx. 100 chars). Con cliente resuelto
+   * (email) o autenticado el alias queda en null (XOR).
+   */
+  describe('guest solo-nombre — customer_alias', () => {
+    beforeEach(() => {
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
+    });
+
+    it('checkout: nombre + apellido van al alias y customer_id queda null', async () => {
+      mockOrderCreate(10000);
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Juan', last_name: 'Pérez' },
+      } as any);
+
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data.customer_id).toBeNull();
+      expect(data.customer_alias).toBe('Juan Pérez');
+      expect(result.customer_id).toBeNull();
+      expect(result.customer_alias).toBe('Juan Pérez');
+    });
+
+    it('checkout: solo first_name con espacios se recorta', async () => {
+      mockOrderCreate(10000);
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: '  Invitado  ' },
+      } as any);
+
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data.customer_id).toBeNull();
+      expect(data.customer_alias).toBe('Invitado');
+      expect(result.customer_alias).toBe('Invitado');
+    });
+
+    it('checkout: el alias se trunca a 100 caracteres', async () => {
+      mockOrderCreate(10000);
+      const long = 'a'.repeat(150);
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: long },
+      } as any);
+
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data.customer_alias).toBe('a'.repeat(100));
+      expect(result.customer_alias).toHaveLength(100);
+    });
+
+    it('checkout: con email resuelto se mantiene customer_id y alias null', async () => {
+      (service as any).customersService.resolveGuestCustomerForCheckout
+        .mockResolvedValue({ customer_id: 77, was_created: true, was_updated: false });
+      mockOrderCreate(10000);
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Juan', email: 'juan@example.com' },
+      } as any);
+
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data.customer_id).toBe(77);
+      expect(data.customer_alias).toBeNull();
+      expect(result.customer_id).toBe(77);
+      expect(result.customer_alias).toBeNull();
+    });
+
+    it('whatsappCheckout: guest solo-nombre también persiste el alias', async () => {
+      mockOrderCreate(10000);
+      const result: any = await service.whatsappCheckout({
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'María', last_name: 'Gómez' },
+      } as any);
+
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data.customer_id).toBeNull();
+      expect(data.customer_alias).toBe('María Gómez');
+      expect(result.customer_id).toBeNull();
+      expect(result.customer_alias).toBe('María Gómez');
+    });
+
+    it('checkout autenticado: alias null aunque no haya guest_customer', async () => {
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(USER_ID);
+      mockOrderCreate(10000);
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+      } as any);
+
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data.customer_id).toBe(USER_ID);
+      expect(data.customer_alias).toBeNull();
+      expect(result.customer_id).toBe(USER_ID);
+      expect(result.customer_alias).toBeNull();
+    });
+  });
 });

@@ -2657,7 +2657,7 @@ private cartService = inject(PosCartService);
     name?: string;
     first_name?: string;
     last_name?: string;
-    legal_name?: string;
+    legal_name?: string | null;
     business_name?: string;
     email?: string;
   } | null | undefined): string {
@@ -2681,7 +2681,7 @@ private cartService = inject(PosCartService);
     name?: string;
     first_name?: string;
     last_name?: string;
-    legal_name?: string;
+    legal_name?: string | null;
     business_name?: string;
     email?: string;
   } | null): string {

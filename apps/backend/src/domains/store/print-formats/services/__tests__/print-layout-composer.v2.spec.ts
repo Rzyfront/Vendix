@@ -428,7 +428,7 @@ describe('PrintLayoutComposerService — tirilla 80mm en negro absoluto', () => 
     pos_sale_ticket: {
       v: 2,
       paper: rollPaper,
-      styles: rollStyles(9),
+      styles: rollStyles(8.5),
       sections: [
         { id: 'sec_header', type: 'header', title: 'Encabezado', enabled: true, order: 1 },
         { id: 'sec_doc_info', type: 'document_info', title: 'Datos del Ticket', enabled: true, order: 2 },
@@ -440,8 +440,7 @@ describe('PrintLayoutComposerService — tirilla 80mm en negro absoluto', () => 
       columns: [
         { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 50, align: 'left' },
         { id: 'col_qty', key: 'quantity', label: 'Cant.', enabled: true, width_percent: 15, align: 'center' },
-        { id: 'col_price', key: 'unit_price', label: 'Precio', enabled: true, width_percent: 15, align: 'right' },
-        { id: 'col_tot', key: 'total_price', label: 'Total', enabled: true, width_percent: 20, align: 'right' },
+        { id: 'col_tot', key: 'total_price', label: 'Total', enabled: true, width_percent: 35, align: 'right' },
       ],
     },
     pos_electronic_invoice: {
@@ -1049,4 +1048,127 @@ describe('PrintLayoutComposerService — calidades fiscales en la cabecera', () 
       expect(html).not.toContain('store-regime');
     });
   }
+});
+
+describe('PrintLayoutComposerService — show_sku por sección (térmicos)', () => {
+  let composer: PrintLayoutComposerService;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [PrintLayoutComposerService, PrintTemplateCompilerService],
+    }).compile();
+
+    composer = module.get<PrintLayoutComposerService>(PrintLayoutComposerService);
+  });
+
+  // Forma mínima para render: solo importan nombre + SKU (+ cantidades).
+  const item = {
+    index: 1,
+    product_name: 'Camisa Oxford',
+    variant_sku: 'CAM-OXF-AZ-M',
+    quantity: 2,
+    unit_price: 65000,
+    total_price: 130000,
+    dispatched_qty: 2,
+  } as any;
+
+  const data = (): StandardPrintDataModel =>
+    ({
+      store: { name: 'Mi Tienda' },
+      document: {
+        id: 1,
+        number: 'T-1',
+        date: '2026-09-25',
+        date_formatted: '2026-09-25',
+        state: 'x',
+        state_label: 'X',
+      },
+      items: [item],
+      taxes: [],
+      totals: {
+        subtotal: 130000,
+        subtotal_formatted: '$130.000',
+        discount_total: 0,
+        discount_total_formatted: '$0',
+        shipping_total: 0,
+        shipping_total_formatted: '$0',
+        tax_total: 0,
+        tax_total_formatted: '$0',
+        grand_total: 130000,
+        grand_total_formatted: '$130.000',
+      },
+    }) as unknown as StandardPrintDataModel;
+
+  const paper = {
+    format: 'thermal_80',
+    width_mm: 80,
+    is_roll: true,
+    margin_mm: 1.5,
+    copies: 1,
+  } as const;
+
+  const columns = [
+    { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 50, align: 'left', format: 'text' },
+    { id: 'col_qty', key: 'quantity', label: 'Cant.', enabled: true, width_percent: 15, align: 'center', format: 'number' },
+    { id: 'col_tot', key: 'total_price', label: 'Total', enabled: true, width_percent: 35, align: 'right', format: 'currency' },
+  ] as any;
+
+  it('items_table con show_sku:false omite el subrenglón SKU', () => {
+    const def: PrintFormatDefinition = {
+      v: 2,
+      paper,
+      columns,
+      sections: [
+        { id: 'sec_items', type: 'items_table', title: 'Ítems', enabled: true, order: 1, show_sku: false },
+      ],
+    };
+    const html = composer.compose(def, data());
+    expect(html).toContain('Camisa Oxford');
+    expect(html).not.toContain('item-sku');
+    expect(html).not.toContain('CAM-OXF-AZ-M');
+  });
+
+  it('items_table sin el flag sigue mostrando el SKU (default visible)', () => {
+    const def: PrintFormatDefinition = {
+      v: 2,
+      paper,
+      columns,
+      sections: [
+        { id: 'sec_items', type: 'items_table', title: 'Ítems', enabled: true, order: 1 },
+      ],
+    };
+    const html = composer.compose(def, data());
+    expect(html).toContain('item-sku');
+    expect(html).toContain('SKU: CAM-OXF-AZ-M');
+  });
+
+  it('dispatch_ticket con show_sku:false omite dt-sku', () => {
+    const def: PrintFormatDefinition = {
+      v: 2,
+      paper,
+      columns,
+      sections: [
+        { id: 'sec_x', type: 'dispatch_ticket', title: 'Despacho', enabled: true, order: 1, show_sku: false },
+      ],
+    };
+    const html = composer.compose(def, data());
+    expect(html).toContain('Camisa Oxford');
+    // Ojo: `.dt-sku` también vive en el <style> embebido; se aserta el DIV.
+    expect(html).not.toContain('<div class="dt-sku">');
+    expect(html).not.toContain('CAM-OXF-AZ-M');
+  });
+
+  it('dispatch_ticket sin el flag sigue mostrando dt-sku', () => {
+    const def: PrintFormatDefinition = {
+      v: 2,
+      paper,
+      columns,
+      sections: [
+        { id: 'sec_x', type: 'dispatch_ticket', title: 'Despacho', enabled: true, order: 1 },
+      ],
+    };
+    const html = composer.compose(def, data());
+    expect(html).toContain('<div class="dt-sku">');
+    expect(html).toContain('CAM-OXF-AZ-M');
+  });
 });

@@ -217,6 +217,19 @@ export class StoreShippingMethodsService {
             enable_dto.cost_settlement_timing ??
             system_method.cost_settlement_timing ??
             'immediate_on_close',
+          // Cobro por distancia: el DTO permite activar + pinear al habilitar.
+          distance_pricing_enabled:
+            enable_dto.distance_pricing_enabled ??
+            system_method.distance_pricing_enabled ??
+            false,
+          origin_latitude:
+            enable_dto.origin_latitude ??
+            system_method.origin_latitude ??
+            null,
+          origin_longitude:
+            enable_dto.origin_longitude ??
+            system_method.origin_longitude ??
+            null,
           copied_from_system_method_id: system_shipping_method_id,
         },
       });
@@ -392,6 +405,27 @@ export class StoreShippingMethodsService {
     }
 
     // Validar que los ejecutores pertenezcan al tenant actual.
+    // Cobro por distancia: no se activa sin origen pineado. Se resuelven
+    // valores efectivos (DTO + existente) igual que la política de despacho.
+    const next_distance_enabled =
+      update_dto.distance_pricing_enabled ?? method.distance_pricing_enabled;
+    const next_origin_lat =
+      update_dto.origin_latitude !== undefined
+        ? update_dto.origin_latitude
+        : method.origin_latitude;
+    const next_origin_lng =
+      update_dto.origin_longitude !== undefined
+        ? update_dto.origin_longitude
+        : method.origin_longitude;
+    if (
+      next_distance_enabled &&
+      (next_origin_lat == null || next_origin_lng == null)
+    ) {
+      throw new BadRequestException(
+        'Para activar el cobro por distancia el método necesita un origen pineado (origin_latitude/origin_longitude)',
+      );
+    }
+
     if (next_default_vehicle != null) {
       const v = await this.prisma.vehicles.findFirst({
         where: { id: next_default_vehicle, store_id: method.store_id ?? undefined },

@@ -8,7 +8,13 @@ import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
-import { resolveFiscalQualitiesLine } from '../services/fiscal-issuer-identity';
+import {
+  resolveFiscalIssuerForPrint,
+  resolveFiscalQualitiesLine,
+} from '../services/fiscal-issuer-identity';
+
+/** Descargo no fiscal del tiquete POS: texto único real + muestra (ADR-2). */
+const NON_FISCAL_DISCLAIMER = 'Este documento no es factura electrónica de venta.';
 import { mapUserAddress } from '../lib/customer-address';
 import { formatFiscalMoney } from './fiscal-document-print.mapper';
 import {
@@ -80,6 +86,19 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             organizations: {
               include: {
                 organization_settings: { select: { settings: true } },
+                // Paridad FE: `resolveFiscalIssuerForPrint` lee `org.addresses[0]`
+                // (mismo select que `FISCAL_DOCUMENT_PRINT_INCLUDE`).
+                addresses: {
+                  take: 1,
+                  select: {
+                    address_line1: true,
+                    city: true,
+                    state_province: true,
+                    municipality_code: true,
+                    postal_code: true,
+                    phone_number: true,
+                  },
+                },
               },
             },
           },
@@ -131,6 +150,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     // A.3 (F-047): si la orden ya tiene factura, el desglose y los totales
     // salen del snapshot fiscal. Nunca lanza: ver el método.
     await this.overrideWithInvoiceSnapshot(storeId, orderId, model);
+    // CP-REFUND-FLOW-REDESIGN paso 9: sección Reembolsos/NC referenciada,
+    // ADITIVA en `custom_variables` — los totales originales quedan intactos.
+    // Nunca lanza: ver el método.
+    await this.attachRefundsSection(storeId, orderId, model);
     return model;
   }
 
@@ -237,6 +260,207 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
   }
 
   /**
+   * CP-REFUND-FLOW-REDESIGN paso 9 — sección Reembolsos/NC de la reimpresión.
+   *
+   * Los documentos ORIGINALES son inmutables: esta sección es ADITIVA y vive
+   * en `model.custom_variables.refunds` — jamás toca `model.totals`,
+   * `model.items` ni `model.taxes`. Sin refunds con dinero comprometido, el
+   * modelo sale byte-idéntico al de antes (cero regresión en el papel).
+   *
+   * Semántica compartida con `RefundCoverageService` (paso 7), re-derivada
+   * acá porque el provider no puede inyectar servicios de `order-flow` (el
+   * módulo es ajeno a este paso): por línea, `refunded_*` agrega
+   * `refund_items` de refunds con dinero comprometido
+   * (`completed`/`pending_approval`/`processing` — el mismo conjunto que el
+   * techo del paso 1 y las NC sugeribles del paso 7; `requested`/`approved`
+   * quedan fuera hasta que un plan los asigne, `failed`/`cancelled` no
+   * devolvieron nada); `nc_covered_*` suma el puente estructural
+   * `credit_note_refund_items` solo de NC `accepted`, y `notes` lista TODAS
+   * las NC del puente para trazabilidad. Ningún UPDATE toca documentos
+   * emitidos: lectura pura.
+   *
+   * Nunca lanza: si la lectura falla por lo que sea, la tirilla sale sin la
+   * sección como siempre. Un recibo sin sección vale más que ningún recibo.
+   */
+  private async attachRefundsSection(
+    storeId: number,
+    orderId: number,
+    model: StandardPrintDataModel,
+  ): Promise<void> {
+    try {
+      // `refunds` está registrado en `StorePrismaService` con scope
+      // relacional (`orders.store_id`), así que el `findMany` ya viene
+      // anclado al tenant; el `orderId` además salió de una orden verificada
+      // con `store_id` más arriba.
+      const refunds = await this.prisma.refunds.findMany({
+        where: {
+          order_id: orderId,
+          state: { in: ['completed', 'pending_approval', 'processing'] },
+        },
+        select: {
+          id: true,
+          state: true,
+          amount: true,
+          refund_method: true,
+          reason: true,
+          requested_at: true,
+          processed_at: true,
+          refund_items: {
+            select: {
+              id: true,
+              order_item_id: true,
+              quantity: true,
+              refund_amount: true,
+              order_items: { select: { product_name: true } },
+            },
+          },
+        },
+        orderBy: { id: 'asc' },
+      });
+      if (refunds.length === 0) return;
+
+      const refundItemIds = refunds.flatMap((r) =>
+        r.refund_items.map((ri) => ri.id),
+      );
+      // `withoutScope()` + ids ya verificados: el puente no está registrado
+      // en `StorePrismaService` y no necesita estarlo — los ids salen de
+      // lecturas scopeadas, así que la consulta va anclada al tenant por
+      // construcción (mismo criterio que `RefundCoverageService`).
+      const bridgeRows =
+        refundItemIds.length > 0
+          ? await this.prisma
+              .withoutScope()
+              .credit_note_refund_items.findMany({
+                where: { refund_item_id: { in: refundItemIds } },
+                include: {
+                  credit_note: {
+                    select: { id: true, invoice_number: true, status: true },
+                  },
+                },
+              })
+          : [];
+
+      const orderItemOf = new Map<number, number>();
+      for (const r of refunds) {
+        for (const ri of r.refund_items) {
+          orderItemOf.set(ri.id, ri.order_item_id);
+        }
+      }
+      const notesByLine = new Map<
+        number,
+        Array<{
+          credit_note_id: number;
+          invoice_number: string | null;
+          status: string;
+          covered_qty: number;
+          covered_amount: number;
+        }>
+      >();
+      const coveredByLine = new Map<number, { qty: number; amount: number }>();
+      for (const row of bridgeRows) {
+        const orderItemId = orderItemOf.get(row.refund_item_id);
+        if (orderItemId == null) continue;
+        const list = notesByLine.get(orderItemId) ?? [];
+        list.push({
+          credit_note_id: row.credit_note.id,
+          invoice_number: row.credit_note.invoice_number,
+          status: row.credit_note.status,
+          covered_qty: row.covered_qty,
+          covered_amount: Number(row.covered_amount ?? 0),
+        });
+        notesByLine.set(orderItemId, list);
+        // Solo la NC aceptada cubre: el resto se LISTA (trazabilidad) pero
+        // no suma (no acreditó nada todavía).
+        if (row.credit_note.status === 'accepted') {
+          const acc = coveredByLine.get(orderItemId) ?? { qty: 0, amount: 0 };
+          acc.qty += row.covered_qty;
+          acc.amount += Number(row.covered_amount ?? 0);
+          coveredByLine.set(orderItemId, acc);
+        }
+      }
+
+      const lines = new Map<
+        number,
+        {
+          order_item_id: number;
+          product_name: string | null;
+          refunded_qty: number;
+          refunded_amount: number;
+        }
+      >();
+      for (const r of refunds) {
+        for (const ri of r.refund_items) {
+          const line = lines.get(ri.order_item_id) ?? {
+            order_item_id: ri.order_item_id,
+            product_name: ri.order_items?.product_name ?? null,
+            refunded_qty: 0,
+            refunded_amount: 0,
+          };
+          line.refunded_qty += ri.quantity;
+          line.refunded_amount += Number(ri.refund_amount ?? 0);
+          lines.set(ri.order_item_id, line);
+        }
+      }
+      // Refunds sin ítems (patas de cancelación, filas legacy) aportan solo
+      // a nivel orden: sin líneas no hay sección que agregar.
+      if (lines.size === 0) return;
+
+      const sectionLines = Array.from(lines.values()).map((line) => {
+        const nc = coveredByLine.get(line.order_item_id) ?? {
+          qty: 0,
+          amount: 0,
+        };
+        return {
+          ...line,
+          refunded_amount_formatted: this.formatOrderMoney(
+            line.refunded_amount,
+          ),
+          nc_covered_qty: nc.qty,
+          nc_covered_amount: nc.amount,
+          notes: notesByLine.get(line.order_item_id) ?? [],
+        };
+      });
+      const refundedAmount = sectionLines.reduce(
+        (sum, line) => sum + line.refunded_amount,
+        0,
+      );
+      const ncCoveredAmount = sectionLines.reduce(
+        (sum, line) => sum + line.nc_covered_amount,
+        0,
+      );
+      model.custom_variables = {
+        ...(model.custom_variables ?? {}),
+        refunds: {
+          lines: sectionLines,
+          totals: {
+            refunded_amount: refundedAmount,
+            refunded_amount_formatted: this.formatOrderMoney(refundedAmount),
+            nc_covered_amount: ncCoveredAmount,
+            nc_covered_amount_formatted:
+              this.formatOrderMoney(ncCoveredAmount),
+          },
+          refunds: refunds.map((r) => ({
+            id: r.id,
+            state: r.state,
+            amount: Number(r.amount ?? 0),
+            amount_formatted: this.formatOrderMoney(Number(r.amount ?? 0)),
+            refund_method: r.refund_method,
+            reason: r.reason,
+            requested_at: r.requested_at
+              ? new Date(r.requested_at).toISOString()
+              : null,
+            processed_at: r.processed_at
+              ? new Date(r.processed_at).toISOString()
+              : null,
+          })),
+        },
+      };
+    } catch {
+      // Ver docblock: la tirilla sin sección es el fallback.
+    }
+  }
+
+  /**
    * Agrega `invoice_taxes` por `(tax_name, tax_rate)` sumando importes YA
    * truncados — igual que `aggregateHeaderTaxes` del calculador.
    *
@@ -335,6 +559,8 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         amount_received_formatted: '$100.000',
         change_due: 12500,
         change_due_formatted: '$12.500',
+        // Paridad muestra/real (ADR-2): el mismo descargo, sin literales sueltos.
+        non_fiscal_disclaimer: NON_FISCAL_DISCLAIMER,
       },
       // C.2 (ADR-12) — muestra en `'gross'`, paridad con `fetchDocumentData`.
       money_basis: 'gross',
@@ -403,6 +629,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       { token: '{{customer.address}}', path: 'customer.address', description: 'Dirección del cliente', example: 'Carrera 15 # 88-64, Bogotá D.C.' },
       { token: '{{order.grand_total}}', path: 'totals.grand_total_formatted', description: 'Total a pagar con formato', example: '$87.500' },
       { token: '{{order.change_due}}', path: 'document.change_due_formatted', description: 'Cambio o vuelto entregado', example: '$12.500' },
+      { token: '{{document.non_fiscal_disclaimer}}', path: 'document.non_fiscal_disclaimer', description: 'Leyenda fija: no es factura electrónica', example: 'Este documento no es factura electrónica de venta.' },
     ];
   }
 
@@ -507,6 +734,9 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     const store = order.stores || {};
     const org = store.organizations || {};
     const addr = store.addresses?.[0] || {};
+    // Paridad FE: sin fila en `addresses`, la dirección cae a la identidad
+    // fiscal (modo permisivo: un ticket nunca falla 422 por datos fiscales).
+    const issuer = resolveFiscalIssuerForPrint(org, store, false);
     const user = order.users || {};
 
     // ADR-04 — mesa + mesero derivados de la última sesión, abierta o cerrada.
@@ -599,7 +829,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         tax_id: org.tax_id,
         phone: store.phone,
         email: store.email,
-        address: addr.address_line1 ? `${addr.address_line1} ${addr.address_line2 || ''}`.trim() : undefined,
+        address: addr.address_line1 ? `${addr.address_line1} ${addr.address_line2 || ''}`.trim() : issuer.address_line || issuer.fiscal_address || undefined,
         city: addr.city,
         logo_url: signedLogoUrl,
       },
@@ -646,6 +876,8 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
               change_due_formatted: this.formatOrderMoney(change_due),
             }
           : {}),
+        // Leyenda no fiscal fija (el validador la exige en `pos_sale_ticket`).
+        non_fiscal_disclaimer: NON_FISCAL_DISCLAIMER,
         // QUI-737 (B.4) — alias de venta rápida ("Mesa 5"). Va en la CABECERA
         // junto al número de orden, NO bajo el bloque "Datos del Cliente"
         // (`customer`): el alias no es un cliente formal y no debe leerse como

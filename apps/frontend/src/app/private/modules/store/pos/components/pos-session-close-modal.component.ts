@@ -585,7 +585,7 @@ export class PosSessionCloseModalComponent {
     cash: 'Efectivo',
     card: 'Tarjeta',
     bank_transfer: 'Transferencia',
-    voucher: 'Voucher',
+    voucher: 'Datáfono',
     wompi: 'Wompi',
     wallet: 'Wallet',
     paypal: 'PayPal',

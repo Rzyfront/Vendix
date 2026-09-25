@@ -9,7 +9,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
-import { forkJoin, of } from 'rxjs';
+import { forkJoin, of, firstValueFrom } from 'rxjs';
 import { switchMap, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../../environments/environment';
 import { ShippingMethodsService } from '../../services/shipping-methods.service';
@@ -30,13 +30,18 @@ import {
   InputsearchComponent,
   BadgeComponent,
   ResponsiveDataViewComponent,
+  ToggleComponent,
   ToastService,
   DialogService} from '../../../../../../../shared/components/index';
+import { AddressMapPickerComponent } from '../../../../../ecommerce/components/address-map-picker/address-map-picker.component';
 import {
   TableColumn,
   TableAction} from '../../../../../../../shared/components/table/table.component';
 import { ItemListCardConfig } from '../../../../../../../shared/components/item-list/item-list.interfaces';
-import { AddRateWizardModalComponent } from '../../components/index';
+import {
+  AddRateWizardModalComponent,
+  ZoneModalComponent,
+} from '../../components/index';
 
 @Component({
   selector: 'app-method-detail',
@@ -50,7 +55,10 @@ import { AddRateWizardModalComponent } from '../../components/index';
     InputsearchComponent,
     BadgeComponent,
     ResponsiveDataViewComponent,
+    ToggleComponent,
+    AddressMapPickerComponent,
     AddRateWizardModalComponent,
+    ZoneModalComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -69,47 +77,46 @@ import { AddRateWizardModalComponent } from '../../components/index';
         (actionClicked)="onHeaderAction($event)"
       />
 
-      <!-- Mini Stats (4 horizontal) -->
+      <!-- Mini Stats (4 horizontal): app-stats as DIRECT children of the global
+           stats-container (it is itself the grid). No inner wrapper: a nested
+           div becomes a single 1/4-width grid item and collapses the cards.
+           iconBgColor/iconColor take Tailwind classes, not var() strings. -->
       <div
         class="stats-container sticky top-[52px] z-20 bg-background py-3 md:static md:bg-transparent md:py-0 mb-4"
       >
-        <div
-          class="flex gap-3 overflow-x-auto px-4 md:px-0 md:grid md:grid-cols-4 md:gap-4 no-scrollbar"
-        >
-          <app-stats
-            title="Zonas"
-            [value]="zones_with_rates().length"
-            iconName="map-pin"
-            iconBgColor="#ECFDF5"
-            iconColor="#10B981"
-            [loading]="is_loading()"
-          />
-          <app-stats
-            title="Tarifas activas"
-            [value]="active_rates_count()"
-            iconName="tag"
-            iconBgColor="var(--color-violet-50, #F5F3FF)"
-            iconColor="#8B5CF6"
-            [loading]="is_loading()"
-          />
-          <app-stats
-            title="Pedidos este mes"
-            [value]="0"
-            iconName="package"
-            iconBgColor="var(--color-orange-50, #FFF7ED)"
-            iconColor="#F59E0B"
-            [loading]="is_loading()"
-            smallText="—"
-          />
-          <app-stats
-            title="Ingresos envio"
-            [value]="'—'"
-            iconName="banknote"
-            iconBgColor="var(--color-indigo-50, #EEF2FF)"
-            iconColor="#6366F1"
-            [loading]="is_loading()"
-          />
-        </div>
+        <app-stats
+          title="Zonas"
+          [value]="zones_with_rates().length"
+          iconName="map-pin"
+          iconBgColor="bg-emerald-100"
+          iconColor="text-emerald-500"
+          [loading]="is_loading()"
+        />
+        <app-stats
+          title="Tarifas activas"
+          [value]="active_rates_count()"
+          iconName="tag"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-500"
+          [loading]="is_loading()"
+        />
+        <app-stats
+          title="Pedidos este mes"
+          [value]="0"
+          iconName="package"
+          iconBgColor="bg-orange-100"
+          iconColor="text-orange-500"
+          [loading]="is_loading()"
+          smallText="—"
+        />
+        <app-stats
+          title="Ingresos envio"
+          [value]="'—'"
+          iconName="banknote"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-500"
+          [loading]="is_loading()"
+        />
       </div>
 
       <!-- Dispatch route shortcut (only own_fleet / custom methods) -->
@@ -280,6 +287,83 @@ import { AddRateWizardModalComponent } from '../../components/index';
         </div>
       </div>
 
+      <!--
+        Cobro por distancia (shipping-distance-pricing plan paso 4).
+        Toggle por método + pin de origen con el map picker existente.
+        Sin origen pineado no se puede activar (guard).
+      -->
+      @if (method()) {
+        <div class="mx-4 md:mx-0 mb-4">
+          <div class="bg-surface rounded-xl border border-border p-4">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <app-icon
+                  name="map-pin"
+                  [size]="18"
+                  class="text-text-secondary"
+                />
+                <h3
+                  class="text-sm md:text-base font-semibold text-text-primary"
+                >
+                  Cobro por distancia
+                </h3>
+              </div>
+              <app-button
+                size="sm"
+                variant="primary"
+                (clicked)="saveDistanceConfig()"
+                [disabled]="!distance_dirty() || saving_distance()"
+                [loading]="saving_distance()"
+              >
+                Guardar
+              </app-button>
+            </div>
+
+            <div
+              class="flex items-center justify-between gap-3 rounded-lg border border-border p-3"
+            >
+              <div>
+                <p class="text-sm font-medium text-text-primary">
+                  Cobrar por distancia real
+                </p>
+                <p class="text-xs text-text-secondary">
+                  Calcula el costo por los km recorridos por calles desde tu
+                  origen. Si falta algún dato, se cobra la tarifa de zona.
+                </p>
+              </div>
+              <app-toggle
+                [checked]="distance_enabled()"
+                [disabled]="!has_origin() && !distance_enabled()"
+                ariaLabel="Cobro por distancia"
+                (toggled)="onDistanceToggle($event)"
+              />
+            </div>
+
+            @if (!has_origin()) {
+              <p class="text-xs text-text-secondary mt-2">
+                Pinea el origen en el mapa para poder activar el cobro por
+                distancia.
+              </p>
+            }
+
+            <div class="mt-3">
+              <p class="block text-xs font-medium text-text-secondary mb-1">
+                Origen de los despachos
+              </p>
+              <app-address-map-picker
+                [center]="origin_center()"
+                (located)="onOriginLocated($event)"
+              />
+              @if (has_origin()) {
+                <p class="text-xs text-text-secondary mt-1">
+                  Origen pineado. Mueve el marcador si tu base cambia de lugar.
+                </p>
+              }
+            </div>
+          </div>
+        </div>
+      }
+
       <!-- Zones Table Card -->
       <div class="mx-4 md:mx-0 mb-6">
         <div class="bg-surface rounded-xl border border-border overflow-hidden">
@@ -301,6 +385,10 @@ import { AddRateWizardModalComponent } from '../../components/index';
                 class="flex-1 md:w-56"
                 (searchChange)="search_term.set($event)"
               />
+              <app-button size="sm" variant="outline" (clicked)="openCreateZone()">
+                <app-icon slot="icon" name="map-pin" [size]="16" />
+                Nueva Zona
+              </app-button>
               <app-button size="sm" (clicked)="openRateWizard()">
                 <app-icon slot="icon" name="plus" [size]="16" />
                 Agregar Tarifa
@@ -335,9 +423,29 @@ import { AddRateWizardModalComponent } from '../../components/index';
             [method_id]="method()!.id"
             [existing_zones]="available_zones()"
             [edit_rate]="edit_rate()"
+            [method_distance_enabled]="method()?.distance_pricing_enabled ?? false"
             (close)="closeRateWizard()"
             (saved)="onRateSaved()"
             (zones_changed)="onZonesChanged()"
+          />
+        }
+      }
+
+      <!-- Gestión de zonas: crear/editar con zone-modal (fuera de otros modales,
+           mismo patrón que el wizard evita anidamiento). -->
+      @if (show_zone_modal()) {
+        @if (editing_zone()) {
+          <app-zone-modal
+            mode="edit"
+            [zone]="editing_zone()!"
+            (close)="closeZoneModal()"
+            (saved)="onZoneSaved()"
+          />
+        } @else {
+          <app-zone-modal
+            mode="create"
+            (close)="closeZoneModal()"
+            (saved)="onZoneSaved()"
           />
         }
       }
@@ -378,6 +486,8 @@ export class MethodDetailComponent implements OnInit {
   search_term = signal<string>('');
   show_rate_wizard = signal<boolean>(false);
   edit_rate = signal<ShippingRate | null>(null);
+  show_zone_modal = signal<boolean>(false);
+  editing_zone = signal<ShippingZone | null>(null);
 
   // Plan Despacho Economía — FASE 2 paso 10.
   // Estado de la política tipada del método (signals para reactividad sin zona).
@@ -394,6 +504,23 @@ export class MethodDetailComponent implements OnInit {
   available_vehicles = signal<Array<{ id: number; plate: string }>>([]);
   available_drivers = signal<Array<{ id: number; first_name: string; last_name: string }>>([]);
   available_carriers = signal<Array<{ id: number; name: string }>>([]);
+
+  // Cobro por distancia (shipping-distance-pricing plan paso 4).
+  distance_enabled = signal<boolean>(false);
+  origin_latitude = signal<number | null>(null);
+  origin_longitude = signal<number | null>(null);
+  saving_distance = signal<boolean>(false);
+  distance_dirty = signal<boolean>(false);
+
+  has_origin = computed(
+    () => this.origin_latitude() !== null && this.origin_longitude() !== null,
+  );
+
+  origin_center = computed<{ lat: number; lng: number } | null>(() => {
+    const lat = this.origin_latitude();
+    const lng = this.origin_longitude();
+    return lat !== null && lng !== null ? { lat, lng } : null;
+  });
 
   /** Tipo de método: helpers para gating del ejecutor por defecto. */
   is_own_fleet = computed(() => this.method()?.type === ShippingMethodType.OWN_FLEET);
@@ -427,12 +554,9 @@ export class MethodDetailComponent implements OnInit {
   header_actions = computed<StickyHeaderActionButton[]>(() => {
     const m = this.method();
     if (!m) return [];
+    // Sin acción "Configurar": la config vive inline (política + distancia) y
+    // el botón anterior estaba muerto (onHeaderAction nunca lo atendía).
     const actions: StickyHeaderActionButton[] = [
-      {
-        id: 'configure',
-        label: 'Configurar',
-        variant: 'outline' as const,
-        icon: 'settings'},
       {
         id: 'toggle',
         label: m.is_active ? 'Desactivar' : 'Activar',
@@ -524,6 +648,32 @@ export class MethodDetailComponent implements OnInit {
       variant: 'danger',
       action: (item: any) =>
         this.confirmDeleteRate(item._original as ZoneWithRates)},
+    {
+      label: 'Editar zona',
+      icon: 'map-pin',
+      variant: 'secondary',
+      action: (item: any) => this.editZone(item)},
+    {
+      label: (item: any) =>
+        (item._original as ZoneWithRates).zone.is_active
+          ? 'Desactivar zona'
+          : 'Activar zona',
+      icon: (item: any) =>
+        (item._original as ZoneWithRates).zone.is_active
+          ? 'toggle-right'
+          : 'toggle-left',
+      variant: (item: any) =>
+        (item._original as ZoneWithRates).zone.is_active
+          ? 'warning'
+          : 'success',
+      action: (item: any) =>
+        this.toggleZoneActive(item._original as ZoneWithRates)},
+    {
+      label: 'Eliminar zona',
+      icon: 'trash-2',
+      variant: 'danger',
+      action: (item: any) =>
+        this.confirmDeleteZone(item._original as ZoneWithRates)},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -564,6 +714,18 @@ export class MethodDetailComponent implements OnInit {
       .subscribe({
         next: (method) => {
           this.method.set(method);
+          this.distance_enabled.set(method.distance_pricing_enabled ?? false);
+          // El backend serializa DECIMAL como string: se coerciona a número
+          // para que el mapa y el PATCH reciban coordenadas numéricas.
+          this.origin_latitude.set(
+            method.origin_latitude != null ? Number(method.origin_latitude) : null,
+          );
+          this.origin_longitude.set(
+            method.origin_longitude != null
+              ? Number(method.origin_longitude)
+              : null,
+          );
+          this.distance_dirty.set(false);
           this.policy_collects_payment.set(method.collects_payment ?? false);
           this.policy_payment_timing.set(method.payment_timing ?? 'on_delivery');
           this.policy_generates_cost.set(method.generates_transport_cost ?? 'none');
@@ -719,6 +881,81 @@ export class MethodDetailComponent implements OnInit {
       });
   }
 
+  // ─── Cobro por distancia ───
+
+  /**
+   * Guard: sin origen pineado no se activa. El toggle además queda
+   * deshabilitado en ese caso; esto es defensa en profundidad.
+   */
+  onDistanceToggle(next: boolean): void {
+    if (next && !this.has_origin()) {
+      this.toastService.show({
+        variant: 'error',
+        description:
+          'Pinea el origen en el mapa antes de activar el cobro por distancia',
+      });
+      // Resincroniza el toggle (su estado interno ya cambió con el clic).
+      this.distance_enabled.set(true);
+      this.distance_enabled.set(false);
+      return;
+    }
+    this.distance_enabled.set(next);
+    this.distance_dirty.set(true);
+  }
+
+  onOriginLocated(coord: { lat: number; lng: number }): void {
+    this.origin_latitude.set(coord.lat);
+    this.origin_longitude.set(coord.lng);
+    this.distance_dirty.set(true);
+  }
+
+  /**
+   * PATCH /store/shipping-methods/:id con toggle + origen. El origen solo se
+   * envía cuando hay pin (sin pin y apagado no hay nada que persistir).
+   */
+  saveDistanceConfig(): void {
+    const method = this.method();
+    if (!method) return;
+    if (this.distance_enabled() && !this.has_origin()) {
+      this.toastService.show({
+        variant: 'error',
+        description:
+          'Pinea el origen en el mapa antes de activar el cobro por distancia',
+      });
+      return;
+    }
+    this.saving_distance.set(true);
+    this.shippingService
+      .updateStoreShippingMethod(method.id, {
+        distance_pricing_enabled: this.distance_enabled(),
+        ...(this.has_origin()
+          ? {
+              origin_latitude: this.origin_latitude(),
+              origin_longitude: this.origin_longitude(),
+            }
+          : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (m) => {
+          this.method.set(m);
+          this.distance_dirty.set(false);
+          this.saving_distance.set(false);
+          this.toastService.show({
+            variant: 'success',
+            description: 'Configuración de distancia guardada',
+          });
+        },
+        error: () => {
+          this.saving_distance.set(false);
+          this.toastService.show({
+            variant: 'error',
+            description: 'No se pudo guardar la configuración de distancia',
+          });
+        },
+      });
+  }
+
   // ─── Header Actions ───
 
   onHeaderAction(actionId: string): void {
@@ -838,6 +1075,96 @@ export class MethodDetailComponent implements OnInit {
   onZonesChanged(): void {
     const m = this.method();
     if (m) this.loadZonesWithRates(m.id);
+  }
+
+  // ─── Zone Modal (crear/editar) ───
+
+  openCreateZone(): void {
+    this.editing_zone.set(null);
+    this.show_zone_modal.set(true);
+  }
+
+  editZone(item: any): void {
+    const zr = item._original as ZoneWithRates;
+    this.editing_zone.set(zr.zone);
+    this.show_zone_modal.set(true);
+  }
+
+  closeZoneModal(): void {
+    this.show_zone_modal.set(false);
+    this.editing_zone.set(null);
+  }
+
+  /** zone-modal ya muestra su propio toast; aquí solo se refresca la lista. */
+  onZoneSaved(): void {
+    this.closeZoneModal();
+    const m = this.method();
+    if (m) this.loadZonesWithRates(m.id);
+  }
+
+  async confirmDeleteZone(zr: ZoneWithRates): Promise<void> {
+    const zone = zr.zone;
+    let rates_count: number | null = null;
+    try {
+      const rates = await firstValueFrom(
+        this.shippingService.getStoreZoneRates(zone.id),
+      );
+      rates_count = rates.length;
+    } catch {
+      rates_count = null;
+    }
+
+    const cascade_suffix =
+      rates_count !== null && rates_count > 0
+        ? ` Se eliminarán también ${rates_count} tarifa${rates_count === 1 ? '' : 's'} asociada${rates_count === 1 ? '' : 's'}.`
+        : '';
+    const confirmed = await this.dialogService.confirm({
+      title: 'Eliminar zona',
+      message: `¿Estas seguro de eliminar la zona "${zone.name}"?${cascade_suffix} Esta accion no se puede deshacer.`,
+      confirmText: 'Eliminar',
+      confirmVariant: 'danger'});
+
+    if (!confirmed) return;
+
+    this.shippingService
+      .deleteZone(zone.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.show({
+            variant: 'success',
+            description: 'Zona eliminada correctamente'});
+          const m = this.method();
+          if (m) this.loadZonesWithRates(m.id);
+        },
+        error: () => {
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al eliminar la zona'});
+        }});
+  }
+
+  toggleZoneActive(zr: ZoneWithRates): void {
+    const zone = zr.zone;
+    const next_active = !zone.is_active;
+    this.shippingService
+      .updateZone(zone.id, { is_active: next_active })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.show({
+            variant: 'success',
+            description: next_active
+              ? `Zona "${zone.name}" activada`
+              : `Zona "${zone.name}" desactivada`});
+          const m = this.method();
+          if (m) this.loadZonesWithRates(m.id);
+        },
+        error: () => {
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al cambiar el estado de la zona'});
+        }});
   }
 
   /**

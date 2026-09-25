@@ -38,7 +38,7 @@ import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException } from '@common/errors';
-import { OrderEtaService } from './services/order-eta.service';
+import { OrderEtaService, EtaItemInput } from './services/order-eta.service';
 import { SettingsService } from '../settings/settings.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { EcommercePrismaService } from 'src/prisma/services/ecommerce-prisma.service';
@@ -144,7 +144,7 @@ export class OrdersController {
     @Query('shipping_method_id') shippingMethodId?: string,
   ) {
     try {
-      let items: { preparation_time_minutes: number | null }[] = [];
+      let items: EtaItemInput[] = [];
       let transitMinutes = 0;
 
       if (cartId) {
@@ -152,11 +152,16 @@ export class OrdersController {
           where: { cart_id: +cartId },
           include: {
             product: { select: { preparation_time_minutes: true } },
+            // R8-F2 — `cart_items.product_variant_id` sí existe: el preview
+            // resuelve la misma regla variante ?? producto ?? default.
+            product_variant: { select: { preparation_time_minutes: true } },
           },
         });
         items = cartItems.map((ci: any) => ({
           preparation_time_minutes:
             ci.product?.preparation_time_minutes ?? null,
+          variant_preparation_time_minutes:
+            ci.product_variant?.preparation_time_minutes ?? null,
         }));
       }
 

@@ -112,6 +112,21 @@
   line-height: 1.3;
 }
 
+/* Paso 5: acción "Cambiar cliente" en el header. Columna en móvil,
+   fila con el botón a la derecha desde md. */
+.customer-card-header-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (min-width: 768px) {
+  .customer-card-header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
 .customer-card-content {
   display: flex;
   flex-direction: column;
@@ -186,6 +201,15 @@
   font-weight: 900;
   line-height: 1.15;
   word-break: break-word;
+}
+
+/* Paso 3: identidad fiscal del titular bajo la razón social. */
+.customer-doc-line {
+  margin: 0.125rem 0 0;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .customer-contact-panel {

@@ -1,9 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { S3Service } from '@common/services/s3.service';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { v4 as uuidv4 } from 'uuid';
+import * as crypto from 'crypto';
 import { Prisma } from '@prisma/client';
 import { SubmitInvoiceDataDto } from './dto/submit-invoice-data.dto';
 import {
@@ -33,6 +35,16 @@ interface InvoiceDataRequestCustomerData {
   phone?: string | null;
 }
 
+/**
+ * Paso 6 (roku-shop-checkout-tarifa-detalle-orden) — binding liviano
+ * token→orden para el stream SSE guest. Ambos ids se derivan SERVER-SIDE
+ * del token; el controller los usa como clave default-deny del filtro.
+ */
+export interface GuestStreamBinding {
+  order_id: number;
+  store_id: number;
+}
+
 type NominativeConversionStrategy =
   | 'updated_in_place'
   | 'credit_note_reissue'
@@ -57,6 +69,13 @@ export class InvoiceDataRequestsService {
     private readonly invoiceFlowService: InvoiceFlowService,
     private readonly s3Service: S3Service,
   ) {}
+
+  // `S3PathHelper` es stateless (sin constructor): se instancia directo en
+  // vez de inyectarlo para NO cambiar la aridad del constructor — el spec
+  // existente construye el servicio con 6 args y `buildcheck:types` (CI)
+  // tipa los specs. La key sigue centralizada en el helper (skill
+  // vendix-s3-storage), solo cambia cómo se obtiene.
+  private readonly receiptPaths = new S3PathHelper();
 
   /**
    * Create a new invoice data request when a CF sale is completed.
@@ -97,8 +116,11 @@ export class InvoiceDataRequestsService {
       status: 'pending',
     } as InvoiceDataRequestEvent);
 
+    // F3 (roku-shop-checkout-tarifa-detalle-orden) — el token es la
+    // capability guest: jamás se loguea (antes iba en claro en esta línea).
+    // El `request.id` basta para correlacionar en los logs.
     this.logger.log(
-      `Invoice data request created for order #${orderId}, token: ${token}`,
+      `Invoice data request #${request.id} created for order #${orderId}`,
     );
 
     return request;
@@ -203,6 +225,26 @@ export class InvoiceDataRequestsService {
   }
 
   /**
+   * Paso 3 — espejo backend de `kitchenStateFor` (order-details-page):
+   * prefiere una fila in-flight (`pending`/`in_preparation`/`ready`) sobre
+   * la más reciente terminal; las filas ya vienen `orderBy: { id: 'desc' }`.
+   * `null` = el ítem nunca se disparó a cocina (sin badge).
+   */
+  private kitchenStatusFor(
+    ticketItems: { id: number; status: string }[] | null | undefined,
+  ): string | null {
+    if (!ticketItems || ticketItems.length === 0) return null;
+    const inFlight = ticketItems.find(
+      (k) =>
+        k.status === 'pending' ||
+        k.status === 'in_preparation' ||
+        k.status === 'ready',
+    );
+    if (inFlight) return inFlight.status;
+    return ticketItems[0].status;
+  }
+
+  /**
    * Public read-only order summary for anonymous ecommerce checkouts.
    * Unlike getByToken(), this endpoint must keep working after the invoice
    * data request is submitted/completed so guests retain purchase support.
@@ -234,8 +276,19 @@ export class InvoiceDataRequestsService {
                 // necesita para el mismo cálculo.
                 final_unit_price: true,
                 price_unit_quantity: true,
+                // Paso 3 (roku-shop-checkout-tarifa-detalle-orden): cocina en
+                // vivo por plato + ETA variant-aware. Solo estado e id del
+                // ticket-item: nada de notas internas ni joins a tickets.
+                kitchen_ticket_items: {
+                  orderBy: { id: 'desc' },
+                  select: { id: true, status: true },
+                },
+                product_variants: {
+                  select: { preparation_time_minutes: true },
+                },
                 products: {
                   select: {
+                    preparation_time_minutes: true,
                     product_images: {
                       where: { is_main: true },
                       take: 1,
@@ -247,9 +300,13 @@ export class InvoiceDataRequestsService {
             },
             payments: {
               select: {
+                id: true,
                 state: true,
                 amount: true,
                 paid_at: true,
+                // Paso 3: presencia de comprobante. La key NUNCA sale en el
+                // payload — solo `has_receipt` + content-type del HEAD.
+                receipt_s3_key: true,
                 store_payment_method: {
                   select: {
                     display_name: true,
@@ -340,6 +397,13 @@ export class InvoiceDataRequestsService {
       );
     }
 
+    // Paso 3: mismo default que `OrderEtaService.computeEta` (paso 5):
+    // `operations.default_preparation_time_minutes` de la tienda, 15 si ausente.
+    // Los settings ya vienen cargados para el gate fiscal (C.7) — sin query extra.
+    const defaultPrep =
+      (request.store?.store_settings?.settings as any)?.operations
+        ?.default_preparation_time_minutes ?? 15;
+
     // Sign image URLs per item (mirrors account.service getOrderDetail).
     const items = await Promise.all(
       request.order.order_items.map(async (item) => ({
@@ -351,6 +415,13 @@ export class InvoiceDataRequestsService {
         total_price: item.total_price,
         tax_amount_item: item.tax_amount_item,
         ...this.deriveLineGross(item as any),
+        // Paso 3: cocina en vivo + prep resuelto variante→producto (null si
+        // ninguno lo define; el default solo aplica al MAX agregado).
+        kitchen_status: this.kitchenStatusFor(item.kitchen_ticket_items),
+        preparation_time_minutes:
+          item.product_variants?.preparation_time_minutes ??
+          item.products?.preparation_time_minutes ??
+          null,
         image_url: item.products?.product_images?.[0]?.image_url
           ? await this.s3Service.signUrl(item.products.product_images[0].image_url)
           : null,
@@ -358,6 +429,41 @@ export class InvoiceDataRequestsService {
           ? await this.s3Service.signUrl(item.variant_image_url)
           : null,
       })),
+    );
+
+    // Paso 3: MAX por ítem con la regla exacta de `computeEta`
+    // (variante ?? producto ?? default tienda) — coherente con el paso 5.
+    const prep_minutes_max = items.length
+      ? Math.max(
+          ...items.map(
+            (item) => item.preparation_time_minutes ?? defaultPrep,
+          ),
+        )
+      : defaultPrep;
+
+    // Paso 3: comprobante por pago. `receipt_content_type` no se persiste
+    // (igual que `getPaymentReceiptUrl`): HEAD del objeto S3 por lectura,
+    // fail-soft a null si el objeto no existe.
+    const payments = await Promise.all(
+      request.order.payments.map(async (payment) => {
+        const hasReceipt = !!payment.receipt_s3_key;
+        const head = hasReceipt
+          ? await this.s3Service.headObject(payment.receipt_s3_key)
+          : null;
+        return {
+          payment_id: payment.id,
+          state: payment.state,
+          amount: payment.amount,
+          paid_at: payment.paid_at,
+          method:
+            payment.store_payment_method?.display_name ||
+            payment.store_payment_method?.system_payment_method?.display_name ||
+            payment.store_payment_method?.system_payment_method?.type ||
+            null,
+          has_receipt: hasReceipt,
+          receipt_content_type: head?.contentType ?? null,
+        };
+      }),
     );
 
     // C.7 (ADR-12) — mismo gate fiscal que el gateway de impresión, resuelto
@@ -400,6 +506,11 @@ export class InvoiceDataRequestsService {
         currency: request.order.currency,
         created_at: request.order.created_at,
         placed_at: request.order.placed_at,
+        // Paso 3: ETA persistido + MAX en vivo + tipo de entrega.
+        estimated_ready_at: request.order.estimated_ready_at,
+        estimated_delivered_at: request.order.estimated_delivered_at,
+        prep_minutes_max,
+        delivery_type: request.order.delivery_type,
         shipping_address: request.order.shipping_address_snapshot,
         items,
         // Historical discount snapshots persisted on the order.
@@ -424,19 +535,297 @@ export class InvoiceDataRequestsService {
           discount_applied: cu.discount_applied,
           used_at: cu.used_at,
         })),
-        payments: request.order.payments.map((payment) => ({
-          state: payment.state,
-          amount: payment.amount,
-          paid_at: payment.paid_at,
-          method:
-            payment.store_payment_method?.display_name ||
-            payment.store_payment_method?.system_payment_method?.display_name ||
-            payment.store_payment_method?.system_payment_method?.type ||
-            null,
-        })),
+        payments,
         invoice: request.order.invoices[0] || null,
       },
     };
+  }
+
+  /**
+   * Paso 4 (roku-shop-checkout-tarifa-detalle-orden) — mismo contrato de
+   * archivo que el checkout (`CheckoutService.RECEIPT_ALLOWED_MIME_TYPES` +
+   * `FileInterceptor` 5MB): el guest puede releer y cargar tardíamente el
+   * comprobante de transferencia/voucher de SU pedido.
+   */
+  private static readonly RECEIPT_ALLOWED_MIME_TYPES: readonly string[] = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/pdf',
+  ];
+  private static readonly RECEIPT_MAX_BYTES = 5 * 1024 * 1024;
+  private static readonly RECEIPT_URL_TTL_SECONDS = 300;
+
+  /**
+   * Paso 4 — binding server-side token→orden→pago para los endpoints guest
+   * de comprobante. La query es UNA sola lectura relacional desde
+   * `invoice_data_requests` (getter SIN scope: el token es global por
+   * diseño, paso 3) y el vínculo pago↔orden lo impone la propia relación
+   * (`payments.where.order_id`), no un parámetro del cliente. No depende
+   * del `store_id` del contexto: funciona con host resuelto, `?store_id=` o
+   * sin ninguno.
+   *
+   * 404 ciego: token ajeno/inexistente y pago de otra orden responden el
+   * mismo shape de "no existe" sin distinguirlos.
+   */
+  private async resolveGuestPayment(token: string, paymentId: number) {
+    const request = await this.prisma.invoice_data_requests.findUnique({
+      where: { token },
+      select: {
+        id: true,
+        store_id: true,
+        order_id: true,
+        order: {
+          select: {
+            id: true,
+            // R8-F1 — el gate de estados de `uploadGuestPaymentReceipt`
+            // necesita ambos `state`; el path de lectura
+            // (`getGuestPaymentReceiptUrl`) los ignora.
+            state: true,
+            payments: {
+              where: { id: paymentId },
+              select: {
+                id: true,
+                order_id: true,
+                state: true,
+                receipt_s3_key: true,
+                receipt_uploaded_at: true,
+                store_payment_method: {
+                  select: {
+                    system_payment_method: { select: { type: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_DATA_REQUEST_002,
+        'El enlace para solicitar tu factura no es válido. Pídele a la tienda uno nuevo.',
+      );
+    }
+
+    const payment = request.order?.payments?.[0] ?? null;
+    if (!payment) {
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+    }
+
+    return { request, payment };
+  }
+
+  /**
+   * Paso 6 — binding server-side token→`{order_id, store_id}` para el
+   * stream SSE guest. UNA lectura mínima por `token` (global por diseño,
+   * igual que `resolveGuestPayment`), sin joins ni throws: `null` = token
+   * desconocido y el controller cierra la conexión sin emitir datos
+   * (404 ciego, sin distinguir de "tienda ajena").
+   */
+  async resolveGuestStreamBinding(
+    token: string,
+  ): Promise<GuestStreamBinding | null> {
+    if (!token || typeof token !== 'string') {
+      return null;
+    }
+    const request = await this.prisma.invoice_data_requests.findUnique({
+      where: { token },
+      select: { order_id: true, store_id: true },
+    });
+    if (!request) {
+      return null;
+    }
+    return { order_id: request.order_id, store_id: request.store_id };
+  }
+
+  /**
+   * Paso 4 — clon guest de `CheckoutService.getPaymentReceiptUrl`: URL
+   * firmada TTL 5 min + HEAD de content-type. La autorización es el binding
+   * de arriba (capability = token uuid en path), no el scope de comprador.
+   */
+  async getGuestPaymentReceiptUrl(
+    token: string,
+    paymentId: number,
+  ): Promise<{ url: string; expires_at: string; content_type: string | null }> {
+    const { payment } = await this.resolveGuestPayment(token, paymentId);
+
+    if (!payment.receipt_s3_key) {
+      throw new VendixHttpException(ErrorCodes.PAY_RECEIPT_NOT_FOUND_001);
+    }
+
+    const TTL_SECONDS =
+      InvoiceDataRequestsService.RECEIPT_URL_TTL_SECONDS;
+    const [url, head] = await Promise.all([
+      this.s3Service.getPresignedUrl(payment.receipt_s3_key, TTL_SECONDS),
+      this.s3Service.headObject(payment.receipt_s3_key),
+    ]);
+    const expires_at = new Date(
+      Date.now() + TTL_SECONDS * 1000,
+    ).toISOString();
+
+    return { url, expires_at, content_type: head?.contentType ?? null };
+  }
+
+  /**
+   * Paso 4 — subida tardía del comprobante desde la vista guest. Mismo
+   * contrato que el checkout: solo métodos `bank_transfer`/`voucher`
+   * (el tipo ya es visible en el summary, así que el 400 no filtra nada
+   * nuevo), MIME imagen/PDF, 5MB (el `FileInterceptor` del controller
+   * corta con 413; la guarda de acá es defensa si la config deriva).
+   *
+   * Re-subir REEMPLAZA la key (mismo orphan-policy que el checkout: el
+   * objeto viejo se purga offline, sin rollback en el happy path).
+   */
+  async uploadGuestPaymentReceipt(
+    token: string,
+    paymentId: number,
+    file: Express.Multer.File | undefined,
+  ): Promise<{
+    payment_id: number;
+    has_receipt: boolean;
+    receipt_content_type: string | null;
+    receipt_uploaded_at: Date;
+  }> {
+    const { request, payment } = await this.resolveGuestPayment(
+      token,
+      paymentId,
+    );
+
+    // R8-F1 — sin comprobantes tardíos sobre estados terminales: la orden
+    // ya se cerró o el pago ya se resolvió y el recibo no cambiaría nada.
+    // Mismo código que el gate de método (400, mensaje ES al guest).
+    const TERMINAL_ORDER_STATES = ['cancelled', 'refunded', 'finished', 'delivered'];
+    const TERMINAL_PAYMENT_STATES = ['succeeded', 'captured', 'refunded', 'cancelled'];
+    if (TERMINAL_ORDER_STATES.includes(request.order?.state as string)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Esta orden ya está cerrada y no recibe más comprobantes.',
+      );
+    }
+    if (TERMINAL_PAYMENT_STATES.includes(payment.state as string)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Este pago ya quedó resuelto y no necesita comprobante.',
+      );
+    }
+
+    const methodType =
+      payment.store_payment_method?.system_payment_method?.type ?? null;
+    if (methodType !== 'bank_transfer' && methodType !== 'voucher') {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Este medio de pago no recibe comprobante. Solo transferencia y datáfono lo permiten.',
+      );
+    }
+
+    if (!file || !file.buffer?.length) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Adjunta el comprobante de tu transferencia (imagen o PDF, máximo 5 MB).',
+      );
+    }
+
+    if (
+      !file.mimetype ||
+      !InvoiceDataRequestsService.RECEIPT_ALLOWED_MIME_TYPES.includes(
+        file.mimetype,
+      )
+    ) {
+      throw new VendixHttpException(ErrorCodes.VALIDATION_FILE_TYPE);
+    }
+
+    if (file.size > InvoiceDataRequestsService.RECEIPT_MAX_BYTES) {
+      throw new PayloadTooLargeException(
+        'El comprobante supera los 5 MB. Comprime la imagen o el PDF e inténtalo de nuevo.',
+      );
+    }
+
+    const key = await this.uploadGuestReceipt(file, request.store_id);
+    const receipt_uploaded_at = new Date();
+    // `payments` SÍ está scopeado en `StorePrismaService`, pero el update va
+    // por PK + `order_id` del binding: aunque el scope aporte el filtro de
+    // tienda, el vínculo token→orden→pago ya quedó verificado arriba y la
+    // fila solo se toca si pertenece a esta orden.
+    const persisted = await this.prisma.payments.updateMany({
+      where: { id: payment.id, order_id: request.order_id },
+      data: { receipt_s3_key: key, receipt_uploaded_at },
+    });
+
+    // R8-F4 — `count === 0` (carrera: el pago se borró tras el binding) no
+    // es éxito: se purga el objeto recién subido para no dejar un huérfano
+    // en S3 y se responde el mismo 404 ciego del binding.
+    if (persisted.count === 0) {
+      try {
+        await this.s3Service.deleteFile(key);
+      } catch (cleanupError) {
+        this.logger.warn(
+          `Orphan receipt cleanup failed for key ${key}: ${(cleanupError as Error)?.message}`,
+        );
+      }
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+    }
+
+    return {
+      payment_id: payment.id,
+      has_receipt: true,
+      receipt_content_type: file.mimetype,
+      receipt_uploaded_at,
+    };
+  }
+
+  /**
+   * Clon de `CheckoutService.uploadCheckoutReceipt` con la tienda tomada del
+   * binding (orden del token), no del contexto: el guest no tiene tienda en
+   * ALS. Misma key `.../receipts/{YYYY}/{MM}/{uuid}-{sanitized}`.
+   */
+  private async uploadGuestReceipt(
+    file: Express.Multer.File,
+    storeId: number,
+  ): Promise<string> {
+    // `stores`/`organizations` son getters globales (sin scope): el filtro
+    // por id tiene que ser explícito (misma nota que en checkout).
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { id: true, slug: true, organization_id: true },
+    });
+    if (!store) {
+      throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
+    }
+
+    const organization = await this.prisma.organizations.findUnique({
+      where: { id: store.organization_id },
+      select: { id: true, slug: true },
+    });
+    if (!organization) {
+      throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
+    }
+
+    const basePath = this.receiptPaths.buildReceiptPath(
+      { id: organization.id, slug: organization.slug },
+      { id: store.id, slug: store.slug },
+    );
+
+    const now = new Date();
+    const year = String(now.getUTCFullYear());
+    const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+
+    const safeFilename = this.sanitizeReceiptFilename(file.originalname);
+    const key = `${basePath}/${year}/${month}/${crypto.randomUUID()}-${safeFilename}`;
+
+    await this.s3Service.uploadFile(file.buffer, key, file.mimetype);
+    return key;
+  }
+
+  /**
+   * Clon de `CheckoutService.sanitizeReceiptFilename`: solo
+   * `[a-zA-Z0-9._-]`, resto a `_`; vacío ⇒ `receipt`.
+   */
+  private sanitizeReceiptFilename(name: string | undefined | null): string {
+    const base = (name ?? '').split(/[\\/]/).pop() ?? '';
+    const sanitized = base.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return sanitized.length > 0 ? sanitized : 'receipt';
   }
 
   /**

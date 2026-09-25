@@ -45,10 +45,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       allow_public_access: false,
     },
 
-    // Ecommerce storefront — solo defaults del bloque checkout. Todo en
-    // `false` preserva el comportamiento actual (las lecturas usan `!!` o
-    // comparan contra `false`). `require_payment_receipt` es opt-in: ausente
-    // ⇒ comprobante opcional.
+    // Ecommerce storefront — solo defaults de los bloques checkout y orders.
+    // Todo en `false` preserva el comportamiento actual (las lecturas usan
+    // `!!` o comparan contra `false`). `require_payment_receipt` es opt-in:
+    // ausente ⇒ comprobante opcional. `orders.hide_*` es opt-out: ausente
+    // ⇒ sección visible (las lecturas comparan `!== true`).
     ecommerce: {
       enabled: false,
       checkout: {
@@ -58,6 +59,10 @@ export function getDefaultStoreSettings(): StoreSettings {
         terms_required: false,
         guest_newsletter_opt_in: false,
         require_payment_receipt: false,
+      },
+      orders: {
+        hide_tracking_progress: false,
+        hide_prep_eta: false,
       },
     },
 

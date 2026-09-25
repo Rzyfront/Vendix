@@ -91,6 +91,35 @@ export class CreateCreditNoteDto {
   reason?: string;
 
   /**
+   * CP-REFUND-FLOW-REDESIGN paso 7 — NC guiada por reembolso.
+   *
+   * Id del `refunds` que esta nota acredita. Opcional y sólo en la NOTA
+   * CRÉDITO (el débito aumenta el valor de la factura, no acredita
+   * devoluciones): cuando viene, el servicio deriva las líneas de
+   * `refund_items` (mapeo ADR-03 del order-details, movido a backend),
+   * persiste `invoices.refund_id` y escribe el puente por línea en
+   * `credit_note_refund_items`.
+   *
+   * Reglas que el servicio impone (aquí sólo viaja el id):
+   *   · `related_invoice_id` sigue siendo obligatorio y pasa la misma
+   *     puerta de tipos corregibles — la NC corrige la FACTURA, el refund
+   *     sólo aporta las líneas.
+   *   · El refund debe pertenecer a la orden de la factura que se corrige.
+   *   · No se combina con `items` explícitos: guiada o manual, no mezcla.
+   */
+  @IsOptional()
+  @IsInt({
+    message:
+      'refund_id debe ser un número entero: los ids de reembolso no tienen fracciones.',
+  })
+  @Type(() => Number)
+  @Min(1, {
+    message:
+      'refund_id debe ser un número entero mínimo 1: es el id del reembolso que esta nota crédito acredita — un 0 o un negativo no identifica ningún reembolso.',
+  })
+  refund_id?: number;
+
+  /**
    * Concepto de corrección DIAN — `cac:DiscrepancyResponse/cbc:ResponseCode`.
    * '1' devolución parcial · '2' anulación · '3' rebaja o descuento ·
    * '4' ajuste de precio · '5' otros (Anexo Técnico 1.9, tabla 13.2.4).

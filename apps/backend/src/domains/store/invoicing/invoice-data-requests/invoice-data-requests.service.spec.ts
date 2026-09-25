@@ -290,3 +290,47 @@ describe('InvoiceDataRequestsService (nominative conversion)', () => {
     expect(result?.status).toBe('completed');
   });
 });
+
+describe('InvoiceDataRequestsService (paso 3: summary guest)', () => {
+  const service = new InvoiceDataRequestsService(
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+  const kitchenStatusFor = (rows: { id: number; status: string }[] | null) =>
+    (service as any).kitchenStatusFor(rows);
+
+  it('prefiere la fila in-flight sobre la terminal más reciente', () => {
+    // order 448 / item 915 en dev: pending (id 31) + delivered (id 79),
+    // el backend entrega desc por id → [delivered, pending].
+    expect(
+      kitchenStatusFor([
+        { id: 79, status: 'delivered' },
+        { id: 31, status: 'pending' },
+      ]),
+    ).toBe('pending');
+  });
+
+  it('sin filas in-flight devuelve la más reciente (desc por id)', () => {
+    expect(
+      kitchenStatusFor([
+        { id: 78, status: 'cancelled' },
+        { id: 55, status: 'cancelled' },
+      ]),
+    ).toBe('cancelled');
+    expect(
+      kitchenStatusFor([
+        { id: 82, status: 'delivered' },
+        { id: 80, status: 'cancelled' },
+      ]),
+    ).toBe('delivered');
+  });
+
+  it('sin filas (nunca disparado) devuelve null', () => {
+    expect(kitchenStatusFor([])).toBeNull();
+    expect(kitchenStatusFor(null)).toBeNull();
+  });
+});

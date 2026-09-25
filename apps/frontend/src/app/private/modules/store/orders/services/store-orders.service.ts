@@ -28,6 +28,7 @@ import {
   CreateRefundRequest,
   RefundCalculationResult,
   RefundRecord,
+  RefundCoverageResult,
   FastTrackOrderDto,
   AssignShippingMethodDto,
 } from '../interfaces/order.interface';
@@ -407,6 +408,26 @@ export class StoreOrdersService {
   }
 
   /**
+   * Paso 5 — cambia el titular de la orden vía el PATCH del backend.
+   * `UpdateOrderDto extends PartialType(CreateOrderDto)` expone `customer_id`
+   * y `customer_alias`; el XOR lo impone el CHECK de BD, así que al asignar
+   * un titular real se limpia el alias. Desempaqueta `ResponseService`.
+   */
+  updateOrderCustomer(orderId: string, customerId: number): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}`;
+
+    return this.http
+      .patch<any>(url, { customer_id: customerId, customer_alias: null })
+      .pipe(
+        map((r) => (r?.data ?? r) as Order),
+        catchError((error) => {
+          console.error('Error updating order customer:', error);
+          return throwError(() => this.buildApiError(error));
+        }),
+      );
+  }
+
+  /**
    * Eliminar una orden
    */
   deleteOrder(orderId: string): Observable<void> {
@@ -754,6 +775,21 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error fetching order refunds:', error);
+        return throwError(() => this.buildApiError(error));
+      }),
+    );
+  }
+
+  // CP-REFUND-FLOW-REDESIGN paso 7 (consumido en paso 8) — cobertura
+  // refund↔NC por línea + aviso FE. El detalle la usa para badges de línea,
+  // guardas de saldo y el banner FE→NC; si falla, la página degrada al cruce
+  // local `orderRefunds().refund_items` (ver `lineRefundInfo`).
+  getRefundCoverage(orderId: string): Observable<RefundCoverageResult> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/refund/coverage`;
+    return this.http.get<any>(url).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error fetching refund coverage:', error);
         return throwError(() => this.buildApiError(error));
       }),
     );

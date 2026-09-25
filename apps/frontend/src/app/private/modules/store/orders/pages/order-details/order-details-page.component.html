@@ -273,6 +273,18 @@
                   <p>Contacto, entrega y facturacion de esta orden</p>
                 </div>
               </div>
+              <div class="customer-card-header-actions">
+                <app-button
+                  variant="outline-secondary"
+                  size="sm"
+                  [loading]="changingCustomer()"
+                  (clicked)="openChangeCustomer()"
+                  ariaLabel="Cambiar titular de la orden"
+                >
+                  <app-icon slot="icon" name="repeat" size="13"></app-icon>
+                  Cambiar cliente
+                </app-button>
+              </div>
             </div>
 
             <div class="customer-card-content">
@@ -281,6 +293,7 @@
                   <div class="customer-avatar" aria-hidden="true">
                     {{
                       (
+                        orderData.users?.legal_name?.charAt(0) ||
                         orderData.users?.first_name?.charAt(0) ||
                         orderData.users?.last_name?.charAt(0) ||
                         "C"
@@ -294,7 +307,7 @@
                         <!-- si no hay alias ni nombre, customerDisplayName ya cae a "Consumidor Final"; el badge CF refuerza la marca fiscal -->
                       } @else if (
                         orderData.customer_alias?.trim() &&
-                        !(orderData.users?.first_name || orderData.users?.last_name)
+                        !(orderData.users?.legal_name?.trim() || orderData.users?.first_name || orderData.users?.last_name)
                       ) {
                         <span
                           class="cf-badge"
@@ -302,6 +315,11 @@
                         >CF</span>
                       }
                     </h2>
+                    @if (orderData.users?.document_number?.trim()) {
+                      <p class="customer-doc-line">
+                        {{ orderData.users?.document_type }} {{ orderData.users?.document_number }}@if (orderData.users?.person_type === 'JURIDICA') { · Jurídica }
+                      </p>
+                    }
                   </div>
                 </div>
 
@@ -693,6 +711,31 @@
                       <p class="text-[10px] font-mono text-gray-400 truncate">
                         SKU: {{ item.variant_sku || "N/A" }}@if (parseVariantAttributes(item.variant_attributes); as attrs) {@if (attrs.length) {@for (attr of attrs; track attr.name + attr.value) {<span class="variant-mini-badge">@if (attr.name) {<span>{{ attr.name }}: </span>}{{ attr.value }}</span>}}}
                       </p>
+                      <!-- CP-REFUND-FLOW-REDESIGN paso 8 — badge Reembolsado
+                           por línea (total o parcial con cantidades) desde la
+                           cobertura refund↔NC; la línea facturada no se toca. -->
+                      @if (lineRefundInfo(item); as ri) {
+                        @if (ri.refundedQty > 0) {
+                          <span
+                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 bg-orange-100 text-orange-800 border border-orange-200"
+                            [title]="
+                              ri.isNcCovered
+                                ? 'Reembolsado ' + ri.refundedQty + ' de ' + ri.quantity + ' — cubierto por nota crédito'
+                                : 'Reembolsado ' + ri.refundedQty + ' de ' + ri.quantity
+                            "
+                          >
+                            <app-icon name="rotate-ccw" [size]="10" />
+                            @if (ri.isFull) {
+                              Reembolsado
+                            } @else {
+                              Reembolsado parcial {{ ri.refundedQty }}/{{ ri.quantity }}
+                            }
+                            @if (ri.isNcCovered) {
+                              · NC
+                            }
+                          </span>
+                        }
+                      }
                       <!-- Restaurant Suite — Fase K Gap 2: per-item KDS
                            state badge. Renders only for items that were
                            actually fired to the kitchen. -->
@@ -819,7 +862,7 @@
                           Reversar
                         </app-button>
                       }
-                      @if ((item.delivered_at || !item.cancelled_at) && cancellationPaid()) {
+                      @if ((item.delivered_at || !item.cancelled_at) && cancellationPaid() && lineHasRefundableBalance(item)) {
                         <span class="text-xs text-amber-700">
                           Orden cobrada: no se puede cancelar este plato.
                           <button type="button" class="underline font-semibold" (click)="openRefundModal()">
@@ -1290,15 +1333,27 @@
                         >
                       </p>
                       @if (step.data.new_values?.state) {
-                        <div
-                          class="mt-2 text-xs bg-[var(--color-surface)] text-text-secondary px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-border"
-                        >
-                          <span
-                            class="w-1.5 h-1.5 rounded-full bg-primary-500"
-                          ></span>
-                          Nuevo estado:
-                          {{ formatStatus(step.data.new_values.state) }}
-                        </div>
+                        @if (isRefundStateValue(step.data.new_values.state)) {
+                          <div
+                            class="mt-2 text-xs bg-orange-50 text-orange-800 px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-orange-200"
+                          >
+                            <span
+                              class="w-1.5 h-1.5 rounded-full bg-orange-500"
+                            ></span>
+                            Reembolso:
+                            {{ refundStateLabel(step.data.new_values.state) }}
+                          </div>
+                        } @else {
+                          <div
+                            class="mt-2 text-xs bg-[var(--color-surface)] text-text-secondary px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-border"
+                          >
+                            <span
+                              class="w-1.5 h-1.5 rounded-full bg-primary-500"
+                            ></span>
+                            Nuevo estado:
+                            {{ formatStatus(step.data.new_values.state) }}
+                          </div>
+                        }
                       }
                     }
                   </div>
@@ -1940,6 +1995,42 @@
             </div>
           }
 
+          <!-- CP-REFUND-FLOW-REDESIGN paso 8 — aviso obligatorio FE→NC
+               (paso 7): con FE aceptada y reembolso sin NC que lo cubra, se
+               avisa e invita con 1 clic a emitir la nota (flujo B.3, nunca
+               automática). -->
+          @if (feNotice(); as notice) {
+            <div
+              role="alert"
+              class="bg-amber-50 rounded-xl border border-amber-200 p-4 shadow-sm flex items-start gap-3"
+            >
+              <app-icon
+                name="alert-triangle"
+                size="18"
+                class="text-amber-600 mt-0.5 flex-shrink-0"
+              ></app-icon>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-bold text-amber-900">
+                  Factura electrónica emitida — falta la nota crédito
+                </p>
+                <p class="text-xs text-amber-800 mt-1">
+                  {{ notice.message }}
+                </p>
+                <div class="mt-3">
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    [disabled]="refundNoteState() !== null"
+                    (clicked)="startFeNoticeNote()"
+                  >
+                    <app-icon slot="icon" name="file-text" size="14"></app-icon>
+                    Emitir nota crédito
+                  </app-button>
+                </div>
+              </div>
+            </div>
+          }
+
           <!-- Refund History (for partial refunds or detailed view) -->
           @if (orderRefunds() && orderRefunds().length > 0) {
             <app-card shadow="sm" [responsivePadding]="true">
@@ -2168,8 +2259,14 @@
             </h2>
 
             <div class="space-y-2.5">
-              <!-- C.7 (§5.3, base gross): sin fila Subtotal — las líneas ya
-                   van en bruto y un Subtotal en base quedaría huérfano. -->
+              <!-- Desglose completo: valores persistidos tal cual (base gross).
+                   Subtotal = suma de líneas en bruto; IVA va incluido, no suma. -->
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-text-secondary">Subtotal</span>
+                <span class="font-semibold text-gray-900">{{
+                  orderData.subtotal_amount || 0 | currency
+                }}</span>
+              </div>
 
               <!-- Applied promotions (persisted snapshot) -->
               @if (appliedPromotions().length > 0) {
@@ -2259,8 +2356,15 @@
                   }}</span>
                 </div>
               }
-              <!-- C.7 (§5.3, base gross): sin fila de impuesto que sume; con
-                   desglose respaldado, nota informativa fuera de la aritmética. -->
+              @if (tipAmount() > 0) {
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Propina</span>
+                  <span class="font-semibold text-gray-900">{{
+                    tipAmount() | currency
+                  }}</span>
+                </div>
+              }
+              <!-- IVA incluido: informativo, fuera de la aritmética (base gross). -->
               @if (showDetailVatNote()) {
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">IVA incluido</span>
@@ -2279,6 +2383,25 @@
                   {{ orderData.grand_total || 0 | currency }}
                 </span>
               </div>
+              <!-- CP-REFUND-FLOW-REDESIGN paso 8 — filas derivadas: lo
+                   facturado (`grand_total`) intacto arriba; Reembolsado y Neto
+                   derivados de refunds `completed`. -->
+              @if (totalRefunded() > 0) {
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Reembolsado</span>
+                  <span class="font-semibold text-orange-600"
+                    >-{{ totalRefunded() | currency }}</span
+                  >
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-base font-bold text-gray-900">Neto</span>
+                  <span
+                    class="text-xl sm:text-2xl font-black text-gray-900 font-mono tracking-tighter"
+                  >
+                    {{ netTotal() | currency }}
+                  </span>
+                </div>
+              }
             </div>
 
             <!-- Credit Payment Progress -->
@@ -2819,6 +2942,24 @@
         (submitEdit)="onShippingAddressEdit($event)"
       ></app-shipping-address-modal>
     }
+
+    <!-- CAMBIO DE TITULAR: buscar-primero (existentes) antes de crear -->
+    <app-change-titular-search-modal
+      [isOpen]="showTitularSearchModal()"
+      (closed)="closeTitularSearch()"
+      (selected)="onTitularSearchSelected($event)"
+      (createNew)="onTitularSearchCreateNew()"
+    ></app-change-titular-search-modal>
+
+    <!-- Paso 5: CAMBIO DE TITULAR (reutiliza app-customer-modal en crear-mode) -->
+    <app-customer-modal
+      [isOpen]="showChangeCustomerModal()"
+      [customer]="null"
+      [loading]="changingCustomer()"
+      (closed)="closeChangeCustomer()"
+      (save)="onChangeCustomerSave($event)"
+      (addressData)="onChangeCustomerAddress($event)"
+    ></app-customer-modal>
 
     <!-- DELIVER MODAL -->
     <app-modal

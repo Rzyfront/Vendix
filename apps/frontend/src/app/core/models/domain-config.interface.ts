@@ -152,6 +152,9 @@ export interface EcommerceConfig {
     // producto. Default `false`, así que se lee con `=== true` (ausente ⇒ off),
     // NO con el patrón `!== false` que usa `show_variants` (default `true`).
     enable_sale_unit_selector: boolean;
+    // Opt-in: muestra el tiempo de preparación del producto en el catálogo
+    // público (lista y detalle). Ausente ⇒ apagado (se lee `=== true`).
+    show_preparation_time?: boolean;
   };
   cart?: {
     allow_guest_checkout: boolean;
@@ -169,6 +172,14 @@ export interface EcommerceConfig {
     whatsapp_number?: string;
     whatsapp_pitch?: string;
     require_payment_receipt?: boolean;
+  };
+  orders?: {
+    // Opt-out: oculta la barra de progreso de seguimiento en /pedido/:token.
+    // Ausente ⇒ visible: se lee con `!== true`.
+    hide_tracking_progress?: boolean;
+    // Opt-out: oculta el ETA de preparación en /pedido/:token.
+    // Ausente ⇒ visible: se lee con `!== true`.
+    hide_prep_eta?: boolean;
   };
   shipping?: {
     free_shipping_threshold?: number;

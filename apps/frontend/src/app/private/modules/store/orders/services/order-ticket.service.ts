@@ -9,6 +9,47 @@ import { TicketData, TicketItem } from '../../pos/models/ticket.model';
 const DEFAULT_CASHIER_NAME = 'Administrador';
 
 /**
+ * CP-REFUND-FLOW-REDESIGN paso 9 — una línea reembolsada de la sección
+ * Reembolsos/NC. Espejo del `lines[]` que los providers backend
+ * (`pos-sale-ticket`, `sales-order-invoice`) publican en
+ * `custom_variables.refunds`: mismos nombres, misma semántica (cantidades y
+ * montos agregados del ledger de `refund_items`). Las NC referenciadas por
+ * línea (`notes`) solo existen en el carril backend — el `findOne` que
+ * alimenta este mapper no trae el puente `credit_note_refund_items`, así que
+ * el tiquete cliente muestra líneas y montos y deja la cobertura NC al
+ * banner FE→NC del detalle (paso 8) y a la reimpresión backend.
+ */
+export interface TicketRefundLine {
+  order_item_id: number;
+  product_name: string;
+  refunded_qty: number;
+  refunded_amount: number;
+}
+
+/**
+ * CP-REFUND-FLOW-REDESIGN paso 9 — sección Reembolsos del tiquete cliente.
+ * `refunded_total` es lo devuelto (Σ del caché por línea);
+ * `net_total = total − refunded_total` es el neto derivado. El `total`
+ * (grand_total) queda INTACTO: los documentos originales no se reescriben.
+ */
+export interface TicketRefundsSection {
+  lines: TicketRefundLine[];
+  refunded_total: number;
+  net_total: number;
+}
+
+/**
+ * CP-REFUND-FLOW-REDESIGN paso 9 — `TicketData` con sección Reembolsos.
+ * Subtipo aditivo: los llamadores que esperan `TicketData` siguen compilando
+ * y el renderer la ignora hasta que pinte la sección (fuera de este paso).
+ * Sin líneas reembolsadas, `toTicketData` NO escribe la clave y el payload
+ * sale byte-idéntico al de antes.
+ */
+export interface RefundAwareTicketData extends TicketData {
+  refunds?: TicketRefundsSection;
+}
+
+/**
  * Maps the `Order` domain object onto the `TicketData` contract consumed by
  * `PosTicketService`. Extracted from `OrderDetailsPageComponent` so the order
  * detail page and the bulk print flow share one mapping instead of two that
@@ -32,7 +73,7 @@ export class OrderTicketService {
    * that would name the operator running the printer instead of the seller,
    * stamping a false statement on every ticket in the batch.
    */
-  toTicketData(order: Order, options?: { cashier?: string }): TicketData {
+  toTicketData(order: Order, options?: { cashier?: string }): RefundAwareTicketData {
     const items: TicketItem[] = (order.order_items || []).map((item) => ({
       id: String(item.id || '0'),
       name: item.product_name || 'Producto',
@@ -110,7 +151,28 @@ export class OrderTicketService {
     // del QR de FE ni del encabezado fiscal.
     const customerAlias = order.customer_alias ?? null;
 
-    return {
+    // CP-REFUND-FLOW-REDESIGN paso 9 — sección Reembolsos desde el caché por
+    // línea (`refunded_qty`/`refunded_amount`, paso 3). Solo líneas con
+    // cantidad reembolsada > 0; sin ellas `refunds` queda `undefined` y el
+    // payload sale byte-idéntico al de antes. `total` (grand_total) intacto.
+    const total = Number(order.grand_total) || 0;
+    const refundLines: TicketRefundLine[] = (order.order_items || [])
+      .map((item) => {
+        return {
+          order_item_id: item.id,
+          product_name: item.product_name || 'Producto',
+          refunded_qty: Number(item.refunded_qty || 0),
+          refunded_amount: Number(item.refunded_amount || 0),
+        };
+      })
+      .filter((line) => line.refunded_qty > 0);
+    const refundedTotal = refundLines.reduce((sum, line) => sum + line.refunded_amount, 0);
+    const refunds: TicketRefundsSection | undefined =
+      refundLines.length > 0
+        ? { lines: refundLines, refunded_total: refundedTotal, net_total: total - refundedTotal }
+        : undefined;
+
+    const ticket: RefundAwareTicketData = {
       id: order.order_number || 'N/A',
       orderId: order.id,
       date: new Date(order.created_at || Date.now()),
@@ -118,7 +180,7 @@ export class OrderTicketService {
       subtotal: Number(order.subtotal_amount) || 0,
       tax: Number(order.tax_amount) || 0,
       discount: Number(order.discount_amount) || 0,
-      total: Number(order.grand_total) || 0,
+      total,
       paymentMethod,
       cashReceived: cashReceived ? Number(cashReceived) : undefined,
       change: cashReceived ? Number(change || 0) : undefined,
@@ -144,7 +206,11 @@ export class OrderTicketService {
           }
         : undefined,
       electronicInvoice,
+      // Spread condicional: sin reembolsos la clave NO existe en el payload
+      // (cero regresión); con reembolsos viaja la sección refund-aware.
+      ...(refunds ? { refunds } : {}),
     };
+    return ticket;
   }
 
   /**

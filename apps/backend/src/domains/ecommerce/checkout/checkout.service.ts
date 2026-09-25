@@ -59,6 +59,7 @@ import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 import { CheckoutIdempotencyService } from './checkout-idempotency.service';
 import { ShippingTaxService } from '../../store/shipping/services/shipping-tax.service';
+import { ShippingDistanceService } from '../../store/shipping/services/shipping-distance.service';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -207,6 +208,10 @@ export class CheckoutService {
     // `@Optional()` para no romper los TestingModule existentes; sin él (sólo
     // en specs) el envío sale sin impuesto.
     @Optional() private readonly shippingTaxService?: ShippingTaxService,
+    // Cobro por distancia: mismo resolver del cotizador, recalculado en
+    // servidor al confirmar. `@Optional()` por el mismo motivo; sin él el
+    // envío sale a precio de zona.
+    @Optional() private readonly shippingDistance?: ShippingDistanceService,
   ) {}
 
   /**
@@ -225,6 +230,60 @@ export class CheckoutService {
     return this.shippingTaxService.snapshotForRate(null, rate_id, shipping_cost, {
       store_id,
     });
+  }
+
+  /**
+   * Recalcula el costo de envío por distancia al confirmar, con el mismo
+   * resolver del cotizador (`ShippingDistanceService`) y las coords de la
+   * dirección final. Sin método-distancia/escala/coords, o con el motor
+   * caído, rige el precio de zona; si la distancia cae fuera de todos los
+   * rangos la selección ya no es válida (el cotizador nunca la habría
+   * ofrecido) y el checkout se rechaza con 400.
+   */
+  private async resolveConfirmShippingCost(
+    rate: {
+      distance_tiers?: unknown;
+      shipping_method?: {
+        distance_pricing_enabled?: boolean | null;
+        origin_latitude?: unknown;
+        origin_longitude?: unknown;
+      } | null;
+    },
+    address_snapshot: {
+      latitude?: unknown;
+      longitude?: unknown;
+    } | null,
+    zone_cost: number,
+  ): Promise<number> {
+    const distance = this.shippingDistance;
+    const method = rate.shipping_method;
+    if (!distance || !method?.distance_pricing_enabled) return zone_cost;
+    const tiers = ShippingDistanceService.parseTiers(rate.distance_tiers);
+    if (!tiers) return zone_cost;
+    const origin = ShippingDistanceService.toCoords(
+      method.origin_latitude,
+      method.origin_longitude,
+    );
+    const buyer = ShippingDistanceService.toCoords(
+      address_snapshot?.latitude,
+      address_snapshot?.longitude,
+    );
+    if (!origin || !buyer) return zone_cost;
+    let distanceKm: number | null;
+    try {
+      distanceKm = await distance.resolveDistanceKm(origin, buyer);
+    } catch {
+      return zone_cost;
+    }
+    if (distanceKm == null) return zone_cost;
+    const tier = ShippingDistanceService.matchTier(tiers, distanceKm);
+    if (!tier) {
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_003,
+        'La tarifa de envío seleccionada ya no cubre la distancia a tu dirección; vuelve a cotizar el envío',
+      );
+    }
+    return tier.price;
   }
 
   /**
@@ -672,6 +731,32 @@ export class CheckoutService {
     };
 
     return Object.values(normalized).some(Boolean) ? normalized : null;
+  }
+
+  /**
+   * Alias de cliente para la venta guest sin identidad resuelta.
+   *
+   * Cuando `resolved_customer_id` es null (invitado solo-nombre: sin email ni
+   * teléfono que permitan resolver/crear el `users` vía
+   * `resolveGuestCustomerForCheckout`) y hay nombre, la orden se persiste con
+   * `customer_id = null` + `customer_alias = trim(nombre)` truncado a 100
+   * caracteres (límite del `VARCHAR(100)` de `orders.customer_alias`). Con
+   * cliente resuelto el alias queda en null (XOR `orders_customer_xor_alias`).
+   */
+  private static resolveGuestCustomerAlias(
+    guest: {
+      first_name?: string | null;
+      last_name?: string | null;
+    } | null,
+    resolved_customer_id: number | null,
+  ): string | null {
+    if (resolved_customer_id != null || !guest) return null;
+    const alias = [guest.first_name, guest.last_name]
+      .filter((part) => typeof part === 'string' && part.trim().length > 0)
+      .join(' ')
+      .trim()
+      .slice(0, 100);
+    return alias.length > 0 ? alias : null;
   }
 
   private async createInvoiceIfConfigured(
@@ -1434,6 +1519,16 @@ export class CheckoutService {
       shipping_method_id = rate.shipping_method_id;
       shipping_rate_id = rate.id;
 
+      // Cobro por distancia: el costo se deriva 100% en servidor con el mismo
+      // resolver del cotizador y las coords de la dirección final; el cliente
+      // nunca envía costos. Va ANTES del snapshot de impuesto para que el IVA
+      // del envío se calcule sobre el costo final.
+      shipping_cost = await this.resolveConfirmShippingCost(
+        rate,
+        shipping_address_snapshot,
+        shipping_cost,
+      );
+
       // Derive delivery_type from shipping method type
       const methodType = rate.shipping_method.type;
       if (methodType === 'pickup') {
@@ -1718,11 +1813,17 @@ export class CheckoutService {
       dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
       delivery_type,
     );
+    // Guest solo-nombre: sin cliente resuelto el nombre viaja como alias.
+    const guest_customer_alias = CheckoutService.resolveGuestCustomerAlias(
+      guest_customer,
+      resolved_customer_id,
+    );
     // store_id y customer_id (user_id) se inyectan automáticamente
     const order = await this.prisma.orders.create({
       data: {
         order_number,
         customer_id: resolved_customer_id,
+        customer_alias: guest_customer_alias,
         // Canal unificado CP-tienda-checkout-whatsapp: "Finalizar por
         // WhatsApp" recorre este mismo núcleo con channel='whatsapp'; el
         // endpoint legacy POST /whatsapp sigue creando channel='whatsapp'
@@ -1979,6 +2080,9 @@ export class CheckoutService {
     return {
       order_id: order.id,
       order_number: order.order_number,
+      customer_id: (order as any).customer_id ?? resolved_customer_id ?? null,
+      customer_alias:
+        (order as any).customer_alias ?? guest_customer_alias ?? null,
       // Contrato numérico: Prisma devuelve Decimal (serializa como string);
       // el storefront tipa `total: number` (auditoría D.3).
       total: this.roundMoney(Number(order.grand_total)),
@@ -2542,10 +2646,16 @@ export class CheckoutService {
       'whatsapp',
       wa_delivery_type,
     );
+    // Mismo alias guest que el núcleo web (endpoint legacy, mismo contrato).
+    const wa_guest_customer_alias = CheckoutService.resolveGuestCustomerAlias(
+      guest_customer,
+      resolved_customer_id,
+    );
     const order = await this.prisma.orders.create({
       data: {
         order_number,
         customer_id: resolved_customer_id,
+        customer_alias: wa_guest_customer_alias,
         channel: 'whatsapp',
         currency: cart_currency,
         subtotal_amount: subtotal,
@@ -2692,6 +2802,9 @@ export class CheckoutService {
     return {
       order_id: order.id,
       order_number: order.order_number,
+      customer_id: (order as any).customer_id ?? resolved_customer_id ?? null,
+      customer_alias:
+        (order as any).customer_alias ?? wa_guest_customer_alias ?? null,
       total: order.grand_total,
       public_order_token: guestArtifacts?.invoice_data_token ?? null,
       invoice_data_token: guestArtifacts?.invoice_data_token ?? null,
