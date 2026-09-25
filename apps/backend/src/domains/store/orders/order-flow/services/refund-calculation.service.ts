@@ -16,6 +16,52 @@ const CEILING_RESERVING_STATES: refunds_state_enum[] = [
   refunds_state_enum.processing,
 ];
 
+/** Step 3 (CP-REFUND-FLOW-REDESIGN): unified per-line coverage ledger.
+ *
+ * The ledger is the aggregation of `refund_items` per `order_item_id`,
+ * across ALL refund states. It feeds `is_full_refund`, the per-line
+ * `maxRefundableQty` guard, and (via `RefundFlowService` §2b) the
+ * `order_items.refunded_qty` / `refunded_amount` cache columns, which are
+ * absolute re-aggregations of this same ledger — never increments.
+ *
+ * Item-less refunds (cancellation legs, legacy rows) contribute NOTHING
+ * per line: they only count order-level through `already_refunded`. That
+ * is the documented orphan fallback: a cancellation refund cannot mark
+ * any line badge, it only shrinks the remaining `max_refundable` ceiling.
+ */
+export interface RefundLineCoverage {
+  order_item_id: number;
+  refunded_qty: number;
+  refunded_amount: Prisma.Decimal;
+}
+
+export function buildRefundCoverageLedger(
+  refunds: Array<{
+    refund_items: Array<{
+      order_item_id: number;
+      quantity: number;
+      refund_amount?: Prisma.Decimal | number | string | null;
+    }>;
+  }>,
+): Map<number, RefundLineCoverage> {
+  const ledger = new Map<number, RefundLineCoverage>();
+  for (const refund of refunds) {
+    for (const ri of refund.refund_items) {
+      const current = ledger.get(ri.order_item_id) ?? {
+        order_item_id: ri.order_item_id,
+        refunded_qty: 0,
+        refunded_amount: new Prisma.Decimal(0),
+      };
+      current.refunded_qty += ri.quantity;
+      current.refunded_amount = current.refunded_amount.plus(
+        ri.refund_amount ?? 0,
+      );
+      ledger.set(ri.order_item_id, current);
+    }
+  }
+  return ledger;
+}
+
 export interface RefundItemRequest {
   order_item_id: number;
   quantity: number;
@@ -137,14 +183,12 @@ export class RefundCalculationService {
       requestedQtyMap.set(item.order_item_id, item.quantity);
     }
 
-    // Build map of already-refunded quantities per order_item
-    const refundedQtyMap = new Map<number, number>();
-    for (const refund of order.refunds) {
-      for (const ri of refund.refund_items) {
-        const current = refundedQtyMap.get(ri.order_item_id) || 0;
-        refundedQtyMap.set(ri.order_item_id, current + ri.quantity);
-      }
-    }
+    // Step 3: `is_full_refund` and the per-line quantity guard below both
+    // read from the unified coverage ledger (single aggregation point).
+    const coverageLedger = buildRefundCoverageLedger(order.refunds);
+    const refundedQtyMap = new Map<number, number>(
+      [...coverageLedger].map(([id, cov]) => [id, cov.refunded_qty]),
+    );
 
     // Already refunded total amount
     const already_refunded = order.refunds.reduce(

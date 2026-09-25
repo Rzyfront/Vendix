@@ -1485,6 +1485,21 @@ model order_items {
   // POS ticket) never read the live serial pool. The strong link lives in
   // sales_document_serials (document_item_type = order_item).
   serial_numbers_snapshot          String?
+  // CP-REFUND-FLOW-REDESIGN paso 3 — caché reconciliable de cobertura por
+  // línea. La VERDAD es la agregación de `refund_items` por línea (todos los
+  // estados); este caché se escribe en la misma tx que inserta los
+  // `refund_items` (RefundFlowService.createRefund §2b) con valores
+  // absolutos re-agregados, por lo que es idempotente y auto-reparable.
+  // NULL ≡ 0 (línea sin cobertura calculada); el backfill deja 0/0.00 en
+  // todas las filas existentes. `grand_total` y las líneas facturadas jamás
+  // se mutan. Reconciliación caché↔ledger (debe retornar 0 filas):
+  //   SELECT oi.id, oi.refunded_qty, COALESCE(SUM(ri.quantity),0)
+  //   FROM order_items oi LEFT JOIN refund_items ri
+  //     ON ri.order_item_id = oi.id
+  //   GROUP BY oi.id
+  //   HAVING oi.refunded_qty IS DISTINCT FROM COALESCE(SUM(ri.quantity),0);
+  refunded_qty                     Int?
+  refunded_amount                  Decimal?                 @db.Decimal(12, 2)
   created_at                       DateTime?                @default(now()) @db.Timestamp(6)
   updated_at                       DateTime?                @default(now()) @db.Timestamp(6)
   inventory_transactions           inventory_transactions[]

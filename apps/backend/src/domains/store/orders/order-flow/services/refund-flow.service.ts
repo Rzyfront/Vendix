@@ -559,6 +559,41 @@ export class RefundFlowService {
           refundItemIdByOrderItem.set(item.order_item_id, refundItem.id);
         }
 
+        // 2b. Step 3 (CP-REFUND-FLOW-REDESIGN) — per-line coverage cache.
+        // Same tx that inserts the `refund_items` above: absolute
+        // re-aggregation of the ledger (ALL states — `failed`/`cancelled`
+        // rows keep their `refund_items`, so no later adjustment is needed
+        // on failure paths), never an increment, so the write is idempotent
+        // and self-healing under the order lock. Item-less refunds
+        // (cancellation/legacy) carry no lines: the non-empty guard skips
+        // them and they count order-level only (see `already_refunded`).
+        // Raw SQL via the already-used `$queryRaw` (same primitive as the
+        // §1 claim above): the `oi.order_id` predicate keeps the write
+        // pinned to the locked order.
+        const coveredItemIds = [
+          ...new Set(
+            calculation.items
+              .map((item) => item.order_item_id)
+              .filter((id): id is number => typeof id === 'number'),
+          ),
+        ];
+        if (coveredItemIds.length > 0) {
+          await tx.$queryRaw`
+            UPDATE "order_items" oi
+            SET "refunded_qty" = s.qty,
+                "refunded_amount" = s.amt
+            FROM (
+              SELECT "order_item_id",
+                     SUM("quantity")::int AS qty,
+                     COALESCE(SUM("refund_amount"), 0) AS amt
+              FROM "refund_items"
+              WHERE "order_item_id" IN (${Prisma.join(coveredItemIds)})
+              GROUP BY "order_item_id"
+            ) s
+            WHERE oi."id" = s."order_item_id"
+              AND oi."order_id" = ${orderId}`;
+        }
+
         // 3. Process inventory per item
         for (const item of calculation.items) {
           if (item.inventory_action === 'no_return') continue;
