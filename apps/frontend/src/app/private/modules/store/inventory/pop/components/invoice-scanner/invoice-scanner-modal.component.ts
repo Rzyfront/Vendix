@@ -1012,7 +1012,9 @@ import {
          para evitar anidar app-modal dentro de app-modal. -->
     <app-pop-supplier-quick-create
       [(isOpen)]="showSupplierCreate"
+      [preload]="supplierCreatePreload() ?? null"
       (supplierCreated)="onSupplierCreated($event)"
+      (close)="onSupplierCreateClosed()"
     ></app-pop-supplier-quick-create>
   `,
   styles: [
@@ -1192,6 +1194,15 @@ export class InvoiceScannerModalComponent {
   readonly selectedSupplierId = signal<number | null>(null);
   readonly selectedSupplierName = signal<string | null>(null);
   readonly showSupplierCreate = signal(false);
+  /** QUI-845: snapshot del proveedor OCR para precargar el quick-create. */
+  private readonly supplierCreatePreload = signal<{
+    name?: string;
+    tax_id?: string;
+    phone?: string;
+  } | null>(null);
+  /** True cuando el quick-create fue abierto desde `onConfirm` (is_new): al
+   *  crearse el proveedor la confirmación continúa automáticamente. */
+  private pendingSupplierConfirm = false;
   readonly supplierDropdownOpen = signal(false);
   private readonly suppliers = signal<Supplier[]>([]);
   readonly supplierSearchResults = signal<Supplier[]>([]);
@@ -1936,6 +1947,20 @@ export class InvoiceScannerModalComponent {
     this.selectedSupplierName.set(supplier.name);
     this.supplierDropdownOpen.set(false);
     this.showSupplierCreate.set(false);
+
+    // QUI-845: si el quick-create se abrió desde el confirm (is_new), el
+    // proveedor ya existe → completar la emisión que quedó pendiente.
+    if (this.pendingSupplierConfirm) {
+      this.pendingSupplierConfirm = false;
+      this.supplierCreatePreload.set(null);
+      this.onConfirm();
+    }
+  }
+
+  /** QUI-845: al cancelar el quick-create, el confirm vuelve a comportamiento
+   *  manual (el proveedor se deja sin cambiar). */
+  onSupplierCreateClosed(): void {
+    this.pendingSupplierConfirm = false;
   }
 
   // ============================================================
@@ -2024,6 +2049,22 @@ export class InvoiceScannerModalComponent {
     const kept = this.keptItems();
     if (kept.length === 0) return;
 
+    // QUI-845: proveedor nuevo del OCR sin seleccionar. En vez de emitir
+    // `supplierId: null` (pop.component solo asigna cuando id != null), abre
+    // el quick-create precargado con lo que reconoció el escaneo; al crearlo,
+    // la confirmación continúa sola desde `onSupplierCreated`.
+    const supplierMatch = match.supplier_match;
+    if (supplierMatch.is_new && !this.selectedSupplierId()) {
+      this.supplierCreatePreload.set({
+        name: scan.supplier?.name || supplierMatch.name,
+        tax_id: scan.supplier?.tax_id || supplierMatch.tax_id,
+        phone: scan.supplier?.phone,
+      });
+      this.pendingSupplierConfirm = true;
+      this.showSupplierCreate.set(true);
+      return;
+    }
+
     this.confirmed.emit({
       // El descuento de pie viaja EDITADO. `pop.component` lee
       // `scanResult.discount_amount` para fijar el descuento general del
@@ -2079,6 +2120,8 @@ export class InvoiceScannerModalComponent {
     this.selectedSupplierName.set(null);
     this.showSupplierCreate.set(false);
     this.supplierDropdownOpen.set(false);
+    this.supplierCreatePreload.set(null);
+    this.pendingSupplierConfirm = false;
     this.supplierSearchResults.set([]);
     this.supplierSearchLoading.set(false);
     this.supplierSearchTerm.set('');
