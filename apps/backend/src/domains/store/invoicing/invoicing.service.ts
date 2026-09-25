@@ -552,6 +552,43 @@ export function computeOrderInvoiceSubtotal(
 }
 
 /**
+ * Texto fiscal de una línea orden→factura (`invoice_items.description`, lo que
+ * la DIAN recibe como `cac:Item/cbc:Description`).
+ *
+ * Nombre-primero: el POS persiste la descripción de marketing del catálogo en
+ * `order_items.description`, y leerla antes que el nombre declaraba esa
+ * descripción en el documento firmado. La cadena cae por nombre snapshot →
+ * nombre vivo → variante → descripción, y solo la descripción (texto libre
+ * largo) se recorta al techo FAZ02 de 300 caracteres; los nombres son
+ * `VARCHAR(255)` y nunca lo alcanzan. Cada eslabón ignora blancos puros.
+ */
+export const INVOICE_LINE_DESCRIPTION_MAX_LENGTH = 300;
+
+export interface OrderInvoiceLineDescriptionSource {
+  product_name?: unknown;
+  description?: unknown;
+  products?: { name?: unknown } | null;
+  product_variants?: { name?: unknown } | null;
+}
+
+export function resolveOrderInvoiceLineDescription(
+  item: OrderInvoiceLineDescriptionSource | null | undefined,
+): string {
+  const text = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  };
+  return (
+    text(item?.product_name) ??
+    text(item?.products?.name) ??
+    text(item?.product_variants?.name) ??
+    text(item?.description)?.slice(0, INVOICE_LINE_DESCRIPTION_MAX_LENGTH) ??
+    'Product'
+  );
+}
+
+/**
  * Lo que `createFromOrder` lee de la orden para proyectar el impuesto del
  * envío. Es la COPIA congelada al vender (`orders.shipping_tax_*`), nunca la
  * tarifa ni su categoría actual: editar la tarifa después no mueve la factura
@@ -2648,11 +2685,9 @@ export class InvoicingService {
     );
     const productItems = (order.order_items || []).map((item: any, index: number) => {
       const projectedLine = lineProjection.lines[index];
-      const description =
-        item.description ||
-        item.product_name ||
-        item.products?.name ||
-        'Product';
+      // Nombre-primero: la descripción del catálogo que trae la línea es
+      // respaldo, nunca titular (ver `resolveOrderInvoiceLineDescription`).
+      const description = resolveOrderInvoiceLineDescription(item);
       const quantity = Number(item.quantity || 1);
       const unit_price = Number(item.unit_price || 0);
       // `order_items` no tiene columna de descuento: el de la línea es el que
