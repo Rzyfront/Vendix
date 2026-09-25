@@ -5502,6 +5502,11 @@ export class OrderFlowService {
               products: {
                 select: { preparation_time_minutes: true },
               },
+              // R8-F2 — `computeEta` resuelve variante ?? producto ??
+              // default: sin este include la variante nunca llegaba.
+              product_variants: {
+                select: { preparation_time_minutes: true },
+              },
             },
           },
           shipping_method: {
@@ -5518,6 +5523,8 @@ export class OrderFlowService {
         orderWithItems.order_items.map((item) => ({
           preparation_time_minutes:
             item.products?.preparation_time_minutes ?? null,
+          variant_preparation_time_minutes:
+            item.product_variants?.preparation_time_minutes ?? null,
         })),
         orderWithItems.shipping_method?.transit_time_minutes ?? 0,
         (settings as any)?.operations,

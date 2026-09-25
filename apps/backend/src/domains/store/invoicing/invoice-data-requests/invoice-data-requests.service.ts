@@ -578,11 +578,16 @@ export class InvoiceDataRequestsService {
         order: {
           select: {
             id: true,
+            // R8-F1 — el gate de estados de `uploadGuestPaymentReceipt`
+            // necesita ambos `state`; el path de lectura
+            // (`getGuestPaymentReceiptUrl`) los ignora.
+            state: true,
             payments: {
               where: { id: paymentId },
               select: {
                 id: true,
                 order_id: true,
+                state: true,
                 receipt_s3_key: true,
                 receipt_uploaded_at: true,
                 store_payment_method: {
@@ -688,6 +693,24 @@ export class InvoiceDataRequestsService {
       paymentId,
     );
 
+    // R8-F1 — sin comprobantes tardíos sobre estados terminales: la orden
+    // ya se cerró o el pago ya se resolvió y el recibo no cambiaría nada.
+    // Mismo código que el gate de método (400, mensaje ES al guest).
+    const TERMINAL_ORDER_STATES = ['cancelled', 'refunded', 'finished', 'delivered'];
+    const TERMINAL_PAYMENT_STATES = ['succeeded', 'captured', 'refunded', 'cancelled'];
+    if (TERMINAL_ORDER_STATES.includes(request.order?.state as string)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Esta orden ya está cerrada y no recibe más comprobantes.',
+      );
+    }
+    if (TERMINAL_PAYMENT_STATES.includes(payment.state as string)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Este pago ya quedó resuelto y no necesita comprobante.',
+      );
+    }
+
     const methodType =
       payment.store_payment_method?.system_payment_method?.type ?? null;
     if (methodType !== 'bank_transfer' && methodType !== 'voucher') {
@@ -725,10 +748,24 @@ export class InvoiceDataRequestsService {
     // por PK + `order_id` del binding: aunque el scope aporte el filtro de
     // tienda, el vínculo token→orden→pago ya quedó verificado arriba y la
     // fila solo se toca si pertenece a esta orden.
-    await this.prisma.payments.updateMany({
+    const persisted = await this.prisma.payments.updateMany({
       where: { id: payment.id, order_id: request.order_id },
       data: { receipt_s3_key: key, receipt_uploaded_at },
     });
+
+    // R8-F4 — `count === 0` (carrera: el pago se borró tras el binding) no
+    // es éxito: se purga el objeto recién subido para no dejar un huérfano
+    // en S3 y se responde el mismo 404 ciego del binding.
+    if (persisted.count === 0) {
+      try {
+        await this.s3Service.deleteFile(key);
+      } catch (cleanupError) {
+        this.logger.warn(
+          `Orphan receipt cleanup failed for key ${key}: ${(cleanupError as Error)?.message}`,
+        );
+      }
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+    }
 
     return {
       payment_id: payment.id,

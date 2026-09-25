@@ -493,7 +493,9 @@ interface GuestOrderSummary {
                                   : 'Ver comprobante'
                               }}
                             </app-button>
-                          } @else {
+                          } @else if (
+                            receiptUploadAllowed(data.order.state, p)
+                          ) {
                             <div class="receipt-upload">
                               <span class="receipt-upload-label">
                                 ¿Pagaste por transferencia? Adjunta tu
@@ -1426,6 +1428,9 @@ export class GuestOrderSummaryComponent implements OnInit {
           this.loading.set(false);
         },
         error: () => {
+          // R8-F3 — sin summary (token 404) el stream nunca rendirá: se
+          // cierra para no quemar reconexiones contra un token inválido.
+          this.sse.disconnect();
           this.error.set(true);
           this.loading.set(false);
         },
@@ -1915,6 +1920,23 @@ export class GuestOrderSummaryComponent implements OnInit {
     const source = url.split('?')[0].toLowerCase();
     if (/\.(jpe?g|png|webp)$/.test(source)) return 'image';
     return 'pdf';
+  }
+
+  /**
+   * R8-F1 — espejo frontend del gate de `uploadGuestPaymentReceipt`: el
+   * dropzone solo existe cuando NI la orden NI el pago están en estado
+   * terminal. El backend re-valida (la fuente de verdad es el 400); esto
+   * evita mostrar una subida que siempre fallaría.
+   */
+  receiptUploadAllowed(
+    orderState: string,
+    payment: GuestOrderPayment,
+  ): boolean {
+    const terminalOrder = ['cancelled', 'refunded', 'finished', 'delivered'];
+    const terminalPayment = ['succeeded', 'captured', 'refunded', 'cancelled'];
+    if (terminalOrder.includes(orderState)) return false;
+    if (terminalPayment.includes(payment.state)) return false;
+    return true;
   }
 
   /**
