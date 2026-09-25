@@ -1,5 +1,8 @@
 import { Prisma } from '@prisma/client';
-import { CreditNotesService } from './credit-notes.service';
+import {
+  CreditNotesService,
+  derivePartialNoteLinesViaKernel,
+} from './credit-notes.service';
 
 /**
  * CP-REFUND-FLOW-REDESIGN paso 10 — gate de NC guiada + puente refund↔NC (paso 7).
@@ -44,11 +47,23 @@ describe('CreditNotesService — gate de NC guiada + puente refund↔NC (paso 7,
     ...over,
   });
 
+  // Paso 2 (shipping-tax A1): copia del impuesto del envío SIN impuesto por
+  // defecto —los casos históricos esperan la línea de envío igual que hoy
+  // (sin flag, cuota 0) y nunca consultan previos.
+  const noTaxCopy = () => ({
+    shipping_cost: new Prisma.Decimal(3000),
+    shipping_tax_amount: new Prisma.Decimal(0),
+  });
+
   function createService(over: any = {}) {
     const prisma = {
-      refunds: { findFirst: jest.fn().mockResolvedValue(refundRow()) },
+      refunds: {
+        findFirst: jest.fn().mockResolvedValue(refundRow()),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: { findMany: jest.fn().mockResolvedValue([orderLine()]) },
+      orders: { findFirst: jest.fn().mockResolvedValue(noTaxCopy()) },
       ...(over.prisma ?? {}),
     };
     const service = new CreditNotesService(
@@ -347,6 +362,336 @@ describe('CreditNotesService — gate de NC guiada + puente refund↔NC (paso 7,
       expect(link.bridge_rows).toEqual([
         expect.objectContaining({ refund_item_id: 201, covered_qty: 2 }),
       ]);
+    });
+  });
+
+  describe('paso 2 (shipping-tax A1): envío gravado como línea incluida', () => {
+    const taxedCopy = (
+      shipping_cost: number = 15000,
+      shipping_tax_amount: number = 1111.11,
+    ) => ({
+      shipping_cost: new Prisma.Decimal(shipping_cost),
+      shipping_tax_amount: new Prisma.Decimal(shipping_tax_amount),
+    });
+
+    const guidedWithShipping = (over: any = {}) =>
+      createService({
+        prisma: {
+          refunds: {
+            findFirst: jest
+              .fn()
+              .mockResolvedValue(refundRow(over.refund ?? {})),
+            findMany: jest.fn().mockResolvedValue(over.priors ?? []),
+          },
+          invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+          order_items: {
+            findMany: jest
+              .fn()
+              .mockResolvedValue(over.order_items ?? [orderLine()]),
+          },
+          orders: {
+            // `in`, no `??`: el caso de orden ausente pasa `copy: null`
+            // a propósito (fail-open) y `??` lo taparía con la copia gravada.
+            findFirst: jest.fn().mockResolvedValue(
+              'copy' in over ? over.copy : taxedCopy(),
+            ),
+          },
+        },
+      });
+
+    it('envío 15.000 INC 8% ⇒ línea incluida 15.000 con pista 1.111,11; el kernel cierra 15.000', async () => {
+      const { service } = guidedWithShipping({
+        refund: {
+          refund_items: [],
+          shipping_refund: new Prisma.Decimal(15000),
+        },
+      });
+
+      const link = await resolve(
+        service,
+        guidedDto(),
+        'credit_note',
+        invoiceOf(1),
+      );
+
+      expect(link.derived_items).toEqual([
+        {
+          description: 'Reembolso de envío — orden #1',
+          quantity: 1,
+          unit_price: 15000,
+          discount_amount: 0,
+          tax_amount: 1111.11,
+          is_inclusive: true,
+        },
+      ]);
+      expect(link.bridge_rows).toEqual([]);
+
+      // El carril parcial por kernel: la factura persiste el Envío en forma
+      // base (`is_inclusive: false`); la línea incluida despeja base + cuota
+      // y el total queda en el bruto devuelto, no en 16.200.
+      const derived = derivePartialNoteLinesViaKernel(
+        link.derived_items,
+        [
+          {
+            id: 77,
+            product_id: null,
+            product_variant_id: null,
+            is_inclusive: false,
+            tax_amount: new Prisma.Decimal(1111.11),
+            quantity: new Prisma.Decimal(1),
+            unit_price: new Prisma.Decimal(13888.89),
+            discount_amount: new Prisma.Decimal(0),
+          },
+        ],
+        [
+          {
+            tax_rate_id: 9,
+            tax_name: 'INC 8%',
+            tax_rate: new Prisma.Decimal(8),
+            tax_type: 'inc',
+            invoice_item_id: 77,
+          },
+        ],
+        901,
+        'credit_note',
+      );
+      expect(derived.lines[0].base_amount.toString()).toBe('13888.89');
+      expect(derived.lines[0].tax_amount.toString()).toBe('1111.11');
+      expect(derived.lines[0].total_amount.toString()).toBe('15000');
+      expect(derived.totals.total.toString()).toBe('15000');
+      expect(derived.taxes).toHaveLength(1);
+      expect(derived.taxes[0]).toMatchObject({
+        tax_name: 'INC 8%',
+        tax_amount: 1111.11,
+      });
+    });
+
+    it('reembolso total mixto (IVA productos + INC envío) ⇒ NC 115.000 exacta', async () => {
+      const productLine = orderLine({
+        id: 11,
+        product_id: 3,
+        product_variant_id: null,
+        product_name: 'Cena',
+        quantity: 1,
+        unit_price: new Prisma.Decimal(100000),
+      });
+      const { service } = guidedWithShipping({
+        refund: {
+          refund_items: [
+            refundItem({
+              order_item_id: 11,
+              quantity: 1,
+              refund_amount: new Prisma.Decimal(100000),
+            }),
+          ],
+          shipping_refund: new Prisma.Decimal(15000),
+        },
+        order_items: [productLine],
+      });
+
+      const link = await resolve(
+        service,
+        guidedDto(),
+        'credit_note',
+        invoiceOf(1),
+      );
+
+      expect(link.concept_code).toBe('2');
+      expect(link.derived_items).toHaveLength(2);
+      expect(link.derived_items[1]).toMatchObject({
+        unit_price: 15000,
+        tax_amount: 1111.11,
+        is_inclusive: true,
+      });
+
+      const derived = derivePartialNoteLinesViaKernel(
+        link.derived_items,
+        [
+          {
+            id: 21,
+            product_id: 3,
+            product_variant_id: null,
+            is_inclusive: true,
+            tax_amount: new Prisma.Decimal(15966.38),
+            quantity: new Prisma.Decimal(1),
+            unit_price: new Prisma.Decimal(100000),
+            discount_amount: new Prisma.Decimal(0),
+          },
+          {
+            id: 22,
+            product_id: null,
+            product_variant_id: null,
+            is_inclusive: false,
+            tax_amount: new Prisma.Decimal(1111.11),
+            quantity: new Prisma.Decimal(1),
+            unit_price: new Prisma.Decimal(13888.89),
+            discount_amount: new Prisma.Decimal(0),
+          },
+        ],
+        [
+          {
+            tax_rate_id: 5,
+            tax_name: 'IVA 19%',
+            tax_rate: new Prisma.Decimal(19),
+            tax_type: 'iva',
+            invoice_item_id: 21,
+          },
+          {
+            tax_rate_id: 9,
+            tax_name: 'INC 8%',
+            tax_rate: new Prisma.Decimal(8),
+            tax_type: 'inc',
+            invoice_item_id: 22,
+          },
+        ],
+        902,
+        'credit_note',
+      );
+      // Cada línea despeja SU tributo (mixta por gemela) y la suma es el
+      // dinero devuelto al centavo: la guarda de saldo acreditable no ve
+      // exceso (el bug sumaba 16.200 y lanzaba INVOICING_CREDIT_NOTE_001).
+      expect(derived.taxes).toHaveLength(2);
+      expect(derived.taxes).toContainEqual(
+        expect.objectContaining({ tax_name: 'IVA 19%', tax_amount: 15966.38 }),
+      );
+      expect(derived.taxes).toContainEqual(
+        expect.objectContaining({ tax_name: 'INC 8%', tax_amount: 1111.11 }),
+      );
+      expect(derived.totals.tax.toString()).toBe('17077.49');
+      expect(derived.totals.total.toString()).toBe('115000');
+    });
+
+    it('dos parciales de 7.500: pistas 555,56 y 555,55 que cierran contra la copia', async () => {
+      const partial = (priors: any[]) =>
+        guidedWithShipping({
+          refund: {
+            refund_items: [],
+            shipping_refund: new Prisma.Decimal(7500),
+          },
+          priors,
+        });
+
+      const { service: firstService } = partial([]);
+      const first = await resolve(
+        firstService,
+        guidedDto(),
+        'credit_note',
+        invoiceOf(1),
+      );
+      expect(first.derived_items).toEqual([
+        expect.objectContaining({
+          unit_price: 7500,
+          tax_amount: 555.56,
+          is_inclusive: true,
+        }),
+      ]);
+
+      const { service: secondService } = partial([
+        { shipping_refund: new Prisma.Decimal(7500) },
+      ]);
+      const second = await resolve(
+        secondService,
+        guidedDto(),
+        'credit_note',
+        invoiceOf(1),
+      );
+      expect(second.derived_items).toEqual([
+        expect.objectContaining({
+          unit_price: 7500,
+          tax_amount: 555.55,
+          is_inclusive: true,
+        }),
+      ]);
+      const hinted =
+        Number(first.derived_items[0].tax_amount) +
+        Number(second.derived_items[0].tax_amount);
+      expect(hinted).toBeCloseTo(1111.11, 2);
+
+      // La pista del primer parcial difiere 1 ¢ del re-despeje del kernel
+      // (555,55): el kernel gana, la NC cierra a 7.500 y queda aviso.
+      const warnings: string[] = [];
+      const derived = derivePartialNoteLinesViaKernel(
+        first.derived_items,
+        [
+          {
+            id: 77,
+            product_id: null,
+            product_variant_id: null,
+            is_inclusive: false,
+            tax_amount: new Prisma.Decimal(1111.11),
+            quantity: new Prisma.Decimal(1),
+            unit_price: new Prisma.Decimal(13888.89),
+            discount_amount: new Prisma.Decimal(0),
+          },
+        ],
+        [
+          {
+            tax_rate_id: 9,
+            tax_name: 'INC 8%',
+            tax_rate: new Prisma.Decimal(8),
+            tax_type: 'inc',
+            invoice_item_id: 77,
+          },
+        ],
+        903,
+        'credit_note',
+        { warn: (message: string) => warnings.push(message) },
+      );
+      expect(derived.lines[0].tax_amount.toString()).toBe('555.55');
+      expect(derived.totals.total.toString()).toBe('7500');
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('server wins');
+    });
+
+    it('sin impuesto en el envío la línea queda igual que hoy (sin flag, cuota 0)', async () => {
+      const { service, prisma } = guidedWithShipping({
+        refund: {
+          refund_items: [],
+          shipping_refund: new Prisma.Decimal(3000),
+        },
+        copy: noTaxCopy(),
+      });
+
+      const link = await resolve(
+        service,
+        guidedDto(),
+        'credit_note',
+        invoiceOf(1),
+      );
+
+      expect(link.derived_items).toEqual([
+        {
+          description: 'Reembolso de envío — orden #1',
+          quantity: 1,
+          unit_price: 3000,
+          discount_amount: 0,
+          tax_amount: 0,
+        },
+      ]);
+      // Sin impuesto no se consultan previos.
+      expect(prisma.refunds.findMany).not.toHaveBeenCalled();
+    });
+
+    it('orden ausente: fail-open con la línea de hoy, la nota no se bloquea', async () => {
+      const { service } = guidedWithShipping({
+        refund: {
+          refund_items: [],
+          shipping_refund: new Prisma.Decimal(3000),
+        },
+        copy: null,
+      });
+
+      const link = await resolve(
+        service,
+        guidedDto(),
+        'credit_note',
+        invoiceOf(1),
+      );
+
+      expect(link.derived_items).toEqual([
+        expect.objectContaining({ unit_price: 3000, tax_amount: 0 }),
+      ]);
+      expect(link.derived_items[0]).not.toHaveProperty('is_inclusive');
     });
   });
 });
