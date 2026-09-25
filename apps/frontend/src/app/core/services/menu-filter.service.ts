@@ -1144,7 +1144,7 @@ export class MenuFilterService {
    * requires trusted roles (owner/admin/super_admin/STORE_OWNER/ORG_OWNER/manager)
    * or explicit permissions ('store:dashboard:view', 'store:analytics:read').
    */
-  canAccessDashboard(): boolean {
+  private canAccessDashboard(): boolean {
     return canUserAccessDashboard(this.authFacade);
   }
 }

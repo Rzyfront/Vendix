@@ -492,11 +492,10 @@ export async function seedUsers(
           orders: true,
           orders_sales: true,
           inventory: true,
-          cashier: true,
           customers: true,
-          tables: true,
-          kitchen_display: true,
-          dispatch_routes: true,
+          restaurant_ops_tables: true,
+          restaurant_ops_kds: true,
+          orders_dispatch_routes: true,
           settings: true,
         },
       };
@@ -509,7 +508,7 @@ export async function seedUsers(
           orders: true,
           orders_sales: true,
           customers: true,
-          tables: true,
+          restaurant_ops_tables: true,
         },
       };
     } else {

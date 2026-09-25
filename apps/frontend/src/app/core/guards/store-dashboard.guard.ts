@@ -50,8 +50,9 @@ export const storeDashboardGuard: CanActivateFn = () => {
 
   const menuTree = menuFilter.currentMenuTree();
   const target = menuFilter.firstActiveModuleRoute(menuTree);
-  // QUI-860: Evita la pantalla en blanco cuando no hay a dónde redirigir o target
-  // cae en el mismo dashboard: navegar a /admin/no-access en vez de retornar false en el vacío.
+  // QUI-860: defensa intencional (cubierta por spec) aunque firstActiveModuleRoute
+  // en la práctica nunca retorna vacío ni el dashboard para no autorizados:
+  // evita la pantalla en blanco navegando a /admin/no-access.
   if (!target || target === '/admin/dashboard') {
     router.navigateByUrl(PANEL_UI_NO_ACCESS_ROUTE);
     return false;
