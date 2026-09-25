@@ -1195,7 +1195,7 @@ export class InvoiceScannerModalComponent {
   readonly selectedSupplierName = signal<string | null>(null);
   readonly showSupplierCreate = signal(false);
   /** QUI-845: snapshot del proveedor OCR para precargar el quick-create. */
-  private readonly supplierCreatePreload = signal<{
+  readonly supplierCreatePreload = signal<{
     name?: string;
     tax_id?: string;
     phone?: string;
