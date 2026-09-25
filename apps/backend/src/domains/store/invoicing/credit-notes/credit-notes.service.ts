@@ -17,6 +17,7 @@ import {
   CreateCreditNoteDto,
   CreateDebitNoteDto,
 } from './dto/create-credit-note.dto';
+import { CreateInvoiceItemDto } from '../dto/create-invoice.dto';
 import { InvoiceNumberGenerator } from '../utils/invoice-number-generator';
 import { RESOLUTION_PUBLIC_SELECT } from '../utils/technical-key.util';
 import { absorbInclusiveLine } from '../utils/dian-money.util';
@@ -75,6 +76,30 @@ interface IncomingNoteTaxRow {
  */
 interface ResolvedNoteTaxRow extends IncomingNoteTaxRow {
   tax_type: tax_type_enum;
+}
+
+/**
+ * CP-REFUND-FLOW-REDESIGN paso 7 — vínculo refund↔NC resuelto y validado.
+ *
+ * `derived_items` nunca llega vacío: un refund sin líneas derivables se
+ * rechaza en `resolveRefundLink` (una NC vinculada que cayera al copiado
+ * TOTAL acreditaría la factura entera por un reembolso que no devolvió
+ * nada). `bridge_rows` en cambio SÍ puede llegar vacío — es el caso de la
+ * línea libre de envío, que no tiene `refund_item` que cubrir.
+ */
+interface ResolvedRefundLink {
+  refund: {
+    id: number;
+    order_id: number;
+  };
+  derived_items: CreateInvoiceItemDto[];
+  concept_code: '1' | '2';
+  default_reason: string;
+  bridge_rows: Array<{
+    refund_item_id: number;
+    covered_qty: number;
+    covered_amount: Prisma.Decimal;
+  }>;
 }
 
 const TAX_TYPE_VALUES: readonly string[] = Object.values(tax_type_enum);
@@ -295,6 +320,17 @@ export class CreditNotesService {
       );
     }
 
+    // CP-REFUND-FLOW-REDESIGN paso 7 — NC guiada por reembolso. Se resuelve
+    // ANTES de numerar, como todas las guardas: un refund inexistente, de
+    // otra orden o ya vinculado no debe gastar un consecutivo. Devuelve null
+    // en la NC manual (100 % del histórico) y el flujo de abajo no cambia.
+    // La puerta de tipos corregibles de arriba NO se salta: la NC corrige la
+    // FACTURA, el refund sólo aporta las líneas.
+    const refund_link = await this.resolveRefundLink(dto, type, {
+      id: related_invoice.id,
+      order_id: related_invoice.order_id,
+    });
+
     // ANTES de tomar el consecutivo, no después. Una línea que referencia un
     // artículo ajeno al catálogo de esta tienda tiene dos finales y los dos son
     // malos: el id inexistente revienta en la FK de `invoice_items` como un 500
@@ -308,7 +344,12 @@ export class CreditNotesService {
     // protección hay que repetirla aquí; es el precio de tener dos carriles de
     // escritura, y se prefiere duplicar catorce líneas antes que dejar el
     // carril de notas sin puerta.
-    await this.assertNoteLinesResolvable(dto.items);
+    // Paso 7: la NC guiada valida sus líneas DERIVADAS por la misma puerta
+    // (el combo guiada+explícita se rechazó arriba, así que sólo una de las
+    // dos ramas trae líneas).
+    await this.assertNoteLinesResolvable(
+      dto.items ?? refund_link?.derived_items,
+    );
 
     // ANTES de tomar el consecutivo, por la misma razón que la guarda de arriba:
     // un consecutivo gastado no se devuelve.
@@ -351,9 +392,14 @@ export class CreditNotesService {
     // Iterar `dto.items` sin este fallback lanzaba un `TypeError` crudo —un 500
     // «Error interno»— sobre lo que en realidad es una nota de anulación
     // perfectamente válida.
+    // Paso 7: la NC guiada deriva sus líneas del refund (mapeo ADR-03).
+    // Nunca cae al copiado TOTAL: `resolveRefundLink` rechaza el refund sin
+    // líneas derivables antes de llegar acá.
     const items = dto.items?.length
       ? dto.items
-      : related_invoice.invoice_items.map((item) => ({
+      : refund_link
+        ? refund_link.derived_items
+        : related_invoice.invoice_items.map((item) => ({
           product_id: item.product_id ?? undefined,
           product_variant_id: item.product_variant_id ?? undefined,
           description: item.description,
@@ -380,7 +426,11 @@ export class CreditNotesService {
     // `tax_amount` del cliente: cada línea se deriva por el kernel único
     // `absorbInclusiveLine`, el mismo loop del motor, y la cabecera suma lo
     // derivado. La rama TOTAL sigue copia exacta (ver `derivePartialNote...`).
-    const is_partial = !!dto.items?.length;
+    // Paso 7: las líneas derivadas del refund recorren el mismo carril
+    // PARCIAL por kernel que las explícitas — la cuota se deriva, nunca se
+    // confía (el `tax_amount` del `refund_item` viaja en la línea pero el
+    // kernel lo ignora, igual que ignora el reclamo de cualquier cliente).
+    const is_partial = !!dto.items?.length || !!refund_link;
     const derived_partial = !dto.taxes?.length &&
       is_partial
         ? derivePartialNoteLinesViaKernel(
@@ -495,7 +545,15 @@ export class CreditNotesService {
         currency: dto.currency || related_invoice.currency || 'COP',
         issue_date,
         created_by_user_id: context.user_id,
-        notes: dto.notes || (dto as CreateCreditNoteDto).reason,
+        // Paso 7: la NC guiada se auto-describe (`Reembolso #N de la orden
+        // #M`) salvo que el operador escriba motivo/notas.
+        notes:
+          dto.notes ||
+          (dto as CreateCreditNoteDto).reason ||
+          refund_link?.default_reason,
+        // Paso 7: vínculo estructural refund↔NC (el detalle por línea va al
+        // puente, más abajo).
+        refund_id: refund_link?.refund.id ?? null,
         // Concepto DIAN (`cac:DiscrepancyResponse/cbc:ResponseCode`). El DTO ya
         // validó que el código pertenece al catálogo de ESTE tipo de nota —los
         // dos catálogos son distintos—, así que aquí sólo se persiste.
@@ -505,7 +563,11 @@ export class CreditNotesService {
         // vacío a '2' acá dejaría indistinguibles «el usuario eligió anulación»
         // y «esta nota nació sin concepto», que es justo lo que hay que poder
         // separar para saber qué se declaró de verdad.
-        note_concept_code: dto.note_concept_code ?? null,
+        // Paso 7: la NC guiada defaultea el concepto ('2' anulación si el
+        // refund cubre la orden completa, '1' devolución parcial si no) salvo
+        // que el operador elija otro — el explícito siempre manda.
+        note_concept_code:
+          dto.note_concept_code ?? refund_link?.concept_code ?? null,
         invoice_items: {
           create: items.map((item, index) => {
             // B.1 (F-020) — parcial por kernel: la línea persiste base/cuota
@@ -592,6 +654,30 @@ export class CreditNotesService {
       include: INVOICE_INCLUDE,
     });
 
+    // Paso 7 — puente refund↔NC por línea. `withoutScope()` + ids ya
+    // verificados: el modelo no está registrado en `StorePrismaService`
+    // (ese archivo quedó fuera del scope de este paso) y no necesita
+    // estarlo — los dos extremos ya se validaron en scope (la nota nació en
+    // esta tienda, los `refund_items` se leyeron por el refund scopeado),
+    // así que la escritura va anclada al tenant por construcción.
+    // `skipDuplicates` cubre el reintento tras un fallo parcial (la guarda
+    // anti-doble-vínculo impide el duplicado real). Si esto falla, la nota
+    // YA existe: se lanza para que el fallo sea visible —nunca silencioso—
+    // y el operador anule el borrador y reintente.
+    if (refund_link && refund_link.bridge_rows.length > 0) {
+      await this.prisma
+        .withoutScope()
+        .credit_note_refund_items.createMany({
+          data: refund_link.bridge_rows.map((row) => ({
+            credit_note_id: note.id,
+            refund_item_id: row.refund_item_id,
+            covered_qty: row.covered_qty,
+            covered_amount: row.covered_amount,
+          })),
+          skipDuplicates: true,
+        });
+    }
+
     this.event_emitter.emit('invoice.created', {
       invoice_id: note.id,
       invoice_number: note.invoice_number,
@@ -640,6 +726,202 @@ export class CreditNotesService {
    * invisible la tarifa global/organizacional — que es justamente el caso que
    * se está intentando resolver.
    */
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 7 — resuelve y valida el vínculo
+   * refund↔NC de una nota guiada.
+   *
+   * El mapeo `refund_items` → líneas es el ADR-03 del order-details
+   * (frontend), movido a backend: cantidad y montos del reembolso, precio
+   * y descripción de la línea de la orden. Nunca re-deriva impuestos acá —
+   * las líneas entran al carril parcial por kernel como cualquier otra.
+   *
+   * Todo rechazo sale ANTES de numerar (el llamador numera después):
+   * refund inexistente/ajeno, factura padre sin orden, cruce de órdenes,
+   * doble vínculo vivo, mezcla guiada+explícita, y refund sin nada que
+   * derivar. Null = NC manual, el flujo histórico intacto.
+   */
+  private async resolveRefundLink(
+    dto: CreateCreditNoteDto | CreateDebitNoteDto,
+    type: 'credit_note' | 'debit_note',
+    related_invoice: { id: number; order_id: number | null },
+  ): Promise<ResolvedRefundLink | null> {
+    const refund_id = (dto as CreateCreditNoteDto).refund_id;
+    if (refund_id == null) return null;
+
+    // Sólo la NC acredita devoluciones: la ND aumenta el valor facturado.
+    // Inalcanzable por validación (`refund_id` no existe en el DTO de débito
+    // y el pipe global lo rechaza), pero el servicio no confía en el pipe.
+    if (type !== 'credit_note') {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED,
+        `El reembolso #${refund_id} no puede vincularse a una nota débito: sólo la nota crédito acredita devoluciones.`,
+        { refund_id },
+      );
+    }
+
+    // Guiada o manual, no mezcla: con líneas explícitas no hay mapeo honesto
+    // de vuelta a `refund_items` y el puente mentiría la cobertura.
+    if (dto.items?.length) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_001,
+        `La nota vinculada al reembolso #${refund_id} deriva sus líneas del reembolso: no envíes \`items\` explícitos. Omitelos para la NC guiada, u omite \`refund_id\` para la manual.`,
+        { refund_id },
+      );
+    }
+
+    // `refunds` scopea por relación (`orders.store_id`): un refund ajeno
+    // responde 404, no 403 — mismo contrato que el resto del servicio.
+    const refund = await this.prisma.refunds.findFirst({
+      where: { id: refund_id },
+      include: { refund_items: true },
+    });
+    if (!refund) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+    }
+
+    // Sin orden en la factura padre no hay ancla: las líneas del refund
+    // cuelgan de `order_items` y sin orden no hay contra qué cruzarlas.
+    if (related_invoice.order_id == null) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_001,
+        `El reembolso #${refund.id} no puede vincularse: la factura que esta nota corrige no nació de una orden y las líneas del reembolso no tienen contra qué cruzarse. Emite la nota manual (sin \`refund_id\`).`,
+        { refund_id: refund.id, related_invoice_id: related_invoice.id },
+      );
+    }
+
+    if (refund.order_id !== related_invoice.order_id) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_001,
+        `El reembolso #${refund.id} es de la orden #${refund.order_id} pero la factura que esta nota corrige es de la orden #${related_invoice.order_id}: una NC acredita devoluciones de su propia orden.`,
+        {
+          refund_id: refund.id,
+          refund_order_id: refund.order_id,
+          related_invoice_id: related_invoice.id,
+          invoice_order_id: related_invoice.order_id,
+        },
+      );
+    }
+
+    // Anti-doble-vínculo: dos NC vivas sobre el mismo refund duplicarían
+    // `nc_covered_qty` en el endpoint de cobertura. Sólo cuentan las vivas
+    // (`draft`/`validated`/`sent`/`accepted`): una rechazada/anulada no
+    // acreditó un peso, igual que en el saldo acreditable.
+    const live_link = await this.prisma.invoices.findFirst({
+      where: {
+        refund_id: refund.id,
+        invoice_type: 'credit_note',
+        status: { in: ['draft', 'validated', 'sent', 'accepted'] },
+      },
+      select: { id: true, invoice_number: true, status: true },
+    });
+    if (live_link) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_001,
+        `El reembolso #${refund.id} ya lo acredita la nota crédito ${live_link.invoice_number ?? `#${live_link.id}`} (estado «${live_link.status}»). Anula esa nota antes de emitir otra sobre el mismo reembolso.`,
+        {
+          refund_id: refund.id,
+          credit_note_id: live_link.id,
+          credit_note_status: live_link.status,
+        },
+      );
+    }
+
+    // Snapshot de la orden en scope: precio y descripción salen de acá,
+    // cantidad y montos del refund.
+    const order_items = await this.prisma.order_items.findMany({
+      where: { order_id: refund.order_id },
+      select: {
+        id: true,
+        product_id: true,
+        product_variant_id: true,
+        product_name: true,
+        quantity: true,
+        unit_price: true,
+      },
+    });
+
+    const derived_items: CreateInvoiceItemDto[] = [];
+    const bridge_rows: ResolvedRefundLink['bridge_rows'] = [];
+    for (const ri of refund.refund_items) {
+      if (!(Number(ri.quantity) > 0)) continue;
+      const oi = order_items.find((o) => o.id === ri.order_item_id);
+      if (!oi) continue;
+      const unit_price = Number(oi.unit_price);
+      const discount = Number(ri.discount_amount ?? 0);
+      const tax = Number(ri.tax_amount ?? 0);
+      derived_items.push({
+        ...(oi.product_id != null && oi.product_id > 0
+          ? { product_id: oi.product_id }
+          : {}),
+        ...(oi.product_variant_id != null
+          ? { product_variant_id: oi.product_variant_id }
+          : {}),
+        description: oi.product_name ?? `Ítem ${oi.id}`,
+        quantity: Number(ri.quantity),
+        unit_price,
+        discount_amount: discount,
+        tax_amount: tax,
+      });
+      bridge_rows.push({
+        refund_item_id: ri.id,
+        covered_qty: Number(ri.quantity),
+        covered_amount:
+          ri.refund_amount != null
+            ? new Prisma.Decimal(ri.refund_amount)
+            : new Prisma.Decimal(
+                Number(ri.quantity) * unit_price - discount + tax,
+              ),
+      });
+    }
+
+    // Refund sin líneas pero con envío (orden-nivel): línea libre de envío,
+    // sin puente (no hay `refund_item` que cubrir).
+    if (derived_items.length === 0 && Number(refund.shipping_refund ?? 0) > 0) {
+      derived_items.push({
+        description: `Reembolso de envío — orden #${refund.order_id}`,
+        quantity: 1,
+        unit_price: Number(refund.shipping_refund),
+        discount_amount: 0,
+        tax_amount: 0,
+      });
+    }
+
+    // Sin líneas y sin envío no hay nada que acreditar: caer al copiado
+    // TOTAL acreditaría la factura entera por un reembolso vacío.
+    if (derived_items.length === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_001,
+        `El reembolso #${refund.id} no tiene líneas ni envío que acreditar: no hay nada de donde derivar la nota. Emite la nota manual (sin \`refund_id\`).`,
+        { refund_id: refund.id },
+      );
+    }
+
+    // '2' anulación si el refund cubre la orden completa, '1' devolución
+    // parcial en cualquier otro caso (mismo criterio del frontend).
+    const covers_whole_order =
+      order_items.length > 0 &&
+      order_items.every((oi) => {
+        const qty = Number(
+          refund.refund_items.find((ri) => ri.order_item_id === oi.id)
+            ?.quantity ?? 0,
+        );
+        return qty >= Number(oi.quantity);
+      });
+
+    const default_reason = (
+      `Reembolso #${refund.id} de la orden #${refund.order_id}` +
+      (refund.reason ? ` — ${refund.reason}` : '')
+    ).slice(0, 500);
+
+    return {
+      refund: { id: refund.id, order_id: refund.order_id },
+      derived_items,
+      concept_code: covers_whole_order ? '2' : '1',
+      default_reason,
+      bridge_rows,
+    };
+  }
+
   private async resolveNoteTaxTypes(
     rows: IncomingNoteTaxRow[],
     related_invoice_id: number,

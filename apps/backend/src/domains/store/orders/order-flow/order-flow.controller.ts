@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import { OrderFlowService } from './order-flow.service';
 import { RefundFlowService } from './services/refund-flow.service';
+import { RefundCoverageService } from './services/refund-coverage.service';
 import { RefundMethodsService } from './services/refund-methods.service';
 import {
   PayOrderDto,
@@ -53,6 +54,7 @@ export class OrderFlowController {
   constructor(
     private readonly orderFlowService: OrderFlowService,
     private readonly refundFlowService: RefundFlowService,
+    private readonly refundCoverageService: RefundCoverageService,
     private readonly refundMethodsService: RefundMethodsService,
     private readonly responseService: ResponseService,
     // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · emits the timeline rows
@@ -586,6 +588,20 @@ export class OrderFlowController {
     return this.responseService.success(
       available,
       'Available refund methods retrieved',
+    );
+  }
+
+  // CP-REFUND-FLOW-REDESIGN paso 7 — cobertura refund↔NC por línea + aviso
+  // FE. Lectura pura (permiso `read`, como `preview` y
+  // `available-methods`): la consumen el banner FE→NC del detalle (paso 8)
+  // y la sección Reembolsos del ticket (paso 9).
+  @Get('refund/coverage')
+  @Permissions('store:orders:order_flow:read')
+  async getRefundCoverage(@Param('orderId', ParseIntPipe) orderId: number) {
+    const coverage = await this.refundCoverageService.getCoverage(orderId);
+    return this.responseService.success(
+      coverage,
+      'Refund coverage retrieved',
     );
   }
 }

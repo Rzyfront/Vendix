@@ -2263,8 +2263,39 @@ model refund_items {
   created_at              DateTime?            @default(now()) @db.Timestamp(6)
   order_items             order_items          @relation(fields: [order_item_id], references: [id], onUpdate: NoAction)
   refunds                 refunds              @relation(fields: [refund_id], references: [id], onUpdate: NoAction)
+  credit_note_refund_items credit_note_refund_items[]
   inventory_locations     inventory_locations? @relation(fields: [location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   bank_accounts           bank_accounts?       @relation(fields: [bank_account_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+}
+
+/// CP-REFUND-FLOW-REDESIGN paso 7 — puente estructural refund↔NC POR LÍNEA.
+///
+/// Una NC vinculada (`invoices.refund_id`) acredita líneas concretas de
+/// `refund_items`, no un monto global: cada fila congela qué cantidad de
+/// qué línea del refund cubre la nota. Es lo que `GET
+/// /store/orders/:orderId/flow/refund/coverage` agrega como
+/// `nc_covered_qty` por `order_item_id` — nunca comparación floja por
+/// monto/fecha.
+///
+/// Sólo las NC `accepted` cuentan como cobertura (una `draft` aún no
+/// acreditó un peso — mismo criterio que el saldo acreditable en
+/// `credit-notes.service.ts`); las filas se escriben al crear la nota y
+/// NUNCA se reescriben (documento fiscal emitido es inmutable).
+///
+/// Restrict en ambas FK: ni la NC ni el refund se borran jamás (estados,
+/// no deletes), así que la restricción no bloquea ningún flujo vivo.
+model credit_note_refund_items {
+  id              Int          @id @default(autoincrement())
+  credit_note_id  Int
+  refund_item_id  Int
+  covered_qty     Int
+  covered_amount  Decimal?     @db.Decimal(12, 2)
+  created_at      DateTime?    @default(now()) @db.Timestamp(6)
+  credit_note     invoices     @relation(fields: [credit_note_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  refund_item     refund_items @relation(fields: [refund_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([credit_note_id, refund_item_id])
+  @@index([refund_item_id])
 }
 
 model refunds {
@@ -2298,6 +2329,9 @@ model refunds {
   resolved_by_user_id   Int?
   resolution_notes      String?            @db.Text
   refund_items          refund_items[]
+  /// CP-REFUND-FLOW-REDESIGN paso 7 — NCs vinculadas a este refund
+  /// (`invoices.refund_id`). Back-relation, sin columna propia.
+  invoices              invoices[]
   orders                orders             @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   payments              payments?          @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   ar_payments           ar_payments?       @relation(fields: [ar_payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -5895,6 +5929,14 @@ model invoices {
   order_id                         Int?
   sales_order_id                   Int?
   related_invoice_id               Int?
+  /// CP-REFUND-FLOW-REDESIGN paso 7 — reembolso que esta NOTA CRÉDITO
+  /// acredita. Sólo `invoice_type = 'credit_note'` lo puebla, vía
+  /// `CreateCreditNoteDto.refund_id` (deriva ADR-03 en
+  /// `credit-notes.service.ts`); el detalle por línea vive en
+  /// `credit_note_refund_items`. NULL = nota manual sin vínculo a refund
+  /// (100 % del histórico). Restrict: un refund con NC vinculada no se
+  /// elimina — los refunds nunca se borran, sólo cambian de estado.
+  refund_id                        Int?
   /// D.1 (DB-05, ADR-03) — contrato de obra que origina ESTE documento
   /// (FB-08 `POST /contracts/:id/invoice`). Nullable: el 100 % del historico
   /// factura ordenes o captura manual y sigue intacto. La unicidad "un
@@ -5973,6 +6015,7 @@ model invoices {
   contract                 contracts?                 @relation(fields: [contract_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   related_invoice          invoices?                  @relation("invoice_credit_debit_notes", fields: [related_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   credit_debit_notes       invoices[]                 @relation("invoice_credit_debit_notes")
+  refund                   refunds?                   @relation(fields: [refund_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   resolution               invoice_resolutions?       @relation(fields: [resolution_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   /// `map` explícito: sin él Prisma esperaría el nombre
   /// `invoices_profile_id_profile_version_fkey` y cada `migrate diff` reportaría
@@ -5982,6 +6025,7 @@ model invoices {
   accounting_entry         accounting_entries?        @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   created_by_user          users?                     @relation("invoices_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   invoice_items            invoice_items[]
+  credit_note_refund_items credit_note_refund_items[]
   invoice_taxes            invoice_taxes[]
   withholding_calculations withholding_calculations[]
   invoice_retry_queue      invoice_retry_queue[]
@@ -5997,6 +6041,7 @@ model invoices {
   @@index([accounting_entity_id, fiscal_document_type])
   @@index([organization_id, issue_date])
   @@index([customer_id])
+  @@index([refund_id])
 }
 
 model invoice_items {
