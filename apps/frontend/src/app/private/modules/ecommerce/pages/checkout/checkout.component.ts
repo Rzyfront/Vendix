@@ -1518,10 +1518,12 @@ export class CheckoutComponent implements OnInit {
       .subscribe({
         next: (res) => {
           this.savedGeocodeInFlight.delete(id);
-          if (res?.lat == null || res?.lng == null) return;
+          const lat = res?.lat;
+          const lng = res?.lng;
+          if (lat == null || lng == null) return;
           this.savedCoordsOverride.update((m) => ({
             ...m,
-            [id]: { lat: res.lat, lng: res.lng },
+            [id]: { lat, lng },
           }));
           this.bumpCoordsVersion();
         },
