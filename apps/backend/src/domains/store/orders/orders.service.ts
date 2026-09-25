@@ -828,16 +828,20 @@ export class OrdersService {
     // Auto-scoped query
     const where: Prisma.ordersWhereInput = {
       ...(search && {
-        // Search by order number OR by customer (first_name, last_name, email)
-        // OR by customer_alias (carril B — B1). Customer is reached via
-        // orders.users (customer_id). Guest orders (customer_id null) without
-        // an alias still fall through to shipping_address_snapshot JSON
-        // (search fragile, out of scope).
+        // Search by order number OR by customer (first_name, last_name, email,
+        // legal_name, phone) OR by customer_alias (carril B — B1). Customer is
+        // reached via orders.users (customer_id). Guest orders (customer_id
+        // null) without an alias still fall through to
+        // shipping_address_snapshot JSON (search fragile, out of scope).
+        // Tenant scope: the whole `where` runs under StorePrismaService, so
+        // the users-relation predicates can only match orders of this store.
         OR: [
           { order_number: { contains: search, mode: 'insensitive' } },
           { users: { first_name: { contains: search, mode: 'insensitive' } } },
           { users: { last_name: { contains: search, mode: 'insensitive' } } },
           { users: { email: { contains: search, mode: 'insensitive' } } },
+          { users: { legal_name: { contains: search, mode: 'insensitive' } } },
+          { users: { phone: { contains: search, mode: 'insensitive' } } },
           { customer_alias: { contains: search, mode: 'insensitive' } },
         ],
       }),
@@ -942,10 +946,19 @@ export class OrdersService {
           // Cliente para la columna "Cliente" de los listados (wizard de
           // remisiones, lista de órdenes). findAll ya FILTRA por users en la
           // búsqueda pero no los devolvía → "No data" en la lista. Select
-          // ligero: solo lo que renderiza el transform (nombre); guests
-          // (customer_id null) traen users=null y caen al fallback.
+          // ligero: nombre + identidad fiscal para pintar jurídica (razón
+          // social) sin otro round-trip; guests (customer_id null) traen
+          // users=null y caen al fallback.
           users: {
-            select: { id: true, first_name: true, last_name: true },
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              legal_name: true,
+              document_type: true,
+              document_number: true,
+              person_type: true,
+            },
           },
           // Carril B — B2: badge Mesa en el listado. Mismo shape que findOne
           // (:821-847) pero con take:1 + orderBy id desc para quedarnos con
@@ -1128,6 +1141,10 @@ export class OrdersService {
             email: true,
             phone: true,
             avatar_url: true,
+            legal_name: true,
+            document_type: true,
+            document_number: true,
+            person_type: true,
           },
         },
         order_installments: {
@@ -1385,6 +1402,39 @@ export class OrdersService {
     const economicFields = ['items', 'subtotal', 'total_amount', 'tax_amount', 'discount_amount', 'shipping_cost', 'customer_id', 'customer_alias', 'currency'];
     if (economicFields.some((key) => Object.prototype.hasOwnProperty.call(updateOrderDto, key))) assertNoActiveFinancialSplit(order);
 
+    // Contrato PATCH titular: el cambio de titular (customer_id/customer_alias)
+    // por esta vía exige el mismo estado editable que `updateOrderFromEditor`
+    // (created/draft). En cualquier otro estado el titular es inmutable y se
+    // responde 409 ORD_EDIT_NOT_ALLOWED_001, igual que el editor.
+    const touchesTitular =
+      Object.prototype.hasOwnProperty.call(updateOrderDto, 'customer_id') ||
+      Object.prototype.hasOwnProperty.call(updateOrderDto, 'customer_alias');
+    if (
+      touchesTitular &&
+      order.state !== 'created' &&
+      order.state !== 'draft'
+    ) {
+      throw new VendixHttpException(ErrorCodes.ORD_EDIT_NOT_ALLOWED_001);
+    }
+    // Titular del store: un customer_id de otra tienda se rechaza con 403
+    // antes de tocar la fila, igual que el editor.
+    if (
+      updateOrderDto.customer_id != null &&
+      updateOrderDto.customer_id !== order.customer_id
+    ) {
+      const titularStoreId =
+        RequestContextService.getContext()?.store_id ?? order.store_id;
+      const titularMembership = await this.prisma.store_users.findFirst({
+        where: { store_id: titularStoreId, user_id: updateOrderDto.customer_id },
+        select: { id: true },
+      });
+      if (!titularMembership) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_CUSTOMER_STORE_MISMATCH_001,
+        );
+      }
+    }
+
     /**
      * QUI-557 — NINGÚN estado puede escribirse en crudo sobre `orders.state`.
      *
@@ -1537,6 +1587,10 @@ export class OrdersService {
             email: true,
             phone: true,
             avatar_url: true,
+            legal_name: true,
+            document_type: true,
+            document_number: true,
+            person_type: true,
           },
         },
       },

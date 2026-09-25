@@ -2988,6 +2988,23 @@ export class InvoicingService {
         // consecutivo en cada venta anónima.
         customer_tax_id: acquirerRail.identity.document_number,
         customer_document_type: acquirerRail.identity.document_type,
+        // Snapshot del adquiriente congelado al facturar: email/teléfono para
+        // `cac:Contact`, DV y responsabilidades para recalcular el MISMO CUFE
+        // en reenvíos años después. La fuente es la misma del carril (ficha
+        // `users` o datos del invitado) y nunca se mezclan.
+        // `customer_tax_regime` NO se copia: la columna espera código DIAN
+        // ('48'/'49') y `users.tax_regime` es etiqueta RUT ('COMUN'…); la
+        // emisión lo resuelve de la ficha viva.
+        customer_email:
+          order.users?.email ?? invoiceDataRequest?.email ?? null,
+        customer_phone:
+          order.users?.phone ?? invoiceDataRequest?.phone ?? null,
+        customer_verification_digit:
+          order.users?.verification_digit ?? null,
+        customer_fiscal_responsibilities:
+          order.users?.fiscal_responsibilities?.length
+            ? order.users.fiscal_responsibilities
+            : undefined,
         order_id: order.id,
         invoice_number: null,
         resolution_id: null,
@@ -3720,6 +3737,18 @@ export class InvoicingService {
 
     // Only allow editing invoices in draft state
     if (invoice.status !== 'draft') {
+      // Titular de emitida: el documento ya tiene efectos fiscales y su
+      // adquiriente es inmutable; la vía de corrección es la nota crédito.
+      if (
+        dto.customer_id !== undefined &&
+        dto.customer_id !== invoice.customer_id
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_STATUS_002,
+          `La factura #${id} ya no está en borrador y su titular no se puede cambiar. Emite una nota crédito para corregir el adquiriente.`,
+          { invoice_id: id, status: invoice.status },
+        );
+      }
       throw new VendixHttpException(ErrorCodes.INVOICING_STATUS_002);
     }
 
@@ -3780,9 +3809,70 @@ export class InvoicingService {
       await this.assertCustomerResolvable(dto.customer_id);
     }
 
+    // Cambio de titular en borrador: refresca el snapshot del adquiriente
+    // desde la ficha del nuevo cliente para no dejar nombre/documento viejos
+    // con FK nueva. Los campos que el PATCH trae explícitos ganan al refresco
+    // (se aplican después en `update_data`).
+    let titular_snapshot: Record<string, unknown> = {};
+    if (
+      dto.customer_id !== undefined &&
+      dto.customer_id !== invoice.customer_id
+    ) {
+      if (dto.customer_id != null) {
+        const new_customer = await this.prisma.users.findFirst({
+          where: { id: dto.customer_id },
+          select: {
+            first_name: true,
+            last_name: true,
+            legal_name: true,
+            email: true,
+            phone: true,
+            document_type: true,
+            document_number: true,
+            verification_digit: true,
+            fiscal_responsibilities: true,
+          },
+        });
+        if (new_customer) {
+          const rail = resolveAcquirerRail({
+            document_type: new_customer.document_type,
+            document_number: new_customer.document_number,
+            legal_name: new_customer.legal_name,
+            first_name: new_customer.first_name,
+            last_name: new_customer.last_name,
+          });
+          titular_snapshot = {
+            customer_name: rail.identity.name,
+            customer_tax_id: rail.identity.document_number,
+            customer_document_type: rail.identity.document_type,
+            customer_email: new_customer.email ?? null,
+            customer_phone: new_customer.phone ?? null,
+            customer_verification_digit:
+              new_customer.verification_digit ?? null,
+            customer_fiscal_responsibilities:
+              new_customer.fiscal_responsibilities?.length
+                ? new_customer.fiscal_responsibilities
+                : null,
+          };
+        }
+      } else {
+        // Titular a null: limpia el snapshot para no dejar identidad huérfana.
+        titular_snapshot = {
+          customer_name: null,
+          customer_tax_id: null,
+          customer_document_type: null,
+          customer_email: null,
+          customer_phone: null,
+          customer_verification_digit: null,
+          customer_fiscal_responsibilities: null,
+        };
+      }
+    }
+
     // If items are provided, recalculate amounts and replace
     const update_data: any = {
       ...(dto.customer_id !== undefined && { customer_id: dto.customer_id }),
+      ...titular_snapshot,
       ...(dto.supplier_id !== undefined && { supplier_id: dto.supplier_id }),
       ...(dto.customer_name !== undefined && {
         customer_name: dto.customer_name,

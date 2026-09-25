@@ -1179,11 +1179,17 @@ export class CustomersService {
     };
 
     if (search) {
+      // Búsqueda case-insensitive por nombre, email, documento, razón social
+      // (jurídica) y teléfono. El scope tenant lo aportan los filtros base de
+      // arriba (`store_users.some.store_id` + rol customer): el OR sólo puede
+      // matchear clientes de esta tienda.
       where.OR = [
         { first_name: { contains: search, mode: 'insensitive' } },
         { last_name: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
         { document_number: { contains: search, mode: 'insensitive' } },
+        { legal_name: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
       ];
     }
 
