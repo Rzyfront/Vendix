@@ -9,7 +9,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
-import { forkJoin, of } from 'rxjs';
+import { forkJoin, of, firstValueFrom } from 'rxjs';
 import { switchMap, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../../environments/environment';
 import { ShippingMethodsService } from '../../services/shipping-methods.service';
@@ -36,7 +36,10 @@ import {
   TableColumn,
   TableAction} from '../../../../../../../shared/components/table/table.component';
 import { ItemListCardConfig } from '../../../../../../../shared/components/item-list/item-list.interfaces';
-import { AddRateWizardModalComponent } from '../../components/index';
+import {
+  AddRateWizardModalComponent,
+  ZoneModalComponent,
+} from '../../components/index';
 
 @Component({
   selector: 'app-method-detail',
@@ -51,6 +54,7 @@ import { AddRateWizardModalComponent } from '../../components/index';
     BadgeComponent,
     ResponsiveDataViewComponent,
     AddRateWizardModalComponent,
+    ZoneModalComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -301,6 +305,10 @@ import { AddRateWizardModalComponent } from '../../components/index';
                 class="flex-1 md:w-56"
                 (searchChange)="search_term.set($event)"
               />
+              <app-button size="sm" variant="outline" (clicked)="openCreateZone()">
+                <app-icon slot="icon" name="map-pin" [size]="16" />
+                Nueva Zona
+              </app-button>
               <app-button size="sm" (clicked)="openRateWizard()">
                 <app-icon slot="icon" name="plus" [size]="16" />
                 Agregar Tarifa
@@ -341,6 +349,25 @@ import { AddRateWizardModalComponent } from '../../components/index';
           />
         }
       }
+
+      <!-- Gestión de zonas: crear/editar con zone-modal (fuera de otros modales,
+           mismo patrón que el wizard evita anidamiento). -->
+      @if (show_zone_modal()) {
+        @if (editing_zone()) {
+          <app-zone-modal
+            mode="edit"
+            [zone]="editing_zone()!"
+            (close)="closeZoneModal()"
+            (saved)="onZoneSaved()"
+          />
+        } @else {
+          <app-zone-modal
+            mode="create"
+            (close)="closeZoneModal()"
+            (saved)="onZoneSaved()"
+          />
+        }
+      }
     </div>
   `,
   styles: [
@@ -378,6 +405,8 @@ export class MethodDetailComponent implements OnInit {
   search_term = signal<string>('');
   show_rate_wizard = signal<boolean>(false);
   edit_rate = signal<ShippingRate | null>(null);
+  show_zone_modal = signal<boolean>(false);
+  editing_zone = signal<ShippingZone | null>(null);
 
   // Plan Despacho Economía — FASE 2 paso 10.
   // Estado de la política tipada del método (signals para reactividad sin zona).
@@ -524,6 +553,32 @@ export class MethodDetailComponent implements OnInit {
       variant: 'danger',
       action: (item: any) =>
         this.confirmDeleteRate(item._original as ZoneWithRates)},
+    {
+      label: 'Editar zona',
+      icon: 'map-pin',
+      variant: 'secondary',
+      action: (item: any) => this.editZone(item)},
+    {
+      label: (item: any) =>
+        (item._original as ZoneWithRates).zone.is_active
+          ? 'Desactivar zona'
+          : 'Activar zona',
+      icon: (item: any) =>
+        (item._original as ZoneWithRates).zone.is_active
+          ? 'toggle-right'
+          : 'toggle-left',
+      variant: (item: any) =>
+        (item._original as ZoneWithRates).zone.is_active
+          ? 'warning'
+          : 'success',
+      action: (item: any) =>
+        this.toggleZoneActive(item._original as ZoneWithRates)},
+    {
+      label: 'Eliminar zona',
+      icon: 'trash-2',
+      variant: 'danger',
+      action: (item: any) =>
+        this.confirmDeleteZone(item._original as ZoneWithRates)},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -838,6 +893,96 @@ export class MethodDetailComponent implements OnInit {
   onZonesChanged(): void {
     const m = this.method();
     if (m) this.loadZonesWithRates(m.id);
+  }
+
+  // ─── Zone Modal (crear/editar) ───
+
+  openCreateZone(): void {
+    this.editing_zone.set(null);
+    this.show_zone_modal.set(true);
+  }
+
+  editZone(item: any): void {
+    const zr = item._original as ZoneWithRates;
+    this.editing_zone.set(zr.zone);
+    this.show_zone_modal.set(true);
+  }
+
+  closeZoneModal(): void {
+    this.show_zone_modal.set(false);
+    this.editing_zone.set(null);
+  }
+
+  /** zone-modal ya muestra su propio toast; aquí solo se refresca la lista. */
+  onZoneSaved(): void {
+    this.closeZoneModal();
+    const m = this.method();
+    if (m) this.loadZonesWithRates(m.id);
+  }
+
+  async confirmDeleteZone(zr: ZoneWithRates): Promise<void> {
+    const zone = zr.zone;
+    let rates_count: number | null = null;
+    try {
+      const rates = await firstValueFrom(
+        this.shippingService.getStoreZoneRates(zone.id),
+      );
+      rates_count = rates.length;
+    } catch {
+      rates_count = null;
+    }
+
+    const cascade_suffix =
+      rates_count !== null && rates_count > 0
+        ? ` Se eliminarán también ${rates_count} tarifa${rates_count === 1 ? '' : 's'} asociada${rates_count === 1 ? '' : 's'}.`
+        : '';
+    const confirmed = await this.dialogService.confirm({
+      title: 'Eliminar zona',
+      message: `¿Estas seguro de eliminar la zona "${zone.name}"?${cascade_suffix} Esta accion no se puede deshacer.`,
+      confirmText: 'Eliminar',
+      confirmVariant: 'danger'});
+
+    if (!confirmed) return;
+
+    this.shippingService
+      .deleteZone(zone.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.show({
+            variant: 'success',
+            description: 'Zona eliminada correctamente'});
+          const m = this.method();
+          if (m) this.loadZonesWithRates(m.id);
+        },
+        error: () => {
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al eliminar la zona'});
+        }});
+  }
+
+  toggleZoneActive(zr: ZoneWithRates): void {
+    const zone = zr.zone;
+    const next_active = !zone.is_active;
+    this.shippingService
+      .updateZone(zone.id, { is_active: next_active })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.show({
+            variant: 'success',
+            description: next_active
+              ? `Zona "${zone.name}" activada`
+              : `Zona "${zone.name}" desactivada`});
+          const m = this.method();
+          if (m) this.loadZonesWithRates(m.id);
+        },
+        error: () => {
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al cambiar el estado de la zona'});
+        }});
   }
 
   /**
