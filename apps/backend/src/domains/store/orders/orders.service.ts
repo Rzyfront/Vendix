@@ -287,6 +287,92 @@ export class OrdersService {
     );
   }
 
+  /**
+   * Paso 5 (B1+B2) — total de cabecera único (invariante I-6):
+   * `grand_total = max(0, subtotal + tax − descuento + envío + propina)`.
+   *
+   * Lo usan los tres caminos que cambian el envío (editor, `update()`,
+   * `assignShipping`). La propina sale de la orden persistida salvo que el
+   * llamador traiga una explícita; sin propina el término es 0 y el
+   * resultado es idéntico al cálculo histórico.
+   */
+  private computeOrderGrandTotal(args: {
+    subtotal: number;
+    tax: number;
+    discount: number;
+    shipping: number;
+    tip?: number | string | Prisma.Decimal | null;
+  }): number {
+    const tip = Number(args.tip ?? 0);
+    return Math.max(
+      0,
+      roundMoney(
+        Number(args.subtotal) +
+          Number(args.tax) -
+          Number(args.discount) +
+          Number(args.shipping) +
+          (Number.isFinite(tip) ? tip : 0),
+      ),
+    );
+  }
+
+  /**
+   * Paso 5 (B1+B2) — regla única del impuesto del envío, usada por los
+   * tres caminos (editor, `update()`, `assignShipping`):
+   * - `shippingUnchanged` ⇒ `undefined`: la copia congelada queda intacta
+   *   (editar una nota no refactura el envío).
+   * - tarifa con costo de tarifa (±1¢) ⇒ snapshot vigente de la tarifa.
+   * - resto (costo manual, tarifa sin costo determinista) ⇒ copia vacía.
+   *
+   * Cada llamador resuelve `rateCost` con `resolveExpectedRateCost`; el
+   * editor pasa su costo de servidor ya validado por el guard de
+   * tolerancia. El paso 14 extiende esta región con el modo incluido /
+   * agregado de la tarifa.
+   */
+  private async resolveShippingTaxChange(args: {
+    shippingUnchanged: boolean;
+    rateId: number | null;
+    rateCost: number | null;
+    shippingCost: number;
+    storeId: number;
+    client?: any;
+  }): Promise<ShippingTaxSnapshot | undefined> {
+    if (args.shippingUnchanged) return undefined;
+    const costComesFromRate =
+      args.rateId != null &&
+      args.rateCost != null &&
+      !differsByAtLeastCents(args.shippingCost, args.rateCost, 1);
+    if (!costComesFromRate) return { ...EMPTY_SHIPPING_TAX };
+    return this.snapshotShippingTax(
+      args.rateId,
+      args.shippingCost,
+      args.storeId,
+      args.client,
+    );
+  }
+
+  /**
+   * Paso 5 (B1+B2) — costo que dicta una tarifa para una orden:
+   * - `flat`: `base_cost`.
+   * - calculadas (`weight_based`, `price_based`, `free`): se recalcula en
+   *   el servidor con `ShippingCalculatorService` sobre la dirección y las
+   *   líneas de la orden (mismo contrato que
+   *   `PaymentsService.resolvePosShippingTax`).
+   * - `carrier_calculated`, sin dirección resoluble, tarifa desconocida o
+   *   fallo del calculador ⇒ `null` ⇒ copia vacía (nunca inventa impuesto).
+   */
+  private async resolveExpectedRateCost(
+    rate: { id: number; type: string; base_cost: unknown } | null,
+    orderId: number,
+    storeId: number,
+  ): Promise<number | null> {
+    if (!rate) return null;
+    if (rate.type === 'flat') return Number(rate.base_cost);
+    const options = await this.quoteOrderShippingOptions(orderId, storeId);
+    const match = options?.find((o) => o.rate_id === rate.id);
+    return match ? Number(match.cost) : null;
+  }
+
   // === Carril B - B3: listeners de EventEmitter que empujan al SSE =========
   // El hub es por store_id; el cliente del detalle de orden discrimina por
   // data.order_id. Si nadie escucha, `push` es no-op.
@@ -1459,6 +1545,34 @@ export class OrdersService {
         );
       }
     }
+    // Paso 5 (B1) — el envío congela su impuesto en la copia
+    // `shipping_tax_*`: cambiarlo en una orden que ya salió (shipped /
+    // delivered / finished) descuadraría la factura, igual que en
+    // `assignShipping`. Solo el CAMBIO se bloquea: reenviar el mismo
+    // costo/método/tarifa es no-op y pasa. `hasOwn` distingue "el DTO
+    // trae null explícito" (cambio) de "el DTO no dice nada" (persistido).
+    const hasShippingKey = (key: string): boolean =>
+      Object.prototype.hasOwnProperty.call(updateOrderDto, key);
+    const persistedShippingCost = Number(order.shipping_cost ?? 0);
+    const nextShippingCost = hasShippingKey('shipping_cost')
+      ? Number(updateOrderDto.shipping_cost ?? 0)
+      : persistedShippingCost;
+    const nextShippingMethodId = hasShippingKey('shipping_method_id')
+      ? (updateOrderDto.shipping_method_id ?? null)
+      : (order.shipping_method_id ?? null);
+    const nextShippingRateId = hasShippingKey('shipping_rate_id')
+      ? (updateOrderDto.shipping_rate_id ?? null)
+      : (order.shipping_rate_id ?? null);
+    const shippingChanged =
+      differsByAtLeastCents(nextShippingCost, persistedShippingCost, 1) ||
+      nextShippingMethodId !== (order.shipping_method_id ?? null) ||
+      nextShippingRateId !== (order.shipping_rate_id ?? null);
+    if (
+      shippingChanged &&
+      ['shipped', 'delivered', 'finished'].includes(order.state)
+    ) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_LOCKED_001);
+    }
     // Release-853 paso 10 — titular vs factura. Si la orden tiene una
     // `sales_invoice` vigente (cualquier estado fuera de draft/voided/
     // cancelled), el adquiriente es inmutable y el cambio responde 409
@@ -1561,39 +1675,48 @@ export class OrdersService {
           : order_delivery_type_enum.home_delivery;
     }
 
+    // Paso 5 (B1) — copia coherente con el costo nuevo: si es el costo
+    // de la tarifa efectiva (DTO o persistida) se re-deriva el snapshot;
+    // si es manual, copia vacía. Sin cambio de envío no se toca la copia.
+    if (shippingChanged) {
+      const shippingStoreId =
+        RequestContextService.getContext()?.store_id ?? order.store_id;
+      const shippingRate =
+        nextShippingRateId != null
+          ? await this.prisma.shipping_rates.findFirst({
+              where: { id: nextShippingRateId, is_active: true },
+            })
+          : null;
+      const rateCost = await this.resolveExpectedRateCost(
+        shippingRate,
+        id,
+        shippingStoreId,
+      );
+      const taxChange = await this.resolveShippingTaxChange({
+        shippingUnchanged: false,
+        rateId: nextShippingRateId,
+        rateCost,
+        shippingCost: nextShippingCost,
+        storeId: shippingStoreId,
+      });
+      if (taxChange) Object.assign(updateOrderDto, taxChange);
+    }
+
     // Recalculate grand_total if shipping_cost changes.
     //
-    // F-086 punto (b) — a esta fórmula le faltaban DOS términos frente a los
-    // dos carriles POS que ya la calculan bien (venta directa
-    // `payments.service.ts` y cierre de mesa, ambos:
-    // `Math.max(0, subtotal + tax − descuento + envío + propina)`):
-    //
-    //  1. La propina (`tip_amount`). Sin ella, reabrir el editor y guardar
-    //     sólo un cambio de envío sobre una orden POS con propina le borraba
-    //     la propina del `grand_total` mientras `orders.tip_amount` seguía
-    //     intacta: el pago ya cobrado queda por encima del nuevo total y el
-    //     asiento contable pierde el CR del pasivo custodio de la propina.
-    //     `UpdateOrderDto` no declara `tip_amount` hoy (el `whitelist` del
-    //     ValidationPipe rechazaría el campo si llegara), así que el término
-    //     sale SIEMPRE de la orden persistida; el `(updateOrderDto as
-    //     any).tip_amount ?? …` deja el cálculo listo para el día en que el
-    //     DTO sí la exponga, sin que nadie tenga que volver a tocar esta
-    //     fórmula.
-    //  2. El clamp `Math.max(0, …)`. Sin él, un cupón del 100% puede dejar
-    //     el paréntesis en negativo y romper la invariante de cabecera I-6
-    //     (`grand_total = max(0, subtotal + tax − descuento + envío +
-    //     propina)`).
+    // F-086 punto (b) — la fórmula vive en `computeOrderGrandTotal`:
+    // incluye la propina (persistida; `UpdateOrderDto` no declara
+    // `tip_amount` hoy, así que el término sale SIEMPRE de la orden y el
+    // `??` solo deja el cálculo listo para cuando el DTO la exponga) y el
+    // clamp `Math.max(0, …)` de la invariante I-6.
     if (updateOrderDto.shipping_cost !== undefined) {
-      const subtotal = Number(order.subtotal_amount);
-      const tax = Number(order.tax_amount);
-      const discount = Number(order.discount_amount);
-      const shipping = Number(updateOrderDto.shipping_cost);
-      const tip = Number(
-        (updateOrderDto as any).tip_amount ?? order.tip_amount ?? 0,
-      );
-      (updateOrderDto as any).grand_total = roundMoney(
-        Math.max(0, subtotal + tax - discount + shipping + tip),
-      );
+      (updateOrderDto as any).grand_total = this.computeOrderGrandTotal({
+        subtotal: Number(order.subtotal_amount),
+        tax: Number(order.tax_amount),
+        discount: Number(order.discount_amount),
+        shipping: Number(updateOrderDto.shipping_cost),
+        tip: (updateOrderDto as any).tip_amount ?? order.tip_amount ?? 0,
+      });
     }
 
     // Release-853 paso 10 — propagación al borrador. Va AQUÍ (después de
@@ -2538,20 +2661,17 @@ export class OrdersService {
           (resolvedShippingRateId ?? null) ===
             (existingOrder.shipping_rate_id ?? null)
         : true);
-    let shippingTaxUpdate: ShippingTaxSnapshot | undefined;
-    if (dtoDropsShipment) {
-      shippingTaxUpdate = { ...EMPTY_SHIPPING_TAX };
-    } else if (shippingUnchanged) {
-      shippingTaxUpdate = undefined;
-    } else if (dto.shipping_method_id) {
-      shippingTaxUpdate = await this.snapshotShippingTax(
-        resolvedShippingRateId,
-        shippingCost,
-        storeId,
-      );
-    } else if (dto.shipping_cost !== undefined) {
-      shippingTaxUpdate = { ...EMPTY_SHIPPING_TAX };
-    }
+    // Paso 5 (B1+B2) — regla única del impuesto del envío. El guard de
+    // tolerancia de arriba asegura que el costo es el de la tarifa, así
+    // que `rateCost` es el costo del servidor y un método con tarifa
+    // siempre re-deriva su snapshot. `undefined` ⇒ se conserva la actual.
+    const shippingTaxUpdate = await this.resolveShippingTaxChange({
+      shippingUnchanged,
+      rateId: dtoDropsShipment ? null : resolvedShippingRateId,
+      rateCost: dtoDropsShipment ? null : shippingCost,
+      shippingCost,
+      storeId,
+    });
 
     // 9) Promotion quote: recotizamos server-side, NUNCA confiamos en
     //    `promotion_ids` como verdad. El motor decide qué aplica.
@@ -2767,17 +2887,18 @@ export class OrdersService {
     const discountAmount = roundMoney(promotionDiscount + couponDiscount);
     // F-081 (blocker): paridad con los dos carriles POS (`payments.service.ts`
     // `:3263`/`:3736`), que sí clampan a 0 — el editor no lo hacía.
+    // Paso 5 (B1+B2): el total sale del helper único, con la propina
+    // persistida (F-086): antes se perdía del `grand_total` al guardar.
     const editorShipping = dto.shipping_cost ?? shippingCost;
+    const editorTip = Number(existingOrder.tip_amount ?? 0);
     const computeEditorGrandTotal = () =>
-      Math.max(
-        0,
-        roundMoney(
-          recalculatedSubtotal +
-            recalculatedTax -
-            discountAmount +
-            editorShipping,
-        ),
-      );
+      this.computeOrderGrandTotal({
+        subtotal: recalculatedSubtotal,
+        tax: recalculatedTax,
+        discount: discountAmount,
+        shipping: editorShipping,
+        tip: editorTip,
+      });
     let grandTotal = computeEditorGrandTotal();
 
     // 12) Stock validation se ejecuta DENTRO de la transacción. Para
@@ -3853,6 +3974,11 @@ export class OrdersService {
       throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
     }
 
+    // Paso 5 (B2) — el envío mueve `shipping_cost`/`grand_total`: con
+    // cuentas independientes activas se cobra cada cuenta primero, igual
+    // que en `update()` y el editor.
+    assertNoActiveFinancialSplit(order);
+
     const lockedStates: string[] = [
       'shipped',
       'delivered',
@@ -3908,50 +4034,44 @@ export class OrdersService {
         throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
       }
 
-      // Costo esperado de la tarifa (mismo contrato que
-      // `PaymentsService.resolvePosShippingTax`, 16081a2ab):
-      //  - `flat`: `base_cost`.
-      //  - calculadas (`weight_based`, `price_based`, `free`): se RECALCULA
-      //    en el servidor con `ShippingCalculatorService` sobre la dirección y
-      //    las líneas de ESTA orden, y se toma la opción de ESTA tarifa. Antes
-      //    se comparaba contra `base_cost`, que en una tarifa calculada no es
-      //    el costo real: el costo correcto se leía como manual (sin
-      //    impuesto) y uno arbitrario igual a `base_cost` heredaba impuesto.
-      //  - `carrier_calculated`: sin cotización determinista (el calculador
-      //    no la devuelve) ⇒ `null` ⇒ copia vacía. Igual sin dirección
-      //    resoluble o si el calculador no ofrece la tarifa.
-      if (rate.type === 'flat') {
-        rateCost = Number(rate.base_cost);
-      } else {
-        const options = await this.quoteOrderShippingOptions(
-          orderId,
-          storeId,
-        );
-        const match = options?.find((o) => o.rate_id === rate.id);
-        rateCost = match ? Number(match.cost) : null;
-      }
+      // Costo esperado de la tarifa (paso 5: helper compartido con
+      // `update()`; mismo contrato que
+      // `PaymentsService.resolvePosShippingTax`, 16081a2ab).
+      rateCost = await this.resolveExpectedRateCost(rate, orderId, storeId);
       if (dto.shipping_cost === undefined) {
         shippingCost = rateCost ?? Number(rate.base_cost);
       }
     }
 
-    const costComesFromRate =
-      resolvedRateId != null &&
-      rateCost != null &&
-      !differsByAtLeastCents(shippingCost, rateCost, 1);
-    const shippingTax = costComesFromRate
-      ? await this.snapshotShippingTax(resolvedRateId, shippingCost, storeId)
-      : { ...EMPTY_SHIPPING_TAX };
+    // Paso 5 (B1+B2) — regla única: sin cambio ⇒ copia intacta; tarifa
+    // con su costo ⇒ snapshot; costo manual ⇒ copia vacía.
+    const shippingUnchanged =
+      !differsByAtLeastCents(
+        shippingCost,
+        Number(order.shipping_cost ?? 0),
+        1,
+      ) &&
+      method.id === (order.shipping_method_id ?? null) &&
+      (resolvedRateId ?? null) === (order.shipping_rate_id ?? null);
+    const shippingTax = await this.resolveShippingTaxChange({
+      shippingUnchanged,
+      rateId: resolvedRateId,
+      rateCost,
+      shippingCost,
+      storeId,
+    });
 
     const { deriveDeliveryType } =
       await import('../shipping/shipping-derivation.util');
     const deliveryType = deriveDeliveryType(method.type);
 
-    const newGrandTotal =
-      Number(order.subtotal_amount) +
-      Number(order.tax_amount) -
-      Number(order.discount_amount) +
-      shippingCost;
+    const newGrandTotal = this.computeOrderGrandTotal({
+      subtotal: Number(order.subtotal_amount),
+      tax: Number(order.tax_amount),
+      discount: Number(order.discount_amount),
+      shipping: shippingCost,
+      tip: order.tip_amount ?? 0,
+    });
 
     const updated = await this.prisma.orders.update({
       where: { id: orderId },
@@ -3960,9 +4080,8 @@ export class OrdersService {
         shipping_rate_id: resolvedRateId,
         delivery_type: deliveryType,
         shipping_cost: shippingCost,
-        // Copia del impuesto del envío: de la tarifa si el costo es el suyo;
-        // vacía si el costo se digitó a mano. No mueve `grand_total`.
-        ...shippingTax,
+        // Copia del impuesto del envío: `undefined` ⇒ se conserva la actual.
+        ...(shippingTax ?? {}),
         grand_total: newGrandTotal,
         updated_at: new Date(),
       },
