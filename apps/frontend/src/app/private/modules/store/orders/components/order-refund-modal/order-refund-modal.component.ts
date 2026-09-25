@@ -38,6 +38,12 @@ interface RefundItemState {
   alreadyRefunded: number;
   inventoryAction: InventoryAction;
   locationId: number | null;
+  // CP-REFUND-FLOW-REDESIGN paso 6/8 — disposición de plato guiada por
+  // estado: `isFiredDish` (cocinado) solo admite `write_off` con motivo;
+  // `isPreparedDish` no disparado admite `restock` con reversa BOM.
+  isPreparedDish: boolean;
+  isFiredDish: boolean;
+  dishReason: string;
 }
 
 @Component({
@@ -76,15 +82,17 @@ interface RefundItemState {
         <!-- ═══ STEP 1: Select Items ═══ -->
         @if (currentStep() === 0) {
           <!-- Select All -->
-          <div class="flex items-center justify-between">
-            <h4 class="text-sm font-bold text-gray-900">Seleccionar items a reembolsar</h4>
-            <button
-              (click)="toggleSelectAll()"
-              class="text-xs font-semibold text-primary hover:text-primary-700 transition-colors"
-            >
-              {{ allSelected() ? 'Deseleccionar Todo' : 'Seleccionar Todo' }}
-            </button>
-          </div>
+          @if (refundItems().length > 0) {
+            <div class="flex items-center justify-between">
+              <h4 class="text-sm font-bold text-gray-900">Seleccionar items a reembolsar</h4>
+              <button
+                (click)="toggleSelectAll()"
+                class="text-xs font-semibold text-primary hover:text-primary-700 transition-colors"
+              >
+                {{ allSelected() ? 'Deseleccionar Todo' : 'Seleccionar Todo' }}
+              </button>
+            </div>
+          }
 
           <!-- Items List -->
           <div class="space-y-2">
@@ -175,15 +183,37 @@ interface RefundItemState {
             }
           </div>
 
+          <!-- Paso 8 — estado vacío explícito: la página ya impide abrir
+               sin saldo ('hasRefundableBalance'), pero si el modal abre de
+               todos modos (estado intermedio de carga), nunca muestra un
+               wizard vacío sin explicación. -->
+          @if (itemsLoaded() && refundItems().length === 0) {
+            <div
+              class="p-4 rounded-xl border border-border bg-[var(--color-surface)] flex items-start gap-3"
+              role="status"
+            >
+              <app-icon name="info" size="18" class="text-gray-400 mt-0.5 flex-shrink-0"></app-icon>
+              <div>
+                <p class="text-sm font-semibold text-gray-900">Sin saldo reembolsable</p>
+                <p class="text-xs text-gray-500 mt-1">
+                  Todas las líneas de esta orden ya fueron reembolsadas o
+                  canceladas. Cierra este diálogo para volver al detalle.
+                </p>
+              </div>
+            </div>
+          }
+
           <!-- Reason -->
-          <app-textarea
-            label="Razon del reembolso"
-            [required]="true"
-            [ngModel]="reason()"
-            (ngModelChange)="reason.set($event)"
-            [rows]="2"
-            placeholder="Describe la razon del reembolso..."
-          ></app-textarea>
+          @if (refundItems().length > 0) {
+            <app-textarea
+              label="Razon del reembolso"
+              [required]="true"
+              [ngModel]="reason()"
+              (ngModelChange)="reason.set($event)"
+              [rows]="2"
+              placeholder="Describe la razon del reembolso..."
+            ></app-textarea>
+          }
         }
 
         <!-- ═══ STEP 2: Inventory Actions ═══ -->
@@ -208,11 +238,32 @@ interface RefundItemState {
                   </div>
                 </div>
 
+                <!-- Paso 6/8 — disposición de plato guiada por estado. -->
+                @if (item.isFiredDish) {
+                  <div class="mb-2 p-2 rounded-lg bg-red-50 border border-red-200 flex items-start gap-2">
+                    <app-icon name="flame" size="14" class="text-red-600 mt-0.5 flex-shrink-0"></app-icon>
+                    <p class="text-[11px] text-red-800">
+                      Plato cocinado (disparado a cocina): solo admite
+                      <strong>baja con motivo</strong>. Los insumos no vuelven a stock.
+                    </p>
+                  </div>
+                } @else if (item.isPreparedDish) {
+                  <div class="mb-2 p-2 rounded-lg bg-blue-50 border border-blue-200 flex items-start gap-2">
+                    <app-icon name="info" size="14" class="text-blue-600 mt-0.5 flex-shrink-0"></app-icon>
+                    <p class="text-[11px] text-blue-800">
+                      Plato no disparado: <strong>Reabastecer</strong> revierte
+                      la receta (BOM) a stock.
+                    </p>
+                  </div>
+                }
+
                 <!-- Action buttons -->
                 <div class="grid grid-cols-3 gap-1.5">
                   <button
                     (click)="setInventoryAction(item.orderItem.id, 'restock')"
-                    class="p-2 rounded-lg border text-center transition-all text-xs font-medium"
+                    [disabled]="item.isFiredDish"
+                    [title]="item.isFiredDish ? 'Plato cocinado: el insumo no puede volver a stock' : ''"
+                    class="p-2 rounded-lg border text-center transition-all text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
                     [ngClass]="{
                       'border-green-400 bg-green-50 text-green-700 ring-1 ring-green-200': item.inventoryAction === 'restock',
                       'border-border hover:bg-gray-50 text-gray-600': item.inventoryAction !== 'restock'
@@ -234,7 +285,9 @@ interface RefundItemState {
                   </button>
                   <button
                     (click)="setInventoryAction(item.orderItem.id, 'no_return')"
-                    class="p-2 rounded-lg border text-center transition-all text-xs font-medium"
+                    [disabled]="item.isFiredDish"
+                    [title]="item.isFiredDish ? 'Plato cocinado: requiere baja con motivo' : ''"
+                    class="p-2 rounded-lg border text-center transition-all text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
                     [ngClass]="{
                       'border-gray-400 bg-gray-50 text-gray-700 ring-1 ring-gray-200': item.inventoryAction === 'no_return',
                       'border-border hover:bg-gray-50 text-gray-600': item.inventoryAction !== 'no_return'
@@ -244,6 +297,18 @@ interface RefundItemState {
                     No devolver
                   </button>
                 </div>
+
+                @if (item.isFiredDish) {
+                  <div class="mt-2">
+                    <app-textarea
+                      label="Motivo de la baja"
+                      [ngModel]="item.dishReason"
+                      (ngModelChange)="setDishReason(item.orderItem.id, $event)"
+                      [rows]="1"
+                      placeholder="Opcional — si se deja vacío se usa el motivo del reembolso"
+                    ></app-textarea>
+                  </div>
+                }
 
                 <!-- Location selector for restock/write_off -->
                 @if (item.inventoryAction === 'restock' || item.inventoryAction === 'write_off') {
@@ -468,6 +533,10 @@ export class OrderRefundModalComponent {
   // ── State ───────────────────────────────────────────────────
   currentStep = signal(0);
   refundItems = signal<RefundItemState[]>([]);
+  // Paso 8 — true cuando el cruce con refunds ya resolvió (con o sin
+  // saldo): distingue "cargando" de "sin saldo reembolsable" para el
+  // estado vacío explícito del paso 1.
+  itemsLoaded = signal(false);
   reason = signal('');
   notes = '';
   includeShipping = signal(false);
@@ -572,7 +641,10 @@ export class OrderRefundModalComponent {
 
   private loadRefundedQuantities(): void {
     const order = this.order();
-    if (!order?.order_items) return;
+    if (!order?.order_items) {
+      this.itemsLoaded.set(true);
+      return;
+    }
 
     const orderId = order.id?.toString();
     if (!orderId) {
@@ -616,19 +688,28 @@ export class OrderRefundModalComponent {
       .map((oi) => {
         const alreadyRefunded = refundedMap.get(oi.id) || 0;
         const maxQuantity = oi.quantity - alreadyRefunded;
+        // Paso 6/8 — plato cocinado (`prepared` + disparado a cocina): el
+        // backend solo admite `write_off`, así que nace preseleccionado y
+        // bloqueado (ver paso Inventario + `setInventoryAction`).
+        const isPreparedDish = oi.products?.product_type === 'prepared';
+        const isFiredDish = isPreparedDish && oi.inventory_consumed_at_fire === true;
         return {
           orderItem: oi,
           selected: false,
           quantity: Math.max(maxQuantity, 1),
           maxQuantity,
           alreadyRefunded,
-          inventoryAction: 'restock' as InventoryAction,
+          inventoryAction: (isFiredDish ? 'write_off' : 'restock') as InventoryAction,
           locationId: defaultLocationId,
+          isPreparedDish,
+          isFiredDish,
+          dishReason: '',
         };
       })
       .filter((item) => item.maxQuantity > 0);
 
     this.refundItems.set(items);
+    this.itemsLoaded.set(true);
   }
 
   // REFUND OVERHAUL — picks the canonical default location from the
@@ -787,10 +868,25 @@ export class OrderRefundModalComponent {
 
   setInventoryAction(orderItemId: number, action: InventoryAction): void {
     this.refundItems.update((items) =>
+      items.map((i) => {
+        if (i.orderItem.id !== orderItemId) return i;
+        // Paso 6/8 — defensa en profundidad: el plato cocinado solo admite
+        // `write_off` (el backend responde 400 ante cualquier otra). Los
+        // botones ya nacen deshabilitados; esto cubre llamadas directas.
+        if (i.isFiredDish && action !== 'write_off') return i;
+        return {
+          ...i,
+          inventoryAction: action,
+          locationId: action !== 'no_return' ? i.locationId : null,
+        };
+      }),
+    );
+  }
+
+  setDishReason(orderItemId: number, reason: string): void {
+    this.refundItems.update((items) =>
       items.map((i) =>
-        i.orderItem.id === orderItemId
-          ? { ...i, inventoryAction: action, locationId: action !== 'no_return' ? i.locationId : null }
-          : i,
+        i.orderItem.id === orderItemId ? { ...i, dishReason: reason } : i,
       ),
     );
   }
@@ -846,6 +942,9 @@ export class OrderRefundModalComponent {
             : undefined,
         bank_account_id:
           method === 'bank_transfer' ? bankAccountId : undefined,
+        // Paso 6/8 — motivo de la baja del plato cocinado. Opcional: el
+        // backend usa el motivo general del reembolso como fallback.
+        reason: item.dishReason.trim() || undefined,
       })),
       include_shipping: this.includeShipping(),
       refund_method: method,
@@ -914,6 +1013,7 @@ export class OrderRefundModalComponent {
   private resetState(): void {
     this.currentStep.set(0);
     this.refundItems.set([]);
+    this.itemsLoaded.set(false);
     this.reason.set('');
     this.notes = '';
     this.includeShipping.set(false);

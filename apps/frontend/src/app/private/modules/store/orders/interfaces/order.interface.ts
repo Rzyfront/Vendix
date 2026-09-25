@@ -424,6 +424,15 @@ export interface OrderItem {
   cancelled_at?: string | null;
   cancellation_reason?: string | null;
   cancellation_type?: string | null;
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 3 — caché reconciliable de cobertura por
+   * línea (la verdad es la agregación de `refund_items`). `orders.service.ts`
+   * `findOne` usa `include` sin `select`, así que ambas columnas YA viajan
+   * por el cable — esta declaración es declarar lo que ya llega (igual que
+   * `delivered_at`). Nulables: `null` = sin reembolsos registrados.
+   */
+  refunded_qty?: number | null;
+  refunded_amount?: number | string | null;
 }
 
 export interface Address {
@@ -1024,6 +1033,50 @@ export interface RefundItemRecord {
     name: string;
     code: string;
   };
+}
+
+// ── Refund Coverage (CP-REFUND-FLOW-REDESIGN paso 7, consumido en paso 8) ──
+// Espejo exacto de `RefundCoverageResult` en
+// `apps/backend/src/domains/store/orders/order-flow/services/refund-coverage.service.ts`.
+// Contrato: `GET /store/orders/:orderId/flow/refund/coverage`.
+
+export interface RefundCoverageLineNote {
+  credit_note_id: number;
+  invoice_number: string | null;
+  status: string;
+  covered_qty: number;
+  covered_amount: number;
+}
+
+export interface RefundCoverageLine {
+  order_item_id: number;
+  product_name: string | null;
+  quantity: number;
+  refunded_qty: number;
+  refunded_amount: number;
+  nc_covered_qty: number;
+  nc_covered_amount: number;
+  notes: RefundCoverageLineNote[];
+}
+
+export interface RefundCoverageFeNotice {
+  related_invoice_id: number;
+  invoice_number: string | null;
+  message: string;
+  suggested_refund_ids: number[];
+  uncovered_order_item_ids: number[];
+}
+
+export interface RefundCoverageResult {
+  order_id: number;
+  lines: RefundCoverageLine[];
+  totals: {
+    refunded_qty: number;
+    refunded_amount: number;
+    nc_covered_qty: number;
+    nc_covered_amount: number;
+  };
+  fe_notice: RefundCoverageFeNotice | null;
 }
 
 /**

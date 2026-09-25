@@ -48,6 +48,8 @@ import {
   OrderActionConfig,
   PayOrderDto,
   RefundRecord,
+  RefundCoverageResult,
+  RefundCoverageLine,
   ResolveRefundPayload,
   FastTrackOrderDto,
   AssignShippingMethodDto,
@@ -336,7 +338,73 @@ export class OrderDetailsPageComponent {
   readonly hasDiscountSnapshot = computed(
     () => this.appliedPromotions().length > 0 || this.appliedCoupons().length > 0,
   );
+
+  // ── CP-REFUND-FLOW-REDESIGN paso 8: neto derivado + cobertura ──
+
+  /**
+   * Cruce `orderRefunds().refund_items` → qty comprometida por línea.
+   * Cuenta estados que reservan techo (`completed`/`pending_approval`/
+   * `processing`, mismo conjunto que el ledger del backend): es el fallback
+   * cuando `refundCoverage()` aún no cargó o el endpoint falló.
+   */
+  readonly refundedQtyByLine = computed(() => {
+    const byLine = new Map<number, number>();
+    for (const refund of this.orderRefunds()) {
+      if (!['completed', 'pending_approval', 'processing'].includes(refund.state)) continue;
+      for (const ri of refund.refund_items ?? []) {
+        byLine.set(
+          ri.order_item_id,
+          (byLine.get(ri.order_item_id) ?? 0) + (Number(ri.quantity) || 0),
+        );
+      }
+    }
+    return byLine;
+  });
+
+  readonly coverageByLine = computed(() => {
+    const byLine = new Map<number, RefundCoverageLine>();
+    for (const line of this.refundCoverage()?.lines ?? []) {
+      byLine.set(line.order_item_id, line);
+    }
+    return byLine;
+  });
+
+  /**
+   * Dinero efectivamente devuelto: solo refunds `completed` (los pendientes
+   * aún no movieron dinero, así que no restan del Neto). `grand_total` jamás
+   * se muta: el neto es derivado, no persistido.
+   */
+  readonly totalRefunded = computed(() => {
+    const sum = this.orderRefunds()
+      .filter((r) => r.state === 'completed')
+      .reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
+    return Math.round(sum * 100) / 100;
+  });
+
+  /** Neto derivado: lo facturado menos lo devuelto. Nunca negativo. */
+  readonly netTotal = computed(() => {
+    const gross = Number(this.order()?.grand_total) || 0;
+    return Math.max(Math.round((gross - this.totalRefunded()) * 100) / 100, 0);
+  });
+
+  /** ¿Queda al menos una línea con saldo reembolsable? Guarda del wizard. */
+  readonly hasRefundableBalance = computed(() => {
+    const order = this.order();
+    if (!order) return false;
+    if (!['delivered', 'finished'].includes(order.state)) return false;
+    return (order.order_items ?? []).some((item) => this.lineRefundRemaining(item) > 0);
+  });
+
+  /** Aviso obligatorio FE→NC del paso 7 (`null` = sin FE aceptada descubierta). */
+  readonly feNotice = computed(() => this.refundCoverage()?.fe_notice ?? null);
   orderRefunds = signal<RefundRecord[]>([]);
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 8 — cobertura refund↔NC por línea
+   * (`GET .../flow/refund/coverage`, paso 7). Fuente primaria de badges de
+   * línea, guardas de saldo y banner FE→NC. `null` = aún no cargada o el
+   * endpoint falló: todo degrada al cruce local `orderRefunds()`.
+   */
+  refundCoverage = signal<RefundCoverageResult | null>(null);
   /**
    * Bug 4 — dispatch notes (remisiones) generated from this order, loaded from
    * `GET /store/dispatch-notes/by-order/:orderId`. Drives the
@@ -1154,14 +1222,20 @@ export class OrderDetailsPageComponent {
 
       case 'delivered':
         actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
+        // Paso 8 — sin saldo reembolsable no se ofrece el reembolso.
+        if (this.hasRefundableBalance()) {
+          actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
+        }
         break;
 
       case 'finished':
         if (order.payment_form === '2' && Number(order.remaining_balance) > 0.01) {
           actions.push({ id: 'credit-payment', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
         }
-        actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
+        // Paso 8 — sin saldo reembolsable no se ofrece el reembolso.
+        if (this.hasRefundableBalance()) {
+          actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
+        }
         break;
 
       case 'cancelled':
@@ -1854,6 +1928,9 @@ export class OrderDetailsPageComponent {
           // Load refund history
           this.loadRefunds();
 
+          // Paso 8 — cobertura refund↔NC por línea (badges, guardas, banner FE→NC)
+          this.loadRefundCoverage();
+
           // B.2 — NC/ND de la factura para las cards (GET :id/notes).
           this.loadInvoiceNotes();
 
@@ -1899,6 +1976,23 @@ export class OrderDetailsPageComponent {
         },
         error: () => {
           this.orderRefunds.set([]);
+        },
+      });
+  }
+
+  loadRefundCoverage(): void {
+    if (!this.orderId) return;
+    this.ordersService
+      .getRefundCoverage(this.orderId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (coverage) => {
+          this.refundCoverage.set(coverage ?? null);
+        },
+        error: () => {
+          // Degradación explícita: badges y guardas usan el cruce local
+          // `refundedQtyByLine`; el banner FE→NC simplemente no aparece.
+          this.refundCoverage.set(null);
         },
       });
   }
@@ -3108,6 +3202,18 @@ export class OrderDetailsPageComponent {
   }
 
   openRefundModal(): void {
+    // Paso 8 — sin saldo reembolsable el wizard no abre (ni vacío ni
+    // parcial): la acción/botón ya se oculta, esta guarda cubre CTAs legacy
+    // (banner fiscal `open-refund`, link por línea) y llamadas directas.
+    const order = this.order();
+    if (!order || !['delivered', 'finished'].includes(order.state)) {
+      this.toastService.info('Solo se pueden reembolsar órdenes entregadas o finalizadas.');
+      return;
+    }
+    if (!this.hasRefundableBalance()) {
+      this.toastService.info('Esta orden no tiene saldo reembolsable.');
+      return;
+    }
     this.showRefundModal.set(true);
   }
 
@@ -3825,6 +3931,14 @@ export class OrderDetailsPageComponent {
     const newState = log.new_values?.state;
     const oldState = log.old_values?.state;
 
+    // Paso 8 — los audits de refund comparten `resource: 'orders'`, así que
+    // sus estados (`completed`, ...) llegan a `new_values.state`. Sin esta
+    // rama el timeline mostraba "Nuevo estado: completed" en crudo.
+    if (newState && this.isRefundStateValue(newState)) {
+      const label = this.refundStateLabel(newState);
+      return `Reembolso ${label.charAt(0).toLowerCase()}${label.slice(1)}`;
+    }
+
     if (newState) {
       // Detect manual transitions (skip payment flow)
       if (oldState === 'pending_payment' && newState === 'shipped') {
@@ -3853,7 +3967,15 @@ export class OrderDetailsPageComponent {
       CREATE: 'Orden Creada',
       UPDATE: 'Orden Actualizada',
       DELETE: 'Orden Eliminada',
+      // Paso 6/8 — disposición de plato auditada dentro del refund.
+      'ORDER_ITEM.REFUND_DISH_DISPOSITION': 'Disposición de plato reembolsado',
+      'ORDER_ITEM.PREPARED_DISPOSITION': 'Disposición de plato',
     };
+    // Paso 8 — cualquier otra acción de la familia refund nombra el evento
+    // en vez de filtrar la clave cruda al timeline.
+    if (action?.includes('REFUND') && !actionLabels[action]) {
+      return 'Evento de reembolso';
+    }
     return actionLabels[action] || log.action || 'Evento';
   }
 
@@ -4576,6 +4698,70 @@ export class OrderDetailsPageComponent {
       return this.REFUND_STATE_LABELS[state as RefundState];
     }
     return state ?? '';
+  }
+
+  /**
+   * Paso 8 — cobertura de una línea para el badge Reembolsado. Fuente
+   * primaria: el endpoint de cobertura (ledger unificado del backend, todos
+   * los estados que reservan techo); fallback: cruce local
+   * `refundedQtyByLine` + caché `item.refunded_qty` del paso 3.
+   */
+  lineRefundInfo(item: OrderItem): {
+    refundedQty: number;
+    quantity: number;
+    isFull: boolean;
+    ncCoveredQty: number;
+    isNcCovered: boolean;
+  } {
+    const quantity = Number(item.quantity) || 0;
+    const coverage = this.coverageByLine().get(item.id);
+    const refundedQty =
+      coverage != null
+        ? Number(coverage.refunded_qty) || 0
+        : Math.max(
+            this.refundedQtyByLine().get(item.id) ?? 0,
+            Number(item.refunded_qty) || 0,
+          );
+    const ncCoveredQty = coverage != null ? Number(coverage.nc_covered_qty) || 0 : 0;
+    return {
+      refundedQty,
+      quantity,
+      isFull: quantity > 0 && refundedQty >= quantity,
+      ncCoveredQty,
+      isNcCovered: refundedQty > 0 && ncCoveredQty >= refundedQty,
+    };
+  }
+
+  /** Unidades aún reembolsables de la línea (canceladas = 0, excluidas). */
+  lineRefundRemaining(item: OrderItem): number {
+    if (item.cancelled_at) return 0;
+    const info = this.lineRefundInfo(item);
+    return Math.max(info.quantity - info.refundedQty, 0);
+  }
+
+  lineHasRefundableBalance(item: OrderItem): boolean {
+    return this.lineRefundRemaining(item) > 0;
+  }
+
+  /** ¿Es `state` un estado de refund (no de orden)? Para timeline refund-aware. */
+  isRefundStateValue(state: string | undefined | null): boolean {
+    return !!state && state in this.REFUND_STATE_LABELS;
+  }
+
+  /**
+   * Paso 8 — 1 clic del banner FE→NC: emite la NC del primer reembolso
+   * sugerido por el backend que siga siendo candidato. Reutiliza el flujo
+   * B.3 (`startRefundNote`): nunca automática, siempre vía borrador +
+   * "¿Emitirla ahora?".
+   */
+  startFeNoticeNote(): void {
+    const notice = this.feNotice();
+    if (!notice || this.refundNoteState()) return;
+    const candidates = this.refundNoteCandidateIds();
+    const refund = (notice.suggested_refund_ids ?? [])
+      .map((id) => this.orderRefunds().find((r) => r.id === id))
+      .find((r) => r != null && candidates.has(r.id));
+    if (refund) this.startRefundNote(refund);
   }
 
   getAuditActionLabel(action: string): string {
