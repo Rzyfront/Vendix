@@ -262,6 +262,8 @@ export class InvoiceDataRequestsService {
             order_items: {
               where: { cancelled_at: null },
               select: {
+                // CP-853-fix (paso 5): clave por línea para la cocina guest.
+                id: true,
                 product_name: true,
                 variant_sku: true,
                 variant_attributes: true,
@@ -407,6 +409,9 @@ export class InvoiceDataRequestsService {
     // Sign image URLs per item (mirrors account.service getOrderDetail).
     const items = await Promise.all(
       request.order.order_items.map(async (item) => ({
+        // CP-853-fix (paso 5): clave por línea para la cocina guest — dos
+        // líneas del mismo producto ya no comparten estado. Aditivo.
+        order_item_id: item.id,
         product_name: item.product_name,
         variant_sku: item.variant_sku,
         variant_attributes: item.variant_attributes,

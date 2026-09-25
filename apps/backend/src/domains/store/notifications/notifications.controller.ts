@@ -201,11 +201,16 @@ export class NotificationsController {
     // emitir notificaciones reales — se excluyen los eventos foráneos para no
     // inflar el badge ni disparar sonido. El stream dedicado
     // /store/memberships/access/stream sí filtra su propio 'membership-access'.
+    // CP-853-fix (paso 3): los eventos `order.*` son telemetría para el
+    // stream de órdenes y los guests, no notificaciones de persona.
     const events$ = merged.pipe(
-      filter(
-        (payload) =>
-          (payload as { type?: string })?.type !== 'membership-access',
-      ),
+      filter((payload) => {
+        const type = (payload as { type?: string })?.type;
+        return (
+          type !== 'membership-access' &&
+          !(typeof type === 'string' && type.startsWith('order.'))
+        );
+      }),
       map(
         (payload) =>
           ({

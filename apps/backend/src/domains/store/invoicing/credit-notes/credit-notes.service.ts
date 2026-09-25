@@ -26,6 +26,7 @@ import {
   localDateString,
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
+import { REFUND_LEDGER_STATES } from '../../orders/order-flow/services/refund-calculation.service';
 
 /**
  * Este servicio NO necesita la ClTec: no calcula CUDE ni arma XML — eso lo hace
@@ -652,7 +653,7 @@ export class CreditNotesService {
           }),
       },
       include: INVOICE_INCLUDE,
-    });
+    }).catch((error) => this.throwIfDuplicateRefundLink(error, refund_link));
 
     // Paso 7 — puente refund↔NC por línea. `withoutScope()` + ids ya
     // verificados: el modelo no está registrado en `StorePrismaService`
@@ -727,6 +728,43 @@ export class CreditNotesService {
    * se está intentando resolver.
    */
   /**
+   * Release-853 (paso 8) — traduce el P2002 del índice parcial único
+   * `invoices_refund_id_active_credit_note_key` al error de "refund ya
+   * vinculado" de la guarda pre-vuelo. La guarda no cierra la carrera
+   * (doble clic / dos operadores); el índice sí, y sin esta traducción la
+   * carrera respondería 500. El re-chequeo distingue el conflicto real de
+   * un P2002 ajeno (consecutivo): sólo se traduce si el vínculo vivo
+   * existe AHORA. Cualquier otro error se relanza intacto.
+   */
+  private async throwIfDuplicateRefundLink(
+    error: unknown,
+    refund_link: ResolvedRefundLink | null,
+  ): Promise<never> {
+    if (refund_link && (error as { code?: string })?.code === 'P2002') {
+      const live_link = await this.prisma.invoices.findFirst({
+        where: {
+          refund_id: refund_link.refund.id,
+          invoice_type: 'credit_note',
+          status: { in: ['draft', 'validated', 'sent', 'accepted'] },
+        },
+        select: { id: true, invoice_number: true, status: true },
+      });
+      if (live_link) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_CALC_001,
+          `El reembolso #${refund_link.refund.id} ya lo acredita la nota crédito ${live_link.invoice_number ?? `#${live_link.id}`} (estado «${live_link.status}»). Anula esa nota antes de emitir otra sobre el mismo reembolso.`,
+          {
+            refund_id: refund_link.refund.id,
+            credit_note_id: live_link.id,
+            credit_note_status: live_link.status,
+          },
+        );
+      }
+    }
+    throw error;
+  }
+
+  /**
    * CP-REFUND-FLOW-REDESIGN paso 7 — resuelve y valida el vínculo
    * refund↔NC de una nota guiada.
    *
@@ -777,6 +815,19 @@ export class CreditNotesService {
     });
     if (!refund) {
       throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+    }
+
+    // Release-853 (paso 8): sólo se acredita ante la DIAN un reembolso
+    // REAL — estado dentro del ledger (`completed`/`pending_approval`/
+    // `processing`). Un `failed`/`cancelled` no movió dinero y acreditarlo
+    // descuadraría la cobertura. No es 404: el refund SÍ existe (el
+    // operador lo ve en la lista); el error dice por qué no acredita.
+    if (!(REFUND_LEDGER_STATES as readonly string[]).includes(refund.state)) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_001,
+        `El reembolso #${refund.id} está en estado «${refund.state}»: sólo se puede acreditar un reembolso en estado válido (completed, pending_approval, processing).`,
+        { refund_id: refund.id, refund_state: refund.state },
+      );
     }
 
     // Sin orden en la factura padre no hay ancla: las líneas del refund
@@ -874,9 +925,11 @@ export class CreditNotesService {
       });
     }
 
-    // Refund sin líneas pero con envío (orden-nivel): línea libre de envío,
-    // sin puente (no hay `refund_item` que cubrir).
-    if (derived_items.length === 0 && Number(refund.shipping_refund ?? 0) > 0) {
+    // Release-853 (paso 8): el envío devuelto SIEMPRE se acredita cuando
+    // `shipping_refund > 0`, haya líneas o no — antes un refund con líneas
+    // + envío perdía el envío en la NC. Línea libre, sin puente (no hay
+    // `refund_item` que cubrir).
+    if (Number(refund.shipping_refund ?? 0) > 0) {
       derived_items.push({
         description: `Reembolso de envío — orden #${refund.order_id}`,
         quantity: 1,

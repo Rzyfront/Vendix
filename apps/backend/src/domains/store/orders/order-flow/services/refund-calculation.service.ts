@@ -375,11 +375,24 @@ export class RefundCalculationService {
     // The non-empty guard closes the vacuous-truth promotion: once cancelled
     // lines are excluded, the set can be empty, and an empty request must not
     // read as a full refund.
+    //
+    // Release-853 (paso 7): el historial que cubre es SÓLO `completed` —
+    // la guarda por línea de arriba sigue pendiente-aware (un parcial en
+    // vuelo reserva su parte del techo), pero la PROMOCIÓN a `refunded`
+    // exige dinero completado: un `pending_approval`/`processing` previo no
+    // puede completar la orden junto con este request. `state` ausente
+    // conserva el include legacy (misma convención del builder M2): en
+    // prod la columna es NOT NULL y siempre viaja.
+    const completedQtyMap = new Map<number, number>(
+      [...buildRefundCoverageLedger(
+        order.refunds.filter((r) => r.state == null || r.state === 'completed'),
+      )].map(([id, cov]) => [id, cov.refunded_qty]),
+    );
     const is_full_refund =
       order.order_items.length > 0 &&
       order.order_items.every(
         (item) =>
-          (refundedQtyMap.get(item.id) || 0) +
+          (completedQtyMap.get(item.id) || 0) +
             (requestedQtyMap.get(item.id) || 0) >=
           item.quantity,
       );

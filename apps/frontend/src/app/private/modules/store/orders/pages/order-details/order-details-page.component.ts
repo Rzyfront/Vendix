@@ -313,6 +313,19 @@ export class OrderDetailsPageComponent {
     }
     return Array.from(groups.values());
   });
+  /**
+   * Release-853 paso 10 — Subtotal BRUTO del Resumen de Pago: Σ de las
+   * líneas en bruto (`final_total_price ?? total_price`). El IVA va
+   * incluido, no suma; el persistido `subtotal_amount` puede traer otra
+   * base según el canal que creó la orden.
+   */
+  readonly grossSubtotal = computed(() =>
+    (this.order()?.order_items ?? []).reduce(
+      (sum, item) =>
+        sum + Number(item.final_total_price ?? item.total_price ?? 0),
+      0,
+    ),
+  );
 
   // ── Discount snapshots (read-only from order; never recalculated) ──
   readonly appliedPromotions = computed(() =>
@@ -4129,6 +4142,9 @@ export class OrderDetailsPageComponent {
    * `orders.service.ts`): el titular cambia en created/draft/pending_payment/
    * processing/pending_delivery. En shipped/delivered/finished/cancelled/
    * refunded se muestra el dialog informativo y no se abre ningún modal.
+   * Release-853 paso 10: también se bloquea si la orden tiene una
+   * `sales_invoice` vigente (espejo de `ORD_TITULAR_INVOICED_001`); el
+   * borrador sí deja pasar porque el backend le propaga el titular.
    * En estado editable se abre el buscar-primero; el `app-customer-modal`
    * en modo crear solo aparece vía "Crear cliente nuevo".
    */
@@ -4146,50 +4162,93 @@ export class OrderDetailsPageComponent {
       await this.notifyTitularLocked();
       return;
     }
+    if (this.hasActiveSalesInvoice()) {
+      await this.notifyTitularLocked('ORD_TITULAR_INVOICED_001');
+      return;
+    }
     this.pendingChangeCustomerAddress.set(null);
     this.showTitularSearchModal.set(true);
   }
 
   /**
+   * Release-853 paso 10 — espejo local del gate backend
+   * `ORD_TITULAR_INVOICED_001`: la orden tiene `sales_invoice` con estado
+   * fuera de draft/voided/cancelled. Tipo o estado ausentes se tratan como
+   * factura vigente (falla cerrado: el backend es el guard real).
+   */
+  private hasActiveSalesInvoice(): boolean {
+    const invoice = this.orderInvoice();
+    if (!invoice) return false;
+    const isSalesInvoice =
+      invoice.invoice_type === undefined ||
+      invoice.invoice_type === 'sales_invoice';
+    if (!isSalesInvoice) return false;
+    const status = invoice.status;
+    return status !== 'draft' && status !== 'voided' && status !== 'cancelled';
+  }
+
+  /**
    * Dialog informativo (español) del titular bloqueado. Se usa tanto en el
    * pre-check local como al mapear 409/403 del PATCH titular.
+   *
+   * Release-853 regresión (paso 10): recibe opcionalmente el `errorCode` que
+   * disparó el bloqueo para diferenciar el copy del caso factura vigente
+   * (`ORD_TITULAR_INVOICED_001`) del genérico de estado/tienda ajena.
    */
-  private notifyTitularLocked(): Promise<boolean> {
+  private notifyTitularLocked(code?: string | null): Promise<boolean> {
+    const message =
+      code === 'ORD_TITULAR_INVOICED_001'
+        ? 'La orden ya tiene una factura emitida; anúlala o emite una nota crédito para cambiar el titular.'
+        : 'Esta orden ya está en curso o finalizada, por lo que su titular no puede cambiarse. ' +
+          'El titular queda fijado al avanzar la orden y es inmutable por trazabilidad fiscal.';
     return this.dialogService.confirm({
       title: 'No se puede cambiar el titular',
-      message:
-        'Esta orden ya está en curso o finalizada, por lo que su titular no puede cambiarse. ' +
-        'El titular queda fijado al avanzar la orden y es inmutable por trazabilidad fiscal.',
+      message,
       confirmText: 'Entendido',
       confirmVariant: 'primary',
     });
   }
 
   /**
-   * `true` cuando el error del PATCH titular es el bloqueo de estado (409
-   * `ORD_EDIT_NOT_ALLOWED_001`) o de tienda ajena (403
-   * `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`). `updateOrderCustomer` envuelve
-   * el fallo con `buildApiError` (`errorCode` + `cause` = HttpErrorResponse
-   * original), así que se revisan ambas vías.
+   * Devuelve el `errorCode` cuando el error del PATCH titular es uno de los
+   * tres bloqueos de titular: estado (409 `ORD_EDIT_NOT_ALLOWED_001`), tienda
+   * ajena (403 `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`) o factura vigente (409
+   * `ORD_TITULAR_INVOICED_001`); `null` en cualquier otro caso. Release-853
+   * paso 10: decide SOLO por `errorCode` — el fallback por status HTTP metía
+   * en el dialog de bloqueo cualquier 409/403 ajeno al titular (p. ej. un
+   * split financiero activo).
+   *
+   * `StoreOrdersService.updateOrderCustomer` lanza `buildApiError(error)`: un
+   * `Error` con `errorCode` en camelCase y el `HttpErrorResponse` original en
+   * `cause`, no el body crudo. `parseApiError` espera `error_code` en
+   * snake_case dentro de `error.error` o del propio objeto, así que
+   * pasárselo tal cual siempre resuelve `errorCode: null`. Se lee primero el
+   * `errorCode` ya resuelto por el wrapper y, si no está, se cae a
+   * `parseApiError` sobre la causa cruda (o el error tal cual, por si algún
+   * llamador futuro no pasa por `buildApiError`).
    */
-  private isTitularLockedError(error: unknown): boolean {
-    const parsed = parseApiError(error);
-    if (
-      parsed.errorCode === 'ORD_EDIT_NOT_ALLOWED_001' ||
-      parsed.errorCode === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001'
-    ) {
-      return true;
-    }
-    const status =
-      (error as { cause?: { status?: number } } | null)?.cause?.status ??
-      (error as { status?: number } | null)?.status;
-    return status === 409 || status === 403;
+  private isTitularLockedError(error: unknown): string | null {
+    const code =
+      (error as { errorCode?: string | null } | null)?.errorCode ??
+      parseApiError((error as { cause?: unknown } | null)?.cause ?? error).errorCode;
+    return code === 'ORD_EDIT_NOT_ALLOWED_001' ||
+      code === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001' ||
+      code === 'ORD_TITULAR_INVOICED_001'
+      ? code
+      : null;
   }
 
-  /** Error del PATCH titular: bloqueo → dialog español; resto → toast. */
+  /**
+   * Error del PATCH titular: bloqueo → dialog español (con el copy del código
+   * exacto); resto → toast. `extractApiErrorMessage` sobre el `Error` de
+   * `buildApiError` cae en su rama `nestedMessage` (lee `error.message`, que
+   * ya es el `userMessage` resuelto por el servicio) y sí muestra el mensaje
+   * real — verificado en `apps/frontend/src/app/core/utils/api-error-handler.ts`.
+   */
   private handleChangeCustomerError(error: unknown): void {
-    if (this.isTitularLockedError(error)) {
-      void this.notifyTitularLocked();
+    const lockedCode = this.isTitularLockedError(error);
+    if (lockedCode) {
+      void this.notifyTitularLocked(lockedCode);
       return;
     }
     this.toastService.error(extractApiErrorMessage(error));

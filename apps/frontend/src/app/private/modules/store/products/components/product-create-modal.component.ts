@@ -96,6 +96,13 @@ export class ProductCreateModalComponent {
   readonly isOpen = model<boolean>(false);
   readonly isSubmitting = input<boolean>(false);
   readonly product = input<Product | null>(null);
+  /**
+   * Release-853 regresión (paso 4): página actual del listado (`pagination().page`
+   * en `products.component.ts`), para que "Formulario avanzado" (creación) la
+   * propague igual que `navigateToEditPage` ya hace al editar. El modal no
+   * conoce la paginación por sí mismo — se la pasa el listado que lo abre.
+   */
+  readonly currentPage = input<number>(1);
   readonly submit = output<any>();
   readonly cancel = output<void>();
 
@@ -289,6 +296,7 @@ export class ProductCreateModalComponent {
 
     this.router.navigate(['/admin/products/create'], {
       state: { draft: draftData },
+      queryParams: { fromPage: this.currentPage() },
     });
     this.onCancel();
   }
