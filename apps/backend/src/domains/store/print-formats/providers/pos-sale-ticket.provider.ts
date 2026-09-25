@@ -984,3 +984,27 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     }));
   }
 }
+// B6 — el impuesto del envío vive en la copia de la orden, no en
+// `order_item_taxes`: el recibo pre-fiscal lo pinta desde esta definición.
+import { buildShippingTaxBreakdownRow } from '../../shipping/utils/shipping-tax.util';
+    // B6 — fila del impuesto del envío en el bloque `taxes` del recibo
+    // pre-fiscal: `aggregateTaxes` solo lee `order_item_taxes`, así que sin
+    // esto el tributo del domicilio no salía aunque el total sí lo cobró.
+    // Fila PROPIA («INC 8% (incl. envío)»), no fusionada con el grupo de
+    // productos, para que el comerciante vea de dónde sale. Sin copia ⇒
+    // null ⇒ el modelo sale byte-idéntico al de antes. El carril fiscal
+    // (`overrideWithInvoiceSnapshot`) no se toca: `invoice_taxes` ya trae
+    // el envío y `aggregateInvoiceTaxes` ya lo suma.
+    const shippingTaxRow = buildShippingTaxBreakdownRow(order);
+    if (shippingTaxRow) {
+      taxes.push({
+        name: `${shippingTaxRow.tax_type.toUpperCase()} (incl. envío)`,
+        // La copia guarda fracción (`Decimal(6,5)` ⇒ 0.08); la fila se pinta
+        // como `(${rate}%)`, igual que en `aggregateTaxes`.
+        rate: Math.round(shippingTaxRow.tax_rate * 10000) / 100,
+        base_amount: shippingTaxRow.taxable_amount,
+        tax_amount: shippingTaxRow.tax_amount,
+        base_formatted: this.formatOrderMoney(shippingTaxRow.taxable_amount),
+        tax_formatted: this.formatOrderMoney(shippingTaxRow.tax_amount),
+      });
+    }
