@@ -2,6 +2,8 @@ import {
   EMPTY_SHIPPING_TAX,
   buildShippingTaxBreakdownRow,
   evaluateShippingTaxCategory,
+  prorateShippingTaxRefundCents,
+  proportionalShippingTaxCents,
   resolveShippingTaxSnapshot,
   shippingNetBase,
 } from './shipping-tax.util';
@@ -235,6 +237,36 @@ describe('shipping-tax.util', () => {
       expect(buildShippingTaxBreakdownRow(order)).toBeNull();
       expect(buildShippingTaxBreakdownRow(null)).toBeNull();
       expect(shippingNetBase(order)).toBe(15000);
+    });
+  });
+
+  describe('prorateShippingTaxRefundCents', () => {
+    // Envío 15.000 con INC 8 % ⇒ copia 1.111,11. Todo en centavos enteros.
+    const cost = 1500000;
+    const tax = 111111;
+
+    it('devolución total ⇒ todo el impuesto de la copia', () => {
+      expect(prorateShippingTaxRefundCents(cost, tax, [], cost)).toBe(111111);
+    });
+
+    it('un parcial de 7.500 ⇒ proporcional redondeado (55.555,5 ⇒ 55.556)', () => {
+      expect(prorateShippingTaxRefundCents(cost, tax, [], 750000)).toBe(55556);
+      expect(proportionalShippingTaxCents(cost, tax, 750000)).toBe(55556);
+    });
+
+    it('dos parciales de 7.500 ⇒ el segundo cierra al centavo contra la copia (55.556 + 55.555 = 111.111)', () => {
+      const first = prorateShippingTaxRefundCents(cost, tax, [], 750000);
+      const second = prorateShippingTaxRefundCents(cost, tax, [750000], 750000);
+      expect(first).toBe(55556);
+      expect(second).toBe(55555);
+      expect(first + second).toBe(tax);
+    });
+
+    it('sin bruto, sin impuesto o sin devolución actual ⇒ 0', () => {
+      expect(prorateShippingTaxRefundCents(cost, tax, [], 0)).toBe(0);
+      expect(prorateShippingTaxRefundCents(0, tax, [], 750000)).toBe(0);
+      expect(prorateShippingTaxRefundCents(cost, 0, [], 750000)).toBe(0);
+      expect(proportionalShippingTaxCents(0, tax, 750000)).toBe(0);
     });
   });
 });

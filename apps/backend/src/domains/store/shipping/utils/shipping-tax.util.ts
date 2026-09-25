@@ -346,3 +346,56 @@ export function buildShippingTaxBreakdownRow(
 export function shippingNetBase(order: ShippingTaxOrderInput): number {
   return Math.max(0, toCents(order.shipping_cost) - toCents(order.shipping_tax_amount)) / 100;
 }
+
+/**
+ * Cuota proporcional del impuesto del envío para un bruto devuelto, en
+ * centavos enteros. ÚNICA definición: la usan el prorrateo de devoluciones
+ * (`refund-calculation.service.ts`) y la reconstrucción fiscal de la
+ * devolución manual (`manual-refund-accounting.util.ts`).
+ */
+export function proportionalShippingTaxCents(
+  shippingCostCents: number,
+  shippingTaxCents: number,
+  grossRefundCents: number,
+): number {
+  if (shippingCostCents <= 0) return 0;
+  return Math.round((shippingTaxCents * grossRefundCents) / shippingCostCents);
+}
+
+/**
+ * Impuesto del envío a devolver por la devolución actual, en centavos
+ * enteros. ÚNICA definición del prorrateo: proporcional al bruto devuelto,
+ * y la devolución que completa el envío cierra al centavo contra
+ * `shipping_tax_amount`.
+ *
+ * Lo ya devuelto del impuesto no está persistido: se reconstruye con la
+ * MISMA proporción sobre cada bruto previo (determinista). Sin ese cierre,
+ * cada parcial arrastraría ±1 ¢ de redondeo.
+ *
+ * Todo en centavos enteros; con bruto, impuesto o devolución actual ≤ 0
+ * devuelve 0.
+ */
+export function prorateShippingTaxRefundCents(
+  shippingCostCents: number,
+  shippingTaxCents: number,
+  priorRefundCents: readonly number[],
+  currentRefundCents: number,
+): number {
+  if (currentRefundCents <= 0 || shippingCostCents <= 0 || shippingTaxCents <= 0) {
+    return 0;
+  }
+  const priorShippingCents = priorRefundCents.reduce((sum, gross) => sum + gross, 0);
+  const priorTaxCents = priorRefundCents.reduce(
+    (sum, gross) =>
+      sum + proportionalShippingTaxCents(shippingCostCents, shippingTaxCents, gross),
+    0,
+  );
+  const remainingTaxCents = Math.max(0, shippingTaxCents - priorTaxCents);
+  if (priorShippingCents + currentRefundCents >= shippingCostCents) {
+    return remainingTaxCents;
+  }
+  return Math.min(
+    remainingTaxCents,
+    proportionalShippingTaxCents(shippingCostCents, shippingTaxCents, currentRefundCents),
+  );
+}
