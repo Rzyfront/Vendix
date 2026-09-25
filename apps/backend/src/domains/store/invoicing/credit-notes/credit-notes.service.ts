@@ -728,20 +728,6 @@ export class CreditNotesService {
    * se está intentando resolver.
    */
   /**
-   * CP-REFUND-FLOW-REDESIGN paso 7 — resuelve y valida el vínculo
-   * refund↔NC de una nota guiada.
-   *
-   * El mapeo `refund_items` → líneas es el ADR-03 del order-details
-   * (frontend), movido a backend: cantidad y montos del reembolso, precio
-   * y descripción de la línea de la orden. Nunca re-deriva impuestos acá —
-   * las líneas entran al carril parcial por kernel como cualquier otra.
-   *
-   * Todo rechazo sale ANTES de numerar (el llamador numera después):
-   * refund inexistente/ajeno, factura padre sin orden, cruce de órdenes,
-   * doble vínculo vivo, mezcla guiada+explícita, y refund sin nada que
-   * derivar. Null = NC manual, el flujo histórico intacto.
-   */
-  /**
    * Release-853 (paso 8) — traduce el P2002 del índice parcial único
    * `invoices_refund_id_active_credit_note_key` al error de "refund ya
    * vinculado" de la guarda pre-vuelo. La guarda no cierra la carrera
@@ -778,6 +764,20 @@ export class CreditNotesService {
     throw error;
   }
 
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 7 — resuelve y valida el vínculo
+   * refund↔NC de una nota guiada.
+   *
+   * El mapeo `refund_items` → líneas es el ADR-03 del order-details
+   * (frontend), movido a backend: cantidad y montos del reembolso, precio
+   * y descripción de la línea de la orden. Nunca re-deriva impuestos acá —
+   * las líneas entran al carril parcial por kernel como cualquier otra.
+   *
+   * Todo rechazo sale ANTES de numerar (el llamador numera después):
+   * refund inexistente/ajeno, factura padre sin orden, cruce de órdenes,
+   * doble vínculo vivo, mezcla guiada+explícita, y refund sin nada que
+   * derivar. Null = NC manual, el flujo histórico intacto.
+   */
   private async resolveRefundLink(
     dto: CreateCreditNoteDto | CreateDebitNoteDto,
     type: 'credit_note' | 'debit_note',
