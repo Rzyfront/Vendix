@@ -88,24 +88,24 @@ import {
             title="Zonas"
             [value]="zones_with_rates().length"
             iconName="map-pin"
-            iconBgColor="#ECFDF5"
-            iconColor="#10B981"
+            iconBgColor="var(--color-emerald-50, #ecfdf5)"
+            iconColor="var(--color-emerald-500, #10b981)"
             [loading]="is_loading()"
           />
           <app-stats
             title="Tarifas activas"
             [value]="active_rates_count()"
             iconName="tag"
-            iconBgColor="var(--color-violet-50, #F5F3FF)"
-            iconColor="#8B5CF6"
+            iconBgColor="var(--color-purple-50, #faf5ff)"
+            iconColor="var(--color-purple-500, #a855f7)"
             [loading]="is_loading()"
           />
           <app-stats
             title="Pedidos este mes"
             [value]="0"
             iconName="package"
-            iconBgColor="var(--color-orange-50, #FFF7ED)"
-            iconColor="#F59E0B"
+            iconBgColor="var(--color-orange-50, #fff7ed)"
+            iconColor="var(--color-orange-500, #f97316)"
             [loading]="is_loading()"
             smallText="—"
           />
@@ -113,8 +113,8 @@ import {
             title="Ingresos envio"
             [value]="'—'"
             iconName="banknote"
-            iconBgColor="var(--color-indigo-50, #EEF2FF)"
-            iconColor="#6366F1"
+            iconBgColor="var(--color-blue-50, #eff6ff)"
+            iconColor="var(--color-blue-500, #3b82f6)"
             [loading]="is_loading()"
           />
         </div>
