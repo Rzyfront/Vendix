@@ -28,8 +28,11 @@ interface TrackingStep {
  * Máquina híbrida: hitos reales (15/45/75/100% según `orderState`) más un
  * micro-avance simulado con topes (30/65/92%) que jamás cruza al hito
  * siguiente; el avance simulado se reabsorbe cuando llega señal real (el
- * offset se resetea al cambiar el estado). Ritmo base: 15 min
- * (`baseMinutes`, el guest pasa `prep_minutes_max ?? 15`).
+ * offset se resetea al cambiar el estado). `baseMinutes` (el guest pasa
+ * `prep_minutes_max`, sin inventar un default) fija el ritmo de esa deriva;
+ * cuando la tienda no configuró ninguna fuente de ETA (`null`), la barra
+ * NO simula avance — se congela en el % real del hito y solo se mueve
+ * cuando llega una señal real de `orderState`.
  *
  * - `cancelled`/`refunded` congelan la barra en gris, sin deriva ni sheen.
  * - `animateFromZero` (`?success=true`) crece 0→% en ~1s vía transición CSS.
@@ -323,8 +326,13 @@ export class OrderTrackingProgressComponent {
   readonly hasShippingAddress = input(false);
   /** `?success=true`: la barra crece 0→% en ~1s al montar. */
   readonly animateFromZero = input(false);
-  /** Ritmo base en minutos (el guest pasa `prep_minutes_max ?? 15`). */
-  readonly baseMinutes = input(15);
+  /**
+   * Ritmo base en minutos (el guest pasa `prep_minutes_max`, sin default).
+   * `null` cuando la tienda no configuró ninguna fuente de ETA: la deriva
+   * simulada se desactiva por completo (ver el `effect` del constructor) y
+   * la barra queda en el % real del hito, sin cuenta regresiva inventada.
+   */
+  readonly baseMinutes = input<number | null>(null);
   /** `prefers-reduced-motion`: salta al % real, sin sheen ni deriva. */
   readonly reducedMotion = input(false);
 
@@ -424,7 +432,9 @@ export class OrderTrackingProgressComponent {
 
     // Deriva simulada: avanza del % real al tope del hito en `baseMinutes`.
     // El offset se resetea (untracked) ante cualquier señal real, y el tick
-    // se clampéa al tope y se detiene ahí: jamás cruza hitos.
+    // se clampéa al tope y se detiene ahí: jamás cruza hitos. Sin
+    // `baseMinutes` (tienda sin fuente de ETA) NO se inventa un ritmo: el
+    // intervalo ni se arranca y la barra queda fija en el % real del hito.
     effect((onCleanup) => {
       const frozen = this.isFrozen();
       const reduced = this.reducedMotion();
@@ -433,14 +443,13 @@ export class OrderTrackingProgressComponent {
       const base = this.baseMinutes();
       untracked(() => this.simOffset.set(0));
       if (frozen || reduced || milestone >= 3) return;
+      if (base === null || !Number.isFinite(base) || base <= 0) return;
       const cap = MILESTONE_CAPS[milestone] ?? 100;
       const span = Math.max(cap - real, 0);
       if (span <= 0) return;
-      const minutes =
-        Number.isFinite(base) && base > 0 ? base : 15;
       const totalTicks = Math.max(
         1,
-        Math.round((minutes * 60 * 1000) / TICK_MS),
+        Math.round((base * 60 * 1000) / TICK_MS),
       );
       const step = span / totalTicks;
       const id = setInterval(() => {

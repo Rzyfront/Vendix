@@ -306,15 +306,15 @@ interface GuestOrderSummary {
 
           <!-- SEGUIMIENTO (paso 10: tras hide_tracking_progress) -->
           @if (trackingShown()) {
-            <!-- CP-853-fix (paso 4): el ritmo lo da el backend
-                 (prep_minutes_max, con fallback a Logística); el guest no
-                 inventa un 15. La exclamación es solo para el tipo: null cae
-                 en la guarda interna del componente (Number.isFinite). -->
+            <!-- CP-853-fix (paso 4) + regresión (paso 2): el ritmo lo da el
+                 backend (prep_minutes_max); el guest no inventa un 15.
+                 `baseMinutes` acepta `number | null` y, sin fuente de ETA,
+                 el componente NO simula avance (ver su propio doc). -->
             <app-order-tracking-progress
               [orderState]="data.order.state"
               [hasShippingAddress]="data.order.shipping_address != null"
               [animateFromZero]="justPurchased()"
-              [baseMinutes]="etaMinutes(data.order)!"
+              [baseMinutes]="etaMinutes(data.order)"
               [reducedMotion]="sse.prefersReducedMotion()"
             />
           }
