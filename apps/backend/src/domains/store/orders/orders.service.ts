@@ -326,8 +326,8 @@ export class OrdersService {
    *
    * Cada llamador resuelve `rateCost` con `resolveExpectedRateCost`; el
    * editor pasa su costo de servidor ya validado por el guard de
-   * tolerancia. El paso 14 extiende esta región con el modo incluido /
-   * agregado de la tarifa.
+   * tolerancia. Paso 14: la copia viaja con `shipping_tax_is_inclusive`
+   * (modo de la tarifa cuando hay impuesto, null si no).
    */
   private async resolveShippingTaxChange(args: {
     shippingUnchanged: boolean;
@@ -336,24 +336,51 @@ export class OrdersService {
     shippingCost: number;
     storeId: number;
     client?: any;
-  }): Promise<ShippingTaxSnapshot | undefined> {
+  }): Promise<
+    (ShippingTaxSnapshot & { shipping_tax_is_inclusive: boolean | null }) | undefined
+  > {
     if (args.shippingUnchanged) return undefined;
     const costComesFromRate =
       args.rateId != null &&
       args.rateCost != null &&
       !differsByAtLeastCents(args.shippingCost, args.rateCost, 1);
-    if (!costComesFromRate) return { ...EMPTY_SHIPPING_TAX };
-    return this.snapshotShippingTax(
+    if (!costComesFromRate) {
+      return { ...EMPTY_SHIPPING_TAX, shipping_tax_is_inclusive: null };
+    }
+    const snapshot = await this.snapshotShippingTax(
       args.rateId,
       args.shippingCost,
       args.storeId,
       args.client,
     );
+    // Paso 14 — el modo sale del cálculo único, evaluado sobre el costo
+    // cobrado (el modo vive en la fila de la tarifa, así que el precio de
+    // entrada no lo mueve; solo se consulta cuando hay impuesto). Sin
+    // `chargeForRate` (dobles viejos de specs) ⇒ null.
+    if (!(snapshot.shipping_tax_amount > 0)) {
+      return { ...snapshot, shipping_tax_is_inclusive: null };
+    }
+    const charge =
+      this.shippingTaxService &&
+      typeof this.shippingTaxService.chargeForRate === 'function'
+        ? await this.shippingTaxService.chargeForRate(
+            args.client ?? null,
+            args.rateId,
+            args.shippingCost,
+            { store_id: args.storeId },
+          )
+        : null;
+    return {
+      ...snapshot,
+      shipping_tax_is_inclusive:
+        charge && charge.applies ? charge.reason === 'inclusive' : null,
+    };
   }
 
   /**
    * Paso 5 (B1+B2) — costo que dicta una tarifa para una orden:
-   * - `flat`: `base_cost`.
+   * - `flat`: BRUTO del cálculo único (paso 14; agregado ⇒ base +
+   *   impuesto, igual que el cotizador).
    * - calculadas (`weight_based`, `price_based`, `free`): se recalcula en
    *   el servidor con `ShippingCalculatorService` sobre la dirección y las
    *   líneas de la orden (mismo contrato que
@@ -367,7 +394,17 @@ export class OrdersService {
     storeId: number,
   ): Promise<number | null> {
     if (!rate) return null;
-    if (rate.type === 'flat') return Number(rate.base_cost);
+    if (rate.type === 'flat') {
+      const base = Number(rate.base_cost);
+      const charge =
+        this.shippingTaxService &&
+        typeof this.shippingTaxService.chargeForRate === 'function'
+          ? await this.shippingTaxService.chargeForRate(null, rate.id, base, {
+              store_id: storeId,
+            })
+          : null;
+      return charge ? charge.gross : base;
+    }
     const options = await this.quoteOrderShippingOptions(orderId, storeId);
     const match = options?.find((o) => o.rate_id === rate.id);
     return match ? Number(match.cost) : null;
@@ -2542,7 +2579,21 @@ export class OrdersService {
           );
         }
         resolvedShippingRateId = rate.id;
-        shippingCost = Number(rate.base_cost);
+        // Paso 14 — la tarifa explícita cobra el BRUTO del cálculo único
+        // (agregado ⇒ base + impuesto, igual que el cotizador). Sin
+        // `chargeForRate` (dobles viejos de specs) ⇒ `base_cost`.
+        shippingCost =
+          this.shippingTaxService &&
+          typeof this.shippingTaxService.chargeForRate === 'function'
+            ? (
+                await this.shippingTaxService.chargeForRate(
+                  null,
+                  rate.id,
+                  Number(rate.base_cost),
+                  { store_id: storeId },
+                )
+              ).gross
+            : Number(rate.base_cost);
       } else {
         // Auto-calcular si no hay rate explícito.
         if (dto.shipping_address_id) {

@@ -96,6 +96,35 @@ describe('OrdersService.assignShipping — impuesto del envío', () => {
     expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 9000, { store_id: 1 });
   });
 
+  it('paso 14 — flat agregada sin costo en el DTO: cobra el bruto y guarda modo false', async () => {
+    const chargeForRate = jest.fn().mockResolvedValue({
+      applies: true, gross: 11900, base: 10000, tax: 1900, reason: 'exclusive',
+    });
+    service.shippingTaxService.chargeForRate = chargeForRate;
+    snapshotForRate.mockResolvedValue({
+      shipping_tax_rate_id: 5,
+      shipping_tax_name: 'IVA 19%',
+      shipping_tax_type: 'iva',
+      shipping_tax_rate: 0.19,
+      shipping_tax_amount: 1900,
+    });
+    prisma.shipping_rates.findFirst.mockResolvedValue({
+      id: 31, shipping_method_id: 4, type: 'flat', base_cost: 10000, is_active: true,
+    });
+    await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31 });
+    expect(chargeForRate).toHaveBeenCalledWith(null, 31, 10000, { store_id: 1 });
+    expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 11900, { store_id: 1 });
+    const data = prisma.orders.update.mock.calls[0][0].data;
+    expect(data).toMatchObject({
+      shipping_rate_id: 31,
+      shipping_cost: 11900,
+      shipping_tax_amount: 1900,
+      shipping_tax_is_inclusive: false,
+      // 10000 + 800 − 0 + 11900 + 0
+      grand_total: 22700,
+    });
+  });
+
   /**
    * Tarifa explícita NO flat: el costo esperado lo recalcula el servidor con
    * `ShippingCalculatorService` (mismo contrato que
@@ -250,6 +279,34 @@ describe('OrdersService.update — PATCH de envío (paso 5 B1)', () => {
       shipping_cost: 20000,
       // 100000 + 19000 - 0 + 20000 + 0
       grand_total: 139000,
+    });
+  });
+
+  it('paso 14 — PATCH al bruto agregado: re-deriva la copia y guarda modo false', async () => {
+    const chargeForRate = jest.fn().mockResolvedValue({
+      applies: true, gross: 11900, base: 10000, tax: 1900, reason: 'exclusive',
+    });
+    service.shippingTaxService.chargeForRate = chargeForRate;
+    snapshotForRate.mockResolvedValue({
+      shipping_tax_rate_id: 5,
+      shipping_tax_name: 'IVA 19%',
+      shipping_tax_type: 'iva',
+      shipping_tax_rate: 0.19,
+      shipping_tax_amount: 1900,
+    });
+    prisma.shipping_rates.findFirst.mockResolvedValue({
+      id: 31, shipping_method_id: 4, type: 'flat', base_cost: 10000, is_active: true,
+    });
+    await service.update(10, { shipping_cost: 11900 });
+    expect(chargeForRate).toHaveBeenCalledWith(null, 31, 10000, { store_id: 1 });
+    expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 11900, { store_id: 1 });
+    const data = prisma.orders.update.mock.calls[0][0].data;
+    expect(data).toMatchObject({
+      shipping_cost: 11900,
+      shipping_tax_amount: 1900,
+      shipping_tax_is_inclusive: false,
+      // 100000 + 19000 - 0 + 11900 + 0
+      grand_total: 130900,
     });
   });
 

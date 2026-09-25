@@ -249,6 +249,106 @@ describe('InvoicingService.createFromOrder → UBL — cadena con envío gravado
     expect(result.valid).toBe(true);
   });
 
+  it('paso 14 — agregado 10.000 IVA 19%: línea Envío base 10.000 + IVA 1.900 y el XML cuadra', async () => {
+    prisma.orders.findFirst.mockResolvedValue(
+      buildOrder({
+        shipping_cost: money(11900),
+        shipping_tax_rate_id: 5,
+        shipping_tax_name: 'IVA',
+        shipping_tax_type: 'iva',
+        shipping_tax_rate: money('0.19000'),
+        shipping_tax_amount: money('1900'),
+        shipping_tax_is_inclusive: false,
+        order_items: [
+          buildOrderItem({
+            quantity: 1,
+            unit_price: money('42016.80'),
+            total_price: money('42016.80'),
+            tax_rate: money('0.19'),
+            tax_amount_item: money('7983.20'),
+            order_item_taxes: [
+              {
+                tax_rate_id: 1,
+                tax_name: 'IVA 19%',
+                tax_rate: money('0.19'),
+                tax_amount: money('7983.20'),
+                tax_type: 'iva',
+                is_inclusive: true,
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+    prisma.invoice_items.findMany.mockResolvedValue([{ id: 501 }, { id: 502 }]);
+
+    await service.createFromOrder(ORDER_ID);
+
+    const data = prisma.invoices.create.mock.calls[0][0].data as any;
+    const persisted_taxes = (prisma.invoice_taxes.createMany.mock.calls[0]?.[0]
+      ?.data ?? []) as any[];
+
+    expect(data.subtotal_amount.toString()).toBe('52016.8');
+    expect(data.tax_amount.toString()).toBe('9883.2');
+    expect(data.total_amount.toString()).toBe('61900');
+    expect(data.shipping_amount.toString()).toBe('10000');
+
+    const [product, shipping] = data.invoice_items.create;
+    expect(product.total_amount.toString()).toBe('50000');
+    expect(shipping).toMatchObject({
+      product_id: null,
+      description: 'Envio',
+      is_inclusive: false,
+    });
+    expect(shipping.unit_price.toString()).toBe('10000');
+    expect(shipping.tax_amount.toString()).toBe('1900');
+    expect(shipping.total_amount.toString()).toBe('11900');
+    expect(persisted_taxes).toHaveLength(2);
+
+    const items: UblDocumentLine[] = data.invoice_items.create.map(
+      (item: any, index: number) => ({
+        description: item.description,
+        quantity: item.quantity.toString(),
+        unit_price: dianAmount(item.unit_price),
+        discount_amount: dianAmount(item.discount_amount),
+        tax_amount: dianAmount(item.tax_amount),
+        total_amount: dianAmount(item.total_amount),
+        taxes: persisted_taxes
+          .filter((row) => Number(row.invoice_item_id) === 501 + index)
+          .map(toProviderTax),
+      }),
+    );
+    const header: ProviderInvoiceTax[] =
+      persisted_taxes.map(toProviderTax);
+
+    const xml = buildInvoiceXml(items, header, dianAmount(data.tax_amount));
+
+    const [, envio_xml] = invoiceLines(xml);
+    expect(envio_xml).toContain('<cbc:ID>01</cbc:ID>');
+    expect(envio_xml).toContain('<cbc:Percent>19.00</cbc:Percent>');
+    expect(envio_xml).toContain(
+      '<cbc:TaxableAmount currencyID="COP">10000.00</cbc:TaxableAmount>',
+    );
+    expect(envio_xml).toContain(
+      '<cbc:TaxAmount currencyID="COP">1900.00</cbc:TaxAmount>',
+    );
+
+    const totals = monetaryTotals(xml);
+    expect(totals.LineExtensionAmount).toBe('52016.80');
+    expect(totals.TaxExclusiveAmount).toBe('52016.80');
+    expect(totals.TaxInclusiveAmount).toBe('61900.00');
+    expect(totals.PayableAmount).toBe('61900.00');
+
+    const result = DianTotalsValidator.validate(xml);
+    expect(
+      result.violations.filter((v) =>
+        ['FAU04', 'FAU06', 'FAX07'].includes(v.rule),
+      ),
+    ).toEqual([]);
+    expect(result.violations.map((v) => `${v.rule}: ${v.message}`)).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+
   it('CUFE: ValImp reparte el impuesto del productor por tipo (IVA 15.966,39 / INC 1.111,11)', async () => {
     prisma.orders.findFirst.mockResolvedValue(taxedOrder());
     prisma.invoice_items.findMany.mockResolvedValue([{ id: 501 }, { id: 502 }]);
