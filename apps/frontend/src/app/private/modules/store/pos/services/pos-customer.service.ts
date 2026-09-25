@@ -431,6 +431,8 @@ export class PosCustomerService {
       phone: apiCustomer.phone,
       document_type: apiCustomer.document_type,
       document_number: apiCustomer.document_number,
+      legal_name: apiCustomer.legal_name ?? null,
+      person_type: apiCustomer.person_type ?? null,
       addresses: (apiCustomer.addresses || []).map((addr: any) => ({
         id: addr.id,
         address_line1: addr.address_line1,
