@@ -59,6 +59,7 @@ import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 import { CheckoutIdempotencyService } from './checkout-idempotency.service';
 import { ShippingTaxService } from '../../store/shipping/services/shipping-tax.service';
+import { ShippingDistanceService } from '../../store/shipping/services/shipping-distance.service';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -207,6 +208,10 @@ export class CheckoutService {
     // `@Optional()` para no romper los TestingModule existentes; sin él (sólo
     // en specs) el envío sale sin impuesto.
     @Optional() private readonly shippingTaxService?: ShippingTaxService,
+    // Cobro por distancia: mismo resolver del cotizador, recalculado en
+    // servidor al confirmar. `@Optional()` por el mismo motivo; sin él el
+    // envío sale a precio de zona.
+    @Optional() private readonly shippingDistance?: ShippingDistanceService,
   ) {}
 
   /**
@@ -225,6 +230,60 @@ export class CheckoutService {
     return this.shippingTaxService.snapshotForRate(null, rate_id, shipping_cost, {
       store_id,
     });
+  }
+
+  /**
+   * Recalcula el costo de envío por distancia al confirmar, con el mismo
+   * resolver del cotizador (`ShippingDistanceService`) y las coords de la
+   * dirección final. Sin método-distancia/escala/coords, o con el motor
+   * caído, rige el precio de zona; si la distancia cae fuera de todos los
+   * rangos la selección ya no es válida (el cotizador nunca la habría
+   * ofrecido) y el checkout se rechaza con 400.
+   */
+  private async resolveConfirmShippingCost(
+    rate: {
+      distance_tiers?: unknown;
+      shipping_method?: {
+        distance_pricing_enabled?: boolean | null;
+        origin_latitude?: unknown;
+        origin_longitude?: unknown;
+      } | null;
+    },
+    address_snapshot: {
+      latitude?: unknown;
+      longitude?: unknown;
+    } | null,
+    zone_cost: number,
+  ): Promise<number> {
+    const distance = this.shippingDistance;
+    const method = rate.shipping_method;
+    if (!distance || !method?.distance_pricing_enabled) return zone_cost;
+    const tiers = ShippingDistanceService.parseTiers(rate.distance_tiers);
+    if (!tiers) return zone_cost;
+    const origin = ShippingDistanceService.toCoords(
+      method.origin_latitude,
+      method.origin_longitude,
+    );
+    const buyer = ShippingDistanceService.toCoords(
+      address_snapshot?.latitude,
+      address_snapshot?.longitude,
+    );
+    if (!origin || !buyer) return zone_cost;
+    let distanceKm: number | null;
+    try {
+      distanceKm = await distance.resolveDistanceKm(origin, buyer);
+    } catch {
+      return zone_cost;
+    }
+    if (distanceKm == null) return zone_cost;
+    const tier = ShippingDistanceService.matchTier(tiers, distanceKm);
+    if (!tier) {
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_003,
+        'La tarifa de envío seleccionada ya no cubre la distancia a tu dirección; vuelve a cotizar el envío',
+      );
+    }
+    return tier.price;
   }
 
   /**
@@ -1459,6 +1518,16 @@ export class CheckoutService {
       shipping_cost = Number(rate.base_cost);
       shipping_method_id = rate.shipping_method_id;
       shipping_rate_id = rate.id;
+
+      // Cobro por distancia: el costo se deriva 100% en servidor con el mismo
+      // resolver del cotizador y las coords de la dirección final; el cliente
+      // nunca envía costos. Va ANTES del snapshot de impuesto para que el IVA
+      // del envío se calcule sobre el costo final.
+      shipping_cost = await this.resolveConfirmShippingCost(
+        rate,
+        shipping_address_snapshot,
+        shipping_cost,
+      );
 
       // Derive delivery_type from shipping method type
       const methodType = rate.shipping_method.type;

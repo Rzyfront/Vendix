@@ -3233,6 +3233,11 @@ model shipping_methods {
   default_driver_user_id       Int?
   default_carrier_supplier_id  Int?
   cost_settlement_timing       cost_settlement_timing_enum?  @default(immediate_on_close)
+  // Cobro por distancia (opcional por método, apagado por defecto). Origen =
+  // pin del método; escala de km vive en `shipping_rates.distance_tiers`.
+  distance_pricing_enabled     Boolean                       @default(false)
+  origin_latitude              Decimal?                      @db.Decimal(10, 8)
+  origin_longitude             Decimal?                      @db.Decimal(11, 8)
   created_at                   DateTime?                     @default(now()) @db.Timestamp(6)
   updated_at                   DateTime?                     @default(now()) @db.Timestamp(6)
 
@@ -3282,6 +3287,10 @@ model shipping_rates {
   // debe quitar el impuesto del envío en silencio.
   tax_category_id Int?
   tax_category    tax_categories? @relation(fields: [tax_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  // Escala de km para cobro por distancia: [{from_km, to_km|null, price}].
+  // Null/vacío = rige el precio plano de la tarifa.
+  distance_tiers Json?
 
   // Relaciones
   shipping_zone   shipping_zones   @relation(fields: [shipping_zone_id], references: [id], onDelete: Cascade)

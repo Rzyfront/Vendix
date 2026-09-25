@@ -45,6 +45,21 @@ function withTaxCategoryView<T extends { tax_category?: unknown }>(
   };
 }
 
+/**
+ * Normaliza la escala del DTO a JSON plano para Prisma. `null` (quitar la
+ * escala) se persiste como NULL de columna, no como `JsonNull`.
+ */
+function toDistanceTiersJson(
+  tiers: Array<{ from_km: number; to_km?: number | null; price: number }> | null,
+): Array<{ from_km: number; to_km: number | null; price: number }> | null {
+  if (tiers == null) return null;
+  return tiers.map((tier) => ({
+    from_km: tier.from_km,
+    to_km: tier.to_km ?? null,
+    price: tier.price,
+  }));
+}
+
 @Injectable()
 export class StoreShippingZonesService {
   constructor(
@@ -277,6 +292,10 @@ export class StoreShippingZonesService {
         max_val: dto.max_val,
         free_shipping_threshold: dto.free_shipping_threshold,
         is_active: dto.is_active ?? true,
+        // Escala de km: ausente ⇒ precio plano; se persiste como JSON plano.
+        ...(dto.distance_tiers !== undefined
+          ? { distance_tiers: toDistanceTiersJson(dto.distance_tiers) }
+          : {}),
       },
       include: RATE_INCLUDE,
     });
@@ -308,7 +327,8 @@ export class StoreShippingZonesService {
       throw new VendixHttpException(ErrorCodes.SHIP_PERM_001);
     }
 
-    const { shipping_zone_id, tax_category_id, ...update_data } = dto;
+    const { shipping_zone_id, tax_category_id, distance_tiers, ...update_data } =
+      dto;
     if (
       shipping_zone_id !== undefined &&
       shipping_zone_id !== null &&
@@ -343,6 +363,10 @@ export class StoreShippingZonesService {
       data: {
         ...update_data,
         ...(tax_category_changes ? { tax_category_id } : {}),
+        // `undefined` ⇒ no se toca; `null`/vacía ⇒ se quita la escala (zona).
+        ...(distance_tiers !== undefined
+          ? { distance_tiers: toDistanceTiersJson(distance_tiers) }
+          : {}),
       },
       include: RATE_INCLUDE,
     });

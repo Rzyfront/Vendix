@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { address_type_enum, shipping_rate_type_enum } from '@prisma/client';
 import { SettingsService } from '../settings/settings.service';
@@ -10,12 +10,18 @@ import {
   normalizeGeoName,
   postalCodeInList,
 } from 'src/common/utils/geo-name.util';
+import {
+  DistanceCoords,
+  ShippingDistanceService,
+} from './services/shipping-distance.service';
 
 export interface AddressDTO {
   country_code: string;
   state_province?: string;
   city?: string;
   postal_code?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface CartItemDTO {
@@ -69,6 +75,9 @@ export class ShippingCalculatorService {
   constructor(
     private prisma: StorePrismaService,
     private settingsService: SettingsService,
+    // `@Optional()` para no romper los TestingModule existentes; sin él (sólo
+    // en specs) el cotizador cobra zona como siempre.
+    @Optional() private readonly distanceService?: ShippingDistanceService,
   ) {}
 
   /**
@@ -131,6 +140,15 @@ export class ShippingCalculatorService {
 
     const cartTotals = this.getCartTotals(items);
     const storeCurrency = await this.settingsService.getStoreCurrency();
+
+    // Cobro por distancia: la zona autoriza (cobertura), la distancia precio.
+    // Una llamada de ruteo por origen distinto, compartida por todas las
+    // tarifas de la cotización; sin coords o ante cualquier fallo el mapa
+    // queda vacío y cada tarifa cobra su precio de zona.
+    const distanceKmByOrigin = await this.resolveQuoteDistances(
+      rates,
+      address,
+    );
 
     // Determinar la máxima especificidad territorial para cada método de envío.
     // Si una zona de nivel ciudad (score >= 100) ya define tarifas para un método,
@@ -205,6 +223,20 @@ export class ShippingCalculatorService {
               'no soportado actualmente.',
           );
           break;
+      }
+
+      // Cobro por distancia: override del costo de zona por el precio del
+      // tramo cuando el método lo tiene activo. Fuera de todos los rangos la
+      // tarifa no se ofrece; las tarifas `free` siempre salen gratis. Va ANTES
+      // del threshold para que el envío-gratis-sobre-X siga aplicando al costo
+      // final (sea de zona o de escala).
+      if (isApplicable && rate.type !== shipping_rate_type_enum.free) {
+        const override = this.applyDistancePrice(
+          rate,
+          distanceKmByOrigin,
+        );
+        if (override === 'excluded') continue;
+        if (override != null) cost = override;
       }
 
       // ADR-04 (F-008): threshold 0 = envío gratis deliberado de la tienda.
@@ -292,6 +324,95 @@ export class ShippingCalculatorService {
     );
 
     return options;
+  }
+
+  /**
+   * Resuelve la distancia (km) por calles desde cada origen distinto con
+   * distancia activa hasta el comprador. Una llamada al motor por origen,
+   * compartida por todas las tarifas de la cotización. Tarifas sin escala ni
+   * siquiera rutean (su precio de zona rige igual).
+   */
+  private async resolveQuoteDistances(
+    rates: Array<{
+      distance_tiers?: unknown;
+      shipping_method?: {
+        distance_pricing_enabled?: boolean | null;
+        origin_latitude?: unknown;
+        origin_longitude?: unknown;
+      } | null;
+    }>,
+    address: AddressDTO,
+  ): Promise<Map<string, number | null>> {
+    const distances = new Map<string, number | null>();
+    if (!this.distanceService) return distances;
+    const buyer = ShippingDistanceService.toCoords(
+      address.latitude,
+      address.longitude,
+    );
+    if (!buyer) return distances;
+
+    const origins = new Map<string, DistanceCoords>();
+    for (const rate of rates) {
+      const method = rate.shipping_method;
+      if (!method?.distance_pricing_enabled) continue;
+      if (!ShippingDistanceService.parseTiers(rate.distance_tiers)) continue;
+      const origin = ShippingDistanceService.toCoords(
+        method.origin_latitude,
+        method.origin_longitude,
+      );
+      if (!origin) continue;
+      const key = `${origin.latitude},${origin.longitude}`;
+      if (!origins.has(key)) origins.set(key, origin);
+    }
+
+    for (const [key, origin] of origins) {
+      let distanceKm: number | null = null;
+      try {
+        distanceKm = await this.distanceService.resolveDistanceKm(
+          origin,
+          buyer,
+        );
+      } catch {
+        distanceKm = null;
+      }
+      distances.set(key, distanceKm);
+    }
+    return distances;
+  }
+
+  /**
+   * Override por distancia para UNA tarifa: precio del tramo, `'excluded'`
+   * cuando la distancia cae fuera de todos los rangos, o `null` cuando rige
+   * el precio de zona.
+   */
+  private applyDistancePrice(
+    rate: {
+      distance_tiers?: unknown;
+      shipping_method?: {
+        distance_pricing_enabled?: boolean | null;
+        origin_latitude?: unknown;
+        origin_longitude?: unknown;
+      } | null;
+    },
+    distanceKmByOrigin: Map<string, number | null>,
+  ): number | 'excluded' | null {
+    if (!this.distanceService) return null;
+    const method = rate.shipping_method;
+    if (!method?.distance_pricing_enabled) return null;
+    const origin = ShippingDistanceService.toCoords(
+      method.origin_latitude,
+      method.origin_longitude,
+    );
+    if (!origin) return null;
+    const distanceKm =
+      distanceKmByOrigin.get(`${origin.latitude},${origin.longitude}`) ?? null;
+    const resolved = this.distanceService.resolveRatePrice(
+      rate.distance_tiers,
+      distanceKm,
+    );
+    if (!resolved) return null;
+    if ('excluded' in resolved) return 'excluded';
+    return resolved.price;
   }
 
   /**

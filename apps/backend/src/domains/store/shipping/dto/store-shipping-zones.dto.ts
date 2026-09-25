@@ -8,6 +8,9 @@ import {
   IsInt,
   Min,
   ValidateIf,
+  ValidateNested,
+  ValidationOptions,
+  registerDecorator,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { PartialType, ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -72,6 +75,99 @@ export class CreateZoneDto {
 export class UpdateZoneDto extends PartialType(CreateZoneDto) {}
 
 // ===== TARIFAS =====
+
+export class DistanceTierDto {
+  @ApiProperty({ description: 'Km inicial del tramo (inclusivo)', example: 0 })
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  from_km: number;
+
+  @ApiPropertyOptional({
+    description: 'Km final del tramo (exclusivo). null = tramo abierto.',
+    example: 5,
+    nullable: true,
+  })
+  @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === undefined) return undefined;
+    if (raw === null || raw === '') return null;
+    return Number(raw);
+  })
+  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsNumber()
+  @Min(0)
+  to_km?: number | null;
+
+  @ApiProperty({ description: 'Precio del tramo', example: 8000 })
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  price: number;
+}
+
+/**
+ * La escala debe llegar ordenada por `from_km` y ser contigua (cada
+ * `from_km` iguala el `to_km` anterior: sin huecos ni traslapes), con
+ * `to_km > from_km` en cada tramo y tramo abierto (`null`) solo al final.
+ * `undefined`/`null`/vacío = sin escala (rige el precio plano).
+ */
+export function IsValidDistanceTiers(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'isValidDistanceTiers',
+      target: object.constructor,
+      propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: unknown): boolean {
+          if (value === undefined || value === null) return true;
+          if (!Array.isArray(value) || value.length === 0) return true;
+          for (const item of value) {
+            const tier = item as Partial<DistanceTierDto> | null;
+            if (
+              tier == null ||
+              typeof tier.from_km !== 'number' ||
+              !Number.isFinite(tier.from_km) ||
+              tier.from_km < 0 ||
+              typeof tier.price !== 'number' ||
+              !Number.isFinite(tier.price) ||
+              tier.price < 0
+            ) {
+              return false;
+            }
+            const to = tier.to_km;
+            if (
+              to !== null &&
+              to !== undefined &&
+              (typeof to !== 'number' ||
+                !Number.isFinite(to) ||
+                to <= tier.from_km)
+            ) {
+              return false;
+            }
+          }
+          for (let i = 0; i < value.length; i++) {
+            const tier = value[i] as DistanceTierDto;
+            if (i > 0) {
+              const prev = value[i - 1] as DistanceTierDto;
+              if (prev.to_km == null) return false;
+              if (tier.from_km < prev.from_km) return false;
+              if (tier.from_km !== prev.to_km) return false;
+            }
+            const to = tier.to_km ?? null;
+            if (to == null && i !== value.length - 1) return false;
+          }
+          return true;
+        },
+        defaultMessage(): string {
+          return 'distance_tiers debe ser una escala ordenada y contigua [{from_km,to_km|null,price}] sin huecos ni traslapes, con to_km abierto solo en el último tramo';
+        },
+      },
+    });
+  };
+}
 
 export class CreateRateDto {
   @ApiProperty({ description: 'ID of the shipping zone this rate belongs to' })
@@ -197,6 +293,22 @@ export class CreateRateDto {
   @IsInt()
   @Min(1)
   tax_category_id?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Escala de km para cobro por distancia [{from_km,to_km|null,price}]. null/vacía = rige el precio plano.',
+    example: [
+      { from_km: 0, to_km: 5, price: 8000 },
+      { from_km: 5, to_km: null, price: 12000 },
+    ],
+    nullable: true,
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DistanceTierDto)
+  @IsValidDistanceTiers()
+  distance_tiers?: DistanceTierDto[] | null;
 }
 
 export class UpdateRateDto extends PartialType(CreateRateDto) {}
