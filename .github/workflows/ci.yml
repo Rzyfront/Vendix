@@ -503,7 +503,14 @@ jobs:
     # verde conocida. El arreglo de fondo es partir los seis carriles en jobs
     # paralelos (hoy corren en serie en un solo runner), pero eso cambia los
     # required status checks del ruleset y no se toca sin acuerdo.
-    timeout-minutes: 45
+    # QUI-623 (2026-09-24): con 45m de techo el resultado volvio a depender del
+    # reloj bajo la varianza del runner compartido -- dos corridas consecutivas
+    # del MISMO arbol (`05de0fb86`, delta solo-frontend vs. el verde previo de
+    # 36m59s) se cortaron a 45m59s y 45m20s dentro de `jest -- invoicing`, sin un
+    # solo test en rojo, reproduciendo el patron F-220. El `name:` (identificador
+    # del required status check) NO cambia; solo se amplia la correa a 60m. El
+    # arreglo de fondo (partir los seis carriles con matrix) sigue pendiente.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
