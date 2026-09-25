@@ -133,6 +133,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         [(isOpen)]="isCreateModalOpen"
         [product]="null"
         [isSubmitting]="isCreatingProduct"
+        [currentPage]="pagination().page"
         (cancel)="onModalClose()"
         (submit)="onSaveProduct($event)"
       ></app-product-create-modal>
