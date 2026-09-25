@@ -77,47 +77,46 @@ import {
         (actionClicked)="onHeaderAction($event)"
       />
 
-      <!-- Mini Stats (4 horizontal) -->
+      <!-- Mini Stats (4 horizontal): app-stats as DIRECT children of the global
+           stats-container (it is itself the grid). No inner wrapper: a nested
+           div becomes a single 1/4-width grid item and collapses the cards.
+           iconBgColor/iconColor take Tailwind classes, not var() strings. -->
       <div
         class="stats-container sticky top-[52px] z-20 bg-background py-3 md:static md:bg-transparent md:py-0 mb-4"
       >
-        <div
-          class="flex gap-3 overflow-x-auto px-4 md:px-0 md:grid md:grid-cols-4 md:gap-4 no-scrollbar"
-        >
-          <app-stats
-            title="Zonas"
-            [value]="zones_with_rates().length"
-            iconName="map-pin"
-            iconBgColor="var(--color-emerald-50, #ecfdf5)"
-            iconColor="var(--color-emerald-500, #10b981)"
-            [loading]="is_loading()"
-          />
-          <app-stats
-            title="Tarifas activas"
-            [value]="active_rates_count()"
-            iconName="tag"
-            iconBgColor="var(--color-purple-50, #faf5ff)"
-            iconColor="var(--color-purple-500, #a855f7)"
-            [loading]="is_loading()"
-          />
-          <app-stats
-            title="Pedidos este mes"
-            [value]="0"
-            iconName="package"
-            iconBgColor="var(--color-orange-50, #fff7ed)"
-            iconColor="var(--color-orange-500, #f97316)"
-            [loading]="is_loading()"
-            smallText="—"
-          />
-          <app-stats
-            title="Ingresos envio"
-            [value]="'—'"
-            iconName="banknote"
-            iconBgColor="var(--color-blue-50, #eff6ff)"
-            iconColor="var(--color-blue-500, #3b82f6)"
-            [loading]="is_loading()"
-          />
-        </div>
+        <app-stats
+          title="Zonas"
+          [value]="zones_with_rates().length"
+          iconName="map-pin"
+          iconBgColor="bg-emerald-100"
+          iconColor="text-emerald-500"
+          [loading]="is_loading()"
+        />
+        <app-stats
+          title="Tarifas activas"
+          [value]="active_rates_count()"
+          iconName="tag"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-500"
+          [loading]="is_loading()"
+        />
+        <app-stats
+          title="Pedidos este mes"
+          [value]="0"
+          iconName="package"
+          iconBgColor="bg-orange-100"
+          iconColor="text-orange-500"
+          [loading]="is_loading()"
+          smallText="—"
+        />
+        <app-stats
+          title="Ingresos envio"
+          [value]="'—'"
+          iconName="banknote"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-500"
+          [loading]="is_loading()"
+        />
       </div>
 
       <!-- Dispatch route shortcut (only own_fleet / custom methods) -->
