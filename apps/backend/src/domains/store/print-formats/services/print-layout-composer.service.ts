@@ -1252,7 +1252,7 @@ export class PrintLayoutComposerService {
     if (mode !== 'tokenized' && !fiscal?.qr_code_png_base64 && !fiscal?.qr_code_content) return '';
 
     const qrImg = fiscal?.qr_code_png_base64
-      ? `<img src="data:image/png;base64,${fiscal.qr_code_png_base64}" alt="QR Fiscal" style="width: 110px; height: 110px;" />`
+      ? `<img src="data:image/png;base64,${fiscal.qr_code_png_base64}" alt="QR Fiscal" style="width: 210px; height: 210px; image-rendering: pixelated;" />`
       : `<div class="qr-placeholder"><span class="vendix-token-pill" data-token="fiscal.qr_code">&#123;&#123; QR Fiscal &#125;&#125;</span></div>`;
 
     return `

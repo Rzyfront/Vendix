@@ -101,7 +101,7 @@ export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
     let qrBase64: string | undefined;
     if (note.qr_code) {
       try {
-        const qrBuffer = await this.qrService.generateBuffer(note.qr_code, 240);
+        const qrBuffer = await this.qrService.generateBuffer(note.qr_code, 480);
         qrBase64 = qrBuffer.toString('base64');
       } catch (e) {
         // El QR es ilustrativo: su contenido de texto ya va en `qr_code_content`
