@@ -39,6 +39,11 @@ interface GuestOrderItem {
   tax_amount_item?: number | null;
   image_url?: string | null;
   variant_image_url?: string | null;
+  // Paso 3/8 (roku-shop-checkout): `kitchen_status` ya viene resuelto por el
+  // backend con la regla in-flight (`kitchenStatusFor`); null = nunca disparado.
+  // `preparation_time_minutes` = variante ?? producto (null si ninguno).
+  kitchen_status?: string | null;
+  preparation_time_minutes?: number | null;
   // E2 (Carril B) — fecha de cancelación y motivo del soft-cancel D2.
   // Nullable: el grueso de líneas no están canceladas.
   cancelled_at?: string | null;
@@ -73,10 +78,16 @@ interface GuestOrderAddress {
 }
 
 interface GuestOrderPayment {
+  // Paso 3 (roku-shop-checkout): `payment_id` identifica el pago para los
+  // endpoints guest de comprobante (paso 9); `has_receipt` + content-type
+  // alimentan el visor de comprobante.
+  payment_id?: number | null;
   state: string;
   amount?: number | null;
   paid_at?: string | null;
   method?: string | null;
+  has_receipt?: boolean;
+  receipt_content_type?: string | null;
 }
 
 interface GuestOrderInvoice {
@@ -91,6 +102,11 @@ interface GuestOrderData {
   created_at?: string | null;
   placed_at?: string | null;
   currency?: string | null;
+  // Paso 3/8 (roku-shop-checkout): ETA persistido + MAX en vivo + entrega.
+  estimated_ready_at?: string | null;
+  estimated_delivered_at?: string | null;
+  prep_minutes_max?: number | null;
+  delivery_type?: string | null;
   items: GuestOrderItem[];
   applied_promotions?: GuestOrderPromotion[];
   applied_coupons?: GuestOrderCoupon[];
@@ -213,18 +229,14 @@ interface GuestOrderSummary {
                 data.order.channel === 'whatsapp' ? 'WhatsApp' : 'E-commerce'
               }}</strong>
             </div>
-            @if (data.order.payments?.length) {
+            @if (worstPaymentState(data.order.payments); as payState) {
               <div class="meta-cell">
                 <span class="meta-label">Estado de pago</span>
                 <app-badge
-                  [variant]="
-                    getPaymentStateVariant(data.order.payments![0].state)
-                  "
+                  [variant]="getPaymentStateVariant(payState)"
                   size="xs"
                   badgeStyle="outline"
-                  >{{
-                    getPaymentStateLabel(data.order.payments![0].state)
-                  }}</app-badge
+                  >{{ getPaymentStateLabel(payState) }}</app-badge
                 >
               </div>
             }
@@ -235,6 +247,22 @@ interface GuestOrderSummary {
               }}</strong>
             </div>
           </div>
+
+          <!-- ETA DE PREPARACIÓN (paso 8: tras hide_prep_eta) -->
+          @if (etaVisible()) {
+            <div class="eta-banner">
+              <app-icon name="timer" [size]="20" />
+              <div class="eta-text">
+                <strong class="eta-line">{{ etaLabel(data.order) }}</strong>
+                @if (isPaymentPending(data.order)) {
+                  <span class="eta-note"
+                    >Tu pago está pendiente de confirmación; la cocina inicia al
+                    confirmarse y el tiempo puede variar.</span
+                  >
+                }
+              </div>
+            </div>
+          }
 
           <!-- ENTREGA -->
           @if (data.order.shipping_address; as addr) {
@@ -343,6 +371,17 @@ interface GuestOrderSummary {
                         {{ item.cancellation_reason }}
                       </span>
                     }
+                    @if (kitchenStateFor(item); as ks) {
+                      <span class="kitchen-line">
+                        <app-badge
+                          [variant]="kitchenBadgeVariant(ks)"
+                          size="xs"
+                        >
+                          <app-icon name="flame" [size]="10" />
+                          Cocina: {{ kitchenStateLabel(ks) }}
+                        </app-badge>
+                      </span>
+                    }
                   </div>
                   @if (!isItemCancelled(item)) {
                     <strong class="item-total">{{
@@ -354,29 +393,31 @@ interface GuestOrderSummary {
             </div>
           </section>
 
-          <!-- MÉTODO DE PAGO -->
-          @if (data.order.payments?.length) {
-            <section class="order-section">
-              <div class="section-header">
-                <app-icon name="credit-card" [size]="18" />
-                <h2>Método de pago</h2>
-              </div>
-              <div class="payment-block">
-                <span class="payment-method">{{
-                  data.order.payments![0].method || 'Pago'
-                }}</span>
-                <app-badge
-                  [variant]="
-                    getPaymentStateVariant(data.order.payments![0].state)
-                  "
-                  size="sm"
-                  badgeStyle="outline"
-                  >{{
-                    getPaymentStateLabel(data.order.payments![0].state)
-                  }}</app-badge
-                >
-              </div>
-            </section>
+          <!-- MÉTODO DE PAGO (multipago ordenado peor-primero) -->
+          @if (paymentsWorstFirst(data.order.payments); as payments) {
+            @if (payments.length) {
+              <section class="order-section">
+                <div class="section-header">
+                  <app-icon name="credit-card" [size]="18" />
+                  <h2>Método de pago</h2>
+                </div>
+                <div class="payment-list">
+                  @for (p of payments; track p.payment_id ?? p.method ?? $index) {
+                    <div class="payment-block">
+                      <span class="payment-method">{{
+                        p.method || 'Pago'
+                      }}</span>
+                      <app-badge
+                        [variant]="getPaymentStateVariant(p.state)"
+                        size="sm"
+                        badgeStyle="outline"
+                        >{{ getPaymentStateLabel(p.state) }}</app-badge
+                      >
+                    </div>
+                  }
+                </div>
+              </section>
+            }
           }
 
           <!-- TOTALES -->
@@ -464,7 +505,7 @@ interface GuestOrderSummary {
             @if (whatsappEnabled()) {
               <app-button variant="primary" (clicked)="sendToWhatsApp(data)">
                 <app-icon name="message-circle" [size]="16" slot="icon" />
-                Consultar por WhatsApp
+                Preguntar por mi pedido
               </app-button>
             }
           </div>
@@ -847,6 +888,52 @@ interface GuestOrderSummary {
         color: var(--color-text-primary);
       }
 
+      .payment-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      /* ---- ETA banner (paso 8) ---- */
+      .eta-banner {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.6rem;
+        padding: 0.75rem 1rem;
+        border: 1px solid var(--color-primary);
+        border-radius: var(--radius-md);
+        background: var(--color-primary-light);
+        color: var(--color-text-primary);
+        font-size: var(--fs-sm);
+      }
+
+      .eta-banner app-icon {
+        color: var(--color-primary);
+        flex-shrink: 0;
+        margin-top: 0.1rem;
+      }
+
+      .eta-text {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+
+      .eta-line {
+        font-weight: var(--fw-semibold);
+      }
+
+      .eta-note {
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
+      }
+
+      /* ---- Kitchen badge per dish (paso 8, paleta KDS vía app-badge) ---- */
+      .kitchen-line {
+        display: flex;
+        margin-top: 0.2rem;
+      }
+
       /* ---- Totals ---- */
       .totals-panel {
         padding: 1.25rem;
@@ -1029,7 +1116,7 @@ export class GuestOrderSummaryComponent implements OnInit {
         `*Pedido:* #${data.order.order_number}\n` +
         `*Estado:* ${this.getStateLabel(data.order.state)}\n` +
         (itemLines ? `\n*Productos:*\n${itemLines}\n` : '') +
-        `\n*Total:* ${data.order.grand_total}\n\n¡Muchas gracias!`,
+        `\n*Total:* ${this.currencyService.format(Number(data.order.grand_total || 0))}\n\n¡Muchas gracias!`,
     );
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
   }
@@ -1045,6 +1132,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       pending_payment: 'Pendiente de pago',
       processing: 'En proceso',
       shipped: 'Enviada',
+      pending_delivery: 'Pendiente de entrega',
       delivered: 'Entregada',
       finished: 'Finalizada',
       cancelled: 'Cancelada',
@@ -1059,6 +1147,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       finished: 'success',
       processing: 'primary',
       shipped: 'primary',
+      pending_delivery: 'primary',
       pending_payment: 'warning',
       created: 'warning',
       draft: 'warning',
@@ -1075,6 +1164,7 @@ export class GuestOrderSummaryComponent implements OnInit {
       pending_payment: 'clock',
       processing: 'loader-2',
       shipped: 'truck',
+      pending_delivery: 'truck',
       delivered: 'check-circle',
       finished: 'check-circle',
       cancelled: 'circle-x',
@@ -1083,26 +1173,191 @@ export class GuestOrderSummaryComponent implements OnInit {
     return icons[state] || 'clock';
   }
 
+  // ==========================================================================
+  // PAGO — mapa completo de 8 estados + multipago peor-primero (paso 8)
+  // ==========================================================================
+
   getPaymentStateLabel(state: string): string {
     const labels: Record<string, string> = {
+      pending: 'Pendiente de confirmación',
+      authorized: 'Autorizado',
+      succeeded: 'Pagado',
+      captured: 'Pagado',
       paid: 'Pagado',
-      pending: 'Pendiente',
-      partial: 'Parcial',
       failed: 'Fallido',
+      partially_refunded: 'Reembolso parcial',
       refunded: 'Reembolsado',
+      cancelled: 'Cancelado',
+      // Alias legacy: el enum anterior usaba `partial`.
+      partial: 'Parcial',
     };
     return labels[state] || state;
   }
 
   getPaymentStateVariant(state: string): BadgeVariant {
     const variants: Record<string, BadgeVariant> = {
+      succeeded: 'success',
+      captured: 'success',
       paid: 'success',
       pending: 'warning',
+      authorized: 'primary',
+      partially_refunded: 'info',
+      refunded: 'info',
       partial: 'info',
       failed: 'error',
-      refunded: 'info',
+      cancelled: 'neutral',
     };
     return variants[state] || 'neutral';
+  }
+
+  /**
+   * Severidad peor-primero para multipago. `captured`/`paid`/`partial` no
+   * están en la lista del plan: se rankean junto a `succeeded` (pagado) y
+   * `partially_refunded` respectivamente para que ningún estado quede sin
+   * ranking y el badge agregado nunca elija al azar.
+   */
+  private paymentSeverity(state: string): number {
+    const order = [
+      'failed',
+      'pending',
+      'authorized',
+      'partially_refunded',
+      'cancelled',
+      'refunded',
+      'succeeded',
+    ];
+    const legacyAlias: Record<string, string> = {
+      captured: 'succeeded',
+      paid: 'succeeded',
+      partial: 'partially_refunded',
+    };
+    const idx = order.indexOf(legacyAlias[state] ?? state);
+    return idx === -1 ? order.length : idx;
+  }
+
+  /** Pagos ordenados peor-primero (copia; no muta el summary). */
+  paymentsWorstFirst(
+    payments?: GuestOrderPayment[] | null,
+  ): GuestOrderPayment[] {
+    return [...(payments ?? [])].sort(
+      (a, b) => this.paymentSeverity(a.state) - this.paymentSeverity(b.state),
+    );
+  }
+
+  /** Estado agregado del pago: el peor de todos (o null sin pagos). */
+  worstPaymentState(payments?: GuestOrderPayment[] | null): string | null {
+    const sorted = this.paymentsWorstFirst(payments);
+    return sorted.length ? sorted[0].state : null;
+  }
+
+  /** True si el pago sigue pendiente (dispara la nota del ETA). */
+  isPaymentPending(order: GuestOrderData): boolean {
+    const worst = this.worstPaymentState(order.payments);
+    if (worst) return worst === 'pending';
+    // Sin filas de pago (p.ej. canal WhatsApp): el estado de la orden manda.
+    return order.state === 'pending_payment';
+  }
+
+  // ==========================================================================
+  // ETA — persistido o prep_minutes_max, tras hide_prep_eta (paso 8)
+  // ==========================================================================
+
+  /**
+   * Opt-out `ecommerce.orders.hide_prep_eta` (paso 7): ausente ⇒ visible,
+   * se lee con `!== true`. Además exige al menos una fuente de ETA.
+   */
+  etaVisible(): boolean {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    if (config?.customConfig?.ecommerce?.orders?.hide_prep_eta === true) {
+      return false;
+    }
+    const order = this.summary()?.order;
+    if (!order) return false;
+    return order.estimated_ready_at != null || this.etaMinutes(order) != null;
+  }
+
+  private etaMinutes(order: GuestOrderData): number | null {
+    const m = order.prep_minutes_max;
+    return typeof m === 'number' && Number.isFinite(m) ? m : null;
+  }
+
+  /** "Tiempo estimado: ~X min" + hora persistida si existe. */
+  etaLabel(order: GuestOrderData): string {
+    const parts: string[] = [];
+    const minutes = this.etaMinutes(order);
+    if (minutes != null) parts.push(`~${minutes} min`);
+    const readyAt = this.formatReadyTime(order.estimated_ready_at);
+    if (readyAt) parts.push(`listo aprox. ${readyAt}`);
+    return `Tiempo estimado: ${parts.join(' · ') || '—'}`;
+  }
+
+  /**
+   * `estimated_ready_at` es un instante: se muestra en la hora local del
+   * lector (quien consulta su pedido), igual que el voucher impreso.
+   */
+  private formatReadyTime(iso?: string | null): string {
+    if (!iso) return '';
+    try {
+      return new Date(iso).toLocaleTimeString('es-CO', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
+  }
+
+  // ==========================================================================
+  // COCINA — port del admin order-details (kitchenStateFor/Label/Badge) (paso 8)
+  // ==========================================================================
+
+  /**
+   * El backend ya resolvió la regla in-flight (`kitchenStatusFor`, paso 3),
+   * así que aquí solo se desempaqueta: null/ausente = plato no disparado,
+   * sin badge. Sin deep-link al KDS: el guest no ve nada interno.
+   */
+  kitchenStateFor(item: GuestOrderItem): string | null {
+    return item.kitchen_status ?? null;
+  }
+
+  /** 5 labels ES, idénticos al admin. */
+  kitchenStateLabel(status: string): string {
+    switch (status) {
+      case 'pending':
+        return 'Pendiente';
+      case 'in_preparation':
+        return 'En preparación';
+      case 'ready':
+        return 'Listo';
+      case 'delivered':
+        return 'Entregado';
+      case 'cancelled':
+        return 'Cancelado';
+      default:
+        return status;
+    }
+  }
+
+  /**
+   * Paleta KDS del admin mapeada a variantes de `app-badge`:
+   * pending→neutral, in_preparation→warning, ready→success,
+   * delivered→info, cancelled→error.
+   */
+  kitchenBadgeVariant(status: string): BadgeVariant {
+    switch (status) {
+      case 'pending':
+        return 'neutral';
+      case 'in_preparation':
+        return 'warning';
+      case 'ready':
+        return 'success';
+      case 'delivered':
+        return 'info';
+      case 'cancelled':
+        return 'error';
+      default:
+        return 'neutral';
+    }
   }
 
   // === E2 — helpers de cancelación de línea =================================
