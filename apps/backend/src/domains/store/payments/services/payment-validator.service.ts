@@ -41,7 +41,9 @@ export function getSettledOrderAmount(
  * `completed` refunds count: they are the money that actually left the
  * store. Pending/failed rows never moved money and must not reduce the
  * owed total. Absent `refunds` (callers that do not include the relation)
- * discounts zero, preserving the pre-step-2 verdict.
+ * discounts zero — which preserves the pre-step-2 verdict ONLY for orders
+ * without completed refunds; for refunded legs the discount IS the
+ * intended step-2 fix (see the payOrder invariant in order-flow.service).
  */
 export function getCompletedRefundAmount(
   order: Pick<OrderSettlementSnapshot, 'refunds'>,

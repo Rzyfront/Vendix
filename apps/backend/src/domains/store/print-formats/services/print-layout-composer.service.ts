@@ -93,7 +93,7 @@ export class PrintLayoutComposerService {
     // inserta justo después de los totales; sin sección de totales, antes
     // del pie; sin pie, al final. La ruta `custom_template` no la recibe:
     // esa plantilla es diseño total de la tienda.
-    const refundsHtml = this.renderRefundsSection(data, mode);
+    const refundsHtml = this.renderRefundsSection(data);
     if (refundsHtml) {
       const refundsEntry = {
         section: { type: 'refunds_section' },
@@ -1098,7 +1098,9 @@ export class PrintLayoutComposerService {
    * El neto es derivado (`grand_total − reembolsado`), igual que en el
    * detalle del paso 8.
    */
-  private renderRefundsSection(data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
+  // m6 fix-forward: sin param `mode` — la sección es idéntica en ambos
+  // modos (los data-token ya viajan siempre en el HTML).
+  private renderRefundsSection(data: StandardPrintDataModel): string {
     const refunds = (data.custom_variables as any)?.refunds as
       | ComposerRefundsSection
       | undefined;

@@ -1,12 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { buildRefundCoverageLedger } from './refund-calculation.service';
+import {
+  buildRefundCoverageLedger,
+  REFUND_LEDGER_STATES,
+} from './refund-calculation.service';
 
 /**
  * CP-REFUND-FLOW-REDESIGN paso 7 — cobertura refund↔NC por línea.
  *
  * La verdad de `refunded_*` es el ledger unificado de `refund_items`
- * (TODOS los estados — misma semántica que el caché `order_items.*` del
+ * (estados LEDGER — misma semántica que el caché `order_items.*` del
  * paso 3, nunca re-derivada acá). La verdad de `nc_covered_*` es el
  * puente estructural `credit_note_refund_items`, y sólo cuenta la NC
  * `accepted`: una `draft` aún no acreditó un peso (mismo criterio que el
@@ -18,14 +21,9 @@ import { buildRefundCoverageLedger } from './refund-calculation.service';
  */
 
 /** Estados cuyo dinero está comprometido: candidatos a sugerir NC. */
-// `CEILING_RESERVING_STATES` vive sin exportar en
-// `refund-calculation.service.ts` (archivo fuera del scope de este paso);
-// se replica el conjunto con el mismo criterio del paso 1.
-const NC_SUGGESTIBLE_STATES = [
-  'completed',
-  'pending_approval',
-  'processing',
-] as const;
+// M2 fix-forward: el conjunto vive exportado como `REFUND_LEDGER_STATES`
+// (idéntico al techo del paso 1); se reutiliza en vez de replicarlo.
+const NC_SUGGESTIBLE_STATES: readonly string[] = REFUND_LEDGER_STATES;
 
 export interface RefundCoverageLineNote {
   credit_note_id: number;
@@ -91,7 +89,10 @@ export class RefundCoverageService {
         orderBy: { id: 'asc' },
       }),
       this.prisma.refunds.findMany({
-        where: { order_id },
+        // M2 fix-forward: solo estados LEDGER — un refund `failed` con
+        // ítems persistidos no debe marcar cobertura (mismo filtro que
+        // `calculate` con techo pendiente-aware).
+        where: { order_id, state: { in: [...REFUND_LEDGER_STATES] } },
         select: {
           id: true,
           state: true,
@@ -107,7 +108,8 @@ export class RefundCoverageService {
       }),
     ]);
 
-    // Ledger unificado (todos los estados): la única agregación, sin
+    // Ledger unificado (estados LEDGER, ya filtrados en el query; el
+    // builder re-filtra por construcción): la única agregación, sin
     // re-derivar nada en este archivo.
     const ledger = buildRefundCoverageLedger(refunds);
 

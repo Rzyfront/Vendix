@@ -623,15 +623,17 @@ export class RefundFlowService {
 
         // 2b. Step 3 (CP-REFUND-FLOW-REDESIGN) — per-line coverage cache.
         // Same tx that inserts the `refund_items` above: absolute
-        // re-aggregation of the ledger (ALL states — `failed`/`cancelled`
-        // rows keep their `refund_items`, so no later adjustment is needed
-        // on failure paths), never an increment, so the write is idempotent
-        // and self-healing under the order lock. Item-less refunds
-        // (cancellation/legacy) carry no lines: the non-empty guard skips
-        // them and they count order-level only (see `already_refunded`).
-        // Raw SQL via the already-used `$queryRaw` (same primitive as the
-        // §1 claim above): the `oi.order_id` predicate keeps the write
-        // pinned to the locked order.
+        // re-aggregation of the ledger (LEDGER states only — M2
+        // fix-forward: `failed`/`cancelled` rows keep their
+        // `refund_items` but must NOT mark line coverage, otherwise a
+        // failed refund permanently overstates badges/guards and the
+        // retry path loses its UI), never an increment, so the write is
+        // idempotent and self-healing under the order lock. Item-less
+        // refunds (cancellation/legacy) carry no lines: the non-empty
+        // guard skips them and they count order-level only (see
+        // `already_refunded`). Raw SQL via the already-used `$queryRaw`
+        // (same primitive as the §1 claim above): the `oi.order_id`
+        // predicate keeps the write pinned to the locked order.
         const coveredItemIds = [
           ...new Set(
             calculation.items
@@ -645,12 +647,14 @@ export class RefundFlowService {
             SET "refunded_qty" = s.qty,
                 "refunded_amount" = s.amt
             FROM (
-              SELECT "order_item_id",
-                     SUM("quantity")::int AS qty,
-                     COALESCE(SUM("refund_amount"), 0) AS amt
-              FROM "refund_items"
-              WHERE "order_item_id" IN (${Prisma.join(coveredItemIds)})
-              GROUP BY "order_item_id"
+              SELECT ri."order_item_id",
+                     SUM(ri."quantity")::int AS qty,
+                     COALESCE(SUM(ri."refund_amount"), 0) AS amt
+              FROM "refund_items" ri
+              JOIN "refunds" r ON r."id" = ri."refund_id"
+              WHERE ri."order_item_id" IN (${Prisma.join(coveredItemIds)})
+                AND r."state" IN ('completed', 'pending_approval', 'processing')
+              GROUP BY ri."order_item_id"
             ) s
             WHERE oi."id" = s."order_item_id"
               AND oi."order_id" = ${orderId}`;
@@ -1127,10 +1131,12 @@ export class RefundFlowService {
           ? completedRefund
           : { ...completedRefund, cash_movement };
       },
-      // Step 1: the two-arg form only handles the TRANSACTION rejection —
-      // post-commit behavior (resilience guards above) is untouched. A unique
-      // violation inside the claim window surfaces as a creation conflict
-      // instead of a generic 500.
+      // Step 1: the `.then(onFulfilled, onRejected)` two-arg form only
+      // handles the TRANSACTION rejection — `$transaction` itself takes a
+      // single callback (its 2nd param is options, NOT a handler), so the
+      // mapping MUST live here. Post-commit behavior (resilience guards
+      // above) is untouched. A unique violation inside the claim window
+      // surfaces as a creation conflict instead of a generic 500.
       (error: unknown) => {
         if ((error as { code?: string })?.code === 'P2002') {
           throw new VendixHttpException(

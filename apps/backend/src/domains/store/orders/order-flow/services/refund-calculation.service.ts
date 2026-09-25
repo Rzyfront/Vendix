@@ -16,11 +16,21 @@ const CEILING_RESERVING_STATES: refunds_state_enum[] = [
   refunds_state_enum.processing,
 ];
 
+/** M2 fix-forward (review 78/100): states that count toward per-line
+ * coverage. Same set as the ceiling: `failed`/`cancelled`/`requested`/
+ * `approved` rows keep their `refund_items` but must NOT mark line badges,
+ * feed `is_full_refund`, or shrink per-line guards — otherwise a failed
+ * refund permanently overstates coverage and the retry path loses its UI
+ * (guards report no refundable balance while the backend would allow it).
+ * Exported so the coverage endpoint filters with the identical set. */
+export const REFUND_LEDGER_STATES: refunds_state_enum[] = CEILING_RESERVING_STATES;
+
 /** Step 3 (CP-REFUND-FLOW-REDESIGN): unified per-line coverage ledger.
  *
  * The ledger is the aggregation of `refund_items` per `order_item_id`,
- * across ALL refund states. It feeds `is_full_refund`, the per-line
- * `maxRefundableQty` guard, and (via `RefundFlowService` §2b) the
+ * across LEDGER states only (`REFUND_LEDGER_STATES` — same set as the
+ * ceiling). It feeds `is_full_refund`, the per-line `maxRefundableQty`
+ * guard, and (via `RefundFlowService` §2b) the
  * `order_items.refunded_qty` / `refunded_amount` cache columns, which are
  * absolute re-aggregations of this same ledger — never increments.
  *
@@ -28,6 +38,11 @@ const CEILING_RESERVING_STATES: refunds_state_enum[] = [
  * per line: they only count order-level through `already_refunded`. That
  * is the documented orphan fallback: a cancellation refund cannot mark
  * any line badge, it only shrinks the remaining `max_refundable` ceiling.
+ *
+ * M2 fix-forward: refunds carrying a `state` outside `REFUND_LEDGER_STATES`
+ * are skipped. Callers that pre-filter at the query (e.g. `calculate`)
+ * are unaffected; `state` stays optional so typeless aggregations keep
+ * the legacy include behavior instead of silently dropping rows.
  */
 export interface RefundLineCoverage {
   order_item_id: number;
@@ -37,6 +52,7 @@ export interface RefundLineCoverage {
 
 export function buildRefundCoverageLedger(
   refunds: Array<{
+    state?: refunds_state_enum | string | null;
     refund_items: Array<{
       order_item_id: number;
       quantity: number;
@@ -46,6 +62,14 @@ export function buildRefundCoverageLedger(
 ): Map<number, RefundLineCoverage> {
   const ledger = new Map<number, RefundLineCoverage>();
   for (const refund of refunds) {
+    // M2 fix-forward: a present-but-non-ledger state (failed/cancelled/…)
+    // contributes nothing; absent state keeps legacy include behavior.
+    if (
+      refund.state != null &&
+      !(REFUND_LEDGER_STATES as string[]).includes(refund.state)
+    ) {
+      continue;
+    }
     for (const ri of refund.refund_items) {
       const current = ledger.get(ri.order_item_id) ?? {
         order_item_id: ri.order_item_id,

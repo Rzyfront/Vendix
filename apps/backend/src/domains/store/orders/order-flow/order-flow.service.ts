@@ -994,6 +994,11 @@ export class OrderFlowService {
 
     // The winning state claim serializes flow/pay attempts. Re-read settled
     // payments AFTER it, before draft reservation or any new payment row.
+    // m3 invariant (CP-REFUND-FLOW-REDESIGN step 2): `getOrder` carries no
+    // `refunds`, so `isOrderFullyPaid` discounts zero here — safe because
+    // this claim only admits pre-fulfillment states
+    // (draft/created/shipped/pending_payment), which can never hold a
+    // completed refund (REFUNDABLE_STATES = delivered/finished).
     const settledAmount = getSettledOrderAmount(order);
     if (isOrderFullyPaid(order, settledAmount)) {
       if (preClaimState && preClaimState !== 'draft') {
