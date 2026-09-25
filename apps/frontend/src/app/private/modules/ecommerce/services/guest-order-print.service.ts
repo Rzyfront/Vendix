@@ -15,6 +15,9 @@ interface VoucherItem {
   quantity: number;
   unit_price: number;
   total_price: number;
+  // Paso 8 (roku-shop-checkout): paridad con la vista (cocina por plato).
+  kitchen_status?: string | null;
+  preparation_time_minutes?: number | null;
 }
 
 interface VoucherAddress {
@@ -38,6 +41,11 @@ interface VoucherOrder {
   state: string;
   created_at?: string | null;
   placed_at?: string | null;
+  // Paso 8 (roku-shop-checkout): paridad con la vista (ETA + entrega).
+  estimated_ready_at?: string | null;
+  estimated_delivered_at?: string | null;
+  prep_minutes_max?: number | null;
+  delivery_type?: string | null;
   items: VoucherItem[];
   discount_amount: number;
   subtotal_amount: number;
@@ -126,18 +134,35 @@ export class GuestOrderPrintService {
       pending_payment: 'Pendiente de pago',
       processing: 'En proceso',
       shipped: 'Enviada',
+      pending_delivery: 'Pendiente de entrega',
       delivered: 'Entregada',
       finished: 'Finalizada',
       cancelled: 'Cancelada',
       refunded: 'Reembolsada',
     };
 
+    // Paso 8 (roku-shop-checkout): mapa completo de 8 estados, idéntico a la
+    // vista guest (`getPaymentStateLabel`).
     const paymentStateLabels: Record<string, string> = {
+      pending: 'Pendiente de confirmación',
+      authorized: 'Autorizado',
+      succeeded: 'Pagado',
+      captured: 'Pagado',
       paid: 'Pagado',
-      pending: 'Pendiente',
-      partial: 'Parcial',
       failed: 'Fallido',
+      partially_refunded: 'Reembolso parcial',
       refunded: 'Reembolsado',
+      cancelled: 'Cancelado',
+      partial: 'Parcial',
+    };
+
+    // Paso 8: 5 labels ES de cocina, idénticos a la vista guest.
+    const kitchenStateLabels: Record<string, string> = {
+      pending: 'Pendiente',
+      in_preparation: 'En preparación',
+      ready: 'Listo',
+      delivered: 'Entregado',
+      cancelled: 'Cancelado',
     };
 
     const storeName = store?.name || 'Tienda';
@@ -202,6 +227,23 @@ export class GuestOrderPrintService {
     </div>`
       : '';
 
+    // ---- ETA block (paso 8: paridad con la vista) ----
+    const etaMinutes =
+      typeof order.prep_minutes_max === 'number' &&
+      Number.isFinite(order.prep_minutes_max)
+        ? order.prep_minutes_max
+        : null;
+    const etaReadyTime = this.formatTime(order.estimated_ready_at);
+    const etaParts: string[] = [];
+    if (etaMinutes != null) etaParts.push(`~${etaMinutes} min`);
+    if (etaReadyTime) etaParts.push(`listo aprox. ${etaReadyTime}`);
+    const etaHtml = etaParts.length
+      ? `
+    <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px 16px; margin-bottom: 24px;">
+      <p style="margin: 0; font-size: 13px; color: #1e40af;"><strong>Tiempo estimado:</strong> ${this.esc(etaParts.join(' · '))}</p>
+    </div>`
+      : '';
+
     // ---- Items table ----
     const items = order.items || [];
     const itemsHtml =
@@ -216,9 +258,13 @@ export class GuestOrderPrintService {
               const variantLine = variantParts.length
                 ? `<br><span style="font-size: 11px; color: #9ca3af;">${variantParts.join(' · ')}</span>`
                 : '';
+              // Paso 8: badge "Cocina: <estado>" en paridad con la vista.
+              const kitchenLine = item.kitchen_status
+                ? `<br><span style="font-size: 11px; color: #6b7280;">Cocina: ${this.esc(kitchenStateLabels[item.kitchen_status] || item.kitchen_status)}</span>`
+                : '';
               return `
       <tr>
-        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151;">${this.esc(item.product_name)}${variantLine}</td>
+        <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151;">${this.esc(item.product_name)}${variantLine}${kitchenLine}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: center;">${this.esc(item.quantity)}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace;">${fmt(Number(item.unit_price))}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace; font-weight: 600;">${fmt(Number(item.total_price))}</td>
@@ -230,17 +276,43 @@ export class GuestOrderPrintService {
         <td colspan="4" style="padding: 20px 12px; text-align: center; font-size: 13px; color: #9ca3af;">Sin detalle de items</td>
       </tr>`;
 
-    // ---- Payment block ----
-    const payment = order.payments?.length ? order.payments[0] : null;
-    const paymentHtml = payment
-      ? `
-    <div style="display: flex; justify-content: space-between; align-items: center; background: #f9fafb; border-radius: 8px; padding: 12px 16px; margin-bottom: 24px;">
+    // ---- Payment block (paso 8: multipago peor-primero, paridad vista) ----
+    const severityOrder = [
+      'failed',
+      'pending',
+      'authorized',
+      'partially_refunded',
+      'cancelled',
+      'refunded',
+      'succeeded',
+    ];
+    const severityAlias: Record<string, string> = {
+      captured: 'succeeded',
+      paid: 'succeeded',
+      partial: 'partially_refunded',
+    };
+    const sortedPayments = [...(order.payments ?? [])].sort((a, b) => {
+      const ia = severityOrder.indexOf(severityAlias[a.state] ?? a.state);
+      const ib = severityOrder.indexOf(severityAlias[b.state] ?? b.state);
+      return (
+        (ia === -1 ? severityOrder.length : ia) -
+        (ib === -1 ? severityOrder.length : ib)
+      );
+    });
+    const paymentHtml =
+      sortedPayments.length > 0
+        ? sortedPayments
+            .map(
+              (payment) => `
+    <div style="display: flex; justify-content: space-between; align-items: center; background: #f9fafb; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px;">
       <span style="font-size: 13px; font-weight: 600; color: #111827;">${this.esc(payment.method || 'Pago')}</span>
       <span style="display: inline-block; padding: 2px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border-radius: 4px; background: #f3f4f6; color: #374151;">
         ${this.esc(paymentStateLabels[payment.state] || payment.state)}
       </span>
-    </div>`
-      : '';
+    </div>`,
+            )
+            .join('') + `<div style="margin-bottom: 12px;"></div>`
+        : '';
 
     return `
   <div class="container">
@@ -265,6 +337,8 @@ export class GuestOrderPrintService {
     ${customerHtml}
 
     ${addressHtml}
+
+    ${etaHtml}
 
     <!-- Items Table -->
     <table style="width: 100%; margin-bottom: 24px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
@@ -336,6 +410,22 @@ export class GuestOrderPrintService {
       </p>
     </div>
   </div>`;
+  }
+
+  /**
+   * Paso 8: `estimated_ready_at` es un instante — hora local del lector,
+   * igual que la vista guest (`formatReadyTime`).
+   */
+  private formatTime(iso?: string | null): string {
+    if (!iso) return '';
+    try {
+      return new Date(iso).toLocaleTimeString('es-CO', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
   }
 
   private formatDate(iso?: string | null): string {
