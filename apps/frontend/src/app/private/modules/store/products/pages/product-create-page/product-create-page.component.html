@@ -766,6 +766,8 @@
 
         <!-- MOBILE: Images Section (visible only on mobile, after pricing) -->
         <section
+          id="product-images-mobile"
+          tabindex="-1"
           class="lg:hidden bg-surface rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
         >
           <div class="flex items-center gap-2">
@@ -1833,6 +1835,8 @@
       <div class="hidden lg:flex flex-col gap-4 md:gap-6">
         <!-- Images Section (Desktop) -->
         <section
+          id="product-images-desktop"
+          tabindex="-1"
           class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm flex flex-col"
         >
           <div class="flex items-center gap-2 mb-4">
@@ -4103,7 +4107,7 @@
 <!-- Product Image Source Modal -->
 <app-product-image-source-modal
   [isOpen]="isImageSourceModalOpen()"
-  (isOpenChange)="isImageSourceModalOpen.set($event)"
+  (isOpenChange)="onProductImageModalOpenChange($event)"
   [remainingSlots]="remainingImageSlots()"
   [mode]="imageModalMode()"
   [sourceImageUrl]="imageEditSourceUrl()"
