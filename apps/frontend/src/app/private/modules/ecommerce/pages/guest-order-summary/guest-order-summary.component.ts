@@ -294,7 +294,7 @@ interface GuestOrderSummary {
                 <strong class="eta-line">{{ etaLabel(data.order) }}</strong>
                 @if (isPaymentPending(data.order)) {
                   <span class="eta-note"
-                    >Tu pago está pendiente de confirmación; la cocina inicia al
+                    >Tu pago está pendiente de confirmación; la preparación inicia al
                     confirmarse y el tiempo puede variar.</span
                   >
                 }
