@@ -1191,4 +1191,20 @@
       <p>Preparando pago seguro...</p>
     </div>
   }
+
+  @if (showOrderSuccessOverlay()) {
+    <div
+      class="wompi-loading-overlay order-success-overlay"
+      role="status"
+      aria-live="polite"
+    >
+      <app-icon
+        name="check-circle"
+        [size]="52"
+        class="success-icon"
+      ></app-icon>
+      <p class="success-title">¡Pedido confirmado!</p>
+      <p class="success-sub">Redirigiendo al detalle de tu pedido…</p>
+    </div>
+  }
 </div>

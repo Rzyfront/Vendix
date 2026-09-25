@@ -12,7 +12,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterLink, RouterLinkActive } from '@angular/router';
+import { Params, RouterLink, RouterLinkActive } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
 import { ButtonComponent } from '../button/button.component';
 
@@ -85,6 +85,12 @@ export class StickyHeaderComponent implements AfterViewInit {
   variant = input<StickyHeaderVariant>('glass');
   showBackButton = input<boolean>(false);
   backRoute = input<string | string[]>('/');
+  /**
+   * Release-853 paso 12 — queryParams opcionales del botón back (p. ej.
+   * `{ page: fromPage }` para volver al listado en la misma página).
+   * Aditivo: `undefined` = sin queryParams, igual que antes.
+   */
+  backQueryParams = input<Params | undefined>(undefined);
   metadataContent = input<string>('');
   badgePulse = input<boolean>(false);
   badgeText = input<string>('');

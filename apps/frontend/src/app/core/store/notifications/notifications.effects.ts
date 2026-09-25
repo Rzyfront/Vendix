@@ -142,7 +142,13 @@ export class NotificationsEffects {
               // del bell puede multiplexar eventos de otros dominios (p.ej.
               // 'membership-access' del acceso ambiental de gym). Esos no son
               // notificaciones — se ignoran para no ensuciar la campana.
-              if (!data?.id || data.type === 'membership-access') {
+              // CP-853-fix (paso 3): los `order.*` son telemetría, no
+              // notificaciones (defensa en profundidad; el backend ya filtra).
+              if (
+                !data?.id ||
+                data.type === 'membership-access' ||
+                (typeof data.type === 'string' && data.type.startsWith('order.'))
+              ) {
                 return;
               }
               const notification: AppNotification = {

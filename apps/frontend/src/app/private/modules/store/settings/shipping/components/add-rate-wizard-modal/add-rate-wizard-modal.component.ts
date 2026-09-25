@@ -729,7 +729,13 @@ export class AddRateWizardModalComponent implements OnInit {
       // Gratis no cobra envío: no hay impuesto que llevar.
       tax_category_id:
         values.type === 'free' ? null : toTaxCategoryId(values.tax_category_id),
-      ...(useTiers ? this.buildTiersDto() : {}),
+      // Release-853 paso 11 — pasar a `free` limpia la escala previa: se
+      // envía `[]` (el backend la persiste como NULL).
+      ...(useTiers
+        ? this.buildTiersDto()
+        : values.type === 'free'
+          ? { distance_tiers: [] }
+          : {}),
     };
 
     const obs = this.is_edit_mode()

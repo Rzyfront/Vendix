@@ -691,3 +691,20 @@ describe('AutoEntryService postAutoEntry — omisiones instrumentadas (C.9)', ()
     );
   });
 });
+
+describe('AutoEntryService resolveCashBankKey — etiqueta "Datáfono"', () => {
+  const service = new AutoEntryService({} as any, {} as any, {} as any, {} as any, {} as any);
+
+  it.each([
+    ['Datáfono', 'payment_vouchers'],
+    ['datafono', 'payment_vouchers'],
+    ['payment_vouchers', 'payment_vouchers'],
+    ['Vouchers de Pago', 'payment_vouchers'],
+  ])('normaliza %s → %s', (label, code) => {
+    expect((service as any).normalizePaymentMethodCode(label)).toBe(code);
+  });
+
+  it('Datáfono entra a Bancos (payment.received.bank)', () => {
+    expect((service as any).resolveCashBankKey('Datáfono')).toBe('payment.received.bank');
+  });
+});

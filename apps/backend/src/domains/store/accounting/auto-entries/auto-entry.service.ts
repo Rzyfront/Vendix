@@ -3041,7 +3041,9 @@ export class AutoEntryService {
     [/transferencia|bank[\s_-]*transfer|consignaci/, 'bank_transfer'],
     [/paypal/, 'paypal'],
     [/stripe|tarjeta|\bcard\b|cr[eé]dito|d[eé]bito/, 'stripe_card'],
-    [/voucher|bono/, 'payment_vouchers'],
+    // La etiqueta visible de `payment_vouchers` es ahora "Datáfono" (llega ya
+    // sin tilde: "datafono"). Va DESPUÉS de `stripe_card`, que no la captura.
+    [/voucher|bono|datafono/, 'payment_vouchers'],
   ];
 
   /**

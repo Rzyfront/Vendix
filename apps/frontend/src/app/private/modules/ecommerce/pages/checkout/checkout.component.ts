@@ -109,6 +109,42 @@ import {
   ],
   templateUrl: './checkout.component.html',
   styleUrls: ['./checkout.component.scss'],
+  styles: [
+    `
+      /* Paso 10 — overlay de éxito pedido→detalle (900-1200ms). Reutiliza
+         la clase del overlay de pago del scss; aquí solo el acento de éxito. */
+      .order-success-overlay {
+        animation: order-success-in 0.25s ease-out;
+      }
+      .order-success-overlay .success-icon {
+        color: var(--color-success);
+        filter: drop-shadow(0 2px 12px rgba(0, 0, 0, 0.45));
+      }
+      .order-success-overlay .success-title {
+        margin: 0;
+        font-size: var(--fs-lg);
+        font-weight: var(--fw-bold);
+      }
+      .order-success-overlay .success-sub {
+        margin: 0;
+        font-size: var(--fs-sm);
+        opacity: 0.85;
+      }
+      @keyframes order-success-in {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .order-success-overlay {
+          animation: none;
+        }
+      }
+    `,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class CheckoutComponent implements OnInit {
@@ -216,6 +252,12 @@ export class CheckoutComponent implements OnInit {
   // Wompi Widget
   readonly isWompiPayment = signal(false);
   readonly wompiWidgetLoading = signal(false);
+
+  /**
+   * Paso 10 (roku-shop-checkout) — overlay de éxito entre `response.success`
+   * y el `navigate` al detalle, en ambas ramas (normal y Wompi). ~1000ms.
+   */
+  readonly showOrderSuccessOverlay = signal(false);
 
   // Payment instructions modal + receipt file (bank_transfer / voucher)
   readonly show_payment_instructions_modal = signal(false);
@@ -418,6 +460,7 @@ export class CheckoutComponent implements OnInit {
     // Limpieza del debounce de recotización al salir del checkout.
     this.destroyRef.onDestroy(() => {
       if (this.shipping_fetch_timer) clearTimeout(this.shipping_fetch_timer);
+      if (this.order_success_timer) clearTimeout(this.order_success_timer);
     });
     this.initForm();
 
@@ -1444,6 +1487,8 @@ export class CheckoutComponent implements OnInit {
   private shipping_quote_key: string | null = null;
   private shipping_fetch_promise: Promise<void> | null = null;
   private shipping_fetch_timer: ReturnType<typeof setTimeout> | null = null;
+  /** Paso 10 — temporizador del overlay de éxito pedido→detalle. */
+  private order_success_timer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * H2 (paso 2): versión reactiva de las coordenadas de la dirección activa.
@@ -1458,7 +1503,9 @@ export class CheckoutComponent implements OnInit {
    * H2: coords resueltas por forward-geocode para direcciones GUARDADAS sin
    * pin (`address_id → {lat,lng}`). La guardada se cotiza primero por zona y,
    * al resolver el geocode, el override entra a la clave y dispara la
-   * recotización por distancia. Nunca se persiste: solo vive en la sesión.
+   * recotización por distancia. Release-853 paso 11: el override solo se
+   * fija si las coords se persistieron con `updateAddress` (lo mostrado =
+   * lo cobrado); sin persistencia no hay override y rige la zona.
    */
   private savedCoordsOverride = signal<
     Record<number, { lat: number; lng: number }>
@@ -1495,6 +1542,12 @@ export class CheckoutComponent implements OnInit {
    * dispara un forward-geocode no-bloqueante; al resolver, guarda el override
    * y sube `coords_version` para que el effect recotice con lat/lng. La
    * cotización por zona ya sellada sigue vigente hasta entonces.
+   *
+   * Release-853 paso 11 — lo mostrado = lo cobrado: el confirm cotiza con
+   * la dirección PERSISTIDA, así que las coords del geocode se guardan con
+   * `updateAddress` ANTES de cotizar con ellas. El PUT exige la dirección
+   * completa (address_line1/city/country_code requeridos), no solo coords.
+   * Si la persistencia falla, no hay override y rige la zona.
    */
   private ensureSavedAddressCoords(id: number): void {
     if (this.savedCoordsOverride()[id]) return;
@@ -1517,19 +1570,47 @@ export class CheckoutComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          this.savedGeocodeInFlight.delete(id);
-          if (res?.lat == null || res?.lng == null) return;
-          // La reducción de tipos en propiedades (`res.lat`) no sobrevive al
-          // closure del `.update(...)`: TS re-ancha a `number | null` y el
-          // literal con key computada genera un index-union que rompe el build.
-          // Hoistear los valores congelados en const evita el TS2322.
-          const lat = res.lat;
-          const lng = res.lng;
-          this.savedCoordsOverride.update((m) => ({
-            ...m,
-            [id]: { lat, lng },
-          }));
-          this.bumpCoordsVersion();
+          const lat = res?.lat;
+          const lng = res?.lng;
+          if (lat == null || lng == null) {
+            this.savedGeocodeInFlight.delete(id);
+            return;
+          }
+          this.account_service
+            .updateAddress(id, {
+              address_line1: saved.address_line1,
+              address_line2: saved.address_line2 ?? undefined,
+              city: saved.city,
+              state_province: saved.state_province ?? undefined,
+              country_code: saved.country_code,
+              postal_code: saved.postal_code ?? undefined,
+              phone_number: saved.phone_number ?? undefined,
+              latitude: lat,
+              longitude: lng,
+            })
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: () => {
+                this.savedGeocodeInFlight.delete(id);
+                this.addresses.update((list) =>
+                  list.map((a) =>
+                    a.id === id
+                      ? { ...a, latitude: lat, longitude: lng }
+                      : a,
+                  ),
+                );
+                this.savedCoordsOverride.update((m) => ({
+                  ...m,
+                  [id]: { lat, lng },
+                }));
+                this.bumpCoordsVersion();
+              },
+              error: () => {
+                // Sin persistencia no hay override: lo mostrado sigue
+                // siendo la cotización por zona (warning no-bloqueante).
+                this.savedGeocodeInFlight.delete(id);
+              },
+            });
         },
         error: () => {
           // Sin coords se conserva la cotización por zona; el form manual
@@ -2409,6 +2490,24 @@ export class CheckoutComponent implements OnInit {
     this.step.set(this.step() - 1);
   }
 
+  /**
+   * Paso 10 — transición pedido→detalle: muestra el overlay de éxito y
+   * navega tras ~1000ms (ventana 900-1200ms del plan). Ambas ramas de éxito
+   * (normal y Wompi APPROVED) pasan por aquí.
+   */
+  private navigateAfterSuccessOverlay(
+    commands: (string | number)[],
+    queryParams: Record<string, string | number | boolean>,
+  ): void {
+    this.showOrderSuccessOverlay.set(true);
+    if (this.order_success_timer) clearTimeout(this.order_success_timer);
+    this.order_success_timer = setTimeout(() => {
+      this.order_success_timer = null;
+      this.showOrderSuccessOverlay.set(false);
+      void this.router.navigate(commands, { queryParams });
+    }, 1000);
+  }
+
   placeOrder(): void {
     if (!this.selected_payment_method_id()) {
       this.error_message.set('Por favor selecciona un método de pago');
@@ -2645,16 +2744,15 @@ export class CheckoutComponent implements OnInit {
           }
           if (!this.is_authenticated() && response.data.public_order_token) {
             this.cart_service.clearAllCart();
-            this.router.navigate(
+            this.navigateAfterSuccessOverlay(
               ['/pedido', response.data.public_order_token],
-              {
-                queryParams: { success: true },
-              },
+              { success: true },
             );
           } else {
-            this.router.navigate(['/account/orders', response.data.order_id], {
-              queryParams: { success: true },
-            });
+            this.navigateAfterSuccessOverlay(
+              ['/account/orders', response.data.order_id],
+              { success: true },
+            );
           }
         }
       },
@@ -2885,13 +2983,11 @@ export class CheckoutComponent implements OnInit {
             if (publicOrderToken) {
               this.cart_service.clearAllCart();
             }
-            this.router.navigate(
+            this.navigateAfterSuccessOverlay(
               publicOrderToken
                 ? ['/pedido', publicOrderToken]
                 : ['/account/orders', orderId],
-              {
-                queryParams: { success: true },
-              },
+              { success: true },
             );
           } else if (
             transaction.status === 'DECLINED' ||

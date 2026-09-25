@@ -3,7 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { RefundFlowService } from './refund-flow.service';
-import { RefundCalculationService } from './refund-calculation.service';
+import { RefundCalculationService, REFUND_LEDGER_STATES } from './refund-calculation.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StockLevelManager } from '../../../inventory/shared/services/stock-level-manager.service';
@@ -332,6 +332,37 @@ describe('RefundFlowService — gate de platos (paso 6, CP-REFUND-FLOW-REDESIGN)
 
       expect((t as any).order_items).toBeUndefined();
       expect(kitchenFire.cancelTicketItemsForRefund).toHaveBeenCalled();
+    });
+  });
+
+  describe('release-853 paso 7: ledger filtrado por estado (caso d)', () => {
+    it('el ledger acumulativo filtra por REFUND_LEDGER_STATES: un failed previo no infla cumAfter', async () => {
+      const t = tx({
+        inventory_transactions: { findMany: jest.fn().mockResolvedValue([consumedLeaf()]) },
+        // La BD ya excluyó al failed por el filtro de estado: solo llegan
+        // las filas LEDGER (este refund). Sin el filtro, el failed previo
+        // inflaría cumAfter y el prorrateo repondría insumos de más.
+        refund_items: { findMany: jest.fn().mockResolvedValue([{ quantity: 2 }]) },
+      });
+      const i = input();
+
+      await run(t, i);
+
+      expect(t.refund_items.findMany).toHaveBeenCalledWith({
+        where: {
+          order_item_id: 11,
+          refunds: { state: { in: [...REFUND_LEDGER_STATES] } },
+        },
+        select: { quantity: true },
+      });
+      // cumAfter = 2 (solo este refund) ⇒ reversa exacta, sin sobre-reposición.
+      expect(stockLevelManager.updateStock).toHaveBeenCalledWith(
+        expect.objectContaining({ product_id: 7, quantity_change: 200 }),
+        t,
+      );
+      expect(i.postCommit.reclassJobs).toEqual([
+        { order_item_id: 11, organization_id: 1, disposition: 'reuse', total_cost: 10000 },
+      ]);
     });
   });
 });

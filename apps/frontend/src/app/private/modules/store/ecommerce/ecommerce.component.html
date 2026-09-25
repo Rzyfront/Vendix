@@ -757,7 +757,7 @@
               <app-setting-toggle
                 [formControl]="requirePaymentReceiptControl"
                 label="Soporte de pago obligatorio"
-                description="Exigir comprobante en transferencia y voucher"
+                description="Exigir comprobante en transferencia y datáfono"
               ></app-setting-toggle>
               @if (whatsappCheckoutControl.value) {
                 <div class="col-span-1 md:col-span-2">
@@ -809,6 +809,38 @@
                   </div>
                 </div>
               }
+            </div>
+          </div>
+          <!-- SECCIÓN 5.1: PEDIDOS (vista pública /pedido/:token) -->
+          <div
+            class="bg-surface rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
+            data-tour="orders-section"
+          >
+            <h2
+              class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
+            >
+              <div
+                class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
+              >
+                <app-icon
+                  name="clipboard-list"
+                  size="18"
+                  class="text-primary-600"
+                ></app-icon>
+              </div>
+              Visibilidad del Pedido Público
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <app-setting-toggle
+                [formControl]="hidePrepEtaControl"
+                label="Ocultar tiempo estimado de preparación"
+                description="No mostrar el ETA en /pedido ni en su impresión"
+              ></app-setting-toggle>
+              <app-setting-toggle
+                [formControl]="hideTrackingProgressControl"
+                label="Ocultar barra de seguimiento"
+                description="No mostrar el progreso en /pedido ni en su impresión"
+              ></app-setting-toggle>
             </div>
           </div>
         </div>
