@@ -130,74 +130,6 @@ import { CreateCustomerRequest } from '../../customers/models/customer.model';
         <!-- Search Step -->
         @if (currentStep() === 'search') {
           <div class="space-y-4">
-            <!-- Document Quick Lookup -->
-            <div class="mb-4 p-4 bg-[var(--color-primary-light)]/30 rounded-lg border border-[var(--color-primary)]/20">
-              <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
-                Búsqueda rápida por documento
-              </label>
-              <div class="flex gap-2">
-                <div class="flex-1">
-                  <app-input
-                    [ngModel]="lookupQuery()"
-                    (ngModelChange)="lookupQuery.set($event)"
-                    placeholder="Ingrese cédula o NIT..."
-                    type="text"
-                    [size]="'md'"
-                    (keydown.enter)="onDocumentLookup()"
-                  ></app-input>
-                </div>
-                <app-button
-                  variant="primary"
-                  size="md"
-                  (clicked)="onDocumentLookup()"
-                  [loading]="lookupLoading()"
-                  [disabled]="!lookupQuery() || lookupQuery().trim().length < 5"
-                  >
-                  <app-icon name="search" [size]="16" slot="icon" ></app-icon>
-                  Buscar
-                </app-button>
-              </div>
-              <!-- Lookup Result: Found -->
-              @if (lookupPerformed() && lookupResult(); as lr) {
-                <div class="mt-3 p-3 bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)]">
-                  <div class="flex items-center justify-between gap-3">
-                    <div class="min-w-0">
-                      <p class="font-medium text-[var(--color-text-primary)] truncate">
-                        {{ displayName(lr) }}
-                      </p>
-                      <p class="text-sm text-[var(--color-neutral-600)] truncate">{{ lr.email }}</p>
-                      @if (documentLine(lr)) {
-                        <p class="text-xs text-[var(--color-neutral-600)]">{{ documentLine(lr) }}</p>
-                      }
-                    </div>
-                    <app-button variant="primary" size="sm" customClasses="min-h-[44px] shrink-0" (clicked)="selectCustomer(lr)">
-                      Seleccionar
-                    </app-button>
-                  </div>
-                </div>
-              }
-              <!-- Lookup Result: Not Found -->
-              @if (lookupPerformed() && !lookupResult() && !lookupLoading()) {
-                <div class="mt-3 text-center">
-                  <p class="text-sm text-[var(--color-neutral-600)] mb-2">
-                    No se encontró cliente con este documento
-                  </p>
-                  <app-button variant="outline" size="sm" customClasses="min-h-[44px]" (clicked)="createFromLookup()">
-                    <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
-                    Crear con este documento
-                  </app-button>
-                </div>
-              }
-            </div>
-            <!-- Divider -->
-            <div class="relative my-4">
-              <div class="absolute inset-0 flex items-center">
-                <div class="w-full border-t border-[var(--color-border)]"></div>
-              </div>
-              <div class="relative flex justify-center text-sm">
-                <span class="px-2 bg-[var(--color-surface)] text-[var(--color-neutral-600)]">o buscar por nombre</span>
-              </div>
-            </div>
             <app-inputsearch
               placeholder="Buscar por nombre, email o documento..."
               (search)="onSearch($event)"
@@ -285,6 +217,65 @@ import { CreateCustomerRequest } from '../../customers/models/customer.model';
                 </app-button>
               </div>
             }
+            <!-- Búsqueda avanzada: lookup por documento (debajo de crear) -->
+            <div class="mb-4 p-4 bg-[var(--color-primary-light)]/30 rounded-lg border border-[var(--color-primary)]/20">
+              <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
+                Búsqueda avanzada
+              </label>
+              <div class="flex gap-2">
+                <div class="flex-1">
+                  <app-input
+                    [ngModel]="lookupQuery()"
+                    (ngModelChange)="lookupQuery.set($event)"
+                    placeholder="Ingrese cédula o NIT..."
+                    type="text"
+                    [size]="'md'"
+                    (keydown.enter)="onDocumentLookup()"
+                  ></app-input>
+                </div>
+                <app-button
+                  variant="primary"
+                  size="md"
+                  (clicked)="onDocumentLookup()"
+                  [loading]="lookupLoading()"
+                  [disabled]="!lookupQuery() || lookupQuery().trim().length < 5"
+                  >
+                  <app-icon name="search" [size]="16" slot="icon" ></app-icon>
+                  Buscar
+                </app-button>
+              </div>
+              <!-- Lookup Result: Found -->
+              @if (lookupPerformed() && lookupResult(); as lr) {
+                <div class="mt-3 p-3 bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)]">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                      <p class="font-medium text-[var(--color-text-primary)] truncate">
+                        {{ displayName(lr) }}
+                      </p>
+                      <p class="text-sm text-[var(--color-neutral-600)] truncate">{{ lr.email }}</p>
+                      @if (documentLine(lr)) {
+                        <p class="text-xs text-[var(--color-neutral-600)]">{{ documentLine(lr) }}</p>
+                      }
+                    </div>
+                    <app-button variant="primary" size="sm" customClasses="min-h-[44px] shrink-0" (clicked)="selectCustomer(lr)">
+                      Seleccionar
+                    </app-button>
+                  </div>
+                </div>
+              }
+              <!-- Lookup Result: Not Found -->
+              @if (lookupPerformed() && !lookupResult() && !lookupLoading()) {
+                <div class="mt-3 text-center">
+                  <p class="text-sm text-[var(--color-neutral-600)] mb-2">
+                    No se encontró cliente con este documento
+                  </p>
+                  <app-button variant="outline" size="sm" customClasses="min-h-[44px]" (clicked)="createFromLookup()">
+                    <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
+                    Crear con este documento
+                  </app-button>
+                </div>
+              }
+            </div>
           </div>
         }
     
