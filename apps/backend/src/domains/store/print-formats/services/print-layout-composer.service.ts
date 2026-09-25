@@ -9,6 +9,50 @@ import { getPaperGeometry, PaperFormat } from '../lib/page-geometry';
 import { resolvePaperDefinition } from '../print-templates/paper-defaults';
 import { FISCAL_FORMATS } from './print-fiscal-validator.service';
 
+/**
+ * CP-REFUND-FLOW-REDESIGN paso 9b — espejo estructural de
+ * `custom_variables.refunds`, que los providers `pos-sale-ticket` y
+ * `sales-order-invoice` publican en la reimpresión (paso 9). El compositor la
+ * lee con un cast local porque `StandardPrintDataModel.custom_variables` es
+ * `Record<string, any>` y el contrato vive en los providers, no en el modelo.
+ */
+interface ComposerRefundNote {
+  credit_note_id: number;
+  invoice_number: string | null;
+  status: string;
+  covered_qty: number;
+  covered_amount: number;
+}
+
+interface ComposerRefundLine {
+  order_item_id: number;
+  product_name: string | null;
+  refunded_qty: number;
+  refunded_amount: number;
+  refunded_amount_formatted?: string;
+  nc_covered_qty: number;
+  nc_covered_amount: number;
+  notes: ComposerRefundNote[];
+}
+
+interface ComposerRefundsSection {
+  lines: ComposerRefundLine[];
+  totals: {
+    refunded_amount: number;
+    refunded_amount_formatted?: string;
+    nc_covered_amount: number;
+    nc_covered_amount_formatted?: string;
+  };
+  refunds: Array<{
+    id: number;
+    state: string;
+    amount: number;
+    amount_formatted?: string;
+    refund_method: string | null;
+    reason: string | null;
+  }>;
+}
+
 @Injectable()
 export class PrintLayoutComposerService {
   constructor(private readonly compiler: PrintTemplateCompilerService) {}
@@ -32,14 +76,47 @@ export class PrintLayoutComposerService {
       .filter((s) => s.enabled)
       .sort((a, b) => (a.order || 0) - (b.order || 0));
 
-    const renderedSections: string[] = [];
+    const rendered: Array<{ section: any; html: string }> = [];
 
     for (const section of sortedSections) {
       const sectionHtml = this.renderSection(section, definition, data, mode);
       if (sectionHtml) {
-        renderedSections.push(sectionHtml);
+        rendered.push({ section, html: sectionHtml });
       }
     }
+
+    // CP-REFUND-FLOW-REDESIGN paso 9b — sección Reembolsos ADITIVA en la
+    // reimpresión. Solo `pos-sale-ticket` y `sales-order-invoice` publican
+    // `custom_variables.refunds` (paso 9), así que la presencia del dato ES el
+    // gate de formato — ningún otro documento cambia, y sin refunds la
+    // salida queda byte-idéntica (sección ausente, cero CSS nuevo). Se
+    // inserta justo después de los totales; sin sección de totales, antes
+    // del pie; sin pie, al final. La ruta `custom_template` no la recibe:
+    // esa plantilla es diseño total de la tienda.
+    const refundsHtml = this.renderRefundsSection(data, mode);
+    if (refundsHtml) {
+      const refundsEntry = {
+        section: { type: 'refunds_section' },
+        html: refundsHtml,
+      };
+      const totalsIdx = rendered.findIndex(
+        (r) => r.section?.type === 'totals_summary',
+      );
+      if (totalsIdx >= 0) {
+        rendered.splice(totalsIdx + 1, 0, refundsEntry);
+      } else {
+        const footerIdx = rendered.findIndex(
+          (r) => r.section?.type === 'footer',
+        );
+        if (footerIdx >= 0) {
+          rendered.splice(footerIdx, 0, refundsEntry);
+        } else {
+          rendered.push(refundsEntry);
+        }
+      }
+    }
+
+    const renderedSections: string[] = rendered.map((r) => r.html);
 
     const bodyContent = `
       <div class="print-container ${definition.paper.is_roll ? 'is-roll' : 'is-sheet'}">
@@ -1001,6 +1078,100 @@ export class PrintLayoutComposerService {
           </table>
         </div>
         ${showVatNote ? `<div class="vat-included-note" data-element-id="f_vat_note" data-section-id="sec_totals">IVA incluido: ${taxVal}</div>` : ''}
+      </div>
+    `;
+  }
+
+  /**
+   * CP-REFUND-FLOW-REDESIGN paso 9b — pintado de la sección Reembolsos/NC en
+   * la reimpresión de `pos_sale_ticket` y `sales-order-invoice`.
+   *
+   * Lee `custom_variables.refunds` (paso 9) y NO toca `totals`, `items` ni
+   * `taxes`: los documentos originales son inmutables y el TOTAL impreso
+   * arriba queda intacto. Sin líneas reembolsadas devuelve `''` y la salida
+   * queda byte-idéntica.
+   *
+   * Solo reusa clases CSS existentes (`section-label`, `print-table`,
+   * `totals-table`, `total-label`, `total-val`, `item-sub`) y cero colores
+   * inline: en rollo térmico el bloque `[tirilla-80mm-negro]` no alcanza
+   * atributos `style`, así que un color inline viajaría al papel como trama.
+   * El neto es derivado (`grand_total − reembolsado`), igual que en el
+   * detalle del paso 8.
+   */
+  private renderRefundsSection(data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
+    const refunds = (data.custom_variables as any)?.refunds as
+      | ComposerRefundsSection
+      | undefined;
+    if (!refunds) return '';
+    const lines = Array.isArray(refunds.lines) ? refunds.lines : [];
+    if (lines.length === 0) return '';
+
+    const money = (formatted: unknown, raw: unknown): string =>
+      typeof formatted === 'string' && formatted
+        ? formatted
+        : `$${Number(raw || 0).toLocaleString('es-CO')}`;
+    const esc = (v: unknown): string => this.compiler.escapeHtml(v);
+
+    const lineRows = lines
+      .map((line) => {
+        const notes = Array.isArray(line.notes) ? line.notes : [];
+        const noteSublines = notes
+          .map(
+            (n) =>
+              `<br><small class="item-sub">NC ${esc(n.invoice_number ?? `#${n.credit_note_id}`)} (${esc(n.status)})</small>`,
+          )
+          .join('');
+        return `<tr data-element-id="rf_line_${line.order_item_id}" data-section-id="sec_refunds" data-token="custom_variables.refunds.lines">
+          <td>${esc(line.product_name ?? 'Producto')}${noteSublines}</td>
+          <td style="text-align: center;">${esc(line.refunded_qty)}</td>
+          <td style="text-align: right;">${esc(money(line.refunded_amount_formatted, line.refunded_amount))}</td>
+        </tr>`;
+      })
+      .join('');
+
+    const totals = refunds.totals ?? ({} as ComposerRefundsSection['totals']);
+    const refundedAmount = Number(totals.refunded_amount || 0);
+    const ncCoveredAmount = Number(totals.nc_covered_amount || 0);
+    const grandTotal = Number((data.totals as any)?.grand_total || 0);
+    const netTotal = grandTotal - refundedAmount;
+    const netFormatted = `$${netTotal.toLocaleString('es-CO')}`;
+
+    const headers = Array.isArray(refunds.refunds) ? refunds.refunds : [];
+    const headerLines = headers
+      .map((h) => {
+        const reason = h.reason ? ` — ${esc(h.reason)}` : '';
+        return `<div><small class="item-sub" data-element-id="rf_${h.id}" data-section-id="sec_refunds" data-token="custom_variables.refunds.refunds">Reembolso #${esc(h.id)} (${esc(h.state)}): ${esc(money(h.amount_formatted, h.amount))} — ${esc(h.refund_method ?? 'N/A')}${reason}</small></div>`;
+      })
+      .join('');
+
+    return `
+      <div class="print-section section-refunds" data-section-id="sec_refunds">
+        <div class="section-label">REEMBOLSOS</div>
+        <table class="print-table">
+          <thead>
+            <tr><th style="text-align: left;">Producto</th><th style="text-align: center;">Cant. devuelta</th><th style="text-align: right;">Monto</th></tr>
+          </thead>
+          <tbody>${lineRows}</tbody>
+        </table>
+        ${headerLines}
+        <table class="totals-table">
+          <tr data-element-id="rf_refunded" data-section-id="sec_refunds" data-token="custom_variables.refunds.totals">
+            <td class="total-label">Reembolsado:</td>
+            <td class="total-val discount">-${esc(money(totals.refunded_amount_formatted, refundedAmount))}</td>
+          </tr>
+          ${
+            ncCoveredAmount > 0
+              ? `<tr data-element-id="rf_nc_covered" data-section-id="sec_refunds" data-token="custom_variables.refunds.totals">
+            <td class="total-label">Cubierto por NC:</td>
+            <td class="total-val">${esc(money(totals.nc_covered_amount_formatted, ncCoveredAmount))}</td>
+          </tr>`
+              : ''
+          }
+          <tr data-element-id="rf_net" data-section-id="sec_refunds" data-token="custom_variables.refunds.totals">
+            <td class="total-label">Neto:</td>
+            <td class="total-val">${esc(netFormatted)}</td>
+          </tr>
+        </table>
       </div>
     `;
   }
