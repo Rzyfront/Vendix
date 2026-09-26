@@ -771,11 +771,22 @@ describe('OrderFlowService.deliverOrderItem — item_delivered', () => {
         findMany: jest.fn().mockResolvedValue([{ status: 'delivered' }]),
       },
     };
+    // `deliverOrderItem` (plan order-truth-and-invoice-tz paso 5) envuelve el
+    // commit de stock + stamp + historial en `this.prisma.$transaction`. La
+    // convención del repo (`src/testing/prisma-mock.ts`) resuelve el callback
+    // contra el MISMO mock, así que las llamadas hechas con `tx` adentro
+    // (`tx.order_items.updateMany`, `orderHistoryService.record(tx, ...)`)
+    // siguen viendo `prismaMock` — igual que afirma este test más abajo.
+    prismaMock.$transaction = jest.fn((cb: any) => cb(prismaMock));
+    const orderStockCommit = {
+      commitOrderLines: jest.fn().mockResolvedValue(undefined),
+    };
     const orderHistoryService = { record: jest.fn().mockResolvedValue(null) };
     const service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
       eventEmitter as any,
-      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any,
+      orderStockCommit as any,
       { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
       kitchenFireService as any,
       undefined, undefined, undefined, undefined, undefined,
@@ -910,6 +921,10 @@ describe('OrderFlowService.cancelDeliveredOrderItem — item_delivery_reverted',
     const stockLevelManager = {
       getDefaultLocationForProduct: jest.fn().mockResolvedValue(1),
       updateStock: jest.fn().mockResolvedValue({}),
+      // `inventory_committed` no viene en el fixture de `order_items.findFirst`
+      // (undefined ⇒ falsy) ⇒ `cancelDeliveredOrderItem` toma la rama "nunca
+      // comprometido" y libera la reserva en vez de reponer stock.
+      releaseReservationQuantity: jest.fn().mockResolvedValue(undefined),
     };
     const auditService = { logCustom: jest.fn().mockResolvedValue(undefined) };
     const orderHistoryService = { record: jest.fn().mockResolvedValue(null) };
