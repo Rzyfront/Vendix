@@ -155,7 +155,23 @@ export class StoreUsersService {
     const limit = Math.min(Math.max(Number(query.limit) || 10, 1), 20);
 
     const where: any = {
-      user: { state: 'active' },
+      user: {
+        state: 'active',
+        // Ecommerce customers are also `store_users` rows — customers.service
+        // upserts a store_users link on registration — so filtering on
+        // `state: 'active'` alone let customers show up in this staff-only
+        // picker (POS payment "Buscar mesero" tip selector). Require at
+        // least one role that is NOT 'customer' so a staff member who is
+        // ALSO a registered customer still appears; a user whose only role
+        // is 'customer' (or who has no roles) is excluded.
+        user_roles: {
+          some: {
+            roles: {
+              name: { not: 'customer' },
+            },
+          },
+        },
+      },
     };
 
     if (query.search) {
