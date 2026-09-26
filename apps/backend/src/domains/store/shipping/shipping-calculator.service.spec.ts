@@ -3,6 +3,7 @@ import { ShippingCalculatorService } from './shipping-calculator.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { ShippingTaxService } from './services/shipping-tax.service';
+import { ShippingDistanceService } from './services/shipping-distance.service';
 import { shipping_rate_type_enum } from '@prisma/client';
 
 describe('ShippingCalculatorService', () => {
@@ -649,6 +650,179 @@ describe('ShippingCalculatorService', () => {
       expect(options[0].base).toBe(10000);
       expect(options[0].shipping_tax_amount).toBe(0);
       expect(options[0].tax_is_inclusive).toBe(true);
+    });
+  });
+
+  describe('quoteRateGross (paso 1 — unificación de la cotización de una tarifa puntual)', () => {
+    const riohachaZone = {
+      id: 10,
+      store_id: 1,
+      name: 'Riohacha Local',
+      countries: ['CO'],
+      regions: ['La Guajira'],
+      cities: ['Riohacha'],
+      zip_codes: [],
+      is_active: true,
+    };
+
+    const address = {
+      country_code: 'CO',
+      state_province: 'La Guajira',
+      city: 'Riohacha',
+    };
+
+    it('flat con umbral de envío gratis superado ⇒ 0', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([riohachaZone]);
+      mockPrisma.shipping_rates.findMany.mockResolvedValue([
+        {
+          id: 101,
+          shipping_zone_id: 10,
+          shipping_method_id: 5,
+          name: 'Envío a domicilio',
+          type: shipping_rate_type_enum.flat,
+          base_cost: 10000,
+          free_shipping_threshold: 50000,
+          is_active: true,
+          shipping_method: {
+            id: 5,
+            name: 'Envío a domicilio',
+            type: 'own_fleet',
+            is_active: true,
+            display_order: 1,
+          },
+        },
+      ]);
+
+      const cost = await service.quoteRateGross(
+        1,
+        101,
+        [{ product_id: 1, quantity: 1, price: 60000 }],
+        address,
+      );
+
+      expect(cost).toBe(0);
+    });
+
+    // Adaptado: `per_unit_cost` solo aplica a tarifas `weight_based` en el
+    // cotizador real (no a `flat`, como sugería literalmente el caso del
+    // encargo). Se documenta la desviación en el reporte final.
+    it('adaptado — weight_based con per_unit_cost y 3kg ⇒ base + 3×unitario', async () => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([riohachaZone]);
+      mockPrisma.shipping_rates.findMany.mockResolvedValue([
+        {
+          id: 102,
+          shipping_zone_id: 10,
+          shipping_method_id: 5,
+          name: 'Envío por peso',
+          type: shipping_rate_type_enum.weight_based,
+          base_cost: 5000,
+          per_unit_cost: 1000,
+          min_val: null,
+          max_val: null,
+          free_shipping_threshold: null,
+          is_active: true,
+          shipping_method: {
+            id: 5,
+            name: 'Envío por peso',
+            type: 'own_fleet',
+            is_active: true,
+            display_order: 1,
+          },
+        },
+      ]);
+
+      const cost = await service.quoteRateGross(
+        1,
+        102,
+        [{ product_id: 1, quantity: 1, price: 10000, weight: 3 }],
+        address,
+      );
+
+      expect(cost).toBe(8000);
+    });
+
+    describe('con distancia activa', () => {
+      let distanceService: ShippingDistanceService;
+
+      beforeEach(async () => {
+        distanceService = new ShippingDistanceService();
+        const module: TestingModule = await Test.createTestingModule({
+          providers: [
+            ShippingCalculatorService,
+            { provide: StorePrismaService, useValue: mockPrisma },
+            { provide: SettingsService, useValue: mockSettings },
+            { provide: ShippingTaxService, useValue: mockShippingTax },
+            { provide: ShippingDistanceService, useValue: distanceService },
+          ],
+        }).compile();
+        service = module.get<ShippingCalculatorService>(
+          ShippingCalculatorService,
+        );
+      });
+
+      const distanceRate = (overrides: any = {}) => ({
+        id: 103,
+        shipping_zone_id: 10,
+        shipping_method_id: 5,
+        name: 'Envío por distancia',
+        type: shipping_rate_type_enum.flat,
+        base_cost: 8000,
+        free_shipping_threshold: null,
+        is_active: true,
+        distance_tiers: [
+          { from_km: 0, to_km: 5, price: 3000 },
+          { from_km: 5, to_km: null, price: 6000 },
+        ],
+        shipping_method: {
+          id: 5,
+          name: 'Envío por distancia',
+          type: 'own_fleet',
+          is_active: true,
+          display_order: 1,
+          distance_pricing_enabled: true,
+          origin_latitude: 4.65,
+          origin_longitude: -74.1,
+        },
+        ...overrides,
+      });
+
+      it('tarifa por distancia con dirección con coordenadas ⇒ cobra el precio del tramo', async () => {
+        jest.spyOn(distanceService, 'resolveDistanceKm').mockResolvedValue(7);
+        mockPrisma.shipping_zones.findMany.mockResolvedValue([riohachaZone]);
+        mockPrisma.shipping_rates.findMany.mockResolvedValue([
+          distanceRate(),
+        ]);
+
+        const cost = await service.quoteRateGross(
+          1,
+          103,
+          [{ product_id: 1, quantity: 1, price: 10000 }],
+          { ...address, latitude: 4.711, longitude: -74.0721 },
+        );
+
+        expect(cost).toBe(6000);
+      });
+
+      // Adaptado: contrato fail-open de `vendix-shipping-distance-pricing` —
+      // sin coords del comprador la cotización degrada al precio de zona,
+      // NUNCA a `null` directo (eso solo ocurre si la tarifa no aparece del
+      // todo entre las opciones, p.ej. sin cobertura de zona). Se documenta
+      // la desviación del enunciado literal en el reporte final.
+      it('adaptado — tarifa por distancia sin lat/lng del comprador ⇒ degrada al precio de zona (fail-open), no null', async () => {
+        mockPrisma.shipping_zones.findMany.mockResolvedValue([riohachaZone]);
+        mockPrisma.shipping_rates.findMany.mockResolvedValue([
+          distanceRate(),
+        ]);
+
+        const cost = await service.quoteRateGross(
+          1,
+          103,
+          [{ product_id: 1, quantity: 1, price: 10000 }],
+          address, // sin latitude/longitude
+        );
+
+        expect(cost).toBe(8000);
+      });
     });
   });
 });
