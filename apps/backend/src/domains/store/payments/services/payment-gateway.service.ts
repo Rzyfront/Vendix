@@ -273,8 +273,8 @@ export class PaymentGatewayService {
         });
 
         if (payment) {
-          await this.createRefundRecord(payment, result, reason);
-          await this.updateOrderAfterRefund(payment.order_id);
+          const refund = await this.createRefundRecord(payment, result, reason);
+          await this.updateOrderAfterRefund(payment.order_id, refund);
         }
       }
 
@@ -769,7 +769,16 @@ export class PaymentGatewayService {
     });
   }
 
-  private async updateOrderAfterRefund(orderId: number) {
+  private async updateOrderAfterRefund(
+    orderId: number,
+    refund?: {
+      id: number;
+      payment_id: number | null;
+      amount: Prisma.Decimal | number | string;
+      state: refunds_state_enum;
+      refund_transaction_id: string | null;
+    },
+  ) {
     const order = await this.prisma.orders.findUnique({
       where: { id: orderId },
       include: {
@@ -780,6 +789,33 @@ export class PaymentGatewayService {
     });
 
     if (!order) return;
+
+    // Plan order-truth-and-invoice-tz — refund_resolved (shape espejo de
+    // `RefundFlowService.resolveRefund`). Solo cuando la pasarela dejó el
+    // reembolso en estado TERMINAL (`completed`/`failed`); un `processing`
+    // (pasarela respondió `pending`) aún no está resuelto y no se registra.
+    // Carril HTTP (`PaymentsService.refundPayment` ← controller): sin
+    // `source` explícito, `record` resuelve 'http'/'system' por contexto.
+    if (
+      refund &&
+      (refund.state === refunds_state_enum.completed ||
+        refund.state === refunds_state_enum.failed)
+    ) {
+      await this.orderHistory?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: (order as any).stores?.organization_id ?? undefined,
+        type: 'refund_resolved',
+        paymentId: refund.payment_id ?? null,
+        amount: refund.amount.toString(),
+        payload: {
+          refund_id: refund.id,
+          target_state: refund.state,
+          payout_reference: refund.refund_transaction_id ?? null,
+          payout_channel: 'gateway',
+        },
+      });
+    }
 
     const totalPaid = order.payments
       .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
