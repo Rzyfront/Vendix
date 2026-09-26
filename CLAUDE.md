@@ -401,6 +401,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Selecting the correct skills for each plan step using the Skill Selection Matrix | `how-to-plan` |
 | Self-bootstrap Engram on a fresh dev machine | `vendix-engram` |
 | Setting up or migrating an Engram installation (brew, setup, MCP, plugin, doctor) | `vendix-engram` |
+| Splitting withholding across multi-tender payment legs | `vendix-auto-entries` |
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Summarizing Linear bugs and validated tickets for a sprint into a visual report | `qa-report` |
