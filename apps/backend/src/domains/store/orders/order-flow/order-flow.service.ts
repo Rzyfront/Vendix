@@ -2048,7 +2048,7 @@ export class OrderFlowService {
     }
   }
 
-  async confirmPayment(orderId: number) {
+  async confirmPayment(orderId: number, opts?: { source?: OrderEventSource }) {
     const initial = await this.getOrder(orderId);
     assertNoActiveFinancialSplit(initial);
     const afterCommit: Array<() => Promise<void>> = [];
@@ -2063,6 +2063,15 @@ export class OrderFlowService {
         await tx.payments.updateMany({
           where: { id: pendingPayment.id, state: 'pending' },
           data: { state: 'succeeded', paid_at: new Date(), updated_at: new Date() },
+        });
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: order.store_id,
+          organizationId: order.stores?.organization_id,
+          type: 'payment_registered',
+          paymentId: pendingPayment.id,
+          amount: pendingPayment.amount.toString(),
+          source: opts?.source,
         });
       }
       await this.commitCouponUseForOrder(orderId, tx, afterCommit);
@@ -2099,6 +2108,15 @@ export class OrderFlowService {
           data: { state: 'processing', completed_at: new Date(), updated_at: new Date() },
         });
         if (claim.count !== 1) throw new BadRequestException('La orden cambió durante la confirmación.');
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: order.store_id,
+          organizationId: order.stores?.organization_id,
+          type: 'state_changed',
+          fromState: 'pending_payment',
+          toState: 'processing',
+          source: opts?.source,
+        });
       }
       return { order: await this.getOrder(orderId, tx), applied: true, previousState: order.state };
     });
