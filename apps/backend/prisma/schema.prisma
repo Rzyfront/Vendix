@@ -55,6 +55,7 @@ model users {
   addresses                  addresses[]                  @relation("user_addresses")
   api_keys                   api_keys[]
   audit_logs                 audit_logs[]
+  order_events                order_events[]
   email_verification_tokens  email_verification_tokens[]
   inventory_adjustments1     inventory_adjustments[]      @relation("inventory_adjustments_approved_by")
   inventory_adjustments      inventory_adjustments[]      @relation("inventory_adjustments_created_by")
@@ -516,6 +517,48 @@ model audit_logs {
   @@index([resource, resource_id, created_at(sort: Desc)])
 }
 
+/// Historial veraz de la orden (plan order-truth-and-invoice-tz, Objetivos 5-7).
+/// Tabla dedicada, escrita por un único servicio (`OrderHistoryService`) DENTRO
+/// de la misma transacción que el cambio que registra — a diferencia de
+/// `audit_logs`, que la escribe un interceptor HTTP y por eso ignora
+/// webhooks/jobs/listeners y nunca guarda el estado anterior de forma
+/// confiable. Solo aditiva: sin backfill desde `audit_logs`; las órdenes
+/// anteriores a este cambio simplemente no tienen filas aquí y el timeline cae
+/// a `audit_logs` como antes (ver Objetivo 7).
+model order_events {
+  id              Int                @id @default(autoincrement())
+  store_id        Int
+  organization_id Int?
+  order_id        Int
+  /// Unión cerrada en TypeScript (`OrderEventType`): state_changed |
+  /// payment_registered | payment_cancelled | refund_created | refund_resolved
+  /// | customer_changed | item_delivered | item_cancelled |
+  /// item_delivery_reverted | shipping_assigned | invoice_issued.
+  event_type      String             @db.VarChar(50)
+  from_state      order_state_enum?
+  to_state        order_state_enum?
+  actor_user_id   Int?
+  /// 'http' | 'webhook' | 'job' | 'listener' | 'system' (`OrderEventSource`).
+  actor_source    String             @db.VarChar(20)
+  /// Sin FK a propósito (dato de correlación, no relación de integridad):
+  /// mismo criterio que `payment_id`/`order_item_id` — el evento debe seguir
+  /// existiendo aunque el pago o el ítem referenciado se borre/reescriba.
+  payment_id      Int?
+  order_item_id   Int?
+  amount          Decimal?           @db.Decimal(12, 2)
+  payload         Json?
+  request_id      String?            @db.VarChar(100)
+  created_at      DateTime           @default(now()) @db.Timestamptz(6)
+
+  organizations organizations? @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores        stores         @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  orders        orders         @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  users         users?         @relation(fields: [actor_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([order_id, created_at])
+  @@index([store_id, created_at])
+}
+
 model organizations {
   id                            Int                               @id @default(autoincrement())
   name                          String                            @db.VarChar(255)
@@ -566,6 +609,7 @@ model organizations {
   acm_cert_revision             Int                               @default(0)
   addresses                     addresses[]
   audit_logs                    audit_logs[]
+  order_events                  order_events[]
   domain_settings               domain_settings[]
   domain_roots                  domain_roots[]
   inventory_adjustments         inventory_adjustments[]
@@ -834,6 +878,7 @@ model stores {
   default_location            inventory_locations?          @relation("StoreDefaultLocation", fields: [default_location_id], references: [id])
   addresses                   addresses[]
   audit_logs                  audit_logs[]
+  order_events                order_events[]
   brands                      brands[]
   categories                  categories[]
   domain_settings             domain_settings[]
@@ -1616,6 +1661,7 @@ model orders {
   @@index([created_by_user_id])
   order_items                                     order_items[]
   order_installments                              order_installments[]
+  order_events                                     order_events[]
   addresses_orders_billing_address_idToaddresses  addresses?                @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   addresses_orders_shipping_address_idToaddresses addresses?                @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   stores                                          stores                    @relation(fields: [store_id], references: [id], onUpdate: NoAction)
