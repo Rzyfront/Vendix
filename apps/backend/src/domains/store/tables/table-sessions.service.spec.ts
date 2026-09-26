@@ -669,7 +669,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       (service as any).stockValidator.assertLinesAvailable.mockRejectedValueOnce(shortage);
 
       await expect(service.addItems(1, { items: [{ product_id: 51, quantity: 1 }] } as any))
-        .rejects.toBe(shortage);
+        .rejects.toMatchObject({ errorCode: 'INV_STOCK_INSUFFICIENT_LINES' });
       expect(prismaMock.order_items.create).not.toHaveBeenCalled();
       expect((service as any).stockLevelManager.reserveStock).not.toHaveBeenCalled();
     });

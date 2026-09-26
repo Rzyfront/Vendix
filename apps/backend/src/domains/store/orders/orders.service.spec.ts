@@ -1133,7 +1133,9 @@ describe('OrdersService', () => {
 
       await expect(service.create(makeDto({
         items: [{ product_id: 51, product_name: 'MODELO', quantity: 2, unit_price: 100, total_price: 200 }],
-      }), { id: 99 })).rejects.toBe(shortage);
+      }), { id: 99 })).rejects.toMatchObject({
+        errorCode: 'INV_STOCK_INSUFFICIENT_LINES',
+      });
       expect(mockStockValidator.assertLinesAvailable).toHaveBeenCalledWith(
         [expect.objectContaining({ product_id: 51, quantity: 2 })],
         expect.objectContaining({ tx: mockPrismaService }),
@@ -3245,7 +3247,9 @@ describe('OrdersService', () => {
 
       await expect(service.updateOrderItems(700, {
         items: [{ product_id: 1, product_name: 'Test product', quantity: 2, unit_price: 11900, total_price: 23800 }],
-      } as any)).rejects.toBe(shortage);
+      } as any)).rejects.toMatchObject({
+        errorCode: 'INV_STOCK_INSUFFICIENT_LINES',
+      });
       expect(mockStockValidator.assertLinesAvailable).toHaveBeenCalledWith(
         [expect.objectContaining({ product_id: 1, quantity: 2 })],
         { orderId: 700, tx: mockPrismaService },
