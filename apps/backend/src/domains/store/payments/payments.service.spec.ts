@@ -36,6 +36,7 @@ import { WompiProcessor } from './processors/wompi/wompi.processor';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 import { OrderStockCommitService } from '../inventory/shared/services/order-stock-commit.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
@@ -103,6 +104,15 @@ describe('PaymentsService', () => {
   // con `as jest.Mock` desde `eventEmitter.emit` pasaría incluso si el handle
   // dejara de ser el que el servicio inyecta.
   let emitMock: jest.MockedFunction<EventEmitter2['emit']>;
+  // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+  // step 4): same F-157 pattern — created once per test in `beforeEach`,
+  // used DIRECTLY by closure so a test can override its resolution and
+  // assert calls without retyping through `as jest.Mock`.
+  let assertLinesAvailableMock: jest.MockedFunction<
+    StockValidatorService['assertLinesAvailable']
+  >;
+  let reserveStockMock: jest.MockedFunction<StockLevelManager['reserveStock']>;
+  let allocateForLineMock: jest.MockedFunction<SellableStockAllocator['allocateForLine']>;
 
   const mockUser = {
     id: 1,
@@ -238,6 +248,21 @@ describe('PaymentsService', () => {
 
     emitMock = jest.fn() as jest.MockedFunction<EventEmitter2['emit']>;
 
+    // Default: no shortage (resolves) so the rest of this large suite is
+    // unaffected. Tests exercising the no-overselling guard itself override
+    // this per-case with `.mockRejectedValueOnce(...)`.
+    assertLinesAvailableMock = jest
+      .fn()
+      .mockResolvedValue(undefined) as jest.MockedFunction<
+      StockValidatorService['assertLinesAvailable']
+    >;
+    reserveStockMock = jest.fn().mockResolvedValue(undefined) as jest.MockedFunction<
+      StockLevelManager['reserveStock']
+    >;
+    allocateForLineMock = jest.fn() as jest.MockedFunction<
+      SellableStockAllocator['allocateForLine']
+    >;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
@@ -247,7 +272,7 @@ describe('PaymentsService', () => {
         { provide: WebhookHandlerService, useValue: {} },
         {
           provide: StockLevelManager,
-          useValue: { updateStock: jest.fn() },
+          useValue: { updateStock: jest.fn(), reserveStock: reserveStockMock },
         },
         {
           provide: TaxesService,
@@ -316,7 +341,16 @@ describe('PaymentsService', () => {
         // these instead of relying on the empty shape.
         {
           provide: SellableStockAllocator,
-          useValue: { allocateForOrderItem: jest.fn() },
+          useValue: { allocateForOrderItem: jest.fn(), allocateForLine: allocateForLineMock },
+        },
+        // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+        // step 4) — see `assertLinesAvailableMock` declared at describe level.
+        {
+          provide: StockValidatorService,
+          useValue: {
+            assertLinesAvailable: assertLinesAvailableMock,
+            assertIngredientsAvailable: jest.fn().mockResolvedValue(undefined),
+          },
         },
         {
           provide: PriceResolverService,
@@ -3449,6 +3483,59 @@ describe('PaymentsService', () => {
       jest.restoreAllMocks();
     });
 
+    it('un borrador POS con faltante falla antes de reservar o cobrar', async () => {
+      const { order, tx } = arrangePosSale('cash');
+      order.order_items.push({
+        id: 901, product_id: 501, product_variant_id: null,
+        quantity: 1, stock_units_consumed: null, skip_kds: true,
+      } as any);
+      tx.products = { findMany: jest.fn().mockResolvedValue([
+        { id: 501, name: 'MODELO', track_inventory: true, product_type: 'physical' },
+      ]) };
+      assertLinesAvailableMock.mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+          'Sin stock para MODELO', { items: [{ product_name: 'MODELO', requested: 1, available: 0 }] }),
+      );
+
+      await expect(service.processPosPayment(
+        buildPosDto({ is_draft: true, requires_payment: false }), posUser,
+      )).rejects.toMatchObject({ errorCode: 'INV_STOCK_INSUFFICIENT_LINES' });
+      expect(assertLinesAvailableMock).toHaveBeenCalledWith(
+        [expect.objectContaining({ product_id: 501, quantity: 1 })],
+        { orderId: 4242, tx },
+      );
+      expect(tx.order_items.findMany).not.toHaveBeenCalled();
+    });
+
+    it('un borrador POS con stock reserva en el mismo tx antes de salir', async () => {
+      const { order, tx } = arrangePosSale('cash');
+      order.order_items.push({
+        id: 902, product_id: 501, product_variant_id: null,
+        quantity: 1, stock_units_consumed: null, skip_kds: true,
+      } as any);
+      tx.products = { findMany: jest.fn().mockResolvedValue([
+        { id: 501, name: 'MODELO', track_inventory: true, product_type: 'physical' },
+      ]) };
+      tx.stock_reservations = { aggregate: jest.fn().mockResolvedValue({ _sum: { quantity: 0 } }) };
+      const afterReserve = new Error('stop-after-reserve');
+      tx.$executeRawUnsafe = jest.fn(async (sql: string) => {
+        if (sql === 'RELEASE SAVEPOINT stock_reserve_sp') throw afterReserve;
+        return 0;
+      });
+      allocateForLineMock.mockResolvedValueOnce({
+        slices: [{ location_id: 77, quantity: 1 }], allocated: 1,
+        available: 1, shortfall: 0,
+      });
+
+      await expect(service.processPosPayment(
+        buildPosDto({ is_draft: true, requires_payment: false }), posUser,
+      )).rejects.toThrow('stop-after-reserve');
+      expect(reserveStockMock).toHaveBeenCalledWith(
+        501, undefined, 77, 1, 'order', 4242, expect.anything(),
+        true, tx, undefined, false, 1,
+      );
+    });
+
     it('un cobro Wompi en mostrador deja el stock quieto: el pago está prometido, no cobrado', async () => {
       arrangePosSale('wompi');
 
@@ -4588,6 +4675,7 @@ describe('PaymentsService — resolveDeclaredGrossUnitPrice (B.1/F-186)', () => 
         { provide: FiscalInvoiceThresholdService, useValue: {} },
         { provide: OrderStockCommitService, useValue: {} },
         { provide: SellableStockAllocator, useValue: {} },
+        { provide: StockValidatorService, useValue: {} },
         { provide: PriceResolverService, useValue: {} },
         { provide: WithholdingFlowService, useValue: {} },
         { provide: KitchenFireService, useValue: {} },

@@ -11,6 +11,10 @@ import { Prisma, payment_processing_mode_enum, table_status_enum, order_state_en
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
+  StockValidatorService,
+  StockDemandLine,
+} from '../inventory/shared/services/stock-validator.service';
+import {
   OrderStockCommitService,
   CommitResult,
 } from '../inventory/shared/services/order-stock-commit.service';
@@ -22,7 +26,6 @@ import { TaxFiscalType } from '../taxes/dto';
 import { truncMoney } from '../taxes/utils/tax-inclusive-math.util';
 import { LocationsService } from '../inventory/locations/locations.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
-import { sellableStockLevelsWhere } from '../inventory/shared/helpers/pos-stock-scope.helper';
 import {
   CreatePaymentDto,
   CreateOrderPaymentDto,
@@ -146,6 +149,9 @@ export class PaymentsService {
     private prisma: StorePrismaService,
     private paymentGateway: PaymentGatewayService,
     private readonly stockLevelManager: StockLevelManager,
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+    // step 4) — sums per-product demand (not per-line) before reserving.
+    private readonly stockValidatorService: StockValidatorService,
     // Canonical, uniform delivery-commit (skips + reservation consume +
     // availability BLOCK + serial consume + updateStock + inventory_committed).
     private readonly orderStockCommit: OrderStockCommitService,
@@ -1056,18 +1062,27 @@ export class PaymentsService {
           discount_amount: 0,
         };
 
-        // CP-POS-SVC-PERF-001 / A.4 — pure drafts (Guardar borrador) must NOT
-        // touch stock_levels or stock_reservations. The cashier reserves at
-        // flow/pay when actually charging. Forcing drafts through the
-        // reservation path was the dominant cost of the slow-Guardar bug.
-        if (createPosPaymentDto.is_draft) {
-          // §1.5 + §1.6 of stock validation/reservation are skipped entirely.
-        } else {
+        // A saved draft promises stock just like an open table. Reserve on
+        // entry so a second cashier cannot sell the same units before this
+        // draft reaches flow/pay. Payment will only top up a missing delta.
 
         // 1.5. BLOCKING stock validation using stock_levels (source of truth)
         // Validate ALL items before any reservation occurs
         // Oversell is intentionally not controlled by the public POS payload.
         const allowOversell = false;
+
+        // no-overselling-stock-guard plan, Step 4 (POS): a prepared dish
+        // that is about to be fired to the kitchen (skip_kds=false, restaurant
+        // store) is NOT validated against its OWN stock row here — the thing
+        // that can run out is its ingredients, and those are validated at
+        // fire time (`KitchenFireService.fireOrderItemsInTx`, invoked further
+        // below in this SAME transaction, still before any payment row is
+        // created). Only skip_kds=true lines (and non-restaurant /
+        // non-prepared products) consume their own stock, so only those are
+        // checked here. `order.stores` is a full include (see
+        // `createOrUpdateOrderFromPos`), so `industries` is already loaded —
+        // no extra query needed inside this transactional window.
+        const restaurantMode = storeIsRestaurant(order.stores?.industries);
 
         // `track_inventory` es el mismo valor para los dos bucles de stock y
         // para toda la transacción, así que consultarlo por ítem —dos veces por
@@ -1080,6 +1095,7 @@ export class PaymentsService {
           id: number;
           track_inventory: boolean;
           name: string;
+          product_type: string | null;
         };
         const stockProductIds = Array.from(
           new Set(
@@ -1092,7 +1108,12 @@ export class PaymentsService {
           (stockProductIds.length
             ? await tx.products.findMany({
                 where: { id: { in: stockProductIds } },
-                select: { id: true, track_inventory: true, name: true },
+                select: {
+                  id: true,
+                  track_inventory: true,
+                  name: true,
+                  product_type: true,
+                },
               })
             : []
           ).map((row: StockProductRow): [number, StockProductRow] => [
@@ -1100,35 +1121,50 @@ export class PaymentsService {
             row,
           ]),
         );
+        const stockVariantIds = Array.from(new Set(order.order_items
+          .map((item) => item.product_variant_id)
+          .filter((id): id is number => id != null)));
+        const stockVariantById = new Map(
+          (stockVariantIds.length > 0
+            ? await tx.product_variants.findMany({
+                where: { id: { in: stockVariantIds } },
+                select: { id: true, track_inventory_override: true },
+              })
+            : []).map((row) => [row.id, row.track_inventory_override]),
+        );
 
-        for (const item of order.order_items) {
+        // A line is exempt from ITS OWN stock check when it is a prepared
+        // dish headed to the kitchen — see comment above `restaurantMode`.
+        const isFiredToKitchenLine = (item: {
+          product_id?: number | null;
+          skip_kds?: boolean | null;
+        }): boolean => {
+          if (!item.product_id) return false;
+          const product = stockProductById.get(item.product_id);
+          return (
+            restaurantMode &&
+            product?.product_type === 'prepared' &&
+            item.skip_kds !== true
+          );
+        };
+
+        // no-overselling-stock-guard plan, Step 4: lines of the SAME
+        // product+variant are summed before comparing against available
+        // stock (`StockValidatorService.assertLinesAvailable`) — two lines
+        // of 6 units each against a stock of 10 now block (12 > 10) instead
+        // of each passing individually against the same 10.
+        const stockDemandLines: StockDemandLine[] = [];
+        for (const item of order.order_items as Array<{
+          product_id?: number | null;
+          product_variant_id?: number | null;
+          quantity: number;
+          stock_units_consumed?: number | null;
+          skip_kds?: boolean | null;
+        }>) {
           if (!item.product_id) continue;
+          if (isFiredToKitchenLine(item)) continue;
 
           const product = stockProductById.get(item.product_id);
-
-          if (!product?.track_inventory) continue;
-
-          // Get actual available stock from stock_levels table (source of truth)
-          // Aggregate across store-local, sellable locations only.
-          // POS canal MUST exclude central warehouse and non-sellable types
-          // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
-          //
-          // QUI-559: the predicate is no longer written inline here — it comes
-          // from `sellableStockLevelsWhere`, the same helper that drives what
-          // the POS grid displays and what the delivery commit may deduct.
-          // Three copies of this filter is how they drifted apart.
-          const stockAggregate = await tx.stock_levels.aggregate({
-            where: {
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id ?? null,
-              ...sellableStockLevelsWhere(order.store_id),
-            },
-            _sum: {
-              quantity_available: true,
-            },
-          });
-
-          const available = stockAggregate._sum.quantity_available ?? 0;
 
           const requiredStock =
             typeof item.stock_units_consumed === 'number' &&
@@ -1136,20 +1172,21 @@ export class PaymentsService {
               ? item.stock_units_consumed
               : item.quantity;
 
-          // BLOCK: If not allowing oversell and required units exceed available, throw immediately.
-          if (!allowOversell && requiredStock > available) {
-            const variantInfo = item.product_variant_id
-              ? ` (variant ${item.product_variant_id})`
-              : '';
-            const packageHint =
-              requiredStock !== item.quantity
-                ? ` (${item.quantity} x ${requiredStock / Math.max(item.quantity, 1)} unid/empaque)`
-                : '';
-            throw new VendixHttpException(
-              ErrorCodes.POS_STOCK_INSUFFICIENT_001,
-              `Stock insuficiente para ${product.name}${variantInfo}: requiere ${requiredStock} unidades${packageHint}, disponible ${available}.`,
-            );
-          }
+          stockDemandLines.push({
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? undefined,
+            quantity: requiredStock,
+            product_name: product?.name,
+          });
+        }
+
+        // BLOCK: if not allowing oversell, throw before any payment/reservation
+        // happens naming every product that cannot cover the summed demand.
+        if (!allowOversell && stockDemandLines.length > 0) {
+          await this.stockValidatorService.assertLinesAvailable(
+            stockDemandLines,
+            { orderId: order.id, tx },
+          );
         }
 
         // QUI-559: no "default location" fallback here any more. Picking an
@@ -1157,11 +1194,44 @@ export class PaymentsService {
         // reservation land somewhere the commit would not draw from. The
         // allocator resolves the real sellable locations; if none covers the
         // line, that is a stock error, not a location-resolution problem.
+        const demandByIdentity = new Map<string, number>();
+        for (const line of stockDemandLines) {
+          const key = `${line.product_id}:${line.product_variant_id ?? 'base'}`;
+          demandByIdentity.set(key, (demandByIdentity.get(key) ?? 0) + line.quantity);
+        }
+        const processedIdentities = new Set<string>();
         for (const item of order.order_items) {
           if (!item.product_id) continue;
 
           const product = stockProductById.get(item.product_id);
-          if (!product?.track_inventory) continue;
+          if (!product || product.product_type === 'service') continue;
+          const effectiveTracking = item.product_variant_id != null
+            ? (stockVariantById.get(item.product_variant_id) ?? product.track_inventory)
+            : product.track_inventory;
+          if (!effectiveTracking) continue;
+          // Same exemption as §1.5 above: a prepared dish fired to the
+          // kitchen reserves nothing against its OWN stock row — only its
+          // ingredients move, at fire time.
+          if (isFiredToKitchenLine(item)) continue;
+          const identity = `${item.product_id}:${item.product_variant_id ?? 'base'}`;
+          if (processedIdentities.has(identity)) continue;
+          processedIdentities.add(identity);
+
+          const reserved = await tx.stock_reservations.aggregate({
+            where: {
+              reserved_for_type: 'order',
+              reserved_for_id: order.id,
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id ?? null,
+              status: 'active',
+            },
+            _sum: { quantity: true },
+          });
+          const unitsToReserve = Math.max(
+            0,
+            (demandByIdentity.get(identity) ?? 0) - Number(reserved._sum.quantity ?? 0),
+          );
+          if (unitsToReserve === 0) continue;
           try {
             // Use savepoint to isolate stock reservation errors from the main transaction.
             // PostgreSQL aborts the entire transaction on any error; a savepoint lets us
@@ -1172,13 +1242,6 @@ export class PaymentsService {
             // (>0), pasarlo como override al reservador para descontar la
             // cantidad real de unidades de stock (empaque por tarifa, cuando el
             // packSize resuelto de la tarifa/override es > 1).
-            const stockUnitsConsumed =
-              typeof item.stock_units_consumed === 'number' &&
-              item.stock_units_consumed > 0
-                ? item.stock_units_consumed
-                : undefined;
-            const unitsToReserve = stockUnitsConsumed ?? item.quantity;
-
             // QUI-559: reserve ACROSS the store's sellable locations instead of
             // picking the single one with the highest availability. The
             // validation above approved an aggregate total; reserving from one
@@ -1203,8 +1266,16 @@ export class PaymentsService {
               // it aborts the payment instead of leaving the order partially
               // reserved and failing later at the delivery commit.
               throw new VendixHttpException(
-                ErrorCodes.POS_STOCK_INSUFFICIENT_001,
-                `Stock insuficiente al reservar el producto ${item.product_id}: requiere ${unitsToReserve} unidades, disponible ${allocation.available}.`,
+                ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+                `Stock insuficiente para ${product.name}: requiere ${unitsToReserve} unidades, disponible ${allocation.available}.`,
+                { items: [{
+                  product_id: item.product_id,
+                  product_variant_id: item.product_variant_id ?? null,
+                  product_name: product.name,
+                  kind: 'product',
+                  requested: unitsToReserve,
+                  available: allocation.available,
+                }] },
               );
             }
 
@@ -1224,7 +1295,7 @@ export class PaymentsService {
                 'order',
                 order.id,
                 user?.id,
-                false, // Already validated above against stock_levels source of truth.
+                true, // Strict floor also protects races after the aggregate check.
                 tx,
                 undefined, // expires_at
                 false, // skip_reservation
@@ -1243,23 +1314,11 @@ export class PaymentsService {
               );
             } catch {}
 
-            // QUI-559: a stock error is a business answer, not an incident.
-            // Swallowing it here let the payment succeed with the line
-            // unreserved, and the delivery commit then rejected the whole sale
-            // with an opaque INV_STOCK_002. Re-throw so the cashier gets the
-            // real reason and the transaction rolls back cleanly; genuine
-            // infrastructure hiccups keep the previous tolerant behaviour.
-            if (error instanceof VendixHttpException) {
-              throw error;
-            }
-
-            this.logger.warn(
-              `Stock reservation failed for product ${item.product_id} in order #${order.id}: ${error.message}`,
-            );
+            // A failed reservation is never optional: otherwise the draft or
+            // payment survives without the stock it promised.
+            throw error;
           }
         }
-
-        } // end A.4 is_draft skip
 
         // 1.6. Persist promotions from the server-recalculated snapshot.
         // Backend already validated each promotion via `quoteDiscounts` and

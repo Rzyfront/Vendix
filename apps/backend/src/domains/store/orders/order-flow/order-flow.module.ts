@@ -11,6 +11,7 @@ import { RefundCoverageService } from './services/refund-coverage.service';
 import { RefundFlowService } from './services/refund-flow.service';
 import { RefundMethodsService } from './services/refund-methods.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../../inventory/shared/services/stock-validator.service';
 import { InventoryTransactionsService } from '../../inventory/transactions/inventory-transactions.service';
 import { CashRegistersModule } from '../../cash-registers/cash-registers.module';
 import { SettingsModule } from '../../settings/settings.module';
@@ -59,6 +60,11 @@ import { OrderHistoryModule } from '../order-history/order-history.module'; // P
     RefundFlowService,
     RefundMethodsService,
     StockLevelManager,
+    // docs/plans/no-overselling-stock-guard-plan.md step 4 — re-declared
+    // locally per the established pattern (see `OrderStockCommitModule`'s
+    // own doc comment); `SellableStockAllocator` is already resolvable here
+    // via the `OrderStockCommitModule` import above.
+    StockValidatorService,
     InventoryTransactionsService,
     OrderEtaService,
     // P3.4: ORG-scope auto-fulfillment of ecommerce orders.

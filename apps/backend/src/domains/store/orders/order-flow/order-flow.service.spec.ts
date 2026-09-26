@@ -52,6 +52,17 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
       },
       stock_reservations: {
         findFirst: jest.fn(async () => reservations.find((row) => row.status === 'active') ?? null),
+        // Step 4 (no-overselling-stock-guard-plan): promoteDraftToCreated now
+        // aggregates already-active quantity per identity instead of an
+        // existence-only check. This fixture's single line always demands 2
+        // (item.quantity); an existing active row is treated as covering the
+        // full demand, matching the old existence-based dedup semantics this
+        // harness's tests already assume.
+        aggregate: jest.fn(async () => ({
+          _sum: {
+            quantity: reservations.some((row) => row.status === 'active') ? 2 : 0,
+          },
+        })),
       },
     };
     const prismaMock: any = {
@@ -90,6 +101,18 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
         if (row) row.status = 'consumed';
         events.push('release');
       }),
+      // Step 4 — `compensateClaimedDraftPayment` now releases a bounded
+      // quantity instead of the whole identity, so it never touches an
+      // older reservation on the order.
+      releaseReservationQuantity: jest.fn(async (
+        _refType: string, _refId: number, productId: number,
+      ) => {
+        const row = reservations.find((reservation) =>
+          reservation.product_id === productId && reservation.status === 'active');
+        if (row) row.status = 'consumed';
+        events.push('release');
+        return 1;
+      }),
     };
     const audit: any = { logCustom: jest.fn(async () => undefined) };
     const service = new OrderFlowService(
@@ -124,7 +147,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     const args = h.stock.reserveStock.mock.calls[0];
     expect(args.slice(0, 6)).toEqual([701, undefined, 11, 2, 'order', 1]);
     expect([args[7], args[8], args[10], args[12]]).toEqual([
-      false, h.tx, false, true,
+      true, h.tx, false, false,
     ]);
     expect(h.audit.logCustom).toHaveBeenCalledWith(
       expect.any(Number), 'order.promoted_to_created', expect.anything(),
@@ -275,14 +298,56 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.getState()).toBe('delivered');
   });
 
-  it('stock agotado no bloquea el cobro; consumo en cocina evita descontar otra vez', async () => {
+  it('consumo previo en cocina evita reservar el plato otra vez', async () => {
     const h = harness(true);
     await h.service.payOrder(1, DTO);
-    const args = h.stock.reserveStock.mock.calls[0];
-    expect([args[7], args[8], args[10], args[12]]).toEqual([
-      false, h.tx, true, true,
-    ]);
+    expect(h.stock.reserveStock).not.toHaveBeenCalled();
     expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('suma dos líneas del mismo producto y reserva solo la diferencia pendiente', async () => {
+    const h = harness();
+    h.tx.orders.findFirst.mockResolvedValueOnce({
+      id: 1,
+      store_id: 4,
+      order_items: [
+        { product_id: 701, product_variant_id: null, quantity: 2,
+          products: { id: 701, name: 'MODELO', track_inventory: true, product_type: 'physical' } },
+        { product_id: 701, product_variant_id: null, quantity: 3,
+          products: { id: 701, name: 'MODELO', track_inventory: true, product_type: 'physical' } },
+      ],
+    });
+    h.tx.stock_reservations.aggregate.mockResolvedValueOnce({ _sum: { quantity: 2 } });
+    const validator = { assertLinesAvailable: jest.fn().mockResolvedValue(undefined) };
+    (h.service as any).stockValidator = validator;
+
+    await h.service.payOrder(1, DTO);
+
+    expect(validator.assertLinesAvailable).toHaveBeenCalledWith(
+      [expect.objectContaining({ product_id: 701, quantity: 5 })],
+      { orderId: 1, tx: h.tx },
+    );
+    expect(h.stock.reserveStock).toHaveBeenCalledTimes(1);
+    expect(h.stock.reserveStock.mock.calls[0][3]).toBe(3);
+  });
+
+  it('faltante al promover bloquea antes de reservar o crear el pago', async () => {
+    const h = harness();
+    (h.service as any).stockValidator = {
+      assertLinesAvailable: jest.fn().mockRejectedValue(
+        new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+          'Stock insuficiente para MODELO', { items: [{ product_name: 'MODELO', requested: 2, available: 0 }] }),
+      ),
+    };
+
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(error.getResponse()).toMatchObject({ details: {
+      cause_code: 'INV_STOCK_INSUFFICIENT_LINES',
+      items: [expect.objectContaining({ product_name: 'MODELO' })],
+    } });
+    expect(h.stock.reserveStock).not.toHaveBeenCalled();
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
   });
 
   it('si falla la infraestructura de reserva, no cobra y restaura el draft', async () => {
@@ -302,7 +367,9 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
     expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
     expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
-    expect(h.stock.releaseReservation).toHaveBeenCalledWith(701, undefined, 11, 'order', 1, h.tx);
+    expect(h.stock.releaseReservationQuantity).toHaveBeenCalledWith(
+      'order', 1, 701, undefined, 2, 'cancelled', h.tx,
+    );
     expect(h.reservations[0].status).toBe('consumed');
     expect(h.getState()).toBe('draft');
   });
@@ -315,7 +382,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     const error = await h.service.payOrder(1, { ...DTO, amount_received: 50 }).catch((failure) => failure);
     expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
     expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
-    expect(h.stock.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(h.stock.releaseReservationQuantity).toHaveBeenCalledTimes(1);
     expect(h.reservations[0].status).toBe('consumed');
     expect(h.getState()).toBe('draft');
   });
@@ -324,7 +391,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     const h = harness();
     h.prismaMock.payments.create.mockRejectedValueOnce(new Error('payment db unavailable'));
     await expect(h.service.payOrder(1, DTO)).rejects.toThrow('payment db unavailable');
-    expect(h.stock.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(h.stock.releaseReservationQuantity).toHaveBeenCalledTimes(1);
     expect(h.reservations[0].status).toBe('consumed');
     expect(h.getState()).toBe('draft');
   });
@@ -339,7 +406,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.prismaMock.payments.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 99 }, data: expect.objectContaining({ state: 'cancelled' }),
     }));
-    expect(h.stock.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(h.stock.releaseReservationQuantity).toHaveBeenCalledTimes(1);
     expect(h.reservations[0].status).toBe('consumed');
     expect(h.getState()).toBe('draft');
   });
@@ -367,7 +434,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.prismaMock.payments.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 99 }, data: expect.objectContaining({ state: 'cancelled' }),
     }));
-    expect(h.stock.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(h.stock.releaseReservationQuantity).toHaveBeenCalledTimes(1);
     expect(h.reservations[0].status).toBe('consumed');
     expect(h.getState()).toBe('draft');
   });
@@ -1910,6 +1977,7 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
     const kitchenFireService = {
       emitTicketUpdatedEvent: jest.fn().mockResolvedValue(undefined),
     };
+    const commitOrderLines = jest.fn().mockResolvedValue({ committedItemCount: 1, totalCost: 0 });
     const orderView = {
       id: ORDER_ID,
       store_id: STORE_ID,
@@ -1918,6 +1986,7 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
       ...(opts.order ?? {}),
     };
     const prismaMock: any = {
+      $transaction: jest.fn(async (callback: any) => callback(prismaMock)),
       order_items: {
         findFirst: jest
           .fn()
@@ -1948,13 +2017,36 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
       {} as any,
       {} as any,
       {} as any,
-      {} as any,
+      { commitOrderLines } as any,
       { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
       kitchenFireService as any,
     );
     jest.spyOn(service as any, 'getOrder').mockResolvedValue(orderView);
-    return { service, prismaMock, eventEmitter, kitchenFireService, orderView };
+    return { service, prismaMock, eventEmitter, kitchenFireService, orderView, commitOrderLines };
   };
+
+  it('faltante al entregar no estampa delivered_at ni actualiza cocina', async () => {
+    const { service, prismaMock, commitOrderLines } = buildService({});
+    commitOrderLines.mockRejectedValueOnce(new VendixHttpException(ErrorCodes.INV_STOCK_002));
+
+    await expect(service.deliverOrderItem(ORDER_ID, ITEM_ID)).rejects.toMatchObject({
+      errorCode: 'INV_STOCK_002',
+    });
+    expect(prismaMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.kitchen_ticket_items.update).not.toHaveBeenCalled();
+  });
+
+  it('entregar un ítem hace commit solo de esa línea antes de estamparla', async () => {
+    const { service, prismaMock, commitOrderLines } = buildService({});
+
+    await service.deliverOrderItem(ORDER_ID, ITEM_ID);
+
+    expect(commitOrderLines).toHaveBeenCalledWith(ORDER_ID, [ITEM_ID],
+      expect.objectContaining({ blockOnInsufficient: true }));
+    expect(commitOrderLines.mock.invocationCallOrder[0]).toBeLessThan(
+      prismaMock.order_items.updateMany.mock.invocationCallOrder[0],
+    );
+  });
 
   it('(a) ticket ready mono-ítem no-takeaway → estampa, cierra ticket y emite puente', async () => {
     const { service, prismaMock, eventEmitter, kitchenFireService, orderView } = buildService({
@@ -2263,6 +2355,8 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
     product_variant_id: null,
     product_name: 'Pollo asado',
     quantity: 2,
+    stock_units_consumed: 2,
+    inventory_committed: true,
     delivered_at: new Date('2026-09-10T12:00:00.000Z'),
     cancelled_at: null,
     ...overrides,
@@ -2303,6 +2397,7 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
     const stockLevelManager = {
       getDefaultLocationForProduct: jest.fn().mockResolvedValue(1),
       updateStock: jest.fn().mockResolvedValue({}),
+      releaseReservationQuantity: jest.fn().mockResolvedValue(0),
     };
     const auditService = { logCustom: jest.fn().mockResolvedValue(undefined) };
     const service = new OrderFlowService(
@@ -2470,6 +2565,33 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
       }),
     );
     expect((result as any).id).toBe(ORDER_ID);
+  });
+
+  it('entrega no comprometida libera reserva sin inventar stock', async () => {
+    const { service, stockLevelManager, txMock } = buildService({
+      item: deliveredItem({ inventory_committed: false, stock_units_consumed: 3 }),
+    });
+
+    await service.cancelDeliveredOrderItem(ORDER_ID, ITEM_ID, 'sin stock físico', 'restock');
+
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(stockLevelManager.releaseReservationQuantity).toHaveBeenCalledWith(
+      'order', ORDER_ID, 11, undefined, 3, 'cancelled', txMock,
+    );
+  });
+
+  it('restock comprometido devuelve stock_units_consumed y no la cantidad lógica', async () => {
+    const { service, stockLevelManager } = buildService({
+      item: deliveredItem({ inventory_committed: true, stock_units_consumed: 6 }),
+    });
+
+    await service.cancelDeliveredOrderItem(ORDER_ID, ITEM_ID, 'devolución', 'restock');
+
+    expect(stockLevelManager.updateStock).toHaveBeenCalledWith(
+      expect.objectContaining({ quantity_change: 6 }),
+      expect.anything(),
+    );
+    expect(stockLevelManager.releaseReservationQuantity).not.toHaveBeenCalled();
   });
 
   it('waste: NO toca stock, deja merma auditada', async () => {
@@ -2838,7 +2960,7 @@ describe('D.4 — recálculo de propina al cancelar (F-001)', () => {
       {} as any,
       {} as any,
       {} as any,
-      { updateStock: jest.fn() } as any,
+      { updateStock: jest.fn(), releaseReservationQuantity: jest.fn().mockResolvedValue(0) } as any,
       {} as any,
       {} as any,
       { logCustom: jest.fn() } as any,

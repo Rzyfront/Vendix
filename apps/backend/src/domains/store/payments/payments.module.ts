@@ -13,6 +13,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
 import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import { TaxesModule } from '../taxes/taxes.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -119,6 +120,13 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     WebhookHandlerService,
     WebhookController,
     StockLevelManager,
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+    // step 4) — re-declared locally, same established pattern as
+    // `StockLevelManager` above (see `order-stock-commit.module.ts` docstring).
+    // `OrderStockCommitModule` (imported below) provides its own instance but
+    // only exports `OrderStockCommitService` + `SellableStockAllocator`, not
+    // this one.
+    StockValidatorService,
     InventoryTransactionsService,
     SystemPaymentMethodsService,
     StorePaymentMethodsService,

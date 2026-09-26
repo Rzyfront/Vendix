@@ -67,6 +67,8 @@ import { MovementsService } from '../../cash-registers/movements/movements.servi
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { AutoEntryService } from '../../accounting/auto-entries/auto-entry.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
+import { StockValidatorService } from '../../inventory/shared/services/stock-validator.service';
+import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { OrderEtaService } from '../services/order-eta.service';
 import { KitchenFireService } from '../../kitchen-fire/kitchen-fire.service';
 import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
@@ -97,6 +99,11 @@ type DraftReservationKey = {
   productId: number;
   variantId: number | undefined;
   locationId: number;
+  /** Stock units THIS claim added on top of whatever was already reserved
+   * for the order/identity. Bounds `compensateClaimedDraftPayment`'s release
+   * so a failed payment never releases an older reservation on the order
+   * (docs/plans/no-overselling-stock-guard-plan.md step 4). */
+  quantity: number;
 };
 
 type ConsumedLeafDisposition = {
@@ -234,6 +241,16 @@ export class OrderFlowService {
     // resultado del flujo (regla del plan). En prod siempre resuelve vía
     // `OrderHistoryModule` (ver `order-flow.module.ts`).
     @Optional() private readonly orderHistoryService?: OrderHistoryService,
+    // docs/plans/no-overselling-stock-guard-plan.md step 4 —
+    // `promoteDraftToCreated`'s strict guard. `@Optional()` + trailing
+    // position for the same reason as the deps above: ~20 positional `new
+    // OrderFlowService(...)` constructions in order-flow.service.spec.ts /
+    // order-flow-forced-state.spec.ts must not break. In prod always
+    // resolves (`orders.module.ts` provides `StockValidatorService`
+    // directly). When undefined (legacy specs), the strict pre-check is a
+    // no-op and `reserveStock`'s own `validate_availability` still enforces
+    // the hard floor per identity.
+    @Optional() private readonly stockValidator?: StockValidatorService,
   ) {}
 
   /**
@@ -648,16 +665,23 @@ export class OrderFlowService {
       throw new VendixHttpException(ErrorCodes.ORD_DELIVERED_REVERSAL_OWNER_001);
     }
 
-    // `finished` is the only state that mutates inventory. Route the stock
-    // deduction through the canonical OrderStockCommitService and make the
-    // commit + state write ATOMIC: the deduction runs FIRST inside the same
-    // $transaction, so if it throws (INV_STOCK_002 / SERIAL_REQUIRED_001) the
-    // state write is rolled back and the order stays in its previous state.
-    // All the skip rules (service / !track_inventory / consumed-at-fire /
-    // already-committed / restaurant-prepared-pending-fire) live inside the
-    // canonical service — they are NOT replicated here. Side-effect events are
-    // emitted only AFTER the transaction commits (never on rollback).
-    if (newState === 'finished') {
+    // `finished` AND `delivered` mutate inventory (docs/plans/
+    // no-overselling-stock-guard-plan.md step 5: consume on delivery, not
+    // only on finish — `deliverOrder`, `markKitchenOrderDelivered` and
+    // `forceOrderState('delivered')` all funnel through this method). Route
+    // the stock deduction through the canonical OrderStockCommitService and
+    // make the commit + state write ATOMIC: the deduction runs FIRST inside
+    // the same $transaction, so if it throws (INV_STOCK_002 /
+    // SERIAL_REQUIRED_001) the state write is rolled back and the order
+    // stays in its previous state. All the skip rules (service /
+    // !track_inventory / consumed-at-fire / already-committed /
+    // restaurant-prepared-pending-fire) live inside the canonical service —
+    // they are NOT replicated here. `commitOrderDelivery`'s per-item
+    // `inventory_committed` claim makes running it again from `finished`
+    // (after an order already committed at `delivered`) an idempotent no-op:
+    // no double deduction. Side-effect events are emitted only AFTER the
+    // transaction commits (never on rollback).
+    if (newState === 'finished' || newState === 'delivered') {
       const stockEvents: Array<() => void> = [];
       try {
         const { updated_order, commit } = await this.prisma.$transaction(
@@ -668,7 +692,8 @@ export class OrderFlowService {
                 movementType: 'sale',
                 blockOnInsufficient: true,
                 consumeSerials: true,
-                reason: 'Order completed',
+                reason:
+                  newState === 'finished' ? 'Order completed' : 'Order delivered',
                 afterCommit: stockEvents,
                 userId: RequestContextService.getUserId(),
               },
@@ -750,7 +775,7 @@ export class OrderFlowService {
           throw error;
         }
         this.logger.error(
-          `Failed to finish order #${orderId}: ${error.message}`,
+          `Failed to ${newState === 'finished' ? 'finish' : 'deliver'} order #${orderId}: ${error.message}`,
         );
         throw error;
       }
@@ -854,6 +879,7 @@ export class OrderFlowService {
         const order = await tx.orders.findFirst({
           where: { id: orderId, store_id: storeId },
           include: {
+            stores: { select: { industries: true } },
             order_items: {
               include: {
                 products: {
@@ -864,7 +890,9 @@ export class OrderFlowService {
                     product_type: true,
                   },
                 },
-                product_variants: { select: { id: true } },
+                product_variants: {
+                  select: { id: true, name: true, track_inventory_override: true },
+                },
               },
             },
           },
@@ -875,67 +903,137 @@ export class OrderFlowService {
         }
 
         const userId = RequestContextService.getUserId();
+        const isRestaurant = storeIsRestaurant((order as any).stores?.industries);
 
         // 3) Reserve stock. The lock is held for the entire loop.
+        //
+        // docs/plans/no-overselling-stock-guard-plan.md step 4 (reverses
+        // QUI-557): the previous dedup only checked whether ANY active
+        // reservation existed for (order, product, variant) — when two
+        // sibling lines shared the same product/variant, the first line's
+        // check found nothing and reserved its quantity; the second line's
+        // check then found the FIRST line's row and skipped its OWN quantity
+        // entirely, silently under-reserving the order. Fix: aggregate
+        // demand per (product_id, product_variant_id) across every sibling
+        // line, subtract what is ALREADY actively reserved for this order
+        // under that identity, and reserve only the resulting DIFFERENCE.
+        //
+        // Kitchen dishes (`isRestaurant && product_type==='prepared' &&
+        // !skip_kds`) are excluded: their ingredients are validated/consumed
+        // at fire by kitchen-fire.service.ts, never by their own
+        // finished-good stock. Lines already `inventory_consumed_at_fire`
+        // are excluded too — their stock was already deducted, not reserved.
+        type ReservationGroup = {
+          product_id: number;
+          product_variant_id: number | undefined;
+          demand: number; // total stock units this order needs reserved
+          product_name: string;
+        };
+        const groups = new Map<string, ReservationGroup>();
+
         for (const item of order.order_items) {
-          if (
-            !item.products?.track_inventory ||
-            item.products?.product_type === 'service'
-          ) {
-            continue;
+          const product = item.products;
+          if (!product || product.product_type === 'service') continue;
+
+          const effectiveTracking =
+            item.product_variants?.track_inventory_override ??
+            product.track_inventory ??
+            false;
+          if (!effectiveTracking) continue;
+
+          if (item.inventory_consumed_at_fire === true) continue;
+
+          const isKitchenDish =
+            isRestaurant && product.product_type === 'prepared' && !item.skip_kds;
+          if (isKitchenDish) continue;
+
+          const variantId = item.product_variant_id ?? undefined;
+          const key = `${item.product_id}-${variantId ?? 'null'}`;
+          const qty = item.stock_units_consumed ?? item.quantity;
+          const productName = item.product_variants?.name
+            ? `${product.name} - ${item.product_variants.name}`
+            : product.name;
+
+          const existing = groups.get(key);
+          if (existing) {
+            existing.demand += qty;
+          } else {
+            groups.set(key, {
+              product_id: item.product_id,
+              product_variant_id: variantId,
+              demand: qty,
+              product_name: productName,
+            });
           }
+        }
 
-          const skip = item.inventory_consumed_at_fire === true;
+        if (groups.size > 0) {
+          // Strict guard (reverses QUI-557): a draft/table order is only
+          // payable when the order's TOTAL demand per identity is covered by
+          // sellable stock plus its own already-reserved quantity. Throws
+          // `INV_STOCK_INSUFFICIENT_LINES` naming every short product in one
+          // shot — must run BEFORE any reservation write in this loop and
+          // BEFORE `payOrder` writes a payment row (the caller's try/catch
+          // around this call wraps and rethrows as a typed 409 without
+          // inserting anything).
+          await this.stockValidator?.assertLinesAvailable(
+            Array.from(groups.values()).map((g) => ({
+              product_id: g.product_id,
+              product_variant_id: g.product_variant_id ?? null,
+              quantity: g.demand,
+              product_name: g.product_name,
+            })),
+            { orderId, tx },
+          );
 
-          const location_id =
-            await this.stockLevelManager.getDefaultLocationForProduct(
-              item.product_id,
-              item.product_variant_id || undefined,
+          for (const group of groups.values()) {
+            const location_id =
+              await this.stockLevelManager.getDefaultLocationForProduct(
+                group.product_id,
+                group.product_variant_id,
+              );
+
+            const alreadyReserved = await tx.stock_reservations.aggregate({
+              where: {
+                reserved_for_type: 'order',
+                reserved_for_id: orderId,
+                product_id: group.product_id,
+                product_variant_id: group.product_variant_id ?? null,
+                status: 'active',
+              },
+              _sum: { quantity: true },
+            });
+            const toReserve =
+              group.demand - Number(alreadyReserved?._sum?.quantity ?? 0);
+            if (toReserve <= 0) continue;
+
+            await this.stockLevelManager.reserveStock(
+              group.product_id,
+              group.product_variant_id,
+              location_id,
+              toReserve,
+              'order',
+              orderId,
+              userId,
+              true, // validate_availability: strict — assertLinesAvailable already guarded this in aggregate
+              tx,
+              undefined, // expires_at
+              false, // skip_reservation
+              undefined, // stock_units_consumed — `toReserve` is already expressed in stock units
+              // QUI-557 reversal: a payable order can never leave a negative
+              // available; the hard floor is enforced here too.
+              false,
             );
 
-          // Anti-duplicate: skip if an active reservation for this order+item
-          // already exists (e.g. a previous promote attempt that committed the
-          // reservations but failed before the state change).
-          const existing = await tx.stock_reservations.findFirst({
-            where: {
-              reserved_for_type: 'order',
-              reserved_for_id: orderId,
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id ?? null,
-              status: 'active',
-            },
-            select: { id: true },
-          });
-          if (existing) {
-            continue;
-          }
-
-          await this.stockLevelManager.reserveStock(
-            item.product_id,
-            item.product_variant_id || undefined,
-            location_id,
-            item.quantity,
-            'order',
-            orderId,
-            userId,
-            false, // validate_availability: NEVER block a payment on stock
-            tx,
-            undefined, // expires_at
-            skip, // skip_reservation: already consumed at fire
-            undefined, // stock_units_consumed
-            // QUI-557: cobrar nunca se bloquea por stock, así que este flujo
-            // autoriza el disponible negativo de forma explícita. El piso duro
-            // de `reserveStock` sigue protegiendo a los demás callers.
-            true,
-          );
-          // reserveStock returns void and skip_reservation creates no row.
-          // Track only identities first reserved by THIS draft claim so a
-          // failed payment cannot release an older reservation on the order.
-          if (!skip) {
+            // Track only the DIFFERENCE this claim added — never the group's
+            // full demand — so a failed payment releases exactly what this
+            // attempt reserved and never an older reservation on the order
+            // (see `compensateClaimedDraftPayment`).
             createdInTransaction.push({
-              productId: item.product_id,
-              variantId: item.product_variant_id || undefined,
+              productId: group.product_id,
+              variantId: group.product_variant_id,
               locationId: location_id,
+              quantity: toReserve,
             });
           }
         }
@@ -1894,11 +1992,7 @@ export class OrderFlowService {
           // SIEMPRE `ORD_FLOW_PAYMENT_FAILED_001`. El código tipado original
           // (p.ej. `INV_STOCK_002` / `SERIAL_REQUIRED_001`) viaja en
           // `details.cause_code` para que la UI y soporte puedan pivotar.
-          throw this.wrapPaymentFailure(
-            'finish_blocked',
-            { order_id: orderId },
-            (e as any).errorCode ?? 'n/a',
-          );
+          throw this.wrapPaymentFailure('finish_blocked', e);
         }
         // Error de infra (no Vendix): envolvemos también, pero sin un
         // cause_code tipado. La restauración aplica igual: el claim ya se
@@ -2053,8 +2147,12 @@ export class OrderFlowService {
     });
     if (current?.channel === 'pos' && current.delivery_type === 'direct_delivery' &&
         !current.order_items.some((line) => line.products?.requires_serial_numbers)) {
+      // docs/plans/no-overselling-stock-guard-plan.md step 5 (reverses
+      // QUI-557): a financial-split source order is a real sale closing out
+      // — it must block on insufficient stock like every other delivery
+      // commit, not silently oversell with a floor of 0.
       await this.orderStockCommit.commitOrderDelivery(orderId, {
-        movementType: 'sale', blockOnInsufficient: false, consumeSerials: true,
+        movementType: 'sale', blockOnInsufficient: true, consumeSerials: true,
         reason: 'POS Sale (cuentas financieras cobradas)', userId: actorUserId ?? context?.user_id,
       });
     }
@@ -3302,29 +3400,56 @@ export class OrderFlowService {
         }
       }
 
-      // 4. Stamp de entrega — la `where` con `order_id: orderId` es la barrera
-      //    de scope: si alguien intenta entregar el item de otra orden, el
-      //    updateMany no toca filas.
+      // 4. docs/plans/no-overselling-stock-guard-plan.md step 5 — consume
+      //    THIS item's stock atomically with the delivery stamp.
+      //    `commitOrderLines` runs FIRST inside the same tx; its own skip
+      //    rules (untracked / service / already consumed at fire / already
+      //    committed / restaurant prepared-pending-fire) decide whether
+      //    there is anything to deduct. A shortfall throws INV_STOCK_002 and
+      //    rolls back the stamp — `delivered_at` stays null. La `where` con
+      //    `order_id: orderId` es la barrera de scope: si alguien intenta
+      //    entregar el item de otra orden, el updateMany no toca filas.
       const now = new Date();
       const userId = RequestContextService.getUserId() ?? null;
+      const stockEvents: Array<() => void> = [];
 
-      await this.prisma.order_items.updateMany({
-        where: { id: orderItemId, order_id: orderId },
-        data: {
-          delivered_at: now,
-          delivered_by_user_id: userId,
-          updated_at: now,
-        },
+      await this.prisma.$transaction(async (tx) => {
+        await this.orderStockCommit.commitOrderLines(orderId, [orderItemId], {
+          blockOnInsufficient: true,
+          tx,
+          userId: userId ?? undefined,
+          reason: 'Entrega de item de orden',
+          afterCommit: stockEvents,
+        });
+
+        await tx.order_items.updateMany({
+          where: { id: orderItemId, order_id: orderId },
+          data: {
+            delivered_at: now,
+            delivered_by_user_id: userId,
+            updated_at: now,
+          },
+        });
+
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: order.store_id,
+          organizationId: order.stores?.organization_id,
+          type: 'item_delivered',
+          orderItemId,
+          actorUserId: userId,
+        });
       });
 
-      await this.orderHistoryService?.record(this.prisma, {
-        orderId,
-        storeId: order.store_id,
-        organizationId: order.stores?.organization_id,
-        type: 'item_delivered',
-        orderItemId,
-        actorUserId: userId,
-      });
+      for (const publish of stockEvents) {
+        try {
+          publish();
+        } catch (error) {
+          this.logger.warn(
+            `Stock committed; notification failed: ${(error as Error).message}`,
+          );
+        }
+      }
 
       this.logger.log(
         `Order item #${orderItemId} of order #${orderId} delivered by user #${userId}`,
@@ -3593,6 +3718,10 @@ export class OrderFlowService {
       where: { id: orderItemId, order_id: orderId },
       select: {
         id: true,
+        product_id: true,
+        product_variant_id: true,
+        quantity: true,
+        stock_units_consumed: true,
         product_name: true,
         inventory_consumed_at_fire: true,
         products: { select: { product_type: true } },
@@ -3784,6 +3913,27 @@ export class OrderFlowService {
             tx,
           );
         }
+      }
+
+      // docs/plans/no-overselling-stock-guard-plan.md step 7 — an
+      // undelivered, never-committed line's active stock reservation must
+      // be released back to sellable, or the cancelled line keeps holding
+      // stock hostage forever. Safe no-op when there is nothing to release:
+      // untracked products, kitchen dishes excluded from Step 3/4's own
+      // reservation (their reservation never existed — ingredients are
+      // handled above via `disposeConsumedPreparedLeaves`), and lines whose
+      // stock was already consumed/released by the branches above.
+      const releaseQty = orderItem.stock_units_consumed ?? orderItem.quantity;
+      if (orderItem.product_id != null && releaseQty > 0 && !orderItem.inventory_consumed_at_fire) {
+        await this.stockLevelManager.releaseReservationQuantity(
+          'order',
+          orderId,
+          orderItem.product_id,
+          orderItem.product_variant_id ?? undefined,
+          releaseQty,
+          'cancelled',
+          tx,
+        );
       }
 
       // Soft cancel: el ítem queda VISIBLE marcado como cancelado, pero
@@ -3981,6 +4131,8 @@ export class OrderFlowService {
         product_variant_id: true,
         product_name: true,
         quantity: true,
+        stock_units_consumed: true,
+        inventory_committed: true,
         delivered_at: true,
         cancelled_at: true,
         inventory_consumed_at_fire: true,
@@ -4081,28 +4233,56 @@ export class OrderFlowService {
           tx, orderId, orderItemId, preparedOrganizationId, order.store_id,
           trimmedReason, destination === 'restock' ? 'reuse' : 'waste', preparedLeaves,
         );
-      } else if (destination === 'restock' && orderItem.product_id != null) {
-        const locationId =
-          await this.stockLevelManager.getDefaultLocationForProduct(
+      } else if (orderItem.product_id != null) {
+        // docs/plans/no-overselling-stock-guard-plan.md step 7 — you only
+        // return what you actually took out. Gate on `inventory_committed`
+        // (was this line's stock ever really deducted?), not on
+        // `delivered_at`/`quantity`: a delivered-but-never-committed line
+        // (untracked product, or a legacy order delivered before this plan
+        // shipped commit-on-delivery) never removed anything from on_hand —
+        // adding stock back would fabricate units that were never taken.
+        const restockQty =
+          orderItem.stock_units_consumed ?? orderItem.quantity;
+        if (orderItem.inventory_committed) {
+          if (destination === 'restock') {
+            const locationId =
+              await this.stockLevelManager.getDefaultLocationForProduct(
+                orderItem.product_id,
+                orderItem.product_variant_id ?? undefined,
+              );
+            await this.stockLevelManager.updateStock(
+              {
+                product_id: orderItem.product_id,
+                variant_id: orderItem.product_variant_id ?? undefined,
+                location_id: locationId,
+                quantity_change: restockQty,
+                movement_type: 'return',
+                reason: `Reversa entrega ítem orden — restock (${trimmedReason})`,
+                source_module: 'order_item_cancel_delivered',
+                // NO order_item_id: la reversa no debe crear un hijo que
+                // apunte al order_item cancelado (FK onDelete: Restrict).
+                create_movement: true,
+                validate_availability: false,
+              },
+              tx,
+            );
+          }
+          // destination === 'waste': stock was already deducted at commit
+          // and stays consumed (merma) — nothing to undo here.
+        } else if (restockQty > 0) {
+          // Never committed — nothing was deducted, only (maybe) reserved.
+          // Release that reservation (regardless of destination) instead of
+          // either inventing stock or leaving it held forever.
+          await this.stockLevelManager.releaseReservationQuantity(
+            'order',
+            orderId,
             orderItem.product_id,
             orderItem.product_variant_id ?? undefined,
+            restockQty,
+            'cancelled',
+            tx,
           );
-        await this.stockLevelManager.updateStock(
-          {
-            product_id: orderItem.product_id,
-            variant_id: orderItem.product_variant_id ?? undefined,
-            location_id: locationId,
-            quantity_change: orderItem.quantity,
-            movement_type: 'return',
-            reason: `Reversa entrega ítem orden — restock (${trimmedReason})`,
-            source_module: 'order_item_cancel_delivered',
-            // NO order_item_id: la reversa no debe crear un hijo que
-            // apunte al order_item cancelado (FK onDelete: Restrict).
-            create_movement: true,
-            validate_availability: false,
-          },
-          tx,
-        );
+        }
       }
 
       // Soft cancel: el ítem queda VISIBLE marcado como cancelado, pero
@@ -6147,6 +6327,7 @@ export class OrderFlowService {
       },
     });
 
+    let shouldFinish = false;
     if (remaining.length === 0 && newRemaining <= 0.01) {
       // F2-guard (AUTOMATIC path): mirror `registerCreditPayment` — the
       // forgiveness is recorded regardless, but we do NOT finish the order
@@ -6159,8 +6340,7 @@ export class OrderFlowService {
         );
       } else {
         this.validateTransition(order.state as OrderState, 'finished');
-        orderUpdate.state = 'finished';
-        orderUpdate.completed_at = new Date();
+        shouldFinish = true;
       }
     }
 
@@ -6168,6 +6348,19 @@ export class OrderFlowService {
       where: { id: orderId },
       data: orderUpdate,
     });
+
+    if (shouldFinish) {
+      // docs/plans/no-overselling-stock-guard-plan.md step 5 — never write
+      // `state: 'finished'` directly: `updateOrderState` is the only path
+      // that runs the atomic stock commit before the state write. A
+      // shortfall throws INV_STOCK_002 and the order stays open (the
+      // installment forgiveness above still stands — it is credit
+      // bookkeeping, independent of whether stock allows the order to
+      // close).
+      await this.updateOrderState(orderId, 'finished', {
+        finished_at: new Date(),
+      });
+    }
 
     this.logger.log(
       `Installment #${installmentId} forgiven for order #${orderId}`,
@@ -7058,8 +7251,13 @@ export class OrderFlowService {
     }
   }
 
-  /** Release only identities reserved by this draft claim, then reopen it for
-   * retry. Both effects commit together; never release an older order reserve. */
+  /** Release only the quantity reserved by this draft claim, then reopen it
+   * for retry. Both effects commit together; never release an older order
+   * reserve. Bounded by `reservation.quantity` (docs/plans/no-overselling-
+   * stock-guard-plan.md step 4): `promoteDraftToCreated` may have topped up
+   * an identity that already carried an older reservation (e.g. a second
+   * line of the same product placed earlier by `create`/`addItems`) — a
+   * full-identity release here would wipe that older reservation too. */
   private async compensateClaimedDraftPayment(
     orderId: number,
     storeId: number,
@@ -7068,12 +7266,13 @@ export class OrderFlowService {
     await this.prisma.$transaction(
       async (tx) => {
         for (const reservation of reservations) {
-          await this.stockLevelManager.releaseReservation(
-            reservation.productId,
-            reservation.variantId,
-            reservation.locationId,
+          await this.stockLevelManager.releaseReservationQuantity(
             'order',
             orderId,
+            reservation.productId,
+            reservation.variantId,
+            reservation.quantity,
+            'cancelled',
             tx,
           );
         }
@@ -7221,7 +7420,12 @@ export class OrderFlowService {
     if (cause instanceof VendixHttpException) {
       causeCode = (cause as any).errorCode ?? causeCode;
       message = cause.message;
-      const causeDetails = (cause as any).details;
+      // VendixHttpException stores public details in HttpException's
+      // response body, not on a `.details` property of the instance.
+      const causeResponse = cause.getResponse();
+      const causeDetails = typeof causeResponse === 'object' && causeResponse !== null
+        ? (causeResponse as { details?: Record<string, unknown> }).details
+        : undefined;
       if (causeDetails && typeof causeDetails === 'object') {
         extraDetails = { ...causeDetails };
       }
