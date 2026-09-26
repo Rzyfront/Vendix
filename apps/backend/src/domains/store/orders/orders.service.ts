@@ -28,6 +28,7 @@ import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService, StockDemandLine } from '../inventory/shared/services/stock-validator.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
@@ -298,7 +299,64 @@ export class OrdersService {
     // existentes. En prod siempre resuelve vía `OrderHistoryModule` (ver
     // `orders.module.ts`).
     @Optional() private readonly orderHistoryService?: OrderHistoryService,
+    @Optional() private readonly stockValidator?: StockValidatorService,
   ) {}
+
+  /** Reserve every sellable slice, rather than assuming one location holds the entire line. */
+  private async reserveOrderItemStrict(
+    item: {
+      product_id: number;
+      product_variant_id: number | null;
+      quantity: number;
+      stock_units_consumed: number | null;
+      product_name: string;
+    },
+    orderId: number,
+    storeId: number,
+    userId: number | undefined,
+    tx: Prisma.TransactionClient,
+  ): Promise<void> {
+    const required = Math.max(0, Number(item.stock_units_consumed ?? 0)) || item.quantity;
+    const allocation = await this.sellableStockAllocator.allocateForLine(
+      storeId,
+      item.product_id,
+      item.product_variant_id ?? undefined,
+      required,
+      [],
+      tx,
+    );
+    if (allocation.shortfall > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+        `No hay existencias suficientes de ${item.product_name}.`,
+        { items: [{
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id,
+          product_name: item.product_name,
+          kind: 'product',
+          requested: required,
+          available: allocation.available,
+        }] },
+      );
+    }
+    for (const slice of allocation.slices) {
+      await this.stockLevelManager.reserveStock(
+        item.product_id,
+        item.product_variant_id ?? undefined,
+        slice.location_id,
+        slice.quantity,
+        'order',
+        orderId,
+        userId,
+        true,
+        tx,
+        undefined,
+        false,
+        undefined,
+        false,
+      );
+    }
+  }
 
   /** Copia del impuesto de la tarifa `rate_id` (vacía sin tarifa/servicio). */
   private async snapshotShippingTax(
@@ -738,7 +796,19 @@ export class OrdersService {
         );
 
         // Use scoped client (creates are not scoped by extension but using correct service is good style)
-        const order = await this.prisma.orders.create({
+        const order = await this.prisma.$transaction(async (tx) => {
+          const demands: StockDemandLine[] = createOrderDto.items.flatMap((item, index) =>
+            item.product_id != null && variantCheckProductById.get(item.product_id)?.product_type !== 'prepared'
+              ? [{
+                  product_id: item.product_id,
+                  product_variant_id: item.product_variant_id,
+                  quantity: Math.max(0, Number(tierSnapshots[index]?.stock_units_consumed ?? 0)) || item.quantity,
+                  product_name: item.product_name,
+                }]
+              : [],
+          );
+          await this.stockValidator!.assertLinesAvailable(demands, { tx });
+          const createdOrder = await tx.orders.create({
           data: {
             created_by_user_id: creatingUser?.id ?? context?.user_id ?? null,
             customer_id: createOrderDto.customer_id ?? null,
@@ -781,10 +851,12 @@ export class OrdersService {
                   const product = item.product_id
                     ? variantCheckProductById.get(item.product_id) ?? null
                     : null;
-                  const itemType =
-                    item.item_type === 'product'
-                      ? product?.product_type || 'physical'
-                      : item.item_type || product?.product_type || 'custom';
+                  // The catalog, not a caller-provided item_type, decides
+                  // whether this line is prepared (ingredient-backed) or
+                  // physical (reservation-backed).
+                  const itemType = item.product_id
+                    ? product?.product_type || 'physical'
+                    : item.item_type || 'custom';
                   const tierSnap = tierSnapshots[index];
                   // Snapshot variant image S3 key (never signed URL)
                   let variant_image_url: string | null = null;
@@ -880,47 +952,17 @@ export class OrdersService {
           },
         });
 
-        // Reserve stock for each item with track_inventory
-        for (const item of order.order_items) {
-          if (!item.products?.track_inventory) continue;
-          try {
-            const location_id =
-              await this.stockLevelManager.getDefaultLocationForProduct(
-                item.product_id,
-                item.product_variant_id || undefined,
-              );
-            // Multi-tarifa: si el item persistió stock_units_consumed (>0),
-            // pasarlo como override al reservador.
-            const stockUnitsConsumed =
-              typeof item.stock_units_consumed === 'number' &&
-              item.stock_units_consumed > 0
-                ? item.stock_units_consumed
-                : undefined;
-            await this.stockLevelManager.reserveStock(
-              item.product_id,
-              item.product_variant_id || undefined,
-              location_id,
-              item.quantity,
-              'order',
-              order.id,
-              creatingUser?.id,
-              false, // POS: don't validate availability (non-restrictive UX)
-              undefined,
-              undefined,
-              false,
-              stockUnitsConsumed,
-              // QUI-557: el POS sobrevende a propósito, así que aquí SÍ se
-              // autoriza el disponible negativo. Es la única forma de que el
-              // piso duro de `reserveStock` proteja al resto de flujos sin
-              // romper esta decisión de producto.
-              true,
-            );
-          } catch (error) {
-            this.logger.warn(
-              `Stock reservation failed for product ${item.product_id}: ${error.message}`,
-            );
+          // The order and its reservations must commit or roll back together.
+          for (const item of createdOrder.order_items) {
+            if (!item.product_id || item.item_type === 'prepared' || item.item_type === 'service' ||
+              !this.stockValidator!.resolveEffectiveTracking(
+                item.products ?? { track_inventory: false },
+                item.product_variants ?? undefined,
+              )) continue;
+            await this.reserveOrderItemStrict(item, createdOrder.id, store_id, creatingUser?.id, tx);
           }
-        }
+          return createdOrder;
+        }, { timeout: 20_000, maxWait: 5_000 });
 
         this.eventEmitter.emit('order.created', {
           store_id: order.store_id,
@@ -2302,12 +2344,6 @@ export class OrdersService {
 
     await this.assertTableOrderEditable(id, order.store_id);
 
-    // Las órdenes de mesa nacen en 'draft' SIN reservar stock (se reserva al
-    // pagar vía promoteDraftToCreated). Al editar un draft NO liberamos ni
-    // re-reservamos: no hay reservas que liberar y re-reservar duplicaría el
-    // descuento con inventory_consumed_at_fire. Para 'created' sí (flujo actual).
-    const isDraft = order.state === 'draft';
-
     // Multi-tarifa: revalida permission + recalcula snapshots si las nuevas
     // líneas traen applied_price_tier_id.
     const ctx = RequestContextService.getContext();
@@ -2396,7 +2432,7 @@ export class OrdersService {
       // Único enforcement centralizado (mismo helper que `create` y
       // `updateOrderFromEditor`); si queda duplicado en dos sitios,
       // vuelve a divergir como ya pasó (Round 3 minor #15).
-      await assertVariantRequiredForPrepared(tx, dto.items);
+      const updateProductsById = await assertVariantRequiredForPrepared(tx, dto.items);
 
       // Release old reservations before deleting items
       const existingOrder = await tx.orders.findUnique({
@@ -2460,8 +2496,21 @@ export class OrdersService {
         );
       }
 
-      if (!isDraft) {
-        // Se liberan las reservas POR REFERENCIA, no adivinando la bodega.
+      await this.stockValidator!.assertLinesAvailable(
+        dto.items.flatMap((item, index) =>
+          item.product_id != null && updateProductsById.get(item.product_id)?.product_type !== 'prepared'
+            ? [{
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id,
+                quantity: Math.max(0, Number(tierSnapshots[index]?.stock_units_consumed ?? 0)) || item.quantity,
+                product_name: item.product_name,
+              }]
+            : [],
+        ),
+        { orderId: id, tx },
+      );
+
+      // Se liberan las reservas POR REFERENCIA, no adivinando la bodega.
         // Antes se resolvía `getDefaultLocationForProduct` —la bodega con más
         // disponible HOY— y se liberaba ahí; pero el POS reserva repartido en
         // varias bodegas (slices del asignador), así que la porción de la otra
@@ -2470,13 +2519,12 @@ export class OrdersService {
         // filas reales de `stock_reservations`, cubre todas las bodegas y corre
         // DENTRO de la transacción, así que un fallo revierte el update completo
         // en vez de dejarlo a medias con un warn.
-        await this.stockLevelManager.releaseReservationsByReference(
-          'order',
-          id,
-          'cancelled',
-          tx,
-        );
-      }
+      await this.stockLevelManager.releaseReservationsByReference(
+        'order',
+        id,
+        'cancelled',
+        tx,
+      );
 
       // Delete existing items. P0-4: primero el desglose fiscal (FK
       // `order_item_taxes_order_item_id_fkey` requerida, sin `onDelete`),
@@ -2547,9 +2595,9 @@ export class OrdersService {
             weight: item.weight,
             weight_unit: item.weight_unit,
             item_type:
-              item.item_type === 'product'
-                ? 'physical'
-                : item.item_type || (item.product_id ? 'physical' : 'custom'),
+              item.product_id != null
+                ? updateProductsById.get(item.product_id)?.product_type ?? 'physical'
+                : item.item_type || 'custom',
             // Multi-tarifa snapshot
             applied_price_tier_id: tierSnap?.tier_id ?? null,
             applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
@@ -2579,46 +2627,19 @@ export class OrdersService {
           order_items: {
             include: {
               products: { select: { id: true, track_inventory: true } },
+              product_variants: { select: { track_inventory_override: true } },
             },
           },
         },
       });
 
-      if (!isDraft) {
-        for (const item of updatedOrder?.order_items || []) {
-          if (!item.products?.track_inventory) continue;
-          try {
-            const location_id =
-              await this.stockLevelManager.getDefaultLocationForProduct(
-                item.product_id,
-                item.product_variant_id || undefined,
-              );
-            const stockUnitsConsumed =
-              typeof item.stock_units_consumed === 'number' &&
-              item.stock_units_consumed > 0
-                ? item.stock_units_consumed
-                : undefined;
-            await this.stockLevelManager.reserveStock(
-              item.product_id,
-              item.product_variant_id || undefined,
-              location_id,
-              item.quantity,
-              'order',
-              id,
-              undefined,
-              false, // Don't validate availability (non-restrictive UX)
-              undefined,
-              undefined,
-              false,
-              stockUnitsConsumed,
-              true, // QUI-557: oversell deliberado, disponible negativo autorizado.
-            );
-          } catch (error) {
-            this.logger.warn(
-              `Failed to reserve stock for product ${item.product_id}: ${error.message}`,
-            );
-          }
-        }
+      for (const item of updatedOrder?.order_items || []) {
+        if (!item.product_id || item.item_type === 'prepared' || item.item_type === 'service' ||
+            !this.stockValidator!.resolveEffectiveTracking(
+              item.products ?? { track_inventory: false },
+              item.product_variants ?? undefined,
+            )) continue;
+        await this.reserveOrderItemStrict(item, id, order.store_id, undefined, tx);
       }
 
       // Return updated order with all includes

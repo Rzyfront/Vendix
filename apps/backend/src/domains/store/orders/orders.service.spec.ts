@@ -7,6 +7,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { OrderFlowService } from './order-flow/order-flow.service';
@@ -170,6 +171,11 @@ describe('OrdersService', () => {
     getStoreCurrency: jest.fn(async () => 'COP'),
   };
   const mockScheduleValidation = { validateOrThrow: jest.fn() };
+  const mockStockValidator = {
+    assertLinesAvailable: jest.fn().mockResolvedValue(undefined),
+    resolveEffectiveTracking: jest.fn((product, variant) =>
+      variant?.track_inventory_override ?? product?.track_inventory ?? false),
+  };
   const mockStockLevelManager = {
     reserveStock: jest.fn(),
     releaseReservation: jest.fn(),
@@ -177,10 +183,10 @@ describe('OrdersService', () => {
     getDefaultLocationForProduct: jest.fn(async () => 1),
   };
   const mockSellableStockAllocator = {
-    allocateForLine: jest.fn(async () => ({
-      slices: [{ location_id: 1, quantity: 1 }],
-      allocated: 1,
-      available: 1,
+    allocateForLine: jest.fn(async (_storeId, _productId, _variantId, quantity) => ({
+      slices: [{ location_id: 1, quantity }],
+      allocated: quantity,
+      available: quantity,
       shortfall: 0,
     })),
   };
@@ -249,6 +255,7 @@ describe('OrdersService', () => {
         { provide: SettingsService, useValue: mockSettingsService },
         { provide: ScheduleValidationService, useValue: mockScheduleValidation },
         { provide: StockLevelManager, useValue: mockStockLevelManager },
+        { provide: StockValidatorService, useValue: mockStockValidator },
         { provide: SellableStockAllocator, useValue: mockSellableStockAllocator },
         { provide: ShippingCalculatorService, useValue: mockShippingCalculator },
         { provide: OrderFlowService, useValue: mockOrderFlowService },
@@ -297,6 +304,7 @@ describe('OrdersService', () => {
     });
 
     jest.clearAllMocks();
+    mockStockValidator.assertLinesAvailable.mockReset().mockResolvedValue(undefined);
     mockPrismaService.table_sessions.findFirst.mockReset().mockResolvedValue(null);
   });
 
@@ -1096,7 +1104,7 @@ describe('OrdersService', () => {
       contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
         store_id: 1, organization_id: 1, user_id: 99, request_id: 'req-e3',
       } as any);
-      mockPrismaService.orders.create.mockImplementation(async ({ data }: any) => ({
+      mockPrismaService.orders.create.mockReset().mockImplementation(async ({ data }: any) => ({
         id: 930,
         store_id: 1,
         order_number: data.order_number,
@@ -1110,6 +1118,101 @@ describe('OrdersService', () => {
     });
 
     afterEach(() => contextSpy.mockRestore());
+
+    it('rejects an insufficient tracked line before creating the order', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([{ id: 51, price_unit_quantity: null, product_tax_assignments: [] }] as any);
+      mockPrismaService.products.findUnique.mockResolvedValue({
+        id: 51, name: 'MODELO', product_type: 'physical', product_variants: [],
+      } as any);
+      const shortage = new VendixHttpException(
+        ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+        'MODELO sin existencias',
+        { items: [{ product_id: 51, product_variant_id: null, product_name: 'MODELO', kind: 'product', requested: 2, available: 0 }] },
+      );
+      mockStockValidator.assertLinesAvailable.mockRejectedValueOnce(shortage);
+
+      await expect(service.create(makeDto({
+        items: [{ product_id: 51, product_name: 'MODELO', quantity: 2, unit_price: 100, total_price: 200 }],
+      }), { id: 99 })).rejects.toBe(shortage);
+      expect(mockStockValidator.assertLinesAvailable).toHaveBeenCalledWith(
+        [expect.objectContaining({ product_id: 51, quantity: 2 })],
+        expect.objectContaining({ tx: mockPrismaService }),
+      );
+      expect(mockPrismaService.orders.create).not.toHaveBeenCalled();
+      expect(mockStockLevelManager.reserveStock).not.toHaveBeenCalled();
+    });
+
+    it('reserves a tracked line strictly in the same transaction as create', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([{ id: 51, price_unit_quantity: null, product_tax_assignments: [] }] as any);
+      mockPrismaService.products.findUnique.mockResolvedValue({
+        id: 51, name: 'MODELO', product_type: 'physical', product_variants: [],
+      } as any);
+      mockPrismaService.orders.create.mockResolvedValueOnce({
+        id: 930, store_id: 1, order_number: 'ORD-E3-1', grand_total: 100,
+        currency: 'COP', order_items: [{
+          product_id: 51, product_variant_id: null, product_name: 'MODELO',
+          item_type: 'physical', quantity: 1, stock_units_consumed: null,
+          products: { track_inventory: true }, product_variants: null,
+        }],
+      } as any);
+
+      await service.create(makeDto({
+        items: [{ product_id: 51, product_name: 'MODELO', quantity: 1, unit_price: 100, total_price: 100 }],
+      }), { id: 99 });
+
+      expect(mockStockLevelManager.reserveStock).toHaveBeenCalledWith(
+        51, undefined, 1, 1, 'order', 930, 99,
+        true, mockPrismaService, undefined, false, undefined, false,
+      );
+    });
+
+    it('reserves split stock across two sellable locations in one transaction', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([{ id: 51, price_unit_quantity: null, product_tax_assignments: [] }] as any);
+      mockPrismaService.products.findUnique.mockResolvedValue({
+        id: 51, name: 'MODELO', product_type: 'physical', product_variants: [],
+      } as any);
+      mockPrismaService.orders.create.mockResolvedValueOnce({
+        id: 931, store_id: 1, order_number: 'ORD-E3-1', grand_total: 200,
+        currency: 'COP', order_items: [{
+          product_id: 51, product_variant_id: null, product_name: 'MODELO',
+          item_type: 'physical', quantity: 2, stock_units_consumed: null,
+          products: { track_inventory: true }, product_variants: null,
+        }],
+      } as any);
+      mockSellableStockAllocator.allocateForLine.mockResolvedValueOnce({
+        slices: [{ location_id: 1, quantity: 1 }, { location_id: 2, quantity: 1 }],
+        allocated: 2, available: 2, shortfall: 0,
+      });
+
+      await service.create(makeDto({
+        items: [{ product_id: 51, product_name: 'MODELO', quantity: 2, unit_price: 100, total_price: 200 }],
+      }), { id: 99 });
+
+      expect(mockStockLevelManager.reserveStock).toHaveBeenCalledTimes(2);
+      expect(mockStockLevelManager.reserveStock).toHaveBeenNthCalledWith(1,
+        51, undefined, 1, 1, 'order', 931, 99, true, mockPrismaService,
+        undefined, false, undefined, false,
+      );
+      expect(mockStockLevelManager.reserveStock).toHaveBeenNthCalledWith(2,
+        51, undefined, 2, 1, 'order', 931, 99, true, mockPrismaService,
+        undefined, false, undefined, false,
+      );
+    });
+
+    it('uses catalog prepared type even if the client claims physical', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([{ id: 52, price_unit_quantity: null, product_tax_assignments: [] }] as any);
+      mockPrismaService.products.findUnique.mockResolvedValue({
+        id: 52, name: 'Plato', product_type: 'prepared', product_variants: [],
+      } as any);
+
+      await service.create(makeDto({
+        items: [{ product_id: 52, product_name: 'Plato', item_type: 'physical', quantity: 1, unit_price: 100, total_price: 100 }],
+      }), { id: 99 });
+
+      expect(mockPrismaService.orders.create.mock.calls[0][0].data.order_items.create[0].item_type).toBe('prepared');
+      expect(mockStockValidator.assertLinesAvailable).toHaveBeenCalledWith([], expect.anything());
+      expect(mockStockLevelManager.reserveStock).not.toHaveBeenCalled();
+    });
 
     it('persists dine_in and whatsapp instead of falling through to schema defaults', async () => {
       const order = await service.create(makeDto({ delivery_type: order_delivery_type_enum.dine_in, channel: order_channel_enum.whatsapp }), { id: 99 });
@@ -3130,6 +3233,26 @@ describe('OrdersService', () => {
         ],
       } as any);
     };
+
+    it('rejects a stock shortfall before releasing old reservations or replacing lines', async () => {
+      arrange();
+      const shortage = new VendixHttpException(
+        ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+        'Test product sin existencias',
+        { items: [{ product_id: 1, product_variant_id: null, product_name: 'Test product', kind: 'product', requested: 2, available: 0 }] },
+      );
+      mockStockValidator.assertLinesAvailable.mockRejectedValueOnce(shortage);
+
+      await expect(service.updateOrderItems(700, {
+        items: [{ product_id: 1, product_name: 'Test product', quantity: 2, unit_price: 11900, total_price: 23800 }],
+      } as any)).rejects.toBe(shortage);
+      expect(mockStockValidator.assertLinesAvailable).toHaveBeenCalledWith(
+        [expect.objectContaining({ product_id: 1, quantity: 2 })],
+        { orderId: 700, tx: mockPrismaService },
+      );
+      expect(mockStockLevelManager.releaseReservationsByReference).not.toHaveBeenCalled();
+      expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+    });
 
     it('rechaza PUT items sobre orden con solo sesión cerrada antes de escribir', async () => {
       const contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({

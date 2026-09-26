@@ -12,6 +12,8 @@ import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService, StockDemandLine } from '../inventory/shared/services/stock-validator.service';
+import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import type { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import {
   groupRatesByProductId,
@@ -295,6 +297,8 @@ export class TableSessionsService {
     // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
     // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
     private readonly orderHistory: OrderHistoryService,
+    private readonly stockValidator: StockValidatorService,
+    private readonly sellableStockAllocator: SellableStockAllocator,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -696,8 +700,9 @@ export class TableSessionsService {
    * Validates the order is still in 'draft' state (cannot mutate a
    * paid/closed order) and re-derives `subtotal_amount` and
    * `grand_total` after appending the new lines. Inventory reservation
-   * is intentionally NOT performed for `prepared` items — the consume
-   * happens at fire-to-kitchen (Fase D).
+   * is intentionally NOT performed for `prepared` items — this DTO has no
+   * `skip_kds`, so prepared lines always go to kitchen and consume ingredients
+   * at fire-to-kitchen (Fase D).
    */
   async addItems(
     sessionId: number,
@@ -834,6 +839,7 @@ export class TableSessionsService {
         id: number;
         product_id: number;
         price_override: Prisma.Decimal | number | null;
+        track_inventory_override: boolean | null;
         is_on_sale: boolean;
         sale_price: Prisma.Decimal | number | null;
       };
@@ -846,6 +852,7 @@ export class TableSessionsService {
               id: true,
               product_id: true,
               price_override: true,
+              track_inventory_override: true,
               is_on_sale: true,
               sale_price: true,
             },
@@ -863,6 +870,19 @@ export class TableSessionsService {
           }
         }
       }
+
+      const stockDemands: StockDemandLine[] = dto.items.flatMap((item) => {
+        const product = productMap.get(item.product_id)!;
+        return product.product_type === 'prepared'
+          ? []
+          : [{
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id,
+              quantity: item.quantity,
+              product_name: product.name,
+            }];
+      });
+      await this.stockValidator.assertLinesAvailable(stockDemands, { tx });
 
       for (const item of dto.items) {
         const product = productMap.get(item.product_id)!;
@@ -1000,6 +1020,49 @@ export class TableSessionsService {
               : {}),
           },
         });
+
+        if (product.product_type !== 'prepared' && product.product_type !== 'service' &&
+          this.stockValidator.resolveEffectiveTracking(product, variant)) {
+          const allocation = await this.sellableStockAllocator.allocateForLine(
+            storeId,
+            item.product_id,
+            item.product_variant_id ?? undefined,
+            item.quantity,
+            [],
+            tx,
+          );
+          if (allocation.shortfall > 0) {
+            throw new VendixHttpException(
+              ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+              `No hay existencias suficientes de ${product.name}.`,
+              { items: [{
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id ?? null,
+                product_name: product.name,
+                kind: 'product',
+                requested: item.quantity,
+                available: allocation.available,
+              }] },
+            );
+          }
+          for (const slice of allocation.slices) {
+            await this.stockLevelManager.reserveStock(
+              item.product_id,
+              item.product_variant_id ?? undefined,
+              slice.location_id,
+              slice.quantity,
+              'order',
+              session.order_id,
+              RequestContextService.getContext()?.user_id ?? undefined,
+              true,
+              tx,
+              undefined,
+              false,
+              undefined,
+              false,
+            );
+          }
+        }
 
         // QUI-655 — LA INTENCION, no el consumo. Se registra lo que el cliente
         // pidio sin, para que el KDS lo muestre tachado y el cocinero no tenga que

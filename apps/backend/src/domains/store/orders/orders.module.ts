@@ -15,6 +15,7 @@ import { ShippingModule } from '../shipping/shipping.module';
 import { DispatchNotesModule } from '../dispatch-notes/dispatch-notes.module';
 import { DispatchRoutesModule } from '../dispatch-routes/dispatch-routes.module';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import { OrderEtaService } from './services/order-eta.service';
@@ -81,6 +82,7 @@ import { OrderHistoryModule } from './order-history/order-history.module'; // Pl
     OrdersService,
     OrdersBulkService,
     StockLevelManager,
+    StockValidatorService,
     SellableStockAllocator,
     InventoryTransactionsService,
     OrderEtaService,
