@@ -490,6 +490,78 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     );
     expect(payment.processShippingSale.calls.mostRecent().args[1].shippingAddressId).toBe(321);
   });
+
+  it('paso 15b — muestra base + impuesto en modo incluido', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    mount(state);
+    latestQuote().next([{ ...quote(1, 15000), base: 13888.89, shipping_tax_amount: 1111.11, tax_is_inclusive: true }]);
+    fixture.detectChanges();
+    component.goToShipSubStep(2);
+    fixture.detectChanges();
+    expect(component.shippingTaxBreakdown()).toEqual({ base: 13888.89, tax: 1111.11, taxIsInclusive: true });
+    expect(component.shippingTaxModeLabel()).toBe('Incluido');
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Base envío');
+    expect(text).toContain('13888.89');
+    expect(text).toContain('Impuesto (Incluido)');
+    expect(text).toContain('1111.11');
+  });
+
+  it('paso 15b — modo agregado etiqueta Agregado; el costo manual oculta el desglose con aviso y volver restaura', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    mount(state);
+    const taxed = { ...quote(1, 11900), base: 10000, shipping_tax_amount: 1900, tax_is_inclusive: false };
+    latestQuote().next([taxed]);
+    fixture.detectChanges();
+    component.goToShipSubStep(2);
+    fixture.detectChanges();
+    expect(component.shippingTaxBreakdown()).toEqual({ base: 10000, tax: 1900, taxIsInclusive: false });
+    expect(component.shippingTaxModeLabel()).toBe('Agregado');
+    expect(fixture.nativeElement.textContent).toContain('Impuesto (Agregado)');
+    component.toggleManualCost();
+    component.shippingCost.set(5000);
+    component.onShippingCostChange();
+    fixture.detectChanges();
+    expect(component.shippingTaxBreakdown()).toBeNull();
+    expect(component.manualCostLosesTax()).toBeTrue();
+    expect(fixture.nativeElement.textContent).toContain('se registra sin impuesto');
+    // Volver a automático restaura el desglose sin esperar la recotización.
+    component.toggleManualCost();
+    expect(component.shippingTaxBreakdown()).toEqual({ base: 10000, tax: 1900, taxIsInclusive: false });
+    fixture.detectChanges();
+    latestQuote().next([taxed]);
+    fixture.detectChanges();
+    expect(component.shippingTaxBreakdown()).toEqual({ base: 10000, tax: 1900, taxIsInclusive: false });
+  });
+
+  it('paso 15b — sin bloque fiscal en la cotización no hay desglose ni aviso', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    mount(state);
+    latestQuote().next([quote(1, 7000)]);
+    fixture.detectChanges();
+    component.goToShipSubStep(2);
+    fixture.detectChanges();
+    expect(component.shippingTaxBreakdown()).toBeNull();
+    expect(component.manualCostLosesTax()).toBeFalse();
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).not.toContain('Base envío');
+    expect(text).not.toContain('Impuesto (');
+  });
+
+  it('paso 15b — el snapshot histórico sin cotizar no inventa desglose', () => {
+    mount();
+    component.goToShipSubStep(2);
+    fixture.detectChanges();
+    expect(calculate).not.toHaveBeenCalled();
+    expect(component.shippingTaxBreakdown()).toBeNull();
+    expect(fixture.nativeElement.textContent).not.toContain('Base envío');
+  });
 });
 
 describe('posShippingRateIdForPayload', () => {

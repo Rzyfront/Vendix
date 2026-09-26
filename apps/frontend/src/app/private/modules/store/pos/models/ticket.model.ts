@@ -41,6 +41,12 @@ export interface TicketData {
   discount: number;
   total: number;
   paymentMethod: string;
+  /**
+   * Cobro multimétodo: un elemento por tramo en orden de pago. Cuando llega,
+   * el renderer imprime «Efectivo $20.000 · Transferencia $80.000» en vez de
+   * la línea escalar. Ausente = tiquete de un solo método (lo histórico).
+   */
+  paymentBreakdown?: { label: string; amount: number }[];
   cashReceived?: number;
   change?: number;
   customer?: {

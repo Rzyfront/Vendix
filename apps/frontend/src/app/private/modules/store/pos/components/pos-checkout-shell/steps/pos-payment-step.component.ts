@@ -26,12 +26,14 @@ import type {
   CreditTerms,
   PaymentMode,
 } from '../../../../../../../shared/components';
+import type { PaymentLeg } from '../../../../../../../shared/components/payment-collector/payment-collector.model';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
   PosPaymentService,
   PaymentMethod,
   PosSalePaymentResponse,
 } from '../../../services/pos-payment.service';
+import type { PosPaymentLeg } from '../../../services/pos-payment.service';
 import { PaymentMethodType } from '../../../../../../../shared/models/payment-method.model';
 import { FulfillmentType } from '../../pos-fulfillment-selector.component';
 import type { CheckoutIntent } from '../pos-checkout-shell.component';
@@ -53,6 +55,42 @@ import { SerialNumbersService } from '../../../../serial-numbers/services/serial
 import { PosCashRegisterService } from '../../../services/pos-cash-register.service';
 import { CartItem } from '../../../models/cart.model';
 import { MultiSelectorOption } from '../../../../../../../shared/components/multi-selector/multi-selector.component';
+
+/**
+ * Cobro multimétodo de contado: traduce los tramos del collector al DTO del
+ * backend (`PaymentLegDto`). Claves snake_case EXACTAS; `leg.method` es eco
+ * de UI y NUNCA viaja.
+ */
+function toPosPaymentLegs(legs: PaymentLeg[]): PosPaymentLeg[] {
+  return legs.map((leg) => ({
+    store_payment_method_id: leg.storePaymentMethodId,
+    amount: leg.amount,
+    ...(leg.amountReceived != null
+      ? { amount_received: leg.amountReceived }
+      : {}),
+    ...(leg.reference ? { payment_reference: leg.reference } : {}),
+    ...(leg.bankAccountId != null
+      ? { bank_account_id: leg.bankAccountId }
+      : {}),
+  }));
+}
+
+/**
+ * Copy en español para los rechazos multimétodo. `parseApiError` no tiene
+ * estos códigos en `ERROR_MESSAGES` (catálogo fuera del alcance de este
+ * paso), así que el consumidor los traduce aquí leyendo el `errorCode` que
+ * el servicio deja en superficie.
+ */
+const MULTI_TENDER_ERROR_COPY: Record<string, string> = {
+  PAY_MULTI_TENDER_SUM_MISMATCH:
+    'La suma de los métodos no coincide con el total a cobrar. Revisa los montos e inténtalo de nuevo.',
+  PAY_MULTI_TENDER_METHOD_NOT_ALLOWED:
+    'Uno de los métodos no permite cobro combinado. Usa solo efectivo, tarjeta o transferencia.',
+  PAY_MULTI_TENDER_MULTIPLE_CASH:
+    'Solo se permite un pago en efectivo dentro del cobro combinado.',
+  PAY_MULTI_TENDER_CASH_INSUFFICIENT:
+    'El efectivo recibido es menor que el monto en efectivo. Revisa el recibido.',
+};
 
 /**
  * Fase 5·B1 — `app-pos-payment-step`.
@@ -831,6 +869,16 @@ export class PosPaymentStepComponent implements OnInit {
       bank_account_id: submit.bankAccountId,
     };
 
+    // Cobro multimétodo de contado: con 2+ tramos el payload lleva
+    // `payments[]` y el servicio omite las claves escalares de método (el
+    // backend prefiere `payments[]`). Con 1 tramo, el payload escalar es
+    // idéntico al actual.
+    const multiLegs =
+      submit.legs && submit.legs.length >= 2 ? submit.legs : null;
+    if (multiLegs) {
+      payment_request.payments = toPosPaymentLegs(multiLegs);
+    }
+
     if (method.type === 'wallet' && this.walletInfo()) {
       payment_request.metadata = { walletId: this.walletInfo()?.wallet_id };
     }
@@ -856,6 +904,9 @@ export class PosPaymentStepComponent implements OnInit {
           payment_type: 'direct',
           amount: this.cartState()!.summary.total,
           amount_received: submit.amountReceived,
+          // Multimétodo: `PayOrderDto` exige el escalar pero el backend
+          // prefiere `payments[]` cuando llega. Se adjunta, no se sustituye.
+          ...(multiLegs ? { payments: toPosPaymentLegs(multiLegs) } : {}),
         } as any)
       : this.paymentService.processSaleWithPayment(
           editingId && immediateSerials
@@ -900,9 +951,15 @@ export class PosPaymentStepComponent implements OnInit {
                 5000,
               );
             }
+            // Multimétodo: `pos.component` arma la confirmación esparciendo
+            // `paymentData.order`, así que el desglose viaja colgado de la
+            // orden (único canal en alcance hacia el tiquete).
+            const ticketPayments = this.resolveTicketPayments(response, submit);
             this.paymentCompleted.emit({
               success: true,
-              order: response.order,
+              order: ticketPayments
+                ? { ...response.order, payments: ticketPayments }
+                : response.order,
               payment: response.payment,
               change: response.change,
               message: response.message,
@@ -923,6 +980,14 @@ export class PosPaymentStepComponent implements OnInit {
         error: (error: any) => {
           this.processing.set(false);
           console.error('Payment error:', error);
+          // Multimétodo: ambas vías (`processSaleWithPayment` y `flowPayOrder`)
+          // dejan el `errorCode` en superficie; se traduce al copy en español.
+          const surfaceCode: string | undefined =
+            (error as { errorCode?: string })?.errorCode ??
+            extractApiError(error).code;
+          const multiTenderCopy = surfaceCode
+            ? MULTI_TENDER_ERROR_COPY[surfaceCode]
+            : undefined;
           this.toastService.show({
             variant: 'error',
             title: 'Error',
@@ -930,12 +995,49 @@ export class PosPaymentStepComponent implements OnInit {
             // A legitimate stock block used to read "Http failure response …
             // 409 Conflict", which tells the cashier nothing actionable.
             description:
+              multiTenderCopy ??
               extractApiError(error).message ??
               'Error de conexión al procesar el pago',
           });
         },
       });
   }
+  /**
+   * Desglose por método para el tiquete local. Prefiere `response.payments`
+   * (contrato del backend: misma forma que `payment`, solo presente si se
+   * usó `payments[]`); si no viene (p. ej. `flow/pay`, que no lo devuelve),
+   * lo reconstruye desde los tramos del submit con las etiquetas del
+   * catálogo. `undefined` en cobro escalar: el tiquete imprime lo de hoy.
+   */
+  private resolveTicketPayments(
+    response: PosSalePaymentResponse,
+    submit: PaymentSubmit,
+  ): Array<{ amount: number; payment_method: string }> | undefined {
+    const echoed = (
+      response as {
+        payments?: Array<{ amount?: unknown; payment_method?: unknown }>;
+      }
+    ).payments;
+    if (Array.isArray(echoed) && echoed.length > 0) {
+      return echoed.map((p) => ({
+        amount: Number(p.amount) || 0,
+        payment_method: String(p.payment_method ?? 'Pago'),
+      }));
+    }
+    const legs = submit.legs;
+    if (!legs || legs.length < 2) return undefined;
+    const catalog = this.paymentMethods();
+    return legs.map((leg) => ({
+      amount: Number(leg.amount) || 0,
+      payment_method:
+        leg.method?.label ??
+        catalog.find((m) => Number(m.id) === leg.storePaymentMethodId)
+          ?.displayName ??
+        catalog.find((m) => Number(m.id) === leg.storePaymentMethodId)?.name ??
+        leg.methodType,
+    }));
+  }
+
   private runCreditSale(terms: CreditTerms | null): void {
     if (!this.cartState() || !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');

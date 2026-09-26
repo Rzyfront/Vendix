@@ -126,4 +126,33 @@ describe('OrderFlowService.shipOrder — impuesto del envío', () => {
     const data = prisma.orders.update.mock.calls[0][0].data;
     expect(new Prisma.Decimal(data.grand_total).toNumber()).toBe(25800);
   });
+
+  it('paso 14 — tarifa agregada 10.000 IVA 19%: cobra el bruto 11.900 y guarda modo false', async () => {
+    const chargeForRate = jest.fn().mockResolvedValue({
+      applies: true, gross: 11900, base: 10000, tax: 1900, reason: 'exclusive',
+    });
+    service.shippingTaxService.chargeForRate = chargeForRate;
+    snapshotForRate.mockResolvedValue({
+      shipping_tax_rate_id: 5,
+      shipping_tax_name: 'IVA 19%',
+      shipping_tax_type: 'iva',
+      shipping_tax_rate: 0.19,
+      shipping_tax_amount: 1900,
+    });
+    prisma.shipping_rates.findFirst.mockResolvedValue({
+      id: 31, shipping_method_id: 4, base_cost: 10000,
+    });
+    await service.shipOrder(10, { shipping_method_id: 4, shipping_rate_id: 31 });
+    expect(chargeForRate).toHaveBeenCalledWith(null, 31, 10000, { store_id: 1 });
+    expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 11900, { store_id: 1 });
+    const data = prisma.orders.update.mock.calls[0][0].data;
+    expect(data).toMatchObject({
+      shipping_rate_id: 31,
+      shipping_cost: 11900,
+      shipping_tax_amount: 1900,
+      shipping_tax_is_inclusive: false,
+    });
+    // 10800 − 0 + 11900
+    expect(new Prisma.Decimal(data.grand_total).toNumber()).toBe(22700);
+  });
 });

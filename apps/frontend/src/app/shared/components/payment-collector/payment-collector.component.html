@@ -7,7 +7,7 @@
     <div
       class="pc-stepped-grid"
       [class.pc-stepped-grid--with-keypad]="
-        mode() === 'contado' && isCashSelected() && config().showKeypad && subStep() === montoIndex() && !amountCollapsed()
+        mode() === 'contado' && !multiEnabled() && isCashSelected() && config().showKeypad && subStep() === montoIndex() && !amountCollapsed()
       "
     >
       <div class="pc-stepped-main">
@@ -86,6 +86,179 @@
                 <h3 class="pc-section-label">Método de pago</h3>
               </div>
 
+              <!--
+                5b — toggle Un método / Varios métodos. Duplicado consciente
+                en la rama flat (precedente T1): misma estructura, indentación
+                ajustada a cada rama. Si cambia el patrón, cambiar AMBAS.
+              -->
+              @if (config().allowMultiTender) {
+                <div class="pc-multi-toggle" role="tablist" aria-label="Modo de cobro">
+                  <button
+                    type="button"
+                    role="tab"
+                    class="pc-multi-toggle-btn"
+                    [class.is-active]="!multiEnabled()"
+                    [attr.aria-selected]="!multiEnabled()"
+                    (click)="setMultiEnabled(false)"
+                  >
+                    Un método
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    class="pc-multi-toggle-btn"
+                    [class.is-active]="multiEnabled()"
+                    [attr.aria-selected]="multiEnabled()"
+                    (click)="setMultiEnabled(true)"
+                  >
+                    Varios métodos
+                  </button>
+                </div>
+              }
+
+              @if (multiEnabled()) {
+                <div class="pc-multi" [class.pc-flash-target]="flashSection() === 'method'">
+                  @if (legs().length === 0) {
+                    <div class="pc-loading">Cargando métodos…</div>
+                  }
+                  @for (leg of legs(); track $index; let i = $index) {
+                    @if (legGroup(i); as g) {
+                      <div class="pc-multi-leg" [formGroup]="g">
+                        <div class="pc-multi-head">
+                          <span class="pc-multi-title">Método {{ i + 1 }}</span>
+                          @if (legs().length > 1) {
+                            <button
+                              type="button"
+                              class="pc-multi-remove"
+                              [attr.aria-label]="'Quitar método ' + (i + 1)"
+                              (click)="removeLeg(i)"
+                            >
+                              <app-icon name="x" [size]="16" />
+                            </button>
+                          }
+                        </div>
+                        <div class="pc-multi-row">
+                          <select
+                            class="pc-input pc-multi-method"
+                            [attr.aria-label]="'Método del tramo ' + (i + 1)"
+                            (change)="setLegMethod(i, directMethodsForLeg(i)[$any($event.target).value])"
+                          >
+                            @for (m of directMethodsForLeg(i); track m.id; let mi = $index) {
+                              <option [value]="mi" [selected]="legMethod(i)?.id === m.id">
+                                {{ m.name }}
+                              </option>
+                            }
+                          </select>
+                          <input
+                            appCurrencyInput
+                            [currencyDecimals]="currencyDecimals()"
+                            formControlName="amount"
+                            class="pc-input pc-multi-amount"
+                            [class.error]="!(leg.amount > 0)"
+                            inputmode="decimal"
+                            [attr.aria-label]="'Monto del tramo ' + (i + 1)"
+                            (keydown.enter)="handleEnter($event); $event.stopPropagation()"
+                          />
+                        </div>
+                        @if (leg.methodType === PaymentMethodType.CASH) {
+                          <div class="pc-multi-row">
+                            <label class="pc-multi-field">
+                              <span class="pc-multi-label">Recibido</span>
+                              <input
+                                appCurrencyInput
+                                [currencyDecimals]="currencyDecimals()"
+                                formControlName="amountReceived"
+                                class="pc-input"
+                                [class.error]="(leg.amountReceived ?? 0) < leg.amount"
+                                [class.pc-flash-target]="flashSection() === 'cash'"
+                                inputmode="decimal"
+                                aria-label="Efectivo recibido del tramo"
+                                (keydown.enter)="handleEnter($event); $event.stopPropagation()"
+                              />
+                            </label>
+                          </div>
+                          @if ((leg.amountReceived ?? 0) < leg.amount) {
+                            <span class="error-text">
+                              Faltan: {{ leg.amount - (leg.amountReceived ?? 0) | currency }}
+                            </span>
+                          } @else if (legChange(leg) > 0) {
+                            <div class="change-display">
+                              <span>Cambio</span>
+                              <span>{{ legChange(leg) | currency }}</span>
+                            </div>
+                          }
+                        }
+                        @if (legNeedsReference(leg)) {
+                          <div class="pc-multi-row">
+                            <label class="pc-multi-field">
+                              <span class="pc-multi-label">{{ legReferenceLabel(leg) }}</span>
+                              <input
+                                type="text"
+                                formControlName="reference"
+                                [placeholder]="legReferenceLabel(leg)"
+                                class="pc-input"
+                                [class.pc-flash-target]="flashSection() === 'reference'"
+                                (keydown.enter)="handleEnter($event); $event.stopPropagation()"
+                              />
+                            </label>
+                          </div>
+                        }
+                        @if (leg.methodType === PaymentMethodType.BANK_TRANSFER) {
+                          @if (legBankAccounts(i).length > 0) {
+                            <div class="pc-multi-row">
+                              <label class="pc-multi-field">
+                                <span class="pc-multi-label">Cuenta de destino</span>
+                                <select
+                                  class="pc-input"
+                                  [class.pc-flash-target]="flashSection() === 'reference'"
+                                  aria-label="Cuenta bancaria de destino del tramo"
+                                  (change)="setLegBankAccount(i, $any($event.target).value)"
+                                >
+                                  <option value="" [selected]="leg.bankAccountId == null">
+                                    Selecciona una cuenta
+                                  </option>
+                                  @for (acc of legBankAccounts(i); track acc.key) {
+                                    <option [value]="acc.key" [selected]="acc.id === leg.bankAccountId">
+                                      {{ bankAccountLabel(acc) }}
+                                    </option>
+                                  }
+                                </select>
+                              </label>
+                            </div>
+                          } @else {
+                            <p
+                              class="pc-warn pc-multi-warn"
+                              [class.pc-flash-target]="flashSection() === 'reference'"
+                            >
+                              Sin cuentas configuradas. Contacta al administrador.
+                            </p>
+                          }
+                        }
+                      </div>
+                    }
+                  }
+                  @if (remaining() > 0) {
+                    <p class="pc-warn pc-multi-balance">
+                      <app-icon name="alert-triangle" [size]="18" />
+                      <span>Falta {{ remaining() | currency }}</span>
+                    </p>
+                  } @else if (remaining() < 0) {
+                    <p class="pc-warn pc-multi-balance">
+                      <app-icon name="alert-triangle" [size]="18" />
+                      <span>Sobra {{ 0 - remaining() | currency }}</span>
+                    </p>
+                  }
+                  <button
+                    type="button"
+                    class="pc-multi-add"
+                    [disabled]="legs().length >= maxMultiLegs"
+                    (click)="addLeg()"
+                  >
+                    <app-icon name="plus" [size]="16" />
+                    Agregar método
+                  </button>
+                </div>
+              } @else {
               @if (allCards().length > 0) {
                 <div class="payment-methods-grid">
                   @for (m of allCards(); track m.id) {
@@ -135,6 +308,7 @@
                   <p>No hay métodos de pago disponibles</p>
                 </div>
               }
+              }
             </div>
           } @else if (subStep() > modoOffset()) {
             <button
@@ -143,7 +317,13 @@
               (click)="goToSubStep(modoOffset())"
             >
               <span class="sw-check"><app-icon name="check" [size]="16" /></span>
-              <span class="sw-label">Método: {{ selectedMethod()?.name }}</span>
+              <span class="sw-label">
+                @if (multiEnabled()) {
+                  Método: Varios métodos ({{ legs().length }})
+                } @else {
+                  Método: {{ selectedMethod()?.name }}
+                }
+              </span>
               <span class="sw-edit"><app-icon name="pencil" [size]="16" /></span>
             </button>
           }
@@ -160,7 +340,7 @@
             </section>
 
             <!-- Cash -->
-            @if (isCashSelected()) {
+            @if (!multiEnabled() && isCashSelected()) {
               <div class="pc-cash-block">
                 <label class="pc-cash-label" for="pc-cash-received">Efectivo recibido</label>
                 <div
@@ -194,7 +374,7 @@
             }
 
             <!-- Wallet -->
-            @if (isWalletSelected()) {
+            @if (!multiEnabled() && isWalletSelected()) {
               <section class="pc-card">
                 <div class="section-header">
                   <div class="section-indicator"></div>
@@ -215,7 +395,7 @@
             }
 
             <!-- Wompi -->
-            @if (isWompiSelected()) {
+            @if (!multiEnabled() && isWompiSelected()) {
               <section class="pc-card">
                 <div class="section-header">
                   <div class="section-indicator"></div>
@@ -226,7 +406,7 @@
             }
 
             <!-- Reference -->
-            @if (needsReference()) {
+            @if (!multiEnabled() && needsReference()) {
               <section
                 class="pc-card"
                 [class.pc-flash-target]="flashSection() === 'reference'"
@@ -246,7 +426,7 @@
             }
 
             <!-- QUI-728: selector de cuenta bancaria de destino (transferencia) -->
-            @if (isBankTransferSelected()) {
+            @if (!multiEnabled() && isBankTransferSelected()) {
               <section
                 class="pc-card"
                 [class.pc-flash-target]="flashSection() === 'reference'"
@@ -397,7 +577,7 @@
 
       <!-- Keypad column (cash + montoIndex only) -->
       @if (
-        mode() === 'contado' && isCashSelected() && config().showKeypad && subStep() === montoIndex() && !amountCollapsed()
+        mode() === 'contado' && !multiEnabled() && isCashSelected() && config().showKeypad && subStep() === montoIndex() && !amountCollapsed()
       ) {
         <aside class="pc-keypad-col">
           <div class="keypad">
@@ -509,6 +689,178 @@
           <h3 class="section-title">Método de pago</h3>
         </div>
 
+        <!--
+          5b — duplicado consciente del bloque multi de la rama `stepped`.
+          Misma estructura; si cambia el patrón, cambiar AMBAS ramas.
+        -->
+        @if (config().allowMultiTender) {
+          <div class="pc-multi-toggle" role="tablist" aria-label="Modo de cobro">
+            <button
+              type="button"
+              role="tab"
+              class="pc-multi-toggle-btn"
+              [class.is-active]="!multiEnabled()"
+              [attr.aria-selected]="!multiEnabled()"
+              (click)="setMultiEnabled(false)"
+            >
+              Un método
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="pc-multi-toggle-btn"
+              [class.is-active]="multiEnabled()"
+              [attr.aria-selected]="multiEnabled()"
+              (click)="setMultiEnabled(true)"
+            >
+              Varios métodos
+            </button>
+          </div>
+        }
+
+        @if (multiEnabled()) {
+          <div class="pc-multi" [class.pc-flash-target]="flashSection() === 'method'">
+            @if (legs().length === 0) {
+              <div class="pc-loading">Cargando métodos…</div>
+            }
+            @for (leg of legs(); track $index; let i = $index) {
+              @if (legGroup(i); as g) {
+                <div class="pc-multi-leg" [formGroup]="g">
+                  <div class="pc-multi-head">
+                    <span class="pc-multi-title">Método {{ i + 1 }}</span>
+                    @if (legs().length > 1) {
+                      <button
+                        type="button"
+                        class="pc-multi-remove"
+                        [attr.aria-label]="'Quitar método ' + (i + 1)"
+                        (click)="removeLeg(i)"
+                      >
+                        <app-icon name="x" [size]="16" />
+                      </button>
+                    }
+                  </div>
+                  <div class="pc-multi-row">
+                    <select
+                      class="pc-input pc-multi-method"
+                      [attr.aria-label]="'Método del tramo ' + (i + 1)"
+                      (change)="setLegMethod(i, directMethodsForLeg(i)[$any($event.target).value])"
+                    >
+                      @for (m of directMethodsForLeg(i); track m.id; let mi = $index) {
+                        <option [value]="mi" [selected]="legMethod(i)?.id === m.id">
+                          {{ m.name }}
+                        </option>
+                      }
+                    </select>
+                    <input
+                      appCurrencyInput
+                      [currencyDecimals]="currencyDecimals()"
+                      formControlName="amount"
+                      class="pc-input pc-multi-amount"
+                      [class.error]="!(leg.amount > 0)"
+                      inputmode="decimal"
+                      [attr.aria-label]="'Monto del tramo ' + (i + 1)"
+                      (keydown.enter)="handleEnter($event); $event.stopPropagation()"
+                    />
+                  </div>
+                  @if (leg.methodType === PaymentMethodType.CASH) {
+                    <div class="pc-multi-row">
+                      <label class="pc-multi-field">
+                        <span class="pc-multi-label">Recibido</span>
+                        <input
+                          appCurrencyInput
+                          [currencyDecimals]="currencyDecimals()"
+                          formControlName="amountReceived"
+                          class="pc-input"
+                          [class.error]="(leg.amountReceived ?? 0) < leg.amount"
+                          [class.pc-flash-target]="flashSection() === 'cash'"
+                          inputmode="decimal"
+                          aria-label="Efectivo recibido del tramo"
+                          (keydown.enter)="handleEnter($event); $event.stopPropagation()"
+                        />
+                      </label>
+                    </div>
+                    @if ((leg.amountReceived ?? 0) < leg.amount) {
+                      <span class="error-text">
+                        Faltan: {{ leg.amount - (leg.amountReceived ?? 0) | currency }}
+                      </span>
+                    } @else if (legChange(leg) > 0) {
+                      <div class="change-display">
+                        <span>Cambio</span>
+                        <span>{{ legChange(leg) | currency }}</span>
+                      </div>
+                    }
+                  }
+                  @if (legNeedsReference(leg)) {
+                    <div class="pc-multi-row">
+                      <label class="pc-multi-field">
+                        <span class="pc-multi-label">{{ legReferenceLabel(leg) }}</span>
+                        <input
+                          type="text"
+                          formControlName="reference"
+                          [placeholder]="legReferenceLabel(leg)"
+                          class="pc-input"
+                          [class.pc-flash-target]="flashSection() === 'reference'"
+                          (keydown.enter)="handleEnter($event); $event.stopPropagation()"
+                        />
+                      </label>
+                    </div>
+                  }
+                  @if (leg.methodType === PaymentMethodType.BANK_TRANSFER) {
+                    @if (legBankAccounts(i).length > 0) {
+                      <div class="pc-multi-row">
+                        <label class="pc-multi-field">
+                          <span class="pc-multi-label">Cuenta de destino</span>
+                          <select
+                            class="pc-input"
+                            [class.pc-flash-target]="flashSection() === 'reference'"
+                            aria-label="Cuenta bancaria de destino del tramo"
+                            (change)="setLegBankAccount(i, $any($event.target).value)"
+                          >
+                            <option value="" [selected]="leg.bankAccountId == null">
+                              Selecciona una cuenta
+                            </option>
+                            @for (acc of legBankAccounts(i); track acc.key) {
+                              <option [value]="acc.key" [selected]="acc.id === leg.bankAccountId">
+                                {{ bankAccountLabel(acc) }}
+                              </option>
+                            }
+                          </select>
+                        </label>
+                      </div>
+                    } @else {
+                      <p
+                        class="pc-warn pc-multi-warn"
+                        [class.pc-flash-target]="flashSection() === 'reference'"
+                      >
+                        Sin cuentas configuradas. Contacta al administrador.
+                      </p>
+                    }
+                  }
+                </div>
+              }
+            }
+            @if (remaining() > 0) {
+              <p class="pc-warn pc-multi-balance">
+                <app-icon name="alert-triangle" [size]="18" />
+                <span>Falta {{ remaining() | currency }}</span>
+              </p>
+            } @else if (remaining() < 0) {
+              <p class="pc-warn pc-multi-balance">
+                <app-icon name="alert-triangle" [size]="18" />
+                <span>Sobra {{ 0 - remaining() | currency }}</span>
+              </p>
+            }
+            <button
+              type="button"
+              class="pc-multi-add"
+              [disabled]="legs().length >= maxMultiLegs"
+              (click)="addLeg()"
+            >
+              <app-icon name="plus" [size]="16" />
+              Agregar método
+            </button>
+          </div>
+        } @else {
         @if (allCards().length > 0) {
           <div class="payment-methods-grid">
             @for (m of allCards(); track m.id) {
@@ -529,10 +881,11 @@
             <p>No hay métodos de pago disponibles</p>
           </div>
         }
+        }
       </section>
 
       <!-- Cash -->
-      @if (isCashSelected()) {
+      @if (!multiEnabled() && isCashSelected()) {
         <section class="pc-card">
           <div class="section-header">
             <div class="section-indicator"></div>
@@ -583,7 +936,7 @@
       }
 
       <!-- Wallet -->
-      @if (isWalletSelected()) {
+      @if (!multiEnabled() && isWalletSelected()) {
         <section class="pc-card">
           <div class="section-header">
             <div class="section-indicator"></div>
@@ -604,7 +957,7 @@
       }
 
       <!-- Wompi -->
-      @if (isWompiSelected()) {
+      @if (!multiEnabled() && isWompiSelected()) {
         <section class="pc-card">
           <div class="section-header">
             <div class="section-indicator"></div>
@@ -615,7 +968,7 @@
       }
 
       <!-- Reference -->
-      @if (needsReference()) {
+      @if (!multiEnabled() && needsReference()) {
         <section class="pc-card">
           <div class="section-header">
             <div class="section-indicator"></div>
@@ -632,7 +985,7 @@
       }
 
       <!-- QUI-728: selector de cuenta bancaria de destino (transferencia) -->
-      @if (isBankTransferSelected()) {
+      @if (!multiEnabled() && isBankTransferSelected()) {
         <section
           class="pc-card"
           [class.pc-flash-target]="flashSection() === 'reference'"

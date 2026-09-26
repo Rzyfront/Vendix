@@ -6,6 +6,7 @@ import {
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { Prisma, refunds_state_enum } from '@prisma/client';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
+import { prorateShippingTaxRefundCents } from '../../../shipping/utils/shipping-tax.util';
 
 /** Step 1 (CP-REFUND-FLOW-REDESIGN): states that reserve ceiling once the
  * caller opts into a pending-aware ceiling. `failed` never reserves;
@@ -342,27 +343,15 @@ export class RefundCalculationService {
     // completo, se devuelve el REMANENTE exacto de la copia: la suma de las
     // devoluciones cierra al centavo contra `shipping_tax_amount` en vez de
     // arrastrar ±1 ¢ de redondeo por cada parcial.
-    const proportionalShippingTax = (refund_cents: number) =>
-      Math.round((shipping_tax_cents * refund_cents) / shipping_cost_cents);
-    let shipping_tax_refund_cents = 0;
-    if (shipping_refund_cents > 0 && shipping_cost_cents > 0 && shipping_tax_cents > 0) {
-      let prior_shipping_cents = 0;
-      let prior_shipping_tax_cents = 0;
-      for (const refund of order.refunds ?? []) {
-        const refund_cents = Math.round(Number(refund.shipping_refund ?? 0) * 100);
-        if (refund_cents <= 0) continue;
-        prior_shipping_cents += refund_cents;
-        prior_shipping_tax_cents += proportionalShippingTax(refund_cents);
-      }
-      const remaining_tax_cents = Math.max(
-        0,
-        shipping_tax_cents - prior_shipping_tax_cents,
-      );
-      shipping_tax_refund_cents =
-        prior_shipping_cents + shipping_refund_cents >= shipping_cost_cents
-          ? remaining_tax_cents
-          : Math.min(remaining_tax_cents, proportionalShippingTax(shipping_refund_cents));
-    }
+    const prior_shipping_refund_cents = (order.refunds ?? [])
+      .map((refund) => Math.round(Number(refund.shipping_refund ?? 0) * 100))
+      .filter((refund_cents) => refund_cents > 0);
+    const shipping_tax_refund_cents = prorateShippingTaxRefundCents(
+      shipping_cost_cents,
+      shipping_tax_cents,
+      prior_shipping_refund_cents,
+      shipping_refund_cents,
+    );
 
     if (total_refund > max_refundable + 0.01) {
       throw new BadRequestException(

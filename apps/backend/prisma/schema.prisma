@@ -1543,10 +1543,11 @@ model orders {
   tax_amount                                      Decimal                   @default(0.00) @db.Decimal(12, 2)
   shipping_cost                                   Decimal                   @default(0.00) @db.Decimal(12, 2)
   // Copia CONGELADA del impuesto del envío al vender (shipping-tax.service.ts
-  // `snapshotForRate`). Sale de la tarifa (`shipping_rates.tax_category_id`) y
-  // no cambia si luego se edita la tarifa o la categoría. Costo digitado a
-  // mano ⇒ copia vacía. El impuesto va INCLUIDO en `shipping_cost` (bruto):
-  // base del envío = `shipping_cost - shipping_tax_amount` (no se guarda).
+  // `snapshotForRate`). Sale de la tarifa (`shipping_rates.tax_category_id` +
+  // `tax_is_inclusive`) y no cambia si luego se edita la tarifa o la
+  // categoría. Costo digitado a mano ⇒ copia vacía. `shipping_cost` es
+  // siempre el BRUTO: base del envío = `shipping_cost - shipping_tax_amount`
+  // (no se guarda), sea el modo incluido o agregado.
   //
   // ASIMETRÍA DELIBERADA: `orders.tax_amount` NO incluye `shipping_tax_amount`
   // (sigue siendo Σ order_item_taxes; el envío ya va bruto en shipping_cost y
@@ -1558,6 +1559,8 @@ model orders {
   // Fracción (0.08000 = 8 %), misma unidad que `order_item_taxes.tax_rate`.
   shipping_tax_rate                               Decimal?                  @db.Decimal(6, 5)
   shipping_tax_amount                             Decimal                   @default(0) @db.Decimal(12, 2)
+  // Modo congelado de la tarifa al vender (null = histórico o sin impuesto).
+  shipping_tax_is_inclusive                       Boolean?
   shipping_tax_rate_ref                           tax_rates?                @relation("orders_shipping_tax_rate", fields: [shipping_tax_rate_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   grand_total                                     Decimal                   @default(0.00) @db.Decimal(12, 2)
   // Plan Despacho Economía — FASE 6 paso 19. Estado de cumplimiento del
@@ -3332,14 +3335,20 @@ model shipping_rates {
   copied_from_system_rate_id Int? // ID de tarifa del sistema de donde se copió
   source_type                zone_source_type_enum? // 'system_copy' | 'custom'
 
-  // Impuesto OPCIONAL del envío (null = sin impuesto). Siempre INCLUIDO en
-  // `base_cost`: se ignora `tax_categories.is_inclusive`, lo que paga el
-  // cliente no cambia. Elegible: categoría de la tienda (u org si
+  // Impuesto OPCIONAL del envío (null = sin impuesto). El modo vive en la
+  // tarifa (`tax_is_inclusive`): true = INCLUIDO en el precio de tarifa (lo
+  // que paga el cliente no cambia); false = AGREGADO encima (bruto = base +
+  // trunc(base·r), `resolveShippingCharge`). Se ignora
+  // `tax_categories.is_inclusive` en el cálculo (solo preselecciona en
+  // tarifas nuevas). Elegible: categoría de la tienda (u org si
   // fiscal_scope=ORGANIZATION), tax_type iva|inc y exactamente UNA tasa > 0
   // (`shipping/utils/shipping-tax.util.ts`). RESTRICT: borrar la categoría no
   // debe quitar el impuesto del envío en silencio.
   tax_category_id Int?
   tax_category    tax_categories? @relation(fields: [tax_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  // Modo del impuesto de la tarifa: true = incluido en el precio de tarifa
+  // (default; filas existentes quedan incluidas), false = agregado encima.
+  tax_is_inclusive Boolean @default(true)
 
   // Escala de km para cobro por distancia: [{from_km, to_km|null, price}].
   // Null/vacío = rige el precio plano de la tarifa.

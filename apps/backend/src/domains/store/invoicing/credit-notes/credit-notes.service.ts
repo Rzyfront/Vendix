@@ -5,7 +5,7 @@ import { Injectable, Logger } from '@nestjs/common';
 // sin un solo cast. El `TaxFiscalType` de la capa de dominio refleja los
 // mismos seis valores, pero es un enum NOMINAL de TS y no es asignable a la
 // unión de literales de Prisma — de ahí venía el `as any` de salida.
-import { Prisma, tax_type_enum } from '@prisma/client';
+import { Prisma, refunds_state_enum, tax_type_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -27,6 +27,7 @@ import {
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
 import { REFUND_LEDGER_STATES } from '../../orders/order-flow/services/refund-calculation.service';
+import { prorateShippingTaxRefundCents } from '../../shipping/utils/shipping-tax.util';
 
 /**
  * Este servicio NO necesita la ClTec: no calcula CUDE ni arma XML — eso lo hace
@@ -929,14 +930,16 @@ export class CreditNotesService {
     // `shipping_refund > 0`, haya líneas o no — antes un refund con líneas
     // + envío perdía el envío en la NC. Línea libre, sin puente (no hay
     // `refund_item` que cubrir).
+    // Paso 2 (shipping-tax A1): con impuesto en el envío la línea sale en
+    // forma INCLUIDA (`unit_price` = bruto devuelto, `is_inclusive: true`).
+    // Sin el flag heredaba la inclusividad de la gemela de la factura —que
+    // el motor persiste en forma base (`is_inclusive: false`)— y el kernel
+    // sumaba el impuesto ENCIMA del bruto (15.000 ⇒ 16.200: la NC superaba
+    // la factura y se rechazaba). La cuota proporcional viaja sólo como
+    // pista (el kernel gana y avisa si difiere); sin impuesto la línea
+    // queda igual que hoy.
     if (Number(refund.shipping_refund ?? 0) > 0) {
-      derived_items.push({
-        description: `Reembolso de envío — orden #${refund.order_id}`,
-        quantity: 1,
-        unit_price: Number(refund.shipping_refund),
-        discount_amount: 0,
-        tax_amount: 0,
-      });
+      derived_items.push(await this.resolveRefundShippingLine(refund));
     }
 
     // Sin líneas y sin envío no hay nada que acreditar: caer al copiado
@@ -972,6 +975,67 @@ export class CreditNotesService {
       concept_code: covers_whole_order ? '2' : '1',
       default_reason,
       bridge_rows,
+    };
+  }
+
+  /**
+   * Paso 2 (shipping-tax A1) — línea libre «Reembolso de envío» de una NC
+   * guiada. Lee la copia congelada de la orden (`orders.shipping_tax_*`):
+   * con impuesto, la línea va incluida con la cuota proporcional del helper
+   * del paso 1 como pista; sin copia o sin impuesto, idéntica a la de hoy
+   * (fail-open: una copia ilegible jamás bloquea la nota).
+   *
+   * Los previos son los `shipping_refund` de los OTROS reembolsos
+   * completados de la orden —la misma reconstrucción determinista que
+   * `refund-calculation.service.ts`—, así el que completa el envío cierra
+   * al centavo contra la copia. La pista nunca bloquea: el kernel del
+   * carril parcial la reemplaza y deja aviso si difiere.
+   */
+  private async resolveRefundShippingLine(refund: {
+    id: number;
+    order_id: number;
+    shipping_refund: Prisma.Decimal | number | null;
+  }): Promise<CreateInvoiceItemDto> {
+    const shipping_refund = Number(refund.shipping_refund ?? 0);
+    const plain_line = (): CreateInvoiceItemDto => ({
+      description: `Reembolso de envío — orden #${refund.order_id}`,
+      quantity: 1,
+      unit_price: shipping_refund,
+      discount_amount: 0,
+      tax_amount: 0,
+    });
+    const order = await this.prisma.orders.findFirst({
+      where: { id: refund.order_id },
+      select: { shipping_cost: true, shipping_tax_amount: true },
+    });
+    const shipping_tax_cents = Math.round(
+      (Number(order?.shipping_tax_amount ?? 0) || 0) * 100,
+    );
+    if (shipping_tax_cents <= 0) return plain_line();
+    const shipping_cost_cents = Math.round(
+      (Number(order?.shipping_cost ?? 0) || 0) * 100,
+    );
+    const prior_refunds = await this.prisma.refunds.findMany({
+      where: {
+        order_id: refund.order_id,
+        id: { not: refund.id },
+        state: refunds_state_enum.completed,
+      },
+      select: { shipping_refund: true },
+    });
+    const prior_cents = (prior_refunds ?? [])
+      .map((row) => Math.round(Number(row.shipping_refund ?? 0) * 100))
+      .filter((cents) => cents > 0);
+    const hint_cents = prorateShippingTaxRefundCents(
+      shipping_cost_cents,
+      shipping_tax_cents,
+      prior_cents,
+      Math.round(shipping_refund * 100),
+    );
+    return {
+      ...plain_line(),
+      tax_amount: hint_cents / 100,
+      is_inclusive: true,
     };
   }
 

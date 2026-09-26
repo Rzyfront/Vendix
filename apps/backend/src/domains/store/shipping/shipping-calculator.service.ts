@@ -14,6 +14,9 @@ import {
   DistanceCoords,
   ShippingDistanceService,
 } from './services/shipping-distance.service';
+import { ShippingTaxService } from './services/shipping-tax.service';
+import type { RateTaxContext } from './services/shipping-tax.service';
+import { resolveShippingCharge } from './utils/shipping-tax.util';
 
 export interface AddressDTO {
   country_code: string;
@@ -38,7 +41,24 @@ export interface ShippingOption {
   method_id: number;
   method_name: string;
   method_type: string; // 'pickup' | 'own_fleet' | 'carrier' | etc.
+  /**
+   * Lo que paga el cliente por el envío: siempre el BRUTO (lote C). En modo
+   * agregado ya trae el impuesto sumado; el storefront muestra solo este valor.
+   */
   cost: number;
+  /**
+   * Base neta del envío (bruto − impuesto). Viaja solo para superficies del
+   * comerciante (wizard, POS); el storefront no la muestra.
+   */
+  base?: number;
+  /**
+   * Impuesto del envío incluido en `cost`. Solo superficies del comerciante.
+   */
+  shipping_tax_amount?: number;
+  /**
+   * Modo de la tarifa (`shipping_rates.tax_is_inclusive`). Solo comerciante.
+   */
+  tax_is_inclusive?: boolean;
   currency: string;
   estimated_days?: { min: number; max: number };
   /** Zona que originó la opción. Null cuando viene del fallback de retiro. */
@@ -75,6 +95,7 @@ export class ShippingCalculatorService {
   constructor(
     private prisma: StorePrismaService,
     private settingsService: SettingsService,
+    private readonly shippingTaxService: ShippingTaxService,
     // `@Optional()` para no romper los TestingModule existentes; sin él (sólo
     // en specs) el cotizador cobra zona como siempre.
     @Optional() private readonly distanceService?: ShippingDistanceService,
@@ -137,6 +158,16 @@ export class ShippingCalculatorService {
         { id: 'asc' },
       ],
     });
+
+    // Lote C (paso 13): una sola lectura fiscal por cotización. El modo de
+    // cada tarifa (incluido/agregado) se resuelve al final de la selección
+    // de precio, por opción, con el cálculo único `resolveShippingCharge`.
+    // `store_id` explícito: el endpoint es público (storefront) y puede no
+    // haber contexto de request con tienda.
+    const rateTaxContext = await this.shippingTaxService.loadRateTaxContext(
+      rates.map((r) => r.id),
+      { store_id: storeId },
+    );
 
     const cartTotals = this.getCartTotals(items);
     const storeCurrency = await this.settingsService.getStoreCurrency();
@@ -274,13 +305,19 @@ export class ShippingCalculatorService {
                rate.shipping_zone?.name?.trim() ||
                rate.shipping_method.name);
 
+        // El precio seleccionado (zona → distancia → peso → umbral de envío
+        // gratis) entra al cálculo único UNA sola vez: `cost` es el bruto.
+        // Umbral alcanzado o tarifa `free` ⇒ precio 0 ⇒ sin impuesto.
+        const charged = this.applyRateTax(rate.id, cost, rateTaxContext);
+
         options.push({
           id: rate.id,
           rate_id: rate.id,
           method_id: rate.shipping_method_id,
           method_name: optionName,
           method_type: rate.shipping_method.type,
-          cost: cost,
+          cost: charged.gross,
+          ...charged.fields,
           currency: storeCurrency,
           estimated_days: {
             min: rate.shipping_method.min_days || 0,
@@ -416,6 +453,44 @@ export class ShippingCalculatorService {
   }
 
   /**
+   * Aplica el cálculo único "precio de tarifa → bruto" a UNA opción ya
+   * seleccionada (lote C, paso 13). Sin contexto fiscal para la tarifa (ajena
+   * o inexistente) el precio sale tal cual y sin campos de comerciante: nunca
+   * se inventa un impuesto. Precio 0 (gratis o umbral alcanzado) ⇒ sin
+   * impuesto. `base`, `shipping_tax_amount` y `tax_is_inclusive` viajan solo
+   * para superficies del comerciante; el storefront muestra `cost`.
+   */
+  private applyRateTax(
+    rate_id: number,
+    ratePrice: number,
+    ctxByRateId: Map<number, RateTaxContext>,
+  ): {
+    gross: number;
+    fields: Pick<
+      ShippingOption,
+      'base' | 'shipping_tax_amount' | 'tax_is_inclusive'
+    >;
+  } {
+    const ctx = ctxByRateId.get(rate_id);
+    if (!ctx) return { gross: ratePrice, fields: {} };
+    const charge = resolveShippingCharge({
+      rate_price: ratePrice,
+      category: ctx.category,
+      tax_is_inclusive: ctx.tax_is_inclusive,
+      vat_responsible: ctx.vat_responsible,
+      inc_responsible: ctx.inc_responsible,
+    });
+    return {
+      gross: charge.gross,
+      fields: {
+        base: charge.base,
+        shipping_tax_amount: charge.tax,
+        tax_is_inclusive: ctx.tax_is_inclusive,
+      },
+    };
+  }
+
+  /**
    * Opciones de retiro en tienda cuando ninguna zona cubre la dirección.
    *
    * Regla de negocio: sólo tiene sentido ofrecer "recoger en tienda" si la
@@ -488,6 +563,13 @@ export class ShippingCalculatorService {
       return [];
     }
 
+    // Mismo cálculo único que la ruta principal: el retiro también cotiza
+    // el bruto (una lectura fiscal para todo el fallback).
+    const rateTaxContext = await this.shippingTaxService.loadRateTaxContext(
+      pickupRates.map((r) => r.id),
+      { store_id: storeId },
+    );
+
     const storeCurrency = await this.settingsService.getStoreCurrency();
     const seenMethods = new Set<number>();
     const options: ShippingOption[] = [];
@@ -503,13 +585,20 @@ export class ShippingCalculatorService {
              rate.shipping_zone?.name?.trim() ||
              rate.shipping_method.name);
 
+      const ratePrice =
+        rate.type === shipping_rate_type_enum.free
+          ? 0
+          : Number(rate.base_cost);
+      const charged = this.applyRateTax(rate.id, ratePrice, rateTaxContext);
+
       options.push({
         id: rate.id,
         rate_id: rate.id,
         method_id: rate.shipping_method_id,
         method_name: optionName,
         method_type: rate.shipping_method.type,
-        cost: rate.type === shipping_rate_type_enum.free ? 0 : Number(rate.base_cost),
+        cost: charged.gross,
+        ...charged.fields,
         currency: storeCurrency,
         estimated_days: {
           min: rate.shipping_method.min_days || 0,

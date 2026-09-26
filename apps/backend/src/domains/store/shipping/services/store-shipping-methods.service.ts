@@ -348,6 +348,8 @@ export class StoreShippingMethodsService {
                 min_val: system_rate.min_val,
                 max_val: system_rate.max_val,
                 free_shipping_threshold: system_rate.free_shipping_threshold,
+                // El clonado copia el modo del impuesto de la tarifa.
+                tax_is_inclusive: system_rate.tax_is_inclusive,
                 is_active: true,
                 source_type: 'system_copy',
                 copied_from_system_rate_id: system_rate.id,

@@ -202,4 +202,59 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
     } catch (error) { caught = error; }
     expect(caught?.errorCode).toBe(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001.code);
   });
+
+  describe('paso 14 — isManualCost compara contra el bruto', () => {
+    const IVA_SNAPSHOT = {
+      shipping_tax_rate_id: 5,
+      shipping_tax_name: 'IVA 19%',
+      shipping_tax_type: 'iva' as const,
+      shipping_tax_rate: 0.19,
+      shipping_tax_amount: 1900,
+    };
+    let chargeForRate: jest.Mock;
+    const aggTx = () => tx({ id: 9, shipping_method_id: 5, type: 'flat', base_cost: 10000 });
+
+    beforeEach(() => {
+      chargeForRate = jest.fn().mockResolvedValue({
+        applies: true, gross: 11900, base: 10000, tax: 1900, reason: 'exclusive',
+      });
+      service.shippingTaxService.chargeForRate = chargeForRate;
+      snapshotForRate.mockResolvedValue({ ...IVA_SNAPSHOT });
+    });
+
+    it('costo = bruto agregado (11.900): conserva el impuesto y guarda modo false', async () => {
+      const client = aggTx();
+      await service.createOrUpdateOrderFromPos(
+        client, dto({ shipping_rate_id: 9, shipping_cost: 11900 }), user,
+      );
+
+      expect(chargeForRate).toHaveBeenCalledWith(client, 9, 10000, { store_id: 1 });
+      expect(snapshotForRate).toHaveBeenCalledWith(client, 9, 11900, { store_id: 1 });
+      const data = client.orders.update.mock.calls[0][0].data;
+      expect(data).toEqual(expect.objectContaining({
+        ...IVA_SNAPSHOT,
+        shipping_rate_id: 9,
+        shipping_cost: 11900,
+        shipping_tax_is_inclusive: false,
+        grand_total: 21900,
+      }));
+    });
+
+    it('costo = base agregada (10.000): es manual ⇒ copia vacía', async () => {
+      const client = aggTx();
+      await service.createOrUpdateOrderFromPos(
+        client, dto({ shipping_rate_id: 9, shipping_cost: 10000 }), user,
+      );
+
+      expect(snapshotForRate).not.toHaveBeenCalled();
+      const data = client.orders.update.mock.calls[0][0].data;
+      expect(data).toEqual(expect.objectContaining({
+        ...EMPTY_SHIPPING_TAX,
+        shipping_rate_id: 9,
+        shipping_cost: 10000,
+        shipping_tax_is_inclusive: null,
+        grand_total: 20000,
+      }));
+    });
+  });
 });

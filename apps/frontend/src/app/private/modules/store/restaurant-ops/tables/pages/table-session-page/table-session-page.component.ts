@@ -1667,6 +1667,9 @@ export class TableSessionPageComponent implements OnInit {
         // QUI-728 (E.1) — el cobro de mesa va a POST /store/payments/pos
         // (CreatePosPaymentDto); el bank_account_id viaja con él.
         bank_account_id: payload.bank_account_id,
+        // Multimétodo: `TablePaymentSubmit.payments?` (solo 2+ tramos);
+        // `payTableSession` lo prefiere sobre el contrato escalar.
+        payments: payload.payments,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

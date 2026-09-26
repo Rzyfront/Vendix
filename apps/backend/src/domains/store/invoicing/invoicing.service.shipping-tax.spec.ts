@@ -364,6 +364,26 @@ describe('InvoicingService.createFromOrder — impuesto del envío (copia de la 
     },
   );
 
+  it('B7: copia 1.111,11 con shipping_cost 0 ⇒ rechazo amount_not_below_cost, nunca omisión silenciosa', async () => {
+    prisma.orders.findFirst.mockResolvedValue(
+      buildOrder({
+        shipping_cost: money(0),
+        ...incShippingCopy,
+        order_items: [ivaProducto()],
+      }),
+    );
+    const error: any = await service
+      .createFromOrder(ORDER_ID)
+      .then(() => null, (e) => e);
+    expect(error?.errorCode).toBe('INVOICING_CALC_006');
+    expect(error.getResponse().details).toEqual({
+      order_id: 9001,
+      detail: 'shipping_tax:amount_not_below_cost',
+    });
+    expect(prisma.invoices.create).not.toHaveBeenCalled();
+    expect(prisma.invoice_taxes.createMany).not.toHaveBeenCalled();
+  });
+
   /**
    * `update()` completo sobre el borrador nacido de la orden. Se falsean sólo
    * las lecturas de contexto (período, catálogo, perfil, AIU); el motor, el

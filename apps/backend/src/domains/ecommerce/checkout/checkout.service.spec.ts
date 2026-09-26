@@ -63,6 +63,7 @@ const PRODUCT_BASE = {
   // the pricing logic these tests exist to cover.
   is_sellable: true,
   product_tax_assignments: [],
+  weight: 1,
 };
 
 const PRODUCT_CATEGORY = {
@@ -1234,6 +1235,185 @@ describe('CheckoutService - promotions and coupons', () => {
         shipping_rate_id: 31,
         shipping_cost: 15000,
         grand_total: 25000,
+      });
+    });
+  });
+
+  describe('paso 14 — productores unificados con la cotización', () => {
+    const IVA_SNAPSHOT = {
+      shipping_tax_rate_id: 5,
+      shipping_tax_name: 'IVA 19%',
+      shipping_tax_type: 'iva',
+      shipping_tax_rate: 0.19,
+      shipping_tax_amount: 1900,
+    };
+    const EMPTY_SNAPSHOT = {
+      shipping_tax_rate_id: null,
+      shipping_tax_name: null,
+      shipping_tax_type: null,
+      shipping_tax_rate: null,
+      shipping_tax_amount: 0,
+    };
+    const address = {
+      address_line1: 'Calle 1', city: 'Bogotá', country_code: 'CO',
+    };
+    const rate = (over: Record<string, unknown> = {}) => ({
+      id: 32,
+      is_active: true,
+      type: 'flat',
+      base_cost: 10000,
+      shipping_method_id: 4,
+      shipping_method: { id: 4, type: 'delivery' },
+      shipping_zone: { id: 2, store_id: STORE_ID },
+      ...over,
+    });
+    let snapshotForRate: jest.Mock;
+    let chargeForRate: jest.Mock;
+
+    beforeEach(() => {
+      snapshotForRate = jest.fn().mockResolvedValue({ ...IVA_SNAPSHOT });
+      // Sin impuesto por defecto: el precio es el bruto (igual que el
+      // cotizador cuando la tarifa no tiene categoría gravada).
+      chargeForRate = jest.fn().mockImplementation(
+        async (_client: unknown, _rate_id: number, price: unknown) => ({
+          applies: false,
+          gross: Number(price),
+          base: Number(price),
+          tax: 0,
+          reason: 'no_category',
+        }),
+      );
+      (service as any).shippingTaxService = { snapshotForRate, chargeForRate };
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
+    });
+
+    it('checkout agregado 10.000 IVA 19%: cobra 11.900 y guarda modo false', async () => {
+      storePrisma.shipping_rates.findFirst.mockResolvedValue(rate());
+      chargeForRate.mockResolvedValue({
+        applies: true, gross: 11900, base: 10000, tax: 1900, reason: 'exclusive',
+      });
+      mockOrderCreate(21900);
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Invitado' },
+        shipping_rate_id: 32,
+        shipping_address: address,
+      } as any);
+
+      // Cotizar ⇒ confirmar: el cálculo único recibe el precio de tarifa y
+      // la copia se deriva sobre el bruto cobrado.
+      expect(chargeForRate).toHaveBeenCalledWith(null, 32, 10000, { store_id: STORE_ID });
+      expect(snapshotForRate).toHaveBeenCalledWith(null, 32, 11900, { store_id: STORE_ID });
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        ...IVA_SNAPSHOT,
+        shipping_rate_id: 32,
+        shipping_cost: 11900,
+        shipping_tax_is_inclusive: false,
+        // 10000 + 0 − 0 + 11900
+        grand_total: 21900,
+      });
+    });
+
+    it('checkout weight_based cobra lo cotizado (base + per_unit × peso)', async () => {
+      storePrisma.shipping_rates.findFirst.mockResolvedValue(
+        rate({ id: 33, type: 'weight_based', base_cost: 5000, per_unit_cost: 1000 }),
+      );
+      snapshotForRate.mockResolvedValue({ ...EMPTY_SNAPSHOT });
+      prisma.products.findUnique.mockResolvedValue(buildProduct({ weight: 2 }));
+      mockOrderCreate(17000);
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Invitado' },
+        shipping_rate_id: 33,
+        shipping_address: address,
+      } as any);
+
+      // 5000 + 1000 × 2 kg, igual que /shipping/calculate.
+      expect(chargeForRate).toHaveBeenCalledWith(null, 33, 7000, { store_id: STORE_ID });
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        shipping_rate_id: 33,
+        shipping_cost: 7000,
+        shipping_tax_amount: 0,
+        shipping_tax_is_inclusive: null,
+        grand_total: 17000,
+      });
+    });
+
+    it('checkout con umbral de envío gratis alcanzado ⇒ 0 sin impuesto', async () => {
+      storePrisma.shipping_rates.findFirst.mockResolvedValue(
+        rate({ id: 34, base_cost: 15000, free_shipping_threshold: 20000 }),
+      );
+      snapshotForRate.mockResolvedValue({ ...EMPTY_SNAPSHOT });
+      mockOrderCreate(30000);
+      await service.checkout({
+        payment_method_id: 7,
+        // Bruto de productos 30000 ≥ umbral 20000.
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 3 }],
+        guest_customer: { first_name: 'Invitado' },
+        shipping_rate_id: 34,
+        shipping_address: address,
+      } as any);
+
+      expect(chargeForRate).not.toHaveBeenCalled();
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        shipping_rate_id: 34,
+        shipping_cost: 0,
+        shipping_tax_amount: 0,
+        shipping_tax_is_inclusive: null,
+        grand_total: 30000,
+      });
+    });
+
+    it('checkout tarifa free ⇒ 0 sin impuesto aunque base_cost traiga valor', async () => {
+      storePrisma.shipping_rates.findFirst.mockResolvedValue(
+        rate({ id: 35, type: 'free', base_cost: 5000 }),
+      );
+      snapshotForRate.mockResolvedValue({ ...EMPTY_SNAPSHOT });
+      mockOrderCreate(10000);
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Invitado' },
+        shipping_rate_id: 35,
+        shipping_address: address,
+      } as any);
+
+      expect(chargeForRate).not.toHaveBeenCalled();
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        shipping_rate_id: 35,
+        shipping_cost: 0,
+        shipping_tax_amount: 0,
+        shipping_tax_is_inclusive: null,
+        grand_total: 10000,
+      });
+    });
+
+    it('whatsappCheckout agregado cobra el bruto y guarda modo false', async () => {
+      storePrisma.shipping_rates.findFirst.mockResolvedValue(rate());
+      chargeForRate.mockResolvedValue({
+        applies: true, gross: 11900, base: 10000, tax: 1900, reason: 'exclusive',
+      });
+      mockOrderCreate(21900);
+      await service.whatsappCheckout({
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        shipping_rate_id: 32,
+      } as any);
+
+      expect(chargeForRate).toHaveBeenCalledWith(null, 32, 10000, { store_id: STORE_ID });
+      expect(snapshotForRate).toHaveBeenCalledWith(null, 32, 11900, { store_id: STORE_ID });
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        ...IVA_SNAPSHOT,
+        shipping_rate_id: 32,
+        shipping_cost: 11900,
+        shipping_tax_is_inclusive: false,
+        grand_total: 21900,
       });
     });
   });

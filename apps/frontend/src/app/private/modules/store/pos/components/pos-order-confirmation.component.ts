@@ -968,6 +968,11 @@ export class PosOrderConfirmationComponent {
     discount_applied: number;
   }> = [];
   paymentInfo: any = null;
+  /**
+   * Cobro multimétodo: desglose por tramo para el tiquete local. Se deriva
+   * de `data.payments` junto a `paymentInfo`; `null` = cobro escalar.
+   */
+  paymentBreakdown: Array<{ label: string; amount: number }> | null = null;
 private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
   private ticketService = inject(PosTicketService);
@@ -1155,6 +1160,16 @@ private authFacade = inject(AuthFacade);
     this.orderTax = this.invoiceTaxSnapshotTotal(data) ?? Number(data?.invoice?.tax_amount ?? data?.tax_amount ?? data?.tax ?? 0);
     this.appliedPromotions = data?.applied_promotions || data?.appliedPromotions || [];
     this.appliedCoupons = data?.applied_coupons || data?.appliedCoupons || [];
+    // Multimétodo: `payments[]` (misma forma que `payment`) solo llega si
+    // el cobro usó tramos; alimenta el desglose del tiquete local. Se
+    // resetea en cada alimentación para no arrastrar el desglose anterior.
+    this.paymentBreakdown =
+      Array.isArray(data?.payments) && data.payments.length > 0
+        ? data.payments.map((p: any) => ({
+            label: String(p.payment_method ?? p.method ?? 'Pago'),
+            amount: Number(p.amount) || 0,
+          }))
+        : null;
     if (data.payment) {
       this.paymentInfo = {
         method: data.payment.payment_method || data.payment.method || 'Pago',
@@ -1334,6 +1349,7 @@ private authFacade = inject(AuthFacade);
       discount: this.derivedOrderDiscount() ?? this.orderDiscount,
       total: this.derivedOrderTotal() ?? this.orderTotal,
       paymentMethod: this.paymentInfo?.method || 'Pago',
+      paymentBreakdown: this.paymentBreakdown ?? undefined,
       cashReceived: this.paymentInfo?.amount || (this.derivedOrderTotal() || this.orderTotal),
       change: Number(this.orderData()?.change || 0),
       customer: this.derivedCustomerName() ? {

@@ -706,6 +706,12 @@ export interface RelatedNote {
   currency?: string | null;
   issue_date: string;
   note_concept_code?: string | null;
+  /**
+   * Id del `refunds` que esta NC acredita (`invoices.refund_id`, paso A2).
+   * Lo usa el detalle de la orden para saber si un reembolso ya quedó
+   * cubierto por una NC viva, sin heurística de montos/fechas.
+   */
+  refund_id?: number | null;
   created_at: string;
 }
 
@@ -1030,6 +1036,12 @@ export interface CreateCreditNoteDto {
    * `cbc:Description`. No se sustituyen.
    */
   note_concept_code?: string;
+  /**
+   * Id del `refunds` que esta nota acredita (paso A2, solo NC). Cuando viene,
+   * el backend deriva las líneas del reembolso (`resolveRefundLink`) y NO
+   * deben enviarse `items` explícitos: el backend los rechaza con 422.
+   */
+  refund_id?: number;
   issue_date?: string;
   currency?: string;
   notes?: string;

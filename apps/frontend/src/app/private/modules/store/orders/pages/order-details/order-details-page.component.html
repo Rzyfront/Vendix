@@ -2349,7 +2349,7 @@
               @if (shippingTaxAmount() > 0) {
                 <div class="flex justify-between items-center text-xs -mt-1">
                   <span class="text-text-secondary pl-3"
-                    >Incluye {{ shippingTaxLabel() }}:</span
+                    >{{ shippingTaxPrefix() }} {{ shippingTaxLabel() }}:</span
                   >
                   <span class="text-text-secondary">{{
                     shippingTaxAmount() | currency

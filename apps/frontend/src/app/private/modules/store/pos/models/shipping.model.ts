@@ -70,7 +70,22 @@ export interface PosShippingOption {
   rate_name?: string;
   /** Optional zone label resolved by the calculator. */
   zone_name?: string;
+  /**
+   * Lo que paga el cliente por el envío: siempre el BRUTO (lote C). En modo
+   * agregado ya trae el impuesto sumado.
+   */
   cost: number;
+  /**
+   * Bloque fiscal para superficies del COMERCIANTE (wizard, POS). El
+   * storefront muestra solo `cost`. Ausentes = backend sin contexto fiscal
+   * para la tarifa ⇒ sin desglose (fail-closed, nunca derivado en floats).
+   */
+  /** Base neta del envío (bruto − impuesto). */
+  base?: number;
+  /** Impuesto del envío incluido en `cost`. */
+  shipping_tax_amount?: number;
+  /** Modo de la tarifa: true = incluido, false = agregado. */
+  tax_is_inclusive?: boolean;
   currency: string;
   estimated_days?: { min: number; max: number };
 }

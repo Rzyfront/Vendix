@@ -17,10 +17,7 @@ import {
 const NON_FISCAL_DISCLAIMER = 'Este documento no es factura electrónica de venta.';
 import { mapUserAddress } from '../lib/customer-address';
 import { formatFiscalMoney } from './fiscal-document-print.mapper';
-import {
-  ORDER_PAYMENT_MEANS_INCLUDE,
-  resolveOrderPaymentLabel,
-} from '../../payments/order-payment-means.contract';
+import { ORDER_PAYMENT_MEANS_INCLUDE } from '../../payments/order-payment-means.contract';
 // C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — el tiquete declara
 // `money_basis: 'gross'` (G-01) y propaga el gate fiscal que C.1 resolvió,
 // usando las filas `org`/`store` que el `include` de C.1 ya trae en memoria.
@@ -31,6 +28,9 @@ import {
   resolveOrderLinePrintedGross,
   resolveOrderLineTaxTotal,
 } from '../../taxes/utils/final-price.util';
+// B6 — el impuesto del envío vive en la copia de la orden, no en
+// `order_item_taxes`: el recibo pre-fiscal lo pinta desde esta definición.
+import { buildShippingTaxBreakdownRow } from '../../shipping/utils/shipping-tax.util';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
@@ -686,21 +686,26 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
   }
 
   /**
-   * Efectivo entregado y vuelto, leídos del pago en efectivo de la orden.
+   * Efectivo entregado y vuelto, leídos del tramo en efectivo de la orden.
    *
-   * El POS los escribe dentro de `payments.gateway_response`
+   * El POS y `flow/pay` los escriben dentro de `payments.gateway_response`
    * (`metadata.amount_received` y `change`), que es `Json?` en Prisma: puede
    * llegar `null`, una cadena, un arreglo o un objeto sin esas claves. Por eso
    * se comprueba la FORMA antes de leer: asumirla reventaría el tiquete entero
    * por un pago viejo con otro contenido.
    *
-   * Ambos valores salen del MISMO pago —el primer cobro que traiga alguno— y no
-   * de una búsqueda independiente por campo: son las dos mitades de un único
-   * acto de entrega de efectivo, y cruzar el recibido de un pago con el vuelto
-   * de otro imprimiría una cuenta que nunca ocurrió.
+   * Se filtra PRIMERO por `system_payment_method.type === 'cash'`: en un cobro
+   * multimétodo los tramos no-efectivo también traen claves de tender (el POS
+   * escribe `metadata.amount_received` en todos los tramos y ambos carriles
+   * escriben `change: 0` en los que no dan vuelto), así que «el primer cobro
+   * que traiga alguno» devolvería el recibido de una tarjeta. Sin tramo en
+   * efectivo ambos quedan `undefined`: el compositor no emite las filas (no hay
+   * vuelto que inventar).
    *
-   * Una venta con tarjeta no tiene ninguno de los dos y ambos quedan
-   * `undefined`: el compositor no emite las filas (no hay vuelto que inventar).
+   * Ambos valores salen del MISMO pago y no de una búsqueda independiente por
+   * campo: son las dos mitades de un único acto de entrega de efectivo, y
+   * cruzar el recibido de un pago con el vuelto de otro imprimiría una cuenta
+   * que nunca ocurrió.
    */
   private resolveCashTender(payments: any[]): {
     amount_received?: number;
@@ -716,6 +721,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
 
     for (const payment of payments || []) {
       if (!payment || payment.state !== 'succeeded') continue;
+      // Multimétodo: sólo el tramo en efectivo entrega y devuelve billetes.
+      if (payment.store_payment_method?.system_payment_method?.type !== 'cash') {
+        continue;
+      }
 
       const gateway = payment.gateway_response;
       if (!isPlainObject(gateway)) continue;
@@ -728,6 +737,56 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       return { amount_received: received, change_due: change };
     }
     return {};
+  }
+
+  /**
+   * Desglose del cobro por pago, listo para `document.payment_method`.
+   *
+   * Un cobro multimétodo une una entrada por pago («Efectivo $20.000 ·
+   * Transferencia $80.000»), SIN deduplicar y en el orden en que llegan —que
+   * es `paid_at` ascendente porque la consulta usa
+   * `ORDER_PAYMENT_MEANS_INCLUDE`—. El monto sale con `formatOrderMoney`, igual
+   * que el TOTAL que tiene al lado.
+   *
+   * Con un solo pago con nombre se devuelve la etiqueta sola, sin monto:
+   * idéntico a lo que el contrato compartido devolvía hoy. `undefined` cuando
+   * ningún cobro trae nombre: la fila no se emite. El desglose se arma acá y no
+   * en el compositor para no tocar su región de totales.
+   */
+  private resolvePaymentBreakdown(payments: any[]): string | undefined {
+    const entries: Array<{ label: string; amount: number }> = [];
+    for (const payment of payments || []) {
+      if (!payment || payment.state !== 'succeeded') continue;
+      const label = this.resolvePaymentLegLabel(payment);
+      if (!label) continue;
+      entries.push({ label, amount: Number(payment.amount || 0) });
+    }
+    if (entries.length === 0) return undefined;
+    if (entries.length === 1) return entries[0].label;
+    return entries
+      .map((entry) => `${entry.label} ${this.formatOrderMoney(entry.amount)}`)
+      .join(' · ');
+  }
+
+  /**
+   * Etiqueta de UN pago: la misma cascada de tres niveles del contrato
+   * compartido (`order-payment-means.contract.ts`: alias de la tienda, nombre
+   * canónico del sistema, clave técnica). Vive acá duplicada a propósito: el
+   * contrato no exporta la etiqueta individual y el desglose no deduplica.
+   */
+  private resolvePaymentLegLabel(payment: any): string | undefined {
+    const storeMethod = payment?.store_payment_method;
+    const systemMethod = storeMethod?.system_payment_method;
+    const candidates = [
+      storeMethod?.display_name,
+      systemMethod?.display_name,
+      systemMethod?.name,
+    ];
+    for (const candidate of candidates) {
+      const label = (candidate ?? '').trim();
+      if (label) return label;
+    }
+    return undefined;
   }
 
   private mapOrderToStandardModel(order: any, signedLogoUrl?: string): StandardPrintDataModel {
@@ -805,13 +864,34 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
 
     const taxes = this.aggregateTaxes(order.order_items);
 
-    // Etiqueta del método de pago — la resuelve el contrato compartido, no
-    // este archivo: soporta pago mixto («Efectivo + Tarjeta»), respeta el
-    // alias que la tienda le puso al método y devuelve `undefined` cuando no
-    // hay ningún cobro con nombre. Ese `undefined` se propaga tal cual: la
-    // fila no se emite. Un tiquete que dice «Efectivo» por defecto afirma una
-    // entrada de caja que nadie hizo.
-    const paymentMethod = resolveOrderPaymentLabel(order.payments);
+    // B6 — fila del impuesto del envío en el bloque `taxes` del recibo
+    // pre-fiscal: `aggregateTaxes` solo lee `order_item_taxes`, así que sin
+    // esto el tributo del domicilio no salía aunque el total sí lo cobró.
+    // Fila PROPIA («INC 8% (incl. envío)»), no fusionada con el grupo de
+    // productos, para que el comerciante vea de dónde sale. Sin copia ⇒
+    // null ⇒ el modelo sale byte-idéntico al de antes. El carril fiscal
+    // (`overrideWithInvoiceSnapshot`) no se toca: `invoice_taxes` ya trae
+    // el envío y `aggregateInvoiceTaxes` ya lo suma.
+    const shippingTaxRow = buildShippingTaxBreakdownRow(order);
+    if (shippingTaxRow) {
+      taxes.push({
+        name: `${shippingTaxRow.tax_type.toUpperCase()} (incl. envío)`,
+        // La copia guarda fracción (`Decimal(6,5)` ⇒ 0.08); la fila se pinta
+        // como `(${rate}%)`, igual que en `aggregateTaxes`.
+        rate: Math.round(shippingTaxRow.tax_rate * 10000) / 100,
+        base_amount: shippingTaxRow.taxable_amount,
+        tax_amount: shippingTaxRow.tax_amount,
+        base_formatted: this.formatOrderMoney(shippingTaxRow.taxable_amount),
+        tax_formatted: this.formatOrderMoney(shippingTaxRow.tax_amount),
+      });
+    }
+
+    // Desglose del cobro por pago («Efectivo $20.000 · Transferencia
+    // $80.000», en orden de cobro): lo arma este provider, no el compositor,
+    // y con un solo método devuelve la etiqueta sola, igual que hoy. Ese
+    // `undefined` se propaga tal cual: la fila no se emite. Un tiquete que dice
+    // «Efectivo» por defecto afirma una entrada de caja que nadie hizo.
+    const paymentMethod = this.resolvePaymentBreakdown(order.payments);
     const { amount_received, change_due } = this.resolveCashTender(
       order.payments,
     );

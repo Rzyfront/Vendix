@@ -18,6 +18,7 @@ import {
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { table_status_enum } from '@prisma/client';
+import { PaymentLegDto } from './payment-leg.dto';
 
 export class PosOrderItemDto {
   @IsOptional()
@@ -468,6 +469,20 @@ export class CreatePosPaymentDto {
   @MaxLength(255)
   payment_reference?: string;
 
+  /**
+   * Cobro multimétodo de contado: 2..5 tramos cuya suma debe ser igual al
+   * total a cobrar. Si llega con elementos, gana sobre el contrato escalar
+   * (`store_payment_method_id` + `amount_received` + …); si no llega, el cobro
+   * sigue el camino escalar de siempre. Ver `normalizePaymentLegs`.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(5)
+  @ValidateNested({ each: true })
+  @Type(() => PaymentLegDto)
+  payments?: PaymentLegDto[];
+
   // Control de flujo de pago
   @IsOptional()
   @IsBoolean()
@@ -793,6 +808,14 @@ export class PosPaymentResponseDto {
       data?: any;
     };
   };
+  /**
+   * Cobro multimétodo de contado: un elemento por tramo, en orden de
+   * creación, con la MISMA forma que `payment`. Sólo presente cuando el
+   * cobro usó `payments[]` (2..5 tramos); el escalar no la trae (respuesta
+   * histórica intacta) y `payment` sigue siendo el primero, por
+   * compatibilidad con la app móvil.
+   */
+  payments?: NonNullable<PosPaymentResponseDto['payment']>[];
   nextAction?: {
     type: 'redirect' | '3ds' | 'await' | 'none';
     url?: string;

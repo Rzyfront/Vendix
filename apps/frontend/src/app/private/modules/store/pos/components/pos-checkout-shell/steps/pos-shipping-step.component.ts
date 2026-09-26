@@ -68,6 +68,35 @@ type ShippingCreditConfig = {
 };
 
 /**
+ * Paso 15b (lote C) — desglose fiscal de la ÚLTIMA cotización aceptada para
+ * el método seleccionado. Copia tal cual el bloque del backend
+ * (`ShippingOption.base`, `shipping_tax_amount`, `tax_is_inclusive`); nunca
+ * se deriva en floats desde el costo.
+ */
+type QuotedShippingTax = {
+  base: number;
+  tax: number;
+  taxIsInclusive: boolean;
+};
+
+/**
+ * Normaliza el bloque fiscal de la opción cotizada. Cualquier campo ausente,
+ * no numérico o incoherente (impuesto ≤ 0, base ≤ 0) ⇒ null: sin respaldo no
+ * hay desglose. El modo ausente se lee como incluido (default del backend).
+ */
+function toQuotedShippingTax(option: {
+  base?: unknown;
+  shipping_tax_amount?: unknown;
+  tax_is_inclusive?: unknown;
+}): QuotedShippingTax | null {
+  const base = Number(option.base);
+  const tax = Number(option.shipping_tax_amount);
+  if (!Number.isFinite(base) || !Number.isFinite(tax)) return null;
+  if (tax <= 0 || base <= 0) return null;
+  return { base, tax, taxIsInclusive: option.tax_is_inclusive !== false };
+}
+
+/**
  * Fase 5·B2b — `app-pos-shipping-step`.
  *
  * Cuerpo del paso **Envío** del checkout shell. Recolecta el método de envío,
@@ -210,6 +239,13 @@ export class PosShippingStepComponent {
   readonly calculatedShippingCost = signal<number | null>(null);
   readonly manualCostOverride = signal<boolean>(false);
   readonly isCalculatingShipping = signal<boolean>(false);
+  /**
+   * Paso 15b — bloque fiscal de la última cotización aceptada. Solo lo
+   * escribe el handler de `calculateShippingCost`; lo limpian los cambios de
+   * insumos de cotización (vía `invalidateQuote`, salvo el toggle manual que
+   * lo preserva para poder restaurar el desglose al volver a automático).
+   */
+  readonly quotedShippingTax = signal<QuotedShippingTax | null>(null);
 
   // ── Envío sub-wizard (presentación; espeja el patrón de Cobro) ────────────
   /** Sub-paso activo del paso Envío: 0=Método · 1=Dirección (si no pickup) · Costo (terminal). */
@@ -273,6 +309,33 @@ export class PosShippingStepComponent {
 
   readonly totalWithShipping = computed<number>(
     () => this.subtotal() + this.shippingCost(),
+  );
+
+  /**
+   * Paso 15b — desglose visible al cajero (base + impuesto del envío). Solo
+   * cuando la cotización trae impuesto > 0 para el método actual: en pickup
+   * (costo 0), con costo manual (viaja sin tarifa y el backend lo registra
+   * sin impuesto) o sin respaldo fiscal no hay filas.
+   */
+  readonly shippingTaxBreakdown = computed<QuotedShippingTax | null>(() => {
+    if (this.isPickupMethod() || this.manualCostOverride()) return null;
+    return this.quotedShippingTax();
+  });
+
+  /** Etiqueta del modo de la tarifa para el desglose: Incluido/Agregado. */
+  readonly shippingTaxModeLabel = computed<string>(() =>
+    this.shippingTaxBreakdown()?.taxIsInclusive === false ? 'Agregado' : 'Incluido',
+  );
+
+  /**
+   * El costo manual pierde la tarifa y su impuesto: avisar al cajero, pero
+   * solo cuando la cotización vigente sí traía impuesto (si la tarifa no
+   * tiene impuesto no hay nada que perder y el aviso sería ruido).
+   */
+  readonly manualCostLosesTax = computed<boolean>(() =>
+    this.manualCostOverride() &&
+    !this.isPickupMethod() &&
+    (this.quotedShippingTax()?.tax ?? 0) > 0,
   );
 
   /**
@@ -512,10 +575,11 @@ export class PosShippingStepComponent {
     ].map(norm));
   }
 
-  private invalidateQuote(): void {
+  private invalidateQuote(preserveBreakdown = false): void {
     this.quoteGeneration++;
     this.isCalculatingShipping.set(false);
     this.quoteError.set(null);
+    if (!preserveBreakdown) this.quotedShippingTax.set(null);
   }
 
   onAddressValidChange(valid: boolean): void {
@@ -608,6 +672,7 @@ export class PosShippingStepComponent {
         if (matching) {
           this.calculatedShippingCost.set(matching.cost);
           this.shippingRateId.set(matching.rate_id ?? matching.id);
+          this.quotedShippingTax.set(toQuotedShippingTax(matching));
           if (!this.manualCostOverride()) this.shippingCost.set(matching.cost);
         } else {
           this.calculatedShippingCost.set(null);
@@ -626,14 +691,18 @@ export class PosShippingStepComponent {
   }
 
   toggleManualCost(): void {
-    this.invalidateQuote();
+    // Preserva el desglose: al volver a automático se restaura sin esperar
+    // la recotización, y en manual alimenta el aviso de impuesto perdido.
+    this.invalidateQuote(true);
     this.manualCostOverride.update((value) => !value);
     const calc = this.calculatedShippingCost();
     if (!this.manualCostOverride() && calc !== null) this.shippingCost.set(calc);
   }
 
   onShippingCostChange(): void {
-    this.invalidateQuote();
+    // El costo digitado no cambia los insumos de la cotización: se preserva
+    // el desglose para el aviso de impuesto perdido y la restauración.
+    this.invalidateQuote(true);
     this.manualCostOverride.set(true);
     this.shippingEdited.set(true);
   }

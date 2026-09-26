@@ -237,6 +237,101 @@ export class CheckoutService {
   }
 
   /**
+   * Paso 14 — precio de tarifa por tipo, misma selección del cotizador
+   * (`shipping-calculator.service.ts`): `free` ⇒ 0; `weight_based` ⇒ base +
+   * `per_unit_cost` × peso del carrito; resto ⇒ base. Sin puerta de rangos
+   * (`min_val`/`max_val`): el cotizador ya filtra lo ofrecido y rechazarla
+   * aquí agregaría un 400 nuevo; se cobra la selección tal cual.
+   */
+  private static selectRatePriceByType(
+    rate: {
+      type?: shipping_rate_type_enum | string | null;
+      base_cost?: unknown;
+      per_unit_cost?: unknown;
+    },
+    cart_weight_kg: number,
+  ): number {
+    if (rate.type === shipping_rate_type_enum.free) return 0;
+    const base = Number(rate.base_cost ?? 0);
+    if (rate.type === shipping_rate_type_enum.weight_based) {
+      const per_unit = Number(rate.per_unit_cost ?? 0);
+      const weight = Number.isFinite(cart_weight_kg) ? cart_weight_kg : 0;
+      return base + (Number.isFinite(per_unit) ? per_unit : 0) * weight;
+    }
+    return base;
+  }
+
+  /**
+   * Paso 14 — umbral de envío gratis, misma regla del cotizador: umbral
+   * alcanzado por el bruto de productos ⇒ 0. `null` = sin umbral; negativo
+   * legacy = sin gratis. El bruto aquí es el tarifado en servidor
+   * (subtotal + impuesto), no el estimado del storefront.
+   */
+  private static applyFreeShippingThreshold(
+    rate: { free_shipping_threshold?: unknown },
+    price: number,
+    products_gross: number,
+  ): number {
+    const threshold = rate.free_shipping_threshold;
+    if (threshold == null) return price;
+    const limit = Number(threshold);
+    if (!Number.isFinite(limit) || limit < 0) return price;
+    return products_gross >= limit ? 0 : price;
+  }
+
+  /** Peso del carrito en kg (Σ peso unitario × cantidad, sin peso ⇒ 0). */
+  private static cartWeightKg(
+    cart_items: ReadonlyArray<{
+      quantity?: unknown;
+      product?: { weight?: unknown } | null;
+    }>,
+  ): number {
+    return cart_items.reduce((sum, item) => {
+      const unit = Number(item?.product?.weight ?? 0);
+      const qty = Number(item?.quantity ?? 0);
+      return (
+        sum +
+        (Number.isFinite(unit) && Number.isFinite(qty) && unit > 0 && qty > 0
+          ? unit * qty
+          : 0)
+      );
+    }, 0);
+  }
+
+  /**
+   * Paso 14 — bruto de la tarifa con el cálculo único (`chargeForRate`):
+   * incluido ⇒ precio; agregado ⇒ base + impuesto. Sin servicio (solo
+   * specs) o sin `chargeForRate` (dobles viejos) ⇒ el precio es el bruto y
+   * el modo queda null. Precio 0 ⇒ 0 sin impuesto, sin leer la tarifa.
+   * Nunca lanza por el impuesto.
+   */
+  private async chargeCheckoutRate(
+    rate_id: number | null,
+    rate_price: number,
+    store_id: number | null | undefined,
+  ): Promise<{ gross: number; is_inclusive: boolean | null }> {
+    const passthrough = {
+      gross: rate_price,
+      is_inclusive: null as boolean | null,
+    };
+    if (!rate_id || !store_id || !this.shippingTaxService) return passthrough;
+    if (typeof this.shippingTaxService.chargeForRate !== 'function') {
+      return passthrough;
+    }
+    if (!(rate_price > 0)) return { gross: 0, is_inclusive: null };
+    const charge = await this.shippingTaxService.chargeForRate(
+      null,
+      rate_id,
+      rate_price,
+      { store_id },
+    );
+    return {
+      gross: charge.gross,
+      is_inclusive: charge.applies ? charge.reason === 'inclusive' : null,
+    };
+  }
+
+  /**
    * Recalcula el costo de envío por distancia al confirmar, con el mismo
    * resolver del cotizador (`ShippingDistanceService`) y las coords de la
    * dirección final. Sin método-distancia/escala/coords, o con el motor
@@ -1492,6 +1587,24 @@ export class CheckoutService {
     let shipping_cost = 0;
     let shipping_method_id: number | null = null;
     let shipping_rate_id: number | null = null;
+    // Paso 14 — la tarifa elegida; el COSTO se calcula tarde (junto al
+    // snapshot) porque el umbral de envío gratis se evalúa contra el bruto
+    // de productos (subtotal + impuesto), que solo existe tras tarifar.
+    let selected_rate: {
+      id: number;
+      type?: shipping_rate_type_enum | string | null;
+      base_cost?: unknown;
+      per_unit_cost?: unknown;
+      free_shipping_threshold?: unknown;
+      distance_tiers?: unknown;
+      shipping_method_id: number;
+      shipping_method?: {
+        type?: unknown;
+        distance_pricing_enabled?: boolean | null;
+        origin_latitude?: unknown;
+        origin_longitude?: unknown;
+      } | null;
+    } | null = null;
     let delivery_type:
       | 'pickup'
       | 'home_delivery'
@@ -1523,24 +1636,9 @@ export class CheckoutService {
         throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_003);
       }
 
-      // Release-853 paso 11 — tarifa `free`: base 0 aunque el `base_cost`
-      // persistido traiga otro valor (el cotizador ya la ofrece en 0).
-      shipping_cost =
-        rate.type === shipping_rate_type_enum.free
-          ? 0
-          : Number(rate.base_cost);
       shipping_method_id = rate.shipping_method_id;
       shipping_rate_id = rate.id;
-
-      // Cobro por distancia: el costo se deriva 100% en servidor con el mismo
-      // resolver del cotizador y las coords de la dirección final; el cliente
-      // nunca envía costos. Va ANTES del snapshot de impuesto para que el IVA
-      // del envío se calcule sobre el costo final.
-      shipping_cost = await this.resolveConfirmShippingCost(
-        rate,
-        shipping_address_snapshot,
-        shipping_cost,
-      );
+      selected_rate = rate;
 
       // Derive delivery_type from shipping method type
       const methodType = rate.shipping_method.type;
@@ -1755,6 +1853,36 @@ export class CheckoutService {
       itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0),
     );
 
+    // Paso 14 — el costo cobrado SALE de la tarifa con la misma selección
+    // del cotizador (`/shipping/calculate`: tipo → distancia → umbral de
+    // envío gratis) y el cálculo único (`chargeForRate`: incluido ⇒ precio,
+    // agregado ⇒ base + impuesto). El cliente nunca envía costos. Va ANTES
+    // del snapshot para que el impuesto se calcule sobre el costo final.
+    let shipping_tax_is_inclusive: boolean | null = null;
+    if (selected_rate) {
+      const type_price = CheckoutService.selectRatePriceByType(
+        selected_rate,
+        CheckoutService.cartWeightKg(cart_items),
+      );
+      const distanced_price = await this.resolveConfirmShippingCost(
+        selected_rate,
+        shipping_address_snapshot,
+        type_price,
+      );
+      const rate_price = CheckoutService.applyFreeShippingThreshold(
+        selected_rate,
+        distanced_price,
+        this.roundMoney(subtotal + total_tax),
+      );
+      const charge = await this.chargeCheckoutRate(
+        shipping_rate_id,
+        rate_price,
+        store_id,
+      );
+      shipping_cost = charge.gross;
+      shipping_tax_is_inclusive = charge.is_inclusive;
+    }
+
     // Copia del impuesto del envío (tarifa elegida). Va incluido en
     // `shipping_cost`: no cambia `grand_total`.
     const shipping_tax = await this.resolveCheckoutShippingTax(
@@ -1851,6 +1979,9 @@ export class CheckoutService {
         shipping_rate_id: shipping_rate_id,
         // Copia congelada del impuesto del envío (vacía sin tarifa gravada).
         ...shipping_tax,
+        // Paso 14 — modo de la tarifa que produjo la copia (null = sin
+        // impuesto o histórico).
+        shipping_tax_is_inclusive,
         delivery_type: delivery_type,
         grand_total: grand_total,
         shipping_address_id,
@@ -2588,6 +2719,7 @@ export class CheckoutService {
     let wa_shipping_method_id: number | null = null;
     let wa_shipping_rate_id: number | null = null;
     let wa_shipping_cost = 0;
+    let wa_shipping_tax_is_inclusive: boolean | null = null;
     let wa_delivery_type:
       | 'pickup'
       | 'home_delivery'
@@ -2610,8 +2742,31 @@ export class CheckoutService {
       }
       wa_shipping_method_id = rate.shipping_method_id;
       wa_shipping_rate_id = rate.id;
-      wa_shipping_cost = Number(rate.base_cost);
       wa_delivery_type = deriveDeliveryType(rate.shipping_method.type);
+      // Paso 14 — misma selección del cotizador + cálculo único que el
+      // checkout normal (tipo → distancia → umbral → bruto). El subtotal
+      // tarifado ya existe aquí, así que el costo se resuelve en el sitio.
+      const wa_type_price = CheckoutService.selectRatePriceByType(
+        rate,
+        CheckoutService.cartWeightKg(cart_items),
+      );
+      const wa_distanced = await this.resolveConfirmShippingCost(
+        rate,
+        shipping_address_snapshot,
+        wa_type_price,
+      );
+      const wa_rate_price = CheckoutService.applyFreeShippingThreshold(
+        rate,
+        wa_distanced,
+        this.roundMoney(subtotal + total_tax),
+      );
+      const wa_charge = await this.chargeCheckoutRate(
+        wa_shipping_rate_id,
+        wa_rate_price,
+        wa_store_id,
+      );
+      wa_shipping_cost = wa_charge.gross;
+      wa_shipping_tax_is_inclusive = wa_charge.is_inclusive;
     } else if (dto.shipping_method_id) {
       const method = await this.store_prisma.shipping_methods.findFirst({
         where: {
@@ -2679,6 +2834,9 @@ export class CheckoutService {
         shipping_rate_id: wa_shipping_rate_id,
         // Copia congelada del impuesto del envío (vacía sin tarifa gravada).
         ...wa_shipping_tax,
+        // Paso 14 — modo de la tarifa que produjo la copia (null = sin
+        // impuesto o histórico).
+        shipping_tax_is_inclusive: wa_shipping_tax_is_inclusive,
         delivery_type: wa_delivery_type,
         grand_total: grand_total,
         shipping_address_id,

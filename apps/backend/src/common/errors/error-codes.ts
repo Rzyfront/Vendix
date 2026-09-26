@@ -371,6 +371,29 @@ export const ErrorCodes = {
     devMessage: 'Payment does not belong to the requesting user',
   },
 
+  // Multi-tender cash payments (pago multimétodo de contado)
+  PAY_MULTI_TENDER_SUM_MISMATCH: {
+    code: 'PAY_MULTI_TENDER_SUM_MISMATCH',
+    httpStatus: 400,
+    devMessage: 'Multi-tender legs must add up to the payable amount',
+  },
+  PAY_MULTI_TENDER_METHOD_NOT_ALLOWED: {
+    code: 'PAY_MULTI_TENDER_METHOD_NOT_ALLOWED',
+    httpStatus: 400,
+    devMessage:
+      'Only direct payment methods are allowed in a multi-tender cash payment',
+  },
+  PAY_MULTI_TENDER_MULTIPLE_CASH: {
+    code: 'PAY_MULTI_TENDER_MULTIPLE_CASH',
+    httpStatus: 400,
+    devMessage: 'Only one cash leg is allowed in a multi-tender cash payment',
+  },
+  PAY_MULTI_TENDER_CASH_INSUFFICIENT: {
+    code: 'PAY_MULTI_TENDER_CASH_INSUFFICIENT',
+    httpStatus: 400,
+    devMessage: 'Cash received is less than the cash leg amount',
+  },
+
   // Payment Sources (Card-On-File / Wompi recurrent)
   PAYMENT_SOURCE_NOT_FOUND: {
     code: 'PAYMENT_SOURCE_NOT_FOUND',
@@ -3302,6 +3325,26 @@ export const ErrorCodes = {
     httpStatus: 412,
     devMessage:
       'Commerce is not VAT responsible (DIAN): cannot assign or charge IVA',
+  },
+  // B4 — Gate "no responsable de INC". El comercio NO declara O-33 en su RUT
+  // (casilla 53): no puede asignar INC a una tarifa de envío ni cobrarlo en
+  // una venta. `details` incluye `context: 'shipping'`,
+  // `cta: '/admin/fiscal/wizard'` y `reason`.
+  FISCAL_INC_NOT_RESPONSIBLE_001: {
+    code: 'FISCAL_INC_NOT_RESPONSIBLE_001',
+    httpStatus: 412,
+    devMessage:
+      'Commerce is not INC responsible (DIAN): cannot assign or charge INC',
+  },
+  // B5 — Reparación de la copia del impuesto del envío bloqueada: la orden
+  // está cancelada/devuelta, la copia no se puede completar desde su tarifa,
+  // o `clear` choca con un asiento de venta ya contabilizado. `details`
+  // lleva `order_id` y el motivo (`state`, `reason` o `entry_number`).
+  ORD_SHIPPING_TAX_REPAIR_BLOCKED_001: {
+    code: 'ORD_SHIPPING_TAX_REPAIR_BLOCKED_001',
+    httpStatus: 409,
+    devMessage:
+      'Shipping tax copy cannot be repaired in this state (cancelled/refunded order, unresolvable rate, or posted sale entry)',
   },
   /**
    * Art. 616-1 ET / Res. 000165 de 2023: the POS electronic equivalent document

@@ -1432,7 +1432,12 @@ export class InvoiceDetailComponent {
     }));
   });
 
-  readonly taxLines = computed<InvoiceTax[]>(() => {
+  /**
+   * Filas de impuesto crudas (una por fila persistida): solo las consume
+   * `priorRegimeHint`, que necesita el enlace por línea (`invoice_item_id`)
+   * para el recómputo. El template usa `taxLines` (agrupadas).
+   */
+  private readonly rawTaxLines = computed<InvoiceTax[]>(() => {
     const inv = this.detail();
     return (inv?.invoice_taxes ?? inv?.taxes ?? []).map((tax) => ({
       ...tax,
@@ -1440,6 +1445,30 @@ export class InvoiceDetailComponent {
       tax_amount: this.toNumber(tax?.tax_amount),
       taxable_amount: this.toNumber(tax?.taxable_amount),
     }));
+  });
+
+  /**
+   * B6 — una sola fila por `tax_type|tax_rate`: con dos o más tributos el
+   * backend persiste una fila por (línea × tributo), así que plato INC 8 % +
+   * envío INC 8 % llegaban como dos filas idénticas. Se suman los importes YA
+   * truncados (igual que `aggregateInvoiceTaxes` del ticket). Sin tipo ⇒ IVA
+   * (contrato tipado: lo no tipado es IVA).
+   */
+  readonly taxLines = computed<InvoiceTax[]>(() => {
+    const grouped = new Map<string, InvoiceTax>();
+    for (const tax of this.rawTaxLines()) {
+      const key = `${tax?.tax_type ?? 'iva'}|${tax?.tax_rate}`;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.tax_amount =
+          Number(existing.tax_amount) + Number(tax?.tax_amount);
+        existing.taxable_amount =
+          Number(existing.taxable_amount) + Number(tax?.taxable_amount);
+      } else {
+        grouped.set(key, { ...tax });
+      }
+    }
+    return Array.from(grouped.values());
   });
 
   /**
@@ -1461,7 +1490,7 @@ export class InvoiceDetailComponent {
   readonly priorRegimeHint = computed<string | null>(() => {
     const lines = this.lines();
     if (lines.length === 0) return null;
-    const taxes = this.taxLines() as Array<
+    const taxes = this.rawTaxLines() as Array<
       InvoiceTax & {
         invoice_item_id?: number | null;
         is_inclusive?: boolean | null;

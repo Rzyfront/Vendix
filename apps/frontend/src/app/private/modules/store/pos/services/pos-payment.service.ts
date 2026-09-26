@@ -28,10 +28,38 @@ export interface PosSalePaymentResponse {
   success?: boolean;
   order?: any;
   payment?: any;
+  /**
+   * Cobro multimétodo: un elemento por tramo, con la MISMA forma que
+   * `payment`. Solo presente cuando el cobro usó `payments[]`; el escalar
+   * no la trae y `payment` sigue siendo el primero.
+   */
+  payments?: PosPaymentLegResult[];
   message?: string;
   change?: number;
   nextAction?: { type: 'redirect' | '3ds' | 'await' | 'none'; url?: string; data?: any };
   previous_table_status?: TableStatus;
+}
+
+/**
+ * Tramo de un cobro multimétodo de contado (`PaymentLegDto` del backend).
+ * Claves snake_case EXACTAS: `forbidNonWhitelisted` rechaza cualquier otra.
+ */
+export interface PosPaymentLeg {
+  store_payment_method_id: number;
+  amount: number;
+  amount_received?: number;
+  payment_reference?: string;
+  bank_account_id?: number;
+}
+
+/** Tramo tal como lo devuelve `POST /store/payments/pos` (forma de `payment`). */
+export interface PosPaymentLegResult {
+  id: number;
+  amount: number;
+  payment_method: string;
+  status: string;
+  transaction_id?: string;
+  change?: number;
 }
 
 // Re-export types for component usage
@@ -447,6 +475,15 @@ export class PosPaymentService {
     //   `CouponsService.validate`. Any locally computed `discount_amount` is
     //   intentionally omitted so the frontend cannot override the server
     //   calculation.
+    //
+    // Cobro multimétodo de contado: con 2+ tramos se envía `payments[]` tal
+    // cual y se OMITEN las claves escalares de método (el backend prefiere
+    // `payments[]` y el escalar de `CreatePosPaymentDto` es opcional).
+    const multiPayments = (
+      paymentRequest as { payments?: PosPaymentLeg[] }
+    ).payments;
+    const hasMultiPayments =
+      Array.isArray(multiPayments) && multiPayments.length >= 2;
     const sale_data: any = {
       store_id: this.getStoreId(),
       ...(usePosOrderTransaction && cartState.linkedOrderId != null
@@ -469,22 +506,26 @@ export class PosPaymentService {
       ),
       requires_payment: true,
       payment_form: '1', // DIAN: contado
-      store_payment_method_id: parseInt(paymentRequest.paymentMethod.id),
-      amount_received: Number(
-        parseFloat(
-          (paymentRequest.cashReceived || cartState.summary.total).toString(),
-        ).toFixed(2),
-      ),
-      payment_reference: paymentRequest.reference || '',
-      // QUI-728 (E.1) — el selector de cuentas del collector emite
-      // `bankAccountId`; `pos-payment-step` lo pasa como `bank_account_id` y
-      // aquí viaja al backend, que lo valida y lo persiste en
-      // `payments.bank_account_id` (`processPosPaymentTransaction`). Omitir la
-      // clave cuando no hay cuenta: un `bank_account_id` ausente deja el pago
-      // en "Pagos sin asignar" (E.2), que es la degradación deliberada.
-      ...(paymentRequest.bank_account_id != null
-        ? { bank_account_id: paymentRequest.bank_account_id }
-        : {}),
+      ...(hasMultiPayments
+        ? { payments: multiPayments }
+        : {
+            store_payment_method_id: parseInt(paymentRequest.paymentMethod.id),
+            amount_received: Number(
+              parseFloat(
+                (paymentRequest.cashReceived || cartState.summary.total).toString(),
+              ).toFixed(2),
+            ),
+            payment_reference: paymentRequest.reference || '',
+            // QUI-728 (E.1) — el selector de cuentas del collector emite
+            // `bankAccountId`; `pos-payment-step` lo pasa como `bank_account_id` y
+            // aquí viaja al backend, que lo valida y lo persiste en
+            // `payments.bank_account_id` (`processPosPaymentTransaction`). Omitir la
+            // clave cuando no hay cuenta: un `bank_account_id` ausente deja el pago
+            // en "Pagos sin asignar" (E.2), que es la degradación deliberada.
+            ...(paymentRequest.bank_account_id != null
+              ? { bank_account_id: paymentRequest.bank_account_id }
+              : {}),
+          }),
       wompi_payment_method: (paymentRequest.paymentMethod?.original as any)?.system_payment_method?.type === 'wompi'
         ? paymentRequest.metadata?.wompiPaymentMethod
         : undefined,
@@ -551,6 +592,9 @@ export class PosPaymentService {
               : {}),
             order: data.order,
             payment: mappedPayment,
+            // Multimétodo: el backend solo trae `payments[]` si el cobro
+            // usó tramos; se propaga tal cual para el tiquete local.
+            ...(data.payments != null ? { payments: data.payments } : {}),
             message: data.message,
             change: data.payment?.change,
             nextAction: data.payment?.nextAction || data.nextAction,
@@ -1089,6 +1133,14 @@ export class PosPaymentService {
    * Response shape is normalized to match the legacy `/store/payments/pos`
    * envelope (`{ success, order, payment, message, change, nextAction }`) so
    * the POS UI doesn't need to know which branch ran.
+   *
+   * MULTIMÉTODO — NO APLICA AQUÍ (documentado, sin tocar): `POST
+   * /store/payments` (`CreatePaymentDto`) no declara `payments[]`, así que
+   * los tramos no pueden viajar por esta ruta (`forbidNonWhitelisted` los
+   * rechazaría con 400). Una orden adoptada cobrada desde el modo multi del
+   * collector cae al camino escalar (método del primer tramo por el total).
+   * Habilitar multi en adoptadas exige soporte en el backend o una guarda en
+   * el step; decisión pendiente fuera de este paso.
    */
   private chargeAdoptedOrder(
     cartState: CartState,

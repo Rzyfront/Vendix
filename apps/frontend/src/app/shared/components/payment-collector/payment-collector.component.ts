@@ -12,7 +12,8 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { FormControl, ReactiveFormsModule } from '@angular/forms';
+import { FormArray, FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { map, startWith } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
 import type { IconName } from '../icon/icons.registry';
@@ -37,6 +38,7 @@ import {
   type PaymentCollectorConfig,
   type PaymentCollectorLayout,
   type PaymentContext,
+  type PaymentLeg,
   type PaymentMode,
   type PaymentSubmit,
   type WompiSlice,
@@ -55,6 +57,31 @@ interface PaymentValidationError {
   message: string;
   /** Pide el cliente al padre: el collector no puede capturarlo por sí mismo. */
   requestCustomer?: boolean;
+}
+
+/**
+ * Controles tipados de un tramo multi-tender (5a2). Los montos viajan en
+ * FormControls para que la UI de tramos bindee inputs `[currency]`; todo se
+ * lee a través de la señal `legs`, nunca desde los controles directamente.
+ */
+interface MultiLegFormControls {
+  storePaymentMethodId: FormControl<number>;
+  amount: FormControl<number>;
+  amountReceived: FormControl<number | null>;
+  reference: FormControl<string>;
+  bankAccountId: FormControl<number | null>;
+}
+
+/**
+ * Fila cruda de valor de un grupo de tramo. Todo-optional porque
+ * `FormArray.valueChanges` emite `Partial` (ver TS2345 del watch).
+ */
+interface MultiLegRowValue {
+  storePaymentMethodId?: number | null;
+  amount?: number | null;
+  amountReceived?: number | null;
+  reference?: string | null;
+  bankAccountId?: number | null;
 }
 
 /**
@@ -137,6 +164,8 @@ export class PaymentCollectorComponent implements OnInit {
   readonly requireCustomerIn = input<boolean | undefined>(undefined, { alias: 'requireCustomer' });
   readonly allowAmountOverrideIn = input<boolean | undefined>(undefined, { alias: 'allowAmountOverride' });
   readonly showKeypadIn = input<boolean | undefined>(undefined, { alias: 'showKeypad' });
+  /** 5a2 — split-contado (legs) mode. Undefined → context default. */
+  readonly allowMultiTenderIn = input<boolean | undefined>(undefined, { alias: 'allowMultiTender' });
   /** Incremented by parent shells to explicitly trigger a state reset (e.g. on intent flip) */
   readonly paymentResetKey = input<number>(0);
 
@@ -298,6 +327,7 @@ export class PaymentCollectorComponent implements OnInit {
       requireCustomer: this.requireCustomerIn() ?? base.requireCustomer,
       allowAmountOverride: this.allowAmountOverrideIn() ?? base.allowAmountOverride,
       showKeypad: this.showKeypadIn() ?? base.showKeypad,
+      allowMultiTender: this.allowMultiTenderIn() ?? base.allowMultiTender,
     };
   });
 
@@ -479,6 +509,77 @@ export class PaymentCollectorComponent implements OnInit {
       .slice(0, 4);
   });
 
+  // ── Multi-tender legs (5a2) ──────────────────────────────────────────────
+  // Split-contado mode: the total is covered by 1..maxMultiLegs direct-method
+  // legs instead of a single method. Active only while `multiEnabled()`; the
+  // single-method state (selectedMethod, cash control, …) is left untouched so
+  // toggling multi off restores it. Gate + submit read ONLY the `legs` signal.
+  readonly multiEnabled = signal<boolean>(false);
+  /** Backend cap mirrored: `payments[]` accepts 2..5 legs (`@ArrayMaxSize(5)`). */
+  readonly maxMultiLegs = 5;
+
+  /**
+   * Per-leg controls. Created/destroyed ONLY from event-handler methods
+   * (`setMultiEnabled`/`addLeg`/`removeLeg`/`resetState`, the last inside
+   * `untracked`) — never inside a computed/effect body.
+   */
+  readonly legsForm = new FormArray<FormGroup<MultiLegFormControls>>([]);
+
+  /** Multi legs derived from the form (method resolved against the catalog). */
+  readonly legs = toSignal(
+    this.legsForm.valueChanges.pipe(
+      startWith(this.legsForm.getRawValue()),
+      map((rows: MultiLegRowValue[]) => rows.map((row) => this.toPaymentLeg(row))),
+    ),
+    { initialValue: [] as PaymentLeg[] },
+  );
+
+  /** Σ of leg amounts (display; validity compares in cents via `remaining`). */
+  readonly legsTotal = computed<number>(() =>
+    this.legs().reduce((sum, leg) => sum + (Number(leg.amount) || 0), 0),
+  );
+
+  /**
+   * Signed remainder in favor of the total: >0 = "Falta", <0 = "Sobra", 0 =
+   * exact. Computed in cents so float dust never blocks the gate.
+   */
+  readonly remaining = computed<number>(
+    () => (this.toCents(this.effectiveTotal()) - this.toCents(this.legsTotal())) / 100,
+  );
+
+  /** Multi gate body: non-empty, ≤ cap, Σ == total, every leg valid on its own. */
+  readonly isMultiValid = computed<boolean>(() => {
+    const legs = this.legs();
+    if (legs.length === 0 || legs.length > this.maxMultiLegs) return false;
+    if (this.remaining() !== 0) return false;
+    if (legs.filter((l) => l.methodType === PaymentMethodType.CASH).length > 1) return false;
+    return legs.every((leg) => this.isLegValid(leg));
+  });
+
+  /**
+   * Catalog methods allowed as legs: the direct five (cash, card,
+   * bank_transfer, voucher, paypal) with a numeric row id. Cash drops out once
+   * any leg uses it (single-cash rule); per-leg pickers use
+   * {@link directMethodsForLeg} so a leg keeps its own method selectable.
+   */
+  readonly directMethods = computed<PaymentMethod[]>(() => {
+    const cashUsed = this.legs().some((l) => l.methodType === PaymentMethodType.CASH);
+    return this.resolvedMethods().filter((m) => {
+      if (this.methodRowId(m) == null) return false;
+      switch (m.type) {
+        case PaymentMethodType.CASH:
+          return !cashUsed;
+        case PaymentMethodType.CARD:
+        case PaymentMethodType.BANK_TRANSFER:
+        case PaymentMethodType.VOUCHER:
+        case PaymentMethodType.PAYPAL:
+          return true;
+        default:
+          return false;
+      }
+    });
+  });
+
   // ── The single submit gate ───────────────────────────────────────────────
   /**
    * Gate del COBRO real: única puerta de {@link triggerSubmit}. Exige todo lo de
@@ -513,6 +614,13 @@ export class PaymentCollectorComponent implements OnInit {
       if (!this.customer()) return false; // credit always needs a customer
       if (this.effectiveBase() <= 0) return false;
       return this.creditTerms() != null;
+    }
+
+    // 5a2 — multi-tender contado: the legs carry the whole validation.
+    if (this.multiEnabled()) {
+      if (!cfg.allowMultiTender) return false;
+      if (requireCustomerCheck && cfg.requireCustomer && !this.customer()) return false;
+      return this.isMultiValid();
     }
 
     const method = this.selectedMethod();
@@ -588,6 +696,16 @@ export class PaymentCollectorComponent implements OnInit {
         if ((this.cashReceivedControl.value ?? 0) !== total) {
           this.setCashProgrammatic(total);
         }
+      });
+    });
+
+    // 5a2 — late seed of leg 1: when multi was enabled before the catalog
+    // arrived (autoLoad), the first leg appears as soon as methods exist.
+    effect(() => {
+      if (!this.multiEnabled()) return;
+      const methodCount = this.directMethods().length;
+      untracked(() => {
+        if (this.legsForm.length === 0 && methodCount > 0) this.seedFirstLeg();
       });
     });
 
@@ -693,7 +811,9 @@ export class PaymentCollectorComponent implements OnInit {
       if (this.subStep() < this.montoIndex()) {
         if (this.subStep() < this.modoOffset()) {
           this.goToSubStep(this.modoOffset());
-        } else if (!this.selectedMethod()) {
+          // 5c — en multi el paso Método muestra tramos y selectedMethod() es
+          // residual: el avance exige tramos (la validez total sigue en los gates).
+        } else if (this.multiEnabled() ? this.legs().length === 0 : !this.selectedMethod()) {
           this.flashValidation();
         } else {
           this.goToSubStep(this.montoIndex());
@@ -756,6 +876,172 @@ export class PaymentCollectorComponent implements OnInit {
 
   isManual(method: PaymentMethod): boolean {
     return typeof method.id === 'string' && method.id.startsWith('manual:');
+  }
+
+  // ── Multi-tender legs (public API for the legs UI) ───────────────────────
+  /**
+   * Enter/exit split mode. Entering seeds leg 1 with the live total (cash
+   * preferred, received pre-filled); exiting discards the legs. Ignored unless
+   * the consumer passed `allowMultiTender`.
+   */
+  setMultiEnabled(on: boolean): void {
+    if (on && !this.config().allowMultiTender) return;
+    if (on === this.multiEnabled()) return;
+    this.multiEnabled.set(on);
+    if (on) this.seedFirstLeg();
+    else this.legsForm.clear();
+  }
+
+  /** Append a leg pre-filled with the remaining balance (no-op at the cap). */
+  addLeg(): void {
+    if (!this.multiEnabled()) return;
+    if (this.legsForm.length >= this.maxMultiLegs) return;
+    const options = this.directMethods();
+    if (options.length === 0) return;
+    const method = options[0];
+    const rowId = this.methodRowId(method);
+    if (rowId == null) return;
+    const amount = Math.max(0, this.remaining());
+    this.legsForm.push(
+      this.createLegGroup({
+        storePaymentMethodId: rowId,
+        amount,
+        amountReceived: method.type === PaymentMethodType.CASH ? amount : null,
+      }),
+    );
+  }
+
+  /** Drop leg `index`. The last leg cannot be removed (toggle multi off). */
+  removeLeg(index: number): void {
+    if (!this.multiEnabled()) return;
+    if (this.legsForm.length <= 1) return;
+    if (index < 0 || index >= this.legsForm.length) return;
+    this.legsForm.removeAt(index);
+  }
+
+  /** Group accessor for `[formGroup]` binding in the legs UI. */
+  legGroup(index: number): FormGroup<MultiLegFormControls> | null {
+    return this.legGroupOrNull(index);
+  }
+
+  /** Catalog method behind leg `index` (null when unresolved). */
+  legMethod(index: number): PaymentMethod | null {
+    const group = this.legGroupOrNull(index);
+    if (!group) return null;
+    return this.legMethodById(group.controls.storePaymentMethodId.value);
+  }
+
+  /**
+   * Method options for the leg-`index` picker: {@link directMethods} plus the
+   * leg's own method when cash-exclusion would hide it.
+   */
+  directMethodsForLeg(index: number): PaymentMethod[] {
+    const ownId = this.legGroupOrNull(index)?.controls.storePaymentMethodId.value;
+    const legs = this.legs();
+    const cashUsedElsewhere = legs.some(
+      (l, i) => i !== index && l.methodType === PaymentMethodType.CASH,
+    );
+    return this.resolvedMethods().filter((m) => {
+      if (this.methodRowId(m) == null) return false;
+      switch (m.type) {
+        case PaymentMethodType.CASH:
+          return !cashUsedElsewhere || this.methodRowId(m) === ownId;
+        case PaymentMethodType.CARD:
+        case PaymentMethodType.BANK_TRANSFER:
+        case PaymentMethodType.VOUCHER:
+        case PaymentMethodType.PAYPAL:
+          return true;
+        default:
+          return false;
+      }
+    });
+  }
+
+  /**
+   * Switch the method of leg `index`. Amount is kept; received/reference/bank
+   * account reset (same contract as {@link selectMethod}); switching TO cash
+   * pre-fills received with the leg amount.
+   */
+  setLegMethod(index: number, method: PaymentMethod): void {
+    const group = this.legGroupOrNull(index);
+    if (!group) return;
+    const rowId = this.methodRowId(method);
+    if (rowId == null) return;
+    const amount = group.controls.amount.value;
+    group.setValue({
+      storePaymentMethodId: rowId,
+      amount,
+      amountReceived: method.type === PaymentMethodType.CASH ? amount : null,
+      reference: '',
+      bankAccountId: null,
+    });
+  }
+
+  /** Write the leg amount (clamped at zero; negatives never validate). */
+  setLegAmount(index: number, amount: number): void {
+    const group = this.legGroupOrNull(index);
+    if (!group) return;
+    group.controls.amount.setValue(Math.max(0, Number(amount) || 0));
+  }
+
+  /** Write the cash tendered on leg `index` (cash legs only, clamped at zero). */
+  setLegReceived(index: number, amount: number): void {
+    const group = this.legGroupOrNull(index);
+    if (!group) return;
+    group.controls.amountReceived.setValue(Math.max(0, Number(amount) || 0));
+  }
+
+  /** Write the manual reference of leg `index` (trimmed on read). */
+  setLegReference(index: number, reference: string): void {
+    const group = this.legGroupOrNull(index);
+    if (!group) return;
+    group.controls.reference.setValue(String(reference ?? ''));
+  }
+
+  /**
+   * Pick the destination bank account of leg `index` by stable key (same
+   * semantics as {@link onBankAccountSelect}). Only real-FK accounts are
+   * eligible as legs (see {@link legBankAccounts}); legacy entries resolve to
+   * null and keep the gate closed.
+   */
+  setLegBankAccount(index: number, key: string | null): void {
+    const group = this.legGroupOrNull(index);
+    if (!group) return;
+    const match = key == null ? undefined : this.legBankAccounts(index).find((a) => a.key === key);
+    group.controls.bankAccountId.setValue(match?.id ?? null);
+  }
+
+  /**
+   * Destination accounts eligible for leg `index`: the leg method's
+   * `custom_config.accounts` restricted to entries with a real FK. Legs cannot
+   * carry the legacy key-only shape (`PaymentLeg` has no key field), so legacy
+   * accounts are not offered in multi.
+   */
+  legBankAccounts(index: number): BankAccountSelectOption[] {
+    const method = this.legMethod(index);
+    if (!method || method.type !== PaymentMethodType.BANK_TRANSFER) return [];
+    return this.bankAccountsFor(method).filter((a) => a.id != null);
+  }
+
+  /** True when the leg's method needs a manual reference string. */
+  legNeedsReference(leg: PaymentLeg): boolean {
+    if (!this.config().allowReference) return false;
+    const method = this.legMethodById(leg.storePaymentMethodId);
+    if (method) return method.requiresReference ?? requiresReferenceFor(leg.methodType);
+    return requiresReferenceFor(leg.methodType);
+  }
+
+  /** Reference input label for the leg (method override or canonical label). */
+  legReferenceLabel(leg: PaymentLeg): string {
+    const method = this.legMethodById(leg.storePaymentMethodId);
+    if (method?.referenceLabel) return method.referenceLabel;
+    return resolveReferenceLabel(leg.methodType);
+  }
+
+  /** Change owed back on the leg (cash legs only, otherwise zero). */
+  legChange(leg: PaymentLeg): number {
+    if (leg.methodType !== PaymentMethodType.CASH) return 0;
+    return Math.max(0, (Number(leg.amountReceived) || 0) - (Number(leg.amount) || 0));
   }
 
   /**
@@ -882,6 +1168,106 @@ export class PaymentCollectorComponent implements OnInit {
   }
 
   // ── Internals ────────────────────────────────────────────────────────────
+  // ── Multi-tender internals (5a2) ─────────────────────────────────────────
+  /** Numeric `store_payment_method` row id, or null when the id is not an FK. */
+  private methodRowId(method: PaymentMethod): number | null {
+    const id = Number(method.id);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  }
+
+  /** Catalog method behind a leg row id (null when it no longer resolves). */
+  private legMethodById(storePaymentMethodId: number): PaymentMethod | null {
+    return (
+      this.resolvedMethods().find((m) => this.methodRowId(m) === storePaymentMethodId) ?? null
+    );
+  }
+
+  /** Leg group at `index`, or null when out of range. */
+  private legGroupOrNull(index: number): FormGroup<MultiLegFormControls> | null {
+    if (index < 0 || index >= this.legsForm.length) return null;
+    return this.legsForm.controls[index];
+  }
+
+  private toCents(value: number): number {
+    return Math.round((Number(value) || 0) * 100);
+  }
+
+  private createLegGroup(seed: {
+    storePaymentMethodId: number;
+    amount: number;
+    amountReceived?: number | null;
+  }): FormGroup<MultiLegFormControls> {
+    return new FormGroup<MultiLegFormControls>({
+      storePaymentMethodId: new FormControl(seed.storePaymentMethodId, { nonNullable: true }),
+      amount: new FormControl(seed.amount, { nonNullable: true }),
+      amountReceived: new FormControl<number | null>(seed.amountReceived ?? null),
+      reference: new FormControl('', { nonNullable: true }),
+      bankAccountId: new FormControl<number | null>(null),
+    });
+  }
+
+  /** Seed leg 1 with the live total (cash preferred, received pre-filled). */
+  private seedFirstLeg(): void {
+    if (this.legsForm.length > 0) return;
+    const methods = this.directMethods();
+    if (methods.length === 0) return;
+    const first = methods[0];
+    const method = methods.find((m) => m.type === PaymentMethodType.CASH) ?? first;
+    const rowId = this.methodRowId(method);
+    if (rowId == null) return;
+    const total = this.effectiveTotal();
+    this.legsForm.push(
+      this.createLegGroup({
+        storePaymentMethodId: rowId,
+        amount: total,
+        amountReceived: method.type === PaymentMethodType.CASH ? total : null,
+      }),
+    );
+  }
+
+  /** Map one form row to its `PaymentLeg` (method resolved, change derived). */
+  private toPaymentLeg(row: MultiLegRowValue): PaymentLeg {
+    const storePaymentMethodId = Number(row.storePaymentMethodId) || 0;
+    const method = this.legMethodById(storePaymentMethodId);
+    const leg: PaymentLeg = {
+      storePaymentMethodId,
+      methodType: method ? String(method.type) : '',
+      amount: Number(row.amount) || 0,
+      amountReceived: row.amountReceived ?? undefined,
+      reference: (row.reference || '').trim() || undefined,
+      bankAccountId: row.bankAccountId ?? undefined,
+      method: { label: method?.name },
+    };
+    if (leg.methodType === PaymentMethodType.CASH) leg.change = this.legChange(leg);
+    return leg;
+  }
+
+  /** Per-leg validity: positive amount, known method, cash/reference/account. */
+  private isLegValid(leg: PaymentLeg): boolean {
+    if (!(leg.amount > 0)) return false;
+    if (!leg.methodType) return false;
+    if (!(leg.storePaymentMethodId > 0)) return false;
+    if (leg.methodType === PaymentMethodType.CASH && (leg.amountReceived ?? 0) < leg.amount) {
+      return false;
+    }
+    if (leg.methodType === PaymentMethodType.BANK_TRANSFER && leg.bankAccountId == null) {
+      return false;
+    }
+    if (this.legNeedsReference(leg) && !leg.reference?.trim()) return false;
+    return true;
+  }
+
+  /** Synthetic echo when a leg method no longer resolves against the catalog. */
+  private syntheticLegMethod(leg: PaymentLeg): PaymentMethod {
+    return {
+      id: String(leg.storePaymentMethodId),
+      type: leg.methodType,
+      name: leg.method?.label ?? leg.methodType,
+      icon: resolvePaymentIcon(leg.methodType),
+      enabled: true,
+    };
+  }
+
   /**
    * Resuelve el PRIMER dato faltante del cobro, en orden de prioridad, para que
    * el operador sepa qué corregir. Espeja las guardas de {@link evaluateGate}: si
@@ -906,6 +1292,60 @@ export class PaymentCollectorComponent implements OnInit {
       }
       if (this.creditTerms() == null) {
         return { section: 'credit', message: 'Completa el plan de crédito' };
+      }
+      return this.unnamedGateError();
+    }
+
+    // 5a2 — multi-tender contado. Section contract for the legs UI: 'method'
+    // highlights the legs block (sum/empty problems), 'cash' a cash-leg
+    // tender shortfall, 'reference' a missing reference/bank account.
+    if (this.multiEnabled()) {
+      const legs = this.legs();
+      if (legs.length === 0) {
+        return { section: 'method', message: 'Agrega un método de pago' };
+      }
+      const remainder = this.remaining();
+      if (remainder > 0) {
+        return { section: 'method', message: `Falta ${this.currencyFormat.format(remainder)}` };
+      }
+      if (remainder < 0) {
+        return { section: 'method', message: `Sobra ${this.currencyFormat.format(-remainder)}` };
+      }
+      if (legs.some((l) => !(l.amount > 0))) {
+        return { section: 'method', message: 'Cada tramo debe ser mayor a cero' };
+      }
+      if (legs.some((l) => !l.methodType)) {
+        return { section: 'method', message: 'Un tramo tiene un método no disponible' };
+      }
+      if (legs.filter((l) => l.methodType === PaymentMethodType.CASH).length > 1) {
+        return { section: 'method', message: 'El efectivo solo puede usarse en un tramo' };
+      }
+      const shortCash = legs.find(
+        (l) => l.methodType === PaymentMethodType.CASH && (l.amountReceived ?? 0) < l.amount,
+      );
+      if (shortCash) {
+        return { section: 'cash', message: 'El efectivo recibido no cubre el tramo' };
+      }
+      for (const [i, leg] of legs.entries()) {
+        if (leg.methodType !== PaymentMethodType.BANK_TRANSFER) continue;
+        if (this.legBankAccounts(i).length === 0) {
+          return {
+            section: 'reference',
+            message: 'Sin cuentas configuradas. Contacta al administrador.',
+          };
+        }
+        if (leg.bankAccountId == null) {
+          return {
+            section: 'reference',
+            message: 'Selecciona la cuenta bancaria de destino.',
+          };
+        }
+      }
+      if (legs.some((l) => this.legNeedsReference(l) && !l.reference?.trim())) {
+        return { section: 'reference', message: 'Ingresa la referencia del pago' };
+      }
+      if (this.config().requireCustomer && !this.customer()) {
+        return { section: 'customer', message: 'Selecciona un cliente para completar la venta' };
       }
       return this.unnamedGateError();
     }
@@ -989,6 +1429,10 @@ export class PaymentCollectorComponent implements OnInit {
     this.flashSection.set(null);
     this.flashMessage.set('');
     this.selectedMethod.set(null);
+    // 5a2 — salir del modo multi y destruir sus controles (fuera del contexto
+    // reactivo: resetState corre dentro de untracked).
+    this.multiEnabled.set(false);
+    this.legsForm.clear();
     this.subStep.set(0);
     this.amountCollapsed.set(false);
     this.manuallyEditedCash.set(false);
@@ -1045,6 +1489,42 @@ export class PaymentCollectorComponent implements OnInit {
       };
     }
 
+    // 5a2 — multi-tender contado.
+    if (this.multiEnabled() && this.legs().length > 0) {
+      const legs = this.legs();
+      if (legs.length === 1) {
+        // Un tramo: payload clásico, sin `legs` (valor por valor idéntico al
+        // que emitiría la rama single para el mismo método).
+        return this.buildSingleLegSubmit(legs[0], base, customerId);
+      }
+      const first = legs[0];
+      const cashLeg = legs.find((l) => l.methodType === PaymentMethodType.CASH);
+      const out: PaymentSubmit = {
+        storePaymentMethodId: first.storePaymentMethodId,
+        methodType: first.methodType,
+        amount: this.effectiveTotal(),
+        mode: 'contado',
+        customerId,
+        method: this.legMethodById(first.storePaymentMethodId) ?? this.syntheticLegMethod(first),
+        legs,
+      };
+      // Compat: recibido/vuelto del tramo en efectivo a nivel escalar.
+      if (cashLeg) {
+        out.amountReceived = cashLeg.amountReceived ?? 0;
+        out.change = cashLeg.change ?? 0;
+      }
+      if (cfg.allowTip && (this.tip() || 0) > 0) {
+        const tipResolved = this.tipAmount();
+        out.tip = tipResolved;
+        out.tipType = this.tipType();
+        out.tipValue = tipResolved;
+        const waiter = this.tipWaiterId();
+        if (waiter != null) out.tipWaiterId = waiter;
+      }
+      if (this.selectedInstallmentId() != null) out.installmentId = this.selectedInstallmentId()!;
+      return out;
+    }
+
     const method = this.selectedMethod()!;
     const manual = this.isManual(method);
     const out: PaymentSubmit = {
@@ -1089,6 +1569,45 @@ export class PaymentCollectorComponent implements OnInit {
     }
     if (this.selectedInstallmentId() != null) out.installmentId = this.selectedInstallmentId()!;
 
+    return out;
+  }
+
+  /**
+   * 5a2 — payload clásico reconstruido desde un tramo único. Valor por valor
+   * idéntico al que emite la rama single para el mismo método (monto = base,
+   * propina separada, sin `legs`).
+   */
+  private buildSingleLegSubmit(
+    leg: PaymentLeg,
+    base: number,
+    customerId: number | string | null,
+  ): PaymentSubmit {
+    const method = this.legMethodById(leg.storePaymentMethodId) ?? this.syntheticLegMethod(leg);
+    const out: PaymentSubmit = {
+      storePaymentMethodId: leg.storePaymentMethodId,
+      methodType: leg.methodType,
+      amount: base,
+      mode: 'contado',
+      customerId,
+      method,
+    };
+    if (this.config().allowTip && (this.tip() || 0) > 0) {
+      const tipResolved = this.tipAmount();
+      out.tip = tipResolved;
+      out.tipType = this.tipType();
+      out.tipValue = tipResolved;
+      const waiter = this.tipWaiterId();
+      if (waiter != null) out.tipWaiterId = waiter;
+    }
+    if (leg.methodType === PaymentMethodType.CASH) {
+      out.amountReceived = leg.amountReceived ?? 0;
+      out.change = leg.change ?? 0;
+    }
+    if (this.legNeedsReference(leg)) out.reference = leg.reference ?? '';
+    if (leg.methodType === PaymentMethodType.BANK_TRANSFER) {
+      out.bankAccountId = leg.bankAccountId ?? undefined;
+    }
+    if (this.selectedInstallmentId() != null) out.installmentId = this.selectedInstallmentId()!;
     return out;
   }
 }

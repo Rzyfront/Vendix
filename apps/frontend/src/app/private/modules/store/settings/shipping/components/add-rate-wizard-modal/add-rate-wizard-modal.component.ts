@@ -34,30 +34,85 @@ import {
 import { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import { StepsLineItem } from '../../../../../../../shared/components/steps-line/steps-line.component';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { resolveInclusiveClearing } from '@money-kernel/dian-money';
+
+/** Modo del impuesto de la tarifa (paso 15a): incluido o agregado. */
+export type ShippingTaxMode = 'inclusive' | 'exclusive';
 
 /**
- * Vista previa informativa del impuesto incluido en el precio de la tarifa.
- * El precio configurado es lo que paga el cliente; la base se despeja como
- * `cost / (1 + r)` redondeada a 2 decimales. Solo orienta: el cálculo que se
- * factura lo hace el backend al vender.
+ * Vista previa informativa del impuesto de la tarifa («Cliente paga $X»).
+ * Replica la matemática de `resolveShippingCharge` del backend (el cálculo
+ * único "precio de tarifa → bruto" del cotizador) con el MISMO kernel
+ * (`resolveInclusiveClearing`, truncado DIAN — 10.000 al 19 % ⇒ 1.596,63
+ * incluido, 1.900 agregado). Solo orienta: el cálculo que se factura lo hace
+ * el backend al vender.
  */
 export interface ShippingTaxPreview {
+  /** Precio configurado (bruto en incluido, base en agregado). */
   cost: number;
+  /** Base neta. */
+  base: number;
+  /** Cuota del impuesto. */
   tax: number;
+  /** Lo que paga el cliente (bruto). */
+  gross: number;
+  /** «IVA 19%» — etiqueta con porcentaje. */
   label: string;
+  /** «IVA» — tipo sin porcentaje, para «10.000 + IVA 1.900». */
+  type_label: string;
+  mode: ShippingTaxMode;
 }
-
-const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
 export function computeShippingTaxPreview(
   cost: number,
   rate_percent: number | null | undefined,
   label: string | null,
+  type_label: string | null,
+  tax_is_inclusive = true,
 ): ShippingTaxPreview | null {
-  if (!label || rate_percent == null || !(Number(rate_percent) > 0)) return null;
+  if (!label || !type_label || rate_percent == null || !(Number(rate_percent) > 0)) return null;
   if (!Number.isFinite(cost) || cost <= 0) return null;
-  const base = round2(cost / (1 + Number(rate_percent) / 100));
-  return { cost, tax: round2(cost - base), label };
+  const price_cents = Math.round(cost * 100);
+  if (price_cents <= 0) return null;
+  const price = price_cents / 100;
+  // Misma llamada que `resolveShippingCharge`: fracción explícita; la cuota
+  // se TRUNCA (DIAN), no se redondea hacia arriba.
+  const inclusive = tax_is_inclusive !== false;
+  const clearing = resolveInclusiveClearing(price, [
+    {
+      rate: Number(rate_percent) / 100,
+      rate_basis: 'fraction',
+      is_inclusive: inclusive,
+    },
+  ]);
+  if (clearing.invalid_inputs.length > 0) return null;
+  const tax_cents = Math.round(
+    (clearing.rates[0]?.amount.toNumber() ?? 0) * 100,
+  );
+  if (!(tax_cents > 0)) return null;
+  const tax = tax_cents / 100;
+  if (inclusive) {
+    const base_cents = price_cents - tax_cents;
+    if (base_cents <= 0) return null;
+    return {
+      cost: price,
+      base: base_cents / 100,
+      tax,
+      gross: price,
+      label,
+      type_label,
+      mode: 'inclusive',
+    };
+  }
+  return {
+    cost: price,
+    base: price,
+    tax,
+    gross: (price_cents + tax_cents) / 100,
+    label,
+    type_label,
+    mode: 'exclusive',
+  };
 }
 
 /** El selector trabaja con `number`; `null` es «Sin impuesto». */
@@ -245,6 +300,9 @@ export class AddRateWizardModalComponent implements OnInit {
     is_active: [true],
     name: [''],
     tax_category_id: [null as number | null],
+    // Paso 15a — modo del impuesto: true = incluido (default), false =
+    // agregado. En tarifas nuevas se preselecciona desde la categoría.
+    tax_is_inclusive: [true as boolean],
     tiers: this.fb.array<FormGroup<DistanceTierFormControls>>([]),
   });
 
@@ -311,7 +369,12 @@ export class AddRateWizardModalComponent implements OnInit {
     return options;
   });
 
-  selected_tax = computed<{ rate_percent: number | null; label: string | null } | null>(() => {
+  selected_tax = computed<{
+    rate_percent: number | null;
+    label: string | null;
+    type_label: string;
+    is_inclusive: boolean | null;
+  } | null>(() => {
     const id = toTaxCategoryId(this.form_value().tax_category_id);
     if (id === null) return null;
     const option = this.tax_options()?.categories.find((c) => c.id === id);
@@ -319,6 +382,8 @@ export class AddRateWizardModalComponent implements OnInit {
       return {
         rate_percent: option.rate_percent,
         label: this.shippingService.getRateTaxLabel(option),
+        type_label: (option.tax_type ?? '').toUpperCase(),
+        is_inclusive: option.is_inclusive ?? null,
       };
     }
     const current = this.edit_rate()?.tax_category;
@@ -326,10 +391,23 @@ export class AddRateWizardModalComponent implements OnInit {
       return {
         rate_percent: current.rate_percent,
         label: this.shippingService.getRateTaxLabel(current),
+        type_label: (current.tax_type ?? '').toUpperCase(),
+        // La lectura de la tarifa no trae el modo de la categoría: sin pista.
+        is_inclusive: null,
       };
     }
     return null;
   });
+
+  /** Hay categoría elegida (aunque las opciones aún no carguen): se muestra el modo. */
+  has_tax_category = computed(
+    () => toTaxCategoryId(this.form_value().tax_category_id) !== null,
+  );
+
+  /** Modo leído del formulario (default incluido). */
+  is_inclusive_mode = computed(
+    () => this.form_value().tax_is_inclusive !== false,
+  );
 
   tax_preview = computed<ShippingTaxPreview | null>(() => {
     const tax = this.selected_tax();
@@ -338,7 +416,21 @@ export class AddRateWizardModalComponent implements OnInit {
       Number(this.form_value().base_cost),
       tax.rate_percent,
       tax.label,
+      tax.type_label,
+      this.form_value().tax_is_inclusive !== false,
     );
+  });
+
+  /**
+   * Aviso cuando la categoría es «Adicional» en impuestos pero la tarifa está
+   * en Incluido: el impuesto se descontará del precio en vez de sumarse.
+   */
+  tax_mode_mismatch = computed<string | null>(() => {
+    const tax = this.selected_tax();
+    if (!tax || this.is_free_type()) return null;
+    if (tax.is_inclusive !== false) return null;
+    if (!this.is_inclusive_mode()) return null;
+    return 'Esta categoría es «Adicional» en impuestos, pero la tarifa está en Incluido: el impuesto se descontará del precio en vez de sumarse.';
   });
 
   tax_suggestion = computed(() => this.tax_options()?.suggestion?.message ?? null);
@@ -434,6 +526,22 @@ export class AddRateWizardModalComponent implements OnInit {
     this.zones_list.set(this.existing_zones());
     this.loadTaxOptions();
 
+    // Paso 15a — en tarifas NUEVAS el modo se preselecciona desde la
+    // categoría (`is_inclusive`); al editar manda lo guardado y nunca se
+    // toca. Sin pista (null/sin categoría) se deja lo que haya.
+    this.rate_form.controls.tax_category_id.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((id) => {
+        if (this.is_edit_mode()) return;
+        const category = this.tax_options()?.categories.find(
+          (c) => c.id === toTaxCategoryId(id),
+        );
+        const hint = category?.is_inclusive;
+        if (typeof hint === 'boolean') {
+          this.rate_form.controls.tax_is_inclusive.setValue(hint);
+        }
+      });
+
     const rate = this.edit_rate();
     if (rate) {
       this.selected_zone_id.set(rate.shipping_zone_id);
@@ -450,6 +558,7 @@ export class AddRateWizardModalComponent implements OnInit {
         is_active: rate.is_active,
         name: rate.name || '',
         tax_category_id: rate.tax_category?.id ?? rate.tax_category_id ?? null,
+        tax_is_inclusive: rate.tax_is_inclusive ?? true,
       });
       this.tiersArray.clear();
       for (const t of rate.distance_tiers ?? []) {
@@ -504,6 +613,11 @@ export class AddRateWizardModalComponent implements OnInit {
         free_shipping_threshold: null,
       });
     }
+  }
+
+  /** Paso 15a — el comerciante elige si el impuesto va incluido o agregado. */
+  selectTaxMode(inclusive: boolean): void {
+    this.rate_form.patchValue({ tax_is_inclusive: inclusive });
   }
 
   // ─── Escala por distancia ───
@@ -729,6 +843,8 @@ export class AddRateWizardModalComponent implements OnInit {
       // Gratis no cobra envío: no hay impuesto que llevar.
       tax_category_id:
         values.type === 'free' ? null : toTaxCategoryId(values.tax_category_id),
+      // Paso 15a — el modo viaja siempre (sin impuesto es inerte).
+      tax_is_inclusive: values.tax_is_inclusive !== false,
       // Release-853 paso 11 — pasar a `free` limpia la escala previa: se
       // envía `[]` (el backend la persiste como NULL).
       ...(useTiers
