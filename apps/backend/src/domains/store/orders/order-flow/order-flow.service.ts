@@ -2400,6 +2400,14 @@ export class OrderFlowService {
             },
           },
         });
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: freshOrder.store_id,
+          organizationId: freshOrder.stores?.organization_id,
+          type: 'payment_cancelled',
+          paymentId: activePayment.id,
+          amount: activePayment.amount.toString(),
+        });
       }
 
       if (freshIsFulfilledCancel) {
@@ -2427,6 +2435,14 @@ export class OrderFlowService {
             completed_at: null,
             updated_at: new Date(),
           },
+        });
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: freshOrder.store_id,
+          organizationId: freshOrder.stores?.organization_id,
+          type: 'state_changed',
+          fromState: freshOrder.state,
+          toState: 'created',
         });
       }
     });
