@@ -1984,6 +1984,16 @@ export class CheckoutService {
         shipping_tax_is_inclusive,
         delivery_type: delivery_type,
         grand_total: grand_total,
+        // B8 (release-855): `remaining_balance`/`total_paid` default to 0 in
+        // the schema, which reads as "nothing owed". For a contra-entrega
+        // order that made the dispatch treat it as prepaid (no COD
+        // collection) and the order auto-finished unpaid. Scoped to
+        // ON_DELIVERY only: online/transfer methods keep their historical
+        // shape (their confirmation settles the order).
+        ...(payment_method.system_payment_method?.processing_mode ===
+        payment_processing_mode_enum.ON_DELIVERY
+          ? { total_paid: 0, remaining_balance: grand_total }
+          : {}),
         shipping_address_id,
         shipping_address_snapshot,
         state: 'pending_payment',
@@ -2839,6 +2849,12 @@ export class CheckoutService {
         shipping_tax_is_inclusive: wa_shipping_tax_is_inclusive,
         delivery_type: wa_delivery_type,
         grand_total: grand_total,
+        // B8 (release-855): same reasoning as the normal checkout path —
+        // no `payments` row is created for WhatsApp checkout at all, so the
+        // schema default (`remaining_balance=0`) is even more wrong here:
+        // nothing has ever been collected for this order.
+        total_paid: 0,
+        remaining_balance: grand_total,
         shipping_address_id,
         shipping_address_snapshot,
         state: 'created',

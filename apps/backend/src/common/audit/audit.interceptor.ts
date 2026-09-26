@@ -452,6 +452,25 @@ export class AuditInterceptor implements NestInterceptor {
   private extractIdFromUrl(url: string): number | null {
     const cleanUrl = url.split('?')[0];
     const segments = cleanUrl.split('/').filter((s) => s);
+
+    // B3 (release-855): order sub-routes (`/orders/:id/flow/pay`,
+    // `/orders/:id/items/:itemId/deliver`, `/orders/:id/refunds/:refundId`,
+    // …) carry their OWN numeric segments AFTER the order id (item id,
+    // refund id, payment id…). Scanning from the end for "the last numeric
+    // segment" picked up that nested id instead, so `OrdersService.getTimeline`
+    // (filtered by `resource_id === orderId`) silently dropped every
+    // sub-route action from the order's audit timeline. Scoped narrowly to
+    // `orders`: when the segment right after it is numeric, that IS the
+    // order id — regardless of what follows in the path.
+    const ordersIndex = segments.indexOf('orders');
+    if (ordersIndex !== -1 && ordersIndex + 1 < segments.length) {
+      const candidate = segments[ordersIndex + 1];
+      const orderId = parseInt(candidate, 10);
+      if (!isNaN(orderId) && candidate.length < 10) {
+        return orderId;
+      }
+    }
+
     // Look for the last numeric segment that isn't at a known resource position
     for (let i = segments.length - 1; i >= 0; i--) {
       const id = parseInt(segments[i]);

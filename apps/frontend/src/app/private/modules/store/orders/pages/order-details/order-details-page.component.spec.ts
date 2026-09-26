@@ -1,6 +1,8 @@
 import {
   ORDER_DELIVERY_CONFIG, ORDER_DELIVERY_STEP_LABELS, pendingKitchenLabelsFromError,
   cancellationBody, isOrderItemCancellationPaid, shippingTaxModePrefix,
+  lifecycleLookupState, kitchenStateForItem, canDeliverItem, isOrderCreateLog,
+  isRefundAuditRow, isConfirmedStateTransition,
 } from './order-details-page.component';
 import { Order } from '../../interfaces/order.interface';
 import {
@@ -147,5 +149,103 @@ describe('OrderDetailsPageComponent — prefijo del modo del impuesto del envío
     expect(shippingTaxModePrefix(true)).toBe('Incluye');
     expect(shippingTaxModePrefix(null)).toBe('Incluye');
     expect(shippingTaxModePrefix(undefined)).toBe('Incluye');
+  });
+});
+
+describe('B13 (release-855) — lifecycleLookupState', () => {
+  it('aliasa draft→created y pending_delivery→processing para el índice', () => {
+    expect(lifecycleLookupState('draft' as any)).toBe('created');
+    expect(lifecycleLookupState('pending_delivery' as any)).toBe('processing');
+  });
+
+  it('deja pasar cualquier otro estado sin cambios', () => {
+    for (const state of ['created', 'pending_payment', 'processing', 'shipped', 'delivered', 'finished', 'cancelled', 'refunded']) {
+      expect(lifecycleLookupState(state as any)).toBe(state as any);
+    }
+  });
+});
+
+describe('B16 (release-855) — kitchenStateForItem / canDeliverItem', () => {
+  it('kitchenStateForItem retorna null sin filas de cocina', () => {
+    expect(kitchenStateForItem({ kitchen_ticket_items: [] } as any)).toBeNull();
+    expect(kitchenStateForItem({ kitchen_ticket_items: undefined } as any)).toBeNull();
+  });
+
+  it('kitchenStateForItem prioriza la fila en vuelo sobre una terminal más reciente', () => {
+    const item = { kitchen_ticket_items: [
+      { status: 'delivered', kitchen_ticket_id: 1 },
+      { status: 'in_preparation', kitchen_ticket_id: 2 },
+    ] } as any;
+    expect(kitchenStateForItem(item)).toEqual({ status: 'in_preparation', kitchen_ticket_id: 2 });
+  });
+
+  it('kitchenStateForItem cae a la primera fila (más reciente, pre-ordenada) sin fila en vuelo', () => {
+    const item = { kitchen_ticket_items: [{ status: 'delivered', kitchen_ticket_id: 1 }] } as any;
+    expect(kitchenStateForItem(item)).toEqual({ status: 'delivered', kitchen_ticket_id: 1 });
+  });
+
+  it('canDeliverItem bloquea un ítem ya entregado o cancelado', () => {
+    expect(canDeliverItem({ delivered_at: '2026-01-01', cancelled_at: null, kitchen_ticket_items: [] } as any, 'processing' as any)).toBeFalse();
+    expect(canDeliverItem({ delivered_at: null, cancelled_at: '2026-01-01', kitchen_ticket_items: [] } as any, 'processing' as any)).toBeFalse();
+  });
+
+  it('canDeliverItem bloquea solo en estados terminales de orden (cancelled/refunded)', () => {
+    const item = { delivered_at: null, cancelled_at: null, kitchen_ticket_items: [] } as any;
+    expect(canDeliverItem(item, 'cancelled' as any)).toBeFalse();
+    expect(canDeliverItem(item, 'refunded' as any)).toBeFalse();
+    expect(canDeliverItem(item, null)).toBeFalse();
+  });
+
+  it('B16 — mostrador/domicilio sin sesión de mesa: procesando + sin cocina se entrega directo', () => {
+    // Bebida u otro producto que nunca pasó por KDS: cocina no es su bloqueo.
+    const item = { delivered_at: null, cancelled_at: null, kitchen_ticket_items: [] } as any;
+    expect(canDeliverItem(item, 'processing' as any)).toBeTrue();
+    // shipped/delivered/finished ya NO son terminales para este gate — antes
+    // del fix orfanaban el ítem sin superficie de entrega.
+    expect(canDeliverItem(item, 'shipped' as any)).toBeTrue();
+    expect(canDeliverItem(item, 'delivered' as any)).toBeTrue();
+    expect(canDeliverItem(item, 'finished' as any)).toBeTrue();
+  });
+
+  it('canDeliverItem exige cocina lista (status=ready) cuando el plato sí fue disparado', () => {
+    const firedNotReady = {
+      delivered_at: null, cancelled_at: null,
+      kitchen_ticket_items: [{ status: 'in_preparation' }],
+    } as any;
+    const firedReady = {
+      delivered_at: null, cancelled_at: null,
+      kitchen_ticket_items: [{ status: 'ready' }],
+    } as any;
+    expect(canDeliverItem(firedNotReady, 'processing' as any)).toBeFalse();
+    expect(canDeliverItem(firedReady, 'processing' as any)).toBeTrue();
+  });
+});
+
+describe('B3 (release-855) — isOrderCreateLog / isRefundAuditRow / isConfirmedStateTransition', () => {
+  it('isOrderCreateLog sólo marca la fila CREATE cuyo new_values.id ES la orden', () => {
+    expect(isOrderCreateLog({ action: 'CREATE', new_values: { id: 42 } }, 42)).toBeTrue();
+    expect(isOrderCreateLog({ action: 'CREATE', new_values: { id: 42 } }, null)).toBeFalse();
+    // Sub-acción (ítem, cupón…): CREATE pero con su propio id, no el de la orden.
+    expect(isOrderCreateLog({ action: 'CREATE', new_values: { id: 7, order_id: 42 } }, 42)).toBeFalse();
+    expect(isOrderCreateLog({ action: 'UPDATE', new_values: { id: 42 } }, 42)).toBeFalse();
+  });
+
+  it('isRefundAuditRow identifica filas de refund por su propia forma, no por el valor del estado', () => {
+    expect(isRefundAuditRow({ metadata: { flow_action: 'refund' } })).toBeTrue();
+    expect(isRefundAuditRow({ new_values: { order_id: 42 } })).toBeTrue();
+    expect(isRefundAuditRow({ old_values: { order_id: 42 } })).toBeTrue();
+    // Fila de orden común: sin order_id ni flow_action=refund.
+    expect(isRefundAuditRow({ new_values: { id: 42, state: 'processing' } })).toBeFalse();
+    expect(isRefundAuditRow({})).toBeFalse();
+  });
+
+  it('isConfirmedStateTransition exige una transición real u origen FLOW', () => {
+    expect(isConfirmedStateTransition({}, 'pending_payment', 'processing')).toBeTrue();
+    // Snapshot repetido (mismo estado en old/new): no hubo transición.
+    expect(isConfirmedStateTransition({}, 'processing', 'processing')).toBeFalse();
+    // Sin old_values pero marcado FLOW: sigue siendo una transición real.
+    expect(isConfirmedStateTransition({ metadata: { method: 'FLOW' } }, null, 'processing')).toBeTrue();
+    // Sin old_values y sin marca FLOW: no se puede confirmar la transición.
+    expect(isConfirmedStateTransition({}, null, 'processing')).toBeFalse();
   });
 });

@@ -245,6 +245,111 @@ export function shippingTaxModePrefix(isInclusive: unknown): 'Incluye' | 'Base +
 }
 
 /**
+ * B13 (release-855) — `draft`/`pending_delivery` have no dedicated step in
+ * `HAPPY_PATH`/`stateOrder`; without this alias their lifecycle index lookup
+ * returns -1 and the stepper renders with nothing marked current. Index-only:
+ * never rewrites the order's real state or any displayed label. Pure for
+ * spec sin TestBed.
+ */
+export const LIFECYCLE_STATE_ALIASES: Partial<Record<OrderState, OrderState>> = {
+  draft: 'created',
+  pending_delivery: 'processing',
+};
+
+export function lifecycleLookupState(state: OrderState): OrderState {
+  return LIFECYCLE_STATE_ALIASES[state] ?? state;
+}
+
+/**
+ * B16 (release-855) — kitchen state for an item: the in-flight row (pending/
+ * in_preparation/ready) takes precedence over a terminal one, since a re-fire
+ * after `delivered` must not hide behind the older terminal row. `items` is
+ * pre-sorted desc by the backend include. Pure for spec sin TestBed.
+ */
+export function kitchenStateForItem(
+  item: Pick<OrderItem, 'kitchen_ticket_items'>,
+): { status: string; kitchen_ticket_id?: number } | null {
+  const items = item.kitchen_ticket_items;
+  if (!items || items.length === 0) return null;
+  const inFlight = items.find(
+    (k) => k.status === 'pending' || k.status === 'in_preparation' || k.status === 'ready',
+  );
+  if (inFlight) return inFlight;
+  return items[0];
+}
+
+/**
+ * B16 (release-855) — the old gate blocked delivery from kitchen for ANY
+ * order in a terminal-ish state (`shipped`/`delivered`/`finished` included),
+ * which orphaned counter/delivery items that never pass through a table
+ * session: kitchen is their ONLY delivery surface, and it sits behind
+ * `order.state==='processing'` for most of their life. Only `cancelled`/
+ * `refunded` remain hard blocks — those really are terminal for the whole
+ * order. Pure for spec sin TestBed.
+ */
+export function canDeliverItem(
+  item: Pick<OrderItem, 'delivered_at' | 'cancelled_at' | 'kitchen_ticket_items'>,
+  orderState: OrderState | null | undefined,
+): boolean {
+  if (item.delivered_at) return false;
+  if (item.cancelled_at) return false;
+  if (orderState == null) return false;
+  const terminalStates: OrderState[] = ['cancelled', 'refunded'];
+  if (terminalStates.includes(orderState)) return false;
+  const ks = kitchenStateForItem(item);
+  if (ks == null) return true;
+  return ks.status === 'ready';
+}
+
+/**
+ * B3 (release-855) — a CREATE audit row is "the" order-creation row only
+ * when its own `new_values.id` matches the order's real id. The backend's
+ * `isCreateOperation` is a broad catch-all (nearly any non-update/delete
+ * POST), so order sub-actions (e.g. a refund creation) also land as CREATE
+ * rows sharing `resource: 'orders'` — those must NOT be deduped away as if
+ * they were a repeated order-creation event. Pure for spec sin TestBed.
+ */
+export function isOrderCreateLog(log: any, orderId: number | null | undefined): boolean {
+  const isCreate = log?.action?.toUpperCase?.() === 'CREATE';
+  return !!isCreate && orderId != null && log?.new_values?.id === orderId;
+}
+
+/**
+ * B3 (release-855) — `RefundState` values collide by name with real
+ * `OrderState` values (`processing`, `cancelled`). A raw `state in
+ * REFUND_STATE_LABELS` check alone can't tell "this row IS a refund" from
+ * "this row is an order transition that happens to land on a state refunds
+ * also use". Checks the audit row's own shape instead of the state string:
+ * `metadata.flow_action==='refund'` (POST .../flow/refund) or an `order_id`
+ * on `old_values`/`new_values` (only `refunds` rows have it — `orders`
+ * snapshots have `.id`, never `.order_id`). Pure for spec sin TestBed.
+ */
+export function isRefundAuditRow(log: any): boolean {
+  return (
+    log?.metadata?.flow_action === 'refund' ||
+    log?.new_values?.order_id != null ||
+    log?.old_values?.order_id != null
+  );
+}
+
+/**
+ * B3 (release-855) — a truthy `new_values.state` does not prove a real
+ * transition happened: a PATCH that returns a full order snapshot (e.g.
+ * `deliverOrderItem`, or a generic notes/address edit) carries the SAME
+ * `state` in both `old_values` and `new_values`. Without this gate those
+ * rows got a transition label (e.g. "Pago Confirmado") applied anyway. A
+ * FLOW-tagged row is always a real transition regardless of the old/new
+ * diff (some flow ops don't echo `old_values`). Pure for spec sin TestBed.
+ */
+export function isConfirmedStateTransition(
+  log: any,
+  oldState: string | null | undefined,
+  newState: string | null | undefined,
+): boolean {
+  return log?.metadata?.method === 'FLOW' || (oldState != null && oldState !== newState);
+}
+
+/**
  * Local alias for the refund state enum (`refunds_state_enum`). Mirrors the 7
  * values defined in `apps/backend/prisma/schema.prisma`. Kept local to this
  * component — if a second surface needs the same labels, extract to a shared
@@ -791,6 +896,19 @@ export class OrderDetailsPageComponent {
     'finished',
   ];
 
+  // B13 (release-855) — `draft` (pre-checkout POS/mesa draft) and
+  // `pending_delivery` (Bug 7: envío a domicilio + platos, orden pagada
+  // esperando que despache) are real `OrderState` values but were never in
+  // the happy-path index used by `lifecycleSteps`/`trackingSteps`. `indexOf`
+  // silently returned -1 for both, which `lifecycleSteps` reads as "unknown
+  // state" and short-circuits to an empty list — the whole progress bar
+  // vanished for any order still in `draft` or `pending_delivery`. Alias
+  // them to the closest happy-path step for INDEX LOOKUP ONLY; the order's
+  // real `state` (and its own label) is never rewritten anywhere else.
+  private lifecycleLookupState(state: OrderState): OrderState {
+    return lifecycleLookupState(state);
+  }
+
   // ── Step Labels (delivery-type aware) ──────────────────────
 
   readonly stepLabels = computed<Record<string, string>>(() => {
@@ -818,7 +936,7 @@ export class OrderDetailsPageComponent {
       ];
     }
 
-    const currentIndex = this.HAPPY_PATH.indexOf(state);
+    const currentIndex = this.HAPPY_PATH.indexOf(this.lifecycleLookupState(state));
     if (currentIndex === -1) return [];
 
     return this.HAPPY_PATH.map((key, i) => ({
@@ -972,13 +1090,25 @@ export class OrderDetailsPageComponent {
       (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
 
-    // Deduplicate: keep only the first CREATE event
-    let seenCreate = false;
+    // B3 (release-855) — the backend's `isCreateOperation` (audit
+    // interceptor) is a broad catch-all: any POST whose URL doesn't scream
+    // update/edit/delete gets logged as `action: 'CREATE'` under
+    // `resource: 'orders'` — including order SUB-actions (add item, apply
+    // coupon, resend to kitchen…), not just the order's own creation. The
+    // old dedupe treated every 'CREATE' row as "order created" and silently
+    // dropped every one after the first, hiding real sub-action history
+    // instead of just true duplicates. Only dedupe a CREATE row whose OWN
+    // payload IS the order (`new_values.id === orderId`); a child object
+    // (item, coupon…) has its own id — usually with an `order_id` FK
+    // instead — so it passes through untouched and gets its own
+    // (fallback) timeline label from `getTimelineLabel`.
+    const orderId = this.order()?.id;
+    let seenOrderCreate = false;
     return sorted.filter((log) => {
-      const isCreate = log.action?.toUpperCase() === 'CREATE';
-      if (isCreate) {
-        if (seenCreate) return false;
-        seenCreate = true;
+      const isOrderCreate = isOrderCreateLog(log, orderId);
+      if (isOrderCreate) {
+        if (seenOrderCreate) return false;
+        seenOrderCreate = true;
       }
       return true;
     });
@@ -1276,6 +1406,18 @@ export class OrderDetailsPageComponent {
 
       case 'delivered':
         actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
+        // B8/B4 (release-855): entregado ya no implica pagado — un COD
+        // (contra entrega) llega aquí sin cobrar. `payOrder` acepta ahora
+        // `delivered`/`finished` (ver el claim ampliado en el backend), así
+        // que se ofrece "Registrar Pago" igual que en `shipped`.
+        if (!hasPaid) {
+          actions.push({ id: 'pay', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
+        } else if (this.isPrivilegedUser()) {
+          // `applyCancellationPolicy` (abajo) es la autoridad real: solo deja
+          // pasar el botón cuando `cancellation_policy.can_cancel_payment`
+          // es true (pago directo, sin factura ya emitida a la DIAN).
+          actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
+        }
         // Paso 8 — sin saldo reembolsable no se ofrece el reembolso.
         if (this.hasRefundableBalance()) {
           actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
@@ -1285,6 +1427,12 @@ export class OrderDetailsPageComponent {
       case 'finished':
         if (order.payment_form === '2' && Number(order.remaining_balance) > 0.01) {
           actions.push({ id: 'credit-payment', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
+        } else if (!hasPaid) {
+          // B8/B4 (release-855): same reasoning as `delivered` above — a
+          // finished COD order with nothing settled yet still needs `pay`.
+          actions.push({ id: 'pay', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
+        } else if (this.isPrivilegedUser()) {
+          actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
         }
         // Paso 8 — sin saldo reembolsable no se ofrece el reembolso.
         if (this.hasRefundableBalance()) {
@@ -1405,7 +1553,9 @@ export class OrderDetailsPageComponent {
 
     const state = order.state;
     const stateOrder = ['created', 'pending_payment', 'processing', 'shipped', 'delivered', 'finished'];
-    const stateIndex = stateOrder.indexOf(state);
+    // B13 (release-855) — same `draft`/`pending_delivery` alias as
+    // `lifecycleSteps` above; see `LIFECYCLE_STATE_ALIASES`.
+    const stateIndex = stateOrder.indexOf(this.lifecycleLookupState(state));
 
     const steps = [
       { key: 'received', label: 'Orden recibida', status: 'pending' as string },
@@ -4053,7 +4203,10 @@ export class OrderDetailsPageComponent {
     // Paso 8 — los audits de refund comparten `resource: 'orders'`, así que
     // sus estados (`completed`, ...) llegan a `new_values.state`. Sin esta
     // rama el timeline mostraba "Nuevo estado: completed" en crudo.
-    if (newState && this.isRefundStateValue(newState)) {
+    // B3 (release-855): `RefundState` colisiona por valor con `OrderState`
+    // en `processing`/`cancelled` — sin `isRefundAuditRow` una transición real
+    // de orden a `processing` se etiquetaba "Reembolso en proceso".
+    if (newState && this.isRefundStateValue(newState) && this.isRefundAuditRow(log)) {
       const label = this.refundStateLabel(newState);
       return `Reembolso ${label.charAt(0).toLowerCase()}${label.slice(1)}`;
     }
@@ -4077,7 +4230,14 @@ export class OrderDetailsPageComponent {
         cancelled: 'Orden Cancelada',
         refunded: 'Orden Reembolsada',
       };
-      if (stateLabels[newState]) return stateLabels[newState];
+      // B3 (release-855): un `new_values.state` truthy no prueba que HUBO
+      // transición — un PATCH que devuelve el snapshot completo de la orden
+      // (p. ej. `deliverOrderItem`, o una edición de notas/dirección) trae el
+      // mismo `state` en `old_values` y `new_values`. Sin este guard, esas
+      // filas se etiquetaban con el label de transición igual.
+      if (isConfirmedStateTransition(log, oldState, newState) && stateLabels[newState]) {
+        return stateLabels[newState];
+      }
     }
 
     // Fallback to generic action labels
@@ -4122,13 +4282,7 @@ export class OrderDetailsPageComponent {
   kitchenStateFor(item: OrderItem):
     | { status: string; kitchen_ticket_id?: number }
     | null {
-    const items = item.kitchen_ticket_items;
-    if (!items || items.length === 0) return null;
-    const inFlight = items.find(
-      (k) => k.status === 'pending' || k.status === 'in_preparation' || k.status === 'ready',
-    );
-    if (inFlight) return inFlight;
-    return items[0]; // items are pre-sorted desc by the backend include
+    return kitchenStateForItem(item); // items are pre-sorted desc by the backend include
   }
 
   /**
@@ -4580,10 +4734,16 @@ export class OrderDetailsPageComponent {
    * Espejo del predicado `DELIVER_ORDER_ITEM_NOT_DELIVERABLE` del backend.
    * Ofrece la acción "Entregar" SOLO si:
    *  - El ítem NO está entregado todavía (`delivered_at` IS NULL).
-   *  - La orden NO está en estado terminal. Lista reusada del predicado
-   *    `canResend` (:556): shipped / delivered / finished / cancelled /
-   *    refunded. NO se ofrece si la orden ya está cancelada, devuelta,
-   *    enviada como domicilio o marcada como entregada globalmente.
+   *  - La orden NO está cancelada/reembolsada (únicos estados verdaderamente
+   *    terminales para este gesto — B16, release-855). ANTES esta lista
+   *    también incluía `shipped`/`delivered`/`finished`, lo que bloqueaba
+   *    "Entregar" en un domicilio con platos: el flujo de despacho mueve la
+   *    ORDEN a `delivered`/`finished` cuando el domiciliario la recibe, pero
+   *    eso no es lo mismo que el mesero haya marcado los platos como
+   *    entregados en el KDS — con la lista vieja ese ítem quedaba sin
+   *    superficie para cerrarse nunca. La guarda real de "no marques un
+   *    ítem no listo" ya la da `kitchen_ticket_items[0].status === 'ready'`
+   *    abajo, así que el estado de la orden no necesita duplicarla.
    *  - Si el ítem pasó por cocina, su `kitchen_ticket_items[0].status`
    *    debe ser `ready`. En cualquier otro estado el backend responde 422;
    *    no ofrezco un botón que sé que va a fallar.
@@ -4593,22 +4753,7 @@ export class OrderDetailsPageComponent {
    *    tenía superficie de entrega hasta hoy.
    */
   canDeliver(item: OrderItem): boolean {
-    if (item.delivered_at) return false;
-    // Fila cancelada: excluida de acciones posteriores (badge + motivo).
-    if (item.cancelled_at) return false;
-    const order = this.order();
-    if (!order) return false;
-    const terminalStates: OrderState[] = [
-      'shipped',
-      'delivered',
-      'finished',
-      'cancelled',
-      'refunded',
-    ];
-    if (terminalStates.includes(order.state as OrderState)) return false;
-    const ks = this.kitchenStateFor(item);
-    if (ks == null) return true;
-    return ks.status === 'ready';
+    return canDeliverItem(item, this.order()?.state as OrderState | undefined);
   }
 
   /**
@@ -5007,6 +5152,20 @@ export class OrderDetailsPageComponent {
   /** ¿Es `state` un estado de refund (no de orden)? Para timeline refund-aware. */
   isRefundStateValue(state: string | undefined | null): boolean {
     return !!state && state in this.REFUND_STATE_LABELS;
+  }
+
+  /**
+   * B3 (release-855): `RefundState` values collide by name with real
+   * `OrderState` values (`processing`, `cancelled`). `isRefundStateValue`
+   * alone can't tell "this row IS a refund" from "this row is an order
+   * transition that happens to land on a state refunds also use". This
+   * checks the audit row's own shape instead of the state string:
+   * `metadata.flow_action==='refund'` (POST .../flow/refund) or an
+   * `order_id` on `old_values`/`new_values` (only `refunds` rows have it —
+   * `orders` snapshots have `.id`, never `.order_id`).
+   */
+  isRefundAuditRow(log: any): boolean {
+    return isRefundAuditRow(log);
   }
 
   /**

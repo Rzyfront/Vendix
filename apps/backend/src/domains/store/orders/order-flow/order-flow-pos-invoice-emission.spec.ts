@@ -305,10 +305,12 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
     expect(posEmits()).toHaveLength(0);
   });
 
-  it('guarda de cocina: cancela el pago, RESTAURA el estado previo al claim y rechaza con el errorCode de superficie', async () => {
+  it('guarda de cocina (modo estricto, fast-track): cancela el pago, RESTAURA el estado previo al claim y rechaza con el errorCode de superficie', async () => {
     (service as any).hasPendingKitchenItems.mockResolvedValue(true);
 
-    const error = await service.payOrder(ORDER_ID, DIRECT_DTO).catch((e) => e);
+    const error = await service
+      .payOrder(ORDER_ID, DIRECT_DTO, { strictKitchenPending: true })
+      .catch((e) => e);
 
     expect(error).toBeInstanceOf(VendixHttpException);
     expect(error.errorCode).toBe(ErrorCodes.ORD_FLOW_PAYMENT_FAILED_001.code);

@@ -6282,6 +6282,18 @@ export const ErrorCodes = {
     devMessage:
       'El tributo de la nota no declara tax_type y no hay fila de catálogo de la cual resolverlo; inventarlo haría que la nota acredite un tributo distinto al facturado.',
   },
+
+  // B4 (release-855) — cancelPayment() en una orden `delivered`/`finished`
+  // repagable: se bloquea cuando existe una factura de venta vigente que ya
+  // salió hacia la DIAN (validated/sent/accepted). Anular el pago detrás de
+  // una factura emitida descuadraría lo declarado; la vía correcta es una
+  // nota crédito, no una anulación local del pago.
+  ORD_PAYMENT_CANCEL_INVOICED_001: {
+    code: 'ORD_PAYMENT_CANCEL_INVOICED_001',
+    httpStatus: 409,
+    devMessage:
+      'Order has a sales invoice already issued to DIAN (validated/sent/accepted); cancelling the payment locally would desync the declared invoice. Issue a credit note instead.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

@@ -2727,23 +2727,38 @@ export class KitchenFireService {
       );
     }
     // Paso 3 (takeaway-only KDS): en cocina solo se entregan platos
-    // para llevar. Si ALGUNA fila no-cancelada del ticket no es takeaway
-    // (`order_item.is_takeaway != true`, ya incluido vía
-    // KITCHEN_TICKET_INCLUDE), el ticket completo se bloquea: un ticket
-    // mixto o de mesa no se entrega por partes desde cocina.
-    const nonTakeaway = (ticket.items ?? []).filter(
-      (it) => it.status !== 'cancelled' && it.order_item?.is_takeaway !== true,
-    );
-    if (nonTakeaway.length > 0) {
-      throw new VendixHttpException(
-        ErrorCodes.KITCHEN_TICKET_NOT_TAKEAWAY,
-        undefined,
-        {
-          from: ticket.status,
-          to: 'delivered',
-          hint: 'Solo los platos para llevar se entregan en cocina',
-        },
+    // para llevar CUANDO la orden tiene una sesión de mesa ABIERTA — ese es
+    // el caso que este guard protege: un plato de mesa lo entrega el mesero
+    // vía la sesión, no cocina, así que un ticket con filas no-takeaway se
+    // bloquea completo (mixto o de mesa no se entrega por partes desde
+    // cocina).
+    //
+    // B16 (release-855): esta guarda bloqueaba TAMBIÉN mostrador/domicilio
+    // sin sesión de mesa — órdenes cuyos ítems simplemente nunca llevaron
+    // `is_takeaway=true` estampado porque no hay mesero que las entregue vía
+    // sesión. Sin sesión abierta, cocina es la ÚNICA superficie de entrega;
+    // bloquearla dejaba el plato sin forma de cerrarse nunca. La guarda
+    // ahora solo se aplica cuando existe una sesión de mesa abierta para
+    // esta orden.
+    const openTableSession = await this.prisma.table_sessions.findFirst({
+      where: { order_id: ticket.order_id, closed_at: null },
+      select: { id: true },
+    });
+    if (openTableSession) {
+      const nonTakeaway = (ticket.items ?? []).filter(
+        (it) => it.status !== 'cancelled' && it.order_item?.is_takeaway !== true,
       );
+      if (nonTakeaway.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.KITCHEN_TICKET_NOT_TAKEAWAY,
+          undefined,
+          {
+            from: ticket.status,
+            to: 'delivered',
+            hint: 'Solo los platos para llevar se entregan en cocina',
+          },
+        );
+      }
     }
     // ticket.status is `ready` or `in_preparation` — both valid.
     // If still in_preparation, bump to ready first (sets ready_at).

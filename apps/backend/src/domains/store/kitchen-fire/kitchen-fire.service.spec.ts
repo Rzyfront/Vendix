@@ -1061,6 +1061,10 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       prismaMock.order_items.updateMany = jest
         .fn()
         .mockResolvedValue({ count: 1 });
+      // B16 (release-855): `markDelivered` now queries `table_sessions`.
+      // Default (no open session) matches this block's counter-style
+      // fixtures — the takeaway guard must not apply here.
+      prismaMock.table_sessions = { findFirst: jest.fn() };
     });
 
     const setupStartTx = () => {
@@ -1233,6 +1237,13 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       prismaMock.order_items.updateMany = jest
         .fn()
         .mockResolvedValue({ count: 1 });
+      // B16 (release-855): `markDelivered` now queries `table_sessions` to
+      // scope the takeaway-only guard to orders with an OPEN table session.
+      // Default (no open session) — tests that don't call
+      // `.mockResolvedValue(...)` on it exercise the counter/delivery path
+      // where the guard must NOT apply. Tests naming "ticket de mesa" set
+      // an explicit open session below.
+      prismaMock.table_sessions = { findFirst: jest.fn() };
     });
 
     const setupCancelTx = () => {
@@ -1315,6 +1326,8 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
         makeTicket('ready', [takeawayItem(11, false), takeawayItem(12, false)]),
       );
+      // B16 (release-855): the guard only applies with an OPEN table session.
+      prismaMock.table_sessions.findFirst.mockResolvedValue({ id: 9 });
 
       const err = await service.markDelivered(555).catch((e) => e);
 
@@ -1335,6 +1348,8 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
         makeTicket('ready', [takeawayItem(11, true), takeawayItem(12, false)]),
       );
+      // B16 (release-855): the guard only applies with an OPEN table session.
+      prismaMock.table_sessions.findFirst.mockResolvedValue({ id: 9 });
 
       const err = await service.markDelivered(555).catch((e) => e);
 
@@ -1343,6 +1358,30 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       expect(
         prismaMock.kitchen_ticket_items.updateMany,
       ).not.toHaveBeenCalled();
+    });
+
+    it('B16 (release-855) — mostrador/domicilio sin sesión de mesa: cocina entrega aunque no haya is_takeaway', async () => {
+      // Sin sesión de mesa abierta, cocina es la ÚNICA superficie de
+      // entrega — el guard de "solo takeaway" no debe bloquear un pedido de
+      // mostrador cuyas líneas nunca llevaron `is_takeaway=true` estampado.
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('ready', [takeawayItem(11, false), takeawayItem(12, false)]),
+      );
+      prismaMock.table_sessions.findFirst.mockResolvedValue(null);
+      prismaMock.kitchen_ticket_items.findMany.mockResolvedValue([
+        { order_item_id: 21 },
+        { order_item_id: 22 },
+      ]);
+      prismaMock.kitchen_tickets.findMany.mockResolvedValue([
+        { status: 'delivered' },
+      ]);
+
+      const result = await service.markDelivered(555);
+
+      expect(result).toMatchObject({ id: 555 });
+      expect(prismaMock.kitchen_tickets.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 555 } }),
+      );
     });
 
     it('paso 3 — fila cancelada no-takeaway no bloquea la entrega', async () => {
