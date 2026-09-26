@@ -48,6 +48,7 @@ import { OrderSseService } from './services/order-sse.service';
 // no importa este módulo hoy, pero ambos dominios se referencian vía eventos
 // y seeds, y el ciclo rompería el arranque en silencio.
 import { InvoicingModule } from '../invoicing/invoicing.module';
+import { OrderHistoryModule } from './order-history/order-history.module'; // Plan order-truth-and-invoice-tz — OrdersService inyecta OrderHistoryService directo (customer_changed / shipping_assigned)
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { InvoicingModule } from '../invoicing/invoicing.module';
     NotificationsModule,
     // Release-853 paso 10: propagación del titular al borrador de factura.
     forwardRef(() => InvoicingModule),
+    OrderHistoryModule,
   ],
   controllers: [OrdersController, OrdersBulkController],
   providers: [
