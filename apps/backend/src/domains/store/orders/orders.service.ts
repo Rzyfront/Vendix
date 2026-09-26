@@ -52,7 +52,28 @@ import {
   isVatResponsible,
 } from '@common/helpers/vat-responsibility.helper';
 import { OrderFlowService } from './order-flow/order-flow.service';
-import { getOrderCancellationPolicy } from './order-flow/order-cancellation-policy.util';
+import {
+  getOrderCancellationPolicy,
+  SETTLED_PAYMENT_STATES,
+} from './order-flow/order-cancellation-policy.util';
+import {
+  canPay,
+  canCancelPaymentAsRole,
+  canCancel,
+  canAssignShipping,
+  canConfirmDelivery,
+  canRefund,
+  canReactivate,
+  canFastTrack,
+  canCreditPayment,
+  canEditOrder,
+  canDispatchOrder,
+  canManualShip,
+  canReadyForPickupBeforePayment,
+  canDirectDeliver,
+  computeItemActions,
+  OrderActionSnapshot,
+} from './order-flow/order-action-policy.util';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.service';
@@ -1248,6 +1269,13 @@ export class OrdersService {
           },
           orderBy: { created_at: 'asc' },
         },
+        // order-truth-and-invoice-tz plan — Step 2: `available_actions` reuses
+        // the SAME `canPay`/`canRefund` predicates `OrderFlowService
+        // .getAvailableActions` calls, which need a refund-aware settlement
+        // snapshot (`toSettlementSnapshot` in `order-action-policy.util.ts`).
+        refunds: {
+          select: { state: true, amount: true },
+        },
         shipping_method: {
           select: {
             id: true,
@@ -1457,14 +1485,313 @@ export class OrdersService {
     // factura de CUALQUIER tipo (lo necesita la tarjeta del detalle); este
     // campo responde otra pregunta: ¿hay una `sales_invoice` vigente?
     const activeSalesInvoice = await this.findActiveSalesInvoice(id);
+    // Mirrors `findBlockingSalesInvoiceForPaymentCancel`'s exact semantics
+    // (`OrderFlowService`, order-flow.service.ts) — a `draft` sales invoice
+    // was never transmitted, so it does not block a local payment cancel.
+    const hasIssuedSalesInvoice =
+      !!activeSalesInvoice && activeSalesInvoice.status !== 'draft';
+
+    // order-truth-and-invoice-tz plan — Step 2: additive `available_actions`
+    // (order-level) + `items[].available_actions` (item-level). Both are
+    // computed through the SAME util predicates
+    // `OrderFlowService.getAvailableActions` calls (`order-action-policy
+    // .util.ts`) — one source of truth for "what can this order/item do",
+    // reachable from either GET endpoint without a second round-trip. Built
+    // entirely from data this query already loaded (plus the `refunds`
+    // include added above) — no extra queries.
+    const available_actions = this.buildOrderAvailableActions(order, hasIssuedSalesInvoice);
+    const orderHasSettledPayment = (order.payments ?? []).some((p: any) =>
+      SETTLED_PAYMENT_STATES.has(p.state),
+    );
+    const orderItemsWithActions = (order.order_items ?? []).map((item: any) => ({
+      ...item,
+      available_actions: computeItemActions({
+        order_state: order.state,
+        item_type: item.item_type,
+        delivered_at: item.delivered_at,
+        latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
+        orderHasSettledPayment,
+      }),
+    }));
 
     return {
       ...order,
+      order_items: orderItemsWithActions,
       cancellation_policy: getOrderCancellationPolicy(order),
       active_sales_invoice: activeSalesInvoice
         ? { id: activeSalesInvoice.id, status: activeSalesInvoice.status }
         : null,
+      available_actions,
     };
+  }
+
+  /**
+   * order-truth-and-invoice-tz plan — Step 2. Mirrors
+   * `OrderFlowService.getAvailableActions`'s per-state orchestration
+   * action-for-action (same codes, same `label_key`s, same util predicates)
+   * so `findOne`'s response can render the same buttons without a second
+   * call to `GET .../flow/available-actions`. Deliberately duplicates only
+   * the "which code applies in which state" wiring — never the rule logic
+   * itself, which stays in `order-action-policy.util.ts`'s predicates.
+   *
+   * Two small, intentional differences from `OrderFlowService
+   * .getAvailableActions`, both required to stay a pure/non-requerying
+   * helper over data `findOne` already loaded:
+   *  - `processing`'s method-type branch reads `order.shipping_method?.type`
+   *    (already `include`d by `findOne`) instead of the sibling method's own
+   *    `shipping_methods.findFirst` query.
+   *  - `hasIssuedSalesInvoice` is the caller's already-computed
+   *    `activeSalesInvoice` (unconditional in `findOne`), not the lazy,
+   *    conditional `findBlockingSalesInvoiceForPaymentCancel` lookup — same
+   *    semantics (`status !== 'draft'`), just no separate branch to decide
+   *    whether to bother resolving it.
+   */
+  private buildOrderAvailableActions(
+    order: any,
+    hasIssuedSalesInvoice: boolean,
+  ): Array<{ code: string; label_key: string; enabled: boolean; reason?: string }> {
+    const actions: Array<{
+      code: string;
+      label_key: string;
+      enabled: boolean;
+      reason?: string;
+    }> = [];
+
+    const state = order.state as string;
+    const deliveryType = order.delivery_type as string | null | undefined;
+    const hasMethod = !!order.shipping_method_id;
+    const isDirectDelivery = deliveryType === 'direct_delivery';
+    const isPickupDelivery = (deliveryType || 'direct_delivery') === 'pickup';
+    const requiresDispatch = deliveryType === 'home_delivery';
+    const shippingMethodType = order.shipping_method?.type ?? null;
+
+    const isKitchenOrder = (order.order_items ?? []).some(
+      (item: any) => (item.kitchen_ticket_items ?? []).length > 0,
+    );
+    const hasPendingKitchen = (order.order_items ?? []).some((item: any) =>
+      (item.kitchen_ticket_items ?? []).some(
+        (k: any) => k.status !== 'delivered' && k.status !== 'cancelled',
+      ),
+    );
+    const offersDispatchFlow = requiresDispatch || isKitchenOrder;
+
+    const snapshot: OrderActionSnapshot & {
+      delivery_type?: string | null;
+      shipping_method_id?: number | null;
+      payment_form?: string | null;
+      isKitchenOrder?: boolean;
+      hasOrderItems?: boolean;
+      remaining_balance?: Prisma.Decimal | number | string | null;
+    } = {
+      ...order,
+      refunds: order.refunds ?? [],
+      hasPendingKitchen,
+      isKitchenOrder,
+      hasOrderItems: (order.order_items ?? []).length > 0,
+      hasIssuedSalesInvoice,
+    };
+    const roleCtx = { roles: RequestContextService.getRoles() };
+
+    if (state === 'draft' || state === 'created') {
+      actions.push({
+        code: 'edit_order',
+        label_key: 'ORD_ACTION_EDIT_ORDER',
+        ...canEditOrder(snapshot, roleCtx),
+      });
+      actions.push({ code: 'pay', label_key: 'ORD_ACTION_PAY', ...canPay(snapshot) });
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          ...canAssignShipping(snapshot),
+        });
+      }
+      actions.push({ code: 'cancel', label_key: 'ORD_ACTION_CANCEL', ...canCancel(snapshot) });
+    }
+
+    if (state === 'pending_payment') {
+      const isCreditOrder = order.payment_form === '2';
+      if (isCreditOrder) {
+        actions.push({
+          code: 'credit_payment',
+          label_key: 'ORD_ACTION_CREDIT_PAYMENT',
+          ...canCreditPayment(snapshot),
+        });
+      } else {
+        actions.push({
+          code: 'confirm_payment',
+          label_key: 'ORD_ACTION_CONFIRM_PAYMENT',
+          enabled: true,
+        });
+      }
+
+      actions.push({
+        code: 'cancel_payment',
+        label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+        ...canCancelPaymentAsRole(snapshot, roleCtx),
+      });
+
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          ...canAssignShipping(snapshot),
+        });
+      }
+      actions.push({ code: 'cancel', label_key: 'ORD_ACTION_CANCEL', ...canCancel(snapshot) });
+
+      if (offersDispatchFlow || isPickupDelivery) {
+        actions.push({
+          code: 'dispatch_order',
+          label_key: 'ORD_ACTION_DISPATCH_ORDER',
+          ...canDispatchOrder(snapshot),
+        });
+        actions.push({
+          code: 'manual_ship',
+          label_key: 'ORD_ACTION_MANUAL_SHIP',
+          ...canManualShip(snapshot),
+        });
+        actions.push({
+          code: 'ready_for_pickup',
+          label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+          ...canReadyForPickupBeforePayment(snapshot),
+        });
+      }
+    }
+
+    if (state === 'processing') {
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          ...canAssignShipping(snapshot),
+        });
+        actions.push({
+          code: 'ready_for_pickup',
+          label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+          enabled: false,
+          reason: 'ORD_SHIP_REQUIRED_001',
+        });
+        actions.push({
+          code: 'ship_with_tracking',
+          label_key: 'ORD_ACTION_SHIP_WITH_TRACKING',
+          enabled: false,
+          reason: 'ORD_SHIP_REQUIRED_001',
+        });
+      } else if (hasMethod) {
+        if (shippingMethodType === 'pickup') {
+          actions.push({
+            code: 'ready_for_pickup',
+            label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+            enabled: true,
+          });
+        } else {
+          actions.push({
+            code: 'ship_with_tracking',
+            label_key: 'ORD_ACTION_SHIP_WITH_TRACKING',
+            enabled: true,
+          });
+        }
+      }
+
+      if (offersDispatchFlow) {
+        actions.push({
+          code: 'dispatch_order',
+          label_key: 'ORD_ACTION_DISPATCH_ORDER',
+          ...canDispatchOrder(snapshot),
+        });
+        if (isPickupDelivery) {
+          actions.push({
+            code: 'direct_deliver',
+            label_key: 'ORD_ACTION_DIRECT_DELIVER',
+            ...canDirectDeliver(snapshot),
+          });
+        }
+      }
+
+      if (!requiresDispatch) {
+        actions.push({
+          code: 'confirm_delivery',
+          label_key: 'ORD_ACTION_CONFIRM_DELIVERY',
+          ...canConfirmDelivery(snapshot),
+        });
+      }
+
+      actions.push({
+        code: 'cancel',
+        label_key: 'ORD_ACTION_CANCEL',
+        ...canCancel(snapshot),
+      });
+    }
+
+    if (state === 'shipped') {
+      actions.push({
+        code: 'mark_delivered',
+        label_key: 'ORD_ACTION_MARK_DELIVERED',
+        enabled: true,
+      });
+    }
+
+    if (state === 'delivered') {
+      actions.push({
+        code: 'confirm_delivery',
+        label_key: 'ORD_ACTION_CONFIRM_DELIVERY',
+        ...canConfirmDelivery(snapshot),
+      });
+    }
+
+    if (state === 'cancelled') {
+      actions.push({
+        code: 'reactivate',
+        label_key: 'ORD_ACTION_REACTIVATE',
+        ...canReactivate(snapshot),
+      });
+    }
+
+    if (state === 'delivered' || state === 'finished') {
+      actions.push({ code: 'refund', label_key: 'ORD_ACTION_REFUND', ...canRefund(snapshot) });
+    }
+
+    const isPayEligibleFulfilledState =
+      state === 'shipped' || state === 'delivered' || state === 'finished';
+    if (isPayEligibleFulfilledState) {
+      const hasSettled = (order.payments ?? []).some((p: any) =>
+        SETTLED_PAYMENT_STATES.has(p.state),
+      );
+      const isCreditOrder = order.payment_form === '2';
+      const payResult = canPay(snapshot);
+      actions.push({
+        code: 'pay',
+        label_key: 'ORD_ACTION_PAY',
+        ...(payResult.enabled && isCreditOrder
+          ? { enabled: false, reason: ErrorCodes.ORD_PAY_CREDIT_ORDER_001.code }
+          : payResult),
+      });
+
+      if (isCreditOrder && state === 'finished') {
+        actions.push({
+          code: 'credit_payment',
+          label_key: 'ORD_ACTION_CREDIT_PAYMENT',
+          ...canCreditPayment(snapshot),
+        });
+      }
+
+      if (hasSettled) {
+        actions.push({
+          code: 'cancel_payment',
+          label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+          ...canCancelPaymentAsRole(snapshot, roleCtx),
+        });
+      }
+    }
+
+    actions.push({
+      code: 'fast_track',
+      label_key: 'ORD_ACTION_FAST_TRACK',
+      ...canFastTrack(snapshot),
+    });
+
+    return actions;
   }
 
   /**
