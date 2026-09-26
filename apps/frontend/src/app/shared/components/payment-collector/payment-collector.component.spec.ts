@@ -4,8 +4,11 @@ import { signal } from '@angular/core';
 import { By } from '@angular/platform-browser';
 
 import { PaymentCollectorComponent } from './payment-collector.component';
+import { PaymentModalComponent } from './payment-modal.component';
 import { CurrencyFormatService } from '../../pipes/currency';
 import { PaymentMethodsCatalogService } from '../../services/payment-methods-catalog.service';
+import { PaymentMethodType, type PaymentMethod } from '../../models/payment-method.model';
+import type { PaymentSubmit } from './payment-collector.model';
 
 describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting', () => {
   let fixture: ComponentFixture<PaymentCollectorComponent>;
@@ -274,5 +277,207 @@ describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting',
       expect(optionEls[2].textContent.trim()).toBe('Cuota 2 - 13/11/2026 ($50.000)');
       expect(optionEls[2].disabled).toBe(false);
     });
+  });
+});
+
+/** Mock espejo del bloque QUI-839 + los miembros que tocan el pipe `currency`
+ * (loadCurrency), la directiva de inputs (currencyFormatStyle,
+ * currencyDecimals) y el propio componente (currencySymbol). */
+function buildMultiCurrencyMock() {
+  return {
+    format: (amount: number | string | null | undefined) => {
+      const num = Number(amount) || 0;
+      return `$${num.toLocaleString('es-CO')}`;
+    },
+    loadCurrency: () => Promise.resolve(null),
+    currencySymbol: signal('$'),
+    currencyDecimals: signal(0),
+    currencyFormatStyle: signal('dot_comma'),
+    currentCurrency: signal({
+      code: 'COP',
+      symbol: '$',
+      decimal_places: 0,
+      position: 'before',
+      format_style: 'dot_comma',
+    }),
+    resolution: signal('resolved'),
+  };
+}
+
+const multiCatalogMock = {
+  getEnabledMethods: () => of([]),
+};
+
+const multiCashMethod: PaymentMethod = {
+  id: '1',
+  type: PaymentMethodType.CASH,
+  name: 'Efectivo',
+  icon: 'cash',
+  enabled: true,
+};
+
+const multiCardMethod: PaymentMethod = {
+  id: '2',
+  type: PaymentMethodType.CARD,
+  name: 'Tarjeta',
+  icon: 'credit-card',
+  enabled: true,
+};
+
+const multiTransferMethod: PaymentMethod = {
+  id: '3',
+  type: PaymentMethodType.BANK_TRANSFER,
+  name: 'Transferencia',
+  icon: 'bank',
+  enabled: true,
+  original: {
+    custom_config: {
+      accounts: [{ bank_account_id: 7, bank_name: 'Bancolombia', account_number: '123456' }],
+    },
+  },
+};
+
+describe('PaymentCollectorComponent — modo multi «Varios métodos» (Paso 5)', () => {
+  let fixture: ComponentFixture<PaymentCollectorComponent>;
+  let component: PaymentCollectorComponent;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [PaymentCollectorComponent],
+      providers: [
+        { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
+        { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
+      ],
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(PaymentCollectorComponent);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('amount', 100000);
+    fixture.componentRef.setInput('paymentMethods', [
+      multiCashMethod,
+      multiCardMethod,
+      multiTransferMethod,
+    ]);
+    fixture.componentRef.setInput('allowMultiTender', true);
+    fixture.detectChanges();
+  });
+
+  it('gate: con Σ ≠ total el cobro queda bloqueado y se muestra «Falta»', () => {
+    component.setMultiEnabled(true);
+    fixture.detectChanges();
+    expect(component.legs().length).toBe(1);
+
+    component.setLegAmount(0, 20000);
+    component.addLeg();
+    component.setLegAmount(1, 79999);
+    fixture.detectChanges();
+
+    expect(component.remaining()).toBe(1);
+    expect(component.isMultiValid()).toBe(false);
+    // canSubmit() es la señal que deshabilita el botón del modal padre.
+    expect(component.canSubmit()).toBe(false);
+    const balance = fixture.debugElement.query(By.css('.pc-multi-balance'));
+    expect(balance).toBeTruthy();
+    expect(balance.nativeElement.textContent).toContain('Falta');
+  });
+
+  it('efectivo ya usado no reaparece en el selector de tramos', () => {
+    component.setMultiEnabled(true);
+    fixture.detectChanges();
+    expect(component.legs()[0].methodType).toBe(PaymentMethodType.CASH);
+
+    expect(component.directMethods().some((m) => m.type === PaymentMethodType.CASH)).toBe(false);
+
+    component.addLeg();
+    fixture.detectChanges();
+    const selects = fixture.debugElement.queryAll(By.css('select.pc-multi-method'));
+    expect(selects.length).toBe(2);
+    const secondOptions = Array.from(selects[1].nativeElement.querySelectorAll('option')).map(
+      (o) => (o as HTMLElement).textContent?.trim(),
+    );
+    expect(secondOptions).not.toContain('Efectivo');
+    // El tramo propio conserva su efectivo seleccionado.
+    expect(
+      component.directMethodsForLeg(0).some((m) => m.type === PaymentMethodType.CASH),
+    ).toBe(true);
+  });
+
+  it('20.000 en efectivo con recibido 50.000 muestra vuelto 30.000', () => {
+    component.setMultiEnabled(true);
+    component.setLegAmount(0, 20000);
+    component.setLegReceived(0, 50000);
+    fixture.detectChanges();
+
+    const leg = component.legs()[0];
+    expect(leg.methodType).toBe(PaymentMethodType.CASH);
+    expect(leg.change).toBe(30000);
+    expect(component.legChange(leg)).toBe(30000);
+    const changeBox = fixture.debugElement.query(By.css('.change-display'));
+    expect(changeBox).toBeTruthy();
+    expect(changeBox.nativeElement.textContent).toContain('30.000');
+  });
+
+  it('1 tramo emite el payload clásico idéntico, sin `legs`', () => {
+    const catalogCash = component
+      .resolvedMethods()
+      .find((m) => m.type === PaymentMethodType.CASH);
+    expect(catalogCash).toBeDefined();
+    component.selectMethod(catalogCash!);
+    component.cashReceivedControl.setValue(100000);
+    fixture.detectChanges();
+    expect(component.canSubmit()).toBe(true);
+    let singlePayload: PaymentSubmit | undefined;
+    const sub1 = component.submit.subscribe((p) => {
+      singlePayload = p;
+    });
+    component.triggerSubmit();
+    sub1.unsubscribe();
+    expect(singlePayload).toBeDefined();
+
+    component.setMultiEnabled(true);
+    fixture.detectChanges();
+    expect(component.legs().length).toBe(1);
+    expect(component.canSubmit()).toBe(true);
+    let multiPayload: PaymentSubmit | undefined;
+    const sub2 = component.submit.subscribe((p) => {
+      multiPayload = p;
+    });
+    component.triggerSubmit();
+    sub2.unsubscribe();
+
+    expect(multiPayload).toBeDefined();
+    expect('legs' in multiPayload!).toBe(false);
+    expect(multiPayload).toEqual(singlePayload);
+  });
+});
+
+describe('PaymentModalComponent — arbitraje NG8002 allowMultiTender (Paso 5c)', () => {
+  let fixture: ComponentFixture<PaymentModalComponent>;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [PaymentModalComponent],
+      providers: [
+        { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
+        { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
+      ],
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(PaymentModalComponent);
+  });
+
+  afterEach(() => fixture.destroy());
+
+  it('compila el binding [allowMultiTender] del modal y lo propaga al collector', () => {
+    fixture.componentRef.setInput('amount', 100000);
+    fixture.componentRef.setInput('paymentMethods', [multiCashMethod, multiCardMethod]);
+    fixture.componentRef.setInput('allowMultiTender', true);
+    fixture.componentRef.setInput('open', true);
+    fixture.detectChanges();
+
+    const collectorEl = fixture.debugElement.query(By.directive(PaymentCollectorComponent));
+    expect(collectorEl).toBeTruthy();
+    const collector = collectorEl.componentInstance as PaymentCollectorComponent;
+    expect(collector.config().allowMultiTender).toBe(true);
   });
 });

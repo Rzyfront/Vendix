@@ -371,6 +371,29 @@ export const ErrorCodes = {
     devMessage: 'Payment does not belong to the requesting user',
   },
 
+  // Multi-tender cash payments (pago multimétodo de contado)
+  PAY_MULTI_TENDER_SUM_MISMATCH: {
+    code: 'PAY_MULTI_TENDER_SUM_MISMATCH',
+    httpStatus: 400,
+    devMessage: 'Multi-tender legs must add up to the payable amount',
+  },
+  PAY_MULTI_TENDER_METHOD_NOT_ALLOWED: {
+    code: 'PAY_MULTI_TENDER_METHOD_NOT_ALLOWED',
+    httpStatus: 400,
+    devMessage:
+      'Only direct payment methods are allowed in a multi-tender cash payment',
+  },
+  PAY_MULTI_TENDER_MULTIPLE_CASH: {
+    code: 'PAY_MULTI_TENDER_MULTIPLE_CASH',
+    httpStatus: 400,
+    devMessage: 'Only one cash leg is allowed in a multi-tender cash payment',
+  },
+  PAY_MULTI_TENDER_CASH_INSUFFICIENT: {
+    code: 'PAY_MULTI_TENDER_CASH_INSUFFICIENT',
+    httpStatus: 400,
+    devMessage: 'Cash received is less than the cash leg amount',
+  },
+
   // Payment Sources (Card-On-File / Wompi recurrent)
   PAYMENT_SOURCE_NOT_FOUND: {
     code: 'PAYMENT_SOURCE_NOT_FOUND',

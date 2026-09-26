@@ -62,6 +62,11 @@ import {
   getSettledOrderAmount,
   isOrderFullyPaid,
 } from '../../payments/services/payment-validator.service';
+import {
+  normalizePaymentLegs,
+  type NormalizedLeg,
+  type PaymentLegMethodInfo,
+} from '../../payments/utils/payment-legs.util';
 
 type OrderState = order_state_enum;
 type DraftReservationKey = {
@@ -1187,6 +1192,24 @@ export class OrderFlowService {
       });
     }
 
+    // Cobro multimétodo de contado — guarda upfront: `payments[]` sólo se
+    // acepta con `payment_type: 'direct'`. Va AQUÍ (y no en cada rama) porque
+    // la rama shipped ignora `payment_type`: sin esta guarda, un
+    // shipped+online+tramos cobraría de contado un pago de pasarela. Se lanza
+    // SIN envolver para que la superficie sea 400
+    // `PAY_MULTI_TENDER_METHOD_NOT_ALLOWED` (no el 409 genérico del wrap).
+    if (
+      dto.payment_type === PaymentType.ONLINE &&
+      Array.isArray(dto.payments) &&
+      dto.payments.length > 0
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_MULTI_TENDER_METHOD_NOT_ALLOWED,
+        'El cobro multimétodo de contado sólo se acepta con payment_type direct.',
+        { payment_type: dto.payment_type, legs: dto.payments.length },
+      );
+    }
+
     // -- Propina (T3) ------------------------------------------------------
     // El cobro desde el detalle de orden acepta propina igual que el POS y el
     // cierre de mesa. La resolucion vive en `resolveTip`
@@ -1280,41 +1303,74 @@ export class OrderFlowService {
       remaining_balance: 0,
     };
 
+    // Cobro multimétodo de contado — normalización única (escalar → 1 tramo).
+    // Sólo en los carriles que cobran de inmediato (shipped/direct): el carril
+    // online crea un pago `pending` y admite pasarela, así que no normaliza.
+    // El escalar reutiliza el `paymentMethod` ya cargado (sin `findMany`
+    // extra); con `payments[]` los métodos se cargan por `id IN (...)` bajo
+    // el scope de tienda. Los errores del normalizador se envuelven para
+    // preservar la superficie histórica `ORD_FLOW_PAYMENT_FAILED_001` con el
+    // código tipado en `cause_code` (contrato que ve la app móvil).
+    const isImmediateCharge =
+      preClaimState === 'shipped' || dto.payment_type === PaymentType.DIRECT;
+    let legs: NormalizedLeg[] = [];
+    let change = 0;
+    let legMethodTypes: Record<number, string> = {};
+    if (isImmediateCharge) {
+      const requestedLegs = Array.isArray(dto.payments) ? dto.payments : [];
+      let methodsById: Record<number, PaymentLegMethodInfo>;
+      if (requestedLegs.length > 0) {
+        const legMethodIds = [
+          ...new Set(requestedLegs.map((leg) => leg.store_payment_method_id)),
+        ];
+        const legRows = await this.prisma.store_payment_methods.findMany({
+          where: { id: { in: legMethodIds } },
+          include: { system_payment_method: true },
+        });
+        methodsById = {};
+        for (const row of legRows) {
+          methodsById[row.id] = {
+            type: row?.system_payment_method?.type ?? '',
+            processing_mode:
+              row?.system_payment_method?.processing_mode ?? null,
+          };
+        }
+      } else {
+        methodsById = {
+          [dto.store_payment_method_id]: {
+            type: paymentMethod.system_payment_method?.type ?? '',
+            processing_mode:
+              paymentMethod.system_payment_method?.processing_mode ?? null,
+          },
+        };
+      }
+      for (const [id, info] of Object.entries(methodsById)) {
+        legMethodTypes[Number(id)] = info.type;
+      }
+      try {
+        const normalized = normalizePaymentLegs(
+          dto,
+          amountToCharge,
+          methodsById,
+        );
+        legs = normalized.legs;
+        change = normalized.change;
+      } catch (err) {
+        throw this.wrapPaymentFailure('multi_tender_legs', err as Error);
+      }
+    }
+
     // Shipped orders: register payment without changing state
     if (preClaimState === 'shipped') {
-      const transactionId = await this.generateTransactionId();
-
-      let change = 0;
-      if (
-        paymentMethod.system_payment_method.type === 'cash' &&
-        dto.amount_received
-      ) {
-        change = dto.amount_received - amountToCharge;
-        if (change < 0) {
-          throw this.wrapPaymentFailure('amount_received_short', {
-            amount_received: dto.amount_received,
-            grand_total: amountToCharge,
-          });
-        }
-      }
-
-      const payment = await this.prisma.payments.create({
-        data: {
-          order_id: orderId,
-          store_payment_method_id: dto.store_payment_method_id,
-          amount: amountToCharge,
-          currency: order.currency,
-          state: 'succeeded',
-          transaction_id: transactionId,
-          gateway_reference: dto.payment_reference ?? null,
-          paid_at: new Date(),
-          gateway_response: {
-            payment_type: 'direct',
-            amount_received: dto.amount_received,
-            change: change,
-          },
-        },
-      });
+      // Multimétodo: una fila `succeeded` por tramo (el escalar es 1 tramo).
+      // El `if` falsy de efectivo + `amount_received_short` vivían aquí: la
+      // validación ahora es la del normalizador (ver bloque de arriba).
+      const legPayments = await this.createLegPayments(
+        orderId,
+        order.currency,
+        legs,
+        change,
+      );
       paymentPersisted = true;
 
       // The claim temporarily moved shipped -> processing. Restore its
@@ -1337,63 +1393,44 @@ export class OrderFlowService {
 
       this.logger.log(`Order #${orderId} payment registered while shipped`);
 
-      // Record cash register movement (non-blocking)
-      this.recordPayOrderCashMovement(
-        order.store_id,
-        orderId,
-        amountToCharge,
-        paymentMethod.system_payment_method.type,
-      ).catch(() => {});
+      // Record cash register movement per leg (non-blocking)
+      for (const { payment, leg } of legPayments) {
+        this.recordPayOrderCashMovement(
+          order.store_id,
+          orderId,
+          leg.amount,
+          legMethodTypes[leg.store_payment_method_id] ?? '',
+          payment.id,
+        ).catch(() => {});
+      }
 
       // Compute and persist ETA
       await this.computeAndPersistEta(orderId, new Date());
 
       // Contra entrega de una orden POS: el pago de este cobro la deja saldada.
       await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.shipped');
-      await this.projectPaidOrderToTable(orderId, payment.id);
+      // La proyección a mesa es first-wins e idempotente (`markSessionPaid`
+      // reclama con `paid_at IS NULL`): un solo llamado con el primer tramo
+      // basta y conserva el comportamiento escalar.
+      await this.projectPaidOrderToTable(orderId, legPayments[0].payment.id);
 
       return {
         order: updatedOrder,
-        payment: { transaction_id: transactionId, change },
+        ...this.buildLeggedPaymentResponse(legPayments, change),
       };
     }
 
     if (dto.payment_type === PaymentType.DIRECT) {
-      // Direct payment (cash, card at POS) - goes straight to finished
-      const transactionId = await this.generateTransactionId();
-
-      // Calculate change for cash payments
-      let change = 0;
-      if (
-        paymentMethod.system_payment_method.type === 'cash' &&
-        dto.amount_received
-      ) {
-        change = dto.amount_received - amountToCharge;
-        if (change < 0) {
-          throw this.wrapPaymentFailure('amount_received_short', {
-            amount_received: dto.amount_received,
-            grand_total: amountToCharge,
-          });
-        }
-      }
-
-      const payment = await this.prisma.payments.create({
-        data: {
-          order_id: orderId,
-          store_payment_method_id: dto.store_payment_method_id,
-          amount: amountToCharge,
-          currency: order.currency,
-          state: 'succeeded',
-          transaction_id: transactionId,
-          gateway_reference: dto.payment_reference ?? null,
-          paid_at: new Date(),
-          gateway_response: {
-            payment_type: 'direct',
-            amount_received: dto.amount_received,
-            change: change,
-          },
-        },
-      });
+      // Direct payment (cash, card at POS) - goes straight to finished.
+      // Multimétodo: una fila `succeeded` por tramo (el escalar es 1 tramo).
+      // El `if` falsy de efectivo + `amount_received_short` vivían aquí: la
+      // validación ahora es la del normalizador (ver bloque de arriba).
+      const legPayments = await this.createLegPayments(
+        orderId,
+        order.currency,
+        legs,
+        change,
+      );
       paymentPersisted = true;
 
       // Round 1 MAJOR #13 — cupón en `flow/pay` (direct):
@@ -1421,13 +1458,16 @@ export class OrderFlowService {
           `Order #${orderId} paid directly, moved to processing (requires fulfillment)`,
         );
 
-        // Record cash register movement (non-blocking)
-        this.recordPayOrderCashMovement(
-          order.store_id,
-          orderId,
-          amountToCharge,
-          paymentMethod.system_payment_method.type,
-        ).catch(() => {});
+        // Record cash register movement per leg (non-blocking)
+        for (const { payment, leg } of legPayments) {
+          this.recordPayOrderCashMovement(
+            order.store_id,
+            orderId,
+            leg.amount,
+            legMethodTypes[leg.store_payment_method_id] ?? '',
+            payment.id,
+          ).catch(() => {});
+        }
 
         // Compute and persist ETA
         await this.computeAndPersistEta(orderId, new Date());
@@ -1436,11 +1476,11 @@ export class OrderFlowService {
           orderId,
           'pay_order.processing',
         );
-        await this.projectPaidOrderToTable(orderId, payment.id);
+        await this.projectPaidOrderToTable(orderId, legPayments[0].payment.id);
 
         return {
           order: updatedOrder,
-          payment: { transaction_id: transactionId, change },
+          ...this.buildLeggedPaymentResponse(legPayments, change),
         };
       }
 
@@ -1452,21 +1492,11 @@ export class OrderFlowService {
       // payment row was already created above; the caller surfaces the 422 and
       // the operator finishes once the kitchen delivers.
       if (await this.hasPendingKitchenItems(orderId)) {
-        // El pago `succeeded` ya está creado arriba (línea 642). Lo
-        // cancelamos para mantener la regla "un payment por intento de
-        // cobro" y propagamos como `ORD_FLOW_PAYMENT_FAILED_001` con el
+        // Los pagos `succeeded` ya están creados arriba. Los cancelamos TODOS
+        // con el mismo motivo para mantener la regla "un payment por intento
+        // de cobro" y propagamos como `ORD_FLOW_PAYMENT_FAILED_001` con el
         // código tipado original como causa.
-        await this.prisma.payments.update({
-          where: { id: payment.id },
-          data: {
-            state: 'cancelled',
-            updated_at: new Date(),
-            gateway_response: {
-              ...((payment.gateway_response as object) ?? {}),
-              cancellation_reason: 'kitchen_items_pending',
-            },
-          },
-        });
+        await this.cancelLegPayments(legPayments, 'kitchen_items_pending');
         paymentCompensated = true;
         // El claim del inicio ya movió la orden a `processing`. Sin restaurar,
         // queda varada en `processing` con el pago anulado: ni cobrable (el
@@ -1500,17 +1530,10 @@ export class OrderFlowService {
         });
       } catch (e) {
         if (e instanceof VendixHttpException) {
-          await this.prisma.payments.update({
-            where: { id: payment.id },
-            data: {
-              state: 'cancelled',
-              updated_at: new Date(),
-              gateway_response: {
-                ...((payment.gateway_response as object) ?? {}),
-                cancellation_reason: 'finish_blocked_insufficient_stock',
-              },
-            },
-          });
+          await this.cancelLegPayments(
+            legPayments,
+            'finish_blocked_insufficient_stock',
+          );
           paymentCompensated = true;
           // 1060 paso 3 — el finish falló tras el claim: restaurar el estado
           // previo al claim para no dejar la orden varada en `processing`
@@ -1542,23 +1565,26 @@ export class OrderFlowService {
 
       this.logger.log(`Order #${orderId} paid directly and finished`);
 
-      // Record cash register movement (non-blocking)
-      this.recordPayOrderCashMovement(
-        order.store_id,
-        orderId,
-        amountToCharge,
-        paymentMethod.system_payment_method.type,
-      ).catch(() => {});
+      // Record cash register movement per leg (non-blocking)
+      for (const { payment, leg } of legPayments) {
+        this.recordPayOrderCashMovement(
+          order.store_id,
+          orderId,
+          leg.amount,
+          legMethodTypes[leg.store_payment_method_id] ?? '',
+          payment.id,
+        ).catch(() => {});
+      }
 
       // Compute and persist ETA
       await this.computeAndPersistEta(orderId, new Date());
 
       await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.finished');
-      await this.projectPaidOrderToTable(orderId, payment.id);
+      await this.projectPaidOrderToTable(orderId, legPayments[0].payment.id);
 
       return {
         order: updatedOrder,
-        payment: { transaction_id: transactionId, change },
+        ...this.buildLeggedPaymentResponse(legPayments, change),
       };
     } else {
       // Online payment - goes to pending_payment
@@ -1928,7 +1954,22 @@ export class OrderFlowService {
         if (!rate || rate.shipping_method_id !== method.id) {
           throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
         }
+        // Paso 14 — la tarifa cobra el BRUTO del cálculo único (agregado ⇒
+        // base + impuesto, igual que el cotizador); `free` ⇒ 0. Sin
+        // `chargeForRate` (dobles viejos de specs) ⇒ `base_cost`.
         shippingCost = Number(rate.base_cost);
+        if (rate.type === 'free') {
+          shippingCost = 0;
+        } else if (
+          this.shippingTaxService &&
+          typeof this.shippingTaxService.chargeForRate === 'function'
+        ) {
+          shippingCost = (
+            await this.shippingTaxService.chargeForRate(null, rate.id, shippingCost, {
+              store_id: order.store_id,
+            })
+          ).gross;
+        }
       }
 
       // Orden ya cobrada (o con un cobro en curso): su `grand_total` y su
@@ -1954,22 +1995,7 @@ export class OrderFlowService {
             'La orden ya tiene un cobro: el costo de la tarifa elegida no coincide con el envío cobrado',
             {
               order_id: orderId,
-        // Paso 14 — la tarifa cobra el BRUTO del cálculo único (agregado ⇒
-        // base + impuesto, igual que el cotizador); `free` ⇒ 0. Sin
-        // `chargeForRate` (dobles viejos de specs) ⇒ `base_cost`.
               charged_shipping_cost: chargedShippingCents / 100,
-        if (rate.type === 'free') {
-          shippingCost = 0;
-        } else if (
-          this.shippingTaxService &&
-          typeof this.shippingTaxService.chargeForRate === 'function'
-        ) {
-          shippingCost = (
-            await this.shippingTaxService.chargeForRate(null, rate.id, shippingCost, {
-              store_id: order.store_id,
-            })
-          ).gross;
-        }
               rate_shipping_cost: shippingCost,
             },
           );
@@ -1998,32 +2024,6 @@ export class OrderFlowService {
                 { store_id: order.store_id },
               )
             : { ...EMPTY_SHIPPING_TAX };
-        const previousShippingCents = Math.round(
-          Number(order.shipping_cost ?? 0) * 100,
-        );
-        const grandTotalCents =
-          Math.round(Number(order.grand_total ?? 0) * 100) -
-          previousShippingCents +
-          Math.round(shippingCost * 100);
-
-        await this.prisma.orders.update({
-          where: { id: orderId },
-          data: {
-            shipping_method_id: method.id,
-            shipping_rate_id: dto.shipping_rate_id ?? null,
-            delivery_type: deliveryType,
-            shipping_cost: shippingCost,
-            ...shippingTax,
-            grand_total: new Prisma.Decimal(grandTotalCents).div(100),
-            updated_at: new Date(),
-          },
-        });
-      }
-    }
-
-    if (!force) {
-      this.validateTransition(order.state as OrderState, 'shipped');
-    }
         // Paso 14 — el modo viaja con la copia (modo de la tarifa cuando hay
         // impuesto, null si no). Se evalúa sobre el costo cobrado: el modo
         // vive en la fila de la tarifa, así que el precio no lo mueve.
@@ -2044,6 +2044,33 @@ export class OrderFlowService {
               ? mode_charge.reason === 'inclusive'
               : null;
         }
+        const previousShippingCents = Math.round(
+          Number(order.shipping_cost ?? 0) * 100,
+        );
+        const grandTotalCents =
+          Math.round(Number(order.grand_total ?? 0) * 100) -
+          previousShippingCents +
+          Math.round(shippingCost * 100);
+
+        await this.prisma.orders.update({
+          where: { id: orderId },
+          data: {
+            shipping_method_id: method.id,
+            shipping_rate_id: dto.shipping_rate_id ?? null,
+            delivery_type: deliveryType,
+            shipping_cost: shippingCost,
+            ...shippingTax,
+            shipping_tax_is_inclusive: shipTaxIsInclusive,
+            grand_total: new Prisma.Decimal(grandTotalCents).div(100),
+            updated_at: new Date(),
+          },
+        });
+      }
+    }
+
+    if (!force) {
+      this.validateTransition(order.state as OrderState, 'shipped');
+    }
     const updatedOrder = await this.updateOrderState(orderId, 'shipped', {
       shipped_at: new Date(),
       tracking_number: dto.tracking_number,
@@ -2060,7 +2087,6 @@ export class OrderFlowService {
       select: {
         id: true,
         store_id: true,
-            shipping_tax_is_inclusive: shipTaxIsInclusive,
         stores: { select: { organization_id: true } },
       },
     });
@@ -5529,6 +5555,124 @@ export class OrderFlowService {
   }
 
   /**
+   * Cobro multimétodo de contado — crea una fila `payments` `succeeded` por
+   * tramo, cada una con su propio `transaction_id` (unicidad), su monto, su
+   * referencia, su cuenta bancaria y su vuelto (sólo el tramo en efectivo).
+   *
+   * `gateway_response` conserva las claves planas históricas (`payment_type`,
+   * `amount_received`, `change`) y, SÓLO en el tramo en efectivo, añade la
+   * forma `metadata.amount_received` que escriben el POS y
+   * `processMultiLegDirectPayment` y que leen `resolveCashTender`/el ticket:
+   * los tramos no-efectivo no la traen para que el lector ("primer pago con
+   * recibido") nunca tome el recibido de una tarjeta.
+   */
+  private async createLegPayments(
+    orderId: number,
+    currency: string,
+    legs: NormalizedLeg[],
+    change: number,
+  ): Promise<
+    Array<{ payment: any; leg: NormalizedLeg; transactionId: string }>
+  > {
+    const created: Array<{
+      payment: any;
+      leg: NormalizedLeg;
+      transactionId: string;
+    }> = [];
+    for (const leg of legs) {
+      const transactionId = await this.generateTransactionId();
+      // Ausente ⇒ pago exacto (igual que el escalar de hoy); nunca falsy.
+      const legReceived = leg.amount_received ?? leg.amount;
+      const payment = await this.prisma.payments.create({
+        data: {
+          order_id: orderId,
+          store_payment_method_id: leg.store_payment_method_id,
+          bank_account_id: leg.bank_account_id ?? null,
+          amount: leg.amount,
+          currency,
+          state: 'succeeded',
+          transaction_id: transactionId,
+          gateway_reference: leg.payment_reference ?? null,
+          paid_at: new Date(),
+          gateway_response: {
+            payment_type: 'direct',
+            amount_received: leg.amount_received,
+            change: leg.is_cash ? change : 0,
+            ...(leg.is_cash
+              ? { metadata: { amount_received: legReceived } }
+              : {}),
+          },
+        },
+      });
+      created.push({ payment, leg, transactionId });
+    }
+    return created;
+  }
+
+  /**
+   * Compensación multimétodo — cancela TODAS las filas creadas en el intento
+   * con el mismo `cancellation_reason` (regla "un payment por intento").
+   */
+  private async cancelLegPayments(
+    legPayments: Array<{ payment: any; leg: NormalizedLeg }>,
+    cancellationReason: string,
+  ): Promise<void> {
+    for (const { payment } of legPayments) {
+      await this.prisma.payments.update({
+        where: { id: payment.id },
+        data: {
+          state: 'cancelled',
+          updated_at: new Date(),
+          gateway_response: {
+            ...((payment.gateway_response as object) ?? {}),
+            cancellation_reason: cancellationReason,
+          },
+        },
+      });
+    }
+  }
+
+  /**
+   * Respuesta de cobro con tramos: `payment` conserva la forma histórica
+   * (primer `transaction_id` + vuelto total del acto) y `payments[]` sólo se
+   * añade en multi (2+ tramos), igual que el POS — el escalar queda
+   * byte a byte para la app móvil.
+   */
+  private buildLeggedPaymentResponse(
+    legPayments: Array<{
+      payment: any;
+      leg: NormalizedLeg;
+      transactionId: string;
+    }>,
+    change: number,
+  ): {
+    payment: { transaction_id: string; change: number };
+    payments?: Array<{
+      id: number;
+      transaction_id: string;
+      store_payment_method_id: number;
+      amount: number;
+      change: number;
+    }>;
+  } {
+    const payment = {
+      transaction_id: legPayments[0].transactionId,
+      change,
+    };
+    if (legPayments.length < 2) return { payment };
+    return {
+      payment,
+      payments: legPayments.map(({ payment: row, leg, transactionId }) => ({
+        id: row.id,
+        transaction_id: transactionId,
+        store_payment_method_id: leg.store_payment_method_id,
+        amount: leg.amount,
+        change: leg.is_cash ? change : 0,
+      })),
+    };
+  }
+
+  /**
    * Record a sale movement in the cash register if the feature is enabled
    * and the user has an active session. Non-blocking.
    */
@@ -5537,6 +5681,7 @@ export class OrderFlowService {
     orderId: number,
     amount: number,
     paymentMethodType: string,
+    paymentId?: number,
   ): Promise<void> {
     try {
       const settings = await this.settingsService.getSettings();
@@ -5559,6 +5704,7 @@ export class OrderFlowService {
         amount,
         payment_method: paymentMethodType,
         order_id: orderId,
+        payment_id: paymentId,
       });
     } catch {
       // Non-critical: don't fail the payment if movement recording fails

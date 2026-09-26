@@ -837,6 +837,18 @@ export interface ExtendedOrderStats extends OrderStats {
 
 export type PaymentType = 'direct' | 'online';
 
+/**
+ * Tramo de un cobro multimétodo de contado (`PaymentLegDto` del backend).
+ * Claves snake_case EXACTAS: `forbidNonWhitelisted` rechaza cualquier otra.
+ */
+export interface OrderPaymentLeg {
+  store_payment_method_id: number;
+  amount: number;
+  amount_received?: number;
+  payment_reference?: string;
+  bank_account_id?: number;
+}
+
 export interface PayOrderDto {
   store_payment_method_id: number;
   payment_type: PaymentType;
@@ -844,6 +856,12 @@ export interface PayOrderDto {
   amount?: number;
   installment_id?: number;
   payment_reference?: string;
+  /**
+   * Cobro multimétodo de contado: 2..5 tramos. Cuando llega, el backend lo
+   * prefiere sobre el contrato escalar. El nombre es INMUTABLE (`payments`):
+   * `forbidNonWhitelisted` convierte cualquier otro en un 400.
+   */
+  payments?: OrderPaymentLeg[];
   // Propina (T3). Mismos nombres que `CreatePosPaymentDto` y que el
   // `PayOrderDto` del backend: el collector es uno solo para POS, mesa y
   // detalle de orden, asi que el contrato tiene que ser identico en los tres

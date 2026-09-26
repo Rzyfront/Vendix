@@ -98,6 +98,8 @@ export interface PaymentCollectorConfig {
   allowAmountOverride: boolean;
   /** Show the on-screen numeric keypad for cash. */
   showKeypad: boolean;
+  /** Allow splitting the total across multiple payment methods (multi-tender). */
+  allowMultiTender: boolean;
 }
 
 /**
@@ -114,6 +116,31 @@ export interface PaymentCollectorConfig {
  *                              payment_reference: reference, tip_amount: tip }
  *  - membership `RenewMembershipDto` → { store_payment_method_id: storePaymentMethodId, amount }
  */
+/**
+ * Multi-tender leg: one payment method + amount within a split contado payment.
+ * Mirrors the backend DTO `{ store_payment_method_id, amount, amount_received?,
+ * payment_reference?, bank_account_id? }`. `method` is a UI-only label echo and
+ * is NEVER sent to the backend.
+ */
+export interface PaymentLeg {
+  /** Store payment method row id for this leg. */
+  storePaymentMethodId: number;
+  /** Canonical method type of this leg. */
+  methodType: string;
+  /** Amount charged on this leg. */
+  amount: number;
+  /** Cash tendered (cash legs only). */
+  amountReceived?: number;
+  /** Change owed back (cash legs only). */
+  change?: number;
+  /** Manual reference (card last-4, transfer ref, …). */
+  reference?: string;
+  /** Destination bank account id (`bank_accounts.id`) for transfer legs. */
+  bankAccountId?: number;
+  /** UI-only label echo. NEVER sent to the backend. */
+  method?: { label?: string };
+}
+
 export interface PaymentSubmit {
   /** Store payment method row id, or `null` when a manual method was chosen. */
   storePaymentMethodId: number | null;
@@ -172,6 +199,8 @@ export interface PaymentSubmit {
   notes?: string;
   /** The full method object that was selected (echoed back for convenience). */
   method: PaymentMethod;
+  /** Multi-tender legs (present only on split contado payments). */
+  legs?: PaymentLeg[];
 }
 
 /** Lightweight, catalog-free method option (AR/AP and other manual flows). */
@@ -243,6 +272,7 @@ export const DEFAULT_CONFIG_BY_CONTEXT: Record<PaymentContext, PaymentCollectorC
     requireCustomer: false,
     allowAmountOverride: true,
     showKeypad: false,
+    allowMultiTender: false,
   },
   pos: {
     allowCash: true,
@@ -260,6 +290,7 @@ export const DEFAULT_CONFIG_BY_CONTEXT: Record<PaymentContext, PaymentCollectorC
     requireCustomer: false,
     allowAmountOverride: false,
     showKeypad: true,
+    allowMultiTender: false,
   },
   ecommerce: {
     allowCash: false,
@@ -271,6 +302,7 @@ export const DEFAULT_CONFIG_BY_CONTEXT: Record<PaymentContext, PaymentCollectorC
     requireCustomer: true,
     allowAmountOverride: false,
     showKeypad: false,
+    allowMultiTender: false,
   },
   membership: {
     allowCash: true,
@@ -282,6 +314,7 @@ export const DEFAULT_CONFIG_BY_CONTEXT: Record<PaymentContext, PaymentCollectorC
     requireCustomer: false,
     allowAmountOverride: true,
     showKeypad: false,
+    allowMultiTender: false,
   },
   table: {
     allowCash: true,
@@ -297,6 +330,7 @@ export const DEFAULT_CONFIG_BY_CONTEXT: Record<PaymentContext, PaymentCollectorC
     requireCustomer: false,
     allowAmountOverride: false,
     showKeypad: true,
+    allowMultiTender: false,
   },
   order: {
     allowCash: true,
@@ -317,6 +351,7 @@ export const DEFAULT_CONFIG_BY_CONTEXT: Record<PaymentContext, PaymentCollectorC
     requireCustomer: false,
     allowAmountOverride: false,
     showKeypad: false,
+    allowMultiTender: false,
   },
   ar: {
     allowCash: true,
@@ -328,6 +363,7 @@ export const DEFAULT_CONFIG_BY_CONTEXT: Record<PaymentContext, PaymentCollectorC
     requireCustomer: false,
     allowAmountOverride: true,
     showKeypad: false,
+    allowMultiTender: false,
   },
   ap: {
     allowCash: true,
@@ -339,5 +375,6 @@ export const DEFAULT_CONFIG_BY_CONTEXT: Record<PaymentContext, PaymentCollectorC
     requireCustomer: false,
     allowAmountOverride: true,
     showKeypad: false,
+    allowMultiTender: false,
   },
 };

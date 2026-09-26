@@ -99,6 +99,11 @@ import {
 } from '../shipping/utils/shipping-tax.util';
 import { buildOrderSaleTaxPayload } from './utils/order-sale-tax-payload.util';
 import { resolvePaymentReceivedSaleFields } from './utils/payment-sale-share.util';
+import type { PaymentReceivedSaleFields } from './utils/payment-sale-share.util';
+import {
+  normalizePaymentLegs,
+  type PaymentLegMethodInfo,
+} from './utils/payment-legs.util';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -921,7 +926,22 @@ export class PaymentsService {
         const hasSerialized = orderCreation.hasSerialized;
         const immediateSerialized = hasSerialized && isImmediateHandover &&
           !createPosPaymentDto.is_draft;
-        const paymentRoute = await this.resolvePosPaymentRoute(tx, createPosPaymentDto);
+        // Cobro multimétodo: el total a cobrar ya es final (la orden se creó o
+        // adoptó arriba con mesa, promociones y cupón), así que la ruta puede
+        // rechazar los tramos inválidos aquí, antes del auto-fire de cocina y
+        // del inventario.
+        const paymentRoute = await this.resolvePosPaymentRoute(
+          tx,
+          createPosPaymentDto,
+          this.roundMoney(
+            Number(
+              order?.grand_total ??
+                order?.total_amount ??
+                createPosPaymentDto.total_amount ??
+                0,
+            ),
+          ),
+        );
         if (immediateSerialized) {
           if (!createPosPaymentDto.requires_payment || paymentRoute.isDigitalPayment || paymentRoute.isOnDelivery) {
             throw new VendixHttpException(
@@ -1385,14 +1405,32 @@ export class PaymentsService {
             orderCreation.tableSessionOrderId != null &&
             payment?.state === 'succeeded'
           ) {
-            const projection =
-              await this.tableSessionsService.projectOrderPaymentToTableSession(
-                order.id,
-                payment.id,
-                tx,
-              );
-            paidSessionId = projection?.sessionId ?? null;
-            emitSessionPaidAfterCommit = projection?.emitAfterCommit;
+            // Cobro multimétodo: la proyección recibe TODOS los ids del acto,
+            // un call por tramo. El callee es idempotente (`paid_at IS NULL`
+            // deja un solo ganador: sólo el primero marca y emite), así que
+            // los calls 2..N sólo entregan su id para trazabilidad. Escalar:
+            // un solo call idéntico al de hoy.
+            const projectionPayments =
+              Array.isArray(payment?.leg_payments) &&
+              payment.leg_payments.length > 0
+                ? payment.leg_payments
+                : [payment];
+            for (const projectionPayment of projectionPayments) {
+              const projection =
+                await this.tableSessionsService.projectOrderPaymentToTableSession(
+                  order.id,
+                  projectionPayment.id,
+                  tx,
+                );
+              // First-wins: conserva la sesión pagada y el emit del primer
+              // tramo (en escalar es el único, comportamiento intacto).
+              if (paidSessionId == null) {
+                paidSessionId = projection?.sessionId ?? null;
+              }
+              if (emitSessionPaidAfterCommit == null) {
+                emitSessionPaidAfterCommit = projection?.emitAfterCommit;
+              }
+            }
           }
           await this.updateOrderPaymentStatus(
             tx,
@@ -1633,42 +1671,65 @@ export class PaymentsService {
             // de la fila, no el tipo de método: cualquier pago que nazca sin
             // liquidar queda fuera por construcción.
             if (payment.state === 'succeeded') {
-              this.eventEmitter.emit('payment.received', {
-                payment_id: payment.id,
-                store_id: createPosPaymentDto.store_id,
-                organization_id: order.stores?.organization_id,
-                order_id: order.id,
-                order_number: order.order_number,
-                amount: payment.amount,
-                subtotal_amount: Number(order.subtotal_amount || 0),
-                // Productos + impuesto del envío (si la orden tiene copia).
-                tax_amount: sale_tax.tax_amount,
-                // Plan Despacho Economía — FASE 4 paso 15. Ingreso de flete
-                // separado en cuenta 414505 al pagar un POS directo con flete.
-                // NETO del impuesto del envío (= shipping_cost − shipping_tax_amount).
-                shipping_amount: sale_tax.shipping_amount,
-                tax_breakdown,
-                withholding_breakdown: wh.lines,
-                // Con descuento de orden: sólo su parte de BASE (4175); el
-                // impuesto ya viene neto del descuento (misma proyección que
-                // la factura). Sin descuento = `orders.discount_amount`.
-                discount_amount: sale_tax.discount_amount,
-                // GAP-6 — propina (sin IVA). El asiento la reconoce como pasivo
-                // custodio (CR propinas por pagar) para cuadrar el DR caja que ya
-                // incluye la propina dentro de payment.amount (= grand_total).
-                tip_amount: Number(order.tip_amount || 0),
-                currency: payment.currency || createPosPaymentDto.currency,
-                payment_method:
-                  payment.store_payment_method?.system_payment_method
-                    ?.display_name || 'Unknown',
-                user_id: user.id,
-                // C4-followup: solo tenemos el id en memoria en este flujo POS
-                // (order.customer_id escalar) — name/tax_id quedan undefined a
-                // propósito para no introducir un lookup N+1 aquí.
-                customer: order.customer_id
-                  ? { id: Number(order.customer_id) }
-                  : undefined,
-              });
+              // Multimétodo: un `payment.received` por tramo, cada uno con su
+              // porción de venta (`sale_share`, calculada al crear la fila para
+              // que los tramos anteriores sean los únicos previos y el último
+              // absorba el residuo al centavo). Escalar: un solo evento con el
+              // payload histórico de totales de la orden (sin `sale_share`).
+              const emittedPayments =
+                Array.isArray(payment.leg_payments) &&
+                payment.leg_payments.length > 0
+                  ? payment.leg_payments
+                  : [payment];
+              for (const legPayment of emittedPayments) {
+                const share = legPayment.sale_share as
+                  | PaymentReceivedSaleFields
+                  | undefined;
+                this.eventEmitter.emit('payment.received', {
+                  payment_id: legPayment.id,
+                  store_id: createPosPaymentDto.store_id,
+                  organization_id: order.stores?.organization_id,
+                  order_id: order.id,
+                  order_number: order.order_number,
+                  amount: legPayment.amount,
+                  subtotal_amount:
+                    share?.subtotal_amount ??
+                    Number(order.subtotal_amount || 0),
+                  // Productos + impuesto del envío (si la orden tiene copia).
+                  tax_amount: share?.tax_amount ?? sale_tax.tax_amount,
+                  // Plan Despacho Economía — FASE 4 paso 15. Ingreso de flete
+                  // separado en cuenta 414505 al pagar un POS directo con flete.
+                  // NETO del impuesto del envío (= shipping_cost − shipping_tax_amount).
+                  shipping_amount:
+                    share?.shipping_amount ?? sale_tax.shipping_amount,
+                  tax_breakdown: share
+                    ? (share.tax_breakdown ?? [])
+                    : tax_breakdown,
+                  withholding_breakdown: wh.lines,
+                  // Con descuento de orden: sólo su parte de BASE (4175); el
+                  // impuesto ya viene neto del descuento (misma proyección que
+                  // la factura). Sin descuento = `orders.discount_amount`.
+                  discount_amount:
+                    share?.discount_amount ?? sale_tax.discount_amount,
+                  // GAP-6 — propina (sin IVA). El asiento la reconoce como pasivo
+                  // custodio (CR propinas por pagar) para cuadrar el DR caja que ya
+                  // incluye la propina dentro de payment.amount (= grand_total).
+                  tip_amount:
+                    share?.tip_amount ?? Number(order.tip_amount || 0),
+                  currency:
+                    legPayment.currency || createPosPaymentDto.currency,
+                  payment_method:
+                    legPayment.store_payment_method?.system_payment_method
+                      ?.display_name || 'Unknown',
+                  user_id: user.id,
+                  // C4-followup: solo tenemos el id en memoria en este flujo POS
+                  // (order.customer_id escalar) — name/tax_id quedan undefined a
+                  // propósito para no introducir un lookup N+1 aquí.
+                  customer: order.customer_id
+                    ? { id: Number(order.customer_id) }
+                    : undefined,
+                });
+              }
             }
 
             // Persist suffered withholding once for the immediate-payment
@@ -1929,6 +1990,32 @@ export class PaymentsService {
           // La proyección canónica devuelve la sesión pagada; la emisión
           // correspondiente ocurre exclusivamente después del commit.
           paid_session_id: paidSessionId,
+          // Cobro multimétodo (2a, interno): un resumen por tramo para el
+          // fan-out post-commit (`order.paid` + un movimiento de caja por
+          // tramo). Escalar: un solo elemento. Se borra antes del `return`
+          // para no filtrarse al contrato HTTP (2b mapea `payments[]`).
+          _leg_payments: (
+            payment?.leg_payments ?? (payment ? [payment] : [])
+          ).map((p) => ({
+            id: p.id,
+            amount: Number(p.amount),
+            store_payment_method_id:
+              p.store_payment_method_id ??
+              createPosPaymentDto.store_payment_method_id ??
+              null,
+            // 2b — campos para la respuesta `payments[]` (sólo se exponen
+            // en multi, ver pre-return): misma proyección que `payment`, por
+            // tramo. El vuelto por tramo vive en `gateway_response.change`
+            // (el acto lo pone sólo en el tramo en efectivo, 0 en el resto).
+            payment_method:
+              p.store_payment_method?.display_name ||
+              p.store_payment_method?.system_payment_method?.display_name ||
+              'Unknown',
+            status: p.status,
+            transaction_id: p.transaction_id,
+            change: p.gateway_response?.change ?? p.change ?? 0,
+            nextAction: p.nextAction,
+          })),
           applied_promotions: appliedPromotionsResponse,
           applied_coupons: appliedCouponsResponse,
           payment: payment
@@ -2024,6 +2111,14 @@ export class PaymentsService {
       const orderPaidId = result.order?.id;
       const paymentIdResolved =
         (result.payment as { id?: number } | undefined)?.id ?? null;
+      // Multimétodo: todos los ids del acto; escalar: el único id.
+      const paymentIdsResolved =
+        Array.isArray(result._leg_payments) &&
+        result._leg_payments.length > 0
+          ? result._leg_payments.map((leg) => leg.id)
+          : paymentIdResolved != null
+            ? [paymentIdResolved]
+            : [];
       const paidSessionIdResolved =
         (result as { paid_session_id?: number | null }).paid_session_id ??
         null;
@@ -2033,6 +2128,7 @@ export class PaymentsService {
             store_id: ctxStoreId,
             order_id: orderPaidId,
             payment_id: paymentIdResolved,
+            payment_ids: paymentIdsResolved,
             paid_session_id: paidSessionIdResolved,
             grand_total: Number(result.order.grand_total || 0),
             currency: result.order.currency,
@@ -2165,17 +2261,35 @@ export class PaymentsService {
 
       // Record cash register movement AFTER transaction commit (non-critical)
       if (result.success) {
-        this.recordCashRegisterMovement(
-          createPosPaymentDto,
-          result.order,
-          result.payment,
-          user,
-        ).catch((err) => {
-          this.logger.error(
-            `Failed to record cash register movement: ${err.message}`,
-            err.stack,
-          );
-        });
+        // Multimétodo: un movimiento por tramo, cada uno contra su propio
+        // método. Escalar/digital/crédito: una sola llamada idéntica a la de
+        // hoy (el override del método cae al escalar del DTO).
+        const cashTargets =
+          result._leg_payments?.length > 0
+            ? result._leg_payments
+            : [result.payment];
+        for (const cashTarget of cashTargets) {
+          this.recordCashRegisterMovement(
+            {
+              ...createPosPaymentDto,
+              store_payment_method_id:
+                (
+                  cashTarget as
+                    | { store_payment_method_id?: number }
+                    | undefined
+                )?.store_payment_method_id ??
+                createPosPaymentDto.store_payment_method_id,
+            },
+            result.order,
+            cashTarget,
+            user,
+          ).catch((err) => {
+            this.logger.error(
+              `Failed to record cash register movement: ${err.message}`,
+              err.stack,
+            );
+          });
+        }
 
         // Create order installments for credit sales
         if (!createPosPaymentDto.requires_payment && result.order?.id) {
@@ -2241,6 +2355,26 @@ export class PaymentsService {
           } as PosSaleCompletedEvent);
         }
       }
+
+      // 2b — respuesta multimétodo: `payments[]` con un elemento por tramo,
+      // misma forma que `payment` (que sigue siendo el primero). Sólo en
+      // multi (2+ tramos): el escalar/digital/crédito conserva su respuesta
+      // histórica byte a byte.
+      const legsForResponse = (result as any)._leg_payments;
+      if (Array.isArray(legsForResponse) && legsForResponse.length > 1) {
+        (result as any).payments = legsForResponse.map((leg: any) => ({
+          id: leg.id,
+          amount: leg.amount,
+          payment_method: leg.payment_method,
+          status: leg.status,
+          transaction_id: leg.transaction_id,
+          change: leg.change,
+          nextAction: leg.nextAction,
+        }));
+      }
+
+      // Interno del fan-out post-commit (2a): no es parte del contrato HTTP.
+      delete (result as any)._leg_payments;
 
       return result;
   }
@@ -3566,8 +3700,32 @@ export class PaymentsService {
   private async resolvePosPaymentRoute(
     tx: any,
     dto: CreatePosPaymentDto,
+    payableAmount?: number | null,
   ): Promise<{ isDigitalPayment: boolean; isOnDelivery: boolean }> {
     if (!dto.requires_payment) {
+      return { isDigitalPayment: false, isOnDelivery: false };
+    }
+    // Cobro multimétodo: los tramos sólo admiten métodos directos, así que la
+    // ruta nunca es digital ni contra entrega. Se validan AQUÍ (el llamador
+    // pasa el total a cobrar ya final) para rechazar pasarela/contra entrega
+    // antes del auto-fire de cocina y del inventario;
+    // `processPosPaymentTransaction` re-verifica con la misma función al crear
+    // las filas.
+    const requestedLegs = Array.isArray(dto.payments) ? dto.payments : [];
+    if (requestedLegs.length > 0) {
+      const legMethodIds = [
+        ...new Set(requestedLegs.map((leg) => leg.store_payment_method_id)),
+      ];
+      const methodsById = await this.loadLegMethodsById(
+        tx,
+        dto.store_id as number,
+        legMethodIds,
+      );
+      const legsTotal = requestedLegs.reduce(
+        (sum, leg) => sum + Number(leg.amount || 0),
+        0,
+      );
+      normalizePaymentLegs(dto, payableAmount ?? legsTotal, methodsById);
       return { isDigitalPayment: false, isOnDelivery: false };
     }
     if (dto.store_payment_method_id == null) {
@@ -4185,7 +4343,8 @@ export class PaymentsService {
     // sale de ella ⇒ copia vacía (contrato: un costo manual no lleva
     // impuesto). Misma regla que `costComesFromRate` de
     // `OrdersService.assignShipping`:
-    //  - `flat`: el costo esperado es `base_cost`.
+    //  - `flat`: el costo esperado es el BRUTO del cálculo único (paso 14;
+    //    agregado ⇒ base + impuesto, igual que el cotizador).
     //  - calculadas (`weight_based`, `price_based`, `free`): se RECALCULA en
     //    el servidor con `ShippingCalculatorService.calculateRates` (la misma
     //    lógica del checkout y de `assignShipping`) sobre la dirección y las
@@ -4194,6 +4353,19 @@ export class PaymentsService {
     //    determinista), así que nunca aparece entre las opciones ⇒ copia
     //    vacía. Igual para cualquier tarifa sin dirección resoluble o que el
     //    calculador no devuelva.
+    // Sin `chargeForRate` (dobles viejos de specs) ⇒ `base_cost`, el
+    // comportamiento previo al paso.
+    const flat_charge =
+      rate.type === 'flat' &&
+      this.shippingTaxService &&
+      typeof this.shippingTaxService.chargeForRate === 'function'
+        ? await this.shippingTaxService.chargeForRate(
+            tx,
+            rate.id,
+            Number(rate.base_cost ?? 0),
+            { store_id },
+          )
+        : null;
     const expected_cost =
       rate.type === 'flat'
         ? flat_charge
@@ -4374,19 +4546,6 @@ export class PaymentsService {
     }
     const municipalityCode = optional('municipality_code', 10);
     if (municipalityCode && !findDianMunicipality(municipalityCode)) {
-    // Sin `chargeForRate` (dobles viejos de specs) ⇒ `base_cost`, el
-    // comportamiento previo al paso.
-    const flat_charge =
-      rate.type === 'flat' &&
-      this.shippingTaxService &&
-      typeof this.shippingTaxService.chargeForRate === 'function'
-        ? await this.shippingTaxService.chargeForRate(
-            tx,
-            rate.id,
-            Number(rate.base_cost ?? 0),
-            { store_id },
-          )
-        : null;
       throw new VendixHttpException(
         ErrorCodes.PAY_VALIDATE_001,
         'El municipio DANE de la dirección no es válido.',
@@ -4712,6 +4871,9 @@ export class PaymentsService {
           // Copia del impuesto del envío (vacía sin tarifa). Siempre se
           // escribe, así una orden adoptada no conserva una copia rancia.
           ...shippingTax.snapshot,
+          // Paso 14 — modo de la tarifa que produjo la copia (null = sin
+          // impuesto o histórico).
+          shipping_tax_is_inclusive: shippingTax.is_inclusive,
           // La tarifa validada queda ligada a la orden (null sin tarifa).
           shipping_rate_id: shippingTax.rate_id,
           // GAP-6 — propina persistida aparte (no entra a subtotal/tax).
@@ -4871,9 +5033,6 @@ export class PaymentsService {
             tx,
             (order.order_items ?? []).map((item: any) => ({ product_id: item.product_id })),
           ),
-          // Paso 14 — modo de la tarifa que produjo la copia (null = sin
-          // impuesto o histórico).
-          shipping_tax_is_inclusive: shippingTax.is_inclusive,
           promotionsSnapshot: promotionQuote.order_promotions_snapshot,
           appliedPromotions: promotionQuote.applied_promotions,
           couponInfo,
@@ -4923,6 +5082,140 @@ export class PaymentsService {
   /**
    * Process payment transaction for POS
    */
+  /**
+   * Carga los métodos de los tramos para `normalizePaymentLegs`: sólo filas
+   * de ESTA tienda con su `system_payment_method`. Un id ausente del mapa lo
+   * rechaza el normalizador (fail closed).
+   */
+  private async loadLegMethodsById(
+    tx: any,
+    storeId: number,
+    legMethodIds: number[],
+  ): Promise<Record<number, PaymentLegMethodInfo>> {
+    if (legMethodIds.length === 0) return {};
+    const rows = await tx.store_payment_methods.findMany({
+      where: { id: { in: legMethodIds }, store_id: storeId },
+      include: { system_payment_method: true },
+    });
+    const methodsById: Record<number, PaymentLegMethodInfo> = {};
+    for (const row of rows) {
+      methodsById[row.id] = {
+        type: row?.system_payment_method?.type ?? '',
+        processing_mode: row?.system_payment_method?.processing_mode ?? null,
+      };
+    }
+    return methodsById;
+  }
+
+  /**
+   * Cobro multimétodo de contado: recorre los tramos validados por
+   * `normalizePaymentLegs` dentro de la `$transaction` del llamador.
+   *
+   * Por tramo: una fila `payments` `succeeded`, su
+   * `applyOrderBalanceOnPayment` y su porción de venta (`sale_share`,
+   * calculada aquí para que los tramos YA creados sean los únicos previos y
+   * el último absorba el residuo al centavo). El `change` del acto vive sólo
+   * en la fila del tramo en efectivo (`NormalizedLeg.is_cash`).
+   *
+   * Devuelve el PRIMER pago (compatibilidad con los llamadores escalares)
+   * con `leg_payments` (todas las filas) y `change` (vuelto del acto)
+   * adjuntos para el fan-out posterior (`payment.received`, `order.paid`,
+   * movimientos de caja, respuesta `payments[]` de 2b).
+   */
+  private async processMultiLegDirectPayment(
+    tx: any,
+    order: any,
+    dto: CreatePosPaymentDto,
+    dtoStoreId: number,
+    payableAmount: number,
+  ) {
+    const requestedLegs = Array.isArray(dto.payments) ? dto.payments : [];
+    const legMethodIds = [
+      ...new Set(requestedLegs.map((leg) => leg.store_payment_method_id)),
+    ];
+    const methodsById = await this.loadLegMethodsById(
+      tx,
+      dtoStoreId,
+      legMethodIds,
+    );
+    const { legs, change } = normalizePaymentLegs(
+      dto,
+      payableAmount,
+      methodsById,
+    );
+
+    const created: any[] = [];
+    for (const leg of legs) {
+      // QUI-728 por tramo: la cuenta destino se resuelve y valida dentro de
+      // la misma transacción antes de persistir `bank_account_id`.
+      let resolvedBankAccountId: number | null = null;
+      if (
+        methodsById[leg.store_payment_method_id]?.type === 'bank_transfer' &&
+        leg.bank_account_id
+      ) {
+        const account =
+          await this.paymentGateway.resolveAndValidateBankAccount(
+            leg.bank_account_id,
+            dtoStoreId,
+            tx,
+          );
+        resolvedBankAccountId = account.id;
+      }
+      const legReceived = leg.amount_received ?? leg.amount;
+      const payment = await tx.payments.create({
+        data: {
+          order_id: order.id,
+          store_payment_method_id: leg.store_payment_method_id,
+          // QUI-728 — cuenta bancaria de destino del pago por transferencia.
+          bank_account_id: resolvedBankAccountId,
+          // Sin redondeo: el DTO ya limita a 2 decimales y la Σ en centavos
+          // es exacta; redondear por tramo podría descuadrar el saldo final.
+          amount: leg.amount,
+          currency: dto.currency,
+          state: 'succeeded',
+          transaction_id: await this.generateTransactionId(),
+          gateway_response: {
+            reference: leg.payment_reference,
+            // El vuelto del acto vive sólo en el tramo en efectivo.
+            change: leg.is_cash ? change : 0,
+            metadata: {
+              register_id: dto.register_id,
+              seller_user_id: dto.seller_user_id,
+              amount_received: legReceived,
+              is_pos_payment: true,
+            },
+          },
+        },
+        include: {
+          store_payment_method: {
+            include: {
+              system_payment_method: true,
+            },
+          },
+        },
+      });
+
+      // Aditivo y seguro para N llamadas: re-lee el total fresco en `tx`.
+      await this.applyOrderBalanceOnPayment(tx, order.id, leg.amount);
+
+      // Secuencial por construcción: en este punto sólo existen en `tx` los
+      // tramos anteriores, así que son los únicos `prior_amounts` y el último
+      // tramo toma el remanente exacto.
+      payment.sale_share = await resolvePaymentReceivedSaleFields(tx, {
+        order_id: order.id,
+        payment_id: payment.id,
+        amount: Number(leg.amount),
+      });
+      created.push(payment);
+    }
+
+    const first = created[0];
+    first.leg_payments = created;
+    // Precedente de la rama de pasarela: `change` top-level para la respuesta.
+    first.change = change;
+    return first;
+  }
+
   private async processPosPaymentTransaction(
     tx: any,
     order: any,
@@ -4938,6 +5231,19 @@ export class PaymentsService {
     const payableAmount = this.roundMoney(
       Number(order?.grand_total ?? order?.total_amount ?? dto.total_amount ?? 0),
     );
+
+    // Cobro multimétodo de contado: `payments[]` gana sobre el contrato
+    // escalar. Cada tramo crea su fila `succeeded` en esta misma transacción
+    // (todo o nada); el escalar sigue el camino de abajo sin cambios.
+    if (Array.isArray(dto.payments) && dto.payments.length > 0) {
+      return await this.processMultiLegDirectPayment(
+        tx,
+        order,
+        dto,
+        dtoStoreId,
+        payableAmount,
+      );
+    }
 
     // Get payment method details
     if (!dto.store_payment_method_id) {
@@ -5155,6 +5461,12 @@ export class PaymentsService {
     // /`applyPosPaymentToTableSession` ya escribieron grand_total ANTES de este
     // punto). El helper re-lee grand_total fresco dentro del `tx`.
     await this.applyOrderBalanceOnPayment(tx, order.id, payableAmount);
+
+    // La respuesta lee el vuelto de `payment.change` top-level, pero esta
+    // rama directa sólo lo dejaba en `gateway_response.change` (la de
+    // pasarela sí lo fija, arriba). Sin esto el vuelto nunca llegaba al
+    // contrato HTTP — y el vuelto por tramo pasa por este mismo punto.
+    payment.change = change;
 
     return payment;
   }

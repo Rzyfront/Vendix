@@ -2122,6 +2122,26 @@ export class OrderDetailsPageComponent {
     this.showPayModal.set(true);
   }
 
+  /**
+   * User-facing copy for the 4 multi-tender error codes `flow/pay` can
+   * surface. Stored locally because these codes do not exist in the shared
+   * `ERROR_MESSAGES` catalog (same reason as `ERROR_COPY` below), and
+   * `parseApiError` falls back to a generic copy otherwise. Keys are matched
+   * on the surface `errorCode` AND on `details.cause_code`: in-branch
+   * rejections arrive wrapped as `ORD_FLOW_PAYMENT_FAILED_001` with the
+   * typed cause inside, while the online+legs guard arrives unwrapped.
+   */
+  private readonly MULTI_TENDER_COPY: Record<string, string> = {
+    PAY_MULTI_TENDER_SUM_MISMATCH:
+      'La suma de los métodos no coincide con el total a cobrar. Revisa los montos.',
+    PAY_MULTI_TENDER_METHOD_NOT_ALLOWED:
+      'El cobro en varios métodos solo acepta métodos directos (efectivo, tarjeta, transferencia).',
+    PAY_MULTI_TENDER_MULTIPLE_CASH:
+      'Solo se permite un tramo en efectivo en el cobro en varios métodos.',
+    PAY_MULTI_TENDER_CASH_INSUFFICIENT:
+      'El monto recibido en efectivo es menor que el monto del tramo.',
+  };
+
   onPaymentSubmitted(submit: PaymentSubmit): void {
     if (this.order()?.active_financial_split_id) return;
     if (!this.orderId) return;
@@ -2141,6 +2161,27 @@ export class OrderDetailsPageComponent {
       ...(submit.amountReceived != null ? { amount_received: submit.amountReceived } : {}),
       ...(submit.reference ? { payment_reference: submit.reference } : {}),
     };
+
+    // Cobro multimétodo de contado: con 2+ tramos se envía `payments[]` y se
+    // fuerza `payment_type: 'direct'` (el backend rechaza tramos con
+    // 'online'). El escalar `store_payment_method_id` se conserva porque el
+    // DTO lo exige (`@IsInt()` sin `@IsOptional()`); el normalizador
+    // prefiere `payments[]` cuando trae elementos. `leg.method` es eco de UI
+    // y NUNCA viaja. El crédito nunca entra aquí: el abono sigue escalar
+    // por `flowCreditPayment` (el modal ya apaga la sección con
+    // `[allowMultiTender]="!isCreditOrder()"`; este guard es la segunda
+    // línea, porque un submit puede venir de un estado anterior).
+    const legs = submit.legs ?? [];
+    if (!isCredit && legs.length >= 2) {
+      dto.payment_type = 'direct';
+      dto.payments = legs.map((leg) => ({
+        store_payment_method_id: leg.storePaymentMethodId,
+        amount: leg.amount,
+        ...(leg.amountReceived != null ? { amount_received: leg.amountReceived } : {}),
+        ...(leg.reference ? { payment_reference: leg.reference } : {}),
+        ...(leg.bankAccountId != null ? { bank_account_id: leg.bankAccountId } : {}),
+      }));
+    }
 
     // Credit abono: carry the amount (override ?? remaining balance) and, when the
     // operator picked one, the target installment. `flow/pay` ignores `amount`
@@ -2182,9 +2223,32 @@ export class OrderDetailsPageComponent {
           this.toastService.success(`Pago registrado exitosamente${changeMsg}`);
           this.loadData();
         },
-        error: (err) => {
+        error: (err: unknown) => {
           this.isProcessingAction.set(false);
-          this.toastService.error(err.message || 'Error al registrar el pago');
+          // `flowPayOrder`/`flowCreditPayment` lanzan `buildApiError`
+          // (store-orders.service): un `Error` con el `errorCode` de
+          // superficie en camelCase y el `HttpErrorResponse` crudo en
+          // `cause`. Se lee el wrapper primero y se cae a `parseApiError`
+          // sobre la causa (mismo patrón que `isTitularLockedError`):
+          // pasarle el wrapper tal cual siempre da `errorCode: null`.
+          const wrapped = err as {
+            errorCode?: string | null;
+            cause?: unknown;
+          } | null;
+          const parsed = parseApiError(wrapped?.cause ?? err);
+          const surface = wrapped?.errorCode ?? parsed.errorCode ?? '';
+          const causeDetails = parsed.details as { cause_code?: unknown } | null;
+          const cause =
+            typeof causeDetails?.cause_code === 'string'
+              ? causeDetails.cause_code
+              : '';
+          const code = this.MULTI_TENDER_COPY[surface] ? surface : cause;
+          const message =
+            (code && this.MULTI_TENDER_COPY[code]) ||
+            parsed.userMessage ||
+            (err as { message?: string })?.message ||
+            'Error al registrar el pago';
+          this.toastService.error(message);
         },
       });
   }

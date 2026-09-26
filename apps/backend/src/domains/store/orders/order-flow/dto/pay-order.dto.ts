@@ -1,12 +1,17 @@
 import {
+  IsArray,
+  ArrayMinSize,
+  ArrayMaxSize,
   IsInt,
   IsEnum,
   IsOptional,
   IsNumber,
   Min,
   IsString,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PaymentLegDto } from '../../../payments/dto/payment-leg.dto';
 
 export enum PaymentType {
   DIRECT = 'direct',
@@ -38,6 +43,20 @@ export class PayOrderDto {
   @IsOptional()
   @IsString()
   payment_reference?: string;
+
+  /**
+   * Cobro multimétodo de contado: 2..5 tramos cuya suma debe ser igual al
+   * total a cobrar (`amountToCharge`). Sólo se acepta con
+   * `payment_type: 'direct'`. Si no llega, el cobro sigue el camino escalar de
+   * siempre. Ver `normalizePaymentLegs`.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(5)
+  @ValidateNested({ each: true })
+  @Type(() => PaymentLegDto)
+  payments?: PaymentLegDto[];
 
   // ── Propina (T3) ────────────────────────────────────────────────────────
   // Mismos nombres y validadores que `CreatePosPaymentDto`: el frontend usa

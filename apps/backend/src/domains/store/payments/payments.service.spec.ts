@@ -69,6 +69,13 @@ describe('PaymentsService', () => {
   let couponsService: CouponsService;
   let fiscalThreshold: FiscalInvoiceThresholdService;
   let kitchenFire: KitchenFireService;
+  // Cobro multimétodo (paso 2b): handles para cablear la caja post-commit
+  // (`recordSaleMovement` por tramo) en los casos de ejecución completa.
+  // Mismo patrón que `fiscalThreshold`: `module.get` + `as jest.Mock` al
+  // configurar o assertar (ver los casos de mesa existentes).
+  let settingsService: SettingsService;
+  let sessionsService: SessionsService;
+  let movementsService: MovementsService;
   // F-157/F-166: handles tipados CONCRETOS del mock de TaxesService,
   // declarados en el ámbito del describe para que los tests los usen
   // DIRECTO por closure — nunca recuperados con `as jest.Mock` (eso
@@ -371,6 +378,9 @@ describe('PaymentsService', () => {
       FiscalInvoiceThresholdService,
     );
     kitchenFire = module.get<KitchenFireService>(KitchenFireService);
+    settingsService = module.get<SettingsService>(SettingsService);
+    sessionsService = module.get<SessionsService>(SessionsService);
+    movementsService = module.get<MovementsService>(MovementsService);
   });
 
   it('should be defined', () => {
@@ -4003,6 +4013,509 @@ describe('PaymentsService', () => {
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('processing_mode'),
       );
+    });
+  });
+
+  /**
+   * Cobro multimétodo de contado en el POS (paso 2 del plan de pago
+   * multimétodo): `payments[]` con 2 tramos crea 2 filas `succeeded` en la
+   * misma transacción, emite un `payment.received` por tramo con su porción
+   * de venta y registra un movimiento de caja por tramo. La guarda QUI-704
+   * sigue rechazando un segundo cobro de mesa antes de crear filas, y el
+   * contrato escalar conserva su comportamiento histórico.
+   *
+   * A diferencia de los bloques anteriores (que cortan con un STOP), estos
+   * casos corren `processPosPayment` COMPLETO —incluido el post-commit— para
+   * observar la respuesta `payments[]` y los movimientos de caja. El `tx`
+   * es un fake con estado (saldo que acumula, pagos creados visibles como
+   * previos) para que `resolvePaymentReceivedSaleFields` (real, no mockeada)
+   * reparta con la misma aritmética que en producción.
+   */
+  describe('processPosPayment — cobro multimétodo de contado (2 tramos)', () => {
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+
+    const CASH_METHOD_ID = 9;
+    const TRANSFER_METHOD_ID = 10;
+
+    const cashMethodRow = {
+      id: CASH_METHOD_ID,
+      display_name: 'Efectivo',
+      custom_config: {},
+      system_payment_method: {
+        type: 'cash',
+        processing_mode: payment_processing_mode_enum.DIRECT,
+        display_name: 'Efectivo',
+      },
+    };
+    const transferMethodRow = {
+      id: TRANSFER_METHOD_ID,
+      display_name: 'Transferencia',
+      custom_config: {},
+      system_payment_method: {
+        type: 'bank_transfer',
+        processing_mode: payment_processing_mode_enum.DIRECT,
+        display_name: 'Transferencia',
+      },
+    };
+    const methodsById: Record<number, any> = {
+      [CASH_METHOD_ID]: cashMethodRow,
+      [TRANSFER_METHOD_ID]: transferMethodRow,
+    };
+
+    /**
+     * @param tableSessionOrderId orden de mesa adoptada (proyección B.1);
+     *   `null` = venta retail sin mesa.
+     * @param spyOrderCreation `false` para dejar correr el
+     *   `createOrUpdateOrderFromPos` real (casos de guarda QUI-704).
+     */
+    const arrangeMultiLegSale = (
+      tableSessionOrderId: number | null = null,
+      spyOrderCreation = true,
+    ) => {
+      mockRequestContext({ store_id: 1, organization_id: 1 });
+
+      // Venta de $100.000: subtotal 84.034 + IVA 15.966. Sin descuento,
+      // envío ni propina para que Σ porciones = totales sea exacto.
+      const order = buildOrder({
+        id: 4242,
+        store_id: 1,
+        order_number: 'POS-MULTI-1',
+        delivery_type: 'direct_delivery',
+        subtotal_amount: new Prisma.Decimal(84034),
+        tax_amount: new Prisma.Decimal(15966),
+        discount_amount: new Prisma.Decimal(0),
+        tip_amount: new Prisma.Decimal(0),
+        shipping_cost: new Prisma.Decimal(0),
+        shipping_tax_amount: new Prisma.Decimal(0),
+        grand_total: new Prisma.Decimal(100000),
+        total_paid: new Prisma.Decimal(0),
+        remaining_balance: new Prisma.Decimal(100000),
+        stores: { id: 1, organization_id: 1 },
+        order_items: [],
+      });
+
+      // Estado vivo del fake: lo que `create`/`update` escriben, los
+      // `find*` posteriores lo ven — igual que dentro de un `tx` real.
+      let nextPaymentId = 7;
+      const createdPayments: any[] = [];
+      let fakeTotalPaid = 0;
+      let fakeOrderState: string = order.state;
+
+      const tx: any = {
+        kitchen_tickets: { findMany: jest.fn().mockResolvedValue([]) },
+        // Tienda NO restaurante → el auto-fire (B5) no corre.
+        stores: {
+          findUnique: jest.fn().mockResolvedValue({ industries: ['retail'] }),
+        },
+        store_payment_methods: {
+          findMany: jest.fn(async ({ where }: any) => {
+            const ids: number[] = where?.id?.in ?? [];
+            return ids
+              .filter((id) => methodsById[id])
+              .map((id) => methodsById[id]);
+          }),
+          findFirst: jest.fn(async ({ where }: any) =>
+            where?.id != null ? (methodsById[where.id] ?? null) : cashMethodRow,
+          ),
+        },
+        payments: {
+          create: jest.fn(async ({ data, include }: any) => {
+            const row = {
+              id: nextPaymentId++,
+              ...data,
+              store_payment_method:
+                methodsById[data.store_payment_method_id] ?? null,
+            };
+            void include;
+            createdPayments.push(row);
+            return row;
+          }),
+          // `resolvePaymentReceivedSaleFields` lee los OTROS pagos
+          // liquidados como previos del reparto.
+          findMany: jest.fn(async ({ where }: any) =>
+            createdPayments.filter((row) => row.id !== where?.id?.not),
+          ),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        orders: {
+          update: jest.fn(async ({ data }: any) => {
+            if (data.total_paid != null) {
+              fakeTotalPaid = Number(data.total_paid);
+            }
+            if (typeof data.state === 'string') {
+              fakeOrderState = data.state;
+            }
+            return { id: order.id };
+          }),
+          // Una sola respuesta con TODOS los campos que leen los distintos
+          // consumidores (`applyOrderBalanceOnPayment`,
+          // `resolvePaymentReceivedSaleFields`, refresco de estado).
+          findUnique: jest.fn(async () => ({
+            id: order.id,
+            order_number: order.order_number,
+            state: fakeOrderState,
+            subtotal_amount: order.subtotal_amount,
+            discount_amount: order.discount_amount,
+            tax_amount: order.tax_amount,
+            shipping_cost: order.shipping_cost,
+            // `buildOrder` no declara esta columna: el fixture la pasa en 0.
+            shipping_tax_amount: new Prisma.Decimal(0),
+            tip_amount: order.tip_amount,
+            grand_total: order.grand_total,
+            total_paid: new Prisma.Decimal(fakeTotalPaid),
+            order_items: [],
+          })),
+        },
+        order_items: { findMany: jest.fn().mockResolvedValue([]) },
+        table_sessions: { findUnique: jest.fn().mockResolvedValue(null) },
+      };
+
+      (prisma as any).$transaction = jest.fn(async (cb: any) => cb(tx));
+
+      if (spyOrderCreation) {
+        jest
+          .spyOn(service as any, 'createOrUpdateOrderFromPos')
+          .mockResolvedValue({
+            order,
+            hasSerialized: false,
+            promotionsSnapshot: [],
+            appliedPromotions: [],
+            couponInfo: {
+              coupon_id: null,
+              coupon_code: null,
+              discount_amount: 0,
+            },
+            kitchenFire: null,
+            closedSessionId: null,
+            tableSessionOrderId,
+          });
+      }
+      jest
+        .spyOn(service as any, 'hasPendingKitchenItemsTx')
+        .mockResolvedValue(false);
+
+      (
+        fiscalThreshold.assertInvoiceNotRequired as jest.Mock
+      ).mockResolvedValue(undefined);
+
+      return { order, tx, createdPayments };
+    };
+
+    const buildMultiDto = (overrides: any = {}): any => ({
+      store_id: 1,
+      currency: 'COP',
+      customer_id: 77,
+      items: [],
+      requires_payment: true,
+      payments: [
+        {
+          store_payment_method_id: CASH_METHOD_ID,
+          amount: 20000,
+          amount_received: 50000,
+        },
+        { store_payment_method_id: TRANSFER_METHOD_ID, amount: 80000 },
+      ],
+      ...overrides,
+    });
+
+    /** Payloads de `payment.received` emitidos, en orden. */
+    const receivedPayloads = (): any[] =>
+      emitMock.mock.calls
+        .filter((call) => call[0] === 'payment.received')
+        .map((call) => call[1]);
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('crea una fila succeeded por tramo y responde payments[] con payment como primero', async () => {
+      const { tx } = arrangeMultiLegSale();
+
+      const result = await service.processPosPayment(buildMultiDto(), posUser);
+
+      expect(tx.payments.create).toHaveBeenCalledTimes(2);
+      expect(tx.payments.create).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          data: expect.objectContaining({
+            order_id: 4242,
+            store_payment_method_id: CASH_METHOD_ID,
+            amount: 20000,
+            state: 'succeeded',
+          }),
+        }),
+      );
+      expect(tx.payments.create).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          data: expect.objectContaining({
+            order_id: 4242,
+            store_payment_method_id: TRANSFER_METHOD_ID,
+            amount: 80000,
+            state: 'succeeded',
+          }),
+        }),
+      );
+      // El vuelto del acto (50.000 − 20.000) vive sólo en el tramo en
+      // efectivo; el otro tramo nace con vuelto 0.
+      const legRows = tx.payments.create.mock.calls.map(
+        (call: any) => call[0].data,
+      );
+      expect(legRows[0].gateway_response.change).toBe(30000);
+      expect(legRows[1].gateway_response.change).toBe(0);
+
+      // El saldo cierra a cero dentro del mismo acto (todo o nada).
+      expect(tx.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            total_paid: 100000,
+            remaining_balance: 0,
+          }),
+        }),
+      );
+
+      // Respuesta: `payments[]` por tramo, `payment` = el primero (móvil).
+      expect(result.payments).toHaveLength(2);
+      expect(result.payments![0]).toMatchObject({
+        id: result.payment!.id,
+        amount: 20000,
+        payment_method: 'Efectivo',
+        change: 30000,
+      });
+      expect(result.payments![1]).toMatchObject({
+        amount: 80000,
+        payment_method: 'Transferencia',
+        change: 0,
+      });
+      expect(result.payment).toMatchObject({
+        amount: 20000,
+        payment_method: 'Efectivo',
+        change: 30000,
+      });
+      expect(result.order).toMatchObject({ id: 4242, status: 'finished' });
+      expect(result).not.toHaveProperty('_leg_payments');
+    });
+
+    it('emite un payment.received por tramo que suma el total y cuadra subtotal+impuesto', async () => {
+      arrangeMultiLegSale();
+
+      await service.processPosPayment(buildMultiDto(), posUser);
+
+      const received = receivedPayloads();
+      expect(received).toHaveLength(2);
+      // Mismo orden de creación que las filas.
+      expect(received.map((event) => event.amount)).toEqual([20000, 80000]);
+      expect(
+        received.reduce((sum, event) => sum + Number(event.amount), 0),
+      ).toBe(100000);
+      // Cada tramo cae en su cuenta y la Σ de los asientos cuadra con la
+      // venta: subtotal + impuesto de las porciones = los de la orden.
+      expect(
+        received.reduce(
+          (sum, event) =>
+            sum + Number(event.subtotal_amount) + Number(event.tax_amount),
+          0,
+        ),
+      ).toBe(84034 + 15966);
+      for (const event of received) {
+        expect(event.order_id).toBe(4242);
+        expect(Number(event.subtotal_amount)).toBeGreaterThan(0);
+        expect(Number(event.tax_amount)).toBeGreaterThan(0);
+      }
+      // `order.paid` lleva todos los ids del acto y conserva el primero.
+      const orderPaid = emitMock.mock.calls.find(
+        (call) => call[0] === 'order.paid',
+      )?.[1];
+      expect(orderPaid.payment_ids).toHaveLength(2);
+      expect(orderPaid.payment_id).toBe(orderPaid.payment_ids[0]);
+    });
+
+    it('registra un movimiento de caja por tramo, cada uno contra su método', async () => {
+      arrangeMultiLegSale();
+      // Caja habilitada con rastreo de no-efectivo: sin el flag, el tramo
+      // de transferencia se omite por diseño (no es under-test aquí).
+      (settingsService.getSettings as jest.Mock).mockResolvedValue({
+        checkout: { require_customer_data: false },
+        pos: { cash_register: { enabled: true, track_non_cash_payments: true } },
+      });
+      (sessionsService.getActiveSession as jest.Mock).mockResolvedValue({
+        id: 5,
+      });
+      // Post-commit: la resolución del tipo sale por el prisma real, no el tx.
+      (prisma as any).store_payment_methods = {
+        findFirst: jest.fn(async ({ where }: any) =>
+          where?.id != null ? (methodsById[where.id] ?? null) : null,
+        ),
+      };
+
+      await service.processPosPayment(buildMultiDto(), posUser);
+      // `recordCashRegisterMovement` es fire-and-forget (`.catch`, sin await):
+      // vaciar la cola de microtareas antes de assertar sus efectos.
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const recordSaleMovement =
+        movementsService.recordSaleMovement as jest.Mock;
+      expect(recordSaleMovement).toHaveBeenCalledTimes(2);
+      expect(recordSaleMovement).toHaveBeenNthCalledWith(
+        1,
+        5,
+        expect.objectContaining({
+          amount: 20000,
+          payment_method: 'cash',
+          order_id: 4242,
+        }),
+      );
+      expect(recordSaleMovement).toHaveBeenNthCalledWith(
+        2,
+        5,
+        expect.objectContaining({
+          amount: 80000,
+          payment_method: 'bank_transfer',
+          order_id: 4242,
+        }),
+      );
+      // Cada movimiento apunta a su propia fila de pago.
+      const movementPaymentIds = recordSaleMovement.mock.calls.map(
+        (call: any) => call[1].payment_id,
+      );
+      expect(new Set(movementPaymentIds).size).toBe(2);
+    });
+
+    it('mesa con cobro previo rechaza 409 POS_TABLE_SESSION_ALREADY_CHARGED sin crear filas (QUI-704)', async () => {
+      // Sin espía de orden: la guarda vive en el
+      // `applyPosPaymentToTableSession` real, que corre ANTES de crear los
+      // tramos dentro de la misma transacción.
+      const { tx } = arrangeMultiLegSale(null, false);
+      tx.table_sessions.findUnique.mockResolvedValue({
+        id: 99,
+        store_id: 1,
+        order_id: 4242,
+        closed_at: null,
+        order: { id: 4242, store_id: 1 },
+      });
+      tx.payments.findFirst.mockResolvedValue({
+        id: 5,
+        transaction_id: 'txn_previo',
+        amount: new Prisma.Decimal(100000),
+      });
+
+      const error = await service
+        .processPosPayment(
+          buildMultiDto({ table_session_id: 99 }),
+          posUser,
+        )
+        .catch((caught) => caught);
+
+      expect(error).toMatchObject({
+        errorCode: 'POS_TABLE_SESSION_ALREADY_CHARGED',
+      });
+      expect(error.getStatus()).toBe(409);
+      expect(tx.payments.create).not.toHaveBeenCalled();
+      expect(tx.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('mesa multimétodo proyecta TODOS los ids del acto y emite una sola vez', async () => {
+      const { order, tx } = arrangeMultiLegSale(4242);
+      const emitFirst = jest.fn();
+      const emitSecond = jest.fn();
+      const project = (service as any).tableSessionsService
+        .projectOrderPaymentToTableSession as jest.Mock;
+      project
+        .mockResolvedValueOnce({ sessionId: 99, emitAfterCommit: emitFirst })
+        .mockResolvedValueOnce({ sessionId: 99, emitAfterCommit: emitSecond });
+
+      const result = await service.processPosPayment(buildMultiDto(), posUser);
+
+      const legIds = tx.payments.create.mock.calls.map(
+        (_call: any, index: number) => 7 + index,
+      );
+      expect(project).toHaveBeenCalledTimes(2);
+      expect(project).toHaveBeenNthCalledWith(1, order.id, legIds[0], tx);
+      expect(project).toHaveBeenNthCalledWith(2, order.id, legIds[1], tx);
+      expect((result as any).paid_session_id).toBe(99);
+      // First-wins: sólo el primer tramo fija el emit post-commit.
+      expect(emitFirst).toHaveBeenCalledTimes(1);
+      expect(emitSecond).not.toHaveBeenCalled();
+    });
+
+    it('regresión escalar: un método crea 1 fila, 1 evento con totales plenos y respuesta sin payments[]', async () => {
+      const { tx } = arrangeMultiLegSale();
+
+      const result = await service.processPosPayment(
+        buildMultiDto({
+          payments: undefined,
+          store_payment_method_id: CASH_METHOD_ID,
+          amount_received: 120000,
+        }),
+        posUser,
+      );
+
+      expect(tx.payments.create).toHaveBeenCalledTimes(1);
+      expect(tx.payments.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            order_id: 4242,
+            store_payment_method_id: CASH_METHOD_ID,
+            amount: 100000,
+            state: 'succeeded',
+          }),
+        }),
+      );
+
+      // Payload contable histórico: totales de la orden, sin prorrateo.
+      const received = receivedPayloads();
+      expect(received).toHaveLength(1);
+      expect(received[0]).toMatchObject({
+        order_id: 4242,
+        amount: 100000,
+        subtotal_amount: 84034,
+        tax_amount: 15966,
+        discount_amount: 0,
+        tip_amount: 0,
+      });
+
+      // Respuesta histórica: sin clave `payments`… salvo el fix ordenado por
+      // el plan (el vuelto ahora sí viaja en `payment.change`: antes era
+      // `undefined` porque la rama directa nunca lo fijaba top-level).
+      expect(result).not.toHaveProperty('payments');
+      expect(result.payment).toMatchObject({ amount: 100000, change: 20000 });
+      expect(result.order).toMatchObject({ status: 'finished' });
+      expect(tx.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            total_paid: 100000,
+            remaining_balance: 0,
+          }),
+        }),
+      );
+    });
+
+    it('regresión escalar: efectivo insuficiente conserva su error histórico (no el multimétodo)', async () => {
+      const { tx } = arrangeMultiLegSale();
+
+      const error = await service
+        .processPosPayment(
+          buildMultiDto({
+            payments: undefined,
+            store_payment_method_id: CASH_METHOD_ID,
+            amount_received: 50000,
+          }),
+          posUser,
+        )
+        .catch((caught) => caught);
+
+      // El carril escalar NO se renruta por el normalizador: mismo
+      // `BadRequestException` y mismo mensaje de siempre.
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(error.message).toBe(
+        'El monto recibido no puede ser menor al total de la orden.',
+      );
+      expect(tx.payments.create).not.toHaveBeenCalled();
     });
   });
 });
