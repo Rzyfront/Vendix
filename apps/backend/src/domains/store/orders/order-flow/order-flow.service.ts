@@ -1500,6 +1500,7 @@ export class OrderFlowService {
         order.currency,
         legs,
         change,
+        { storeId: order.store_id, organizationId: order.stores?.organization_id },
       );
       paymentPersisted = true;
 
@@ -1565,6 +1566,7 @@ export class OrderFlowService {
         order.currency,
         legs,
         change,
+        { storeId: order.store_id, organizationId: order.stores?.organization_id },
       );
       paymentPersisted = true;
 
@@ -1637,6 +1639,7 @@ export class OrderFlowService {
         order.currency,
         legs,
         change,
+        { storeId: order.store_id, organizationId: order.stores?.organization_id },
       );
       paymentPersisted = true;
 
@@ -1711,6 +1714,7 @@ export class OrderFlowService {
         order.currency,
         legs,
         change,
+        { storeId: order.store_id, organizationId: order.stores?.organization_id },
       );
       paymentPersisted = true;
 
@@ -6353,6 +6357,7 @@ export class OrderFlowService {
     currency: string,
     legs: NormalizedLeg[],
     change: number,
+    historyCtx?: { storeId: number; organizationId?: number | null },
   ): Promise<
     Array<{ payment: any; leg: NormalizedLeg; transactionId: string }>
   > {
@@ -6387,6 +6392,20 @@ export class OrderFlowService {
         },
       });
       created.push({ payment, leg, transactionId });
+      // Plan order-truth-and-invoice-tz — un `payment_registered` por tramo.
+      // No corre dentro de una `$transaction` (cada `payments.create` de
+      // arriba tampoco), así que se pasa `this.prisma` como `tx` (regla del
+      // plan: fuera de transacción, cliente scopeado hace de `tx`).
+      if (historyCtx) {
+        await this.orderHistoryService?.record(this.prisma, {
+          orderId,
+          storeId: historyCtx.storeId,
+          organizationId: historyCtx.organizationId ?? null,
+          type: 'payment_registered',
+          paymentId: payment.id,
+          amount: leg.amount,
+        });
+      }
     }
     return created;
   }
