@@ -2189,6 +2189,7 @@ export class PosProductSelectionComponent {
   /** Códigos con los que el backend rechaza por stock (QUI-559). */
   private static readonly STOCK_ERROR_CODES = [
     'INV_STOCK_002',
+    'INV_STOCK_INSUFFICIENT_LINES',
     'POS_STOCK_INSUFFICIENT_001',
   ];
 

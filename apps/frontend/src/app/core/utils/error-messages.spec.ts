@@ -314,12 +314,10 @@ describe('ERROR_MESSAGES — E.5 shipping/dispatch guards', () => {
 /**
  * Sin sobreventa — `INV_STOCK_INSUFFICIENT_LINES` (mesa/KDS/POS, varias
  * líneas de producto o insumo) e `INV_STOCK_002` (entrega, un solo faltante
- * plano en `details`, sin `items[]`). El backend ya redacta el mensaje humano
- * en español con el producto y las cantidades, así que `isPresentableApiMessage`
- * lo deja pasar como `userMessage` — el copy enlatado de `ERROR_MESSAGES` es
- * sólo el respaldo cuando el backend no manda nada presentable. `stockShortages`
- * es la lista normalizada que `table-session-page.component.ts` y
- * `pos-payment.service.ts` usan para pintar cada faltante.
+ * plano en `details`, sin `items[]`). La lista estructurada prevalece sobre
+ * el texto del backend para mostrar TODOS los faltantes incluso en servicios
+ * que reducen el error a string. Sin detalles legibles, se usa el mensaje
+ * presentable o el respaldo en `ERROR_MESSAGES`.
  */
 describe('ERROR_MESSAGES / stockShortages — INV_STOCK_INSUFFICIENT_LINES (no overselling)', () => {
   it('tiene copy propia, no el genérico', () => {
@@ -328,13 +326,12 @@ describe('ERROR_MESSAGES / stockShortages — INV_STOCK_INSUFFICIENT_LINES (no o
     expect(copy).not.toBe(DEFAULT_ERROR_MESSAGE);
   });
 
-  it('el mensaje humano del backend (con producto y cantidades) gana sobre el enlatado', () => {
+  it('la lista estructurada gana sobre el mensaje abreviado del backend', () => {
     const parsed = parseApiError({
       error: {
         statusCode: 409,
         error_code: 'INV_STOCK_INSUFFICIENT_LINES',
-        message:
-          'Sin stock suficiente: MODELO (pedido 1, disponible 0). Quítalo de la orden o desactiva «Maneja inventario» en el producto.',
+        message: 'Sin stock suficiente para MODELO y Limón.',
         details: {
           items: [
             {
@@ -345,13 +342,24 @@ describe('ERROR_MESSAGES / stockShortages — INV_STOCK_INSUFFICIENT_LINES (no o
               requested: 1,
               available: 0,
             },
+            {
+              product_id: 88,
+              product_variant_id: null,
+              product_name: 'Limón',
+              kind: 'ingredient',
+              requested: 3,
+              available: 1,
+              used_by: ['Mojito'],
+            },
           ],
         },
       },
     });
 
     expect(parsed.errorCode).toBe('INV_STOCK_INSUFFICIENT_LINES');
-    expect(parsed.userMessage).toContain('MODELO');
+    expect(parsed.userMessage).toContain('MODELO — pedido 1, disponible 0');
+    expect(parsed.userMessage).toContain('Limón (insumo, usado en Mojito) — requerido 3, disponible 1');
+    expect(parsed.userMessage).toContain(STOCK_SHORTAGE_HINT);
     expect(parsed.userMessage).not.toBe(ERROR_MESSAGES['INV_STOCK_INSUFFICIENT_LINES']);
   });
 
@@ -376,7 +384,7 @@ describe('ERROR_MESSAGES / stockShortages — INV_STOCK_INSUFFICIENT_LINES (no o
       },
     });
 
-    expect(parsed.userMessage).toBe(ERROR_MESSAGES['INV_STOCK_INSUFFICIENT_LINES']);
+    expect(parsed.userMessage).toContain('MODELO — pedido 1, disponible 0');
     expect(parsed.userMessage).not.toContain('Insufficient stock');
   });
 
@@ -429,6 +437,29 @@ describe('ERROR_MESSAGES / stockShortages — INV_STOCK_INSUFFICIENT_LINES (no o
         used_by: ['Mojito'],
       },
     ]);
+  });
+
+  it('muestra el faltante al cobrar aunque el código de superficie sea de pago', () => {
+    const parsed = parseApiError({
+      error: {
+        error_code: 'ORD_FLOW_PAYMENT_FAILED_001',
+        message: 'Payment failed',
+        details: {
+          cause_code: 'INV_STOCK_INSUFFICIENT_LINES',
+          items: [{
+            product_id: 501,
+            product_variant_id: null,
+            product_name: 'MODELO',
+            kind: 'product',
+            requested: 1,
+            available: 0,
+          }],
+        },
+      },
+    });
+
+    expect(parsed.userMessage).toContain('MODELO — pedido 1, disponible 0');
+    expect(parsed.userMessage).toContain(STOCK_SHORTAGE_HINT);
   });
 
   it('formatStockShortageLine produce el texto exacto para producto e insumo', () => {
@@ -513,6 +544,8 @@ describe('ERROR_MESSAGES / stockShortages — INV_STOCK_002 (entrega sin stock)'
         available: 0,
       },
     ]);
+    expect(parsed.userMessage).toContain('Gaseosa 1.5L — pedido 2, disponible 0');
+    expect(parsed.userMessage).toContain(STOCK_SHORTAGE_HINT);
   });
 
   it('sin product_name no reporta shortage (fila ilegible se descarta, no revienta)', () => {

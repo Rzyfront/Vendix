@@ -1,4 +1,5 @@
 import { ERROR_MESSAGES, DEFAULT_ERROR_MESSAGE } from './error-messages';
+import { formatStockShortageSummary } from './stock-shortage.util';
 
 export interface ParsedApiError {
   errorCode: string | null;
@@ -239,14 +240,15 @@ export function isPresentableApiMessage(value: unknown): value is string {
  * las validaciones. Revisa los datos.» — que es el mismo defecto que el enlatado
  * pretendía evitar. El orden ahora es:
  *
- *   1. `details.blockers[0].problem` (+ su `fix`) — el diagnóstico por campo.
- *   2. `message` del backend, SI pasa la aduana de {@link isPresentableApiMessage}.
- *   3. `ERROR_MESSAGES[error_code]` — el copy curado.
- *   4. `DEFAULT_ERROR_MESSAGE`.
+ *   1. En errores de stock, `details.items[]` (o la fila plana) — todos los faltantes.
+ *   2. `details.blockers[0].problem` (+ su `fix`) — el diagnóstico por campo.
+ *   3. `message` del backend, SI pasa la aduana de {@link isPresentableApiMessage}.
+ *   4. `ERROR_MESSAGES[error_code]` — el copy curado.
+ *   5. `DEFAULT_ERROR_MESSAGE`.
  *
  * ## LO QUE NO CAMBIA
  *
- * La FIRMA y los cuatro campos del retorno son los mismos: media aplicación
+ * La FIRMA y los campos originales del retorno siguen iguales: media aplicación
  * consume esta función y ninguno de sus llamadores necesita tocarse.
  * `devMessage` sigue siendo el `message` crudo del backend —para el log— aunque
  * ahora, cuando es presentable, también alimente `userMessage`.
@@ -268,10 +270,19 @@ export function parseApiError(error: any): ParsedApiError {
     : DEFAULT_ERROR_MESSAGE;
 
   const stockShortages = readInsufficientStockItems(details);
+  // La lista estructurada es la fuente de verdad: el mensaje del backend
+  // puede abreviar varios faltantes y TablesService/KitchenTicketsService
+  // convierten el error a string antes de entregarlo a la pantalla.
+  const causeCode = readNonEmptyString(asRecord(details)?.['cause_code']);
+  const isStockError = [errorCode, causeCode].some(
+    (code) => code === 'INV_STOCK_INSUFFICIENT_LINES' || code === 'INV_STOCK_002',
+  );
 
   return {
     errorCode,
-    userMessage: resolveUserMessage(devMessage, details, cannedMessage),
+    userMessage: isStockError && stockShortages.length
+      ? formatStockShortageSummary(stockShortages)
+      : resolveUserMessage(devMessage, details, cannedMessage),
     devMessage,
     details,
     request_id: readNonEmptyString(body?.request_id) ?? undefined,

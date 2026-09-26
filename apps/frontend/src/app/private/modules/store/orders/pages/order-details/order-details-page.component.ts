@@ -2846,11 +2846,7 @@ export class OrderDetailsPageComponent {
       this.toastService.success('Orden entregada');
       this.loadData();
     } catch (err: any) {
-      this.toastService.error(
-        err?.error?.message ||
-          err?.message ||
-          'No se pudo completar la entrega directa',
-      );
+      this.showDeliveryStockError(err, 'No se pudo completar la entrega directa');
     } finally {
       this.isProcessingAction.set(false);
     }
@@ -4875,14 +4871,34 @@ export class OrderDetailsPageComponent {
         },
         error: (err: unknown) => {
           this.deliveringItemId.set(null);
-          // C.3: passthrough del mensaje mapeado (ERR-12 lleva al KDS).
-          const { userMessage } = parseApiError(err);
-          this.toastService.error(
-            userMessage || 'No se pudo marcar como entregado',
-          );
+          this.showDeliveryStockError(err, 'No se pudo marcar como entregado');
           console.error('Deliver item failed', err);
         },
       });
+  }
+
+  /** Keep every short line visible and offer the first product's inventory settings. */
+  private showDeliveryStockError(error: unknown, fallback: string): void {
+    const raw = (error as { cause?: unknown } | null)?.cause ?? error;
+    const parsed = parseApiError(raw);
+    const firstProduct = parsed.stockShortages?.find((item) => item.product_id > 0);
+    if (parsed.stockShortages?.length) {
+      this.toastService.show({
+        description: parsed.userMessage,
+        variant: 'error',
+        duration: 8000,
+        ...(firstProduct ? {
+          action: {
+            label: 'Ver producto',
+            onClick: () => void this.router.navigate(['/admin/products/edit', firstProduct.product_id]),
+          },
+        } : {}),
+      });
+      return;
+    }
+    this.toastService.error(
+      (error as Error | null)?.message || parsed.userMessage || fallback,
+    );
   }
 
   // ─── Paso 2 PLAN-order-detail-cancel-item — cancelar un ítem ──────
@@ -5304,7 +5320,7 @@ export class OrderDetailsPageComponent {
         this.loadData();
       },
       error: (err: any) => {
-        this.toastService.error(err?.message || 'No se pudo marcar como entregada');
+        this.showDeliveryStockError(err, 'No se pudo marcar como entregada');
       },
     });
   }

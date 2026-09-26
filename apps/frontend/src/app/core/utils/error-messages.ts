@@ -338,7 +338,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // isPresentableApiMessage en parse-api-error.ts), así que normalmente lo que
   // ve el operador es ESE texto, no éste.
   INV_STOCK_002:
-    'No se puede entregar: no hay stock suficiente para uno o más productos.',
+    'No se puede entregar: no hay stock suficiente. Quita el producto de la orden o desactiva «Maneja inventario» en su ficha.',
   INV_STOCK_INSUFFICIENT_LINES:
     'No hay stock suficiente para uno o más productos o insumos. Quítalos de la orden o desactiva «Maneja inventario» en el producto.',
   INV_LOC_001: 'Ubicacion no encontrada.',
