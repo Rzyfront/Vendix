@@ -525,7 +525,11 @@ export class StockValidatorService {
           product_id: entry.product_id,
           product_variant_id: entry.product_variant_id,
           product_name:
-            variant?.name ?? product.name ?? entry.product_name ??
+            (variant?.name && product.name
+              ? `${product.name} - ${variant.name}`
+              : null) ??
+            product.name ??
+            entry.product_name ??
             `Producto ${entry.product_id}`,
           kind: opts.kind,
           requested: entry.quantity,
