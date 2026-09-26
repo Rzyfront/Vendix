@@ -193,7 +193,7 @@ export class PaymentsService {
     // impuesto (fallo seguro: nunca se inventa un impuesto).
     @Optional() private readonly shippingCalculatorService?: ShippingCalculatorService,
     // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
-    private readonly orderHistory: OrderHistoryService,
+    @Optional() private readonly orderHistory?: OrderHistoryService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -2218,7 +2218,7 @@ export class PaymentsService {
               where: { id: result.order.id },
               data: { state: 'created', updated_at: new Date() },
             });
-            await this.orderHistory.record(this.prisma, {
+            await this.orderHistory?.record(this.prisma, {
               orderId: result.order.id,
               storeId: createPosPaymentDto.store_id,
               organizationId: result.order.stores?.organization_id ?? undefined,
@@ -4102,7 +4102,7 @@ export class PaymentsService {
       dto.customer_id != null &&
       dto.customer_id !== session.order?.customer_id
     ) {
-      await this.orderHistory.record(tx, {
+      await this.orderHistory?.record(tx, {
         orderId: session.order_id,
         storeId: dtoStoreId,
         organizationId: session.order?.stores?.organization_id ?? undefined,
@@ -4722,7 +4722,7 @@ export class PaymentsService {
           `La orden ${orderLabel} cambió mientras se cobraba. Actualiza la lista de órdenes antes de intentarlo de nuevo.`,
         );
       }
-      await this.orderHistory.record(tx, {
+      await this.orderHistory?.record(tx, {
         orderId: existingOrder.id,
         storeId: dtoStoreId,
         organizationId: existingOrder.stores?.organization_id ?? undefined,
@@ -5257,7 +5257,7 @@ export class PaymentsService {
       // Aditivo y seguro para N llamadas: re-lee el total fresco en `tx`.
       await this.applyOrderBalanceOnPayment(tx, order.id, leg.amount);
 
-      await this.orderHistory.record(tx, {
+      await this.orderHistory?.record(tx, {
         orderId: order.id,
         storeId: dtoStoreId,
         organizationId: order.stores?.organization_id ?? undefined,
@@ -5530,7 +5530,7 @@ export class PaymentsService {
     // punto). El helper re-lee grand_total fresco dentro del `tx`.
     await this.applyOrderBalanceOnPayment(tx, order.id, payableAmount);
 
-    await this.orderHistory.record(tx, {
+    await this.orderHistory?.record(tx, {
       orderId: order.id,
       storeId: dtoStoreId,
       organizationId: order.stores?.organization_id ?? undefined,
@@ -5689,7 +5689,7 @@ export class PaymentsService {
     });
 
     if (historyCtx) {
-      await this.orderHistory.record(tx, {
+      await this.orderHistory?.record(tx, {
         orderId,
         storeId: historyCtx.storeId,
         organizationId: historyCtx.organizationId ?? undefined,
@@ -6137,7 +6137,7 @@ export class PaymentsService {
     );
 
     // Plan order-truth-and-invoice-tz (Step 6).
-    await this.orderHistory.record(tx, {
+    await this.orderHistory?.record(tx, {
       orderId: payment.order_id,
       storeId: staffUser.store_id,
       organizationId: payment.orders?.stores?.organization_id ?? undefined,
