@@ -82,6 +82,7 @@ import { differsByAtLeastCents } from '@common/money-kernel';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 // Release-853 paso 10 — propagación del titular al borrador de factura.
 import { InvoicingService } from '../invoicing/invoicing.service';
+import { OrderHistoryService } from './order-history/order-history.service';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -290,6 +291,12 @@ export class OrdersService {
     @Optional()
     @Inject(forwardRef(() => InvoicingService))
     private readonly invoicingService?: InvoicingService,
+    // Plan order-truth-and-invoice-tz — Paso 6. Único escritor de
+    // `order_events`. `@Optional()` por el mismo motivo que el resto de
+    // dependencias tardías: no romper los TestingModule/`new OrdersService(...)`
+    // existentes. En prod siempre resuelve vía `OrderHistoryModule` (ver
+    // `orders.module.ts`).
+    @Optional() private readonly orderHistoryService?: OrderHistoryService,
   ) {}
 
   /** Copia del impuesto de la tarifa `rate_id` (vacía sin tarifa/servicio). */
@@ -4079,6 +4086,32 @@ export class OrdersService {
           updated_at: new Date(),
         },
       });
+
+      // Plan order-truth-and-invoice-tz — customer_changed. Mismo ternario de
+      // arriba (única fuente de la resolución titular) solo para detectar si
+      // el customer_id efectivo cambió; `undefined` (DTO no lo tocó) nunca
+      // dispara el evento.
+      const nextCustomerId =
+        dto.customer_id != null
+          ? dto.customer_id
+          : dto.customer_alias != null
+            ? null
+            : dto.customer_id === null
+              ? null
+              : existingOrder.customer_id;
+      if (nextCustomerId !== existingOrder.customer_id) {
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId,
+          organizationId: context?.organization_id ?? null,
+          type: 'customer_changed',
+          actorUserId: userId || null,
+          payload: {
+            from_customer_id: existingOrder.customer_id,
+            to_customer_id: nextCustomerId,
+          },
+        });
+      }
 
       // 13h) Hidratar respuesta completa dentro de la misma transacción.
       const hydrated = await tx.orders.findFirst({
