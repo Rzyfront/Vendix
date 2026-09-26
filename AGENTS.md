@@ -83,6 +83,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a new tax_type value to the fiscal system | `vendix-tax-typing` |
 | Adding a per-domain BullMQ scan queue (receipt-scan, expense-scan) | `vendix-ai-queue` |
 | Adding a stream-intent handshake to an SSE endpoint | `vendix-ai-streaming` |
+| Adding a validate-before-mutate stock guard on an order/kitchen path | `vendix-inventory-stock` |
 | Adding a write tool that needs user confirmation | `vendix-ai-agent-tools` |
 | Adding an exportEndpoint to the report registry | `vendix-report-xlsx` |
 | Adding backend permissions | `vendix-permissions` |
@@ -206,8 +207,10 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging AI request failures | `vendix-ai-platform-core` |
 | Debugging ECOM_CHECKOUT_003 errors on checkout | `vendix-shipping-distance-pricing` |
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
+| Debugging INV_STOCK_INSUFFICIENT_LINES or INV_STOCK_002 | `vendix-inventory-stock` |
 | Debugging Prisma WhereUnique/AND errors in scoped queries | `vendix-prisma-scopes` |
 | Debugging a Vexi answer that claims a UI change it never confirmed | `vendix-vexi-agent` |
+| Debugging a fire/resend/production block on insufficient tracked ingredient (INV_STOCK_INSUFFICIENT_LINES kind:'ingredient') | `vendix-restaurant-ops` |
 | Debugging a metric that disagrees between two screens | `vendix-analytics-metrics` |
 | Debugging a profit or margin that looks too high | `vendix-analytics-metrics` |
 | Debugging a tax posting to the wrong PUC account | `vendix-tax-typing` |
@@ -431,6 +434,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Using SSH to inspect Vendix production infrastructure | `vendix-cloud-operations` |
 | Using input(), output(), model(), signal(), computed(), effect(), or toSignal() | `vendix-zoneless-signals` |
 | Using toSignal() in facades — validating initialValue presence | `vendix-zoneless-signals` |
+| Validating tracked ingredients before fire/resend/production consumption | `vendix-restaurant-ops` |
 | Validating variant availability in ecommerce, POS, cart, checkout, reservations, or catalog | `vendix-product-variants` |
 | Verificar el reporte de compilación o de pruebas de otro agente | `vendix-known-errors` |
 | Verifying Build | `buildcheck-dev` |
@@ -514,6 +518,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with resolveLocalDateOnlyRange, dateOnlyPeriodSql or CostCoverage | `vendix-analytics-metrics` |
 | Working with service variants, booking duration, buffer, preparation time, or product_variant_id on bookings | `vendix-product-variants` |
 | Working with stock levels, inventory adjustments, or stock transfers | `vendix-inventory-stock` |
+| Working with store_settings.inventory.allow_negative_stock or allow_ingredient_overuse | `vendix-inventory-stock` |
 | Working with the reports export flow (exportReport action, exportReport$ effect, exportFromBackend) | `vendix-report-xlsx` |
 | Working with toLocaleDateString or DatePipe | `vendix-date-timezone` |
 | Working with withholding_breakdown per stop (retefuente/reteiva/reteica) | `vendix-dispatch-routes` |
