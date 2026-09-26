@@ -112,6 +112,11 @@ describe('InvoiceDataRequestsService (nominative conversion)', () => {
       downloadImage: jest.fn(),
       ...overrides.s3Service,
     };
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    const orderHistory = {
+      record: jest.fn().mockResolvedValue(null),
+      ...overrides.orderHistory,
+    };
 
     return {
       service: new InvoiceDataRequestsService(
@@ -121,6 +126,7 @@ describe('InvoiceDataRequestsService (nominative conversion)', () => {
         credit_notes as any,
         invoice_flow as any,
         s3Service as any,
+        orderHistory as any,
       ),
       prisma,
       event_emitter,
@@ -128,6 +134,7 @@ describe('InvoiceDataRequestsService (nominative conversion)', () => {
       credit_notes,
       invoice_flow,
       s3Service,
+      orderHistory,
     };
   };
 
@@ -171,6 +178,23 @@ describe('InvoiceDataRequestsService (nominative conversion)', () => {
     expect(completed).toBeDefined();
     expect(completed[0].data.new_invoice_id).toBe(NEW_INVOICE_ID);
     expect(result?.status).toBe('completed');
+  });
+
+  it('registra customer_changed en order_events cuando el cliente pasa de null a un usuario', async () => {
+    const { service, orderHistory, prisma } = createService();
+
+    await service.processRequest(REQUEST_ID, STORE_ID);
+
+    expect(orderHistory.record).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        orderId: ORDER_ID,
+        storeId: STORE_ID,
+        organizationId: 1,
+        type: 'customer_changed',
+        payload: { from_customer_id: null, to_customer_id: CUSTOMER_ID },
+      }),
+    );
   });
 
   it('updates a draft invoice in place without credit note or new invoice', async () => {
@@ -293,6 +317,7 @@ describe('InvoiceDataRequestsService (nominative conversion)', () => {
 
 describe('InvoiceDataRequestsService (paso 3: summary guest)', () => {
   const service = new InvoiceDataRequestsService(
+    {} as any,
     {} as any,
     {} as any,
     {} as any,
