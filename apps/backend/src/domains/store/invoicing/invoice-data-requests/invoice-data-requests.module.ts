@@ -6,9 +6,10 @@ import { ResponseModule } from '../../../../common/responses/response.module';
 import { PrismaModule } from '../../../../prisma/prisma.module';
 import { InvoicingModule } from '../invoicing.module';
 import { S3Module } from '@common/services/s3.module';
+import { OrderHistoryModule } from '../../orders/order-history/order-history.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, InvoicingModule, S3Module],
+  imports: [ResponseModule, PrismaModule, InvoicingModule, S3Module, OrderHistoryModule],
   controllers: [InvoiceDataRequestsController],
   providers: [InvoiceDataRequestsService, InvoiceDataRequestSubmittedListener],
   exports: [InvoiceDataRequestsService],
