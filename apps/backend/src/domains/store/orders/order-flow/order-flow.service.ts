@@ -3275,6 +3275,15 @@ export class OrderFlowService {
         },
       });
 
+      await this.orderHistoryService?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: order.stores?.organization_id,
+        type: 'item_delivered',
+        orderItemId,
+        actorUserId: userId,
+      });
+
       this.logger.log(
         `Order item #${orderItemId} of order #${orderId} delivered by user #${userId}`,
       );
@@ -3748,6 +3757,15 @@ export class OrderFlowService {
         },
       });
 
+      await this.orderHistoryService?.record(tx, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: order.stores?.organization_id,
+        type: 'item_cancelled',
+        orderItemId,
+        payload: { reason: reason.trim(), cancellation_type: resolvedType },
+      });
+
       // Recálculo excluyendo cancelados (`cancelled_at IS NULL`).
       //
       // F-082 (blocker, C.8): antes sumaba `tax_amount_item` SIN
@@ -4056,6 +4074,16 @@ export class OrderFlowService {
           cancellation_type: cancellationType,
           updated_at: new Date(),
         },
+      });
+
+      await this.orderHistoryService?.record(tx, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: order.stores?.organization_id,
+        type: 'item_delivery_reverted',
+        orderItemId,
+        actorUserId: userId,
+        payload: { reason: trimmedReason, destination },
       });
 
       // Recálculo excluyendo cancelados (`cancelled_at IS NULL`) — mismo
