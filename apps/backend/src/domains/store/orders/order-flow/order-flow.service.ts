@@ -4922,6 +4922,15 @@ export class OrderFlowService {
         throw notCancelableError();
       }
 
+      await this.orderHistoryService?.record(tx, {
+        orderId,
+        storeId: freshOrder.store_id,
+        organizationId: freshOrder.stores?.organization_id,
+        type: 'state_changed',
+        fromState: previousState,
+        toState: 'cancelled',
+      });
+
       // Winner (ADR-12, cash-only): cancel pending attempts plus the
       // succeeded CASH legs the cash-out just returned — the same SQL-verified
       // set, never the include. Non-cash received rows (`succeeded`/`captured`)
