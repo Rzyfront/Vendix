@@ -558,7 +558,14 @@ export class OrderFlowService {
     orderId: number,
     newState: OrderState,
     metadata: Record<string, any> = {},
-    opts?: { source?: string; deliveredReversalOwner?: 'forced' },
+    opts?: {
+      source?: string;
+      deliveredReversalOwner?: 'forced';
+      /** `payOrder` pre-claims the row into `processing` before this write;
+       * the history must show the state the user actually saw (the
+       * pre-claim one), not the transient claim. */
+      historyFromState?: OrderState | null;
+    },
   ) {
     // Filter out non-schema fields and store them in internal_notes as JSON metadata
     const schemaFields: Record<string, any> = {
@@ -693,7 +700,7 @@ export class OrderFlowService {
               organizationId:
                 updated_order.stores?.organization_id ?? previousOrganizationId,
               type: 'state_changed',
-              fromState: previous_order?.state,
+              fromState: opts?.historyFromState ?? previous_order?.state,
               toState: newState,
               source: historySource,
             });
@@ -765,7 +772,7 @@ export class OrderFlowService {
       storeId: updated_order.store_id,
       organizationId: previousOrganizationId,
       type: 'state_changed',
-      fromState: previous_order?.state,
+      fromState: opts?.historyFromState ?? previous_order?.state,
       toState: newState,
       source: historySource,
     });
@@ -1507,7 +1514,7 @@ export class OrderFlowService {
 
       // The claim temporarily moved shipped -> processing. Restore its
       // logistics state and persist the settled balance with the payment.
-      await this.updateOrderState(orderId, 'shipped', settledBalanceMetadata);
+      await this.updateOrderState(orderId, 'shipped', settledBalanceMetadata, { historyFromState: preClaimState });
 
       // Round 1 MAJOR #13 — cupón en `flow/pay` (shipped):
       // si la orden trae `coupon_id` y no existe `coupon_uses` aún,
@@ -1578,7 +1585,7 @@ export class OrderFlowService {
         updatedOrder = await this.updateOrderState(orderId, 'delivered', {
           paid_at: new Date(),
           ...settledBalanceMetadata,
-        });
+        }, { historyFromState: preClaimState });
       } catch (e) {
         // Same contract as every other branch: a state-write failure after
         // the legs were created compensates instead of leaving them orphaned.
@@ -1652,7 +1659,7 @@ export class OrderFlowService {
           paid_at: new Date(),
           finished_at: new Date(),
           ...settledBalanceMetadata,
-        });
+        }, { historyFromState: preClaimState });
       } catch (e) {
         // Mismo contrato que el cobro directo: el finish falló tras crear los
         // tramos → se compensan y la orden vuelve a su estado previo.
@@ -1738,6 +1745,7 @@ export class OrderFlowService {
             paid_at: new Date(),
             ...settledBalanceMetadata,
           },
+          { historyFromState: preClaimState },
         );
 
         this.logger.log(
@@ -1822,6 +1830,7 @@ export class OrderFlowService {
             paid_at: new Date(),
             ...settledBalanceMetadata,
           },
+          { historyFromState: preClaimState },
         );
 
         this.logger.log(
@@ -1867,7 +1876,7 @@ export class OrderFlowService {
           paid_at: new Date(),
           finished_at: new Date(),
           ...settledBalanceMetadata,
-        });
+        }, { historyFromState: preClaimState });
       } catch (e) {
         if (e instanceof VendixHttpException) {
           await this.cancelLegPayments(
@@ -1950,6 +1959,8 @@ export class OrderFlowService {
       const updatedOrder = await this.updateOrderState(
         orderId,
         'pending_payment',
+        {},
+        { historyFromState: preClaimState },
       );
 
       this.logger.log(
