@@ -63,6 +63,7 @@ describe('RefundFlowService — order_events (plan order-truth-and-invoice-tz)',
     calculate: jest.fn(),
     preview: jest.fn(),
     calculateCancellationCashRefund: jest.fn(),
+    calculateCancellationRefund: jest.fn(),
   };
 
   const mockStockLevelManager = { updateStock: jest.fn().mockResolvedValue(undefined) };
@@ -369,6 +370,134 @@ describe('RefundFlowService — order_events (plan order-truth-and-invoice-tz)',
         expect.objectContaining({ type: 'state_changed' }),
       );
       expect(mockPrisma.orders.update).not.toHaveBeenCalled();
+    });
+  });
+  describe('recordCancellationCashRefund / recordCancellationPendingRefunds', () => {
+    const ORDER_ID = 9301;
+    const STORE_ID = 55;
+    const cancelOrderFixture = {
+      id: ORDER_ID,
+      store_id: STORE_ID,
+      stores: { organization_id: 4 },
+      grand_total: new Prisma.Decimal(100000),
+      tax_amount: new Prisma.Decimal(0),
+      shipping_cost: new Prisma.Decimal(0),
+      shipping_tax_amount: new Prisma.Decimal(0),
+      shipping_tax_type: null,
+      tip_amount: new Prisma.Decimal(0),
+      currency: 'COP',
+      payments: [{ id: 801, state: 'succeeded' }],
+    };
+    const breakdownOf = (amount: number) => ({
+      amount: new Prisma.Decimal(amount),
+      subtotal: new Prisma.Decimal(amount),
+      tax: new Prisma.Decimal(0),
+      shipping: new Prisma.Decimal(0),
+    });
+
+    it('efectivo con un solo pago: refund_created con paymentId, monto y refund_method cash en el tx del llamador', async () => {
+      const tx: any = { refunds: { create: jest.fn().mockResolvedValue({ id: 7001 }) } };
+      mockCalculationService.calculateCancellationCashRefund.mockResolvedValue(breakdownOf(40000));
+
+      await service.recordCancellationCashRefund(
+        tx, cancelOrderFixture as any, [801], new Prisma.Decimal(40000), 'Cliente desistió',
+      );
+
+      expect(orderHistoryService.record).toHaveBeenCalledTimes(1);
+      expect(orderHistoryService.record).toHaveBeenCalledWith(tx, {
+        orderId: ORDER_ID,
+        storeId: STORE_ID,
+        organizationId: 4,
+        type: 'refund_created',
+        paymentId: 801,
+        amount: '40000',
+        payload: { reason: 'Cliente desistió', refund_id: 7001, refund_method: 'cash' },
+      });
+      // Documental: nunca cambia el estado de la orden.
+      expect(orderHistoryService.record.mock.calls.some(([, evt]: any) => evt.type === 'state_changed')).toBe(false);
+    });
+
+    it('efectivo con varios pagos: paymentId null', async () => {
+      const tx: any = { refunds: { create: jest.fn().mockResolvedValue({ id: 7002 }) } };
+      mockCalculationService.calculateCancellationCashRefund.mockResolvedValue(breakdownOf(60000));
+
+      await service.recordCancellationCashRefund(
+        tx, cancelOrderFixture as any, [801, 802], new Prisma.Decimal(60000), 'x',
+      );
+
+      expect(orderHistoryService.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ type: 'refund_created', paymentId: null, amount: '60000' }),
+      );
+    });
+
+    it('piernas pendientes: un refund_created por pierna (pago y abono CxP), salta cero y duplicados', async () => {
+      const tx: any = {
+        refunds: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValueOnce(null) // pierna pago 802
+            .mockResolvedValueOnce(null) // pierna abono ar 31
+            .mockResolvedValueOnce({ id: 1 }), // pierna pago 803 ya existe
+          create: jest
+            .fn()
+            .mockResolvedValueOnce({ id: 7101 })
+            .mockResolvedValueOnce({ id: 7102 }),
+        },
+      };
+      mockCalculationService.calculate.mockResolvedValue({ max_refundable: 100000 });
+      mockCalculationService.calculateCancellationRefund
+        .mockResolvedValueOnce(breakdownOf(30000))
+        .mockResolvedValueOnce(breakdownOf(20000));
+
+      await service.recordCancellationPendingRefunds(
+        tx,
+        cancelOrderFixture as any,
+        [
+          { payment_id: 802, amount: 30000, method_label: 'pago #802 (card)' },
+          { ar_payment_id: 31, amount: 20000, method_label: 'abono #31' },
+          { payment_id: 804, amount: 0, method_label: 'pago #804 (card)' },
+          { payment_id: 803, amount: 10000, method_label: 'pago #803 (card)' },
+        ] as any,
+        'Cancelación',
+      );
+
+      expect(orderHistoryService.record).toHaveBeenCalledTimes(2);
+      expect(orderHistoryService.record).toHaveBeenNthCalledWith(1, tx, {
+        orderId: ORDER_ID,
+        storeId: STORE_ID,
+        organizationId: 4,
+        type: 'refund_created',
+        paymentId: 802,
+        amount: '30000',
+        payload: { reason: 'Cancelación', refund_id: 7101, refund_method: 'original_payment', ar_payment_id: null },
+      });
+      expect(orderHistoryService.record).toHaveBeenNthCalledWith(2, tx, {
+        orderId: ORDER_ID,
+        storeId: STORE_ID,
+        organizationId: 4,
+        type: 'refund_created',
+        paymentId: null,
+        amount: '20000',
+        payload: { reason: 'Cancelación', refund_id: 7102, refund_method: 'original_payment', ar_payment_id: 31 },
+      });
+    });
+
+    it('piernas que exceden el techo: lanza antes de crear y no registra', async () => {
+      const tx: any = { refunds: { findFirst: jest.fn(), create: jest.fn() } };
+      mockCalculationService.calculate.mockResolvedValue({ max_refundable: 50000 });
+
+      await expect(
+        service.recordCancellationPendingRefunds(
+          tx,
+          cancelOrderFixture as any,
+          [{ payment_id: 802, amount: 30000, method_label: 'x' }] as any,
+          'Cancelación',
+          new Prisma.Decimal(40000),
+        ),
+      ).rejects.toMatchObject({ errorCode: 'REF_VALIDATE_001' });
+      expect(tx.refunds.create).not.toHaveBeenCalled();
+      expect(orderHistoryService.record).not.toHaveBeenCalled();
     });
   });
 });
