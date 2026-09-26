@@ -4,6 +4,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RecipesService, BomExplosionLine } from '../recipes/recipes.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import {
+  StockValidatorService,
+  StockDemandLine,
+} from '../inventory/shared/services/stock-validator.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
@@ -177,6 +181,15 @@ export interface PreExplodedFireContext {
    * Notas de preparación actualizadas por `order_item_id` al confirmar el envío.
    */
   itemNotesByOrderItem?: Map<number, string>;
+  /**
+   * No-overselling guard (plan step 6) — `true` when the caller (the public
+   * `fireOrderItems`) already ran `assertIngredientsAvailable` against this
+   * EXACT demand moments earlier, outside the transaction, so
+   * `fireOrderItemsInTx` skips the redundant re-query. Callers that invoke
+   * `fireOrderItemsInTx` directly (POS auto-fire, table close-out, split)
+   * never set this — they get the in-tx check.
+   */
+  skipIngredientCheck?: boolean;
 }
 
 /**
@@ -244,6 +257,9 @@ export class KitchenFireService {
     private readonly prisma: StorePrismaService,
     private readonly recipesService: RecipesService,
     private readonly stockLevelManager: StockLevelManager,
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+    // step 6) — tracked ingredients are validated BEFORE being consumed.
+    private readonly stockValidatorService: StockValidatorService,
     private readonly eventEmitter: EventEmitter2,
     private readonly sseService: NotificationsSseService,
     private readonly kdsSessionsService: KdsSessionsService,
@@ -261,6 +277,47 @@ export class KitchenFireService {
     return new Intl.DateTimeFormat('en-CA', {
       timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
     }).format(shifted);
+  }
+
+  /**
+   * No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+   * step 6) — flattens the ALREADY-EXPLODED BOM of every prepared item being
+   * fired into ingredient demand lines, net of confirmed exclusions
+   * (QUI-655). Pure/no DB access: reused verbatim by the pre-tx check in
+   * `fireOrderItems` and the in-tx check in `fireOrderItemsInTx` so both can
+   * never diverge on what is actually about to be consumed.
+   *
+   * `used_by` carries the dish name so a shared ingredient's error names
+   * every dish demanding it (`StockValidatorService.assertIngredientsAvailable`
+   * sums the demand per ingredient across all dishes before deciding).
+   */
+  private buildIngredientDemandLines(
+    items: Array<{
+      orderItem: { id: number; quantity: any; product_name: string };
+      bomLines: BomExplosionLine[];
+    }>,
+    exclusionsByOrderItem: Map<number, number[]>,
+  ): StockDemandLine[] {
+    const demands: StockDemandLine[] = [];
+    for (const { orderItem, bomLines } of items) {
+      const orderQty = Number(orderItem.quantity || 0);
+      if (!Number.isFinite(orderQty) || orderQty <= 0) continue;
+      const excluded = exclusionsByOrderItem.get(orderItem.id);
+      const excludedSet = excluded && excluded.length > 0 ? new Set(excluded) : null;
+      const effectiveBomLines = excludedSet
+        ? bomLines.filter((l) => !excludedSet.has(l.component_product_id))
+        : bomLines;
+      for (const line of effectiveBomLines) {
+        const consumedQty = Math.round(line.quantity * orderQty);
+        if (!Number.isFinite(consumedQty) || consumedQty <= 0) continue;
+        demands.push({
+          product_id: line.component_product_id,
+          quantity: consumedQty,
+          used_by: orderItem.product_name,
+        });
+      }
+    }
+    return demands;
   }
 
   // ---------------------------------------------------------------- fire
@@ -489,6 +546,28 @@ export class KitchenFireService {
       preparedItems.push({ orderItem: item, recipeId: recipe.id, bomLines });
     }
 
+    // 3a. No-overselling guard (plan step 6) — validate tracked ingredients
+    // BEFORE opening the transaction. Built from the exclusions confirmed in
+    // THIS request (available now — `splitLinesForExclusions` already ran),
+    // so the check honors the same "sin salsa" exclusions the tx will
+    // actually consume. If insufficient, nothing is consumed and no
+    // kitchen_ticket is created (no tx was even opened yet).
+    const exclusionsByOrderItem = new Map<number, number[]>(
+      remappedExclusions.map((e) => [
+        e.order_item_id,
+        e.component_product_ids ?? [],
+      ]),
+    );
+    if (preparedItems.length > 0) {
+      const ingredientDemands = this.buildIngredientDemandLines(
+        preparedItems,
+        exclusionsByOrderItem,
+      );
+      await this.stockValidatorService.assertIngredientsAvailable(
+        ingredientDemands,
+      );
+    }
+
     // 3b. Pre-resolve a default location_id per leaf product. Resolved
     //     OUTSIDE the transaction because getDefaultLocationForProduct
       //     uses the outer scoped client; the resulting id is just a
@@ -543,15 +622,15 @@ export class KitchenFireService {
       locationByProduct,
       businessDate,
       user_id,
-      // QUI-655 — exclusiones confirmadas en el modal, indexadas por item. Se
-      // arman aca (fuera de la transaccion) porque el filtrado del BOM ocurre
-      // dentro y no debe pagar el costo de recorrer el DTO por linea.
-      exclusionsByOrderItem: new Map(
-        remappedExclusions.map((e) => [
-          e.order_item_id,
-          e.component_product_ids ?? [],
-        ]),
-      ),
+      // QUI-655 — exclusiones confirmadas en el modal, indexadas por item.
+      // Reutiliza el mapa armado arriba para el chequeo 3a (misma fuente de
+      // verdad, una sola construccion).
+      exclusionsByOrderItem,
+      // No-overselling guard (plan step 6) — 3a ya validó este MISMO demand
+      // (mismos preparedItems + exclusionsByOrderItem) momentos antes, fuera
+      // de la tx. Re-ejecutar el mismo query adentro es correcto pero
+      // redundante; el flag evita pagarlo dos veces.
+      skipIngredientCheck: true,
       itemNotesByOrderItem: (() => {
         const notesMap = new Map<number, string>();
         if (dto.item_notes && Array.isArray(dto.item_notes)) {
@@ -783,6 +862,22 @@ export class KitchenFireService {
       openSessionByKds.set(kdsId, session?.id ?? null);
     }
 
+    // No-overselling guard (plan step 6) — validate tracked ingredients
+    // BEFORE consuming anything, inside THIS tx. Covers the direct callers
+    // (POS auto-fire, table close-out, split) that invoke `fireOrderItemsInTx`
+    // without going through the public `fireOrderItems` pre-check. When the
+    // public method already validated the identical demand moments earlier
+    // (`preComputed.skipIngredientCheck`), this re-query is skipped.
+    if (!preComputed.skipIngredientCheck && preparedItems.length > 0) {
+      const ingredientDemands = this.buildIngredientDemandLines(
+        preparedItems,
+        exclusionsByOrderItem,
+      );
+      await this.stockValidatorService.assertIngredientsAvailable(
+        ingredientDemands,
+        { tx },
+      );
+    }
 
     for (const ctxItem of preparedItems) {
       const { orderItem, bomLines } = ctxItem;
@@ -864,7 +959,12 @@ export class KitchenFireService {
               user_id,
               order_item_id: orderItem.id,
               create_movement: true,
-              validate_availability: false,
+              // No-overselling guard (plan step 6) — the pre-consumption
+              // check above already blocked an insufficient tracked
+              // ingredient; this is the defense-in-depth net against a
+              // concurrent fire taking the same stock in between. No-op for
+              // untracked ingredients (`updateStock` skips them entirely).
+              validate_availability: true,
               kds_session_id: itemKdsSessionId,
             },
             tx,
