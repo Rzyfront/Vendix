@@ -2299,6 +2299,26 @@ export class OrdersService {
       throw error;
     }
 
+    // Plan order-truth-and-invoice-tz — customer_changed. Solo cuando el DTO
+    // trae `customer_id` y difiere del persistido (mismo predicado que la
+    // guarda de factura de arriba); `customer_alias` es etiqueta de display
+    // y no cambia el titular. Este carril no abre transacción: el evento se
+    // escribe justo después del `orders.update` exitoso, como el resto de
+    // escritores no transaccionales de `order_events`.
+    if (titularCustomerChanged) {
+      await this.orderHistoryService?.record(this.prisma, {
+        orderId: id,
+        storeId: order.store_id,
+        organizationId:
+          RequestContextService.getContext()?.organization_id ?? null,
+        type: 'customer_changed',
+        payload: {
+          from_customer_id: order.customer_id ?? null,
+          to_customer_id: updateOrderDto.customer_id ?? null,
+        },
+      });
+    }
+
     /**
      * El estado va DESPUÉS de la metadata, y el orden NO es cosmético.
      *
