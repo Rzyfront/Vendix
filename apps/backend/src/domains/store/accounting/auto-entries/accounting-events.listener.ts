@@ -335,6 +335,53 @@ export class AccountingEventsListener {
     }
   }
 
+  /**
+   * payment.voided — reversa el asiento de `payment.received` cuando se anula
+   * un pago ya asentado (`OrderFlowService.cancelPayment`). Delega en
+   * `AutoEntryService.onPaymentVoided`, que localiza el asiento original por
+   * `source_type='payment.received', source_id=payment_id` (la misma clave
+   * que fija `onPaymentReceived`) y postea su espejo invertido. Idempotente y
+   * nunca lanza hacia el emisor: la anulación del pago de negocio ya se
+   * completó y no debe revertirse por un fallo contable.
+   */
+  @OnEvent('payment.voided')
+  async handlePaymentVoided(event: {
+    store_id: number;
+    organization_id: number;
+    order_id: number;
+    payment_id: number;
+    amount: number;
+    payment_method: string | null;
+    user_id: number | null;
+    reason: 'payment_cancelled';
+  }) {
+    try {
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'payments',
+          event.organization_id,
+        ))
+      )
+        return;
+      await this.auto_entry_service.onPaymentVoided({
+        payment_id: event.payment_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        order_id: event.order_id,
+        user_id: event.user_id ?? undefined,
+      });
+      this.logger.log(
+        `Auto-entry reversal processed for payment.voided #${event.payment_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to reverse auto-entry for payment.voided #${event.payment_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   @OnEvent('credit_sale.created')
   async handleCreditSaleCreated(event: {
     order_id: number;
