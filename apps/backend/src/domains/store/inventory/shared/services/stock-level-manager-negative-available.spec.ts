@@ -79,6 +79,7 @@ describe('StockLevelManager.reserveStock — disponible negativo (QUI-557)', () 
       stock_levels: {
         findFirst: jest.fn().mockResolvedValue(emptyStockLevel),
         update: jest.fn().mockResolvedValue(emptyStockLevel),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       stock_reservations: { create: jest.fn().mockResolvedValue({ id: 1 }) },
       products: { findFirst: jest.fn(), update: jest.fn() },
@@ -143,8 +144,8 @@ describe('StockLevelManager.reserveStock — disponible negativo (QUI-557)', () 
     expect(prismaMock.stock_levels.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          quantity_reserved: 2,
-          quantity_available: -2,
+          quantity_reserved: { increment: 2 },
+          quantity_available: { decrement: 2 },
         }),
       }),
     );
@@ -162,10 +163,20 @@ describe('StockLevelManager.reserveStock — disponible negativo (QUI-557)', () 
 
     await expect(reserve(25, false)).resolves.toBeUndefined();
 
-    expect(prismaMock.stock_levels.update).toHaveBeenCalledWith(
+    expect(prismaMock.stock_levels.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ quantity_available: 15 }),
+        where: expect.objectContaining({ quantity_available: { gte: 25 } }),
+        data: expect.objectContaining({ quantity_available: { decrement: 25 } }),
       }),
     );
+  });
+
+  it('rechaza una carrera si otra mesa toma la última unidad tras la lectura', async () => {
+    const stocked = { ...emptyStockLevel, quantity_on_hand: 1, quantity_available: 1 };
+    jest.spyOn(service as any, 'getOrCreateStockLevel').mockResolvedValue(stocked as any);
+    prismaMock.stock_levels.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(reserve(1, false)).rejects.toMatchObject({ errorCode: 'INV_STOCK_001' });
+    expect(prismaMock.stock_reservations.create).not.toHaveBeenCalled();
   });
 });

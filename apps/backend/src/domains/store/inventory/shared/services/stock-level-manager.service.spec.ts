@@ -97,6 +97,7 @@ describe('StockLevelManager', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         aggregate: jest.fn(),
       },
       products: {
@@ -224,6 +225,34 @@ describe('StockLevelManager', () => {
   });
 
   describe('updateStock', () => {
+    it('respeta la variante que activa tracking aunque el producto padre no lo haga', async () => {
+      prismaService.products.findUnique.mockResolvedValue({
+        track_inventory: false, store_id: 1, name: 'Variant product', cost_price: 0,
+      } as any);
+      (prismaService as any).product_variants.findUnique.mockResolvedValue({
+        track_inventory_override: true,
+      });
+      const reachedStockLevel = new Error('reached stock level');
+      jest.spyOn(service as any, 'getOrCreateStockLevel').mockRejectedValue(reachedStockLevel);
+
+      await expect(service.updateStock({ ...updateStockParams, variant_id: 91 },
+        { products: prismaService.products, product_variants: (prismaService as any).product_variants } as any,
+      )).rejects.toThrow('reached stock level');
+    });
+
+    it('omite la variante que desactiva tracking aunque el padre lo haga', async () => {
+      (prismaService as any).product_variants.findUnique.mockResolvedValue({
+        track_inventory_override: false,
+      });
+      const getLevel = jest.spyOn(service as any, 'getOrCreateStockLevel');
+
+      const result = await service.updateStock({ ...updateStockParams, variant_id: 91 },
+        { products: prismaService.products, product_variants: (prismaService as any).product_variants } as any);
+
+      expect(result.stock_level).toBeNull();
+      expect(getLevel).not.toHaveBeenCalled();
+    });
+
     it('should update stock successfully with stock_in movement', async () => {
       const mockTx = {
         // El espejo denormalizado suma con `$queryRaw` para esquivar el filtro
@@ -321,6 +350,11 @@ describe('StockLevelManager', () => {
         quantity_on_hand: 70,
         quantity_available: 60,
       });
+      prismaService.stock_levels.findUnique.mockResolvedValue({
+        ...mockStockLevel,
+        quantity_on_hand: 70,
+        quantity_available: 60,
+      });
       transactionsService.createTransaction.mockResolvedValue(mockTransaction);
       prismaService.products.update.mockResolvedValue(mockProduct);
       prismaService.stock_levels.aggregate.mockResolvedValue({
@@ -329,8 +363,37 @@ describe('StockLevelManager', () => {
 
       const result = await service.updateStock(stockOutParams);
 
+      expect(prismaService.stock_levels.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ quantity_available: { gte: 30 } }),
+          data: expect.objectContaining({ quantity_on_hand: { decrement: 30 } }),
+        }),
+      );
       expect(result.stock_level.quantity_on_hand).toBe(70);
       expect(result.stock_level.quantity_available).toBe(60);
+    });
+
+    it('rechaza un consumo concurrente que agotó el disponible después de leerlo', async () => {
+      prismaService.products.findFirst.mockResolvedValue(mockProduct);
+      prismaService.inventory_locations.findFirst.mockResolvedValue(mockLocation);
+      prismaService.stock_levels.findFirst.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.updateMany.mockResolvedValueOnce({ count: 0 });
+      const tx: any = {
+        $queryRaw: (prismaService as any).$queryRaw,
+        stock_levels: prismaService.stock_levels,
+        products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
+        inventory_locations: prismaService.inventory_locations,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+      };
+
+      await expect(service.updateStock({
+        ...updateStockParams,
+        quantity_change: -30,
+        movement_type: 'consumption',
+        validate_availability: true,
+      }, tx)).rejects.toThrow(ConflictException);
+      expect(transactionsService.createTransaction).not.toHaveBeenCalled();
     });
 
     it('should throw ConflictException when insufficient stock available', async () => {
@@ -788,6 +851,36 @@ describe('StockLevelManager', () => {
   });
 
   describe('releaseReservationQuantity', () => {
+    it('relee la reserva después del lock para no liberar cantidad obsoleta', async () => {
+      const tx: any = {
+        $queryRaw: (prismaService as any).$queryRaw,
+        stock_levels: prismaService.stock_levels,
+        stock_reservations: prismaService.stock_reservations,
+        products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
+      };
+      prismaService.stock_reservations.findMany
+        .mockResolvedValueOnce([{ id: 1, location_id: 1, quantity: 5 }])
+        .mockResolvedValueOnce([{ id: 1, location_id: 1, quantity: 2 }]);
+      prismaService.stock_reservations.update.mockResolvedValue({} as any);
+      prismaService.stock_levels.findFirst.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.update.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.aggregate.mockResolvedValue({
+        _sum: { quantity_available: 90 },
+      });
+
+      const released = await service.releaseReservationQuantity(
+        'order', 1, 1, undefined, 3, 'cancelled', tx,
+      );
+
+      expect(released).toBe(2);
+      expect(prismaService.stock_reservations.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: expect.objectContaining({ status: 'cancelled' }),
+      });
+      expect((prismaService as any).$queryRaw.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
     it('libera parcialmente: decrementa la reserva más antigua y la deja activa por el resto', async () => {
       const oldReservation = {
         id: 1,
