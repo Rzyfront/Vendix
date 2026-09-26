@@ -16,6 +16,7 @@ import {
   UpdateAddressPayload,
   FlowCancelOrderDto,
   KitchenDisposition,
+  RepairShippingTaxAction,
 } from '../../services/store-orders.service';
 // Plan refund-gateway-dispatch-fix (Step C.1): `resolveRefund` lives on
 // `OrdersService` (W1-C), not on `StoreOrdersService`. Aliased to
@@ -5973,7 +5974,7 @@ export class OrderDetailsPageComponent {
    * contabilizado. Al terminar con éxito recarga el detalle para que el
    * operador facture de nuevo.
    */
-  repairShippingTax(action: 'complete_rate' | 'clear' = 'complete_rate'): void {
+  repairShippingTax(action: RepairShippingTaxAction = 'complete_rate'): void {
     const orderId = this.orderId;
     if (!orderId || this.isRepairingShippingTax()) return;
     void this.dialogService
@@ -5990,11 +5991,8 @@ export class OrderDetailsPageComponent {
         const trimmed = (reason ?? '').trim();
         if (trimmed.length < 3 || trimmed.length > 500) return;
         this.isRepairingShippingTax.set(true);
-        this.http
-          .post(
-            `${environment.apiUrl}/store/orders/${orderId}/shipping-tax/repair`,
-            { action, reason: trimmed },
-          )
+        this.ordersService
+          .repairShippingTax(Number(orderId), action, trimmed)
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: () => {
@@ -6007,8 +6005,18 @@ export class OrderDetailsPageComponent {
             },
             error: (err: unknown) => {
               this.isRepairingShippingTax.set(false);
+              // 409 (ya contabilizado, `clear` rechazado): el aviso fijo
+              // sigue visible — `shippingTaxRepairNeeded` no se toca aquí.
+              //
+              // `repairShippingTax` (store-orders.service) envuelve el
+              // error con `buildApiError`: mismo patrón que
+              // `flowPayOrder`/`flowCreditPayment` arriba — se lee
+              // `err.cause` (el `HttpErrorResponse` crudo) para que
+              // `parseApiError` muestre el mensaje del backend tal cual,
+              // en vez del `Error` ya envuelto.
+              const wrapped = err as { cause?: unknown } | null;
               this.toastService.error(
-                parseApiError(err).userMessage ||
+                parseApiError(wrapped?.cause ?? err).userMessage ||
                   'No se pudo reparar el impuesto del envío',
               );
             },
