@@ -192,6 +192,7 @@
               <div class="map-phone-frame">
               <app-address-map-picker
                 [center]="map_center()"
+                [delegateLocate]="true"
                 (located)="onMapLocated($event)"
                 (locateRequested)="onLocateRequested()"
               />
@@ -468,6 +469,7 @@
                 @if (use_new_address()) {
                   <app-address-map-picker
                     [center]="map_center()"
+                    [delegateLocate]="true"
                     (located)="onMapLocated($event)"
                     (locateRequested)="onLocateRequested()"
                   />

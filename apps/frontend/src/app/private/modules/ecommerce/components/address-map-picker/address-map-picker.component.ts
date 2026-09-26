@@ -108,6 +108,21 @@ class LocateButtonControl {
 export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   /** Coordinate to center the map / marker on. Null → frame Colombia, no marker. */
   readonly center = input<LatLng | null>(null);
+  /**
+   * When `true`, the "locate me" control does NOT call
+   * `navigator.geolocation` itself — it only emits `locateRequested` so the
+   * parent can gate GPS behind its own priming/permission flow (checkout's
+   * pattern: geolocate directly if `granted`, show a modal if `prompt`, toast
+   * if `denied`/`unsupported`).
+   *
+   * When `false` (default), AMP uses MapLibre's native `GeolocateControl`
+   * exactly like before `locateRequested` existed: a click resolves GPS
+   * itself and emits `located` with the resulting coordinate. This keeps
+   * consumers that only listen to `(located)` (e.g. `app-address-form-fields`,
+   * the shipping-method origin picker) working without wiring
+   * `locateRequested` themselves.
+   */
+  readonly delegateLocate = input(false);
   /** Emitted with the new coordinate whenever the marker is moved. */
   readonly located = output<LatLng>();
   /**
@@ -117,9 +132,11 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
    */
   readonly mapReady = output<void>();
   /**
-   * Emitted when the user clicks the "locate me" control. Reports the gesture
-   * only — the parent owns the actual `navigator.geolocation` call (and any
-   * priming permission modal) so GPS never fires without this explicit click.
+   * Emitted when the user clicks the "locate me" control AND `delegateLocate`
+   * is `true`. Reports the gesture only — the parent owns the actual
+   * `navigator.geolocation` call (and any priming permission modal) so GPS
+   * never fires without this explicit click. Ignored when `delegateLocate`
+   * is `false` (native `GeolocateControl` handles GPS itself in that mode).
    */
   readonly locateRequested = output<void>();
 
@@ -178,15 +195,44 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       );
       // Fullscreen: lets the customer expand the map to place the pin precisely.
       this.map.addControl(new this.maplibregl.FullscreenControl(), 'top-right');
-      // "Ubicarme": reports the gesture via `locateRequested` only — it never
-      // calls navigator.geolocation itself. The parent owns the actual GPS
-      // request so it can show a priming permission modal first when the
-      // browser permission is still undecided. GPS must NEVER fire without
-      // this explicit click.
-      this.map.addControl(
-        new LocateButtonControl(() => this.locateRequested.emit()),
-        'top-right',
-      );
+      // "Ubicarme": behavior depends on `delegateLocate`.
+      if (this.delegateLocate()) {
+        // Delegated mode: reports the gesture via `locateRequested` only — it
+        // never calls navigator.geolocation itself. The parent owns the
+        // actual GPS request so it can show a priming permission modal first
+        // when the browser permission is still undecided. GPS must NEVER
+        // fire without this explicit click.
+        this.map.addControl(
+          new LocateButtonControl(() => this.locateRequested.emit()),
+          'top-right',
+        );
+      } else {
+        // Default mode (pre-`locateRequested` behavior): MapLibre's native
+        // GeolocateControl resolves GPS itself and drops/moves the marker,
+        // emitting `located` with the resulting coordinate. Used by
+        // consumers that only listen to `(located)` and never wired
+        // `locateRequested` (e.g. `app-address-form-fields`, the shipping
+        // origin picker).
+        const geolocate = new this.maplibregl.GeolocateControl({
+          // timeout + maximumAge keep the "locate me" button fast: reuse a
+          // recent fix and never hang waiting for a perfect one.
+          positionOptions: {
+            enableHighAccuracy: true,
+            timeout: 6000,
+            maximumAge: 30000,
+          },
+          trackUserLocation: false,
+          showUserLocation: false,
+          showAccuracyCircle: false,
+        });
+        this.map.addControl(geolocate, 'top-right');
+        geolocate.on('geolocate', (pos: any) => {
+          const coord = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          this.ensureMarker(coord);
+          this.map.flyTo({ center: [coord.lng, coord.lat], zoom: POINT_ZOOM });
+          this.emitFromMarker();
+        });
+      }
       this.map.addControl(
         new this.maplibregl.AttributionControl({ compact: true }),
         'bottom-right',

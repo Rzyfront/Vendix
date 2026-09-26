@@ -837,8 +837,14 @@ export class CheckoutComponent implements OnInit {
     if (!countryCode || countryCode === 'CO') parts.push('Colombia');
     const query = parts.join(', ');
 
+    // Pass city/state as separate params (when resolved) instead of relying
+    // on the backend splitting them out of `query` by commas, which breaks
+    // if the customer's free-text address itself contains a comma.
     this.geocoding
-      .forward(query)
+      .forward(query, {
+        city: cityName || undefined,
+        state: stateName || undefined,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {

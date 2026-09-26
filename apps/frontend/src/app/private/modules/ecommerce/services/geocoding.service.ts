@@ -79,9 +79,21 @@ export class GeocodingService {
    * can center on what the customer typed. Calls ONLY our backend proxy
    * (`GET /ecommerce/geocoding/forward`). Emits `{ lat: null, lng: null }` when
    * nothing matched — callers just leave the map where it is.
+   *
+   * `opts.city`/`opts.state` are OPTIONAL and purely additive: when the
+   * caller already knows the city/department (e.g. from a selected
+   * dropdown), pass them so the backend skips parsing them out of `query` by
+   * splitting on commas — which breaks when the free-text address itself
+   * contains a comma (e.g. "Calle 70, apto 4-83"). Omitting them keeps the
+   * previous behavior unchanged (backward-compatible).
    */
-  forward(query: string): Observable<ForwardGeocodeResult> {
-    const params = new HttpParams().set('q', query);
+  forward(
+    query: string,
+    opts?: { city?: string; state?: string },
+  ): Observable<ForwardGeocodeResult> {
+    let params = new HttpParams().set('q', query);
+    if (opts?.city) params = params.set('city', opts.city);
+    if (opts?.state) params = params.set('state', opts.state);
 
     return this.http
       .get<
