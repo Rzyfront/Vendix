@@ -1090,3 +1090,306 @@ describe('OrderFlowService.autoFinishDeliveredOrders — source job', () => {
     );
   });
 });
+
+describe('OrderFlowService.applyDispatchCodPayment — payment_registered (listener)', () => {
+  const ORDER_ID = 7301;
+  const STORE_ID = 42;
+  const NOTE_ID = 88;
+  const PAYMENT_ID = 6601;
+
+  const build = () => {
+    const prismaMock = createPrismaMock({
+      dispatch_notes: ['findFirst'],
+      payments: ['findFirst', 'create'],
+      orders: ['findFirst', 'updateMany'],
+    });
+    prismaMock.dispatch_notes.findFirst.mockResolvedValue({ order_id: ORDER_ID });
+    prismaMock.payments.findFirst.mockResolvedValue(null);
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: ORDER_ID,
+      currency: 'COP',
+      total_paid: 20000,
+      remaining_balance: 30000,
+      customer_id: 12,
+      stores: { organization_id: 3 },
+    });
+    prismaMock.payments.create.mockResolvedValue({ id: PAYMENT_ID });
+    prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
+    const orderHistoryService = { record: jest.fn().mockResolvedValue(null) };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      orderHistoryService as any,
+    );
+    return { prismaMock, orderHistoryService, service };
+  };
+
+  it('registra payment_registered en la MISMA tx del payments.create, con id/monto/método y source listener', async () => {
+    const { prismaMock, orderHistoryService, service } = build();
+
+    await service.applyDispatchCodPayment({
+      storeId: STORE_ID,
+      dispatchNoteId: NOTE_ID,
+      stopId: 5,
+      amount: 30000,
+      correlationKey: 'dispatch_route_stop:5',
+      paymentMethod: 'transfer',
+    });
+
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(orderHistoryService.record).toHaveBeenCalledTimes(1);
+    expect(orderHistoryService.record).toHaveBeenCalledWith(prismaMock, {
+      orderId: ORDER_ID,
+      storeId: STORE_ID,
+      organizationId: 3,
+      type: 'payment_registered',
+      paymentId: PAYMENT_ID,
+      amount: 30000,
+      source: 'listener',
+      payload: {
+        payment_method: 'transfer',
+        correlation_key: 'dispatch_route_stop:5',
+        dispatch_note_id: NOTE_ID,
+        stop_id: 5,
+      },
+    });
+    // El helper no transiciona `orders.state`: jamás un state_changed.
+    expect(
+      orderHistoryService.record.mock.calls.some(([, evt]: any) => evt.type === 'state_changed'),
+    ).toBe(false);
+  });
+
+  it('monto aplicado se recorta al saldo; método default cash; source explícito gana', async () => {
+    const { orderHistoryService, service } = build();
+
+    await service.applyDispatchCodPayment({
+      storeId: STORE_ID,
+      dispatchNoteId: NOTE_ID,
+      amount: 45000,
+      correlationKey: `dispatch_note:${NOTE_ID}`,
+      source: 'job',
+    });
+
+    expect(orderHistoryService.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: 'payment_registered',
+        paymentId: PAYMENT_ID,
+        amount: 30000,
+        source: 'job',
+        payload: expect.objectContaining({ payment_method: 'cash', stop_id: null }),
+      }),
+    );
+  });
+
+  it('NO-OP idempotente (pago ya existe): no escribe pago ni evento', async () => {
+    const { prismaMock, orderHistoryService, service } = build();
+    prismaMock.payments.findFirst.mockResolvedValue({ id: 1 });
+
+    await service.applyDispatchCodPayment({
+      storeId: STORE_ID,
+      dispatchNoteId: NOTE_ID,
+      amount: 30000,
+      correlationKey: `dispatch_note:${NOTE_ID}`,
+    });
+
+    expect(prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(orderHistoryService.record).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: true)', () => {
+  const ORDER_ID = 9101;
+  const PENDING_ITEM = 701;
+  const ADVANCED_ITEM = 702;
+  const UNFIRED_ITEM = 703;
+
+  it('registra un item_cancelled por ítem KDS cancelado en cascada y un único state_changed', async () => {
+    const prismaMock = createPrismaMock({
+      orders: ['updateMany', 'update'],
+      order_items: ['findMany', 'update'],
+      payments: ['findMany', 'update'],
+      table_sessions: ['findFirst'],
+      invoices: ['findMany', 'findFirst'],
+      accounts_receivable: ['findMany', 'update'],
+      order_installments: ['updateMany'],
+      kitchen_tickets: ['findFirst'],
+    });
+    mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
+    prismaMock.invoices.findMany.mockResolvedValue([]);
+    prismaMock.accounts_receivable.findMany.mockResolvedValue([]);
+    prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'processing' }]);
+    const prepared = { product_type: 'prepared' };
+    prismaMock.order_items.findMany.mockResolvedValueOnce([
+      {
+        id: PENDING_ITEM,
+        inventory_consumed_at_fire: true,
+        cancelled_at: null,
+        products: prepared,
+        kitchen_ticket_items: [{ kitchen_ticket_id: 55, kitchen_ticket: { id: 55, status: 'pending' } }],
+      },
+      {
+        id: ADVANCED_ITEM,
+        inventory_consumed_at_fire: true,
+        cancelled_at: null,
+        products: prepared,
+        kitchen_ticket_items: [{ kitchen_ticket_id: 56, kitchen_ticket: { id: 56, status: 'ready' } }],
+      },
+      {
+        id: UNFIRED_ITEM,
+        inventory_consumed_at_fire: false,
+        cancelled_at: null,
+        products: { product_type: 'physical' },
+        kitchen_ticket_items: [],
+      },
+    ]);
+    prismaMock.order_items.findMany.mockResolvedValue([]);
+    prismaMock.order_items.update.mockResolvedValue({});
+    prismaMock.kitchen_tickets.findFirst.mockResolvedValue({ status: 'pending' });
+    prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, store_id: 100, state: 'cancelled' });
+    prismaMock.payments.update.mockResolvedValue({});
+    prismaMock.payments.findMany.mockResolvedValue([]);
+    prismaMock.table_sessions.findFirst.mockResolvedValue(null);
+
+    const kitchenFireService = {
+      cancelTicketInTx: jest.fn().mockResolvedValue(undefined),
+      emitTicketCancelledEvent: jest.fn().mockResolvedValue(undefined),
+    };
+    const orderHistoryService = { record: jest.fn().mockResolvedValue(null) };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      { emit: jest.fn() } as any,
+      { getSettings: jest.fn().mockResolvedValue({ pos: { cash_register: { enabled: true } } }) } as any,
+      { getActiveSession: jest.fn().mockResolvedValue({ id: 1 }) } as any,
+      { createManualMovement: jest.fn().mockResolvedValue({ id: 1 }) } as any,
+      { releaseReservationsByReference: jest.fn().mockResolvedValue(undefined) } as any,
+      {} as any, {} as any,
+      { log: jest.fn().mockResolvedValue(undefined), logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      kitchenFireService as any, undefined, undefined,
+      { recordCancellationPendingRefunds: jest.fn().mockResolvedValue(undefined) } as any,
+      undefined, undefined,
+      orderHistoryService as any,
+    );
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      buildOrder({
+        id: ORDER_ID,
+        store_id: 100,
+        state: 'processing',
+        order_number: 'POS-9',
+        internal_notes: null,
+        stores: { organization_id: 1 },
+        payments: [],
+        order_items: [],
+      }),
+    );
+
+    await service.cancelOrder(
+      ORDER_ID,
+      { reason: '  Mesa se fue  ', kitchenDisposition: 'waste' } as any,
+    );
+
+    const calls = orderHistoryService.record.mock.calls.map(([, evt]: any) => evt);
+    const itemEvents = calls.filter((evt: any) => evt.type === 'item_cancelled');
+    expect(itemEvents).toEqual([
+      {
+        orderId: ORDER_ID,
+        storeId: 100,
+        organizationId: 1,
+        type: 'item_cancelled',
+        orderItemId: PENDING_ITEM,
+        payload: { reason: 'Mesa se fue', cancellation_type: 'after_fire_waste', cascade: true },
+      },
+      {
+        orderId: ORDER_ID,
+        storeId: 100,
+        organizationId: 1,
+        type: 'item_cancelled',
+        orderItemId: ADVANCED_ITEM,
+        payload: { reason: 'Mesa se fue', cancellation_type: 'after_fire_waste', cascade: true },
+      },
+    ]);
+    // El ítem no disparado no se cancela a nivel ítem → sin evento.
+    expect(itemEvents.some((evt: any) => evt.orderItemId === UNFIRED_ITEM)).toBe(false);
+    // Exactamente UN state_changed a nivel orden (el que ya existía).
+    const stateEvents = calls.filter((evt: any) => evt.type === 'state_changed');
+    expect(stateEvents).toEqual([
+      expect.objectContaining({ fromState: 'processing', toState: 'cancelled', orderId: ORDER_ID }),
+    ]);
+    // Todos dentro de la tx (el mock de $transaction entrega el mismo prismaMock).
+    for (const [tx] of orderHistoryService.record.mock.calls) expect(tx).toBe(prismaMock);
+  });
+
+  it('disposición reuse: el item_cancelled avanzado lleva cancellation_type after_fire_reused', async () => {
+    const prismaMock = createPrismaMock({
+      orders: ['updateMany', 'update'],
+      order_items: ['findMany', 'update'],
+      payments: ['findMany', 'update'],
+      table_sessions: ['findFirst'],
+      invoices: ['findMany', 'findFirst'],
+      accounts_receivable: ['findMany', 'update'],
+      order_installments: ['updateMany'],
+      inventory_transactions: ['findMany'],
+    });
+    mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
+    prismaMock.invoices.findMany.mockResolvedValue([]);
+    prismaMock.accounts_receivable.findMany.mockResolvedValue([]);
+    prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'processing' }]);
+    prismaMock.order_items.findMany.mockResolvedValueOnce([
+      {
+        id: ADVANCED_ITEM,
+        inventory_consumed_at_fire: true,
+        cancelled_at: null,
+        products: { product_type: 'prepared' },
+        kitchen_ticket_items: [{ kitchen_ticket_id: 56, kitchen_ticket: { id: 56, status: 'in_preparation' } }],
+      },
+    ]);
+    prismaMock.order_items.findMany.mockResolvedValue([]);
+    prismaMock.order_items.update.mockResolvedValue({});
+    prismaMock.inventory_transactions.findMany.mockResolvedValue([]);
+    prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, store_id: 100, state: 'cancelled' });
+    prismaMock.payments.findMany.mockResolvedValue([]);
+    prismaMock.table_sessions.findFirst.mockResolvedValue(null);
+
+    const orderHistoryService = { record: jest.fn().mockResolvedValue(null) };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      { emit: jest.fn() } as any,
+      { getSettings: jest.fn().mockResolvedValue({ pos: { cash_register: { enabled: true } } }) } as any,
+      { getActiveSession: jest.fn().mockResolvedValue({ id: 1 }) } as any,
+      { createManualMovement: jest.fn().mockResolvedValue({ id: 1 }) } as any,
+      { releaseReservationsByReference: jest.fn().mockResolvedValue(undefined) } as any,
+      {} as any, {} as any,
+      { log: jest.fn().mockResolvedValue(undefined), logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      undefined, undefined, undefined,
+      { recordCancellationPendingRefunds: jest.fn().mockResolvedValue(undefined) } as any,
+      undefined, undefined,
+      orderHistoryService as any,
+    );
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      buildOrder({
+        id: ORDER_ID,
+        store_id: 100,
+        state: 'processing',
+        order_number: 'POS-9',
+        internal_notes: null,
+        stores: { organization_id: 1 },
+        payments: [],
+        order_items: [],
+      }),
+    );
+
+    await service.cancelOrder(ORDER_ID, { reason: 'Error de comanda', kitchenDisposition: 'reuse' } as any);
+
+    expect(orderHistoryService.record).toHaveBeenCalledWith(prismaMock, {
+      orderId: ORDER_ID,
+      storeId: 100,
+      organizationId: 1,
+      type: 'item_cancelled',
+      orderItemId: ADVANCED_ITEM,
+      payload: { reason: 'Error de comanda', cancellation_type: 'after_fire_reused', cascade: true },
+    });
+  });
+});
