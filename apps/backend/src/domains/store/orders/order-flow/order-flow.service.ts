@@ -4406,10 +4406,15 @@ export class OrderFlowService {
         const floorRank = RECONCILE_LADDER.indexOf(floorState);
         const shippedRank = RECONCILE_LADDER.indexOf('shipped');
         if (currentRank >= shippedRank && currentRank > floorRank) {
-          await this.updateOrderState(order_id, floorState, {
-            reverted_from_dispatch: true,
-            reverted_at: new Date().toISOString(),
-          });
+          await this.updateOrderState(
+            order_id,
+            floorState,
+            {
+              reverted_from_dispatch: true,
+              reverted_at: new Date().toISOString(),
+            },
+            { source: 'listener' },
+          );
           this.logger.log(
             `[reconcileOrderFromDispatch] order #${order_id} reverted '${currentState}' → '${floorState}' (no active remisión) (store #${store_id})`,
           );
@@ -4474,11 +4479,16 @@ export class OrderFlowService {
         const from = RECONCILE_LADDER[rank - 1];
         const to = RECONCILE_LADDER[rank];
         this.validateTransition(from, to);
-        await this.updateOrderState(order_id, to, {
-          reconciled_from_dispatch: true,
-          reconciled_at: new Date().toISOString(),
-          ...(to === 'finished' ? { finished_at: new Date() } : {}),
-        });
+        await this.updateOrderState(
+          order_id,
+          to,
+          {
+            reconciled_from_dispatch: true,
+            reconciled_at: new Date().toISOString(),
+            ...(to === 'finished' ? { finished_at: new Date() } : {}),
+          },
+          { source: 'listener' },
+        );
       }
 
       this.logger.log(
@@ -5720,10 +5730,15 @@ export class OrderFlowService {
         // updateOrderState enforces VALID_TRANSITIONS; both 'delivered' and
         // 'processing' allow the move to 'finished'. The auto_finished/
         // auto_finished_at metadata is preserved in internal_notes as before.
-        await this.updateOrderState(orderId, 'finished', {
-          auto_finished: true,
-          auto_finished_at: new Date().toISOString(),
-        });
+        await this.updateOrderState(
+          orderId,
+          'finished',
+          {
+            auto_finished: true,
+            auto_finished_at: new Date().toISOString(),
+          },
+          { source: 'job' },
+        );
         finishedCount++;
         this.logger.log(`Order #${orderId} auto-finished`);
       } catch (error) {
