@@ -893,6 +893,117 @@ describe('PosCartService — tarifa de cliente con impuesto incluido (C.8, terce
 });
 
 /**
+ * B5/B14 — oferta a nivel producto (2026-09-26).
+ *
+ * `pos-product.service.ts` sólo copiaba `is_on_sale`/`sale_price` en variantes
+ * (línea ~740), nunca a nivel producto. `PriceResolverService.resolve()` nunca
+ * entraba a su regla 3 (oferta) y el carrito cobraba `base_price`: la grilla
+ * no mostraba el precio/etiqueta de oferta (B14) y el IVA se calculaba sobre
+ * la base equivocada (B5). Caso del ticket: base 100.000, oferta 80.000, IVA
+ * 19% EXCLUSIVO, `final_price` de catálogo 95.200 (= 80.000 × 1,19).
+ *
+ * Se usa el `PriceResolverService` REAL (mismo motivo que C.8 arriba): no
+ * tiene dependencias propias y es la pieza cuyo contrato con `is_on_sale`
+ * hay que validar de punta a punta, ahora que el producto lo trae poblado.
+ */
+describe('PosCartService — precio de oferta a nivel producto (B5/B14)', () => {
+  let service: PosCartService;
+
+  const saleProduct = (overrides: Record<string, unknown> = {}) =>
+    ({
+      id: 3301,
+      name: 'Producto en oferta',
+      sku: 'OFE-01',
+      price: 100000, // base_price
+      is_on_sale: true,
+      sale_price: 80000,
+      final_price: 95200, // catálogo: 80.000 × 1,19 (servidor, ya con IVA)
+      stock: 0,
+      track_inventory: false,
+      isActive: true,
+      has_variants: false,
+      product_variants: [],
+      tax_assignments: [
+        {
+          product_id: 3301,
+          tax_category_id: 1,
+          is_inclusive: false,
+          tax_categories: {
+            id: 1,
+            name: 'IVA',
+            is_inclusive: false,
+            tax_rates: [{ id: 1, rate: '0.19', is_inclusive: false }],
+          },
+        },
+      ],
+      ...overrides,
+    }) as any;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        PosCartService,
+        PriceResolverService, // real: sin dependencias, es la pieza bajo prueba
+        { provide: PosProductService, useValue: { getProductById: () => of(null) } },
+        { provide: PosApiService, useValue: {} },
+        {
+          provide: PosSaleUnitService,
+          useValue: {
+            configFor: () => ({
+              priceUnitQuantity: 1,
+              unitsPerCapture: 1,
+              captureUnit: null,
+            }),
+          },
+        },
+        { provide: PriceTierCacheService, useValue: {} },
+        {
+          provide: WithholdingTaxService,
+          useValue: {
+            previewWithholding: () => of({ lines: [], total_withholding: 0 }),
+          },
+        },
+        { provide: CurrencyFormatService, useValue: {} },
+        {
+          provide: InvoicingService,
+          useValue: { getPosUvtThreshold: () => of({ data: null }) },
+        },
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+      ],
+    });
+    service = TestBed.inject(PosCartService);
+  });
+
+  it('cantidad 1 — cobra el precio de oferta, no la base, y el IVA sale de la oferta', (done) => {
+    service.addToCart({ product: saleProduct(), quantity: 1 }).subscribe((state) => {
+      const item = state.items[0];
+      expect(item.unitPrice).toBe(80000);
+      expect(item.taxAmount).toBe(15200);
+      expect(item.finalPrice).toBe(95200);
+      expect(item.totalPrice).toBe(95200);
+      expect(state.summary.subtotal).toBe(80000);
+      expect(state.summary.taxAmount).toBe(15200);
+      expect(state.summary.total).toBe(95200);
+      done();
+    });
+  });
+
+  it('cantidad 3 — la oferta escala linealmente en subtotal, IVA y total', (done) => {
+    service.addToCart({ product: saleProduct(), quantity: 3 }).subscribe((state) => {
+      const item = state.items[0];
+      expect(item.unitPrice).toBe(80000);
+      expect(item.taxAmount).toBe(45600);
+      expect(item.finalPrice).toBe(95200);
+      expect(item.totalPrice).toBe(285600);
+      expect(state.summary.subtotal).toBe(240000);
+      expect(state.summary.taxAmount).toBe(45600);
+      expect(state.summary.total).toBe(285600);
+      done();
+    });
+  });
+});
+
+/**
  * F-225 (ADR-16, CP-pos-exclusive-tax-double-charge) — `isPriceOverridden`
  * decide en CENTAVOS ENTEROS, no en punto flotante.
  *

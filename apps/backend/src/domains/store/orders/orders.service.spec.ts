@@ -815,6 +815,249 @@ describe('OrdersService', () => {
     });
   });
 
+  // ----------------------------------------------------------------
+  // order-truth-and-invoice-tz plan — Step 2. `findOne` attaches
+  // `available_actions` (order) + `items[].available_actions` (line),
+  // computed by the SAME util predicates `OrderFlowService
+  // .getAvailableActions` calls — additive fields only, nothing existing
+  // changes shape.
+  // ----------------------------------------------------------------
+  describe('findOne — available_actions (order-truth-and-invoice-tz plan, Step 2)', () => {
+    let contextSpy: jest.SpyInstance;
+
+    afterEach(() => contextSpy?.mockRestore());
+
+    it('attaches order-level available_actions from the same predicates as getAvailableActions', async () => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        user_id: 1,
+        roles: ['owner'],
+      } as any);
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 50,
+        state: 'created',
+        delivery_type: 'shipping',
+        shipping_method_id: null,
+        payment_form: '1',
+        grand_total: 100,
+        payments: [],
+        refunds: [],
+        order_items: [],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const result = await service.findOne(50);
+
+      expect((result as any).available_actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: 'edit_order', enabled: true }),
+          expect.objectContaining({ code: 'pay', enabled: true }),
+          expect.objectContaining({ code: 'assign_shipping', enabled: true }),
+          expect.objectContaining({ code: 'cancel', enabled: true }),
+        ]),
+      );
+    });
+
+    it('disables edit_order/pay for a financial-split-locked order, still owner', async () => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        user_id: 1,
+        roles: ['owner'],
+      } as any);
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 52,
+        state: 'created',
+        delivery_type: 'direct_delivery',
+        active_financial_split_id: 9,
+        grand_total: 100,
+        payments: [],
+        refunds: [],
+        order_items: [],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const result = await service.findOne(52);
+      const actions = (result as any).available_actions as Array<{
+        code: string; enabled: boolean; reason?: string;
+      }>;
+
+      expect(actions.find((a) => a.code === 'edit_order')).toMatchObject({
+        enabled: false,
+        reason: 'SPLIT_ACCOUNT_LOCKED',
+      });
+      expect(actions.find((a) => a.code === 'pay')).toMatchObject({
+        enabled: false,
+        reason: 'SPLIT_ACCOUNT_LOCKED',
+      });
+    });
+
+    it('attaches item-level available_actions (deliver/cancel/reverse_delivered/resend) per order item', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 51,
+        state: 'processing',
+        delivery_type: 'direct_delivery',
+        payments: [],
+        refunds: [],
+        order_items: [
+          {
+            id: 510,
+            product_id: null,
+            unit_price: 10,
+            quantity: 1,
+            total_price: 10,
+            item_type: 'prepared',
+            delivered_at: null,
+            kitchen_ticket_items: [{ status: 'ready' }],
+            products: {},
+          },
+        ],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const result = await service.findOne(51);
+      const item = (result as any).order_items[0];
+
+      expect(item.available_actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: 'deliver', enabled: true }),
+          expect.objectContaining({ code: 'cancel', enabled: true }),
+          expect.objectContaining({ code: 'reverse_delivered', enabled: false }),
+        ]),
+      );
+    });
+  });
+
+  /**
+   * order-truth-and-invoice-tz plan, Step 7 — `getTimeline` lee `order_events`
+   * cuando existen y cae al `audit_logs` legacy cuando no. `orderHistoryService`
+   * es `@Optional()` en el constructor real (para no romper `new OrdersService`
+   * en otros specs), así que aquí se asigna directo sobre la instancia con un
+   * mock mínimo — no hace falta reconstruir el TestingModule completo.
+   */
+  describe('getTimeline — order_events con fallback legacy (order-truth-and-invoice-tz plan, Step 7)', () => {
+    const baseOrder = {
+      id: 700,
+      state: 'created',
+      delivery_type: 'direct_delivery',
+      payments: [],
+      refunds: [],
+      order_items: [],
+      order_promotions: [],
+      coupon_uses: [],
+    };
+
+    beforeEach(() => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(baseOrder);
+    });
+
+    it('returns legacy:false with events mapped only from order_events when the order has any', async () => {
+      const listForOrder = jest.fn().mockResolvedValue([
+        {
+          id: 1,
+          event_type: 'state_changed',
+          from_state: 'created',
+          to_state: 'processing',
+          actor_user_id: 5,
+          actor_source: 'http',
+          payment_id: null,
+          order_item_id: null,
+          amount: null,
+          payload: null,
+          created_at: new Date('2026-01-01T10:00:00Z'),
+          users: { id: 5, first_name: 'Ana', last_name: 'Lopez' },
+        },
+        {
+          id: 2,
+          event_type: 'payment_registered',
+          from_state: null,
+          to_state: null,
+          actor_user_id: null,
+          actor_source: 'webhook',
+          payment_id: 33,
+          order_item_id: null,
+          amount: '50000',
+          payload: { method: 'card' },
+          created_at: new Date('2026-01-01T10:05:00Z'),
+          users: null,
+        },
+      ]);
+      (service as any).orderHistoryService = { listForOrder };
+
+      const result = await service.getTimeline(700);
+
+      expect(listForOrder).toHaveBeenCalledWith(700);
+      expect(mockPrismaService.audit_logs.findMany).not.toHaveBeenCalled();
+      expect(result.legacy).toBe(false);
+      expect(result.events).toEqual([
+        expect.objectContaining({
+          id: 1,
+          event_type: 'state_changed',
+          from_state: 'created',
+          to_state: 'processing',
+          actor: { user_id: 5, name: 'Ana Lopez' },
+          actor_source: 'http',
+        }),
+        expect.objectContaining({
+          id: 2,
+          event_type: 'payment_registered',
+          actor: null,
+          actor_source: 'webhook',
+          payment_id: 33,
+          amount: '50000',
+          payload: { method: 'card' },
+        }),
+      ]);
+    });
+
+    it('falls back to legacy audit_logs output (unchanged) when the order has no order_events', async () => {
+      const listForOrder = jest.fn().mockResolvedValue([]);
+      (service as any).orderHistoryService = { listForOrder };
+      const legacyLogs = [
+        {
+          id: 10,
+          action: 'UPDATE',
+          resource: 'orders',
+          resource_id: 700,
+          users: null,
+          created_at: new Date('2025-01-01T00:00:00Z'),
+        },
+      ];
+      mockPrismaService.audit_logs.findMany.mockResolvedValue(legacyLogs);
+
+      const result = await service.getTimeline(700);
+
+      expect(listForOrder).toHaveBeenCalledWith(700);
+      expect(mockPrismaService.audit_logs.findMany).toHaveBeenCalled();
+      expect(result.legacy).toBe(true);
+      expect(result.events).toBe(legacyLogs);
+    });
+
+    it('falls back to legacy when OrderHistoryService did not resolve (@Optional with no DI provider)', async () => {
+      (service as any).orderHistoryService = undefined;
+      const legacyLogs = [
+        {
+          id: 11,
+          action: 'CREATE',
+          resource: 'orders',
+          resource_id: 700,
+          users: null,
+          created_at: new Date('2025-01-01T00:00:00Z'),
+        },
+      ];
+      mockPrismaService.audit_logs.findMany.mockResolvedValue(legacyLogs);
+
+      const result = await service.getTimeline(700);
+
+      expect(result.legacy).toBe(true);
+      expect(result.events).toBe(legacyLogs);
+    });
+  });
+
   /**
    * QUI-557 — El vector de corrupción que hacía reaparecer el ticket.
    *

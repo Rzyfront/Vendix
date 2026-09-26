@@ -19,6 +19,13 @@ import {
   DianEventParty,
 } from '../providers/dian-direct/xml/ubl-application-response.builder';
 import { onlyDigits } from '../../../../common/utils/nit.util';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  fiscalIssueDate,
+  localDateString,
+  resolveOrganizationTimezone,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
 
 /** Event statuses persisted in `dian_document_events.status`. */
 export const DIAN_EVENT_STATUS = {
@@ -212,8 +219,12 @@ export class DianEventsService {
       }));
 
     const event_number = String(event_row.id);
-    const issue_date = this.dateOnly(new Date());
-    const referenced_date = this.dateOnly(invoice.issue_date);
+    // Step 8 — el evento se fecha en la zona de la tienda emisora, no en la
+    // del contenedor; la fecha referenciada usa la MISMA bifurcación fiscal
+    // que `cbc:IssueDate` (nunca se reconvierte una medianoche UTC exacta).
+    const tz = await this.resolveInvoiceTimezone(invoice);
+    const issue_date = localDateString(new Date(), tz);
+    const referenced_date = fiscalIssueDate(invoice.issue_date, tz);
 
     const result = await provider.sendDocumentEvent({
       event_code,
@@ -475,5 +486,30 @@ export class DianEventsService {
   /** `YYYY-MM-DD` without touching the instant's timezone semantics. */
   private dateOnly(value: Date): string {
     return value.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Store-first, organization-fallback timezone for the event/document dates
+   * (Step 8). Nunca lanza: ante cualquier fallo de resolución cae al default,
+   * igual que el resto de los lectores de fecha fiscal de este dominio.
+   */
+  private async resolveInvoiceTimezone(invoice: {
+    store_id: number | bigint | null;
+    organization_id: number | bigint | null;
+  }): Promise<string> {
+    try {
+      if (invoice.store_id != null) {
+        return await resolveStoreTimezone(this.prisma, Number(invoice.store_id));
+      }
+      if (invoice.organization_id != null) {
+        return await resolveOrganizationTimezone(
+          this.prisma.withoutScope(),
+          Number(invoice.organization_id),
+        );
+      }
+      return DEFAULT_STORE_TIMEZONE;
+    } catch {
+      return DEFAULT_STORE_TIMEZONE;
+    }
   }
 }

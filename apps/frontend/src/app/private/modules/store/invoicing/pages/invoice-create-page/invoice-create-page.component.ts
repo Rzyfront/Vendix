@@ -130,8 +130,10 @@ import { AccountCodeSelectComponent } from '../../../products/components/account
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import {
   formatDateOnlyUTC,
+  storeToday,
   toLocalDateString,
 } from '../../../../../../shared/utils/date.util';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { computeNitDv } from '../../../../../../shared/utils/nit.util';
 import type { DianMunicipalityOption } from '../../../../../../shared/services/dian-municipality-lookup.service';
 import {
@@ -3535,6 +3537,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   private readonly emitReadinessService = inject(InvoiceEmitReadinessService);
   private readonly profileService = inject(InvoiceProfileService);
   private readonly printGateway = inject(PrintGatewayClientService);
+  private readonly storeSettingsFacade = inject(StoreSettingsFacade);
 
   // ── Catálogos estáticos ─────────────────────────────────────
   readonly invoiceTypeOptions = INVOICE_TYPE_OPTIONS;
@@ -3705,8 +3708,13 @@ export class InvoiceCreatePageComponent implements OnInit {
      * lo pone `collectBlockers()`, que nombra el problema.
      */
     resolution_id: [null as number | null],
-    issue_date: [toLocalDateString(), [Validators.required]],
-    due_date: [{ value: toLocalDateString(), disabled: true }],
+    // «Hoy» en la zona de la tienda, no la del navegador — el emisor puede
+    // capturar la factura desde cualquier huso (order-truth-and-invoice-tz-plan
+    // Objetivo 10). `due_date` arranca igual porque el pago de contado lo deja
+    // deshabilitado igual a `issue_date`; sincronizarlos aquí evita que uno
+    // quede en la zona de la tienda y el otro en la del navegador.
+    issue_date: [storeToday(this.storeSettingsFacade.timezone()), [Validators.required]],
+    due_date: [{ value: storeToday(this.storeSettingsFacade.timezone()), disabled: true }],
     payment_form: [PAYMENT_FORM_CASH],
     payment_means_code: ['10'],
     operation_type: [OPERATION_TYPE_STANDARD],
@@ -9386,8 +9394,10 @@ export class InvoiceCreatePageComponent implements OnInit {
       // resolución elegible más antigua en cuanto el formulario se estabiliza.
       // Conservar la anterior podría dejar puesta una que ya se agotó.
       resolution_id: null,
-      issue_date: toLocalDateString(),
-      due_date: toLocalDateString(),
+      // Mismo criterio que el valor inicial del formulario: «hoy» en la zona
+      // de la tienda (order-truth-and-invoice-tz-plan Objetivo 10).
+      issue_date: storeToday(this.storeSettingsFacade.timezone()),
+      due_date: storeToday(this.storeSettingsFacade.timezone()),
       payment_form: PAYMENT_FORM_CASH,
       payment_means_code: '10',
       operation_type: OPERATION_TYPE_STANDARD,

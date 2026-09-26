@@ -22,7 +22,9 @@ describe('PosFiscalEmissionService', () => {
 
     const prisma: any = {
       orders: {
-        findFirst: jest.fn().mockResolvedValue({ id: 1 }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ id: 1, store_id: 1, stores: { organization_id: 9 } }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       invoices: {
@@ -34,6 +36,11 @@ describe('PosFiscalEmissionService', () => {
       fiscal_operation_events: {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 900 }),
+      },
+      // Plan order-truth-and-invoice-tz (Step 6) — guard anti-duplicado de
+      // `recordInvoiceIssued`: sin fila previa por defecto.
+      order_events: {
+        findFirst: jest.fn().mockResolvedValue(null),
       },
       ...overrides.prisma,
     };
@@ -68,6 +75,12 @@ describe('PosFiscalEmissionService', () => {
       ...overrides.fiscal_scope,
     };
 
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    const orderHistory = {
+      record: jest.fn().mockResolvedValue(null),
+      ...overrides.orderHistory,
+    };
+
     return {
       service: new PosFiscalEmissionService(
         prisma as any,
@@ -75,12 +88,14 @@ describe('PosFiscalEmissionService', () => {
         invoice_flow as any,
         retry_queue as any,
         fiscal_scope as any,
+        orderHistory as any,
       ),
       prisma,
       invoicing,
       invoice_flow,
       retry_queue,
       fiscal_scope,
+      orderHistory,
       validatedInvoice,
     };
   };
@@ -337,6 +352,59 @@ describe('PosFiscalEmissionService', () => {
     expect(result.state).toBe('issued');
     expect(result.invoice_id).toBe(5);
     expect(prisma.fiscal_operation_events.create).not.toHaveBeenCalled();
+  });
+
+  it('registra invoice_issued en order_events la primera vez que la emisión queda `issued`', async () => {
+    mockRequestContext({ organization_id: 10, store_id: 20 });
+    const { service, prisma, orderHistory } = createService();
+
+    prisma.invoices.findFirst.mockResolvedValue({
+      id: 5,
+      invoice_number: 'FE-5',
+      status: 'accepted',
+      transmission_status: 'accepted',
+      cufe: 'CUFE-5',
+      pdf_url: null,
+      contingency_deadline: null,
+    });
+
+    await service.emitForOrder(1);
+
+    expect(orderHistory.record).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        orderId: 1,
+        storeId: 1,
+        organizationId: 9,
+        type: 'invoice_issued',
+        payload: { invoice_id: 5, invoice_number: 'FE-5' },
+      }),
+    );
+  });
+
+  it('NO duplica invoice_issued cuando emitForOrder se reinvoca sobre una factura ya aceptada', async () => {
+    mockRequestContext({ organization_id: 10, store_id: 20 });
+    const { service, prisma, orderHistory } = createService({
+      prisma: {
+        order_events: {
+          findFirst: jest.fn().mockResolvedValue({ id: 501 }),
+        },
+      },
+    });
+
+    prisma.invoices.findFirst.mockResolvedValue({
+      id: 5,
+      invoice_number: 'FE-5',
+      status: 'accepted',
+      transmission_status: 'accepted',
+      cufe: 'CUFE-5',
+      pdf_url: null,
+      contingency_deadline: null,
+    });
+
+    await service.emitForOrder(1);
+
+    expect(orderHistory.record).not.toHaveBeenCalled();
   });
 
   describe('banner INVOICE_AUTO_SEND_FAILED (orders.fiscal_alert_code)', () => {

@@ -8,6 +8,10 @@ import { StandardPrintDataModel } from '../interfaces/standard-print-data.model'
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { mapUserAddress } from '../lib/customer-address';
 import { fractionalRateToPercent } from '../lib/tax-rate-percent.util';
+import {
+  formatStoreDate,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
 
 /**
  * [print-editor-dsk P8] — Certificado de retención PRACTICADA
@@ -76,6 +80,10 @@ export class WithholdingPracticedDataProvider implements IDocumentDataProvider {
     const counterpartyTaxId =
       calculation.supplier?.tax_id || calculation.customer?.document_number || '';
 
+    // Step 8 — fecha del certificado en la zona de la tienda, no la
+    // del contenedor.
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+
     return {
       store: { name: '', tax_id: '' },
       document: {
@@ -84,7 +92,7 @@ export class WithholdingPracticedDataProvider implements IDocumentDataProvider {
         date: calculation.created_at
           ? new Date(calculation.created_at).toISOString()
           : new Date().toISOString(),
-        date_formatted: new Date(calculation.created_at || new Date()).toLocaleDateString('es-CO'),
+        date_formatted: formatStoreDate(new Date(calculation.created_at || new Date()), tz),
         state: 'issued',
         state_label: 'Emitido',
         notes: `Periodo gravable: ${calculation.year}`,

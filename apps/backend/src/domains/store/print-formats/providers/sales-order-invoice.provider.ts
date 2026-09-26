@@ -11,6 +11,10 @@ import { signStoreLogoUrl } from '../lib/print-logo.util';
 // C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-06: factura comercial
 // declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
 import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
+import {
+  formatStoreDate,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
 
 @Injectable()
 export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
@@ -104,6 +108,8 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
     const shipping = Number(order.shipping_cost || 0);
     const grandTotal = Number(order.grand_total || subtotal - discount + tax + shipping);
     const signedLogoUrl = await signStoreLogoUrl(this.s3Service, store.logo_url, this.logger);
+    // B17 — fecha del documento en la zona de la tienda, no la del contenedor.
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
 
     const model: StandardPrintDataModel = {
       store: {
@@ -129,7 +135,7 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
         id: order.id,
         number: String(order.order_number),
         date: order.created_at ? new Date(order.created_at).toISOString() : new Date().toISOString(),
-        date_formatted: order.created_at ? new Date(order.created_at).toLocaleDateString('es-CO') : new Date().toLocaleDateString('es-CO'),
+        date_formatted: order.created_at ? formatStoreDate(new Date(order.created_at), tz) : formatStoreDate(new Date(), tz),
         state: order.state,
         state_label: order.state,
         channel: order.channel,

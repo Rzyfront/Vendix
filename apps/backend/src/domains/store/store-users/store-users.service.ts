@@ -140,6 +140,72 @@ export class StoreUsersService {
     };
   }
 
+  /**
+   * B9 — lightweight name-only staff search backing `store:pos:access`
+   * pickers (e.g. the POS payment-collector waiter-tip selector).
+   *
+   * `findAll` above requires `store:users:read`, which cashier/waiter do
+   * not hold (seed comment: "solo owner/admin"). This method intentionally
+   * returns the minimal `{id, first_name, last_name}` projection — no
+   * email/phone/roles — so the wider `store:pos:access` permission (already
+   * granted to both roles) is safe to gate it with. `id` is `users.id`
+   * (not `store_users.id`), matching `orders.tip_waiter_id`'s FK target.
+   */
+  async staffLookup(query: { search?: string; limit?: number }) {
+    const limit = Math.min(Math.max(Number(query.limit) || 10, 1), 20);
+
+    const where: any = {
+      user: {
+        state: 'active',
+        // Ecommerce customers are also `store_users` rows — customers.service
+        // upserts a store_users link on registration — so filtering on
+        // `state: 'active'` alone let customers show up in this staff-only
+        // picker (POS payment "Buscar mesero" tip selector). Require at
+        // least one role that is NOT 'customer' so a staff member who is
+        // ALSO a registered customer still appears; a user whose only role
+        // is 'customer' (or who has no roles) is excluded.
+        user_roles: {
+          some: {
+            roles: {
+              name: { not: 'customer' },
+            },
+          },
+        },
+      },
+    };
+
+    if (query.search) {
+      where.user = {
+        ...where.user,
+        OR: [
+          { first_name: { contains: query.search, mode: 'insensitive' } },
+          { last_name: { contains: query.search, mode: 'insensitive' } },
+        ],
+      };
+    }
+
+    const rows = await this.prisma.store_users.findMany({
+      where,
+      include: {
+        user: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+      },
+      take: limit,
+      orderBy: { id: 'asc' },
+    });
+
+    return rows.map((row) => ({
+      id: row.user.id,
+      first_name: row.user.first_name,
+      last_name: row.user.last_name,
+    }));
+  }
+
   async findOne(id: number) {
     // Auto-scoped
     const user = await this.prisma.store_users.findFirst({

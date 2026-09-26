@@ -194,6 +194,9 @@ describe('FiscalInvoicePdfRenderService — paridad numérica HTML↔PDF y pdf_b
     function buildService(invoiceRow: unknown) {
       const prisma = {
         invoices: { findFirst: jest.fn().mockResolvedValue(invoiceRow) },
+        // B17 — `renderBuffer` resuelve `resolveStoreTimezone` antes de
+        // armar `InvoicePdfData`; sin fila cae al default (`America/Bogota`).
+        store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
       };
       const s3 = { downloadImage: jest.fn().mockRejectedValue(new Error('sin logo')) };
       const service = new FiscalInvoicePdfRenderService(
@@ -246,6 +249,49 @@ describe('FiscalInvoicePdfRenderService — paridad numérica HTML↔PDF y pdf_b
       );
       expect(prisma.invoices.findFirst).not.toHaveBeenCalled();
     });
+  });
+
+  /**
+   * B17 — `buildFiscalInvoicePdfData` formateaba `issue_date` con
+   * `Date#getDate/getMonth/getFullYear` (hora del CONTENEDOR, UTC en
+   * producción). `2026-09-26T02:30:00Z` cae la noche del 25 en Bogotá
+   * (UTC-5): sin el fix el PDF fiscal habría impreso "26/09/2026".
+   */
+  it('B17 — issue_date con tz explícito imprime el día civil de la tienda, no el de UTC', () => {
+    const filaMedianoche = {
+      ...fila,
+      issue_date: new Date('2026-09-26T02:30:00.000Z'),
+    };
+    const issuer = resolveFiscalIssuerForPrint(
+      filaMedianoche.organization,
+      filaMedianoche.store,
+      true,
+    );
+
+    const pdfData = buildFiscalInvoicePdfData(
+      filaMedianoche,
+      issuer,
+      {},
+      'America/Bogota',
+    );
+
+    expect(pdfData.issue_date).toBe('25/09/2026');
+  });
+
+  it('B17 — sin tz explícito cae al default (America/Bogota), mismo resultado', () => {
+    const filaMedianoche = {
+      ...fila,
+      issue_date: new Date('2026-09-26T02:30:00.000Z'),
+    };
+    const issuer = resolveFiscalIssuerForPrint(
+      filaMedianoche.organization,
+      filaMedianoche.store,
+      true,
+    );
+
+    const pdfData = buildFiscalInvoicePdfData(filaMedianoche, issuer, {});
+
+    expect(pdfData.issue_date).toBe('25/09/2026');
   });
 
   it('el papel sale del setting de la tienda; un formato desconocido cae a letter', () => {
@@ -351,6 +397,7 @@ describe('FiscalInvoicePdfRenderService — integración con paper_definitions (
   function buildService(invoiceRow: unknown) {
     const prisma = {
       invoices: { findFirst: jest.fn().mockResolvedValue(invoiceRow) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     const s3 = { downloadImage: jest.fn().mockRejectedValue(new Error('sin logo')) };
     const service = new FiscalInvoicePdfRenderService(

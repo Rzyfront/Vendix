@@ -1852,6 +1852,153 @@ export class SalesAnalyticsService {
 
     return { summary, byBrand, bySupplier, truncated };
   }
+
+  /**
+   * B10 — Propinas por mesero. Lee únicamente `orders.tip_amount` /
+   * `tip_waiter_id`: es la única fuente con atribución de mesero. Las
+   * asignaciones proporcionales en `order_financial_accounts.tip_amount`
+   * (cuenta dividida en split-bill) no tienen columna de mesero y se excluyen
+   * a propósito para no arrastrar un doble conteo por reconciliar.
+   *
+   * Agregación compartida entre {@link getTipsByWaiter} (paginada) y
+   * {@link getTipsByWaiterForExport} (hoja única, sin recorte de página).
+   */
+  private async aggregateTipsByWaiter(
+    query: SalesAnalyticsQueryDto,
+  ): Promise<{ rows: TipsByWaiterRow[]; truncated: boolean }> {
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    const orders = await this.prisma.orders.findMany({
+      where: {
+        state: { in: this.COMPLETED_STATES },
+        created_at: {
+          gte: startDate,
+          lte: endDate,
+        },
+        tip_amount: { gt: 0 },
+      },
+      select: {
+        id: true,
+        created_at: true,
+        tip_amount: true,
+        tip_waiter_id: true,
+        users_orders_tip_waiter_idTousers: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+      take: 10_000,
+    });
+
+    const waiterMap = new Map<
+      string,
+      {
+        id: string;
+        waiter_id: number | null;
+        waiter_name: string;
+        waiter_email: string;
+        tipped_orders_count: number;
+        total_tips: number;
+        last_tip_date: Date | null;
+      }
+    >();
+
+    for (const order of orders) {
+      const waiter = order.users_orders_tip_waiter_idTousers;
+      const waiterId = order.tip_waiter_id;
+      const waiterKey = waiterId ? String(waiterId) : 'unassigned';
+
+      let entry = waiterMap.get(waiterKey);
+      if (!entry) {
+        const waiterName = waiter
+          ? `${waiter.first_name || ''} ${waiter.last_name || ''}`.trim() ||
+            waiter.email ||
+            'Mesero'
+          : 'Sin asignar';
+        entry = {
+          id: waiterKey,
+          waiter_id: waiterId ?? null,
+          waiter_name: waiterName,
+          waiter_email: waiter?.email || '',
+          tipped_orders_count: 0,
+          total_tips: 0,
+          last_tip_date: null,
+        };
+        waiterMap.set(waiterKey, entry);
+      }
+
+      entry.tipped_orders_count += 1;
+      entry.total_tips += Number(order.tip_amount);
+
+      if (order.created_at) {
+        if (!entry.last_tip_date || order.created_at > entry.last_tip_date) {
+          entry.last_tip_date = order.created_at;
+        }
+      }
+    }
+
+    const rows: TipsByWaiterRow[] = Array.from(waiterMap.values()).map(
+      (entry) => ({
+        ...entry,
+        total_tips: round2(entry.total_tips),
+        avg_tip:
+          entry.tipped_orders_count > 0
+            ? round2(entry.total_tips / entry.tipped_orders_count)
+            : 0,
+      }),
+    );
+
+    rows.sort((a, b) => b.total_tips - a.total_tips);
+
+    return { rows, truncated: orders.length >= 10_000 };
+  }
+
+  /** B10 — Propinas por mesero, paginado para la vista del panel. */
+  async getTipsByWaiter(query: SalesAnalyticsQueryDto) {
+    const { rows, truncated } = await this.aggregateTipsByWaiter(query);
+
+    const page = query.page !== undefined && query.page !== null
+      ? Math.max(1, Number(query.page))
+      : 1;
+    const limit = query.limit !== undefined && query.limit !== null
+      ? Math.max(1, Math.min(100, Number(query.limit)))
+      : 10;
+    const total = rows.length;
+    const total_pages = Math.ceil(total / limit);
+    const pagedData = rows.slice((page - 1) * limit, page * limit);
+
+    return {
+      data: pagedData,
+      meta: {
+        pagination: {
+          total,
+          page,
+          limit,
+          total_pages,
+        },
+        truncated,
+      },
+    };
+  }
+
+  /**
+   * B10 — Propinas por mesero para exportación XLSX. Mismo dataset que
+   * {@link getTipsByWaiter} sin recorte de página, en una sola hoja resumen:
+   * a diferencia de `sales/by-user` no se pidió desglose por marca ni
+   * proveedor para propinas.
+   */
+  async getTipsByWaiterForExport(
+    query: SalesAnalyticsQueryDto,
+  ): Promise<TipsByWaiterExportResult> {
+    const { rows, truncated } = await this.aggregateTipsByWaiter(query);
+    return { summary: rows, truncated };
+  }
 }
 
 export interface SalesByUserSummaryRow {
@@ -1886,6 +2033,22 @@ export interface SalesByUserExportResult {
   summary: SalesByUserSummaryRow[];
   byBrand: SalesByUserBrandRow[];
   bySupplier: SalesByUserSupplierRow[];
+  truncated?: boolean;
+}
+
+export interface TipsByWaiterRow {
+  id: string;
+  waiter_id: number | null;
+  waiter_name: string;
+  waiter_email: string;
+  tipped_orders_count: number;
+  total_tips: number;
+  avg_tip: number;
+  last_tip_date: Date | null;
+}
+
+export interface TipsByWaiterExportResult {
+  summary: TipsByWaiterRow[];
   truncated?: boolean;
 }
 

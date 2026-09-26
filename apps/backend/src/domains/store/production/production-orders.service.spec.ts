@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { ProductionOrdersService } from './production-orders.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
@@ -46,6 +47,7 @@ interface FakeTransaction {
 describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
   let service: ProductionOrdersService;
   let stockLevelManager: jest.Mocked<Pick<StockLevelManager, 'updateStock' | 'getDefaultLocationForProduct'>>;
+  let stockValidatorService: jest.Mocked<Pick<StockValidatorService, 'assertIngredientsAvailable'>>;
   let eventEmitter: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let prismaMock: {
     production_orders: {
@@ -70,6 +72,13 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
       getDefaultLocationForProduct: jest.fn(),
     } as any;
 
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+    // step 6): resolves as available by default so the pre-existing smoke
+    // test is unaffected; tests exercising the guard itself override this.
+    stockValidatorService = {
+      assertIngredientsAvailable: jest.fn().mockResolvedValue(undefined),
+    } as any;
+
     eventEmitter = { emit: jest.fn() } as any;
 
     prismaMock = {
@@ -89,6 +98,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
     service = new ProductionOrdersService(
       prismaMock as any,
       stockLevelManager as any,
+      stockValidatorService as any,
       eventEmitter as any,
     );
   });
@@ -372,5 +382,95 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
     const result = await service.cancel(400);
     expect(result.status).toBe('cancelled');
     expect(prismaMock.production_orders.update).not.toHaveBeenCalled();
+  });
+
+  describe('no-overselling ingredient guard (docs/plans/no-overselling-stock-guard-plan.md, step 6)', () => {
+    it('rejects an insufficient tracked ingredient BEFORE opening the transaction — 409, no stock movement', async () => {
+      prismaMock.production_orders.findFirst.mockResolvedValue({
+        id: 500,
+        store_id: 1,
+        product_id: 50,
+        recipe_id: 7,
+        planned_qty: new Prisma.Decimal(10),
+        produced_qty: null,
+        status: 'in_progress',
+        produced_at: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+        product: {
+          id: 50,
+          name: 'Salsa de tomate',
+          sku: 'SAL-1',
+          stock_unit: 'g',
+          is_batch_produced: true,
+        },
+        recipe: {
+          id: 7,
+          yield_quantity: new Prisma.Decimal(10),
+          yield_unit: 'g',
+          waste_percent: new Prisma.Decimal(0),
+          preparation_notes: null,
+          items: [
+            {
+              id: 1,
+              recipe_id: 7,
+              component_product_id: 99,
+              quantity: new Prisma.Decimal(10),
+              waste_percent: new Prisma.Decimal(0),
+              is_optional: false,
+              component_product: {
+                id: 99,
+                name: 'Harina',
+                sku: 'HAR-1',
+                stock_unit: 'g',
+              },
+            },
+          ],
+        },
+      } as any);
+
+      stockLevelManager.getDefaultLocationForProduct.mockResolvedValue(1);
+
+      const insufficiencyError = new VendixHttpException(
+        ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+        'Insumo sin stock suficiente: Harina (requerido 10, disponible 4).',
+        {
+          items: [
+            {
+              product_id: 99,
+              product_variant_id: null,
+              product_name: 'Harina',
+              kind: 'ingredient',
+              requested: 10,
+              available: 4,
+              used_by: ['Salsa de tomate'],
+            },
+          ],
+        },
+      );
+      stockValidatorService.assertIngredientsAvailable.mockRejectedValueOnce(
+        insufficiencyError,
+      );
+
+      let caught: any;
+      try {
+        await service.complete(500, { produced_qty: 10 });
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeDefined();
+      expect(caught.errorCode).toBe('INV_STOCK_INSUFFICIENT_LINES');
+      expect(caught.getResponse()).toMatchObject({
+        details: {
+          items: [expect.objectContaining({ kind: 'ingredient' })],
+        },
+      });
+
+      // Nothing was consumed and the transaction never opened — the check
+      // runs BEFORE `complete()` calls `this.prisma.$transaction`.
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    });
   });
 });

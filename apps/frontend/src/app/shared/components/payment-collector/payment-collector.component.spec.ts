@@ -451,6 +451,72 @@ describe('PaymentCollectorComponent — modo multi «Varios métodos» (Paso 5)'
   });
 });
 
+describe('PaymentCollectorComponent — B15(1) setLegAmount no deja amountReceived obsoleto', () => {
+  let fixture: ComponentFixture<PaymentCollectorComponent>;
+  let component: PaymentCollectorComponent;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [PaymentCollectorComponent],
+      providers: [
+        { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
+        { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
+      ],
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(PaymentCollectorComponent);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('amount', 100000);
+    fixture.componentRef.setInput('paymentMethods', [
+      multiCashMethod,
+      multiCardMethod,
+      multiTransferMethod,
+    ]);
+    fixture.componentRef.setInput('allowMultiTender', true);
+    fixture.detectChanges();
+    component.setMultiEnabled(true);
+    fixture.detectChanges();
+  });
+
+  it('bajar el monto de un tramo en efectivo sin edición manual arrastra el recibido hacia abajo (sin vuelto fantasma)', () => {
+    component.setLegAmount(0, 50000);
+    fixture.detectChanges();
+    expect(component.legs()[0].amountReceived).toBe(50000);
+    expect(component.legChange(component.legs()[0])).toBe(0);
+
+    // Antes del fix: amountReceived se quedaba en 50000 al bajar el monto,
+    // mostrando un vuelto de 30.000 que nunca se entregó.
+    component.setLegAmount(0, 20000);
+    fixture.detectChanges();
+    expect(component.legs()[0].amountReceived).toBe(20000);
+    expect(component.legChange(component.legs()[0])).toBe(0);
+  });
+
+  it('un recibido editado a mano se conserva mientras siga cubriendo el nuevo monto (más bajo)', () => {
+    component.setLegAmount(0, 50000);
+    component.setLegReceived(0, 80000);
+    fixture.detectChanges();
+    expect(component.legs()[0].amountReceived).toBe(80000);
+
+    component.setLegAmount(0, 30000);
+    fixture.detectChanges();
+    expect(component.legs()[0].amountReceived).toBe(80000);
+    expect(component.legChange(component.legs()[0])).toBe(50000);
+  });
+
+  it('un recibido editado a mano se sube si el nuevo monto lo supera (nunca queda por debajo)', () => {
+    component.setLegAmount(0, 20000);
+    component.setLegReceived(0, 25000);
+    fixture.detectChanges();
+    expect(component.legs()[0].amountReceived).toBe(25000);
+
+    component.setLegAmount(0, 60000);
+    fixture.detectChanges();
+    expect(component.legs()[0].amountReceived).toBe(60000);
+    expect(component.legChange(component.legs()[0])).toBe(0);
+  });
+});
+
 describe('PaymentModalComponent — arbitraje NG8002 allowMultiTender (Paso 5c)', () => {
   let fixture: ComponentFixture<PaymentModalComponent>;
 

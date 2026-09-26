@@ -591,7 +591,9 @@ export class WebhookHandlerService {
       await this.storeContextRunner.runInStoreContext(
         order.store_id,
         async () => {
-          await this.orderFlowService.confirmPayment(orderId);
+          await this.orderFlowService.confirmPayment(orderId, {
+            source: 'webhook',
+          });
         },
       );
       this.logger.log(
@@ -625,7 +627,10 @@ export class WebhookHandlerService {
           // on a processing-state replay. Let its failure reach handleWebhook
           // so dedup is released; the terminal payment CAS prevents a second
           // monetary receipt when the gateway retries.
-          const confirmed = await this.orderFlowService.confirmPayment(orderId);
+          const confirmed = await this.orderFlowService.confirmPayment(
+            orderId,
+            { source: 'webhook' },
+          );
           if (!confirmed || !['processing', 'shipped'].includes(confirmed.state)) return;
 
           // El dinero acaba de ENTRAR: éste es el punto donde el inventario

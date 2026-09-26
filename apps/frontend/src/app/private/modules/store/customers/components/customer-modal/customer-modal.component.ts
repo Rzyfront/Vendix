@@ -703,8 +703,13 @@ export class CustomerModalComponent {
           document_number: customer.document_number,
           verification_digit: customer.verification_digit ?? null,
           ciiu_code: customer.ciiu_code ?? null,
-          tax_regime: customer.tax_regime ?? '',
-          person_type: customer.person_type ?? '',
+          // B1 — antes se usaba `?? ''`: el backend valida estos dos con
+          // `@IsEnum` y '' no es un valor DIAN válido, así que cada edición
+          // de un cliente sin régimen/tipo clasificado devolvía 400. `null`
+          // sí es aceptado por `@IsOptional()` (y el DTO ahora normaliza ''
+          // a null como defensa adicional).
+          tax_regime: customer.tax_regime ?? null,
+          person_type: customer.person_type ?? null,
           is_withholding_agent: customer.is_withholding_agent ?? false,
           fiscal_responsibilities: customer.fiscal_responsibilities ?? [],
         });

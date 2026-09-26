@@ -110,6 +110,10 @@ export class DianXmlSignerService {
    *   («Valida que fecha de generación de la factura sea igual a la fecha de
    *   firma»). Omitirlo deja el reloj de pared, que es correcto sólo mientras
    *   la emisión ocurra el mismo día que la fecha del documento.
+   * @param tz - Zona horaria de la tienda emisora para `xades:SigningTime`
+   *   (Step 8, order-truth-and-invoice-tz-plan.md). Por defecto
+   *   `DEFAULT_STORE_TIMEZONE` (`XadesEpesBuilder`), idéntico al
+   *   comportamiento previo a este parámetro para toda tienda en ese huso.
    * @returns The signed XML string (XAdES-EPES)
    */
   async sign(
@@ -118,6 +122,7 @@ export class DianXmlSignerService {
     p12_password: string,
     kms_key_id?: string | null,
     signing_date?: Date,
+    tz?: string,
   ): Promise<string> {
     try {
       // Una sola lectura del contenedor por custodia local. Antes había DOS
@@ -145,6 +150,8 @@ export class DianXmlSignerService {
         signer,
         certificate,
         signing_date ?? new Date(),
+        'supplier',
+        tz,
       );
 
       this.logger.debug(

@@ -15,6 +15,8 @@ import { PlatformInvoicingPersistenceService } from './platform-invoicing-persis
 import { PlatformTenantsService } from './platform-tenants.service';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
 import { resolveDianMunicipality } from '../../../store/invoicing/providers/dian-direct/constants/dian-geography';
+import { PLATFORM_TIMEZONE } from '../../../../common/constants/platform-fiscal.constants';
+import { localDateString } from '../../../../common/utils/store-timezone.util';
 
 /**
  * CP-platform-fiscal-invoicing-mvp · Phase B.1
@@ -803,7 +805,8 @@ document_type: args.dto.customer.document_type ?? '31',
       invoice_type: 'sales_invoice',
       document_type: 'sales_invoice',
       customer,
-      issue_date: new Date().toISOString().slice(0, 10),
+      // Step 8 — fecha en la zona de la plataforma, no la del contenedor.
+      issue_date: localDateString(new Date(), PLATFORM_TIMEZONE),
       currency: dto.currency?.iso_4217 ?? 'COP',
       exchange_rate: dto.currency?.exchange_rate ?? undefined,
       exchange_rate_date: dto.currency?.exchange_rate_date ?? undefined,

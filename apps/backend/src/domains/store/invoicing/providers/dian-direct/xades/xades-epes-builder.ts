@@ -99,6 +99,10 @@ export class XadesEpesBuilder {
    * @param signer_role - `xades:SignerRole` value. DIAN Anexo Técnico 10.12:
    *   `supplier` when the invoice is signed by the "Obligado a Facturar",
    *   `third party` when signed by an authorized technology provider.
+   * @param tz - IANA timezone used to render `signing_date` as
+   *   `xades:SigningTime` (Step 8, order-truth-and-invoice-tz-plan.md).
+   *   Defaults to `DEFAULT_STORE_TIMEZONE` — identical result to before this
+   *   parameter existed for every store on that timezone.
    */
   async sign(
     xml_content: string,
@@ -106,6 +110,7 @@ export class XadesEpesBuilder {
     certificate_pem: string,
     signing_date: Date = new Date(),
     signer_role: string = 'supplier',
+    tz: string = DEFAULT_STORE_TIMEZONE,
   ): Promise<string> {
     const xades_signer = toXadesSigner(signer);
     const cert_info = this.buildCertificateInfo(certificate_pem);
@@ -134,7 +139,7 @@ export class XadesEpesBuilder {
     const signature_value_id = `${signature_id}-sigvalue`;
     const reference_document_id = `${signature_id}-ref0`;
 
-    const signing_time = this.formatColombianTime(signing_date);
+    const signing_time = this.formatColombianTime(signing_date, tz);
 
     // 3. Build the signature skeleton (KeyInfo + Object/QualifyingProperties).
     //    SignedInfo and SignatureValue are added afterwards, once their digests
@@ -432,15 +437,16 @@ export class XadesEpesBuilder {
   }
 
   /**
-   * Formats a Date as ISO 8601 in Colombia time (`SigningTime`). Date, clock
-   * and offset all come from the same tz conversion, so the three can never
-   * describe different instants.
+   * Formats a Date as ISO 8601 in `tz` (`SigningTime`, defaults to
+   * `DEFAULT_STORE_TIMEZONE` — Step 8, order-truth-and-invoice-tz-plan.md).
+   * Date, clock and offset all come from the same tz conversion, so the
+   * three can never describe different instants.
    */
-  private formatColombianTime(date: Date): string {
-    return `${localDateString(date, DEFAULT_STORE_TIMEZONE)}T${localTimeString(
-      date,
-      DEFAULT_STORE_TIMEZONE,
-    )}`;
+  private formatColombianTime(
+    date: Date,
+    tz: string = DEFAULT_STORE_TIMEZONE,
+  ): string {
+    return `${localDateString(date, tz)}T${localTimeString(date, tz)}`;
   }
 
   /** Minimal XML text/attribute escaping for injected string values. */

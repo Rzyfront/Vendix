@@ -17,6 +17,7 @@ import { SplitOrderController } from './split-order.controller';
 import { SplitOrderService } from './split-order.service';
 import { SplitAccountPaymentService } from './split-account-payment.service';
 import { PaymentsModule } from '../payments/payments.module';
+import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 
 /**
  * TablesModule — Restaurant Suite Fase E
@@ -50,6 +51,7 @@ import { PaymentsModule } from '../payments/payments.module';
     InventoryModule,
     OrderFlowModule,
     S3Module,
+    OrderHistoryModule,
   ],
   controllers: [
     TablesController,

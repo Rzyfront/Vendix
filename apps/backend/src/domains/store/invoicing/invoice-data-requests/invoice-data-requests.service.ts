@@ -25,6 +25,8 @@ import {
 // C.7 (CP-pos-exclusive-tax-double-charge, ADR-12) — mismo resolvedor que usan
 // los providers del gateway de impresión para las superficies `@OptionalAuth`.
 import { resolvePrintsVatBreakdownForPrint } from '../../print-formats/services/print-vat-breakdown.resolver';
+// Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+import { OrderHistoryService } from '../../orders/order-history/order-history.service';
 
 interface InvoiceDataRequestCustomerData {
   first_name?: string | null;
@@ -68,6 +70,9 @@ export class InvoiceDataRequestsService {
     private readonly creditNotesService: CreditNotesService,
     private readonly invoiceFlowService: InvoiceFlowService,
     private readonly s3Service: S3Service,
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
+    private readonly orderHistory: OrderHistoryService,
   ) {}
 
   // `S3PathHelper` es stateless (sin constructor): se instancia directo en
@@ -1132,6 +1137,7 @@ export class InvoiceDataRequestsService {
       // 2. Link customer to order (update order with customer_id)
       // QUI-727 (A.3 / ADR-9): al fijar customer_id garantizamos customer_alias
       // NULL — el CHECK orders_customer_xor_alias rechaza ambos poblados.
+      const priorCustomerId = order.customer_id ?? null;
       await this.prisma.orders.update({
         where: { id: order.id },
         data: {
@@ -1140,6 +1146,21 @@ export class InvoiceDataRequestsService {
           updated_at: new Date(),
         },
       });
+
+      // Plan order-truth-and-invoice-tz (Step 6) — writer único de
+      // order_events. Sólo registrar si el cliente realmente cambió.
+      if (priorCustomerId !== customer.id) {
+        await this.orderHistory.record(this.prisma, {
+          orderId: order.id,
+          storeId,
+          organizationId,
+          type: 'customer_changed',
+          payload: {
+            from_customer_id: priorCustomerId,
+            to_customer_id: customer.id,
+          },
+        });
+      }
 
       // 3. Convert the linked fiscal document(s) to a nominative invoice.
       const conversion = await this.convertToNominativeInvoice({

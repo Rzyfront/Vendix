@@ -3,6 +3,10 @@ import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import {
+  StockValidatorService,
+  StockDemandLine,
+} from '../inventory/shared/services/stock-validator.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import {
   VendixHttpException,
@@ -50,8 +54,41 @@ export class ProductionOrdersService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly stockLevelManager: StockLevelManager,
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+    // step 6) — tracked ingredients are validated BEFORE being consumed.
+    private readonly stockValidatorService: StockValidatorService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Consumed quantity for a single `recipe_items` line, net of line + recipe
+   * waste. Extracted so the no-overselling pre-check (before the tx) and the
+   * real consumption (inside the tx) compute the EXACT same number — they
+   * can never diverge on what is about to be deducted.
+   */
+  private computeConsumedQty(
+    item: {
+      quantity: any;
+      waste_percent?: any;
+      waste_mode?: string | null;
+      waste_absolute?: any;
+    },
+    recipeWastePct: number,
+  ): number {
+    const baseQty = Number(item.quantity);
+    if (!Number.isFinite(baseQty) || baseQty <= 0) return 0;
+
+    const lineWastePct = Number(item.waste_percent || 0);
+    const wasteMode = (item as any).waste_mode ?? 'percent';
+    if (wasteMode === 'absolute') {
+      const wasteAbs = Number((item as any).waste_absolute ?? 0);
+      const safeWasteAbs = Number.isFinite(wasteAbs) ? wasteAbs : 0;
+      const withLine = baseQty + safeWasteAbs;
+      return Math.round(withLine * (1 + recipeWastePct / 100));
+    }
+    const multiplier = (1 + lineWastePct / 100) * (1 + recipeWastePct / 100);
+    return Math.round(baseQty * multiplier);
+  }
 
   // ------------------------------------------------------------------ create
   async create(dto: CreateProductionOrderDto) {
@@ -294,6 +331,30 @@ export class ProductionOrdersService {
       order.product_id,
     );
 
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+    // step 6) — validate every tracked ingredient BEFORE opening the
+    // transaction. `computeConsumedQty` is the SAME function the tx below
+    // uses to actually deduct, so this check can never diverge from what
+    // gets consumed. Untracked ingredients are skipped by the validator
+    // itself (unlimited by definition).
+    const recipeWastePctForCheck = Number(recipe.waste_percent || 0);
+    const ingredientDemands: StockDemandLine[] = [];
+    for (const item of recipe.items) {
+      const consumedQty = this.computeConsumedQty(item, recipeWastePctForCheck);
+      if (consumedQty <= 0) continue;
+      ingredientDemands.push({
+        product_id: item.component_product_id,
+        quantity: consumedQty,
+        product_name: item.component_product?.name,
+        used_by: order.product.name,
+      });
+    }
+    if (ingredientDemands.length > 0) {
+      await this.stockValidatorService.assertIngredientsAvailable(
+        ingredientDemands,
+      );
+    }
+
     // Snapshot for the auto-entry event. We collect per-consumption costs
     // and the final derived unit_cost, then emit AFTER the transaction
     // commits (auto-entry failures must not roll back the production).
@@ -305,29 +366,9 @@ export class ProductionOrdersService {
       // 1a. Consume each ingredient (sub-recipes are NOT exploded in Fase C;
       // they are consumed as their own batch stock via the same machinery).
       for (const item of recipe.items) {
-        const baseQty = Number(item.quantity);
-        if (!Number.isFinite(baseQty) || baseQty <= 0) continue;
-
-        const lineWastePct = Number(item.waste_percent || 0);
         const recipeWastePct = Number(recipe.waste_percent || 0);
-        // ===== Waste mode (Fase UoM) =====
-        // percent (default): multiplicative waste 10% line + 5% recipe →
-        // 1.10 * 1.05 = 1.155. absolute: line waste_absolute is added in the
-        // component's minimum stock unit, recipe waste still multiplies
-        // (recipes are dimensionless yields, so percent is the only sane
-        // axis for them).
-        const wasteMode = (item as any).waste_mode ?? 'percent';
-        let consumedQty: number;
-        if (wasteMode === 'absolute') {
-          const wasteAbs = Number((item as any).waste_absolute ?? 0);
-          const safeWasteAbs = Number.isFinite(wasteAbs) ? wasteAbs : 0;
-          const withLine = baseQty + safeWasteAbs;
-          consumedQty = Math.round(withLine * (1 + recipeWastePct / 100));
-        } else {
-          const multiplier =
-            (1 + lineWastePct / 100) * (1 + recipeWastePct / 100);
-          consumedQty = Math.round(baseQty * multiplier);
-        }
+        const consumedQty = this.computeConsumedQty(item, recipeWastePct);
+        if (consumedQty <= 0) continue;
 
         // El insumo se consume de SU propia bodega, no de la del producto
         // terminado. Con una sola ubicación para todo, un insumo que vive en la
@@ -351,6 +392,12 @@ export class ProductionOrdersService {
             source_module: 'production',
             user_id: undefined,
             create_movement: true,
+            // No-overselling guard (plan step 6) — the pre-tx check above
+            // already blocked an insufficient tracked ingredient; this is
+            // the defense-in-depth net against a concurrent consumer taking
+            // the same stock between that check and this write. No-op for
+            // untracked ingredients (`updateStock` skips them entirely).
+            validate_availability: true,
           },
           tx,
         );

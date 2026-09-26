@@ -507,17 +507,14 @@
                   />
                 </div>
                 <label class="pc-tip-waiter">
-                  <span>ID del mesero (opcional)</span>
-                  <input
-                    type="number"
-                    min="1"
-                    [value]="tipWaiterId() ?? ''"
-                    (input)="onTipWaiterInput($any($event.target).value)"
-                    placeholder="Sin asignar"
-                    class="pc-input"
-                    inputmode="numeric"
-                    aria-label="Identificador del mesero que recibe la propina"
-                  />
+                  <span>Mesero (opcional)</span>
+                  <app-store-user-select
+                    lookupMode="staff"
+                    placeholder="Buscar mesero..."
+                    [value]="tipWaiterId()"
+                    (valueChange)="tipWaiterId.set($event)"
+                    aria-label="Mesero que recibe la propina"
+                  ></app-store-user-select>
                 </label>
               </section>
             }
@@ -1066,17 +1063,14 @@
             />
           </div>
           <label class="pc-tip-waiter">
-            <span>ID del mesero (opcional)</span>
-            <input
-              type="number"
-              min="1"
-              [value]="tipWaiterId() ?? ''"
-              (input)="onTipWaiterInput($any($event.target).value)"
-              placeholder="Sin asignar"
-              class="pc-input"
-              inputmode="numeric"
-              aria-label="Identificador del mesero que recibe la propina"
-            />
+            <span>Mesero (opcional)</span>
+            <app-store-user-select
+              lookupMode="staff"
+              placeholder="Buscar mesero..."
+              [value]="tipWaiterId()"
+              (valueChange)="tipWaiterId.set($event)"
+              aria-label="Mesero que recibe la propina"
+            ></app-store-user-select>
           </label>
         </section>
       }

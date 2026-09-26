@@ -27,6 +27,7 @@ import { OrdersModule } from '../orders.module'; // QUI-777: OrderSseService viv
 import { ShippingModule } from '../../shipping/shipping.module'; // ShippingTaxService en shipOrder (sin ciclo: ShippingModule solo importa Prisma/Response/Settings)
 import { KitchenFireModule } from '../../kitchen-fire/kitchen-fire.module'; // Seam cancelOrderItem: cancel KDS pending in-tx + SSE post-commit (sin ciclo: KitchenFireModule no importa este módulo)
 import { AccountingModule } from '../../accounting/accounting.module';
+import { OrderHistoryModule } from '../order-history/order-history.module'; // Plan order-truth-and-invoice-tz — único escritor de order_events (sin ciclo: OrderHistoryModule solo importa PrismaModule)
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { AccountingModule } from '../../accounting/accounting.module';
     AccountingModule,
     ShippingModule,
     WalletModule,
+    OrderHistoryModule,
     // QUI-777: OrderSseService vive en OrdersModule y OrdersModule ya importa
     // OrderFlowModule (línea 54) — ciclo. `forwardRef` rompe el ciclo en DI.
     forwardRef(() => OrdersModule),

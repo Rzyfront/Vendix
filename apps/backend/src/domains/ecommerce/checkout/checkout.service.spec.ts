@@ -419,6 +419,32 @@ describe('CheckoutService - promotions and coupons', () => {
   }
 
   describe('checkout() — normal ecommerce flow', () => {
+    it('B8 — contra entrega persiste remaining_balance = grand_total', async () => {
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
+      mockOrderCreate(10000);
+      prisma.store_payment_methods.findFirst.mockResolvedValueOnce({
+        id: 7,
+        state: 'enabled',
+        system_payment_method: {
+          id: 3,
+          display_name: 'Contra entrega',
+          type: 'cash_on_delivery',
+          provider: 'manual',
+          processing_mode: 'ON_DELIVERY',
+        },
+      });
+
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Invitado' },
+      } as any);
+
+      const orderArgs = prisma.orders.create.mock.calls[0][0].data;
+      expect(orderArgs.total_paid).toBe(0);
+      expect(orderArgs.remaining_balance).toBe(10000);
+    });
+
     it('creates a guest checkout WITHOUT promotions (regression)', async () => {
       jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
       mockOrderCreate(10000);
@@ -439,6 +465,10 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(orderArgs.subtotal_amount).toBe(10000);
       expect(orderArgs.discount_amount).toBe(0);
       expect(orderArgs.grand_total).toBe(10000);
+      // B8 (release-855): el saldo explícito es sólo para contra entrega;
+      // una transferencia conserva la forma histórica (su confirmación salda).
+      expect(orderArgs.total_paid).toBeUndefined();
+      expect(orderArgs.remaining_balance).toBeUndefined();
 
       // Payment created for the same grand_total — never the cart-side estimate.
       expect(prisma.payments.create).toHaveBeenCalledWith(
@@ -806,6 +836,11 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(orderArgs.channel).toBe('whatsapp');
       expect(orderArgs.discount_amount).toBe(1500);
       expect(orderArgs.grand_total).toBe(8500);
+      // B8 (release-855): WhatsApp checkout never creates a `payments` row,
+      // so the schema default is even more wrong here — nothing has ever
+      // been collected for this order.
+      expect(orderArgs.total_paid).toBe(0);
+      expect(orderArgs.remaining_balance).toBe(8500);
 
       expect(promotionEngine.applyPromotion).toHaveBeenCalledWith(
         1,

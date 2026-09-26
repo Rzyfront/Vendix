@@ -18,6 +18,7 @@ import { resolveFiscalQualitiesLine } from '../services/fiscal-issuer-identity';
 // C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-04: nota crédito
 // fiscal declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
 import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
+import { resolveStoreTimezone } from '../../../../common/utils/store-timezone.util';
 
 /**
  * Tipos de `invoices.invoice_type` que ESTE formato puede imprimir.
@@ -110,6 +111,8 @@ export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
     }
 
     const signedLogoUrl = await signStoreLogoUrl(this.s3Service, resolveRawLogoKey(note), this.logger);
+    // B17 — fecha/hora del documento en la zona de la tienda, no la del contenedor.
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
 
     return mapFiscalDocumentToPrintData(note, {
       qrBase64,
@@ -122,6 +125,7 @@ export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
         note.organization,
         note.store,
       ),
+      tz,
     });
   }
 

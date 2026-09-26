@@ -56,6 +56,7 @@ import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.m
 import { TablesModule } from '../tables/tables.module';
 import { InvoicingModule } from '../invoicing/invoicing.module';
 import { ShippingModule } from '../shipping/shipping.module';
+import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 
 @Module({
   imports: [
@@ -90,6 +91,9 @@ import { ShippingModule } from '../shipping/shipping.module';
     // Copia del impuesto del envío (ShippingTaxService) en la venta POS a
     // domicilio. Sin ciclo: ShippingModule solo importa Prisma/Response/Settings.
     ShippingModule,
+    // Plan order-truth-and-invoice-tz — writer único de `order_events`.
+    // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
+    OrderHistoryModule,
   ],
   controllers: [
     // CP-POLLO-ARABE-727 (verificación E2E) — `BankAccountsController` va ANTES

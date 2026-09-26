@@ -177,6 +177,7 @@ export class ShippingCalculatorService {
     // tarifas de la cotización; sin coords o ante cualquier fallo el mapa
     // queda vacío y cada tarifa cobra su precio de zona.
     const distanceKmByOrigin = await this.resolveQuoteDistances(
+      storeId,
       rates,
       address,
     );
@@ -368,9 +369,18 @@ export class ShippingCalculatorService {
    * distancia activa hasta el comprador. Una llamada al motor por origen,
    * compartida por todas las tarifas de la cotización. Tarifas sin escala ni
    * siquiera rutean (su precio de zona rige igual).
+   *
+   * Cuando la distancia no se puede calcular (coords de origen/destino
+   * ausentes o inválidas, o el motor de ruteo falla) el precio de zona rige
+   * igual (fail-open, sin cambios), pero se deja un warn ESTRUCTURADO con
+   * `store_id` + `shipping_method_id` + motivo para que el caso sea
+   * diagnosticable — antes fallaba en silencio y solo un `docker logs` con
+   * suerte de timing lo mostraba.
    */
   private async resolveQuoteDistances(
+    storeId: number,
     rates: Array<{
+      shipping_method_id: number;
       distance_tiers?: unknown;
       shipping_method?: {
         distance_pricing_enabled?: boolean | null;
@@ -382,27 +392,60 @@ export class ShippingCalculatorService {
   ): Promise<Map<string, number | null>> {
     const distances = new Map<string, number | null>();
     if (!this.distanceService) return distances;
-    const buyer = ShippingDistanceService.toCoords(
-      address.latitude,
-      address.longitude,
-    );
-    if (!buyer) return distances;
 
-    const origins = new Map<string, DistanceCoords>();
+    // Métodos con distancia activa Y escala utilizable: son los únicos cuyo
+    // fallo de distancia es diagnosticable con contexto (`shipping_method_id`).
+    const candidates: Array<{
+      methodId: number;
+      method: NonNullable<(typeof rates)[number]['shipping_method']>;
+    }> = [];
     for (const rate of rates) {
       const method = rate.shipping_method;
       if (!method?.distance_pricing_enabled) continue;
       if (!ShippingDistanceService.parseTiers(rate.distance_tiers)) continue;
+      candidates.push({ methodId: rate.shipping_method_id, method });
+    }
+    if (candidates.length === 0) return distances;
+
+    const buyer = ShippingDistanceService.toCoords(
+      address.latitude,
+      address.longitude,
+      'buyer',
+    );
+    if (!buyer) {
+      for (const { methodId } of candidates) {
+        this.logger.warn(
+          `Distancia no calculable (store_id=${storeId}, shipping_method_id=${methodId}): ` +
+            'coords de destino ausentes o inválidas; se cobra tarifa de zona.',
+        );
+      }
+      return distances;
+    }
+
+    const origins = new Map<
+      string,
+      { coords: DistanceCoords; methodIds: number[] }
+    >();
+    for (const { methodId, method } of candidates) {
       const origin = ShippingDistanceService.toCoords(
         method.origin_latitude,
         method.origin_longitude,
+        'origin',
       );
-      if (!origin) continue;
+      if (!origin) {
+        this.logger.warn(
+          `Distancia no calculable (store_id=${storeId}, shipping_method_id=${methodId}): ` +
+            'coords de origen ausentes o inválidas; se cobra tarifa de zona.',
+        );
+        continue;
+      }
       const key = `${origin.latitude},${origin.longitude}`;
-      if (!origins.has(key)) origins.set(key, origin);
+      const entry = origins.get(key);
+      if (entry) entry.methodIds.push(methodId);
+      else origins.set(key, { coords: origin, methodIds: [methodId] });
     }
 
-    for (const [key, origin] of origins) {
+    for (const [key, { coords: origin, methodIds }] of origins) {
       let distanceKm: number | null = null;
       try {
         distanceKm = await this.distanceService.resolveDistanceKm(
@@ -411,6 +454,12 @@ export class ShippingCalculatorService {
         );
       } catch {
         distanceKm = null;
+      }
+      if (distanceKm == null) {
+        this.logger.warn(
+          `Distancia no calculable (store_id=${storeId}, shipping_method_id=[${methodIds.join(',')}]): ` +
+            'el motor de ruteo no devolvió una distancia; se cobra tarifa de zona.',
+        );
       }
       distances.set(key, distanceKm);
     }

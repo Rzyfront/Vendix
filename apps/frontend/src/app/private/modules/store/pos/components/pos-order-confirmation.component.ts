@@ -205,7 +205,38 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
           </div>
     
           <!-- Payment Info -->
-          @if (paymentInfo) {
+          <!-- B15(3) — cobro multimétodo: antes solo se mostraba paymentInfo
+               (el primer tramo, data.payment); con 2+ tramos se muestra el
+               desglose completo (paymentBreakdown, ya calculado en
+               resetStaleInvoiceState pero nunca renderizado) más el total
+               pagado y, si hubo tramo en efectivo, recibido/vuelto reales. -->
+          @if (paymentBreakdown && paymentBreakdown.length > 1) {
+            <div class="confirm-payment">
+              @for (leg of paymentBreakdown; track $index) {
+                <div class="confirm-payment-row">
+                  <div class="confirm-payment-method">
+                    <app-icon name="credit-card" [size]="16"></app-icon>
+                    <span class="confirm-payment-method-name">{{ leg.label }}:</span>
+                  </div>
+                  <span class="confirm-payment-amount">{{ formatCurrency(leg.amount) }}</span>
+                </div>
+              }
+              <div class="confirm-payment-row confirm-payment-row--total">
+                <span class="confirm-payment-method-name">Total pagado:</span>
+                <span class="confirm-payment-amount">{{ formatCurrency(multiPaymentTotalPaid) }}</span>
+              </div>
+              @if (multiPaymentChange > 0) {
+                <div class="confirm-payment-row">
+                  <span class="confirm-payment-method-name">Efectivo recibido:</span>
+                  <span class="confirm-payment-amount">{{ formatCurrency(multiPaymentReceived) }}</span>
+                </div>
+                <div class="confirm-payment-row">
+                  <span class="confirm-payment-method-name">Vuelto:</span>
+                  <span class="confirm-payment-amount">{{ formatCurrency(multiPaymentChange) }}</span>
+                </div>
+              }
+            </div>
+          } @else if (paymentInfo) {
             <div class="confirm-payment">
               <div class="confirm-payment-row">
                 <div class="confirm-payment-method">
@@ -214,6 +245,12 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
                 </div>
                 <span class="confirm-payment-amount">{{ formatCurrency(paymentInfo.amount) }}</span>
               </div>
+              @if ((paymentInfo.change ?? 0) > 0) {
+                <div class="confirm-payment-row">
+                  <span class="confirm-payment-method-name">Vuelto:</span>
+                  <span class="confirm-payment-amount">{{ formatCurrency(paymentInfo.change) }}</span>
+                </div>
+              }
             </div>
           }
         </div>
@@ -971,8 +1008,26 @@ export class PosOrderConfirmationComponent {
   /**
    * Cobro multimétodo: desglose por tramo para el tiquete local. Se deriva
    * de `data.payments` junto a `paymentInfo`; `null` = cobro escalar.
+   * B15(3) — `change` viaja por tramo (0 en todos salvo el de efectivo,
+   * `payments.service.ts` así lo construye); sumarlos da el vuelto real sin
+   * tener que adivinar cuál tramo es el de efectivo.
    */
-  paymentBreakdown: Array<{ label: string; amount: number }> | null = null;
+  paymentBreakdown: Array<{ label: string; amount: number; change: number }> | null = null;
+
+  /** B15(3) — total pagado sumando los tramos del desglose. */
+  get multiPaymentTotalPaid(): number {
+    return (this.paymentBreakdown ?? []).reduce((sum, leg) => sum + leg.amount, 0);
+  }
+
+  /** B15(3) — vuelto real: solo el tramo en efectivo aporta un valor != 0. */
+  get multiPaymentChange(): number {
+    return (this.paymentBreakdown ?? []).reduce((sum, leg) => sum + (leg.change || 0), 0);
+  }
+
+  /** B15(3) — recibido = pagado + vuelto (identidad, sin adivinar el tramo). */
+  get multiPaymentReceived(): number {
+    return this.multiPaymentTotalPaid + this.multiPaymentChange;
+  }
 private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
   private ticketService = inject(PosTicketService);
@@ -1168,12 +1223,18 @@ private authFacade = inject(AuthFacade);
         ? data.payments.map((p: any) => ({
             label: String(p.payment_method ?? p.method ?? 'Pago'),
             amount: Number(p.amount) || 0,
+            change: Number(p.change) || 0,
           }))
         : null;
     if (data.payment) {
       this.paymentInfo = {
         method: data.payment.payment_method || data.payment.method || 'Pago',
-        amount: Number(data.payment.amount || this.orderTotal) };
+        amount: Number(data.payment.amount || this.orderTotal),
+        // B15(3) — antes solo se leía `data.change` (raíz), que
+        // `pos.component.ts` nunca copia en `completedOrder`; el vuelto real
+        // vive en `payment.change` (mismo campo que ya usa `pos-payment.service.ts`).
+        change: Number(data.payment.change ?? data.change ?? 0),
+      };
     } else if (data.isCreditSale) {
       this.paymentInfo = {
         method: 'Venta a Crédito',
@@ -1350,8 +1411,18 @@ private authFacade = inject(AuthFacade);
       total: this.derivedOrderTotal() ?? this.orderTotal,
       paymentMethod: this.paymentInfo?.method || 'Pago',
       paymentBreakdown: this.paymentBreakdown ?? undefined,
-      cashReceived: this.paymentInfo?.amount || (this.derivedOrderTotal() || this.orderTotal),
-      change: Number(this.orderData()?.change || 0),
+      // B15(3)/(4) — multimétodo: recibido/vuelto del tiquete local salen del
+      // desglose (Σ tramos + Σ vuelto), no del primer tramo ni del total de
+      // la venta. Escalar: `paymentInfo.change` (ya trae `payment.change`,
+      // NO `orderData()?.change`, que `pos.component.ts` nunca puebla).
+      cashReceived:
+        this.paymentBreakdown && this.paymentBreakdown.length > 1
+          ? this.multiPaymentReceived
+          : this.paymentInfo?.amount || (this.derivedOrderTotal() || this.orderTotal),
+      change:
+        this.paymentBreakdown && this.paymentBreakdown.length > 1
+          ? this.multiPaymentChange
+          : Number(this.paymentInfo?.change ?? this.orderData()?.change ?? 0),
       customer: this.derivedCustomerName() ? {
         name: this.derivedCustomerName(),
         email: this.derivedCustomerEmail(),

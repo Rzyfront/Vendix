@@ -745,4 +745,122 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(result.last_order_date).toBeNull();
     });
   });
+
+  /**
+   * B1 — `update()` no persistía `document_number`/`document_type` para
+   * ningún tipo de documento salvo NIT: `nextDocumentNumber` arrancaba
+   * `undefined` y solo se asignaba dentro de la rama NIT, así que
+   * `prisma.users.update()` (que omite el campo cuando es `undefined`) nunca
+   * escribía el número nuevo para CC/CE/PA/TI/PEP/PPT. La FE seguía
+   * mostrando el documento viejo (CC) tras editar.
+   */
+  describe('CustomersService — update() B1 document persistence', () => {
+    const STORE_ID = 1;
+    const CUSTOMER_ID = 55;
+
+    const makeExistingUser = (overrides: any = {}) => ({
+      id: CUSTOMER_ID,
+      organization_id: 100,
+      first_name: 'Juan',
+      last_name: 'Pérez',
+      person_type: 'NATURAL',
+      document_type: 'CC',
+      document_number: '111',
+      verification_digit: null,
+      tax_regime: null,
+      state: 'active',
+      addresses: [],
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      // `findOne()` reads `orders.groupBy` for the stats card; not under test
+      // here, so it always resolves empty.
+      mockPrismaService.orders.groupBy.mockResolvedValue([]);
+    });
+
+    it('CC→CE con número nuevo persiste el número (bug B1)', async () => {
+      mockPrismaService.users.findFirst
+        // 1st call: `findOne()` loads the existing customer.
+        .mockResolvedValueOnce(makeExistingUser())
+        // 2nd call: `findByDocumentInOrganization()` conflict check — no match.
+        .mockResolvedValueOnce(null);
+
+      await service.update(STORE_ID, CUSTOMER_ID, {
+        document_type: 'CE',
+        document_number: '222',
+      } as any);
+
+      expect(mockPrismaService.users.update).toHaveBeenCalledTimes(1);
+      const data = mockPrismaService.users.update.mock.calls[0][0].data;
+      expect(data.document_type).toBe('CE');
+      expect(data.document_number).toBe('222');
+      // No era NIT antes ni ahora: sin DV que limpiar, pero el campo se
+      // reafirma en null (no queda un DV huérfano de un NIT previo).
+      expect(data.verification_digit).toBeNull();
+    });
+
+    it('cambio a NIT calcula y persiste el DV', async () => {
+      mockPrismaService.users.findFirst
+        .mockResolvedValueOnce(makeExistingUser())
+        .mockResolvedValueOnce(null);
+
+      // computeNitDv('900000008') = '3' (verificado en los specs de create()).
+      await service.update(STORE_ID, CUSTOMER_ID, {
+        document_type: 'NIT',
+        document_number: '900000008',
+        verification_digit: '3',
+        person_type: 'JURIDICA',
+        legal_name: 'Acme S.A.S',
+      } as any);
+
+      const data = mockPrismaService.users.update.mock.calls[0][0].data;
+      expect(data.document_type).toBe('NIT');
+      expect(data.document_number).toBe('900000008');
+      expect(data.verification_digit).toBe('3');
+    });
+
+    it('update sin cambiar el documento no pisa document_number/document_type', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValueOnce(
+        makeExistingUser(),
+      );
+
+      await service.update(STORE_ID, CUSTOMER_ID, {
+        phone: '3001234567',
+      } as any);
+
+      // Sin `document_type`/`document_number` en el DTO no hay chequeo de
+      // conflicto: `findByDocumentInOrganization` NO debería llamarse de nuevo.
+      expect(mockPrismaService.users.findFirst).toHaveBeenCalledTimes(1);
+      const data = mockPrismaService.users.update.mock.calls[0][0].data;
+      expect(data.document_number).toBeUndefined();
+      expect(data.document_type).toBeUndefined();
+      expect(data.verification_digit).toBeUndefined();
+      expect(data.phone).toBe('3001234567');
+    });
+
+    it("'' en tax_regime/person_type no rompe la edición (DTO normaliza a null)", async () => {
+      const { validate } = await import('class-validator');
+      const { plainToInstance } = await import('class-transformer');
+      const { UpdateCustomerDto } = await import(
+        './dto/update-customer.dto'
+      );
+
+      // Simula el payload que el modal envía cuando el cliente no tiene
+      // régimen/tipo de persona clasificado: `customer.tax_regime ?? ''`.
+      const instance = plainToInstance(UpdateCustomerDto, {
+        tax_regime: '',
+        person_type: '',
+      });
+
+      expect(instance.tax_regime).toBeNull();
+      expect(instance.person_type).toBeNull();
+
+      const errors = await validate(instance);
+      const offending = errors.filter((e) =>
+        ['tax_regime', 'person_type'].includes(e.property),
+      );
+      expect(offending).toEqual([]);
+    });
+  });
 });

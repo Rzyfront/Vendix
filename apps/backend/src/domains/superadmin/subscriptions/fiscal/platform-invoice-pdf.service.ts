@@ -34,6 +34,8 @@ import {
 // 2010/2019 art. 160). Consume ahora la derivación única del num. 12 del art. 11
 // de la Res. DIAN 000165/2023 en vez de una tabla propia.
 import { resolveFiscalQualitiesLine } from '../../../store/print-formats/services/fiscal-issuer-identity';
+import { PLATFORM_TIMEZONE } from '../../../../common/constants/platform-fiscal.constants';
+import { formatStoreDate } from '../../../../common/utils/store-timezone.util';
 
 const PLATFORM_PDF_KEY_PREFIX = 'platform/invoices';
 
@@ -898,11 +900,11 @@ export class PlatformInvoicePdfService {
   }
 
   private formatDate(date: Date): string {
-    const d = new Date(date);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
+    // Step 8 — fecha en la zona de la plataforma (misma bifurcación fiscal
+    // que `formatStoreDate`: instante real → convertido; medianoche UTC
+    // exacta → leída tal cual), no `getDate()/getMonth()/getFullYear()`
+    // crudos del contenedor.
+    return formatStoreDate(new Date(date), PLATFORM_TIMEZONE);
   }
 
   private formatCustomerAddress(address: unknown): string | undefined {

@@ -266,7 +266,7 @@ describe('WebhookHandlerService', () => {
       });
       await service['confirmOrderPaid'](1);
 
-      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1, { source: 'webhook' });
       expect(projectTablePayment).not.toHaveBeenCalled();
       expect(prisma.table_sessions.findFirst).not.toHaveBeenCalled();
       expect(closeTableSession).not.toHaveBeenCalled();
@@ -367,7 +367,7 @@ describe('WebhookHandlerService', () => {
 
       // The order transition is NOT a direct orders.update: it delegates to
       // OrderFlowService, which owns the audit trail and the stock side-effects.
-      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1, { source: 'webhook' });
     });
 
     it('should not update order status if already processing', async () => {
@@ -529,7 +529,7 @@ describe('WebhookHandlerService', () => {
       await expect(
         (service as any).confirmOrderPaid(1),
       ).resolves.toBeUndefined();
-      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1, { source: 'webhook' });
       expect(autoSend).not.toHaveBeenCalled();
       expect(flow.validate).not.toHaveBeenCalled();
       expect(flow.send).not.toHaveBeenCalled();
@@ -599,7 +599,7 @@ describe('WebhookHandlerService', () => {
       await expect(
         (service as any).confirmOrderPaid(1),
       ).resolves.toBeUndefined();
-      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1, { source: 'webhook' });
       expect(autoSend).not.toHaveBeenCalled();
       expect(flow.validate).not.toHaveBeenCalled();
       expect(flow.send).not.toHaveBeenCalled();
@@ -688,7 +688,7 @@ describe('WebhookHandlerService', () => {
       (prisma.orders.findUnique as jest.Mock).mockResolvedValue({id:1,store_id:7,state:'pending_payment'});
       orderFlow.confirmPayment.mockResolvedValue({state:'cancelled',payment_confirmation_applied:false});
       await service['confirmOrderPaid'](1);
-      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1, { source: 'webhook' });
       expect((service as any).orderStockCommit.commitOrderDelivery).not.toHaveBeenCalled();
       expect(prisma.table_sessions.findFirst).not.toHaveBeenCalled();
       expect(projectTablePayment).not.toHaveBeenCalled();

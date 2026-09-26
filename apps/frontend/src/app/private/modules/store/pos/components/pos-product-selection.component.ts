@@ -500,6 +500,15 @@ function isMultiTokenQuery(query: string): boolean {
                       >
                         {{ product.active_promotion.badge_label }}
                       </span>
+                    } @else if (isSaleOnly(product)) {
+                      <!-- B5/B14 — oferta directa sin promoción auto-aplicada:
+                           no hay "precio regular" seguro para tachar (ver
+                           isSaleOnly), así que sólo se muestra la insignia. -->
+                      <span
+                        class="text-[9px] font-semibold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded-full shrink-0"
+                      >
+                        Oferta
+                      </span>
                     }
                   </div>
 
@@ -512,13 +521,13 @@ function isMultiTokenQuery(query: string): boolean {
                   </p>
 
                   <div class="text-xs font-black text-slate-900 mt-1 flex items-baseline gap-1.5">
-                    @if (hasActivePromoOrSale(product)) {
+                    @if (hasGenuinePromotion(product)) {
                       <span>{{ promotionalPrice(product) | currency }}</span>
                       <span class="text-[10px] text-slate-400 line-through font-normal">
                         {{ product.final_price | currency }}
                       </span>
                     } @else {
-                      <span>{{ product.final_price | currency }}</span>
+                      <span>{{ promotionalPrice(product) | currency }}</span>
                     }
                     @if (product.pricing_type === 'weight') {
                       <span class="text-[10px] font-normal text-slate-500">
@@ -696,6 +705,17 @@ function isMultiTokenQuery(query: string): boolean {
                     >
                       {{ product.active_promotion.badge_label }}
                     </app-badge>
+                  } @else if (isSaleOnly(product)) {
+                    <!-- B5/B14 — oferta directa sin promoción: sin tachado
+                         (ver isSaleOnly), sólo insignia. -->
+                    <app-badge
+                      variant="success"
+                      size="xs"
+                      badgeStyle="solid"
+                      class="absolute bottom-2 right-2 z-[1] promo-badge"
+                    >
+                      Oferta
+                    </app-badge>
                   }
                   <!-- Variant Indicator -->
                   @if (product.has_variants) {
@@ -761,7 +781,7 @@ function isMultiTokenQuery(query: string): boolean {
                   >
                     <!-- Price -->
                     <div class="flex flex-col min-w-0">
-                      @if (hasActivePromoOrSale(product)) {
+                      @if (hasGenuinePromotion(product)) {
                         <div class="flex items-baseline gap-1 flex-wrap">
                           <span
                             class="text-slate-900 font-black text-sm sm:text-base leading-tight truncate"
@@ -784,9 +804,9 @@ function isMultiTokenQuery(query: string): boolean {
                       } @else {
                         <span
                           class="text-slate-900 font-black text-sm sm:text-base leading-tight truncate"
-                          [title]="product.final_price | currency"
+                          [title]="promotionalPrice(product) | currency"
                         >
-                          {{ product.final_price | currency }}
+                          {{ promotionalPrice(product) | currency }}
                           @if (product.pricing_type === 'weight') {
                             <span
                               class="text-[10px] font-normal text-slate-500"
@@ -2841,16 +2861,28 @@ export class PosProductSelectionComponent {
   }
 
   /**
-   * Cards render the promotional price when the product has either a
-   * backend-resolved auto promotion (`active_promotion`) or an active
-   * `sale_price < base_price`. Both paths are visually consistent —
-   * struck-through original next to the discounted price + a badge.
+   * True cuando hay una promoción auto-aplicada resuelta por backend
+   * (`active_promotion`) que efectivamente descuenta por debajo de
+   * `final_price`. Sólo en este caso `product.final_price` sigue siendo el
+   * precio REGULAR (sin promo) y es seguro tacharlo como "antes".
    */
-  hasActivePromoOrSale(product: any): boolean {
+  hasGenuinePromotion(product: any): boolean {
     const promo = product?.active_promotion;
-    if (promo && Number(promo.promotional_price) < Number(product.final_price)) {
-      return true;
-    }
+    return !!promo && Number(promo.promotional_price) < Number(product.final_price);
+  }
+
+  /**
+   * B5/B14 — oferta directa (`is_on_sale` + `sale_price`) SIN promoción
+   * auto-aplicada. A diferencia de `hasGenuinePromotion`, aquí
+   * `product.final_price` YA sale resuelto sobre `sale_price` en el backend
+   * (`calculateFinalPrice`): no existe en el payload un "precio regular"
+   * independiente para tachar, y reconstruirlo en cliente sobre `base_price`
+   * + impuestos repite el riesgo ya documentado de divergir del truncado
+   * DIAN del kernel. Por eso este caso no tacha nada — sólo insignia
+   * "Oferta" (ver plantilla).
+   */
+  isSaleOnly(product: any): boolean {
+    if (this.hasGenuinePromotion(product)) return false;
     const salePrice = Number(product?.sale_price);
     const basePrice = Number(product?.price ?? product?.base_price);
     return (
@@ -2864,17 +2896,15 @@ export class PosProductSelectionComponent {
 
   /**
    * Resolve the promotional unit price for a card. Prefer the
-   * backend-resolved `active_promotion.promotional_price`; fall back to
-   * `sale_price` when the product is on sale and the promotion is absent.
+   * backend-resolved `active_promotion.promotional_price`; otherwise fall
+   * back to `final_price`, que el backend ya resuelve sobre `sale_price` +
+   * impuestos cuando el producto está en oferta (B5/B14 — antes devolvía
+   * `sale_price` crudo, neto y sin impuesto, subestimando el precio grande).
    */
   promotionalPrice(product: any): number {
     const promo = product?.active_promotion;
     if (promo && Number.isFinite(Number(promo.promotional_price))) {
       return Number(promo.promotional_price);
-    }
-    const salePrice = Number(product?.sale_price);
-    if (Number.isFinite(salePrice) && salePrice > 0) {
-      return salePrice;
     }
     return Number(product?.final_price ?? 0);
   }

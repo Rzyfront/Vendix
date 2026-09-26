@@ -43,6 +43,7 @@ import { UblCommonBuilder } from '../providers/dian-direct/xml/ubl-common.builde
 import { ProviderInvoiceTax } from '../providers/invoice-provider.interface';
 import {
   DEFAULT_STORE_TIMEZONE,
+  fiscalIssueDate,
   localDateString,
 } from '../../../../common/utils/store-timezone.util';
 
@@ -1105,7 +1106,11 @@ export class FiscalDocumentValidator {
     if (!signing_date || !issue_date) return [];
 
     const timezone = input.timezone || DEFAULT_STORE_TIMEZONE;
-    const issue_day = localDateString(issue_date, timezone);
+    // Step 8 — misma bifurcación fiscal que `cbc:IssueDate`: `signing_date`
+    // siempre trae hora real (viene de la firma), así que `localDateString`
+    // sigue siendo correcto para ella; `issue_date` puede llegar como
+    // medianoche UTC exacta (fecha naive) y ahí NO se reconvierte.
+    const issue_day = fiscalIssueDate(issue_date, timezone);
     const signing_day = localDateString(signing_date, timezone);
     if (issue_day === signing_day) return [];
 
@@ -1744,7 +1749,7 @@ export class FiscalDocumentValidator {
     // regla del repo resuelve exactamente esto: instante → zona del emisor,
     // fecha-sólo → UTC tal como se guardó. Las cadenas `YYYY-MM-DD` se comparan
     // lexicográficamente, que para ISO 8601 es el mismo orden que cronológico.
-    const issue_day = localDateString(
+    const issue_day = fiscalIssueDate(
       issue_date,
       input.timezone || DEFAULT_STORE_TIMEZONE,
     );

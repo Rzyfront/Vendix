@@ -62,12 +62,14 @@ import { EmailModule } from '../email/email.module';
 import { WompiModule } from '../domains/store/payments/processors/wompi/wompi.module';
 import { PlatformGatewayModule } from '../domains/superadmin/subscriptions/gateway/gateway.module';
 import { ResponseModule } from '../common/responses/response.module';
+import { OrderHistoryModule } from '../domains/store/orders/order-history/order-history.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     OrderFlowModule,
     PrismaModule,
+    OrderHistoryModule,
     SubscriptionsModule,
     EmailModule,
     // Direct imports needed by SubscriptionWebhookReconcilerJob:

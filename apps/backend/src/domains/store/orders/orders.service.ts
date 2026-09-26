@@ -52,7 +52,29 @@ import {
   isVatResponsible,
 } from '@common/helpers/vat-responsibility.helper';
 import { OrderFlowService } from './order-flow/order-flow.service';
-import { getOrderCancellationPolicy } from './order-flow/order-cancellation-policy.util';
+import {
+  getOrderCancellationPolicy,
+  SETTLED_PAYMENT_STATES,
+} from './order-flow/order-cancellation-policy.util';
+import {
+  canPay,
+  canCancelPaymentAsRole,
+  canCancel,
+  canAssignShipping,
+  canConfirmDelivery,
+  canRefund,
+  canReactivateAsRole,
+  canFastTrack,
+  canCreditPayment,
+  canEditOrder,
+  canDispatchOrder,
+  canManualShip,
+  canReadyForPickupBeforePayment,
+  canDirectDeliver,
+  canCollectViaShip,
+  computeItemActions,
+  OrderActionSnapshot,
+} from './order-flow/order-action-policy.util';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.service';
@@ -61,6 +83,7 @@ import { differsByAtLeastCents } from '@common/money-kernel';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 // Release-853 paso 10 — propagación del titular al borrador de factura.
 import { InvoicingService } from '../invoicing/invoicing.service';
+import { OrderHistoryService } from './order-history/order-history.service';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -269,6 +292,12 @@ export class OrdersService {
     @Optional()
     @Inject(forwardRef(() => InvoicingService))
     private readonly invoicingService?: InvoicingService,
+    // Plan order-truth-and-invoice-tz — Paso 6. Único escritor de
+    // `order_events`. `@Optional()` por el mismo motivo que el resto de
+    // dependencias tardías: no romper los TestingModule/`new OrdersService(...)`
+    // existentes. En prod siempre resuelve vía `OrderHistoryModule` (ver
+    // `orders.module.ts`).
+    @Optional() private readonly orderHistoryService?: OrderHistoryService,
   ) {}
 
   /** Copia del impuesto de la tarifa `rate_id` (vacía sin tarifa/servicio). */
@@ -1248,6 +1277,13 @@ export class OrdersService {
           },
           orderBy: { created_at: 'asc' },
         },
+        // order-truth-and-invoice-tz plan — Step 2: `available_actions` reuses
+        // the SAME `canPay`/`canRefund` predicates `OrderFlowService
+        // .getAvailableActions` calls, which need a refund-aware settlement
+        // snapshot (`toSettlementSnapshot` in `order-action-policy.util.ts`).
+        refunds: {
+          select: { state: true, amount: true },
+        },
         shipping_method: {
           select: {
             id: true,
@@ -1457,14 +1493,336 @@ export class OrdersService {
     // factura de CUALQUIER tipo (lo necesita la tarjeta del detalle); este
     // campo responde otra pregunta: ¿hay una `sales_invoice` vigente?
     const activeSalesInvoice = await this.findActiveSalesInvoice(id);
+    // Mirrors `findBlockingSalesInvoiceForPaymentCancel`'s exact semantics
+    // (`OrderFlowService`, order-flow.service.ts) — a `draft` sales invoice
+    // was never transmitted, so it does not block a local payment cancel.
+    const hasIssuedSalesInvoice =
+      !!activeSalesInvoice && activeSalesInvoice.status !== 'draft';
+
+    // order-truth-and-invoice-tz plan — Step 2: additive `available_actions`
+    // (order-level) + `items[].available_actions` (item-level). Both are
+    // computed through the SAME util predicates
+    // `OrderFlowService.getAvailableActions` calls (`order-action-policy
+    // .util.ts`) — one source of truth for "what can this order/item do",
+    // reachable from either GET endpoint without a second round-trip. Built
+    // entirely from data this query already loaded (plus the `refunds`
+    // include added above) — no extra queries.
+    const available_actions = this.buildOrderAvailableActions(order, hasIssuedSalesInvoice);
+    const orderHasSettledPayment = (order.payments ?? []).some((p: any) =>
+      SETTLED_PAYMENT_STATES.has(p.state),
+    );
+    const orderItemsWithActions = (order.order_items ?? []).map((item: any) => ({
+      ...item,
+      available_actions: computeItemActions({
+        order_state: order.state,
+        item_type: item.item_type,
+        delivered_at: item.delivered_at,
+        latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
+        orderHasSettledPayment,
+      }),
+    }));
 
     return {
       ...order,
+      order_items: orderItemsWithActions,
       cancellation_policy: getOrderCancellationPolicy(order),
       active_sales_invoice: activeSalesInvoice
         ? { id: activeSalesInvoice.id, status: activeSalesInvoice.status }
         : null,
+      available_actions,
     };
+  }
+
+  /**
+   * order-truth-and-invoice-tz plan — Step 2. Mirrors
+   * `OrderFlowService.getAvailableActions`'s per-state orchestration
+   * action-for-action (same codes, same `label_key`s, same util predicates)
+   * so `findOne`'s response can render the same buttons without a second
+   * call to `GET .../flow/available-actions`. Deliberately duplicates only
+   * the "which code applies in which state" wiring — never the rule logic
+   * itself, which stays in `order-action-policy.util.ts`'s predicates.
+   *
+   * Two small, intentional differences from `OrderFlowService
+   * .getAvailableActions`, both required to stay a pure/non-requerying
+   * helper over data `findOne` already loaded:
+   *  - `processing`'s method-type branch reads `order.shipping_method?.type`
+   *    (already `include`d by `findOne`) instead of the sibling method's own
+   *    `shipping_methods.findFirst` query.
+   *  - `hasIssuedSalesInvoice` is the caller's already-computed
+   *    `activeSalesInvoice` (unconditional in `findOne`), not the lazy,
+   *    conditional `findBlockingSalesInvoiceForPaymentCancel` lookup — same
+   *    semantics (`status !== 'draft'`), just no separate branch to decide
+   *    whether to bother resolving it.
+   */
+  private buildOrderAvailableActions(
+    order: any,
+    hasIssuedSalesInvoice: boolean,
+  ): Array<{ code: string; label_key: string; enabled: boolean; reason?: string }> {
+    const actions: Array<{
+      code: string;
+      label_key: string;
+      enabled: boolean;
+      reason?: string;
+    }> = [];
+
+    const state = order.state as string;
+    const deliveryType = order.delivery_type as string | null | undefined;
+    const hasMethod = !!order.shipping_method_id;
+    const isDirectDelivery = deliveryType === 'direct_delivery';
+    const isPickupDelivery = (deliveryType || 'direct_delivery') === 'pickup';
+    const requiresDispatch = deliveryType === 'home_delivery';
+    const shippingMethodType = order.shipping_method?.type ?? null;
+
+    const isKitchenOrder = (order.order_items ?? []).some(
+      (item: any) => (item.kitchen_ticket_items ?? []).length > 0,
+    );
+    const hasPendingKitchen = (order.order_items ?? []).some((item: any) =>
+      (item.kitchen_ticket_items ?? []).some(
+        (k: any) => k.status !== 'delivered' && k.status !== 'cancelled',
+      ),
+    );
+    const offersDispatchFlow = requiresDispatch || isKitchenOrder;
+
+    const snapshot: OrderActionSnapshot & {
+      delivery_type?: string | null;
+      shipping_method_id?: number | null;
+      payment_form?: string | null;
+      isKitchenOrder?: boolean;
+      hasOrderItems?: boolean;
+      remaining_balance?: Prisma.Decimal | number | string | null;
+    } = {
+      ...order,
+      refunds: order.refunds ?? [],
+      hasPendingKitchen,
+      isKitchenOrder,
+      hasOrderItems: (order.order_items ?? []).length > 0,
+      hasIssuedSalesInvoice,
+    };
+    const roleCtx = { roles: RequestContextService.getRoles() };
+
+    if (state === 'draft' || state === 'created') {
+      actions.push({
+        code: 'edit_order',
+        label_key: 'ORD_ACTION_EDIT_ORDER',
+        ...canEditOrder(snapshot, roleCtx),
+      });
+      actions.push({ code: 'pay', label_key: 'ORD_ACTION_PAY', ...canPay(snapshot) });
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          ...canAssignShipping(snapshot),
+        });
+      }
+      actions.push({ code: 'cancel', label_key: 'ORD_ACTION_CANCEL', ...canCancel(snapshot) });
+    }
+
+    if (state === 'pending_payment') {
+      const isCreditOrder = order.payment_form === '2';
+      if (isCreditOrder) {
+        actions.push({
+          code: 'credit_payment',
+          label_key: 'ORD_ACTION_CREDIT_PAYMENT',
+          ...canCreditPayment(snapshot),
+        });
+      } else {
+        actions.push({
+          code: 'confirm_payment',
+          label_key: 'ORD_ACTION_CONFIRM_PAYMENT',
+          enabled: true,
+        });
+      }
+
+      actions.push({
+        code: 'cancel_payment',
+        label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+        ...canCancelPaymentAsRole(snapshot, roleCtx),
+      });
+
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          ...canAssignShipping(snapshot),
+        });
+      }
+      actions.push({ code: 'cancel', label_key: 'ORD_ACTION_CANCEL', ...canCancel(snapshot) });
+
+      if (offersDispatchFlow || isPickupDelivery) {
+        actions.push({
+          code: 'dispatch_order',
+          label_key: 'ORD_ACTION_DISPATCH_ORDER',
+          ...canDispatchOrder(snapshot),
+        });
+        actions.push({
+          code: 'manual_ship',
+          label_key: 'ORD_ACTION_MANUAL_SHIP',
+          ...canManualShip(snapshot),
+        });
+        actions.push({
+          code: 'ready_for_pickup',
+          label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+          ...canReadyForPickupBeforePayment(snapshot),
+        });
+      }
+    }
+
+    if (state === 'processing') {
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          ...canAssignShipping(snapshot),
+        });
+        actions.push({
+          code: 'ready_for_pickup',
+          label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+          enabled: false,
+          reason: 'ORD_SHIP_REQUIRED_001',
+        });
+        actions.push({
+          code: 'ship_with_tracking',
+          label_key: 'ORD_ACTION_SHIP_WITH_TRACKING',
+          enabled: false,
+          reason: 'ORD_SHIP_REQUIRED_001',
+        });
+      } else if (hasMethod) {
+        if (shippingMethodType === 'pickup') {
+          actions.push({
+            code: 'ready_for_pickup',
+            label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+            enabled: true,
+          });
+        } else {
+          actions.push({
+            code: 'ship_with_tracking',
+            label_key: 'ORD_ACTION_SHIP_WITH_TRACKING',
+            enabled: true,
+          });
+        }
+      }
+
+      if (offersDispatchFlow) {
+        actions.push({
+          code: 'dispatch_order',
+          label_key: 'ORD_ACTION_DISPATCH_ORDER',
+          ...canDispatchOrder(snapshot),
+        });
+        if (isPickupDelivery) {
+          actions.push({
+            code: 'direct_deliver',
+            label_key: 'ORD_ACTION_DIRECT_DELIVER',
+            ...canDirectDeliver(snapshot),
+          });
+        }
+      } else {
+        // Restores the web's removed `ship` button ("Pasar a Cobro", commit
+        // cbebc40db8f) — see `canCollectViaShip`'s doc comment in
+        // `order-action-policy.util.ts`. Same `!offersDispatchFlow` presence
+        // gate as the dispatch trio above, mirroring `getAvailableActions`.
+        actions.push({
+          code: 'collect_payment',
+          label_key: 'ORD_ACTION_COLLECT_PAYMENT',
+          ...canCollectViaShip(snapshot),
+        });
+      }
+
+      if (!requiresDispatch) {
+        actions.push({
+          code: 'confirm_delivery',
+          label_key: 'ORD_ACTION_CONFIRM_DELIVERY',
+          ...canConfirmDelivery(snapshot),
+        });
+      }
+
+      // Parity fix (order-actions-parity spec): mirrors the SAME fix in
+      // `OrderFlowService.getAvailableActions` — the web has always shown
+      // `cancel-payment` in `processing` (gated only by `isPrivilegedUser()`)
+      // and objective 12 explicitly lists `processing` among the
+      // `cancel_payment`-eligible states.
+      actions.push({
+        code: 'cancel_payment',
+        label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+        ...canCancelPaymentAsRole(snapshot, roleCtx),
+      });
+
+      actions.push({
+        code: 'cancel',
+        label_key: 'ORD_ACTION_CANCEL',
+        ...canCancel(snapshot),
+      });
+    }
+
+    if (state === 'shipped') {
+      actions.push({
+        code: 'mark_delivered',
+        label_key: 'ORD_ACTION_MARK_DELIVERED',
+        enabled: true,
+      });
+    }
+
+    if (state === 'delivered') {
+      actions.push({
+        code: 'confirm_delivery',
+        label_key: 'ORD_ACTION_CONFIRM_DELIVERY',
+        ...canConfirmDelivery(snapshot),
+      });
+    }
+
+    if (state === 'cancelled') {
+      // `reactivate` now requires owner/admin (same `RolesGuard` +
+      // `@Roles` as `cancel_payment`) — see `canReactivateAsRole`.
+      actions.push({
+        code: 'reactivate',
+        label_key: 'ORD_ACTION_REACTIVATE',
+        ...canReactivateAsRole(snapshot, roleCtx),
+      });
+    }
+
+    if (state === 'delivered' || state === 'finished') {
+      actions.push({ code: 'refund', label_key: 'ORD_ACTION_REFUND', ...canRefund(snapshot) });
+    }
+
+    const isPayEligibleFulfilledState =
+      state === 'shipped' || state === 'delivered' || state === 'finished';
+    if (isPayEligibleFulfilledState) {
+      const hasSettled = (order.payments ?? []).some((p: any) =>
+        SETTLED_PAYMENT_STATES.has(p.state),
+      );
+      const isCreditOrder = order.payment_form === '2';
+      const payResult = canPay(snapshot);
+      actions.push({
+        code: 'pay',
+        label_key: 'ORD_ACTION_PAY',
+        ...(payResult.enabled && isCreditOrder
+          ? { enabled: false, reason: ErrorCodes.ORD_PAY_CREDIT_ORDER_001.code }
+          : payResult),
+      });
+
+      if (isCreditOrder && state === 'finished') {
+        actions.push({
+          code: 'credit_payment',
+          label_key: 'ORD_ACTION_CREDIT_PAYMENT',
+          ...canCreditPayment(snapshot),
+        });
+      }
+
+      if (hasSettled) {
+        actions.push({
+          code: 'cancel_payment',
+          label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+          ...canCancelPaymentAsRole(snapshot, roleCtx),
+        });
+      }
+    }
+
+    actions.push({
+      code: 'fast_track',
+      label_key: 'ORD_ACTION_FAST_TRACK',
+      ...canFastTrack(snapshot),
+    });
+
+    return actions;
   }
 
   /**
@@ -3742,6 +4100,32 @@ export class OrdersService {
         },
       });
 
+      // Plan order-truth-and-invoice-tz — customer_changed. Mismo ternario de
+      // arriba (única fuente de la resolución titular) solo para detectar si
+      // el customer_id efectivo cambió; `undefined` (DTO no lo tocó) nunca
+      // dispara el evento.
+      const nextCustomerId =
+        dto.customer_id != null
+          ? dto.customer_id
+          : dto.customer_alias != null
+            ? null
+            : dto.customer_id === null
+              ? null
+              : existingOrder.customer_id;
+      if (nextCustomerId !== existingOrder.customer_id) {
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId,
+          organizationId: context?.organization_id ?? null,
+          type: 'customer_changed',
+          actorUserId: userId || null,
+          payload: {
+            from_customer_id: existingOrder.customer_id,
+            to_customer_id: nextCustomerId,
+          },
+        });
+      }
+
       // 13h) Hidratar respuesta completa dentro de la misma transacción.
       const hydrated = await tx.orders.findFirst({
         where: { id: orderId },
@@ -4211,6 +4595,23 @@ export class OrdersService {
       delivery_type: deliveryType,
     });
 
+    // Plan order-truth-and-invoice-tz — solo si el envío realmente cambió
+    // (mismo `shippingUnchanged` que decide la copia de impuesto arriba);
+    // reenviar el mismo método/tarifa/costo es un no-op y no es un evento.
+    if (!shippingUnchanged) {
+      await this.orderHistoryService?.record(this.prisma, {
+        orderId,
+        storeId,
+        organizationId: context?.organization_id ?? null,
+        type: 'shipping_assigned',
+        payload: {
+          shipping_method_id: method.id,
+          shipping_rate_id: resolvedRateId,
+          shipping_cost: shippingCost,
+        },
+      });
+    }
+
     return updated;
   }
 
@@ -4436,9 +4837,47 @@ export class OrdersService {
     };
   }
 
-  async getTimeline(orderId: number) {
+  /**
+   * Plan order-truth-and-invoice-tz — Paso 7.
+   *
+   * Fuente única: si la orden ya tiene `order_events` (escritos por
+   * `OrderHistoryService` desde el paso 6), el timeline sale SOLO de ahí,
+   * ascendente. Las órdenes anteriores al cambio no tienen ninguna fila en
+   * `order_events`, así que caen al `audit_logs` de siempre (`legacy: true`),
+   * sin tocar datos ni su etiquetado actual.
+   */
+  async getTimeline(
+    orderId: number,
+  ): Promise<{ legacy: boolean; events: unknown[] }> {
     // Ensure order exists and belongs to store (handled by findOne/scoped prisma)
     await this.findOne(orderId);
+
+    if (this.orderHistoryService) {
+      const events = await this.orderHistoryService.listForOrder(orderId);
+      if (events.length > 0) {
+        return {
+          legacy: false,
+          events: events.map((evt) => ({
+            id: evt.id,
+            event_type: evt.event_type,
+            from_state: evt.from_state,
+            to_state: evt.to_state,
+            actor: evt.users
+              ? {
+                  user_id: evt.users.id,
+                  name: `${evt.users.first_name ?? ''} ${evt.users.last_name ?? ''}`.trim(),
+                }
+              : null,
+            actor_source: evt.actor_source,
+            payment_id: evt.payment_id,
+            order_item_id: evt.order_item_id,
+            amount: evt.amount,
+            payload: evt.payload,
+            created_at: evt.created_at,
+          })),
+        };
+      }
+    }
 
     // Fetch audit logs for this order
     // Note: StorePrismaService might scope this, but audit_logs are usually queried via findMany
@@ -4467,7 +4906,7 @@ export class OrdersService {
       },
     });
 
-    return logs;
+    return { legacy: true, events: logs };
   }
 
   /**

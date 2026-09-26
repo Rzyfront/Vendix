@@ -70,6 +70,13 @@ describe('InvoiceDeliveryService', () => {
       invoices: {
         findFirst: jest.fn().mockResolvedValue(acceptedInvoice),
       },
+      // B17 — `resolveStoreTimezone` (usado por `formatDate` del reenvío)
+      // consulta `store_settings.findFirst`. Sin fila, cae al default
+      // (`America/Bogota`) — no cambia el `issue_date` de los fixtures, que
+      // ya vienen a mediodía UTC.
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       withoutScope: jest.fn((arg: any) => {
         if (arg !== undefined) {
           return arg;
@@ -387,6 +394,50 @@ describe('InvoiceDeliveryService', () => {
       '<cbc:ParentDocumentID>FE100</cbc:ParentDocumentID>',
     );
     expect(attached_xml).toContain('<cbc:ID>FE100</cbc:ID>');
+  });
+
+  /**
+   * Step 8 (order-truth-and-invoice-tz-plan.md) — el `cbc:IssueDate` del
+   * `AttachedDocument` se computaba con `new Date(invoice.issue_date)
+   * .toISOString().slice(0, 10)`: fecha CIVIL de UTC, no la de la tienda.
+   * Una factura emitida de madrugada UTC (noche anterior en Bogotá, UTC-5)
+   * declaraba un día que aún no había llegado para el emisor. Ahora usa
+   * `fiscalIssueDate(invoice.issue_date, tz)`, que sí respeta la zona ya
+   * resuelta para el reenvío (B17).
+   */
+  it('E.5 — el AttachedDocument fecha el IssueDate en la zona de la tienda, no en UTC', async () => {
+    const xml_document =
+      '<Invoice><ID>FE100</ID><UUID schemeName="CUFE-SHA384">' +
+      'a'.repeat(96) +
+      '</UUID></Invoice>';
+
+    const { service, emailService } = createService({
+      prisma: {
+        invoices: {
+          findFirst: jest.fn().mockResolvedValue({
+            ...acceptedInvoice,
+            // 02:30 UTC del 26-sep = 21:30 del 25-sep en Bogotá (UTC-5).
+            issue_date: new Date('2026-09-26T02:30:00Z'),
+            xml_document,
+          }),
+        },
+      },
+    });
+
+    const result = await service.deliver(10, { email: 'cliente@test.com' } as any);
+    expect(result.zip_name).toBe('Factura-FE100.zip');
+
+    const [, , , attachments] = (emailService.sendEmailWithAttachments as jest.Mock)
+      .mock.calls[0];
+    const AdmZip = require('adm-zip');
+    const sent_zip = new AdmZip(attachments[0].content);
+    const attached_xml = sent_zip
+      .getEntry('Factura-FE100-attached-document.xml')
+      .getData()
+      .toString('utf-8');
+
+    expect(attached_xml).toContain('<cbc:IssueDate>2026-09-25</cbc:IssueDate>');
+    expect(attached_xml).not.toContain('<cbc:IssueDate>2026-09-26</cbc:IssueDate>');
   });
 
   /**

@@ -195,4 +195,50 @@ describe('Order cancellation policy', () => {
     expect(getCancellationBlocker(order)).toBe(PAYMENT_BLOCKER);
     expect(JSON.stringify(order)).toBe(before);
   });
+
+  describe('B4/B1b (release-855 + order-truth-and-invoice-tz) — fulfilled-state payment-only cancellation', () => {
+    it.each(['shipped', 'delivered'])(
+      'allows can_cancel_payment on %s with a settled direct payment, stock blocker aside',
+      (state) => {
+        const policy = getOrderCancellationPolicy(snapshot({
+          state,
+          payments: [payment('succeeded', 'DIRECT', 'cash')],
+        }));
+        expect(policy.can_cancel).toBe(false);
+        expect(policy.reason_code).toBe(state === 'shipped' ? null : STOCK_BLOCKER);
+        expect(policy.can_cancel_payment).toBe(true);
+      },
+    );
+
+    it('rejects can_cancel_payment on finished — B1b hard-reject, use a refund instead (ORD_PAYMENT_CANCEL_FINISHED_001 at the service)', () => {
+      const policy = getOrderCancellationPolicy(snapshot({
+        state: 'finished',
+        payments: [payment('succeeded', 'DIRECT', 'cash')],
+      }));
+      expect(policy.can_cancel_payment).toBe(false);
+    });
+
+    it.each(['delivered', 'finished'])(
+      'keeps can_cancel_payment false on %s when the settled payment is non-direct',
+      (state) => expect(getOrderCancellationPolicy(snapshot({
+        state,
+        payments: [payment('succeeded', 'ONLINE', 'wompi')],
+      })).can_cancel_payment).toBe(false),
+    );
+
+    it.each(['delivered', 'finished'])(
+      'keeps can_cancel_payment false on %s with no settled payment at all',
+      (state) => expect(getOrderCancellationPolicy(snapshot({
+        state,
+        payments: [payment('pending', 'DIRECT', 'cash')],
+      })).can_cancel_payment).toBe(false),
+    );
+
+    it('does not extend the delivered/finished carve-out to refunded orders', () => {
+      expect(getOrderCancellationPolicy(snapshot({
+        state: 'refunded',
+        payments: [payment('succeeded', 'DIRECT', 'cash')],
+      })).can_cancel_payment).toBe(false);
+    });
+  });
 });

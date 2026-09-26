@@ -158,6 +158,12 @@ describe('InvoicePdfService — asimetría vista previa / emisión', () => {
           findFirst: jest.fn().mockResolvedValue(invoiceWith(dian_status)),
           update: jest.fn().mockResolvedValue({}),
         },
+        // B17 — `generatePdf` resuelve `resolveStoreTimezone(this.prisma,
+        // store.id)` justo después de leer `invoice.store`, ANTES del
+        // resolvedor fiscal que estos dos tests ejercitan. Sin fila cae al
+        // default (`America/Bogota`) y no interfiere con la aserción de
+        // "municipio DIAN".
+        store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
         withoutScope: () => ({
           stores: { findFirst: jest.fn().mockResolvedValue(null) },
           organizations: { findFirst: jest.fn().mockResolvedValue(null) },

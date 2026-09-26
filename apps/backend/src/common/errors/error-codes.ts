@@ -1313,6 +1313,15 @@ export const ErrorCodes = {
     devMessage:
       'Insufficient available stock to deliver order (no reservation and available stock is not enough)',
   },
+  // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md) — usado
+  // por StockValidatorService.assertLinesAvailable/assertIngredientsAvailable
+  // para bloquear ANTES de reservar/comprometer, nombrando cada línea/insumo
+  // con stock insuficiente en `details.items`.
+  INV_STOCK_INSUFFICIENT_LINES: {
+    code: 'INV_STOCK_INSUFFICIENT_LINES',
+    httpStatus: 409,
+    devMessage: 'Stock insuficiente para uno o más productos',
+  },
   POS_STOCK_INSUFFICIENT_001: {
     code: 'POS_STOCK_INSUFFICIENT_001',
     httpStatus: 409,
@@ -1482,6 +1491,17 @@ export const ErrorCodes = {
     code: 'ORD_PAY_ALREADY_PAID_001',
     httpStatus: 409,
     devMessage: 'Order is already fully paid',
+  },
+  // B4/B8 follow-up — una orden `delivered`/`finished` con payment_form='2'
+  // (venta a crédito, ver `registerCreditPayment`) NO puede cobrarse de
+  // contado por `payOrder`: dejaría CxC/cuotas abiertas huérfanas. El abono
+  // debe pasar por el flujo de crédito (`registerCreditPayment` /
+  // `installment_payment.received`).
+  ORD_PAY_CREDIT_ORDER_001: {
+    code: 'ORD_PAY_CREDIT_ORDER_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden es a crédito (payment_form=2); registre el abono por el flujo de crédito, no por cobro de contado.',
   },
   // CP-POS-MODAL-SCOPE-001 / Phase C.4 — edit→pay sin cliente cuando el escape
   // hatch está apagado. 409: el cashier debe seleccionar cliente (vía
@@ -6281,6 +6301,31 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'El tributo de la nota no declara tax_type y no hay fila de catálogo de la cual resolverlo; inventarlo haría que la nota acredite un tributo distinto al facturado.',
+  },
+
+  // B4 (release-855) — cancelPayment() en una orden `delivered`/`finished`
+  // repagable: se bloquea cuando existe una factura de venta vigente que ya
+  // salió hacia la DIAN (validated/sent/accepted). Anular el pago detrás de
+  // una factura emitida descuadraría lo declarado; la vía correcta es una
+  // nota crédito, no una anulación local del pago.
+  ORD_PAYMENT_CANCEL_INVOICED_001: {
+    code: 'ORD_PAYMENT_CANCEL_INVOICED_001',
+    httpStatus: 409,
+    devMessage:
+      'Order has a sales invoice already issued to DIAN (validated/sent/accepted); cancelling the payment locally would desync the declared invoice. Issue a credit note instead.',
+  },
+
+  // B1b (order-truth-and-invoice-tz plan) — `finished` is a hard boundary for
+  // `cancelPayment`. Once an order is finalized (stock committed, invoice
+  // cycle closed) a local payment void is no longer the right instrument —
+  // money must flow back through a refund, which is fiscally aware and
+  // leaves an auditable trail. `delivered`/`shipped` still allow the local
+  // void (see `FULFILLED_PAYMENT_CANCELABLE_STATES` in
+  // `order-cancellation-policy.util.ts`); only `finished` rejects.
+  ORD_PAYMENT_CANCEL_FINISHED_001: {
+    code: 'ORD_PAYMENT_CANCEL_FINISHED_001',
+    httpStatus: 409,
+    devMessage: 'La orden ya está finalizada; usa un reembolso.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

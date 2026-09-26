@@ -67,6 +67,10 @@ import { PreviewProfileDto, PreviewProfileLineDto } from './dto/preview-profile.
 import { ProfilesService } from './profiles.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { PrintFormatDefinition } from '../../print-formats/interfaces/print-format.interface';
+import {
+  resolveOrganizationTimezone,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
 import { mapFiscalDocumentToPrintData } from '../../print-formats/providers/fiscal-document-print.mapper';
 import { PrintLayoutComposerService } from '../../print-formats/services/print-layout-composer.service';
 import { resolvePrintsVatBreakdownForPrint } from '../../print-formats/services/print-vat-breakdown.resolver';
@@ -654,7 +658,23 @@ export class ProfilePreviewService {
           (invoice as any).store,
         ),
       });
-      return composer.compose(definition, data, 'dummy');
+      // Step 8 — fecha del papel en la zona de la tienda, no la del
+      // contenedor. Un fallo al resolver la zona no debe costar el papel:
+      // cae al default del compositor y el preview sigue pintando.
+      let tz: string | undefined;
+      try {
+        tz = input.profile.store_id != null
+          ? await resolveStoreTimezone(prisma, input.profile.store_id)
+          : await resolveOrganizationTimezone(
+              prisma.withoutScope(),
+              input.profile.organization_id,
+            );
+      } catch (tzError) {
+        this.logger.warn(
+          'Zona horaria del preview no resuelta: se usa la zona por defecto.',
+        );
+      }
+      return composer.compose(definition, data, 'dummy', tz);
     } catch (error) {
       this.logger.warn(
         'Representación gráfica del preview omitida: se devuelve sólo el XML.',

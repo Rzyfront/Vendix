@@ -17,6 +17,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
   let settingsService: any;
   let prismaMock: any;
   let context: any;
+  let orderHistory: { record: jest.Mock };
 
   const STORE_ID = 100;
   const USER_ID = 42;
@@ -115,6 +116,8 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       getDefaultLocationForProduct: jest.fn(),
       updateStock: jest.fn(),
     };
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    orderHistory = { record: jest.fn().mockResolvedValue(null) };
 
     service = new TableSessionsService(
       prismaMock as any,
@@ -128,6 +131,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       kitchenFireService as any,
       stockLevelManager as any,
       { markItemDelivered: jest.fn() } as any,
+      orderHistory as any,
     );
   });
 
@@ -323,6 +327,20 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       expect((service as any).notificationsSseService.push).toHaveBeenCalledWith(
         STORE_ID,
         expect.objectContaining({ type: 'session_paid' }),
+      );
+
+      // Plan order-truth-and-invoice-tz (Step 6) — payment_registered dentro
+      // de la MISMA tx que confirma el pago y suma el saldo de la orden.
+      expect(orderHistory.record).toHaveBeenCalledWith(
+        prismaMock,
+        expect.objectContaining({
+          orderId,
+          storeId: STORE_ID,
+          organizationId: 1,
+          type: 'payment_registered',
+          paymentId,
+          amount: 60,
+        }),
       );
     });
 

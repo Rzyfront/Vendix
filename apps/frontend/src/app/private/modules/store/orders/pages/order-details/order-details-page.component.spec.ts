@@ -1,8 +1,11 @@
 import {
   ORDER_DELIVERY_CONFIG, ORDER_DELIVERY_STEP_LABELS, pendingKitchenLabelsFromError,
   cancellationBody, isOrderItemCancellationPaid, shippingTaxModePrefix,
+  lifecycleLookupState, kitchenStateForItem, isItemActionEnabled, isOrderCreateLog,
+  isRefundAuditRow, isConfirmedStateTransition, buildOrderActionButtons,
+  orderStateLabel, orderEventLabel, orderEventActorLabel, isRefundOrderEvent,
 } from './order-details-page.component';
-import { Order } from '../../interfaces/order.interface';
+import { Order, OrderItem, OrderEvent } from '../../interfaces/order.interface';
 import {
   previewItemCancellation,
   rederivePercentageTip,
@@ -147,5 +150,278 @@ describe('OrderDetailsPageComponent — prefijo del modo del impuesto del envío
     expect(shippingTaxModePrefix(true)).toBe('Incluye');
     expect(shippingTaxModePrefix(null)).toBe('Incluye');
     expect(shippingTaxModePrefix(undefined)).toBe('Incluye');
+  });
+});
+
+describe('B13 (release-855) — lifecycleLookupState', () => {
+  it('aliasa draft→created y pending_delivery→processing para el índice', () => {
+    expect(lifecycleLookupState('draft' as any)).toBe('created');
+    expect(lifecycleLookupState('pending_delivery' as any)).toBe('processing');
+  });
+
+  it('deja pasar cualquier otro estado sin cambios', () => {
+    for (const state of ['created', 'pending_payment', 'processing', 'shipped', 'delivered', 'finished', 'cancelled', 'refunded']) {
+      expect(lifecycleLookupState(state as any)).toBe(state as any);
+    }
+  });
+});
+
+describe('B16 (release-855) — kitchenStateForItem', () => {
+  it('kitchenStateForItem retorna null sin filas de cocina', () => {
+    expect(kitchenStateForItem({ kitchen_ticket_items: [] } as any)).toBeNull();
+    expect(kitchenStateForItem({ kitchen_ticket_items: undefined } as any)).toBeNull();
+  });
+
+  it('kitchenStateForItem prioriza la fila en vuelo sobre una terminal más reciente', () => {
+    const item = { kitchen_ticket_items: [
+      { status: 'delivered', kitchen_ticket_id: 1 },
+      { status: 'in_preparation', kitchen_ticket_id: 2 },
+    ] } as any;
+    expect(kitchenStateForItem(item)).toEqual({ status: 'in_preparation', kitchen_ticket_id: 2 });
+  });
+
+  it('kitchenStateForItem cae a la primera fila (más reciente, pre-ordenada) sin fila en vuelo', () => {
+    const item = { kitchen_ticket_items: [{ status: 'delivered', kitchen_ticket_id: 1 }] } as any;
+    expect(kitchenStateForItem(item)).toEqual({ status: 'delivered', kitchen_ticket_id: 1 });
+  });
+});
+
+describe('order-truth-and-invoice-tz plan (Objetivo 3) — isItemActionEnabled', () => {
+  it('lee el code correspondiente desde item.available_actions', () => {
+    const item = {
+      available_actions: [
+        { code: 'deliver', enabled: true },
+        { code: 'cancel', enabled: false, reason: 'ORD_ITEM_CANCEL_PAID_001' },
+        { code: 'reverse_delivered', enabled: false },
+        { code: 'resend', enabled: true },
+      ],
+    } as unknown as OrderItem;
+    expect(isItemActionEnabled(item, 'deliver')).toBeTrue();
+    expect(isItemActionEnabled(item, 'cancel')).toBeFalse();
+    expect(isItemActionEnabled(item, 'reverse_delivered')).toBeFalse();
+    expect(isItemActionEnabled(item, 'resend')).toBeTrue();
+  });
+
+  it('sin available_actions (respuesta vieja) no habilita ningún code — nunca cae a un predicado local', () => {
+    const item = {} as OrderItem;
+    expect(isItemActionEnabled(item, 'deliver')).toBeFalse();
+    expect(isItemActionEnabled(item, 'cancel')).toBeFalse();
+    expect(isItemActionEnabled(item, 'reverse_delivered')).toBeFalse();
+    expect(isItemActionEnabled(item, 'resend')).toBeFalse();
+  });
+
+  it('ignora un code presente pero con enabled:false, y uno ausente del arreglo', () => {
+    const item = { available_actions: [{ code: 'deliver', enabled: false }] } as unknown as OrderItem;
+    expect(isItemActionEnabled(item, 'deliver')).toBeFalse();
+    expect(isItemActionEnabled(item, 'resend')).toBeFalse();
+  });
+});
+
+describe('order-truth-and-invoice-tz plan (Objetivos 3/11/12) — buildOrderActionButtons', () => {
+  it('sin available_actions (respuesta vieja) no pinta ningún botón', () => {
+    expect(buildOrderActionButtons({ state: 'created', available_actions: undefined } as any)).toEqual([]);
+    expect(buildOrderActionButtons({ state: 'created', available_actions: [] } as any)).toEqual([]);
+  });
+
+  it('pinta exactamente los botones del backend, en orden presentacional, e ignora codes ajenos al arreglo', () => {
+    const order = {
+      state: 'created',
+      available_actions: [
+        { code: 'cancel', label_key: 'ORD_ACTION_CANCEL', enabled: true },
+        { code: 'pay', label_key: 'ORD_ACTION_PAY', enabled: true },
+        { code: 'edit_order', label_key: 'ORD_ACTION_EDIT_ORDER', enabled: false, reason: 'FORBIDDEN' },
+        // assign_shipping no tiene botón en este arreglo — vive en la UI de envío.
+        { code: 'assign_shipping', label_key: 'ORD_ACTION_ASSIGN_SHIPPING', enabled: false },
+      ],
+    } as any;
+    const buttons = buildOrderActionButtons(order);
+    expect(buttons.map((b) => b.id)).toEqual(['edit-order', 'pay', 'cancel']);
+    expect(buttons.find((b) => b.id === 'edit-order')).toEqual(
+      jasmine.objectContaining({ enabled: false, reason: 'FORBIDDEN' }),
+    );
+    expect(buttons.find((b) => b.id === 'pay')).toEqual(jasmine.objectContaining({ enabled: true }));
+  });
+
+  it('mapea ready_for_pickup a un botón solo en pending_payment, no en processing (esa vive en la UI de envío)', () => {
+    const pending = {
+      state: 'pending_payment',
+      available_actions: [{ code: 'ready_for_pickup', label_key: 'ORD_ACTION_READY_FOR_PICKUP', enabled: true }],
+    } as any;
+    expect(buildOrderActionButtons(pending).map((b) => b.id)).toEqual(['manual-ready-pickup']);
+
+    const processing = {
+      state: 'processing',
+      available_actions: [{ code: 'ready_for_pickup', label_key: 'ORD_ACTION_READY_FOR_PICKUP', enabled: true }],
+    } as any;
+    expect(buildOrderActionButtons(processing)).toEqual([]);
+  });
+
+  it('etiqueta mark_delivered según delivery_type (home_delivery / pickup / otro)', () => {
+    const base = { state: 'shipped', available_actions: [{ code: 'mark_delivered', label_key: 'ORD_ACTION_MARK_DELIVERED', enabled: true }] };
+    expect(buildOrderActionButtons({ ...base, delivery_type: 'home_delivery' } as any)[0].label).toBe('Marcar como Entregado');
+    expect(buildOrderActionButtons({ ...base, delivery_type: 'pickup' } as any)[0].label).toBe('Confirmar recogida en tienda');
+    expect(buildOrderActionButtons({ ...base, delivery_type: 'direct_delivery' } as any)[0].label).toBe('Confirmar Entrega');
+  });
+
+  it('un mismo code repetido con distinto enabled/reason se traduce 1:1 a su botón (objetivo 12: pay + credit_payment simultáneos)', () => {
+    const order = {
+      state: 'finished',
+      available_actions: [
+        { code: 'pay', label_key: 'ORD_ACTION_PAY', enabled: false, reason: 'ORD_PAY_CREDIT_ORDER_001' },
+        { code: 'credit_payment', label_key: 'ORD_ACTION_CREDIT_PAYMENT', enabled: true },
+        { code: 'refund', label_key: 'ORD_ACTION_REFUND', enabled: true },
+      ],
+    } as any;
+    const buttons = buildOrderActionButtons(order);
+    // pay y credit_payment comparten peso presentacional: el orden de
+    // salida para pesos iguales sigue el orden del arreglo del backend
+    // (sort estable), por eso pay aparece primero aquí.
+    expect(buttons.map((b) => b.id)).toEqual(['pay', 'credit-payment', 'refund']);
+    expect(buttons.find((b) => b.id === 'pay')?.enabled).toBeFalse();
+    expect(buttons.find((b) => b.id === 'credit-payment')?.enabled).toBeTrue();
+  });
+
+  it('reactivate se pinta sin gate de rol propio — la verdad de rol ya la aplicó el backend', () => {
+    const order = {
+      state: 'cancelled',
+      available_actions: [{ code: 'reactivate', label_key: 'ORD_ACTION_REACTIVATE', enabled: true }],
+    } as any;
+    expect(buildOrderActionButtons(order)).toEqual([
+      jasmine.objectContaining({ id: 'reactivate', enabled: true }),
+    ]);
+  });
+
+  it('mapea collect_payment al botón "ship" ("Pasar a Cobro") — restaura el botón removido en commit cbebc40db8f', () => {
+    const order = {
+      state: 'processing',
+      delivery_type: 'direct_delivery',
+      available_actions: [
+        { code: 'collect_payment', label_key: 'ORD_ACTION_COLLECT_PAYMENT', enabled: true },
+      ],
+    } as any;
+    expect(buildOrderActionButtons(order)).toEqual([
+      jasmine.objectContaining({
+        id: 'ship',
+        label: 'Pasar a Cobro',
+        icon: 'credit-card',
+        variant: 'primary',
+        enabled: true,
+      }),
+    ]);
+  });
+});
+
+describe('B3 (release-855) — isOrderCreateLog / isRefundAuditRow / isConfirmedStateTransition', () => {
+  it('isOrderCreateLog sólo marca la fila CREATE cuyo new_values.id ES la orden', () => {
+    expect(isOrderCreateLog({ action: 'CREATE', new_values: { id: 42 } }, 42)).toBeTrue();
+    expect(isOrderCreateLog({ action: 'CREATE', new_values: { id: 42 } }, null)).toBeFalse();
+    // Sub-acción (ítem, cupón…): CREATE pero con su propio id, no el de la orden.
+    expect(isOrderCreateLog({ action: 'CREATE', new_values: { id: 7, order_id: 42 } }, 42)).toBeFalse();
+    expect(isOrderCreateLog({ action: 'UPDATE', new_values: { id: 42 } }, 42)).toBeFalse();
+  });
+
+  it('isRefundAuditRow identifica filas de refund por su propia forma, no por el valor del estado', () => {
+    expect(isRefundAuditRow({ metadata: { flow_action: 'refund' } })).toBeTrue();
+    expect(isRefundAuditRow({ new_values: { order_id: 42 } })).toBeTrue();
+    expect(isRefundAuditRow({ old_values: { order_id: 42 } })).toBeTrue();
+    // Fila de orden común: sin order_id ni flow_action=refund.
+    expect(isRefundAuditRow({ new_values: { id: 42, state: 'processing' } })).toBeFalse();
+    expect(isRefundAuditRow({})).toBeFalse();
+  });
+
+  it('isConfirmedStateTransition exige una transición real u origen FLOW', () => {
+    expect(isConfirmedStateTransition({}, 'pending_payment', 'processing')).toBeTrue();
+    // Snapshot repetido (mismo estado en old/new): no hubo transición.
+    expect(isConfirmedStateTransition({}, 'processing', 'processing')).toBeFalse();
+    // Sin old_values pero marcado FLOW: sigue siendo una transición real.
+    expect(isConfirmedStateTransition({ metadata: { method: 'FLOW' } }, null, 'processing')).toBeTrue();
+    // Sin old_values y sin marca FLOW: no se puede confirmar la transición.
+    expect(isConfirmedStateTransition({}, null, 'processing')).toBeFalse();
+  });
+});
+
+describe('order-truth-and-invoice-tz plan (Paso 7) — orderStateLabel / orderEventLabel / orderEventActorLabel / isRefundOrderEvent', () => {
+  const baseEvent = (overrides: Partial<OrderEvent>): OrderEvent => ({
+    id: 1,
+    event_type: 'customer_changed',
+    from_state: null,
+    to_state: null,
+    actor: null,
+    actor_source: 'system',
+    payment_id: null,
+    order_item_id: null,
+    amount: null,
+    payload: null,
+    created_at: '2026-09-01T00:00:00.000Z',
+    ...overrides,
+  });
+  const formatAmount = (amount: number | string | null | undefined) => `$${amount}`;
+
+  it('orderStateLabel traduce los estados conocidos y deja pasar el resto', () => {
+    expect(orderStateLabel('processing')).toBe('Procesando');
+    expect(orderStateLabel('finished')).toBe('Finalizada');
+    expect(orderStateLabel(null)).toBe('Desconocido');
+    expect(orderStateLabel(undefined)).toBe('Desconocido');
+    expect(orderStateLabel('unknown_state' as any)).toBe('unknown_state');
+  });
+
+  it('orderEventLabel arma "Estado: X → Y" para state_changed reusando orderStateLabel', () => {
+    const evt = baseEvent({ event_type: 'state_changed', from_state: 'pending_payment' as any, to_state: 'processing' as any });
+    expect(orderEventLabel(evt, formatAmount)).toBe('Estado: Pago Pendiente → Procesando');
+  });
+
+  it('orderEventLabel arma payment_registered con monto y método cuando el payload los trae', () => {
+    const evt = baseEvent({ event_type: 'payment_registered', amount: 5000, payload: { method: 'cash' } });
+    expect(orderEventLabel(evt, formatAmount)).toBe('Pago registrado — $5000 — cash');
+  });
+
+  it('orderEventLabel se degrada a la etiqueta simple sin monto ni método', () => {
+    const evt = baseEvent({ event_type: 'payment_registered' });
+    expect(orderEventLabel(evt, formatAmount)).toBe('Pago registrado');
+  });
+
+  it('orderEventLabel arma invoice_issued con el número de factura cuando el payload lo trae', () => {
+    expect(orderEventLabel(baseEvent({ event_type: 'invoice_issued', payload: { invoice_number: 'FE-001' } }), formatAmount))
+      .toBe('Factura emitida — FE-001');
+    expect(orderEventLabel(baseEvent({ event_type: 'invoice_issued' }), formatAmount)).toBe('Factura emitida');
+  });
+
+  it('orderEventLabel cubre el resto del mapa determinístico por event_type', () => {
+    const cases: Array<[OrderEvent['event_type'], string]> = [
+      ['payment_cancelled', 'Pago anulado'],
+      ['refund_created', 'Reembolso creado'],
+      ['refund_resolved', 'Reembolso resuelto'],
+      ['customer_changed', 'Cliente cambiado'],
+      ['item_delivered', 'Ítem entregado'],
+      ['item_cancelled', 'Ítem cancelado'],
+      ['item_delivery_reverted', 'Entrega de ítem revertida'],
+      ['shipping_assigned', 'Envío asignado'],
+    ];
+    for (const [event_type, label] of cases) {
+      expect(orderEventLabel(baseEvent({ event_type }), formatAmount)).toBe(label);
+    }
+  });
+
+  it('orderEventActorLabel usa el nombre del actor cuando existe', () => {
+    const evt = baseEvent({ actor: { user_id: 9, name: 'Ana Pérez' }, actor_source: 'http' });
+    expect(orderEventActorLabel(evt)).toBe('Ana Pérez');
+  });
+
+  it('orderEventActorLabel cae al label fijo por actor_source sin actor', () => {
+    expect(orderEventActorLabel(baseEvent({ actor: null, actor_source: 'system' }))).toBe('Sistema');
+    expect(orderEventActorLabel(baseEvent({ actor: null, actor_source: 'webhook' }))).toBe('Pasarela de pago');
+    expect(orderEventActorLabel(baseEvent({ actor: null, actor_source: 'job' }))).toBe('Proceso automático');
+    expect(orderEventActorLabel(baseEvent({ actor: null, actor_source: 'listener' }))).toBe('Cocina/Despacho');
+    expect(orderEventActorLabel(baseEvent({ actor: null, actor_source: 'http' }))).toBe('Sistema');
+  });
+
+  it('isRefundOrderEvent es true SOLO para refund_created/refund_resolved, nunca por colisión de nombre con un estado', () => {
+    expect(isRefundOrderEvent(baseEvent({ event_type: 'refund_created' }))).toBeTrue();
+    expect(isRefundOrderEvent(baseEvent({ event_type: 'refund_resolved' }))).toBeTrue();
+    // state_changed hacia un to_state que en el enum de refunds se llamaría
+    // igual ('processing'/'cancelled') NO activa el badge — a diferencia de
+    // la heurística legacy `isRefundAuditRow`, acá sólo manda el event_type.
+    expect(isRefundOrderEvent(baseEvent({ event_type: 'state_changed', to_state: 'processing' as any }))).toBeFalse();
+    expect(isRefundOrderEvent(baseEvent({ event_type: 'payment_cancelled' }))).toBeFalse();
   });
 });

@@ -65,7 +65,9 @@ import {
   parseApiError,
   withApiErrorReference,
   readApiErrorRequestId,
+  readInsufficientStockItems,
 } from '../../../../../../../core/utils/parse-api-error';
+import { formatStockShortageSummary } from '../../../../../../../core/utils/stock-shortage.util';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { AddItemsModalComponent } from '../../components/add-items-modal/add-items-modal.component';
@@ -1046,10 +1048,39 @@ export class TableSessionPageComponent implements OnInit {
         error: (err: unknown) => {
           this.isAddingItems.set(false);
           this.toastService.error(
-            typeof err === 'string' ? err : 'Error al agregar items',
+            this.describeAddOrPayError(err, 'Error al agregar items'),
           );
         },
       });
+  }
+
+  /**
+   * No overselling — `INV_STOCK_INSUFFICIENT_LINES` / `INV_STOCK_002`.
+   *
+   * `TablesService.handleError` (fuera de este scope, ver `tables.service.ts`)
+   * colapsa HOY todo error a un string plano, así que casi siempre `err` ya
+   * trae el mensaje humano del backend armado — con el producto/insumo y las
+   * cantidades, porque `isPresentableApiMessage` en `parse-api-error.ts` deja
+   * pasar el texto del backend tal cual. Este helper es defensivo y
+   * forward-compatible: si `err` alguna vez llega como objeto con `details`
+   * estructurado (mismo contrato que ya preserva `pos-payment.service.ts`),
+   * preferimos listar cada faltante en vez de un string genérico.
+   */
+  private describeAddOrPayError(err: unknown, fallback: string): string {
+    if (typeof err === 'string') {
+      return err;
+    }
+    const record =
+      typeof err === 'object' && err !== null ? (err as Record<string, unknown>) : null;
+    const details =
+      record?.['details'] ??
+      (record?.['error'] as Record<string, unknown> | undefined)?.['details'];
+    const shortages = readInsufficientStockItems(details);
+    if (shortages.length) {
+      return formatStockShortageSummary(shortages);
+    }
+    const message = record?.['message'];
+    return typeof message === 'string' && message.trim() ? message : fallback;
   }
 
   // ── Remove item (Frente 2) ───────────────────────────────────────────
@@ -1486,6 +1517,19 @@ export class TableSessionPageComponent implements OnInit {
     // at the catchError boundary, so it only survives in whichever shape kept
     // the raw body. Quote it back when present; never invent one.
     const requestId = readApiErrorRequestId(err);
+    // No overselling — `INV_STOCK_INSUFFICIENT_LINES`. `fireOrderItems` /
+    // `previewFire` (kitchen-tickets.service.ts) normalize through a string-
+    // collapsing handler today, so `structured.details` is unreachable in
+    // practice — this check is forward-compatible defense, not dead code we
+    // expect to hit: if `details` ever survives structured, list every
+    // faltante instead of the generic code-lookup below.
+    const shortages = readInsufficientStockItems(structured?.details);
+    if (shortages.length) {
+      this.toastService.error(
+        withApiErrorReference(formatStockShortageSummary(shortages), requestId),
+      );
+      return;
+    }
     if (structured?.code) {
       // parseApiError pulls userMessage from ERROR_MESSAGES using the code,
       // and falls back to DEFAULT_ERROR_MESSAGE if the code isn't mapped.
@@ -1688,7 +1732,7 @@ export class TableSessionPageComponent implements OnInit {
         error: (err: unknown) => {
           this.isPaying.set(false);
           this.toastService.error(
-            typeof err === 'string' ? err : 'Error al procesar el cobro',
+            this.describeAddOrPayError(err, 'Error al procesar el cobro'),
           );
         },
       });

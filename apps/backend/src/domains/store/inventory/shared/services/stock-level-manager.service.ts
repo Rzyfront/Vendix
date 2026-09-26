@@ -756,6 +756,34 @@ export class StockLevelManager {
         : quantity;
 
     const execute = async (prisma: any) => {
+      // 0. No-overselling guard — un producto/variante sin seguimiento de
+      // inventario nunca se valida contra stock_levels, así que tampoco debe
+      // reservar contra ella: crear la reserva igual dejaría un pasivo
+      // (`quantity_reserved`) que ninguna venta futura va a liberar porque el
+      // flujo normal (release/commit) también la ignora. `no-op` silencioso,
+      // igual que `skip_reservation`.
+      const trackingProduct = await prisma.products.findFirst({
+        where: { id: product_id },
+        select: { track_inventory: true },
+      });
+      let trackingOverride: boolean | null | undefined;
+      if (variant_id) {
+        const variant = await prisma.product_variants.findFirst({
+          where: { id: variant_id },
+          select: { track_inventory_override: true },
+        });
+        trackingOverride = variant?.track_inventory_override;
+      }
+      // Producto no encontrado aquí no es este método el que debe fallar: se
+      // trata como "tracked" por defecto para que el chequeo de existencia
+      // real (más abajo, en getOrCreateStockLevel) sea el que reporte
+      // PROD_FIND_001.
+      const effectiveTracking =
+        trackingOverride ?? trackingProduct?.track_inventory ?? true;
+      if (effectiveTracking === false) {
+        return;
+      }
+
       // Validar contexto
       const context = RequestContextService.getContext();
       const organization_id =
@@ -1055,6 +1083,152 @@ export class StockLevelManager {
     } else {
       await this.prisma.$transaction(async (prisma) => execute(prisma));
     }
+  }
+
+  /**
+   * Libera EXACTAMENTE `quantity` unidades de reserva para una referencia +
+   * producto/variante, recorriendo las reservas ACTIVAS de esa identidad de
+   * más antigua a más nueva (oldest-first).
+   *
+   * Existe porque `releaseReservationsByReference` libera TODA la reserva de
+   * la referencia completa — correcto para un commit de orden entera, pero
+   * incorrecto cuando dos líneas de la misma orden reservan el mismo
+   * producto/variante y solo UNA se entrega/comita: liberar "por referencia"
+   * también apagaría la reserva de la línea hermana todavía no entregada.
+   *
+   * Semántica de reserva parcial: si la reserva más antigua cubre más de lo
+   * pedido, se decrementa su `quantity` y permanece `active` por el resto —
+   * nunca se marca consumida/cancelada una reserva que aún protege stock de
+   * otra línea.
+   *
+   * `status`:
+   * - `'consumed'`: entrega física. Por defecto decrementa `quantity_on_hand`
+   *   igual que `releaseReservationsByReference`; los callers que ya
+   *   decrementan `on_hand` por su cuenta (vía `updateStock`, que es la única
+   *   fuente de costeo/movimientos/valuación) deben pasar
+   *   `{ decrementOnHand: false }` para no descontar dos veces.
+   * - `'cancelled'`: aborto sin entrega. Restaura `quantity_available` y
+   *   nunca toca `quantity_on_hand`.
+   *
+   * Sin clamping que oculte faltante: si las reservas activas de esa
+   * identidad suman menos que `quantity`, se libera lo que hay y se retorna
+   * el total realmente liberado (puede ser menor que `quantity`) — el caller
+   * decide si eso es un error.
+   *
+   * @returns unidades efectivamente liberadas (0 si no había reservas activas).
+   */
+  async releaseReservationQuantity(
+    reference_type: ReservationRefType,
+    reference_id: number,
+    product_id: number,
+    variant_id: number | null | undefined,
+    quantity: number,
+    status: 'consumed' | 'cancelled',
+    tx?: Prisma.TransactionClient,
+    options: { decrementOnHand?: boolean } = {},
+  ): Promise<number> {
+    const execute = async (prisma: any): Promise<number> => {
+      if (!(quantity > 0)) return 0;
+
+      const reservations = await prisma.stock_reservations.findMany({
+        where: {
+          reserved_for_type: reference_type,
+          reserved_for_id: reference_id,
+          product_id,
+          product_variant_id: variant_id ?? null,
+          status: 'active',
+        },
+        orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+      });
+
+      if (reservations.length === 0) return 0;
+
+      let remaining = quantity;
+      let released = 0;
+      // location_id -> unidades liberadas en esa ubicación, para actualizar
+      // stock_levels por ubicación (una referencia puede repartirse en varias).
+      const perLocation = new Map<number, number>();
+
+      for (const r of reservations) {
+        if (remaining <= 0) break;
+        const take = Math.min(r.quantity, remaining);
+        if (take <= 0) continue;
+
+        if (take >= r.quantity) {
+          // Reserva se libera completa.
+          await prisma.stock_reservations.update({
+            where: { id: r.id },
+            data: { status, updated_at: new Date() },
+          });
+        } else {
+          // Liberación parcial: el resto sigue activo protegiendo a la línea
+          // hermana.
+          await prisma.stock_reservations.update({
+            where: { id: r.id },
+            data: { quantity: r.quantity - take, updated_at: new Date() },
+          });
+        }
+
+        perLocation.set(
+          r.location_id,
+          (perLocation.get(r.location_id) || 0) + take,
+        );
+        released += take;
+        remaining -= take;
+      }
+
+      if (released === 0) return 0;
+
+      for (const [location_id, released_at_location] of perLocation) {
+        const stock_level = await prisma.stock_levels.findFirst({
+          where: {
+            product_id,
+            product_variant_id: variant_id ?? null,
+            location_id,
+          },
+        });
+        if (!stock_level) continue;
+
+        const newReserved = Math.max(
+          0,
+          stock_level.quantity_reserved - released_at_location,
+        );
+        const data: any = {
+          quantity_reserved: newReserved,
+          last_updated: new Date(),
+          updated_at: new Date(),
+        };
+
+        if (status === 'consumed') {
+          const newOnHand =
+            options.decrementOnHand === false
+              ? stock_level.quantity_on_hand
+              : Math.max(
+                  0,
+                  stock_level.quantity_on_hand - released_at_location,
+                );
+          data.quantity_on_hand = newOnHand;
+          data.quantity_available = Math.max(0, newOnHand - newReserved);
+        } else {
+          data.quantity_available =
+            stock_level.quantity_available + released_at_location;
+        }
+
+        await prisma.stock_levels.update({
+          where: { id: stock_level.id },
+          data,
+        });
+      }
+
+      await this.syncProductStock(prisma, product_id, variant_id ?? undefined);
+
+      return released;
+    };
+
+    if (tx) {
+      return execute(tx);
+    }
+    return this.prisma.$transaction(async (prisma) => execute(prisma));
   }
 
   /**

@@ -5,10 +5,13 @@ import {
   HostListener,
   OnInit,
   DestroyRef,
+  effect,
   forwardRef,
   inject,
   input,
+  output,
   signal,
+  untracked,
 } from '@angular/core';
 import {
   ControlValueAccessor,
@@ -36,6 +39,13 @@ const SEARCH_DEBOUNCE_MS = 300;
  * The search pattern mirrors the organization `user-select` component, but this
  * one is store-scoped and a proper CVA (instead of a `model()`), so it can be
  * driven by reactive forms in the remision / planilla / vehicle flows.
+ *
+ * B9 — also exposes a non-CVA `value` input / `valueChange` output pair
+ * (same convention as the shared `app-selector`), for callers that hold the
+ * selection as a plain signal instead of a `FormControl` (e.g. the POS
+ * payment-collector's waiter-tip picker). Both channels can coexist: CVA
+ * consumers keep using `[formControl]`/`formControlName`/`ngModel` and never
+ * touch `[value]`.
  */
 @Component({
   selector: 'app-store-user-select',
@@ -191,6 +201,16 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
   readonly disabled = input<boolean>(false);
   /** User ids to exclude from search results (e.g. an already-chosen driver). */
   readonly excludeIds = input<number[]>([]);
+  /**
+   * B9 — `'staff'` routes search/resolve through the `store:pos:access`-gated
+   * `staff-lookup` endpoint (see {@link StoreUserLookupService}) instead of
+   * the default `store:users:read`-gated one. Use `'staff'` for any picker
+   * reachable by cashier/waiter.
+   */
+  readonly lookupMode = input<'default' | 'staff'>('default');
+  /** Non-CVA selection channel (plain signal consumers). See class doc. */
+  readonly value = input<number | null>(null);
+  readonly valueChange = output<number | null>();
 
   // Signal UI state (zoneless-safe)
   readonly query = signal<string>('');
@@ -205,6 +225,47 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
   private onChange: (value: number | null) => void = () => {};
   private onTouched: () => void = () => {};
 
+  /**
+   * B9 — whether `[value]` has ever carried a non-null id. Plain field (not a
+   * signal): it must NOT become a dependency of `syncValueInput` below — the
+   * effect is only allowed to depend on `this.value()`.
+   *
+   * Consumers that use this component as a CVA (`formControlName`/`ngModel`,
+   * the 5 form screens) never bind `[value]` at all, so it stays at its
+   * default `null` forever. Without this flag, that default is
+   * indistinguishable from "the caller explicitly cleared it", and the effect
+   * would `selected.set(null)` right after every `writeValue()`/`select()` —
+   * see the regression this fixes.
+   */
+  private receivedValueInput = false;
+
+  /**
+   * B9 — mirrors `writeValue` for the non-CVA `value` input: resolves the
+   * incoming id to a name once (skips when it already matches `selected()`,
+   * so it never fights the user's own in-progress `select()`).
+   *
+   * Depends ONLY on `this.value()` — `selected()` is read via `untracked()`
+   * so this effect never re-runs just because CVA's `writeValue()`/`select()`
+   * changed `selected` (that used to make the effect re-fire, read the
+   * never-bound `value()` as `null`, and wipe out the CVA selection).
+   * While `[value]` has never carried a non-null id (CVA mode), the effect is
+   * a no-op: it never touches `selected` at all.
+   */
+  private readonly syncValueInput = effect(() => {
+    const id = this.value();
+    if (id == null) {
+      if (!this.receivedValueInput) return; // CVA mode: `[value]` isn't bound — don't touch it.
+      if (untracked(() => this.selected()) !== null) this.selected.set(null);
+      return;
+    }
+    this.receivedValueInput = true;
+    if (untracked(() => this.selected())?.id === id) return;
+    this.lookup
+      .getById(id, { mode: this.lookupMode() })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((user) => this.selected.set(user ?? { id, name: `Usuario #${id}` }));
+  });
+
   ngOnInit(): void {
     this.searchSubject
       .pipe(
@@ -213,7 +274,7 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
         tap(() => this.isLoading.set(true)),
         switchMap((term) =>
           this.lookup
-            .search(term, { excludeIds: this.excludeIds() })
+            .search(term, { excludeIds: this.excludeIds(), mode: this.lookupMode() })
             .pipe(catchError(() => of([] as StoreUserOption[]))),
         ),
         takeUntilDestroyed(this.destroyRef),
@@ -232,7 +293,7 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
     }
     // Resolve name/avatar for the incoming id.
     this.lookup
-      .getById(value)
+      .getById(value, { mode: this.lookupMode() })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((user) =>
         this.selected.set(user ?? { id: value, name: `Usuario #${value}` }),
@@ -281,6 +342,7 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
     this.isOpen.set(false);
     this.onChange(user.id);
     this.onTouched();
+    this.valueChange.emit(user.id);
   }
 
   clear(event: Event): void {
@@ -291,6 +353,7 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
     this.results.set([]);
     this.onChange(null);
     this.onTouched();
+    this.valueChange.emit(null);
   }
 
   initial(name: string): string {

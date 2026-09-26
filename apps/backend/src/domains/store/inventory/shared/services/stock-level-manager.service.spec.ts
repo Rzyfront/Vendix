@@ -117,6 +117,7 @@ describe('StockLevelManager', () => {
       stock_reservations: {
         findMany: jest.fn(),
         create: jest.fn(),
+        update: jest.fn(),
         updateMany: jest.fn(),
       },
       inventory_movements: {
@@ -748,6 +749,172 @@ describe('StockLevelManager', () => {
           user_id: 1,
         }),
       });
+    });
+
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md):
+    // un producto sin tracking nunca debe reservar — crear la reserva igual
+    // dejaría un pasivo (`quantity_reserved`) que el flujo normal de
+    // release/commit tampoco mira porque ese flujo también se salta el chequeo
+    // de stock para productos sin tracking.
+    it('no crea reserva ni toca stock_levels cuando el producto no trackea inventario', async () => {
+      const mockTx = {
+        $queryRaw: (prismaService as any).$queryRaw,
+        stock_levels: prismaService.stock_levels,
+        stock_reservations: prismaService.stock_reservations,
+        products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
+        inventory_locations: prismaService.inventory_locations,
+      };
+
+      prismaService.$transaction.mockImplementation((callback) =>
+        callback(mockTx),
+      );
+      // Único findFirst de `products` esperado: el chequeo de tracking del
+      // guard. Si el guard no cortocircuita, `getOrCreateStockLevel` haría
+      // una SEGUNDA llamada (org-scope) que esta prueba también detectaría
+      // vía `toHaveBeenCalledTimes(1)`.
+      prismaService.products.findFirst.mockResolvedValueOnce({
+        track_inventory: false,
+      } as any);
+
+      await expect(
+        service.reserveStock(1, undefined, 1, 20, 'order', 1, 1),
+      ).resolves.toBeUndefined();
+
+      expect(prismaService.stock_reservations.create).not.toHaveBeenCalled();
+      expect(prismaService.stock_levels.update).not.toHaveBeenCalled();
+      expect(prismaService.products.findFirst).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('releaseReservationQuantity', () => {
+    it('libera parcialmente: decrementa la reserva más antigua y la deja activa por el resto', async () => {
+      const oldReservation = {
+        id: 1,
+        location_id: 1,
+        quantity: 5,
+        created_at: new Date('2024-01-01T00:00:00Z'),
+      };
+      const newReservation = {
+        id: 2,
+        location_id: 1,
+        quantity: 5,
+        created_at: new Date('2024-01-02T00:00:00Z'),
+      };
+
+      const mockTx = {
+        $queryRaw: (prismaService as any).$queryRaw,
+        stock_levels: prismaService.stock_levels,
+        stock_reservations: prismaService.stock_reservations,
+        products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
+      };
+
+      prismaService.$transaction.mockImplementation((callback) =>
+        callback(mockTx),
+      );
+      prismaService.stock_reservations.findMany.mockResolvedValue([
+        oldReservation,
+        newReservation,
+      ]);
+      prismaService.stock_reservations.update.mockResolvedValue({});
+      prismaService.stock_levels.findFirst.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.update.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.aggregate.mockResolvedValue({
+        _sum: { quantity_available: 120 },
+      });
+
+      const released = await service.releaseReservationQuantity(
+        'order',
+        1,
+        1,
+        undefined,
+        3,
+        'consumed',
+      );
+
+      expect(released).toBe(3);
+      // Solo la reserva MÁS ANTIGUA se toca (oldest-first) y queda ACTIVA con
+      // el remanente — nunca se marca consumida una reserva que aún cubre
+      // cantidad pedida por otra línea.
+      expect(prismaService.stock_reservations.update).toHaveBeenCalledTimes(1);
+      expect(prismaService.stock_reservations.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: { quantity: 2, updated_at: expect.any(Date) },
+      });
+    });
+
+    it('libera reserva(s) completa(s) cuando la cantidad pedida cubre exactamente su total', async () => {
+      const reservation = {
+        id: 1,
+        location_id: 1,
+        quantity: 5,
+        created_at: new Date('2024-01-01T00:00:00Z'),
+      };
+
+      const mockTx = {
+        $queryRaw: (prismaService as any).$queryRaw,
+        stock_levels: prismaService.stock_levels,
+        stock_reservations: prismaService.stock_reservations,
+        products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
+      };
+
+      prismaService.$transaction.mockImplementation((callback) =>
+        callback(mockTx),
+      );
+      prismaService.stock_reservations.findMany.mockResolvedValue([
+        reservation,
+      ]);
+      prismaService.stock_reservations.update.mockResolvedValue({});
+      prismaService.stock_levels.findFirst.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.update.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.aggregate.mockResolvedValue({
+        _sum: { quantity_available: 120 },
+      });
+
+      const released = await service.releaseReservationQuantity(
+        'order',
+        1,
+        1,
+        undefined,
+        5,
+        'consumed',
+      );
+
+      expect(released).toBe(5);
+      expect(prismaService.stock_reservations.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: { status: 'consumed', updated_at: expect.any(Date) },
+      });
+    });
+
+    it('sin reservas activas no libera nada y no toca stock_levels', async () => {
+      const mockTx = {
+        $queryRaw: (prismaService as any).$queryRaw,
+        stock_levels: prismaService.stock_levels,
+        stock_reservations: prismaService.stock_reservations,
+        products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
+      };
+
+      prismaService.$transaction.mockImplementation((callback) =>
+        callback(mockTx),
+      );
+      prismaService.stock_reservations.findMany.mockResolvedValue([]);
+
+      const released = await service.releaseReservationQuantity(
+        'order',
+        1,
+        1,
+        undefined,
+        3,
+        'consumed',
+      );
+
+      expect(released).toBe(0);
+      expect(prismaService.stock_reservations.update).not.toHaveBeenCalled();
+      expect(prismaService.stock_levels.update).not.toHaveBeenCalled();
     });
   });
 
