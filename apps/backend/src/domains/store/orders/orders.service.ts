@@ -4837,9 +4837,47 @@ export class OrdersService {
     };
   }
 
-  async getTimeline(orderId: number) {
+  /**
+   * Plan order-truth-and-invoice-tz — Paso 7.
+   *
+   * Fuente única: si la orden ya tiene `order_events` (escritos por
+   * `OrderHistoryService` desde el paso 6), el timeline sale SOLO de ahí,
+   * ascendente. Las órdenes anteriores al cambio no tienen ninguna fila en
+   * `order_events`, así que caen al `audit_logs` de siempre (`legacy: true`),
+   * sin tocar datos ni su etiquetado actual.
+   */
+  async getTimeline(
+    orderId: number,
+  ): Promise<{ legacy: boolean; events: unknown[] }> {
     // Ensure order exists and belongs to store (handled by findOne/scoped prisma)
     await this.findOne(orderId);
+
+    if (this.orderHistoryService) {
+      const events = await this.orderHistoryService.listForOrder(orderId);
+      if (events.length > 0) {
+        return {
+          legacy: false,
+          events: events.map((evt) => ({
+            id: evt.id,
+            event_type: evt.event_type,
+            from_state: evt.from_state,
+            to_state: evt.to_state,
+            actor: evt.users
+              ? {
+                  user_id: evt.users.id,
+                  name: `${evt.users.first_name ?? ''} ${evt.users.last_name ?? ''}`.trim(),
+                }
+              : null,
+            actor_source: evt.actor_source,
+            payment_id: evt.payment_id,
+            order_item_id: evt.order_item_id,
+            amount: evt.amount,
+            payload: evt.payload,
+            created_at: evt.created_at,
+          })),
+        };
+      }
+    }
 
     // Fetch audit logs for this order
     // Note: StorePrismaService might scope this, but audit_logs are usually queried via findMany
@@ -4868,7 +4906,7 @@ export class OrdersService {
       },
     });
 
-    return logs;
+    return { legacy: true, events: logs };
   }
 
   /**

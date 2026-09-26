@@ -933,6 +933,132 @@ describe('OrdersService', () => {
   });
 
   /**
+   * order-truth-and-invoice-tz plan, Step 7 — `getTimeline` lee `order_events`
+   * cuando existen y cae al `audit_logs` legacy cuando no. `orderHistoryService`
+   * es `@Optional()` en el constructor real (para no romper `new OrdersService`
+   * en otros specs), así que aquí se asigna directo sobre la instancia con un
+   * mock mínimo — no hace falta reconstruir el TestingModule completo.
+   */
+  describe('getTimeline — order_events con fallback legacy (order-truth-and-invoice-tz plan, Step 7)', () => {
+    const baseOrder = {
+      id: 700,
+      state: 'created',
+      delivery_type: 'direct_delivery',
+      payments: [],
+      refunds: [],
+      order_items: [],
+      order_promotions: [],
+      coupon_uses: [],
+    };
+
+    beforeEach(() => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(baseOrder);
+    });
+
+    it('returns legacy:false with events mapped only from order_events when the order has any', async () => {
+      const listForOrder = jest.fn().mockResolvedValue([
+        {
+          id: 1,
+          event_type: 'state_changed',
+          from_state: 'created',
+          to_state: 'processing',
+          actor_user_id: 5,
+          actor_source: 'http',
+          payment_id: null,
+          order_item_id: null,
+          amount: null,
+          payload: null,
+          created_at: new Date('2026-01-01T10:00:00Z'),
+          users: { id: 5, first_name: 'Ana', last_name: 'Lopez' },
+        },
+        {
+          id: 2,
+          event_type: 'payment_registered',
+          from_state: null,
+          to_state: null,
+          actor_user_id: null,
+          actor_source: 'webhook',
+          payment_id: 33,
+          order_item_id: null,
+          amount: '50000',
+          payload: { method: 'card' },
+          created_at: new Date('2026-01-01T10:05:00Z'),
+          users: null,
+        },
+      ]);
+      (service as any).orderHistoryService = { listForOrder };
+
+      const result = await service.getTimeline(700);
+
+      expect(listForOrder).toHaveBeenCalledWith(700);
+      expect(mockPrismaService.audit_logs.findMany).not.toHaveBeenCalled();
+      expect(result.legacy).toBe(false);
+      expect(result.events).toEqual([
+        expect.objectContaining({
+          id: 1,
+          event_type: 'state_changed',
+          from_state: 'created',
+          to_state: 'processing',
+          actor: { user_id: 5, name: 'Ana Lopez' },
+          actor_source: 'http',
+        }),
+        expect.objectContaining({
+          id: 2,
+          event_type: 'payment_registered',
+          actor: null,
+          actor_source: 'webhook',
+          payment_id: 33,
+          amount: '50000',
+          payload: { method: 'card' },
+        }),
+      ]);
+    });
+
+    it('falls back to legacy audit_logs output (unchanged) when the order has no order_events', async () => {
+      const listForOrder = jest.fn().mockResolvedValue([]);
+      (service as any).orderHistoryService = { listForOrder };
+      const legacyLogs = [
+        {
+          id: 10,
+          action: 'UPDATE',
+          resource: 'orders',
+          resource_id: 700,
+          users: null,
+          created_at: new Date('2025-01-01T00:00:00Z'),
+        },
+      ];
+      mockPrismaService.audit_logs.findMany.mockResolvedValue(legacyLogs);
+
+      const result = await service.getTimeline(700);
+
+      expect(listForOrder).toHaveBeenCalledWith(700);
+      expect(mockPrismaService.audit_logs.findMany).toHaveBeenCalled();
+      expect(result.legacy).toBe(true);
+      expect(result.events).toBe(legacyLogs);
+    });
+
+    it('falls back to legacy when OrderHistoryService did not resolve (@Optional with no DI provider)', async () => {
+      (service as any).orderHistoryService = undefined;
+      const legacyLogs = [
+        {
+          id: 11,
+          action: 'CREATE',
+          resource: 'orders',
+          resource_id: 700,
+          users: null,
+          created_at: new Date('2025-01-01T00:00:00Z'),
+        },
+      ];
+      mockPrismaService.audit_logs.findMany.mockResolvedValue(legacyLogs);
+
+      const result = await service.getTimeline(700);
+
+      expect(result.legacy).toBe(true);
+      expect(result.events).toBe(legacyLogs);
+    });
+  });
+
+  /**
    * QUI-557 — El vector de corrupción que hacía reaparecer el ticket.
    *
    * `UpdateOrderDto extends PartialType(CreateOrderDto)` reexpone `state`, así
