@@ -87,14 +87,15 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
         update: jest.fn().mockResolvedValue({}),
       },
       orders: {
-        // Despacha por la forma del `select`: pre-claim (sólo `state`), helper
-        // de emisión (`channel`) y el resto (probe de envío, cupón) → null.
+        // Despacha por la forma del `select`: pre-claim (`state` +
+        // `payment_form`), helper de emisión (`channel`) y el resto (probe de
+        // envío, cupón) → null.
         findFirst: jest.fn().mockImplementation((args: any) => {
           const select = args?.select ?? {};
           if (select.channel) return Promise.resolve(emissionRow);
-          const keys = Object.keys(select);
-          if (keys.length === 1 && keys[0] === 'state') {
-            return Promise.resolve({ state: 'created' });
+          const keys = Object.keys(select).sort().join(',');
+          if (keys === 'payment_form,state' || keys === 'state') {
+            return Promise.resolve({ state: 'created', payment_form: '1' });
           }
           return Promise.resolve(null);
         }),

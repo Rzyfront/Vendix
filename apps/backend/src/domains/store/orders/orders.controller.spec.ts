@@ -8,6 +8,7 @@ import { SettingsService } from '../settings/settings.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
+import { OrderShippingTaxRepairService } from './services/order-shipping-tax-repair.service';
 import { ResponseService } from '@common/responses/response.service';
 import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
 import { order_state_enum } from '@prisma/client';
@@ -66,6 +67,10 @@ describe('OrdersController', () => {
         // correr un solo test. Stub vacío: ningún test de este archivo
         // ejercita el stream SSE.
         { provide: NotificationsSseService, useValue: {} },
+        // El controller inyecta OrderShippingTaxRepairService desde el paso
+        // de reparación del impuesto del envío; ningún test de este archivo
+        // lo ejercita.
+        { provide: OrderShippingTaxRepairService, useValue: {} },
       ],
     }).compile();
 
