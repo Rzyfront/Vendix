@@ -5116,3 +5116,112 @@ describe('OrderFlowService.fastTrackOrder — pickup/dine_in sin método de env�
     expect(payOrder).not.toHaveBeenCalled();
   });
 });
+
+describe('OrderFlowService.settleFinancialSplitSource — guardia de stock (docs/plans/no-overselling-stock-guard-plan.md paso 9)', () => {
+  const ORDER_ID = 501;
+  const STORE_ID = 4;
+
+  // Cuenta financiera POS de entrega directa, pagada por completo, sin mesa
+  // abierta — la única forma que este método llega a la rama de commit de
+  // stock (línea :2247 en order-flow.service.ts).
+  const baseOrder = (overrides: Record<string, unknown> = {}) => ({
+    id: ORDER_ID,
+    store_id: STORE_ID,
+    state: 'created',
+    active_financial_split_id: 77,
+    grand_total: 100,
+    payments: [{ state: 'succeeded', amount: 100 }],
+    ...overrides,
+  });
+
+  const build = () => {
+    const prismaMock: any = {
+      table_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
+      orders: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findFirst: jest.fn().mockResolvedValue({
+          id: ORDER_ID,
+          channel: 'pos',
+          delivery_type: 'direct_delivery',
+          order_items: [{ products: { requires_serial_numbers: false } }],
+        }),
+      },
+    };
+    const orderStockCommit = { commitOrderDelivery: jest.fn() };
+    const stockValidator = { resolveInventoryPolicy: jest.fn() };
+
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      { emit: jest.fn() } as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any,
+      orderStockCommit as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      stockValidator as any,
+    );
+
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(baseOrder());
+
+    return { service, prismaMock, orderStockCommit, stockValidator };
+  };
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('línea de producto en 0 con allowOversell=false: propaga el errorCode real del commit (INV_STOCK_002) y pide bloqueo', async () => {
+    const { service, orderStockCommit, stockValidator } = build();
+    stockValidator.resolveInventoryPolicy.mockResolvedValue({
+      allowOversell: false,
+      allowIngredientOveruse: true,
+    });
+    // `commitOrderDelivery` con `blockOnInsufficient:true` lanza
+    // `INV_STOCK_002` cuando la disponibilidad total no cubre la línea
+    // (order-stock-commit.service.ts:756-770) — NO `INV_STOCK_INSUFFICIENT_LINES`
+    // (ese código es del guard de `assertLinesAvailable`, otro punto de entrada).
+    orderStockCommit.commitOrderDelivery.mockRejectedValue(
+      new VendixHttpException(
+        ErrorCodes.INV_STOCK_002,
+        'No se puede entregar: stock insuficiente para MODELO (disponible 0, requerido 2)',
+        { product_id: 701, requested: 2, available: 0 },
+      ),
+    );
+
+    const error: any = await service
+      .settleFinancialSplitSource(ORDER_ID)
+      .catch((e) => e);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe(ErrorCodes.INV_STOCK_002.code);
+    expect(stockValidator.resolveInventoryPolicy).toHaveBeenCalledWith(STORE_ID);
+    expect(orderStockCommit.commitOrderDelivery).toHaveBeenCalledWith(
+      ORDER_ID,
+      expect.objectContaining({
+        blockOnInsufficient: true,
+        allowNegativeOnShortfall: false,
+      }),
+    );
+  });
+
+  it('allowOversell=true: no bloquea y el commit recibe la opción de negativo permitido', async () => {
+    const { service, orderStockCommit, stockValidator } = build();
+    stockValidator.resolveInventoryPolicy.mockResolvedValue({
+      allowOversell: true,
+      allowIngredientOveruse: true,
+    });
+    orderStockCommit.commitOrderDelivery.mockResolvedValue({
+      totalCost: 0,
+      committedItemCount: 1,
+    });
+
+    await expect(
+      service.settleFinancialSplitSource(ORDER_ID),
+    ).resolves.toBeUndefined();
+
+    expect(orderStockCommit.commitOrderDelivery).toHaveBeenCalledWith(
+      ORDER_ID,
+      expect.objectContaining({
+        blockOnInsufficient: false,
+        allowNegativeOnShortfall: true,
+      }),
+    );
+  });
+});
