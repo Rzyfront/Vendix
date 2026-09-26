@@ -815,6 +815,123 @@ describe('OrdersService', () => {
     });
   });
 
+  // ----------------------------------------------------------------
+  // order-truth-and-invoice-tz plan — Step 2. `findOne` attaches
+  // `available_actions` (order) + `items[].available_actions` (line),
+  // computed by the SAME util predicates `OrderFlowService
+  // .getAvailableActions` calls — additive fields only, nothing existing
+  // changes shape.
+  // ----------------------------------------------------------------
+  describe('findOne — available_actions (order-truth-and-invoice-tz plan, Step 2)', () => {
+    let contextSpy: jest.SpyInstance;
+
+    afterEach(() => contextSpy?.mockRestore());
+
+    it('attaches order-level available_actions from the same predicates as getAvailableActions', async () => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        user_id: 1,
+        roles: ['owner'],
+      } as any);
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 50,
+        state: 'created',
+        delivery_type: 'shipping',
+        shipping_method_id: null,
+        payment_form: '1',
+        grand_total: 100,
+        payments: [],
+        refunds: [],
+        order_items: [],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const result = await service.findOne(50);
+
+      expect((result as any).available_actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: 'edit_order', enabled: true }),
+          expect.objectContaining({ code: 'pay', enabled: true }),
+          expect.objectContaining({ code: 'assign_shipping', enabled: true }),
+          expect.objectContaining({ code: 'cancel', enabled: true }),
+        ]),
+      );
+    });
+
+    it('disables edit_order/pay for a financial-split-locked order, still owner', async () => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        user_id: 1,
+        roles: ['owner'],
+      } as any);
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 52,
+        state: 'created',
+        delivery_type: 'direct_delivery',
+        active_financial_split_id: 9,
+        grand_total: 100,
+        payments: [],
+        refunds: [],
+        order_items: [],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const result = await service.findOne(52);
+      const actions = (result as any).available_actions as Array<{
+        code: string; enabled: boolean; reason?: string;
+      }>;
+
+      expect(actions.find((a) => a.code === 'edit_order')).toMatchObject({
+        enabled: false,
+        reason: 'SPLIT_ACCOUNT_LOCKED',
+      });
+      expect(actions.find((a) => a.code === 'pay')).toMatchObject({
+        enabled: false,
+        reason: 'SPLIT_ACCOUNT_LOCKED',
+      });
+    });
+
+    it('attaches item-level available_actions (deliver/cancel/reverse_delivered/resend) per order item', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 51,
+        state: 'processing',
+        delivery_type: 'direct_delivery',
+        payments: [],
+        refunds: [],
+        order_items: [
+          {
+            id: 510,
+            product_id: null,
+            unit_price: 10,
+            quantity: 1,
+            total_price: 10,
+            item_type: 'prepared',
+            delivered_at: null,
+            kitchen_ticket_items: [{ status: 'ready' }],
+            products: {},
+          },
+        ],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const result = await service.findOne(51);
+      const item = (result as any).order_items[0];
+
+      expect(item.available_actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: 'deliver', enabled: true }),
+          expect.objectContaining({ code: 'cancel', enabled: true }),
+          expect.objectContaining({ code: 'reverse_delivered', enabled: false }),
+        ]),
+      );
+    });
+  });
+
   /**
    * QUI-557 — El vector de corrupción que hacía reaparecer el ticket.
    *
