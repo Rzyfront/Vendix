@@ -528,6 +528,41 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
+    // B10: Propinas por mesero. Lee únicamente `orders.tip_amount` /
+    // `tip_waiter_id` (atribución de mesero); las cuentas divididas
+    // (`order_financial_accounts.tip_amount`) no tienen mesero asociado y
+    // quedan fuera a propósito para no arrastrar doble conteo.
+    id: 'sales-tips-by-waiter',
+    category: 'sales',
+    title: 'Propinas por Mesero',
+    description: 'Propinas desglosadas por el mesero asignado en cada orden',
+    detailedDescription:
+      'Analiza las propinas recibidas por cada mesero: órdenes con propina, total acumulado, propina promedio y fecha de la última propina registrada.',
+    icon: 'hand-coins',
+    route: '/admin/reports/sales/sales-tips-by-waiter',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    columns: [
+      { key: 'waiter_name', header: 'Mesero', type: 'text' },
+      { key: 'waiter_email', header: 'Correo', type: 'text' },
+      { key: 'tipped_orders_count', header: 'Órdenes con propina', type: 'number', footer: 'sum' },
+      { key: 'total_tips', header: 'Total propinas', type: 'currency', footer: 'sum' },
+      { key: 'avg_tip', header: 'Propina promedio', type: 'currency', footer: 'average' },
+      { key: 'last_tip_date', header: 'Última propina', type: 'date' },
+    ],
+    exportFilename: 'propinas_por_mesero',
+    stats: [
+      { key: 'total_tips', label: 'Total Propinas', type: 'currency', icon: 'dollar-sign' },
+      { key: 'tipped_orders_count', label: 'Órdenes con Propina', type: 'number', icon: 'shopping-cart' },
+      { key: 'avg_tip', label: 'Propina Promedio', type: 'currency', icon: 'calculator' },
+    ],
+    dataEndpoint: 'store/analytics/sales/tips-by-waiter',
+    exportEndpoint: 'store/analytics/sales/tips-by-waiter/export',
+  },
+
+  {
     id: 'sales-trends',
     category: 'sales',
     title: 'Tendencias',
