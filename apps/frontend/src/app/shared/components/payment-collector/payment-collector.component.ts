@@ -30,6 +30,7 @@ import { PaymentMethodsCatalogService } from '../../services/payment-methods-cat
 import { PaymentWompiFieldsComponent } from './payment-wompi-fields.component';
 import { PaymentCreditFieldsComponent } from './payment-credit-fields.component';
 import { StepsLineComponent, type StepsLineItem } from '../steps-line/steps-line.component';
+import { StoreUserSelectComponent } from '../store-user-select/store-user-select.component';
 import {
   DEFAULT_CONFIG_BY_CONTEXT,
   type BankAccountSelectOption,
@@ -70,6 +71,14 @@ interface MultiLegFormControls {
   amountReceived: FormControl<number | null>;
   reference: FormControl<string>;
   bankAccountId: FormControl<number | null>;
+  /**
+   * B15(1) — true en cuanto el cajero toca `setLegReceived` a mano. Mientras
+   * sea false, `setLegAmount` mantiene `amountReceived` pegado a `amount`
+   * (efectivo exacto); en true solo lo SUBE si el recibido manual quedó por
+   * debajo del nuevo monto del tramo (nunca lo baja: sería inventar vuelto).
+   * Puramente interno — nunca viaja al backend (`toPaymentLeg` no la lee).
+   */
+  receivedEdited: FormControl<boolean>;
 }
 
 /**
@@ -82,6 +91,7 @@ interface MultiLegRowValue {
   amountReceived?: number | null;
   reference?: string | null;
   bankAccountId?: number | null;
+  receivedEdited?: boolean | null;
 }
 
 /**
@@ -107,6 +117,7 @@ interface MultiLegRowValue {
     PaymentWompiFieldsComponent,
     PaymentCreditFieldsComponent,
     StepsLineComponent,
+    StoreUserSelectComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './payment-collector.component.html',
@@ -974,14 +985,38 @@ export class PaymentCollectorComponent implements OnInit {
       amountReceived: method.type === PaymentMethodType.CASH ? amount : null,
       reference: '',
       bankAccountId: null,
+      // B15(1) — nuevo método, nuevo tramo: el recibido vuelve a seguir al
+      // monto hasta que el cajero lo edite otra vez.
+      receivedEdited: false,
     });
   }
 
-  /** Write the leg amount (clamped at zero; negatives never validate). */
+  /**
+   * Write the leg amount (clamped at zero; negatives never validate).
+   *
+   * B15(1) — un tramo en efectivo nace con `amountReceived = amount`
+   * (efectivo exacto). Si el cajero luego BAJA el monto del tramo (p. ej.
+   * $100k → $40k al sumar una tarjeta de $60k) sin haber tocado el recibido
+   * a mano, el recibido debe seguir bajando con él — si no, el recibido
+   * viejo ($100k) queda fijo y el backend calcula un vuelto de $60k que
+   * nunca existió. Si el cajero SÍ editó el recibido a mano y éste terminó
+   * por debajo del nuevo monto (recibido insuficiente), se sube al monto
+   * (nunca se baja uno editado a mano: sería inventar vuelto en la otra
+   * dirección).
+   */
   setLegAmount(index: number, amount: number): void {
     const group = this.legGroupOrNull(index);
     if (!group) return;
-    group.controls.amount.setValue(Math.max(0, Number(amount) || 0));
+    const clamped = Math.max(0, Number(amount) || 0);
+    group.controls.amount.setValue(clamped);
+    const method = this.legMethod(index);
+    if (method?.type === PaymentMethodType.CASH) {
+      if (!group.controls.receivedEdited.value) {
+        group.controls.amountReceived.setValue(clamped);
+      } else if ((group.controls.amountReceived.value ?? 0) < clamped) {
+        group.controls.amountReceived.setValue(clamped);
+      }
+    }
   }
 
   /** Write the cash tendered on leg `index` (cash legs only, clamped at zero). */
@@ -989,6 +1024,9 @@ export class PaymentCollectorComponent implements OnInit {
     const group = this.legGroupOrNull(index);
     if (!group) return;
     group.controls.amountReceived.setValue(Math.max(0, Number(amount) || 0));
+    // B15(1) — a partir de aquí el recibido lo gobierna el cajero, no
+    // `setLegAmount`; ver su doc para el porqué.
+    group.controls.receivedEdited.setValue(true);
   }
 
   /** Write the manual reference of leg `index` (trimmed on read). */
@@ -1196,6 +1234,7 @@ export class PaymentCollectorComponent implements OnInit {
     storePaymentMethodId: number;
     amount: number;
     amountReceived?: number | null;
+    receivedEdited?: boolean;
   }): FormGroup<MultiLegFormControls> {
     return new FormGroup<MultiLegFormControls>({
       storePaymentMethodId: new FormControl(seed.storePaymentMethodId, { nonNullable: true }),
@@ -1203,6 +1242,7 @@ export class PaymentCollectorComponent implements OnInit {
       amountReceived: new FormControl<number | null>(seed.amountReceived ?? null),
       reference: new FormControl('', { nonNullable: true }),
       bankAccountId: new FormControl<number | null>(null),
+      receivedEdited: new FormControl(seed.receivedEdited ?? false, { nonNullable: true }),
     });
   }
 

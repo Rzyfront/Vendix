@@ -46,6 +46,15 @@ export interface StoreUserSearchOptions {
    * staff-only pickers to hide ecommerce customers (who are also store users).
    */
   excludeRole?: string;
+  /**
+   * B9 — `'staff'` routes the search to `GET /store/users/staff-lookup`
+   * instead of `GET /store/users`. The default endpoint requires
+   * `store:users:read` ("solo owner/admin"), which cashier/waiter do not
+   * hold; `staff-lookup` is gated by `store:pos:access` (granted to both)
+   * and returns only `{id, first_name, last_name}`. Use this mode for any
+   * picker reachable by cashier/waiter (e.g. the POS waiter-tip selector).
+   */
+  mode?: 'default' | 'staff';
 }
 
 const DEFAULT_LIMIT = 10;
@@ -63,6 +72,8 @@ const GET_BY_ID_LIMIT = 100;
 export class StoreUserLookupService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${environment.apiUrl}/store/users`;
+  /** B9 — `store:pos:access`-gated staff search (see {@link StoreUserSearchOptions.mode}). */
+  private readonly staffLookupUrl = `${environment.apiUrl}/store/users/staff-lookup`;
 
   /**
    * Cache of the full active-user page used by {@link getById}. Store staff
@@ -72,28 +83,36 @@ export class StoreUserLookupService {
   private allActiveUsers$: Observable<StoreUserOption[]> | null = null;
 
   /**
-   * Remote search against `GET /store/users?search=&limit=&state=ACTIVE`.
+   * Remote search against `GET /store/users?search=&limit=&state=ACTIVE`, or,
+   * with `opts.mode === 'staff'`, `GET /store/users/staff-lookup?search=&limit=`
+   * (see {@link StoreUserSearchOptions.mode}). The staff endpoint's DTO is
+   * whitelist-validated with only `search`/`limit`, so `state`/`exclude_role`
+   * are never sent on that path — they would 400 under `forbidNonWhitelisted`.
    *
    * @param term Free-text search (matches first name / last name / email).
-   * @param opts Optional `limit` and `excludeIds`.
+   * @param opts Optional `limit`, `excludeIds`, `excludeRole`, `mode`.
    */
   search(term: string, opts?: StoreUserSearchOptions): Observable<StoreUserOption[]> {
     const trimmed = term?.trim() ?? '';
     const limit = opts?.limit ?? DEFAULT_LIMIT;
     const excludeIds = opts?.excludeIds ?? [];
+    const isStaffMode = opts?.mode === 'staff';
 
-    let params = new HttpParams()
-      .set('limit', String(limit))
-      .set('state', 'ACTIVE');
+    let params = new HttpParams().set('limit', String(limit));
     if (trimmed) {
       params = params.set('search', trimmed);
     }
-    if (opts?.excludeRole) {
-      params = params.set('exclude_role', opts.excludeRole);
+    if (!isStaffMode) {
+      params = params.set('state', 'ACTIVE');
+      if (opts?.excludeRole) {
+        params = params.set('exclude_role', opts.excludeRole);
+      }
     }
 
     return this.http
-      .get<PaginatedEnvelope<RawStoreUser>>(this.baseUrl, { params })
+      .get<PaginatedEnvelope<RawStoreUser>>(isStaffMode ? this.staffLookupUrl : this.baseUrl, {
+        params,
+      })
       .pipe(
         map((res) => (res?.data ?? []).map(toStoreUserOption)),
         map((options) =>
@@ -106,15 +125,25 @@ export class StoreUserLookupService {
   }
 
   /**
-   * Resolve a single user by id so `writeValue(id)` can render name/avatar.
+   * Resolve a single user by id so `writeValue(id)`/the `value` input can
+   * render a name.
    *
-   * The backend has no public `GET /store/users/:id` returning the flat option
-   * shape, so this fetches the (small) active-user list once and resolves
-   * locally. Returns `null` when the id is not found.
+   * Default mode: the backend has no public `GET /store/users/:id` returning
+   * the flat option shape, so this fetches the (small) active-user list once
+   * and resolves locally. Returns `null` when the id is not found.
+   *
+   * Staff mode: `staff-lookup` has no single-resource route (deliberately —
+   * B9 keeps it name-search-only), so this returns a `Usuario #id` placeholder
+   * without a network call. In practice the POS waiter-tip picker only ever
+   * feeds an id it just resolved via `select()`, so this path is a rarely-hit
+   * fallback (e.g. a persisted draft carrying a stale id).
    */
-  getById(id: number): Observable<StoreUserOption | null> {
+  getById(id: number, opts?: { mode?: 'default' | 'staff' }): Observable<StoreUserOption | null> {
     if (id == null) {
       return of(null);
+    }
+    if (opts?.mode === 'staff') {
+      return of({ id, name: `Usuario #${id}` });
     }
     return this.loadAllActiveUsers().pipe(
       map((users) => users.find((u) => u.id === id) ?? null),

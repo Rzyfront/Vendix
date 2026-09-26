@@ -35,6 +35,7 @@ describe('PosPaymentService.processShippingSale — adopted order reference', ()
       { isEnabled: false, getRegisterId: () => null } as any,
       {} as any,
       {} as any,
+      {} as any,
     );
   });
 
@@ -132,6 +133,7 @@ describe('PosPaymentService.processSaleWithPayment — prior table status', () =
       { isEnabled: false, getRegisterId: () => null } as any,
       {} as any,
       {} as any,
+      {} as any,
     );
   });
 
@@ -158,4 +160,164 @@ describe('PosPaymentService.processSaleWithPayment — prior table status', () =
       expect(result.order?.id).toBe(1124);
     });
   }
+});
+
+describe('PosPaymentService.processShippingSale — B7 nota de envío + B11 cobro multimétodo', () => {
+  let service: PosPaymentService;
+  let post: jasmine.Spy;
+
+  const cart = (): CartState => ({
+    items: [],
+    customer: { id: 9, first_name: 'Cliente', last_name: 'POS' },
+    summary: { subtotal: 1000, taxAmount: 0, total: 1000 },
+    appliedDiscounts: [],
+    linkedOrderId: null,
+    notes: 'Nota del carrito',
+  } as unknown as CartState);
+
+  const shipping: PosShippingSaleData = {
+    shippingMethodId: 3,
+    shippingCost: 500,
+    deliveryType: 'home_delivery',
+    deliveryNotes: 'Dejar en portería, timbre 2',
+    shippingAddress: {
+      address_line1: 'Calle 1', city: 'Bogotá', state_province: 'Bogotá',
+      country_code: 'CO', recipient_name: 'Cliente POS', recipient_phone: '3000000000',
+    },
+  } as unknown as PosShippingSaleData;
+
+  beforeEach(() => {
+    post = jasmine.createSpy('post').and.returnValue(of({
+      data: { success: true, order: { id: 41 }, message: 'OK' },
+    }));
+    service = new PosPaymentService(
+      { post } as any,
+      { getUserId: () => 1, getStoreIdOrThrow: () => 1 } as any,
+      { isEnabled: false, getRegisterId: () => null } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+  });
+
+  it('B7 — envía la nota de envío por el canal `notes` (no solo `internal_notes`)', async () => {
+    await firstValueFrom(service.processShippingSale(cart(), shipping, null, 'current_user'));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.notes).toContain('Nota del carrito');
+    expect(payload.notes).toContain('Nota de envío: Dejar en portería, timbre 2');
+    // `internal_notes` sigue existiendo (lo reescribe order-flow más tarde);
+    // B7 no lo toca, solo añade el canal que sí sobrevive al ticket.
+    expect(payload.internal_notes).toBe('Dejar en portería, timbre 2');
+  });
+
+  it('B11 — con 2+ tramos envía `payments[]` y omite las claves escalares de método', async () => {
+    const paymentRequest = {
+      paymentMethod: { id: '1', type: 'cash' },
+      payments: [
+        { store_payment_method_id: 1, amount: 1000, amount_received: 1000 },
+        { store_payment_method_id: 2, amount: 500 },
+      ],
+    } as any;
+
+    await firstValueFrom(
+      service.processShippingSale(cart(), shipping, paymentRequest, 'current_user'),
+    );
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.payments).toEqual(paymentRequest.payments);
+    expect(payload.store_payment_method_id).toBeUndefined();
+    expect(payload.amount_received).toBeUndefined();
+  });
+
+  it('B11 — con 1 tramo conserva el camino escalar de siempre', async () => {
+    const paymentRequest = {
+      paymentMethod: { id: '1', type: 'cash' },
+      cashReceived: 2000,
+    } as any;
+
+    await firstValueFrom(
+      service.processShippingSale(cart(), shipping, paymentRequest, 'current_user'),
+    );
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.payments).toBeUndefined();
+    expect(payload.store_payment_method_id).toBe(1);
+    expect(payload.amount_received).toBe(2000);
+  });
+});
+
+describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada multimétodo enruta a flow/pay', () => {
+  let service: PosPaymentService;
+  let post: jasmine.Spy;
+  let flowPayOrder: jasmine.Spy;
+  let processPaymentForExistingOrder: jasmine.Spy;
+
+  const cart = {
+    items: [],
+    customer: null,
+    summary: { subtotal: 1000, taxAmount: 0, total: 1000 },
+    appliedDiscounts: [],
+    linkedOrderId: 41,
+    linkedOrderNumber: 'ORD-41',
+  } as unknown as CartState;
+
+  beforeEach(() => {
+    post = jasmine.createSpy('post');
+    processPaymentForExistingOrder = jasmine
+      .createSpy('processPaymentForExistingOrder')
+      .and.returnValue(of({ data: { payment: { id: 820 } } }));
+    flowPayOrder = jasmine.createSpy('flowPayOrder').and.returnValue(of({
+      order: { state: 'paid' },
+      payment: { id: 900, change: 0 },
+      payments: [
+        { id: 900, amount: 1000, payment_method: 'Efectivo', status: 'succeeded' },
+        { id: 901, amount: 500, payment_method: 'Tarjeta', status: 'succeeded' },
+      ],
+    }));
+    service = new PosPaymentService(
+      { post } as any,
+      { getUserId: () => 1, getStoreIdOrThrow: () => 1, getStoreId: () => 1 } as any,
+      { isEnabled: false, getRegisterId: () => null } as any,
+      {} as any,
+      { processPaymentForExistingOrder } as any,
+      { flowPayOrder } as any,
+    );
+  });
+
+  it('2 tramos en una orden adoptada llaman a `flow/pay`, no al POST escalar de pagos', async () => {
+    const paymentRequest = {
+      paymentMethod: { id: '1', type: 'cash' },
+      payments: [
+        { store_payment_method_id: 1, amount: 1000, amount_received: 1000 },
+        { store_payment_method_id: 2, amount: 500 },
+      ],
+    } as any;
+
+    const result = await firstValueFrom(
+      service.processSaleWithPayment(cart, paymentRequest, 'current_user'),
+    );
+
+    expect(post).not.toHaveBeenCalled();
+    expect(flowPayOrder).toHaveBeenCalledTimes(1);
+    const [orderIdArg, dtoArg] = flowPayOrder.calls.mostRecent().args;
+    expect(orderIdArg).toBe('41');
+    expect(dtoArg.payments).toEqual(paymentRequest.payments);
+    expect(dtoArg.payment_type).toBe('direct');
+    expect(result.success).toBe(true);
+    expect(result.order?.id).toBe(41);
+    expect(result.payments).toEqual(jasmine.any(Array));
+  });
+
+  it('1 tramo en una orden adoptada conserva el camino escalar existente (sin flow/pay)', async () => {
+    post.and.returnValue(of({
+      data: { success: true, order: { id: 1124 }, payment: { id: 820 } },
+    }));
+    const paymentRequest = {
+      paymentMethod: { id: '1', type: 'cash' },
+      cashReceived: 1000,
+    } as any;
+
+    await firstValueFrom(service.processSaleWithPayment(cart, paymentRequest, 'current_user'));
+
+    expect(flowPayOrder).not.toHaveBeenCalled();
+    expect(processPaymentForExistingOrder).toHaveBeenCalledTimes(1);
+  });
 });

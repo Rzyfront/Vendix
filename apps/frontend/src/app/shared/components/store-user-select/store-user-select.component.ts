@@ -5,9 +5,11 @@ import {
   HostListener,
   OnInit,
   DestroyRef,
+  effect,
   forwardRef,
   inject,
   input,
+  output,
   signal,
 } from '@angular/core';
 import {
@@ -36,6 +38,13 @@ const SEARCH_DEBOUNCE_MS = 300;
  * The search pattern mirrors the organization `user-select` component, but this
  * one is store-scoped and a proper CVA (instead of a `model()`), so it can be
  * driven by reactive forms in the remision / planilla / vehicle flows.
+ *
+ * B9 — also exposes a non-CVA `value` input / `valueChange` output pair
+ * (same convention as the shared `app-selector`), for callers that hold the
+ * selection as a plain signal instead of a `FormControl` (e.g. the POS
+ * payment-collector's waiter-tip picker). Both channels can coexist: CVA
+ * consumers keep using `[formControl]`/`formControlName`/`ngModel` and never
+ * touch `[value]`.
  */
 @Component({
   selector: 'app-store-user-select',
@@ -191,6 +200,16 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
   readonly disabled = input<boolean>(false);
   /** User ids to exclude from search results (e.g. an already-chosen driver). */
   readonly excludeIds = input<number[]>([]);
+  /**
+   * B9 — `'staff'` routes search/resolve through the `store:pos:access`-gated
+   * `staff-lookup` endpoint (see {@link StoreUserLookupService}) instead of
+   * the default `store:users:read`-gated one. Use `'staff'` for any picker
+   * reachable by cashier/waiter.
+   */
+  readonly lookupMode = input<'default' | 'staff'>('default');
+  /** Non-CVA selection channel (plain signal consumers). See class doc. */
+  readonly value = input<number | null>(null);
+  readonly valueChange = output<number | null>();
 
   // Signal UI state (zoneless-safe)
   readonly query = signal<string>('');
@@ -205,6 +224,24 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
   private onChange: (value: number | null) => void = () => {};
   private onTouched: () => void = () => {};
 
+  /**
+   * B9 — mirrors `writeValue` for the non-CVA `value` input: resolves the
+   * incoming id to a name once (skips when it already matches `selected()`,
+   * so it never fights the user's own in-progress `select()`).
+   */
+  private readonly syncValueInput = effect(() => {
+    const id = this.value();
+    if (id == null) {
+      if (this.selected() !== null) this.selected.set(null);
+      return;
+    }
+    if (this.selected()?.id === id) return;
+    this.lookup
+      .getById(id, { mode: this.lookupMode() })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((user) => this.selected.set(user ?? { id, name: `Usuario #${id}` }));
+  });
+
   ngOnInit(): void {
     this.searchSubject
       .pipe(
@@ -213,7 +250,7 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
         tap(() => this.isLoading.set(true)),
         switchMap((term) =>
           this.lookup
-            .search(term, { excludeIds: this.excludeIds() })
+            .search(term, { excludeIds: this.excludeIds(), mode: this.lookupMode() })
             .pipe(catchError(() => of([] as StoreUserOption[]))),
         ),
         takeUntilDestroyed(this.destroyRef),
@@ -232,7 +269,7 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
     }
     // Resolve name/avatar for the incoming id.
     this.lookup
-      .getById(value)
+      .getById(value, { mode: this.lookupMode() })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((user) =>
         this.selected.set(user ?? { id: value, name: `Usuario #${value}` }),
@@ -281,6 +318,7 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
     this.isOpen.set(false);
     this.onChange(user.id);
     this.onTouched();
+    this.valueChange.emit(user.id);
   }
 
   clear(event: Event): void {
@@ -291,6 +329,7 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
     this.results.set([]);
     this.onChange(null);
     this.onTouched();
+    this.valueChange.emit(null);
   }
 
   initial(name: string): string {

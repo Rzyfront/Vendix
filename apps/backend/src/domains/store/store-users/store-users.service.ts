@@ -140,6 +140,56 @@ export class StoreUsersService {
     };
   }
 
+  /**
+   * B9 — lightweight name-only staff search backing `store:pos:access`
+   * pickers (e.g. the POS payment-collector waiter-tip selector).
+   *
+   * `findAll` above requires `store:users:read`, which cashier/waiter do
+   * not hold (seed comment: "solo owner/admin"). This method intentionally
+   * returns the minimal `{id, first_name, last_name}` projection — no
+   * email/phone/roles — so the wider `store:pos:access` permission (already
+   * granted to both roles) is safe to gate it with. `id` is `users.id`
+   * (not `store_users.id`), matching `orders.tip_waiter_id`'s FK target.
+   */
+  async staffLookup(query: { search?: string; limit?: number }) {
+    const limit = Math.min(Math.max(Number(query.limit) || 10, 1), 20);
+
+    const where: any = {
+      user: { state: 'active' },
+    };
+
+    if (query.search) {
+      where.user = {
+        ...where.user,
+        OR: [
+          { first_name: { contains: query.search, mode: 'insensitive' } },
+          { last_name: { contains: query.search, mode: 'insensitive' } },
+        ],
+      };
+    }
+
+    const rows = await this.prisma.store_users.findMany({
+      where,
+      include: {
+        user: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+      },
+      take: limit,
+      orderBy: { id: 'asc' },
+    });
+
+    return rows.map((row) => ({
+      id: row.user.id,
+      first_name: row.user.first_name,
+      last_name: row.user.last_name,
+    }));
+  }
+
   async findOne(id: number) {
     // Auto-scoped
     const user = await this.prisma.store_users.findFirst({

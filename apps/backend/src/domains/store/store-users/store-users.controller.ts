@@ -13,6 +13,7 @@ import { StoreUsersService } from './store-users.service';
 import { StoreUserManagementService } from './store-user-management.service';
 import {
   QueryStoreUsersDto,
+  QueryStaffLookupDto,
   CreateStoreUserDto,
   UpdateStoreUserDto,
   ResetPasswordStoreUserDto,
@@ -45,6 +46,20 @@ export class StoreUsersController {
       result.meta.page,
       result.meta.limit,
     );
+  }
+
+  /**
+   * B9 — name-only staff picker for `store:pos:access` contexts (waiter-tip
+   * attribution in the POS payment collector). Gated by `store:pos:access`
+   * instead of `store:users:read` so cashier/waiter (who lack the latter,
+   * per the permission seed's "solo owner/admin" comment) can search staff
+   * without being granted the full store-users management surface.
+   */
+  @Get('staff-lookup')
+  @Permissions('store:pos:access')
+  async staffLookup(@Query() query: QueryStaffLookupDto) {
+    const result = await this.storeUsersService.staffLookup(query);
+    return this.responseService.success(result);
   }
 
   // ─── Management Endpoints ───────────────────────────────────────────
