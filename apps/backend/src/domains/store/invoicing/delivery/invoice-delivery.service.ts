@@ -29,6 +29,11 @@ import { DIAN_DOCUMENT_TYPES } from '../providers/dian-direct/constants/dian-doc
 import { FiscalInvoicePdfRenderService } from '../../print-formats/services/fiscal-invoice-pdf-render.service';
 import { DeliverInvoiceDto } from './dto/deliver-invoice.dto';
 import { writeInvoiceDeliveryEvent } from './invoice-delivery-events.writer';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  formatStoreDate,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
 
 /**
  * E.6 — Reenviar una factura ya emitida a otro correo (`POST /:id/deliver`).
@@ -279,12 +284,15 @@ export class InvoiceDeliveryService {
         : 'Consumidor Final');
     const store_name = org?.legal_name || org?.name || 'N/A';
 
+    // B17 — fecha del reenvío en la zona de la tienda, no la del contenedor.
+    const tz = await resolveStoreTimezone(this.prisma, invoice.store_id);
+
     const email_data: InvoiceEmailData = {
       invoice_number: invoice.invoice_number,
       invoice_type: invoice.invoice_type,
       customer_name,
-      issue_date: this.formatDate(invoice.issue_date),
-      due_date: invoice.due_date ? this.formatDate(invoice.due_date) : undefined,
+      issue_date: this.formatDate(invoice.issue_date, tz),
+      due_date: invoice.due_date ? this.formatDate(invoice.due_date, tz) : undefined,
       items: (invoice.invoice_items || []).map((item) => ({
         description: item.description,
         quantity: Number(item.quantity),
@@ -603,11 +611,7 @@ export class InvoiceDeliveryService {
     };
   }
 
-  private formatDate(date: Date): string {
-    const d = new Date(date);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
+  private formatDate(date: Date, tz: string = DEFAULT_STORE_TIMEZONE): string {
+    return formatStoreDate(new Date(date), tz);
   }
 }

@@ -521,6 +521,66 @@ export function enumerateLocalPeriodKeys(
 }
 
 // ---------------------------------------------------------------------------
+// Presentation formatters (B17) — printed/displayed date & time, NOT the
+// DIAN XML/CUFE path (that stays on `invoice-flow.service.ts`'s
+// `formatIssueDate`/`formatIssueTime`, untouched).
+// ---------------------------------------------------------------------------
+
+/**
+ * Civil date for DISPLAY (`DD/MM/YYYY`), store-tz aware.
+ *
+ * Mirrors the SAME bifurcation as `invoice-flow.service.ts`'s
+ * `formatIssueDate`, because it feeds columns with the same ambiguity
+ * (`invoices.issue_date`/`due_date`, `invoice_resolutions.*`): some rows hold
+ * a genuine instant, others hold a civil date written as exact UTC midnight
+ * (`2026-08-16 00:00:00`). Converting the midnight-only rows with the store
+ * offset would push them to the PREVIOUS calendar day (`2026-08-15
+ * 19:00-05:00` for Bogotá) — the same one-day-early defect `formatIssueDate`
+ * exists to avoid. So: real time-of-day → convert to the store's local
+ * calendar date; exact UTC midnight → read the UTC components verbatim (it
+ * is already a calendar date, not an instant). For a column that ALWAYS
+ * carries a genuine instant (`orders.created_at`), the first branch is the
+ * only one that ever fires, so this is safe to use everywhere a `date` is
+ * printed.
+ */
+export function formatStoreDate(date: Date, tz: string): string {
+  const safeTz = assertSafeTimezone(tz);
+  const hasRealTime =
+    date.getUTCHours() !== 0 ||
+    date.getUTCMinutes() !== 0 ||
+    date.getUTCSeconds() !== 0;
+  if (hasRealTime) {
+    const p = localCivil(date, safeTz);
+    return `${pad(p.day)}/${pad(p.month)}/${p.year}`;
+  }
+  return [
+    pad(date.getUTCDate()),
+    pad(date.getUTCMonth() + 1),
+    String(date.getUTCFullYear()),
+  ].join('/');
+}
+
+/**
+ * Wall-clock time for DISPLAY, store-tz aware. Only meant for columns that
+ * ALWAYS carry a genuine instant (`orders.created_at`, `invoices.created_at`)
+ * — NOT for `issue_date`/`due_date`, whose ambiguous midnight rows have no
+ * real time to show (use {@link formatStoreDate} for those and omit the
+ * time field, same as the current print models already do).
+ *
+ * Keeps the pre-existing `es-CO` 12h display (`hh:mm a. m./p. m.`) that every
+ * call site already used — only the timezone source changes, from the
+ * container's local TZ to the store's configured one.
+ */
+export function formatStoreTime(date: Date, tz: string): string {
+  const safeTz = assertSafeTimezone(tz);
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: safeTz,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+// ---------------------------------------------------------------------------
 // Date range resolution (TZ-aware replacement for the UTC parseDateRange)
 // ---------------------------------------------------------------------------
 

@@ -16,6 +16,7 @@ import { signStoreLogoUrl } from '../lib/print-logo.util';
 // C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-05: nota crédito no
 // fiscal declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
 import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
+import { resolveStoreTimezone } from '../../../../common/utils/store-timezone.util';
 
 @Injectable()
 export class CreditNoteDataProvider implements IDocumentDataProvider {
@@ -74,6 +75,8 @@ export class CreditNoteDataProvider implements IDocumentDataProvider {
     }
 
     const signedLogoUrl = await signStoreLogoUrl(this.s3Service, resolveRawLogoKey(note), this.logger);
+    // B17 — fecha/hora del documento en la zona de la tienda, no la del contenedor.
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
 
     return mapFiscalDocumentToPrintData(note, {
       acceptedLabel: 'Nota crédito aplicada',
@@ -85,6 +88,7 @@ export class CreditNoteDataProvider implements IDocumentDataProvider {
         note.organization,
         note.store,
       ),
+      tz,
     });
   }
 

@@ -171,6 +171,9 @@ describe('DispatchTicketDataProvider — customer_alias (ADR-9 / 2026-08-31)', (
     const order = makeOrder({ customer_alias: 'jorge', customer: null });
     const prisma = {
       orders: { findFirst: jest.fn().mockResolvedValue(order) },
+      // B17 — `fetchDocumentData` resuelve `resolveStoreTimezone` antes de
+      // formatear `date_formatted`/`time`; sin fila cae al default.
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any;
     const p = new DispatchTicketDataProvider(prisma);
 
@@ -197,6 +200,7 @@ describe('DispatchTicketDataProvider — customer_alias (ADR-9 / 2026-08-31)', (
     });
     const prisma = {
       orders: { findFirst: jest.fn().mockResolvedValue(order) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any;
     const p = new DispatchTicketDataProvider(prisma);
 
@@ -214,6 +218,7 @@ describe('DispatchTicketDataProvider — customer_alias (ADR-9 / 2026-08-31)', (
     const order = makeOrder({ customer: null });
     const prisma = {
       orders: { findFirst: jest.fn().mockResolvedValue(order) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any;
     const p = new DispatchTicketDataProvider(prisma);
 
@@ -284,6 +289,7 @@ describe('DispatchTicketDataProvider — courier_name (domiciliario)', () => {
           .fn()
           .mockResolvedValue(makeOrderWithNote('  Juan Pérez  ')),
       },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any;
     const p = new DispatchTicketDataProvider(prisma);
 
@@ -297,6 +303,7 @@ describe('DispatchTicketDataProvider — courier_name (domiciliario)', () => {
       orders: {
         findFirst: jest.fn().mockResolvedValue(makeOrderWithNote(null)),
       },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any;
     const p = new DispatchTicketDataProvider(prisma);
 

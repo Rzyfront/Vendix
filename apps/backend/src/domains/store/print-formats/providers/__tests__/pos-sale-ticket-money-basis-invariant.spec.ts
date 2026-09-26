@@ -143,6 +143,9 @@ describe('pos-sale-ticket: pipeline real provider→composer (F-100/F-148)', () 
     new PosSaleTicketDataProvider({
       orders: { findFirst: jest.fn().mockResolvedValue(order) },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      // B17 — `resolveStoreTimezone` necesita el delegate top-level (no la
+      // fila anidada en `order.stores.store_settings`, que es otro dato).
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any);
 
   describe('comercio responsable de IVA (fiscal_status ACTIVE + O-48)', () => {

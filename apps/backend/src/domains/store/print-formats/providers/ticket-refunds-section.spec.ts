@@ -67,6 +67,12 @@ describe('ticket — gate de sección Reembolsos/NC (pasos 9+9b, CP-REFUND-FLOW-
       orders: { findFirst: jest.fn().mockResolvedValue(orderRow) },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       refunds: { findMany: jest.fn().mockResolvedValue(refunds) },
+      // B17 — ambos providers resuelven la zona de la tienda
+      // (`resolveStoreTimezone`) antes de formatear `date_formatted`. Sin
+      // fila cae al default (`America/Bogota`); `orderRow.created_at` es un
+      // instante de mañana en Bogotá (09:15 UTC), así que la fecha civil no
+      // cambia de día bajo ese default.
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
       withoutScope: () => ({
         credit_note_refund_items: { findMany: jest.fn().mockResolvedValue(bridge) },
         invoices: { findFirst: jest.fn().mockResolvedValue(null) },

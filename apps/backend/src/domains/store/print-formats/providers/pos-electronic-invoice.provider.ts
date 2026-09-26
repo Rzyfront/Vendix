@@ -18,6 +18,7 @@ import { resolveFiscalQualitiesLine } from '../services/fiscal-issuer-identity';
 // C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-02: tiquete factura
 // electrónica declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
 import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
+import { resolveStoreTimezone } from '../../../../common/utils/store-timezone.util';
 
 @Injectable()
 export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
@@ -68,6 +69,8 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
     }
 
     const signedLogoUrl = await signStoreLogoUrl(this.s3Service, resolveRawLogoKey(invoice), this.logger);
+    // B17 — fecha/hora del documento en la zona de la tienda, no la del contenedor.
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
 
     const printData = mapFiscalDocumentToPrintData(invoice, {
       qrBase64,
@@ -79,6 +82,7 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
         invoice.organization,
         invoice.store,
       ),
+      tz,
     });
 
     // Si la factura tiene orden asociada, enriquecer con mesa/cajero si existen

@@ -501,7 +501,13 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
         },
       ],
     });
-    const prisma = { orders: { findFirst } } as any;
+    // B17 — `fetchDocumentData` resuelve la zona de la tienda
+    // (`resolveStoreTimezone`) antes de armar el modelo; sin fila cae al
+    // default (`America/Bogota`).
+    const prisma = {
+      orders: { findFirst },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as any;
     const p = new PosSaleTicketDataProvider(prisma);
 
     const data = await p.fetchDocumentData(10, 7);
@@ -539,6 +545,9 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
         table_sessions: sessions,
       }) },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      // B17 — mismo motivo que arriba: `resolveStoreTimezone` necesita el
+      // delegate top-level, no la fila anidada en `order.stores`.
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any);
 
     const data = await p.fetchDocumentData(10, 8);

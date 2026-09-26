@@ -70,6 +70,13 @@ describe('InvoiceDeliveryService', () => {
       invoices: {
         findFirst: jest.fn().mockResolvedValue(acceptedInvoice),
       },
+      // B17 — `resolveStoreTimezone` (usado por `formatDate` del reenvío)
+      // consulta `store_settings.findFirst`. Sin fila, cae al default
+      // (`America/Bogota`) — no cambia el `issue_date` de los fixtures, que
+      // ya vienen a mediodía UTC.
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       withoutScope: jest.fn((arg: any) => {
         if (arg !== undefined) {
           return arg;
