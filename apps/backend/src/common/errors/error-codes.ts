@@ -1483,6 +1483,17 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Order is already fully paid',
   },
+  // B4/B8 follow-up — una orden `delivered`/`finished` con payment_form='2'
+  // (venta a crédito, ver `registerCreditPayment`) NO puede cobrarse de
+  // contado por `payOrder`: dejaría CxC/cuotas abiertas huérfanas. El abono
+  // debe pasar por el flujo de crédito (`registerCreditPayment` /
+  // `installment_payment.received`).
+  ORD_PAY_CREDIT_ORDER_001: {
+    code: 'ORD_PAY_CREDIT_ORDER_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden es a crédito (payment_form=2); registre el abono por el flujo de crédito, no por cobro de contado.',
+  },
   // CP-POS-MODAL-SCOPE-001 / Phase C.4 — edit→pay sin cliente cuando el escape
   // hatch está apagado. 409: el cashier debe seleccionar cliente (vía
   // Actualizar) antes de cobrar.
@@ -6293,6 +6304,19 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'Order has a sales invoice already issued to DIAN (validated/sent/accepted); cancelling the payment locally would desync the declared invoice. Issue a credit note instead.',
+  },
+
+  // B1b (order-truth-and-invoice-tz plan) — `finished` is a hard boundary for
+  // `cancelPayment`. Once an order is finalized (stock committed, invoice
+  // cycle closed) a local payment void is no longer the right instrument —
+  // money must flow back through a refund, which is fiscally aware and
+  // leaves an auditable trail. `delivered`/`shipped` still allow the local
+  // void (see `FULFILLED_PAYMENT_CANCELABLE_STATES` in
+  // `order-cancellation-policy.util.ts`); only `finished` rejects.
+  ORD_PAYMENT_CANCEL_FINISHED_001: {
+    code: 'ORD_PAYMENT_CANCEL_FINISHED_001',
+    httpStatus: 409,
+    devMessage: 'La orden ya está finalizada; usa un reembolso.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
