@@ -349,6 +349,12 @@ export class ChangeTitularSearchModalComponent {
 
   onSearch(term: string): void {
     if (term.trim().length < 2) {
+      // Release-853 paso 12 — se emite `''` para resetear la cadena de
+      // `distinctUntilChanged`: sin esto, escribir "ab", borrar y volver a
+      // escribir "ab" no reconsulta (el último valor emitido sigue siendo
+      // "ab"). Va ANTES del reseteo local porque el `of([])` del switchMap
+      // corre sincrónico y marcaría `searchPerformed` en true.
+      this.search$.next('');
       this.searchResults.set([]);
       this.searching.set(false);
       this.searchPerformed.set(false);

@@ -1286,8 +1286,12 @@ export class PrintLayoutComposerService {
     const poweredVal = mode === 'tokenized'
       ? '<span class="vendix-token-pill" data-token="system.powered_by">&#123;&#123; system.powered_by &#125;&#125;</span>'
       : 'Generado por Vendix';
+    // CP-853-fix (paso 2): `f_disclaimer` se excluye del render genérico de
+    // `renderExtraSectionFields` porque ya tiene su propio bloque dedicado
+    // (`legendLine` abajo); sin este exclude, un formato con `f_disclaimer`
+    // en `section.fields` pintaba la leyenda dos veces.
     const extraFooter = this.renderExtraSectionFields(section, data, mode, [
-      'f_msg', 'f_powered',
+      'f_msg', 'f_powered', 'f_disclaimer',
     ]);
 
     // Domiciliario del despacho vía gateway: la plantilla maestra
@@ -1323,8 +1327,12 @@ export class PrintLayoutComposerService {
         : legendText
           ? ` ${this.compiler.escapeHtml(legendText)}`
           : '';
+    // CP-853-fix (paso 2): la leyenda solo se pinta si `f_disclaimer` sigue
+    // activo en la definición (0 ocurrencias cuando el comercio lo deshabilita
+    // en el Hub), y como máximo 1 vez (ver exclude de `f_disclaimer` arriba).
+    const isDisclaimerActive = this.isFieldActive(section, 'f_disclaimer');
     const legendLine =
-      mode === 'tokenized' || legendText
+      isDisclaimerActive && (mode === 'tokenized' || legendText)
         ? `<div class="footer-disclaimer" data-element-id="f_disclaimer" data-section-id="sec_footer" data-token="document.non_fiscal_disclaimer">${legendHtml}</div>`
         : '';
 

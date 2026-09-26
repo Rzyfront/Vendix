@@ -1503,7 +1503,9 @@ export class CheckoutComponent implements OnInit {
    * H2: coords resueltas por forward-geocode para direcciones GUARDADAS sin
    * pin (`address_id → {lat,lng}`). La guardada se cotiza primero por zona y,
    * al resolver el geocode, el override entra a la clave y dispara la
-   * recotización por distancia. Nunca se persiste: solo vive en la sesión.
+   * recotización por distancia. Release-853 paso 11: el override solo se
+   * fija si las coords se persistieron con `updateAddress` (lo mostrado =
+   * lo cobrado); sin persistencia no hay override y rige la zona.
    */
   private savedCoordsOverride = signal<
     Record<number, { lat: number; lng: number }>
@@ -1540,6 +1542,12 @@ export class CheckoutComponent implements OnInit {
    * dispara un forward-geocode no-bloqueante; al resolver, guarda el override
    * y sube `coords_version` para que el effect recotice con lat/lng. La
    * cotización por zona ya sellada sigue vigente hasta entonces.
+   *
+   * Release-853 paso 11 — lo mostrado = lo cobrado: el confirm cotiza con
+   * la dirección PERSISTIDA, así que las coords del geocode se guardan con
+   * `updateAddress` ANTES de cotizar con ellas. El PUT exige la dirección
+   * completa (address_line1/city/country_code requeridos), no solo coords.
+   * Si la persistencia falla, no hay override y rige la zona.
    */
   private ensureSavedAddressCoords(id: number): void {
     if (this.savedCoordsOverride()[id]) return;
@@ -1562,15 +1570,47 @@ export class CheckoutComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          this.savedGeocodeInFlight.delete(id);
           const lat = res?.lat;
           const lng = res?.lng;
-          if (lat == null || lng == null) return;
-          this.savedCoordsOverride.update((m) => ({
-            ...m,
-            [id]: { lat, lng },
-          }));
-          this.bumpCoordsVersion();
+          if (lat == null || lng == null) {
+            this.savedGeocodeInFlight.delete(id);
+            return;
+          }
+          this.account_service
+            .updateAddress(id, {
+              address_line1: saved.address_line1,
+              address_line2: saved.address_line2 ?? undefined,
+              city: saved.city,
+              state_province: saved.state_province ?? undefined,
+              country_code: saved.country_code,
+              postal_code: saved.postal_code ?? undefined,
+              phone_number: saved.phone_number ?? undefined,
+              latitude: lat,
+              longitude: lng,
+            })
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: () => {
+                this.savedGeocodeInFlight.delete(id);
+                this.addresses.update((list) =>
+                  list.map((a) =>
+                    a.id === id
+                      ? { ...a, latitude: lat, longitude: lng }
+                      : a,
+                  ),
+                );
+                this.savedCoordsOverride.update((m) => ({
+                  ...m,
+                  [id]: { lat, lng },
+                }));
+                this.bumpCoordsVersion();
+              },
+              error: () => {
+                // Sin persistencia no hay override: lo mostrado sigue
+                // siendo la cotización por zona (warning no-bloqueante).
+                this.savedGeocodeInFlight.delete(id);
+              },
+            });
         },
         error: () => {
           // Sin coords se conserva la cotización por zona; el form manual

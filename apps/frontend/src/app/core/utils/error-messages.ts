@@ -1175,6 +1175,11 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ORD_EDIT_NOT_ALLOWED_001: 'Esta orden ya no se puede editar.',
   ORD_EDIT_CUSTOMER_STORE_MISMATCH_001:
     'El cliente no pertenece a esta tienda.',
+  // Release-853 regresión (paso 10 del plan de titular): la orden ya tiene
+  // `sales_invoice` vigente y el titular es inmutable por trazabilidad
+  // fiscal; la vía de corrección es anular o emitir nota crédito.
+  ORD_TITULAR_INVOICED_001:
+    'La orden ya tiene una factura emitida; anúlala o emite una nota crédito para cambiar el titular.',
   ORD_EDIT_INVALID_SHIPPING_001:
     'Revisa la dirección, el método y el costo de envío.',
   ORD_EDIT_INVALID_STATE_001:

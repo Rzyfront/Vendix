@@ -1,6 +1,7 @@
 import {
   IsString,
   IsArray,
+  ArrayMaxSize,
   IsBoolean,
   IsOptional,
   IsNumber,
@@ -101,7 +102,7 @@ export class DistanceTierDto {
   to_km?: number | null;
 
   @ApiProperty({ description: 'Precio del tramo', example: 8000 })
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Type(() => Number)
   price: number;
@@ -110,7 +111,8 @@ export class DistanceTierDto {
 /**
  * La escala debe llegar ordenada por `from_km` y ser contigua (cada
  * `from_km` iguala el `to_km` anterior: sin huecos ni traslapes), con
- * `to_km > from_km` en cada tramo y tramo abierto (`null`) solo al final.
+ * `to_km > from_km` en cada tramo, tramo abierto (`null`) solo al final y
+ * el primer tramo arrancando en 0 (sin la base, 0–X km queda sin precio).
  * `undefined`/`null`/vacío = sin escala (rige el precio plano).
  */
 export function IsValidDistanceTiers(validationOptions?: ValidationOptions) {
@@ -124,6 +126,8 @@ export function IsValidDistanceTiers(validationOptions?: ValidationOptions) {
         validate(value: unknown): boolean {
           if (value === undefined || value === null) return true;
           if (!Array.isArray(value) || value.length === 0) return true;
+          // Release-853 paso 11 — el primer tramo arranca en 0.
+          if ((value[0] as DistanceTierDto)?.from_km !== 0) return false;
           for (const item of value) {
             const tier = item as Partial<DistanceTierDto> | null;
             if (
@@ -162,7 +166,7 @@ export function IsValidDistanceTiers(validationOptions?: ValidationOptions) {
           return true;
         },
         defaultMessage(): string {
-          return 'distance_tiers debe ser una escala ordenada y contigua [{from_km,to_km|null,price}] sin huecos ni traslapes, con to_km abierto solo en el último tramo';
+          return 'distance_tiers debe ser una escala ordenada y contigua [{from_km,to_km|null,price}] sin huecos ni traslapes, con to_km abierto solo en el último tramo y from_km=0 en el primero';
         },
       },
     });
@@ -305,6 +309,7 @@ export class CreateRateDto {
   })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(20)
   @ValidateNested({ each: true })
   @Type(() => DistanceTierDto)
   @IsValidDistanceTiers()

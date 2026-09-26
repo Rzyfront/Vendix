@@ -187,6 +187,7 @@ describe('EcommerceInvoiceDataController (paso 6: stream SSE guest)', () => {
         notes_internal: 'cliente conflictivo',
         items: [
           {
+            order_item_id: 501,
             quantity: 2,
             status: 'ready',
             unit_cost: 5000,
@@ -205,8 +206,18 @@ describe('EcommerceInvoiceDataController (paso 6: stream SSE guest)', () => {
       daily_number: 12,
       fired_at: '2026-09-25T10:00:00.000Z',
       ready_at: '2026-09-25T10:05:00.000Z',
-      items: [{ product_name: 'Bandeja', quantity: 2, status: 'ready' }],
+      items: [
+        {
+          order_item_id: 501,
+          product_name: 'Bandeja',
+          quantity: 2,
+          status: 'ready',
+        },
+      ],
     });
+    // CP-853-fix (paso 5): order_item_id es la clave de linea que el
+    // frontend usa para reconciliar KDS con el summary REST; debe salir.
+    expect((projected.ticket as any).items[0].order_item_id).toBe(501);
     const blob = JSON.stringify(projected);
     expect(blob).not.toMatch(/cost|settings|email|device_id|recipe|sku|notes_internal/);
   });
@@ -341,6 +352,7 @@ describe('EcommerceInvoiceDataController (paso 6: stream SSE guest)', () => {
         shipping_address: { city: 'Bogotá' },
         items: [
           {
+            order_item_id: 501,
             product_name: 'Bandeja',
             quantity: 2,
             unit_price: 50,
@@ -375,6 +387,7 @@ describe('EcommerceInvoiceDataController (paso 6: stream SSE guest)', () => {
       prep_minutes_max: 25,
       items: [
         {
+          order_item_id: 501,
           product_name: 'Bandeja',
           quantity: 2,
           kitchen_status: 'in_preparation',
@@ -383,6 +396,9 @@ describe('EcommerceInvoiceDataController (paso 6: stream SSE guest)', () => {
       ],
       payments: [{ payment_id: 1, state: 'pending', has_receipt: true }],
     });
+    // CP-853-fix (paso 5): misma clave de linea que projectForGuest KDS,
+    // para que el frontend reconcilie por order_item_id en ambos canales.
+    expect((projected as any).items[0].order_item_id).toBe(501);
     const blob = JSON.stringify(projected);
     expect(blob).not.toMatch(/cost|settings|email|device_id/);
   });

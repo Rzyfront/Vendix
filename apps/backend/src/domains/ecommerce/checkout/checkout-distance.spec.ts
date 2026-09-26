@@ -458,6 +458,20 @@ describe('CheckoutService - recálculo por distancia al confirmar', () => {
     expect(prisma.orders.create.mock.calls[0][0].data.shipping_cost).toBe(5000);
   });
 
+  it('tarifa free con escala cobra 0 al confirmar y no rutea', async () => {
+    storePrisma.shipping_rates.findFirst.mockResolvedValue(
+      buildRate({ type: 'free', base_cost: 5000 }),
+    );
+
+    const result: any = await service.checkout(buildDto());
+
+    expect(distance.resolveDistanceKm).not.toHaveBeenCalled();
+    const orderArgs = prisma.orders.create.mock.calls[0][0].data;
+    expect(orderArgs.shipping_cost).toBe(0);
+    expect(orderArgs.grand_total).toBe(10000);
+    expect(result.total).toBe(10000);
+  });
+
   it('distancia fuera de todos los rangos rechaza con 400', async () => {
     distance.resolveDistanceKm.mockResolvedValue(50);
     storePrisma.shipping_rates.findFirst.mockResolvedValue(

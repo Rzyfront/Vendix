@@ -641,6 +641,36 @@ export function assertCanChargeVat(
 }
 
 /**
+ * Contexto de la operación bloqueada por INC. Solo `'shipping'`: el INC de
+ * productos no se toca en este plan.
+ */
+export type IncChargeContext = 'shipping';
+
+/**
+ * Enforcement de escritura: lanza `FISCAL_INC_NOT_RESPONSIBLE_001` (HTTP 412)
+ * cuando el comercio NO declara O-33 en su RUT, incluyendo el estado
+ * indeterminado (fail-closed: sin declaración no se puede afirmar el tributo
+ * ante la DIAN). No-op sólo con O-33 declarado. El `context` indica el origen
+ * ('shipping') y el CTA apunta al wizard de activación fiscal.
+ */
+export function assertCanChargeInc(
+  fiscalData: VatFiscalDataInput | null | undefined,
+  context: IncChargeContext,
+): void {
+  const outcome = resolveIncResponsibility(fiscalData);
+  if (outcome.responsible) return;
+  throw new VendixHttpException(
+    ErrorCodes.FISCAL_INC_NOT_RESPONSIBLE_001,
+    undefined,
+    {
+      context,
+      cta: '/admin/fiscal/wizard',
+      reason: outcome.reason,
+    },
+  );
+}
+
+/**
  * Servicio DI que delega a los helpers puros de este archivo.
  *
  * P0.1 — permite convergir las tres réplicas internas de backend

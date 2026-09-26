@@ -5,7 +5,7 @@ import { Injectable, Logger } from '@nestjs/common';
 // sin un solo cast. El `TaxFiscalType` de la capa de dominio refleja los
 // mismos seis valores, pero es un enum NOMINAL de TS y no es asignable a la
 // unión de literales de Prisma — de ahí venía el `as any` de salida.
-import { Prisma, tax_type_enum } from '@prisma/client';
+import { Prisma, refunds_state_enum, tax_type_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -26,6 +26,8 @@ import {
   localDateString,
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
+import { REFUND_LEDGER_STATES } from '../../orders/order-flow/services/refund-calculation.service';
+import { prorateShippingTaxRefundCents } from '../../shipping/utils/shipping-tax.util';
 
 /**
  * Este servicio NO necesita la ClTec: no calcula CUDE ni arma XML — eso lo hace
@@ -652,7 +654,7 @@ export class CreditNotesService {
           }),
       },
       include: INVOICE_INCLUDE,
-    });
+    }).catch((error) => this.throwIfDuplicateRefundLink(error, refund_link));
 
     // Paso 7 — puente refund↔NC por línea. `withoutScope()` + ids ya
     // verificados: el modelo no está registrado en `StorePrismaService`
@@ -727,6 +729,43 @@ export class CreditNotesService {
    * se está intentando resolver.
    */
   /**
+   * Release-853 (paso 8) — traduce el P2002 del índice parcial único
+   * `invoices_refund_id_active_credit_note_key` al error de "refund ya
+   * vinculado" de la guarda pre-vuelo. La guarda no cierra la carrera
+   * (doble clic / dos operadores); el índice sí, y sin esta traducción la
+   * carrera respondería 500. El re-chequeo distingue el conflicto real de
+   * un P2002 ajeno (consecutivo): sólo se traduce si el vínculo vivo
+   * existe AHORA. Cualquier otro error se relanza intacto.
+   */
+  private async throwIfDuplicateRefundLink(
+    error: unknown,
+    refund_link: ResolvedRefundLink | null,
+  ): Promise<never> {
+    if (refund_link && (error as { code?: string })?.code === 'P2002') {
+      const live_link = await this.prisma.invoices.findFirst({
+        where: {
+          refund_id: refund_link.refund.id,
+          invoice_type: 'credit_note',
+          status: { in: ['draft', 'validated', 'sent', 'accepted'] },
+        },
+        select: { id: true, invoice_number: true, status: true },
+      });
+      if (live_link) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_CALC_001,
+          `El reembolso #${refund_link.refund.id} ya lo acredita la nota crédito ${live_link.invoice_number ?? `#${live_link.id}`} (estado «${live_link.status}»). Anula esa nota antes de emitir otra sobre el mismo reembolso.`,
+          {
+            refund_id: refund_link.refund.id,
+            credit_note_id: live_link.id,
+            credit_note_status: live_link.status,
+          },
+        );
+      }
+    }
+    throw error;
+  }
+
+  /**
    * CP-REFUND-FLOW-REDESIGN paso 7 — resuelve y valida el vínculo
    * refund↔NC de una nota guiada.
    *
@@ -777,6 +816,19 @@ export class CreditNotesService {
     });
     if (!refund) {
       throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+    }
+
+    // Release-853 (paso 8): sólo se acredita ante la DIAN un reembolso
+    // REAL — estado dentro del ledger (`completed`/`pending_approval`/
+    // `processing`). Un `failed`/`cancelled` no movió dinero y acreditarlo
+    // descuadraría la cobertura. No es 404: el refund SÍ existe (el
+    // operador lo ve en la lista); el error dice por qué no acredita.
+    if (!(REFUND_LEDGER_STATES as readonly string[]).includes(refund.state)) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_001,
+        `El reembolso #${refund.id} está en estado «${refund.state}»: sólo se puede acreditar un reembolso en estado válido (completed, pending_approval, processing).`,
+        { refund_id: refund.id, refund_state: refund.state },
+      );
     }
 
     // Sin orden en la factura padre no hay ancla: las líneas del refund
@@ -874,16 +926,20 @@ export class CreditNotesService {
       });
     }
 
-    // Refund sin líneas pero con envío (orden-nivel): línea libre de envío,
-    // sin puente (no hay `refund_item` que cubrir).
-    if (derived_items.length === 0 && Number(refund.shipping_refund ?? 0) > 0) {
-      derived_items.push({
-        description: `Reembolso de envío — orden #${refund.order_id}`,
-        quantity: 1,
-        unit_price: Number(refund.shipping_refund),
-        discount_amount: 0,
-        tax_amount: 0,
-      });
+    // Release-853 (paso 8): el envío devuelto SIEMPRE se acredita cuando
+    // `shipping_refund > 0`, haya líneas o no — antes un refund con líneas
+    // + envío perdía el envío en la NC. Línea libre, sin puente (no hay
+    // `refund_item` que cubrir).
+    // Paso 2 (shipping-tax A1): con impuesto en el envío la línea sale en
+    // forma INCLUIDA (`unit_price` = bruto devuelto, `is_inclusive: true`).
+    // Sin el flag heredaba la inclusividad de la gemela de la factura —que
+    // el motor persiste en forma base (`is_inclusive: false`)— y el kernel
+    // sumaba el impuesto ENCIMA del bruto (15.000 ⇒ 16.200: la NC superaba
+    // la factura y se rechazaba). La cuota proporcional viaja sólo como
+    // pista (el kernel gana y avisa si difiere); sin impuesto la línea
+    // queda igual que hoy.
+    if (Number(refund.shipping_refund ?? 0) > 0) {
+      derived_items.push(await this.resolveRefundShippingLine(refund));
     }
 
     // Sin líneas y sin envío no hay nada que acreditar: caer al copiado
@@ -919,6 +975,67 @@ export class CreditNotesService {
       concept_code: covers_whole_order ? '2' : '1',
       default_reason,
       bridge_rows,
+    };
+  }
+
+  /**
+   * Paso 2 (shipping-tax A1) — línea libre «Reembolso de envío» de una NC
+   * guiada. Lee la copia congelada de la orden (`orders.shipping_tax_*`):
+   * con impuesto, la línea va incluida con la cuota proporcional del helper
+   * del paso 1 como pista; sin copia o sin impuesto, idéntica a la de hoy
+   * (fail-open: una copia ilegible jamás bloquea la nota).
+   *
+   * Los previos son los `shipping_refund` de los OTROS reembolsos
+   * completados de la orden —la misma reconstrucción determinista que
+   * `refund-calculation.service.ts`—, así el que completa el envío cierra
+   * al centavo contra la copia. La pista nunca bloquea: el kernel del
+   * carril parcial la reemplaza y deja aviso si difiere.
+   */
+  private async resolveRefundShippingLine(refund: {
+    id: number;
+    order_id: number;
+    shipping_refund: Prisma.Decimal | number | null;
+  }): Promise<CreateInvoiceItemDto> {
+    const shipping_refund = Number(refund.shipping_refund ?? 0);
+    const plain_line = (): CreateInvoiceItemDto => ({
+      description: `Reembolso de envío — orden #${refund.order_id}`,
+      quantity: 1,
+      unit_price: shipping_refund,
+      discount_amount: 0,
+      tax_amount: 0,
+    });
+    const order = await this.prisma.orders.findFirst({
+      where: { id: refund.order_id },
+      select: { shipping_cost: true, shipping_tax_amount: true },
+    });
+    const shipping_tax_cents = Math.round(
+      (Number(order?.shipping_tax_amount ?? 0) || 0) * 100,
+    );
+    if (shipping_tax_cents <= 0) return plain_line();
+    const shipping_cost_cents = Math.round(
+      (Number(order?.shipping_cost ?? 0) || 0) * 100,
+    );
+    const prior_refunds = await this.prisma.refunds.findMany({
+      where: {
+        order_id: refund.order_id,
+        id: { not: refund.id },
+        state: refunds_state_enum.completed,
+      },
+      select: { shipping_refund: true },
+    });
+    const prior_cents = (prior_refunds ?? [])
+      .map((row) => Math.round(Number(row.shipping_refund ?? 0) * 100))
+      .filter((cents) => cents > 0);
+    const hint_cents = prorateShippingTaxRefundCents(
+      shipping_cost_cents,
+      shipping_tax_cents,
+      prior_cents,
+      Math.round(shipping_refund * 100),
+    );
+    return {
+      ...plain_line(),
+      tax_amount: hint_cents / 100,
+      is_inclusive: true,
     };
   }
 

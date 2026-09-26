@@ -1102,14 +1102,51 @@ export class MethodDetailComponent implements OnInit {
     if (m) this.loadZonesWithRates(m.id);
   }
 
+  /**
+   * Release-853 paso 11 — tarifas de la zona que pertenecen a OTROS métodos
+   * (las zonas se comparten entre métodos). Se usa para avisar en el borrado
+   * y en el cambio de estado, con conteo y nombres.
+   */
+  private async otherMethodRates(zone_id: number): Promise<ShippingRate[]> {
+    try {
+      const rates = await firstValueFrom(
+        this.shippingService.getStoreZoneRates(zone_id),
+      );
+      const current_id = this.method()?.id;
+      return (rates ?? []).filter((r) => r.shipping_method_id !== current_id);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Sufijo del diálogo con el conteo y los nombres de las tarifas de otros
+   * métodos afectadas. Nombres capados a 5 + "y N más" para no reventar el
+   * diálogo en zonas muy compartidas. Vacío si no hay afectadas.
+   */
+  private otherRatesSuffix(others: ShippingRate[]): string {
+    if (others.length === 0) return '';
+    const names = others.map(
+      (r) =>
+        `"${r.name?.trim() || `Tarifa #${r.id}`}" (${r.shipping_method?.name?.trim() || `método #${r.shipping_method_id}`})`,
+    );
+    const shown = names.slice(0, 5).join(', ');
+    const rest =
+      names.length > 5 ? `, y ${names.length - 5} más` : '';
+    return ` Afecta a ${others.length} tarifa${others.length === 1 ? '' : 's'} de otro${others.length === 1 ? '' : 's'} método${others.length === 1 ? '' : 's'}: ${shown}${rest}.`;
+  }
+
   async confirmDeleteZone(zr: ZoneWithRates): Promise<void> {
     const zone = zr.zone;
     let rates_count: number | null = null;
+    let others: ShippingRate[] = [];
     try {
       const rates = await firstValueFrom(
         this.shippingService.getStoreZoneRates(zone.id),
       );
       rates_count = rates.length;
+      const current_id = this.method()?.id;
+      others = (rates ?? []).filter((r) => r.shipping_method_id !== current_id);
     } catch {
       rates_count = null;
     }
@@ -1120,7 +1157,7 @@ export class MethodDetailComponent implements OnInit {
         : '';
     const confirmed = await this.dialogService.confirm({
       title: 'Eliminar zona',
-      message: `¿Estas seguro de eliminar la zona "${zone.name}"?${cascade_suffix} Esta accion no se puede deshacer.`,
+      message: `¿Estas seguro de eliminar la zona "${zone.name}"?${cascade_suffix}${this.otherRatesSuffix(others)} Esta accion no se puede deshacer.`,
       confirmText: 'Eliminar',
       confirmVariant: 'danger'});
 
@@ -1144,9 +1181,28 @@ export class MethodDetailComponent implements OnInit {
         }});
   }
 
-  toggleZoneActive(zr: ZoneWithRates): void {
+  /**
+   * Release-853 regresión (paso 5): confirmar SOLO cuando la zona tiene
+   * tarifas de OTROS métodos afectadas (`otherMethodRates`). El paso 11
+   * original pedía confirmación siempre, incluso sin ningún efecto cruzado
+   * de por medio — regresión frente al toggle directo que existía antes de
+   * esa auditoría para el caso sin tarifas ajenas.
+   */
+  async toggleZoneActive(zr: ZoneWithRates): Promise<void> {
     const zone = zr.zone;
     const next_active = !zone.is_active;
+    const others = await this.otherMethodRates(zone.id);
+    if (others.length > 0) {
+      const action = next_active ? 'activar' : 'desactivar';
+      const confirmed = await this.dialogService.confirm({
+        title: `${next_active ? 'Activar' : 'Desactivar'} zona`,
+        message: `¿Estas seguro de ${action} la zona "${zone.name}"?${this.otherRatesSuffix(others)}`,
+        confirmText: next_active ? 'Activar' : 'Desactivar',
+        confirmVariant: next_active ? 'primary' : 'danger'});
+
+      if (!confirmed) return;
+    }
+
     this.shippingService
       .updateZone(zone.id, { is_active: next_active })
       .pipe(takeUntilDestroyed(this.destroyRef))

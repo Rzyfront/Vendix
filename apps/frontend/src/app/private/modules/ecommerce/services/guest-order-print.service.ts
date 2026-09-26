@@ -70,6 +70,23 @@ interface VoucherStore {
   logo_url?: string;
 }
 
+/**
+ * CP-853-fix (paso 4) — opt-outs `ecommerce.orders.hide_*` resueltos por el
+ * llamador desde la config del tenant.
+ *
+ * Release-853 regresión (paso 3): `hideTracking` (`hide_tracking_progress`)
+ * gobierna la barra de seguimiento simulada de la vista guest online
+ * (`trackingShown`); el voucher impreso no tiene esa barra, así que aquí NO
+ * tiene efecto — se conserva en la interfaz solo porque el llamador sigue
+ * resolviéndolo desde la misma config y pasándolo por compatibilidad. El
+ * badge de estado del encabezado y el bloque de ETA se rigen únicamente por
+ * `hidePrepEta`.
+ */
+export interface VoucherPrintOptions {
+  hidePrepEta?: boolean;
+  hideTracking?: boolean;
+}
+
 export interface VoucherSummary {
   token: string;
   order: VoucherOrder;
@@ -112,16 +129,22 @@ export class GuestOrderPrintService {
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly documentPrint = inject(DocumentPrintService);
 
-  async printVoucher(summary: VoucherSummary): Promise<void> {
+  async printVoucher(
+    summary: VoucherSummary,
+    opts?: VoucherPrintOptions,
+  ): Promise<void> {
     await this.documentPrint.print({
       document: 'guest_order',
-      body: this.generateVoucherBody(summary),
+      body: this.generateVoucherBody(summary, opts),
       title: `Comprobante de compra #${this.esc(summary.order.order_number)}`,
       styles: GUEST_ORDER_PRINT_STYLES,
     });
   }
 
-  private generateVoucherBody(summary: VoucherSummary): string {
+  private generateVoucherBody(
+    summary: VoucherSummary,
+    opts?: VoucherPrintOptions,
+  ): string {
     const order = summary.order;
     const store = summary.store;
     const customer = summary.customer;
@@ -237,12 +260,14 @@ export class GuestOrderPrintService {
     const etaParts: string[] = [];
     if (etaMinutes != null) etaParts.push(`~${etaMinutes} min`);
     if (etaReadyTime) etaParts.push(`listo aprox. ${etaReadyTime}`);
-    const etaHtml = etaParts.length
-      ? `
+    // CP-853-fix (paso 4): hide_prep_eta oculta el bloque, como en la vista.
+    const etaHtml =
+      !opts?.hidePrepEta && etaParts.length
+        ? `
     <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px 16px; margin-bottom: 24px;">
       <p style="margin: 0; font-size: 13px; color: #1e40af;"><strong>Tiempo estimado:</strong> ${this.esc(etaParts.join(' · '))}</p>
     </div>`
-      : '';
+        : '';
 
     // ---- Items table ----
     const items = order.items || [];
@@ -258,9 +283,19 @@ export class GuestOrderPrintService {
               const variantLine = variantParts.length
                 ? `<br><span style="font-size: 11px; color: #9ca3af;">${variantParts.join(' · ')}</span>`
                 : '';
-              // Paso 8: badge "Cocina: <estado>" en paridad con la vista.
+              // Paso 8: badge "Preparación: <estado>" en paridad con la
+              // vista. Release-853 regresión (paso 3): `in_preparation` ya
+              // dice "En preparación", así que el prefijo se omite solo en
+              // ese caso (idéntico a `kitchenPrepLine` de la vista guest).
+              const kitchenLabel =
+                kitchenStateLabels[item.kitchen_status || ''] ||
+                item.kitchen_status;
+              const kitchenText =
+                item.kitchen_status === 'in_preparation'
+                  ? kitchenLabel
+                  : `Preparación: ${kitchenLabel}`;
               const kitchenLine = item.kitchen_status
-                ? `<br><span style="font-size: 11px; color: #6b7280;">Cocina: ${this.esc(kitchenStateLabels[item.kitchen_status] || item.kitchen_status)}</span>`
+                ? `<br><span style="font-size: 11px; color: #6b7280;">${this.esc(kitchenText)}</span>`
                 : '';
               return `
       <tr>
@@ -314,6 +349,20 @@ export class GuestOrderPrintService {
             .join('') + `<div style="margin-bottom: 12px;"></div>`
         : '';
 
+    // Release-853 regresión (paso 3): el badge de estado del encabezado NO
+    // es el equivalente de la barra de seguimiento (fuera del plan original
+    // de CP-853-fix) — es el estado de la orden, y debe verse siempre. Antes
+    // `hideTracking` (`hide_tracking_progress`) lo ocultaba también, dejando
+    // el comprobante sin ningún estado visible cuando la tienda apagaba la
+    // barra de seguimiento del guest online. `hideTracking` solo gobierna
+    // ETA/progreso (no aplica al voucher, que no tiene barra simulada).
+    const stateBadgeHtml = `
+        <p style="margin: 6px 0 0;">
+          <span style="display: inline-block; padding: 2px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border-radius: 4px; background: #f3f4f6; color: #374151;">
+            ${this.esc(orderStateLabel)}
+          </span>
+        </p>`;
+
     return `
   <div class="container">
     <!-- Header -->
@@ -326,11 +375,7 @@ export class GuestOrderPrintService {
         <h2 style="margin: 0; font-size: 18px; font-weight: 700; color: #111827;">COMPROBANTE DE COMPRA</h2>
         <p style="margin: 4px 0 0; font-size: 16px; font-weight: 600; color: #4f46e5;">Pedido #${this.esc(order.order_number)}</p>
         ${orderDate ? `<p style="margin: 4px 0 0; font-size: 12px; color: #6b7280;">Fecha: ${this.esc(orderDate)}</p>` : ''}
-        <p style="margin: 6px 0 0;">
-          <span style="display: inline-block; padding: 2px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border-radius: 4px; background: #f3f4f6; color: #374151;">
-            ${this.esc(orderStateLabel)}
-          </span>
-        </p>
+        ${stateBadgeHtml}
       </div>
     </div>
 

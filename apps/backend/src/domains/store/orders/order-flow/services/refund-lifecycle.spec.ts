@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { RefundFlowService } from './refund-flow.service';
 import { RefundCalculationService } from './refund-calculation.service';
+import { RefundCoverageService } from './refund-coverage.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StockLevelManager } from '../../../inventory/shared/services/stock-level-manager.service';
@@ -38,6 +39,8 @@ describe('RefundFlowService — gate de ciclo de vida (pasos 1+2, CP-REFUND-FLOW
   let eventEmitter: { emit: jest.Mock };
   let mockPrisma: any;
   let mockCalculationService: any;
+  let mockCoverageService: { recomputeLineCache: jest.Mock };
+  let mockGateway: { reversePaymentWithProcessor: jest.Mock };
 
   const baseCalculation = {
     items: [],
@@ -71,6 +74,10 @@ describe('RefundFlowService — gate de ciclo de vida (pasos 1+2, CP-REFUND-FLOW
       preview: jest.fn(),
       calculateCancellationCashRefund: jest.fn(),
     };
+    mockCoverageService = {
+      recomputeLineCache: jest.fn().mockResolvedValue(undefined),
+    };
+    mockGateway = { reversePaymentWithProcessor: jest.fn() };
     mockPrisma = {
       orders: { findFirst: jest.fn(), update: jest.fn() },
       stores: {
@@ -125,12 +132,13 @@ describe('RefundFlowService — gate de ciclo de vida (pasos 1+2, CP-REFUND-FLOW
         { provide: WalletBalanceService, useValue: { credit: jest.fn() } },
         {
           provide: PaymentGatewayService,
-          useValue: { reversePaymentWithProcessor: jest.fn() },
+          useValue: mockGateway,
         },
         {
           provide: ManualRefundDeliveryService,
           useValue: { deliver: jest.fn(), enqueue: jest.fn() },
         },
+        { provide: RefundCoverageService, useValue: mockCoverageService },
       ],
     }).compile();
 
@@ -305,7 +313,7 @@ describe('RefundFlowService — gate de ciclo de vida (pasos 1+2, CP-REFUND-FLOW
       inventory_action: 'no_return',
     };
 
-    it('refund con líneas re-agrega el caché con UPDATE absoluto (no incremento)', async () => {
+    it('refund con líneas re-agrega el caché vía recomputeLineCache en la misma tx', async () => {
       mockCalculationService.calculate.mockResolvedValue({
         ...baseCalculation,
         items: [lineItem],
@@ -327,18 +335,73 @@ describe('RefundFlowService — gate de ciclo de vida (pasos 1+2, CP-REFUND-FLOW
 
       await service.createRefund(1, cashDto() as any);
 
-      const rawCalls = mockPrisma.$queryRaw.mock.calls.map((c: any[]) => String(c[0][0]));
-      expect(rawCalls.some((s: string) => s.includes('UPDATE "order_items"'))).toBe(true);
+      // Misma tx que inserta los refund_items (el cliente es la tx).
+      expect(mockCoverageService.recomputeLineCache).toHaveBeenCalledWith(mockPrisma, 1);
       expect(mockPrisma.refund_items.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ refund_id: 999, order_item_id: 11, quantity: 1 }),
       });
-    });
-
-    it('refund sin ítems (orden-nivel) no escribe caché', async () => {
-      await service.createRefund(1, cashDto() as any);
-
       const rawCalls = mockPrisma.$queryRaw.mock.calls.map((c: any[]) => String(c[0][0]));
       expect(rawCalls.some((s: string) => s.includes('UPDATE "order_items"'))).toBe(false);
+    });
+
+    it('refund sin ítems también re-agrega (incondicional, auto-reparable)', async () => {
+      await service.createRefund(1, cashDto() as any);
+
+      expect(mockCoverageService.recomputeLineCache).toHaveBeenCalledWith(mockPrisma, 1);
+    });
+  });
+
+  describe('release-853 paso 7: failed por pasarela + preview (casos a y b)', () => {
+    const gatewayOrder = () =>
+      baseOrder({
+        payments: [
+          {
+            id: 100,
+            state: 'succeeded',
+            transaction_id: 'wompi-tx-1',
+            store_payment_method: { system_payment_method: { type: 'wompi' } },
+          },
+        ],
+      });
+
+    it('(a) un reembolso que falla por pasarela re-agrega el caché (sus líneas quedan en 0)', async () => {
+      mockGateway.reversePaymentWithProcessor.mockResolvedValue({
+        status: 'failed',
+        message: 'rechazado por la pasarela',
+      });
+
+      const result = await (service as any).dispatchRefundProcessor(gatewayOrder(), { id: 999 }, 1000);
+
+      expect(result.status).toBe('failed');
+      expect(mockPrisma.refunds.update).toHaveBeenCalledWith({
+        where: { id: 999 },
+        data: expect.objectContaining({ state: 'failed' }),
+      });
+      expect(mockCoverageService.recomputeLineCache).toHaveBeenCalledWith(mockPrisma, 1);
+    });
+
+    it('(a) si la pasarela lanza, el refund cae a failed y también re-agrega', async () => {
+      mockGateway.reversePaymentWithProcessor.mockRejectedValue(new Error('red caída'));
+
+      const result = await (service as any).dispatchRefundProcessor(gatewayOrder(), { id: 999 }, 1000);
+
+      expect(result.status).toBe('failed');
+      expect(mockPrisma.refunds.update).toHaveBeenCalledWith({
+        where: { id: 999 },
+        data: expect.objectContaining({ state: 'failed' }),
+      });
+      expect(mockCoverageService.recomputeLineCache).toHaveBeenCalledWith(mockPrisma, 1);
+    });
+
+    it('(b) el preview usa el mismo techo pendiente-aware que la creación', async () => {
+      await service.previewRefund(1, cashDto() as any);
+
+      expect(mockCalculationService.calculate).toHaveBeenCalledWith({
+        order_id: 1,
+        items: [],
+        include_shipping: false,
+        include_pending_states: true,
+      });
     });
   });
 });
@@ -467,6 +530,56 @@ describe('RefundCalculationService — techo pendiente-aware + cancelled_at (pas
       order_id: 1,
       items: [{ order_item_id: 12, quantity: 1, inventory_action: 'no_return' }],
       include_shipping: false,
+    });
+
+    expect(result.is_full_refund).toBe(true);
+  });
+
+  it('(c) B que completa la orden con A pendiente NO marca refunded (solo completed cubre)', async () => {
+    const row = orderRow({
+      refunds: [
+        {
+          id: 1,
+          state: 'pending_approval',
+          amount: 5000,
+          shipping_refund: 0,
+          refund_items: [{ order_item_id: 11, quantity: 1, refund_amount: 5000 }],
+        },
+      ],
+    });
+    const { service } = makeService(row);
+
+    const result = await service.calculate({
+      order_id: 1,
+      items: [{ order_item_id: 11, quantity: 1, inventory_action: 'no_return' }],
+      include_shipping: false,
+      include_pending_states: true,
+    });
+
+    // A pendiente (1) + B solicitado (1) cubren las 2 unidades, pero A no
+    // completó dinero: la orden NO se promueve a refunded.
+    expect(result.is_full_refund).toBe(false);
+  });
+
+  it('(c) con A completed, B sí completa (asimetría pendiente/completed)', async () => {
+    const row = orderRow({
+      refunds: [
+        {
+          id: 1,
+          state: 'completed',
+          amount: 5000,
+          shipping_refund: 0,
+          refund_items: [{ order_item_id: 11, quantity: 1, refund_amount: 5000 }],
+        },
+      ],
+    });
+    const { service } = makeService(row);
+
+    const result = await service.calculate({
+      order_id: 1,
+      items: [{ order_item_id: 11, quantity: 1, inventory_action: 'no_return' }],
+      include_shipping: false,
+      include_pending_states: true,
     });
 
     expect(result.is_full_refund).toBe(true);

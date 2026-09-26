@@ -18,6 +18,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import { OrderEtaService } from './services/order-eta.service';
+import { OrderShippingTaxRepairService } from './services/order-shipping-tax-repair.service';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { CouponsModule } from '../coupons/coupons.module';
@@ -42,6 +43,11 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 // con un payload tipado para el dominio `orders`.
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OrderSseService } from './services/order-sse.service';
+// Release-853 paso 10 — el cambio de titular se propaga al borrador de la
+// factura con `InvoicingService.update`. `forwardRef` defensivo: facturación
+// no importa este módulo hoy, pero ambos dominios se referencian vía eventos
+// y seeds, y el ciclo rompería el arranque en silencio.
+import { InvoicingModule } from '../invoicing/invoicing.module';
 
 @Module({
   imports: [
@@ -65,6 +71,8 @@ import { OrderSseService } from './services/order-sse.service';
     CouponsModule,
     // Carril B - B3: necesario para inyectar NotificationsSseService.
     NotificationsModule,
+    // Release-853 paso 10: propagación del titular al borrador de factura.
+    forwardRef(() => InvoicingModule),
   ],
   controllers: [OrdersController, OrdersBulkController],
   providers: [
@@ -76,6 +84,8 @@ import { OrderSseService } from './services/order-sse.service';
     OrderEtaService,
     // Carril B - B3: hub tipado de eventos de orden para SSE.
     OrderSseService,
+    // B5: reparación de la copia del impuesto del envío.
+    OrderShippingTaxRepairService,
   ],
   exports: [OrdersService, OrderFlowModule, OrderEtaService, OrderSseService],
 })

@@ -4,6 +4,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
+  assertCanChargeInc,
   assertCanChargeVat,
   isIncResponsible,
   isVatResponsible,
@@ -91,9 +92,6 @@ interface IssuerContext {
 export const SHIPPING_INC_RESTAURANT_SUGGESTION =
   'La DIAN (Oficio 904106/2022) considera el domicilio parte de la base del INC en restaurantes.';
 
-export const SHIPPING_INC_NOT_RESPONSIBLE_WARNING =
-  'Tu RUT no declara la responsabilidad O-33 (INC). Puedes asignar INC al envío, pero revisa tu configuración fiscal.';
-
 /**
  * Carga tarifa → categoría → tasa, aplica la regla del emisor y devuelve la
  * copia del impuesto del envío. También valida la configuración de la tarifa
@@ -116,7 +114,7 @@ export class ShippingTaxService {
    *
    * Nunca lanza por el impuesto (es accesorio a la venta): tarifa ajena o
    * inexistente, sin categoría, categoría no elegible o costo 0 ⇒ copia
-   * vacía. Un bruto que no cierra exacto SÍ se grava (base = bruto − impuesto). IVA con emisor sin O-48 ⇒ copia vacía + warn.
+   * vacía. Un bruto que no cierra exacto SÍ se grava (base = bruto − impuesto). IVA con emisor sin O-48 ⇒ copia vacía + warn; INC con emisor sin O-33 ⇒ copia vacía + warn.
    * Costo digitado a mano ⇒ el llamador NO debe llamar a esto (copia vacía).
    *
    * `client`: pasar el `tx` si se está dentro de una transacción (evita tomar
@@ -161,6 +159,19 @@ export class ShippingTaxService {
     }
 
     const evaluation = evaluateShippingTaxCategory(category);
+    // B4 — tarifa INC heredada con emisor sin O-33: copia vacía + aviso. El
+    // cliente paga lo mismo; no se inventa un impuesto que el RUT no respalda.
+    if (
+      evaluation.eligible &&
+      evaluation.tax_type === 'inc' &&
+      !isIncResponsible(issuer?.fiscal_data ?? null)
+    ) {
+      this.logger.warn(
+        `[shipping-tax] store=${store_id} rate=${rate_id} category=${category.id} ` +
+          'envío sin impuesto (inc_not_responsible)',
+      );
+      return { ...EMPTY_SHIPPING_TAX };
+    }
     const vat_responsible =
       evaluation.eligible && evaluation.tax_type === 'iva'
         ? isVatResponsible(issuer?.fiscal_data ?? null)
@@ -196,7 +207,8 @@ export class ShippingTaxService {
    * - No elegible ⇒ 400 con el motivo.
    * - IVA con emisor sin O-48 ⇒ 412 `FISCAL_VAT_NOT_RESPONSIBLE_001`
    *   (`context: 'shipping'`).
-   * - INC sin O-33 ⇒ permitido (la advertencia sale en `getRateTaxOptions`).
+   * - INC con emisor sin O-33 ⇒ 412 `FISCAL_INC_NOT_RESPONSIBLE_001`
+   *   (`context: 'shipping'`).
    */
   async assertCategoryAssignable(
     tax_category_id: number | null | undefined,
@@ -228,6 +240,9 @@ export class ShippingTaxService {
     }
     if (evaluation.tax_type === 'iva') {
       assertCanChargeVat(issuer?.fiscal_data ?? null, 'shipping');
+    }
+    if (evaluation.tax_type === 'inc') {
+      assertCanChargeInc(issuer?.fiscal_data ?? null, 'shipping');
     }
   }
 
@@ -270,6 +285,17 @@ export class ShippingTaxService {
             'Tu RUT no declara la responsabilidad O-48 (IVA). Completa tu configuración fiscal para cobrar IVA en el envío.',
         };
       }
+      if (evaluation.tax_type === 'inc' && !inc_responsible) {
+        return {
+          id: row.id,
+          name: row.name,
+          tax_type: 'inc',
+          rate_percent: evaluation.rate_percent,
+          eligible: false,
+          reason:
+            'Tu RUT no declara la responsabilidad O-33 (INC). Completa tu configuración fiscal para cobrar INC en el envío.',
+        };
+      }
       return {
         id: row.id,
         name: row.name,
@@ -280,12 +306,6 @@ export class ShippingTaxService {
     });
 
     const warnings: string[] = [];
-    const hasEligibleInc = categories.some(
-      (c) => c.eligible && c.tax_type === 'inc',
-    );
-    if (hasEligibleInc && !inc_responsible) {
-      warnings.push(SHIPPING_INC_NOT_RESPONSIBLE_WARNING);
-    }
 
     const options: ShippingRateTaxOptions = {
       categories,

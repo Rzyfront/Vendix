@@ -29,6 +29,8 @@ import {
   UpdateOrderEditorDto,
 } from './dto';
 import { AssignShippingMethodDto } from './dto';
+import { RepairShippingTaxDto } from './dto/repair-shipping-tax.dto';
+import { OrderShippingTaxRepairService } from './services/order-shipping-tax-repair.service';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -69,6 +71,9 @@ export class OrdersController {
     // Carril B - B3: NotificationsSseService es el hub por store_id del que
     // OrderSseService empuja. Aqui suscribimos el stream del detalle de orden.
     private readonly sseService: NotificationsSseService,
+    // B5: reparación de la copia del impuesto del envío en órdenes
+    // ya despachadas (salida real de la guarda de facturación).
+    private readonly shippingTaxRepairService: OrderShippingTaxRepairService,
   ) {}
 
   // CP-POS-SVC-PERF-001 / Bugfix — Nest can't reflect Logger as a
@@ -483,6 +488,29 @@ export class OrdersController {
         error.status || 400,
       );
     }
+  }
+
+  /**
+   * B5 — POST /api/store/orders/:id/shipping-tax/repair
+   *
+   * Repara la copia del impuesto del envío (`orders.shipping_tax_*`) en
+   * órdenes ya despachadas: `complete_rate` la completa desde su tarifa,
+   * `clear` la vacía (solo sin asiento de venta contabilizado). Nunca toca
+   * `shipping_cost` ni `grand_total`. Sin try/catch: el servicio solo lanza
+   * `VendixHttpException` y el filtro global emite status + error_code.
+   */
+  @Post(':id/shipping-tax/repair')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:orders:update')
+  async repairShippingTax(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RepairShippingTaxDto,
+  ) {
+    const result = await this.shippingTaxRepairService.repair(id, dto);
+    return this.responseService.updated(
+      result,
+      'Impuesto del envío reparado exitosamente',
+    );
   }
 
   @Delete(':id')

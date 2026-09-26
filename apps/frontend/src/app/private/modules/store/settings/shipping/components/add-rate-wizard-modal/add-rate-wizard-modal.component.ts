@@ -34,20 +34,20 @@ import {
 import { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import { StepsLineItem } from '../../../../../../../shared/components/steps-line/steps-line.component';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { resolveInclusiveClearing } from '@money-kernel/dian-money';
 
 /**
  * Vista previa informativa del impuesto incluido en el precio de la tarifa.
- * El precio configurado es lo que paga el cliente; la base se despeja como
- * `cost / (1 + r)` redondeada a 2 decimales. Solo orienta: el cálculo que se
- * factura lo hace el backend al vender.
+ * El precio configurado es lo que paga el cliente; la cuota sale del MISMO
+ * kernel que usa el backend al vender (`resolveInclusiveClearing`, truncado
+ * DIAN — 10.000 al 19 % ⇒ 1.596,63, no 1.596,64). Solo orienta: el cálculo
+ * que se factura lo hace el backend al vender.
  */
 export interface ShippingTaxPreview {
   cost: number;
   tax: number;
   label: string;
 }
-
-const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
 export function computeShippingTaxPreview(
   cost: number,
@@ -56,8 +56,19 @@ export function computeShippingTaxPreview(
 ): ShippingTaxPreview | null {
   if (!label || rate_percent == null || !(Number(rate_percent) > 0)) return null;
   if (!Number.isFinite(cost) || cost <= 0) return null;
-  const base = round2(cost / (1 + Number(rate_percent) / 100));
-  return { cost, tax: round2(cost - base), label };
+  // B6 — misma llamada que `resolveShippingTaxSnapshot`: fracción explícita,
+  // inclusiva; la cuota se TRUNCA (DIAN), no se redondea hacia arriba.
+  const clearing = resolveInclusiveClearing(cost, [
+    {
+      rate: Number(rate_percent) / 100,
+      rate_basis: 'fraction',
+      is_inclusive: true,
+    },
+  ]);
+  if (clearing.invalid_inputs.length > 0) return null;
+  const tax = clearing.rates[0]?.amount.toNumber() ?? 0;
+  if (!(tax > 0)) return null;
+  return { cost, tax, label };
 }
 
 /** El selector trabaja con `number`; `null` es «Sin impuesto». */
@@ -729,7 +740,13 @@ export class AddRateWizardModalComponent implements OnInit {
       // Gratis no cobra envío: no hay impuesto que llevar.
       tax_category_id:
         values.type === 'free' ? null : toTaxCategoryId(values.tax_category_id),
-      ...(useTiers ? this.buildTiersDto() : {}),
+      // Release-853 paso 11 — pasar a `free` limpia la escala previa: se
+      // envía `[]` (el backend la persiste como NULL).
+      ...(useTiers
+        ? this.buildTiersDto()
+        : values.type === 'free'
+          ? { distance_tiers: [] }
+          : {}),
     };
 
     const obs = this.is_edit_mode()

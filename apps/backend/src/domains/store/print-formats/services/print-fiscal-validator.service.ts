@@ -33,39 +33,19 @@ export class PrintFiscalValidatorService {
   /**
    * Verifica que las representaciones gráficas de factura y nota crédito electrónica
    * cumplan los requisitos obligatorios del Anexo Técnico 1.9 de la DIAN.
+   *
+   * CP-853-fix (paso 2): esta función ya NO valida la leyenda no fiscal del
+   * `pos_sale_ticket` (`f_disclaimer`). Esa regla es de PLANTILLA (se exige al
+   * guardar en el Hub / biblioteca), no de impresión: un override guardado
+   * antes de que la regla existiera nunca debe bloquear la impresión de la
+   * tirilla en producción. Ver `assertSaveCompliance` más abajo, que sí la
+   * incluye. `print-gateway.service.ts` (impresión) usa este método;
+   * `print-formats.service.ts` (guardado) usa `assertSaveCompliance`.
    */
   assertFiscalCompliance(
     formatType: print_format_type_enum,
     definition: PrintFormatDefinition,
   ): void {
-    // Tiquete POS: la leyenda no fiscal es obligatoria (espejo del requisito
-    // CUFE/QR en formatos fiscales). Estructurada: campo `f_disclaimer`
-    // habilitado en el footer; custom: substring del token. Cualquier otro
-    // formato no fiscal sigue pasando sin chequeos (B.6 intacto).
-    if ((formatType as string) === 'pos_sale_ticket') {
-      const hasField = (definition?.sections ?? []).some(
-        (s: any) =>
-          s?.type === 'footer' &&
-          (s.fields ?? []).some(
-            (f: any) => f?.id === 'f_disclaimer' && f?.enabled === true,
-          ),
-      );
-      const hasToken = (
-        (definition as any)?.custom_template ?? ''
-      ).includes('document.non_fiscal_disclaimer');
-      if (!hasField && !hasToken) {
-        throw new VendixHttpException(
-          // Código propio (no el 001 fiscal): el invariante B.6 reserva
-          // PRINT_FISCAL_STRUCTURE_VIOLATION_001 a formatos fiscales.
-          ErrorCodes.PRINT_TICKET_DISCLAIMER_REQUIRED_001,
-          'El Ticket de Venta POS debe declarar que no es factura electrónica: ' +
-            'incluya el campo "Leyenda No Fiscal" habilitado en el pie, o el token ' +
-            '{{document.non_fiscal_disclaimer}} en plantillas personalizadas.',
-        );
-      }
-      return;
-    }
-
     if (!FISCAL_FORMATS.has(formatType as string)) {
       // Los formatos no fiscales no tienen restricciones DIAN obligatorias.
       // Antes de B.6 había dos comparaciones explícitas
@@ -135,6 +115,48 @@ export class PrintFiscalValidatorService {
         ErrorCodes.PRINT_FISCAL_STRUCTURE_VIOLATION_001,
         `El formato fiscal no puede omitir las siguientes secciones exigidas por la DIAN: ${missingSectionTypes.join(', ')}.`,
       );
+    }
+  }
+
+  /**
+   * CP-853-fix (paso 2): validación exigida SOLO al guardar (Hub y biblioteca
+   * de plantillas), nunca al imprimir. Compone la validación fiscal DIAN
+   * (`assertFiscalCompliance`) más la regla de la leyenda no fiscal del
+   * `pos_sale_ticket`, que antes vivía dentro de `assertFiscalCompliance` y
+   * bloqueaba la impresión de overrides guardados antes de que la regla
+   * existiera. Usada por `print-formats.service.ts` en create/update.
+   */
+  assertSaveCompliance(
+    formatType: print_format_type_enum,
+    definition: PrintFormatDefinition,
+  ): void {
+    this.assertFiscalCompliance(formatType, definition);
+
+    // Tiquete POS: la leyenda no fiscal es obligatoria (espejo del requisito
+    // CUFE/QR en formatos fiscales). Estructurada: campo `f_disclaimer`
+    // habilitado en el footer; custom: substring del token. Cualquier otro
+    // formato no fiscal sigue pasando sin chequeos (B.6 intacto).
+    if ((formatType as string) === 'pos_sale_ticket') {
+      const hasField = (definition?.sections ?? []).some(
+        (s: any) =>
+          s?.type === 'footer' &&
+          (s.fields ?? []).some(
+            (f: any) => f?.id === 'f_disclaimer' && f?.enabled === true,
+          ),
+      );
+      const hasToken = (
+        (definition as any)?.custom_template ?? ''
+      ).includes('document.non_fiscal_disclaimer');
+      if (!hasField && !hasToken) {
+        throw new VendixHttpException(
+          // Código propio (no el 001 fiscal): el invariante B.6 reserva
+          // PRINT_FISCAL_STRUCTURE_VIOLATION_001 a formatos fiscales.
+          ErrorCodes.PRINT_TICKET_DISCLAIMER_REQUIRED_001,
+          'El Ticket de Venta POS debe declarar que no es factura electrónica: ' +
+            'incluya el campo "Leyenda No Fiscal" habilitado en el pie, o el token ' +
+            '{{document.non_fiscal_disclaimer}} en plantillas personalizadas.',
+        );
+      }
     }
   }
 }

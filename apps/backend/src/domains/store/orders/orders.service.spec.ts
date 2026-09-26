@@ -110,6 +110,11 @@ describe('OrdersService', () => {
     users: { findUnique: jest.fn() },
     stores: { findFirst: jest.fn() },
     payments: { findFirst: jest.fn() },
+    // Release-854 follow-up — `findOne` expone `active_sales_invoice` vía
+    // `findActiveSalesInvoice` (helper compartido con la guarda de `update`).
+    // Default `null` en el beforeEach: ninguna orden de prueba tiene factura
+    // de venta vigente salvo que un spec lo sobrescriba.
+    invoices: { findFirst: jest.fn() },
     table_sessions: {
       // ADR-07: los dos escritores de ítems consultan la sesión ABIERTA
       // vigente, y solo sin ella preguntan por historial de mesa.
@@ -269,6 +274,7 @@ describe('OrdersService', () => {
     // guard nuevo no bloquea ninguna spec existente. El spec dedicado abajo
     // sobrescribe esto con una fila para probar el 409.
     mockPrismaService.order_item_taxes.findFirst.mockResolvedValue(null);
+    mockPrismaService.invoices.findFirst.mockResolvedValue(null);
     mockPrismaService.order_item_taxes.deleteMany.mockResolvedValue({
       count: 0,
     } as any);

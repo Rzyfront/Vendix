@@ -6,6 +6,7 @@ import {
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { Prisma, refunds_state_enum } from '@prisma/client';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
+import { prorateShippingTaxRefundCents } from '../../../shipping/utils/shipping-tax.util';
 
 /** Step 1 (CP-REFUND-FLOW-REDESIGN): states that reserve ceiling once the
  * caller opts into a pending-aware ceiling. `failed` never reserves;
@@ -342,27 +343,15 @@ export class RefundCalculationService {
     // completo, se devuelve el REMANENTE exacto de la copia: la suma de las
     // devoluciones cierra al centavo contra `shipping_tax_amount` en vez de
     // arrastrar ±1 ¢ de redondeo por cada parcial.
-    const proportionalShippingTax = (refund_cents: number) =>
-      Math.round((shipping_tax_cents * refund_cents) / shipping_cost_cents);
-    let shipping_tax_refund_cents = 0;
-    if (shipping_refund_cents > 0 && shipping_cost_cents > 0 && shipping_tax_cents > 0) {
-      let prior_shipping_cents = 0;
-      let prior_shipping_tax_cents = 0;
-      for (const refund of order.refunds ?? []) {
-        const refund_cents = Math.round(Number(refund.shipping_refund ?? 0) * 100);
-        if (refund_cents <= 0) continue;
-        prior_shipping_cents += refund_cents;
-        prior_shipping_tax_cents += proportionalShippingTax(refund_cents);
-      }
-      const remaining_tax_cents = Math.max(
-        0,
-        shipping_tax_cents - prior_shipping_tax_cents,
-      );
-      shipping_tax_refund_cents =
-        prior_shipping_cents + shipping_refund_cents >= shipping_cost_cents
-          ? remaining_tax_cents
-          : Math.min(remaining_tax_cents, proportionalShippingTax(shipping_refund_cents));
-    }
+    const prior_shipping_refund_cents = (order.refunds ?? [])
+      .map((refund) => Math.round(Number(refund.shipping_refund ?? 0) * 100))
+      .filter((refund_cents) => refund_cents > 0);
+    const shipping_tax_refund_cents = prorateShippingTaxRefundCents(
+      shipping_cost_cents,
+      shipping_tax_cents,
+      prior_shipping_refund_cents,
+      shipping_refund_cents,
+    );
 
     if (total_refund > max_refundable + 0.01) {
       throw new BadRequestException(
@@ -375,11 +364,24 @@ export class RefundCalculationService {
     // The non-empty guard closes the vacuous-truth promotion: once cancelled
     // lines are excluded, the set can be empty, and an empty request must not
     // read as a full refund.
+    //
+    // Release-853 (paso 7): el historial que cubre es SÓLO `completed` —
+    // la guarda por línea de arriba sigue pendiente-aware (un parcial en
+    // vuelo reserva su parte del techo), pero la PROMOCIÓN a `refunded`
+    // exige dinero completado: un `pending_approval`/`processing` previo no
+    // puede completar la orden junto con este request. `state` ausente
+    // conserva el include legacy (misma convención del builder M2): en
+    // prod la columna es NOT NULL y siempre viaja.
+    const completedQtyMap = new Map<number, number>(
+      [...buildRefundCoverageLedger(
+        order.refunds.filter((r) => r.state == null || r.state === 'completed'),
+      )].map(([id, cov]) => [id, cov.refunded_qty]),
+    );
     const is_full_refund =
       order.order_items.length > 0 &&
       order.order_items.every(
         (item) =>
-          (refundedQtyMap.get(item.id) || 0) +
+          (completedQtyMap.get(item.id) || 0) +
             (requestedQtyMap.get(item.id) || 0) >=
           item.quantity,
       );

@@ -2616,6 +2616,30 @@
       "sessions": 4,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "0c3f12c2",
+      "created_by": "rzy",
+      "created_at": "2026-09-25T16:50:05Z",
+      "sessions": 0,
+      "memories": 3,
+      "prompts": 0
+    },
+    {
+      "id": "fb15a264",
+      "created_by": "rzy",
+      "created_at": "2026-09-25T18:10:16Z",
+      "sessions": 1,
+      "memories": 1,
+      "prompts": 0
+    },
+    {
+      "id": "4b114245",
+      "created_by": "rzy",
+      "created_at": "2026-09-25T19:34:42Z",
+      "sessions": 3,
+      "memories": 3,
+      "prompts": 0
     }
   ]
 }

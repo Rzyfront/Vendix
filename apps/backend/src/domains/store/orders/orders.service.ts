@@ -1,5 +1,5 @@
 import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
-import { Injectable, ConflictException, Logger, Optional } from '@nestjs/common';
+import { Injectable, ConflictException, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import {
   CreateOrderDto,
@@ -59,6 +59,8 @@ import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.se
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
+// Release-853 paso 10 — propagación del titular al borrador de factura.
+import { InvoicingService } from '../invoicing/invoicing.service';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -259,6 +261,14 @@ export class OrdersService {
     // asignar/editar el envío. `@Optional()` para no romper los TestingModule
     // existentes; sin él (sólo en specs) el envío sale sin impuesto.
     @Optional() private readonly shippingTaxService?: ShippingTaxService,
+    // Release-853 paso 10 — propagación del titular al borrador de factura.
+    // `@Optional()` por el mismo motivo que el impuesto: los TestingModule
+    // existentes no lo proveen. En producción Nest siempre lo resuelve (el
+    // módulo importa `InvoicingModule` con `forwardRef`); si un borrador
+    // exige propagación y el servicio falta, se falla cerrado con 500.
+    @Optional()
+    @Inject(forwardRef(() => InvoicingService))
+    private readonly invoicingService?: InvoicingService,
   ) {}
 
   /** Copia del impuesto de la tarifa `rate_id` (vacía sin tarifa/servicio). */
@@ -1319,9 +1329,18 @@ export class OrdersService {
       }
     }
 
+    // Release-854 follow-up paso 2 — campo aditivo para el pre-chequeo
+    // del frontend. El `invoices[0]` del include sigue siendo la última
+    // factura de CUALQUIER tipo (lo necesita la tarjeta del detalle); este
+    // campo responde otra pregunta: ¿hay una `sales_invoice` vigente?
+    const activeSalesInvoice = await this.findActiveSalesInvoice(id);
+
     return {
       ...order,
       cancellation_policy: getOrderCancellationPolicy(order),
+      active_sales_invoice: activeSalesInvoice
+        ? { id: activeSalesInvoice.id, status: activeSalesInvoice.status }
+        : null,
     };
   }
 
@@ -1440,6 +1459,37 @@ export class OrdersService {
         );
       }
     }
+    // Release-853 paso 10 — titular vs factura. Si la orden tiene una
+    // `sales_invoice` vigente (cualquier estado fuera de draft/voided/
+    // cancelled), el adquiriente es inmutable y el cambio responde 409
+    // ORD_TITULAR_INVOICED_001. Si la factura es un borrador, se guarda para
+    // propagarle el titular justo antes del write de la orden: si la
+    // propagación falla, la orden no se toca. Solo cubre `customer_id` (el
+    // `customer_alias` es etiqueta de display y no viaja al
+    // `titular_snapshot` de la factura). El filtro espeja
+    // `assertNotAlreadyInvoiced` de `InvoicingService`.
+    const titularCustomerChanged =
+      Object.prototype.hasOwnProperty.call(updateOrderDto, 'customer_id') &&
+      updateOrderDto.customer_id !== order.customer_id;
+    let draftInvoiceToPropagate: {
+      id: number;
+      status: string;
+      customer_id: number | null;
+    } | null = null;
+    if (titularCustomerChanged) {
+      const titularInvoice = await this.findActiveSalesInvoice(id);
+      if (titularInvoice && titularInvoice.status !== 'draft') {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_TITULAR_INVOICED_001,
+          undefined,
+          {
+            invoice_id: titularInvoice.id,
+            invoice_status: titularInvoice.status,
+          },
+        );
+      }
+      draftInvoiceToPropagate = titularInvoice;
+    }
 
     /**
      * QUI-557 — NINGÚN estado puede escribirse en crudo sobre `orders.state`.
@@ -1546,61 +1596,115 @@ export class OrdersService {
       );
     }
 
-    const updatedOrder = await this.prisma.orders.update({
-      where: { id },
-      data: { ...updateOrderDto, updated_at: new Date() },
-      include: {
-        stores: { select: { id: true, name: true, store_code: true } },
-        order_items: {
-          include: {
-            products: {
-              include: {
-                product_images: {
-                  where: { is_main: true },
-                  take: 1,
+    // Release-853 paso 10 — propagación al borrador. Va AQUÍ (después de
+    // todas las validaciones que pueden lanzar, justo antes del write de la
+    // orden): si falla, la orden queda intacta; y nada entre ambas
+    // escrituras puede lanzar salvo un fallo de BD. `InvoicingService.update`
+    // reconstruye el `titular_snapshot` desde la ficha del nuevo cliente.
+    //
+    // Release-854 follow-up paso 1 — compensación: se captura el
+    // `customer_id` previo del borrador antes de propagar. Si el write de
+    // la orden falla después, el `catch` de abajo lo restaura y relanza el
+    // error original. El `?? order.customer_id` cubre el borrador sin
+    // titular cargado: restaurar el titular vigente de la orden deja a
+    // ambas filas consistentes, que es la invariante que importa.
+    let propagatedDraft: { id: number; previousCustomerId: number } | null =
+      null;
+    if (draftInvoiceToPropagate) {
+      if (!this.invoicingService) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_INTERNAL_001,
+          'InvoicingService no disponible para propagar el titular al borrador',
+          { invoice_id: draftInvoiceToPropagate.id, order_id: id },
+        );
+      }
+      const previousCustomerId =
+        draftInvoiceToPropagate.customer_id ?? order.customer_id;
+      await this.invoicingService.update(draftInvoiceToPropagate.id, {
+        customer_id: updateOrderDto.customer_id,
+      });
+      propagatedDraft = { id: draftInvoiceToPropagate.id, previousCustomerId };
+    }
+
+    let updatedOrder;
+    try {
+      updatedOrder = await this.prisma.orders.update({
+        where: { id },
+        data: { ...updateOrderDto, updated_at: new Date() },
+        include: {
+          stores: { select: { id: true, name: true, store_code: true } },
+          order_items: {
+            include: {
+              products: {
+                include: {
+                  product_images: {
+                    where: { is_main: true },
+                    take: 1,
+                  },
                 },
               },
-            },
-            product_variants: true,
-          },
-        },
-        addresses_orders_billing_address_idToaddresses: true,
-        addresses_orders_shipping_address_idToaddresses: true,
-        payments: true,
-        shipping_method: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-            provider_name: true,
-            min_days: true,
-            max_days: true,
-            logo_url: true,
-          },
-        },
-        shipping_rate: {
-          include: {
-            shipping_zone: {
-              select: { id: true, name: true, display_name: true },
+              product_variants: true,
             },
           },
-        },
-        users: {
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            email: true,
-            phone: true,
-            avatar_url: true,
-            legal_name: true,
-            document_type: true,
-            document_number: true,
-            person_type: true,
+          addresses_orders_billing_address_idToaddresses: true,
+          addresses_orders_shipping_address_idToaddresses: true,
+          payments: true,
+          shipping_method: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              provider_name: true,
+              min_days: true,
+              max_days: true,
+              logo_url: true,
+            },
+          },
+          shipping_rate: {
+            include: {
+              shipping_zone: {
+                select: { id: true, name: true, display_name: true },
+              },
+            },
+          },
+          users: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+              phone: true,
+              avatar_url: true,
+              legal_name: true,
+              document_type: true,
+              document_number: true,
+              person_type: true,
+            },
           },
         },
-      },
-    });
+      });
+    } catch (error) {
+      // Release-854 follow-up paso 1 — compensación: el borrador ya tiene
+      // el titular nuevo pero la orden no se escribió. Se restaura el
+      // `customer_id` previo del borrador y se relanza SIEMPRE el error
+      // original, nunca el de la compensación. Si la reversión también
+      // falla, queda en el log con los ids para reparación manual.
+      if (propagatedDraft && this.invoicingService) {
+        try {
+          await this.invoicingService.update(propagatedDraft.id, {
+            customer_id: propagatedDraft.previousCustomerId,
+          });
+        } catch (compensationError) {
+          this.logger.error(
+            `Orden ${id}: no se pudo revertir el titular del borrador ${propagatedDraft.id} ` +
+              `a customer_id=${propagatedDraft.previousCustomerId} tras fallar el write de la orden ` +
+              `(order_id=${id}, invoice_id=${propagatedDraft.id}): ` +
+              `${compensationError instanceof Error ? compensationError.message : String(compensationError)}`,
+          );
+        }
+      }
+      throw error;
+    }
 
     /**
      * El estado va DESPUÉS de la metadata, y el orden NO es cosmético.
@@ -1625,6 +1729,32 @@ export class OrdersService {
     }
 
     return updatedOrder;
+  }
+
+  /**
+   * Release-854 follow-up paso 2 — factura de venta vigente de la orden.
+   *
+   * El filtro es el de la guarda de titular de `update()` (espejo de
+   * `assertNotAlreadyInvoiced` de `InvoicingService`): `sales_invoice` no
+   * anulada ni cancelada, la más reciente. Se comparte entre la guarda y
+   * `findOne()` para que la regla viva en un solo lugar. `customer_id`
+   * viaja solo para la compensación del paso 1; el campo público
+   * `active_sales_invoice` proyecta únicamente `{ id, status }`.
+   */
+  private async findActiveSalesInvoice(orderId: number): Promise<{
+    id: number;
+    status: string;
+    customer_id: number | null;
+  } | null> {
+    return this.prisma.invoices.findFirst({
+      where: {
+        order_id: orderId,
+        invoice_type: 'sales_invoice',
+        status: { notIn: ['voided', 'cancelled'] },
+      },
+      select: { id: true, status: true, customer_id: true },
+      orderBy: { id: 'desc' },
+    });
   }
 
   private async assertTableOrderEditable(orderId: number, storeId: number): Promise<void> {

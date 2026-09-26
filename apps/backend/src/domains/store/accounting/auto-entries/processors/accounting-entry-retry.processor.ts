@@ -1,5 +1,6 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { Job } from 'bullmq';
 import { RequestContextService } from '../../../../../common/context/request-context.service';
 import { AutoEntryService, AutoEntryEventData } from '../auto-entry.service';
@@ -9,6 +10,10 @@ import {
   AccountingEntryRetryJob,
   AccountingEntryFailureService,
 } from '../accounting-entry-failure.service';
+import {
+  MovementsService,
+  REFUND_CASH_MOVEMENT_KEY,
+} from '../../../cash-registers/movements/movements.service';
 
 /**
  * Reintenta asientos automáticos fallidos. Reejecuta `postAutoEntry` con el
@@ -16,6 +21,10 @@ import {
  * ya existe un asiento para el mismo `source_type/source_id/entity`), así que
  * un reintento nunca duplica. El re-throw en el catch deja que BullMQ aplique
  * el backoff exponencial hasta agotar `attempts`.
+ *
+ * Dos claves semánticas NO van a `postAutoEntry`: `manual_refund_delivery_v1`
+ * (asiento de un refund manual) y `refund_cash_movement_v1` (movimiento de
+ * caja de un refund en efectivo) — cada una va a su entrega durable.
  */
 @Processor(ACCOUNTING_ENTRY_RETRY_QUEUE)
 export class AccountingEntryRetryProcessor extends WorkerHost {
@@ -25,6 +34,7 @@ export class AccountingEntryRetryProcessor extends WorkerHost {
     private readonly auto_entry_service: AutoEntryService,
     private readonly failure_service: AccountingEntryFailureService,
     private readonly manualRefundDelivery: ManualRefundDeliveryService,
+    private readonly moduleRef: ModuleRef,
   ) {
     super();
   }
@@ -42,6 +52,18 @@ export class AccountingEntryRetryProcessor extends WorkerHost {
     }
     if (failure.handler_key === MANUAL_REFUND_DELIVERY_KEY) {
       await this.manualRefundDelivery.deliver(failure_id);
+      return;
+    }
+    if (failure.handler_key === REFUND_CASH_MOVEMENT_KEY) {
+      // Release-853 (paso 6): el reintento (manual desde la bandeja o de
+      // cola) de un movimiento de caja va a la entrega durable, NUNCA a
+      // `postAutoEntry` — el payload no es un asiento contable. `ModuleRef`
+      // perezoso (`strict: false`) en vez de importar CashRegistersModule:
+      // evita cablear módulos entre dominios y con eso cualquier ciclo.
+      const movements = this.moduleRef.get(MovementsService, {
+        strict: false,
+      });
+      await movements.deliverRefundCashMovement(failure_id);
       return;
     }
 
