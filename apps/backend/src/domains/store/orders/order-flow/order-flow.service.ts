@@ -2818,6 +2818,18 @@ export class OrderFlowService {
         });
       }
 
+      // Parity fix (order-actions-parity spec): the web has ALWAYS shown
+      // `cancel-payment` in `processing` (gated only by `isPrivilegedUser()`)
+      // and objective 12 explicitly lists `processing` among the
+      // `cancel_payment`-eligible states — `canCancelPayment` already
+      // delegates to `getOrderCancellationPolicy` for this state (unchanged
+      // policy), this method just never pushed the row.
+      actions.push({
+        code: 'cancel_payment',
+        label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+        ...canCancelPaymentAsRole(snapshot, roleCtx),
+      });
+
       actions.push({
         code: 'cancel',
         label_key: 'ORD_ACTION_CANCEL',
