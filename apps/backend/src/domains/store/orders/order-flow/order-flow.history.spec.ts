@@ -188,6 +188,12 @@ describe('OrderFlowService.payOrder — payment_registered / state_changed', () 
   it('delivered sin pago liquidado: registra payment_registered por tramo y NO un state_changed a finished', async () => {
     let paySeq = 500;
     const prismaMock: any = {
+      // `createLegPayments` corre dentro de `this.prisma.$transaction(async
+      // (tx) => …)` (commit bb6ba552c); resolver con el MISMO `prismaMock`
+      // para que `tx.payments`/`tx.orders` y `orderHistoryService.record(tx,
+      // …)` — comparado más abajo contra `prismaMock` — sigan siendo el mismo
+      // objeto.
+      $transaction: jest.fn(async (callback: any) => callback(prismaMock)),
       store_payment_methods: {
         findFirst: jest.fn().mockResolvedValue({
           id: 1,
@@ -274,6 +280,10 @@ describe('OrderFlowService.payOrder — payment_registered / state_changed', () 
 
   it('shipped: registra sólo payment_registered — el guard real de OrderHistoryService suprime el state_changed no-op (fix 5db736e6f)', async () => {
     const prismaMock: any = {
+      // Ídem — `createLegPayments` corre dentro de `$transaction`; este spec
+      // lee `order_events.create` directamente sobre `prismaMock`, así que el
+      // `tx` del callback debe ser el mismo objeto.
+      $transaction: jest.fn(async (callback: any) => callback(prismaMock)),
       store_payment_methods: {
         findFirst: jest.fn().mockResolvedValue({
           id: 1,
@@ -361,6 +371,8 @@ describe('OrderFlowService.payOrder — payment_registered / state_changed', () 
 
   it('created con delivery_type que requiere fulfillment: registra state_changed created→processing, nunca processing→processing', async () => {
     const prismaMock: any = {
+      // Ídem — ver nota de `$transaction` en el `it` anterior.
+      $transaction: jest.fn(async (callback: any) => callback(prismaMock)),
       store_payment_methods: {
         findFirst: jest.fn().mockResolvedValue({
           id: 1,

@@ -75,6 +75,11 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
     latestInvoice = null;
 
     prismaMock = {
+      // `createLegPayments`/`cancelLegPayments` corren dentro de
+      // `this.prisma.$transaction(async (tx) => …)` (commit bb6ba552c); el
+      // mock resuelve el callback con el MISMO `prismaMock` para que
+      // `tx.payments`/`tx.orders` sigan siendo los mocks que este spec ya lee.
+      $transaction: jest.fn(async (callback: any) => callback(prismaMock)),
       store_payment_methods: {
         findFirst: jest
           .fn()
