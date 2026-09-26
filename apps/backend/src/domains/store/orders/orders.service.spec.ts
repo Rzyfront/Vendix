@@ -172,9 +172,16 @@ describe('OrdersService', () => {
   };
   const mockScheduleValidation = { validateOrThrow: jest.fn() };
   const mockStockValidator = {
-    assertLinesAvailable: jest.fn().mockResolvedValue(undefined),
+    assertLinesAvailable: jest.fn().mockResolvedValue([]),
     resolveEffectiveTracking: jest.fn((product, variant) =>
       variant?.track_inventory_override ?? product?.track_inventory ?? false),
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — strict default
+    // (allowOversell=false) preserves every pre-existing assertion byte-for-
+    // byte; tests that want the oversell path override this per-test.
+    resolveInventoryPolicy: jest.fn().mockResolvedValue({
+      allowOversell: false,
+      allowIngredientOveruse: true,
+    }),
   };
   const mockStockLevelManager = {
     reserveStock: jest.fn(),
@@ -190,7 +197,15 @@ describe('OrdersService', () => {
       shortfall: 0,
     })),
   };
-  const mockShippingCalculator = { calculateRates: jest.fn() };
+  const mockShippingCalculator = {
+    calculateRates: jest.fn(),
+    // Paso 2 (unificación de envío) — el editor delega en este método para
+    // la tarifa explícita cuando hay dirección resoluble; ningún test
+    // existente lo dispara (`addresses.findFirst` no está mockeado salvo
+    // donde se agrega explícitamente), así que un `jest.fn()` sin
+    // implementación por defecto es inofensivo para el resto del archivo.
+    quoteRateGross: jest.fn(),
+  };
   const mockOrderFlowService = {
     cancelOrder: jest.fn(),
     forceOrderState: jest.fn(),
@@ -304,7 +319,10 @@ describe('OrdersService', () => {
     });
 
     jest.clearAllMocks();
-    mockStockValidator.assertLinesAvailable.mockReset().mockResolvedValue(undefined);
+    mockStockValidator.assertLinesAvailable.mockReset().mockResolvedValue([]);
+    mockStockValidator.resolveInventoryPolicy
+      .mockReset()
+      .mockResolvedValue({ allowOversell: false, allowIngredientOveruse: true });
     mockPrismaService.table_sessions.findFirst.mockReset().mockResolvedValue(null);
   });
 
@@ -2061,6 +2079,51 @@ describe('OrdersService', () => {
         }
       });
 
+      it('paso 2 — tarifa flat con umbral de envío gratis superado: shipping_cost 0 (unificado con quoteRateGross)', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          // Dirección resoluble ⇒ el editor ahora puede cotizar la tarifa
+          // explícita en vez de asumir `base_cost` a ciegas.
+          mockPrismaService.addresses.findFirst.mockResolvedValueOnce({
+            country_code: 'CO',
+            city: 'Bogotá',
+            latitude: 4.711,
+            longitude: -74.0721,
+          } as any);
+          // El umbral de envío gratis vive dentro del cálculo único de
+          // `ShippingCalculatorService` (probado en
+          // `shipping-calculator.service.spec.ts`, paso 1); acá solo se
+          // prueba que el editor USA ese resultado en vez del atajo
+          // `base_cost`.
+          mockShippingCalculator.quoteRateGross.mockResolvedValueOnce(0);
+          // El guard anti-rollback (ORD_EDIT_TOTALS_ROLLBACK_001) relee la
+          // orden dentro de la tx y la compara contra lo recalculado; el
+          // `persistedOrder` compartido trae `shipping_cost: 10` fijo, así
+          // que hay que reflejar el 0 (y el `grand_total` resultante) en la
+          // lectura posterior a la escritura.
+          mockPrismaService.orders.findFirst.mockResolvedValue({
+            ...persistedOrder,
+            shipping_cost: 0,
+            grand_total: 119,
+          } as any);
+          await service.updateOrderFromEditor(500, { ...fullDto, shipping_cost: 0 });
+          expect(mockShippingCalculator.quoteRateGross).toHaveBeenCalled();
+          expect(mockShippingCalculator.quoteRateGross.mock.calls[0][1]).toBe(7);
+          // El editor trata su propio costo calculado como "de tarifa"
+          // (mismo contrato existente, ver `resolveShippingTaxChange`): con
+          // costo 0 la copia SÍ se re-deriva sobre ese 0, nunca se inventa
+          // sobre el `base_cost` de 10 que hubiera regido sin el paso 2.
+          expect(snapshotForRate).toHaveBeenCalledWith(null, 7, 0, { store_id: 1 });
+          const data = headerUpdate();
+          expect(data.shipping_cost).toBe(0);
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
       it('DTO sin envío: conserva costo y copia (no escribe shipping_tax_*)', async () => {
         setupContext();
         const contextSpy = spyContext();
@@ -3252,7 +3315,7 @@ describe('OrdersService', () => {
       });
       expect(mockStockValidator.assertLinesAvailable).toHaveBeenCalledWith(
         [expect.objectContaining({ product_id: 1, quantity: 2 })],
-        { orderId: 700, tx: mockPrismaService },
+        { orderId: 700, tx: mockPrismaService, allowOversell: false },
       );
       expect(mockStockLevelManager.releaseReservationsByReference).not.toHaveBeenCalled();
       expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();

@@ -28,7 +28,11 @@ import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
-import { StockValidatorService, StockDemandLine } from '../inventory/shared/services/stock-validator.service';
+import {
+  StockValidatorService,
+  StockDemandLine,
+  type InsufficientStockItem,
+} from '../inventory/shared/services/stock-validator.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
@@ -302,7 +306,19 @@ export class OrdersService {
     @Optional() private readonly stockValidator?: StockValidatorService,
   ) {}
 
-  /** Reserve every sellable slice, rather than assuming one location holds the entire line. */
+  /**
+   * Reserve every sellable slice, rather than assuming one location holds the
+   * entire line.
+   *
+   * `allowOversell` (docs/plans/no-overselling-stock-guard-plan.md, step 9):
+   * default `false` preserves the strict guard byte-for-byte. When `true`
+   * (the caller already resolved `StockValidatorService.resolveInventoryPolicy(...)
+   * .allowOversell === true` for this order's store), a shortfall does NOT
+   * throw — it is logged and the full `required` quantity is reserved anyway,
+   * with the uncovered remainder landing on a fallback location via
+   * `allow_negative_available: true` (and `validate_availability: false`,
+   * since the two describe the same accepted-shortfall intent).
+   */
   private async reserveOrderItemStrict(
     item: {
       product_id: number;
@@ -315,6 +331,7 @@ export class OrdersService {
     storeId: number,
     userId: number | undefined,
     tx: Prisma.TransactionClient,
+    allowOversell = false,
   ): Promise<void> {
     const required = Math.max(0, Number(item.stock_units_consumed ?? 0)) || item.quantity;
     const allocation = await this.sellableStockAllocator.allocateForLine(
@@ -325,21 +342,38 @@ export class OrdersService {
       [],
       tx,
     );
+    let slices = allocation.slices;
     if (allocation.shortfall > 0) {
-      throw new VendixHttpException(
-        ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
-        `No hay existencias suficientes de ${item.product_name}.`,
-        { items: [{
-          product_id: item.product_id,
-          product_variant_id: item.product_variant_id,
-          product_name: item.product_name,
-          kind: 'product',
-          requested: required,
-          available: allocation.available,
-        }] },
+      if (!allowOversell) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+          `No hay existencias suficientes de ${item.product_name}.`,
+          { items: [{
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id,
+            product_name: item.product_name,
+            kind: 'product',
+            requested: required,
+            available: allocation.available,
+          }] },
+        );
+      }
+      this.logger.warn(
+        `Sobreventa permitida — ${item.product_name}: requiere ${required}, disponible ${allocation.available}.`,
+      );
+      const fallbackLocationId =
+        allocation.slices[0]?.location_id ??
+        (await this.stockLevelManager.getDefaultLocationForProduct(
+          item.product_id,
+          item.product_variant_id ?? undefined,
+          tx,
+        ));
+      slices = this.sellableStockAllocator.absorbShortfall(
+        allocation,
+        fallbackLocationId,
       );
     }
-    for (const slice of allocation.slices) {
+    for (const slice of slices) {
       await this.stockLevelManager.reserveStock(
         item.product_id,
         item.product_variant_id ?? undefined,
@@ -348,12 +382,12 @@ export class OrdersService {
         'order',
         orderId,
         userId,
-        true,
+        !allowOversell,
         tx,
         undefined,
         false,
         undefined,
-        false,
+        allowOversell,
       );
     }
   }
@@ -465,15 +499,15 @@ export class OrdersService {
   }
 
   /**
-   * Paso 5 (B1+B2) — costo que dicta una tarifa para una orden:
-   * - `flat`: BRUTO del cálculo único (paso 14; agregado ⇒ base +
-   *   impuesto, igual que el cotizador).
-   * - calculadas (`weight_based`, `price_based`, `free`): se recalcula en
-   *   el servidor con `ShippingCalculatorService` sobre la dirección y las
-   *   líneas de la orden (mismo contrato que
-   *   `PaymentsService.resolvePosShippingTax`).
-   * - `carrier_calculated`, sin dirección resoluble, tarifa desconocida o
-   *   fallo del calculador ⇒ `null` ⇒ copia vacía (nunca inventa impuesto).
+   * Paso 5 (B1+B2) — costo que dicta una tarifa para una orden. Unificado
+   * (ver `vendix-shipping-distance-pricing` / plan de unificación del
+   * cálculo de envío): TODOS los tipos (`flat`, `weight_based`,
+   * `price_based`, `free`) pasan por el mismo cálculo único de
+   * `ShippingCalculatorService` sobre la dirección y las líneas de la
+   * orden — ya no hay atajo `flat = base_cost`, que ignoraba el umbral de
+   * envío gratis, el costo por unidad y el precio por distancia.
+   * `carrier_calculated`, sin dirección resoluble, tarifa desconocida o
+   * fallo del calculador ⇒ `null` ⇒ copia vacía (nunca inventa impuesto).
    */
   private async resolveExpectedRateCost(
     rate: { id: number; type: string; base_cost: unknown } | null,
@@ -481,17 +515,6 @@ export class OrdersService {
     storeId: number,
   ): Promise<number | null> {
     if (!rate) return null;
-    if (rate.type === 'flat') {
-      const base = Number(rate.base_cost);
-      const charge =
-        this.shippingTaxService &&
-        typeof this.shippingTaxService.chargeForRate === 'function'
-          ? await this.shippingTaxService.chargeForRate(null, rate.id, base, {
-              store_id: storeId,
-            })
-          : null;
-      return charge ? charge.gross : base;
-    }
     const options = await this.quoteOrderShippingOptions(orderId, storeId);
     const match = options?.find((o) => o.rate_id === rate.id);
     return match ? Number(match.cost) : null;
@@ -795,6 +818,11 @@ export class OrdersService {
           createOrderDto,
         );
 
+        // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive to
+        // the response, only when the store's "Permitir sobreventa" switch
+        // accepted a real shortfall. Declared outside the tx so it survives
+        // into the final return below.
+        const stockWarnings: InsufficientStockItem[] = [];
         // Use scoped client (creates are not scoped by extension but using correct service is good style)
         const order = await this.prisma.$transaction(async (tx) => {
           const demands: StockDemandLine[] = createOrderDto.items.flatMap((item, index) =>
@@ -807,7 +835,10 @@ export class OrdersService {
                 }]
               : [],
           );
-          await this.stockValidator!.assertLinesAvailable(demands, { tx });
+          const inventoryPolicy = await this.stockValidator!.resolveInventoryPolicy(store_id, tx);
+          const allowOversell = inventoryPolicy.allowOversell === true;
+          const shortages = await this.stockValidator!.assertLinesAvailable(demands, { tx, allowOversell });
+          if (shortages.length > 0) stockWarnings.push(...shortages);
           const createdOrder = await tx.orders.create({
           data: {
             created_by_user_id: creatingUser?.id ?? context?.user_id ?? null,
@@ -959,7 +990,7 @@ export class OrdersService {
                 item.products ?? { track_inventory: false },
                 item.product_variants ?? undefined,
               )) continue;
-            await this.reserveOrderItemStrict(item, createdOrder.id, store_id, creatingUser?.id, tx);
+            await this.reserveOrderItemStrict(item, createdOrder.id, store_id, creatingUser?.id, tx, allowOversell);
           }
           return createdOrder;
         }, { timeout: 20_000, maxWait: 5_000 });
@@ -972,7 +1003,9 @@ export class OrdersService {
           currency: order.currency,
         });
 
-        return order;
+        return stockWarnings.length > 0
+          ? { ...order, stock_warnings: stockWarnings }
+          : order;
       } catch (error) {
         if (
           error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -2427,7 +2460,12 @@ export class OrdersService {
     const discountAmount = roundMoney(Number(dto.discount_amount ?? 0));
     const persistedShipping = roundMoney(Number(order.shipping_cost ?? 0));
 
-    return this.prisma.$transaction(async (tx) => {
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive to the
+    // response, only when the store's "Permitir sobreventa" switch accepted
+    // a real shortfall. Declared outside the tx so it survives into the
+    // final return below.
+    const stockWarnings: InsufficientStockItem[] = [];
+    const finalOrder = await this.prisma.$transaction(async (tx) => {
       // ERR-07 / DB-14 — invariante "prepared + variantes exige variante".
       // Único enforcement centralizado (mismo helper que `create` y
       // `updateOrderFromEditor`); si queda duplicado en dos sitios,
@@ -2496,7 +2534,9 @@ export class OrdersService {
         );
       }
 
-      await this.stockValidator!.assertLinesAvailable(
+      const inventoryPolicy = await this.stockValidator!.resolveInventoryPolicy(order.store_id, tx);
+      const allowOversell = inventoryPolicy.allowOversell === true;
+      const shortages = await this.stockValidator!.assertLinesAvailable(
         dto.items.flatMap((item, index) =>
           item.product_id != null && updateProductsById.get(item.product_id)?.product_type !== 'prepared'
             ? [{
@@ -2507,8 +2547,9 @@ export class OrdersService {
               }]
             : [],
         ),
-        { orderId: id, tx },
+        { orderId: id, tx, allowOversell },
       );
+      if (shortages.length > 0) stockWarnings.push(...shortages);
 
       // Se liberan las reservas POR REFERENCIA, no adivinando la bodega.
         // Antes se resolvía `getDefaultLocationForProduct` —la bodega con más
@@ -2639,7 +2680,7 @@ export class OrdersService {
               item.products ?? { track_inventory: false },
               item.product_variants ?? undefined,
             )) continue;
-        await this.reserveOrderItemStrict(item, id, order.store_id, undefined, tx);
+        await this.reserveOrderItemStrict(item, id, order.store_id, undefined, tx, allowOversell);
       }
 
       // Return updated order with all includes
@@ -2676,6 +2717,9 @@ export class OrdersService {
         },
       });
     });
+    return stockWarnings.length > 0
+      ? { ...finalOrder, stock_warnings: stockWarnings }
+      : finalOrder;
   }
 
   /**
@@ -2943,6 +2987,82 @@ export class OrdersService {
         );
       }
 
+      // Paso 2 (unificación de envío) — dirección + líneas del carrito para
+      // el cálculo único, compartida por la tarifa explícita Y el
+      // auto-cálculo. Antes la rama de tarifa explícita ni siquiera
+      // resolvía dirección, así que nunca pasaba por el umbral de envío
+      // gratis, el costo por unidad ni la distancia
+      // (`vendix-shipping-distance-pricing`).
+      let shippingAddressForCalc: {
+        country_code: string;
+        state_province?: string;
+        city?: string;
+        postal_code?: string;
+        latitude?: number;
+        longitude?: number;
+      } | null = null;
+      let itemsForShippingCalc: Array<{
+        product_id: number;
+        quantity: number;
+        price: number;
+        weight?: number;
+        product_type?: string;
+      }> = [];
+      if (dto.shipping_address_id) {
+        // La dirección debe pertenecer al customer_id del editor — sin esto
+        // un operador con acceso al store podría leer o grabar la dirección
+        // de cualquier cliente que comparta tienda (Round 1, blocker 8).
+        const address = await this.prisma.addresses.findFirst({
+          where: {
+            id: dto.shipping_address_id,
+            user_id: dto.customer_id,
+          },
+          select: {
+            country_code: true,
+            state_province: true,
+            city: true,
+            postal_code: true,
+            latitude: true,
+            longitude: true,
+          },
+        });
+        if (address?.country_code) {
+          shippingAddressForCalc = {
+            country_code: address.country_code,
+            state_province: address.state_province || undefined,
+            city: address.city || undefined,
+            postal_code: address.postal_code || undefined,
+            latitude:
+              address.latitude != null ? Number(address.latitude) : undefined,
+            longitude:
+              address.longitude != null
+                ? Number(address.longitude)
+                : undefined,
+          };
+          itemsForShippingCalc = dto.items
+            .filter((it): it is typeof it & { product_id: number } =>
+              typeof it.product_id === 'number',
+            )
+            .map((it) => ({
+              product_id: it.product_id,
+              quantity: Number(it.quantity || 0),
+              // Round 3 MAJOR #7 — server-owned price. Trusting the client
+              // `total_price` (or anything the operator typed in the editor)
+              // lets a manipulated row bias the shipping calculator; here we
+              // derive the price the shipping calculator needs from
+              // `final_unit_price × quantity` so the rate the server picks
+              // never depends on a client-supplied total. The original
+              // `total_price` is still accepted by the rest of the editor
+              // (recomputed server-side in step 11).
+              price:
+                Number(it.final_unit_price ?? it.unit_price ?? 0) *
+                Number(it.quantity || 0),
+              weight: it.weight ? Number(it.weight) : undefined,
+              product_type: (it as any).product_type,
+            }));
+        }
+      }
+
       if (dto.shipping_rate_id) {
         const rate = await this.prisma.shipping_rates.findFirst({
           where: {
@@ -2958,77 +3078,52 @@ export class OrdersService {
           );
         }
         resolvedShippingRateId = rate.id;
-        // Paso 14 — la tarifa explícita cobra el BRUTO del cálculo único
-        // (agregado ⇒ base + impuesto, igual que el cotizador). Sin
-        // `chargeForRate` (dobles viejos de specs) ⇒ `base_cost`.
-        shippingCost =
-          this.shippingTaxService &&
-          typeof this.shippingTaxService.chargeForRate === 'function'
-            ? (
-                await this.shippingTaxService.chargeForRate(
-                  null,
-                  rate.id,
-                  Number(rate.base_cost),
-                  { store_id: storeId },
-                )
-              ).gross
-            : Number(rate.base_cost);
-      } else {
-        // Auto-calcular si no hay rate explícito.
-        if (dto.shipping_address_id) {
-          // La dirección debe pertenecer al customer_id del editor — sin esto
-          // un operador con acceso al store podría leer o grabar la dirección
-          // de cualquier cliente que comparta tienda (Round 1, blocker 8).
-          const address = await this.prisma.addresses.findFirst({
-            where: {
-              id: dto.shipping_address_id,
-              user_id: dto.customer_id,
-            },
-            select: {
-              country_code: true,
-              state_province: true,
-              city: true,
-              postal_code: true,
-            },
-          });
-          if (address?.country_code) {
-            const itemsForCalc = dto.items
-              .filter((it): it is typeof it & { product_id: number } =>
-                typeof it.product_id === 'number',
-              )
-              .map((it) => ({
-                product_id: it.product_id,
-                quantity: Number(it.quantity || 0),
-                // Round 3 MAJOR #7 — server-owned price. Trusting the client
-                // `total_price` (or anything the operator typed in the editor)
-                // lets a manipulated row bias the shipping calculator; here we
-                // derive the price the shipping calculator needs from
-                // `final_unit_price × quantity` so the rate the server picks
-                // never depends on a client-supplied total. The original
-                // `total_price` is still accepted by the rest of the editor
-                // (recomputed server-side in step 11).
-                price:
-                  Number(it.final_unit_price ?? it.unit_price ?? 0) *
-                  Number(it.quantity || 0),
-                weight: it.weight ? Number(it.weight) : undefined,
-                product_type: (it as any).product_type,
-              }));
-            const options = await this.shippingCalculatorService.calculateRates(
+
+        // Paso 2 — la tarifa explícita ahora pasa por el mismo cálculo
+        // único que el auto-cálculo (umbral de envío gratis, costo por
+        // unidad, distancia y agregado del impuesto) en vez del atajo
+        // `chargeForRate(base_cost)`, que ignoraba todo lo anterior.
+        const quoted = shippingAddressForCalc
+          ? await this.shippingCalculatorService.quoteRateGross(
               storeId,
-              itemsForCalc,
-              {
-                country_code: address.country_code,
-                state_province: address.state_province || undefined,
-                city: address.city || undefined,
-                postal_code: address.postal_code || undefined,
-              },
-            );
-            const match = options.find((o) => o.method_id === method.id);
-            if (match) {
-              resolvedShippingRateId = match.rate_id;
-              shippingCost = Number(match.cost);
-            }
-          }
+              rate.id,
+              itemsForShippingCalc,
+              shippingAddressForCalc,
+            )
+          : null;
+        if (quoted != null) {
+          shippingCost = quoted;
+        } else {
+          // Fallback (Paso 14 histórico) — sin dirección resoluble en el
+          // DTO, o la tarifa no apareció entre las opciones calculadas
+          // (specs viejos sin `ShippingCalculatorService` real, o la zona
+          // ya no cubre la dirección): cobra el BRUTO sobre `base_cost` vía
+          // `chargeForRate`; sin `chargeForRate` (dobles viejos de specs)
+          // ⇒ `base_cost` tal cual.
+          shippingCost =
+            this.shippingTaxService &&
+            typeof this.shippingTaxService.chargeForRate === 'function'
+              ? (
+                  await this.shippingTaxService.chargeForRate(
+                    null,
+                    rate.id,
+                    Number(rate.base_cost),
+                    { store_id: storeId },
+                  )
+                ).gross
+              : Number(rate.base_cost);
+        }
+      } else if (shippingAddressForCalc) {
+        // Auto-calcular si no hay rate explícito.
+        const options = await this.shippingCalculatorService.calculateRates(
+          storeId,
+          itemsForShippingCalc,
+          shippingAddressForCalc,
+        );
+        const match = options.find((o) => o.method_id === method.id);
+        if (match) {
+          resolvedShippingRateId = match.rate_id;
+          shippingCost = Number(match.cost);
         }
       }
     }
@@ -4695,6 +4790,13 @@ export class OrdersService {
           state_province: address.state_province || undefined,
           city: address.city || undefined,
           postal_code: address.postal_code || undefined,
+          // Paso 2 (unificación de envío) — sin esto el precio por
+          // distancia (`vendix-shipping-distance-pricing`) nunca se
+          // evaluaba para tarifas ya asignadas a una orden.
+          latitude:
+            address.latitude != null ? Number(address.latitude) : undefined,
+          longitude:
+            address.longitude != null ? Number(address.longitude) : undefined,
         },
       );
     } catch (error) {

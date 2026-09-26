@@ -50,6 +50,21 @@ describe('OrdersService.assignShipping — impuesto del envío', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('costo de la tarifa: copia congelada y grand_total sin cambio', async () => {
+    // Paso 2 (unificación): `resolveExpectedRateCost` ahora cotiza TODAS
+    // las tarifas (incluida `flat`) vía `quoteOrderShippingOptions`, que
+    // hace su propia lectura de la orden (2do `orders.findFirst`).
+    prisma.orders.findFirst
+      .mockResolvedValueOnce({
+        id: 10, store_id: 1, state: 'created',
+        subtotal_amount: 10000, tax_amount: 800, discount_amount: 0,
+      })
+      .mockResolvedValueOnce({
+        addresses_orders_shipping_address_idToaddresses: { country_code: 'CO', city: 'Bogotá' },
+        order_items: [],
+      });
+    service.shippingCalculatorService = {
+      calculateRates: jest.fn().mockResolvedValue([{ method_id: 4, rate_id: 31, cost: 15000 }]),
+    };
     await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31 });
     expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 15000, { store_id: 1 });
     const data = prisma.orders.update.mock.calls[0][0].data;
@@ -62,6 +77,18 @@ describe('OrdersService.assignShipping — impuesto del envío', () => {
   });
 
   it('costo digitado igual a la tarifa: cuenta como tarifa', async () => {
+    prisma.orders.findFirst
+      .mockResolvedValueOnce({
+        id: 10, store_id: 1, state: 'created',
+        subtotal_amount: 10000, tax_amount: 800, discount_amount: 0,
+      })
+      .mockResolvedValueOnce({
+        addresses_orders_shipping_address_idToaddresses: { country_code: 'CO', city: 'Bogotá' },
+        order_items: [],
+      });
+    service.shippingCalculatorService = {
+      calculateRates: jest.fn().mockResolvedValue([{ method_id: 4, rate_id: 31, cost: 15000 }]),
+    };
     await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31, shipping_cost: 15000 });
     expect(snapshotForRate).toHaveBeenCalled();
     expect(prisma.orders.update.mock.calls[0][0].data.shipping_tax_amount).toBe(1111.11);
@@ -111,8 +138,25 @@ describe('OrdersService.assignShipping — impuesto del envío', () => {
     prisma.shipping_rates.findFirst.mockResolvedValue({
       id: 31, shipping_method_id: 4, type: 'flat', base_cost: 10000, is_active: true,
     });
+    // Paso 2 (unificación): el bruto agregado (11900) ahora sale del
+    // cálculo único (`quoteOrderShippingOptions` → `calculateRates`), no
+    // del atajo `chargeForRate(base_cost)` — `chargeForRate` sigue vivo,
+    // pero solo dentro de `resolveShippingTaxChange` para decidir el modo
+    // (inclusivo/agregado), ya sobre el costo cotizado.
+    prisma.orders.findFirst
+      .mockResolvedValueOnce({
+        id: 10, store_id: 1, state: 'created',
+        subtotal_amount: 10000, tax_amount: 800, discount_amount: 0,
+      })
+      .mockResolvedValueOnce({
+        addresses_orders_shipping_address_idToaddresses: { country_code: 'CO', city: 'Bogotá' },
+        order_items: [],
+      });
+    service.shippingCalculatorService = {
+      calculateRates: jest.fn().mockResolvedValue([{ method_id: 4, rate_id: 31, cost: 11900 }]),
+    };
     await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31 });
-    expect(chargeForRate).toHaveBeenCalledWith(null, 31, 10000, { store_id: 1 });
+    expect(chargeForRate).toHaveBeenCalledWith(null, 31, 11900, { store_id: 1 });
     expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 11900, { store_id: 1 });
     const data = prisma.orders.update.mock.calls[0][0].data;
     expect(data).toMatchObject({
@@ -211,11 +255,66 @@ describe('OrdersService.assignShipping — impuesto del envío', () => {
       expect(service.logger.warn).toHaveBeenCalled();
     });
 
-    it('flat no consulta el calculador', async () => {
+    // Paso 2 (unificación de envío) — antes `flat` tenía un atajo propio
+    // (`chargeForRate(base_cost)`) que nunca consultaba el calculador, así
+    // que ignoraba el umbral de envío gratis, el costo por unidad y la
+    // distancia. Reemplaza a la vieja «flat no consulta el calculador»
+    // (aserción contraria a la unificación buscada).
+    it('flat también pasa por el calculador (unificado): costo cobrado = recalculado, no solo base_cost', async () => {
       arrange('flat', 9000);
-      await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31, shipping_cost: 15000 });
-      expect(calculateRates).not.toHaveBeenCalled();
-      expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 15000, { store_id: 1 });
+      await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31, shipping_cost: 9000 });
+      expect(calculateRates).toHaveBeenCalledWith(
+        1,
+        [{ product_id: 5, quantity: 2, price: 10800, weight: 3, product_type: 'physical' }],
+        expect.objectContaining({ country_code: 'CO', city: 'Bogotá' }),
+      );
+      expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 9000, { store_id: 1 });
+      expect(prisma.orders.update.mock.calls[0][0].data.shipping_tax_amount).toBe(1111.11);
+    });
+
+    // Caso de spec del encargo — "assignShipping con tarifa por distancia y
+    // dirección con coordenadas ⇒ costo del tramo". La matemática de tramos
+    // en sí (`ShippingDistanceService`/`ShippingCalculatorService.
+    // applyDistancePrice`) ya está cubierta en
+    // `shipping-calculator.service.spec.ts` (paso 1); acá se prueba el
+    // CABLEADO de este archivo: `quoteOrderShippingOptions` ahora arrastra
+    // `latitude`/`longitude` (numéricos) de la dirección de la orden hacia
+    // `calculateRates`, algo que antes de este paso no ocurría (bug #2 del
+    // encargo).
+    it('con dirección con coordenadas ⇒ el calculador recibe latitude/longitude numéricos', async () => {
+      prisma.shipping_rates.findFirst.mockResolvedValue({
+        id: 31, shipping_method_id: 4, type: 'flat', base_cost: 15000, is_active: true,
+      });
+      prisma.orders.findFirst
+        .mockResolvedValueOnce(orderRow)
+        .mockResolvedValueOnce({
+          addresses_orders_shipping_address_idToaddresses: {
+            country_code: 'CO',
+            city: 'Bogotá',
+            latitude: 4.711,
+            longitude: -74.0721,
+          },
+          order_items: [],
+        });
+      const calcWithDistance = jest
+        .fn()
+        .mockResolvedValue([{ method_id: 4, rate_id: 31, cost: 6000 }]);
+      service.shippingCalculatorService = { calculateRates: calcWithDistance };
+
+      await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31, shipping_cost: 6000 });
+
+      expect(calcWithDistance).toHaveBeenCalledWith(
+        1,
+        [],
+        expect.objectContaining({
+          country_code: 'CO',
+          city: 'Bogotá',
+          latitude: 4.711,
+          longitude: -74.0721,
+        }),
+      );
+      const data = prisma.orders.update.mock.calls[0][0].data;
+      expect(data.shipping_cost).toBe(6000);
     });
   });
 });
@@ -271,6 +370,18 @@ describe('OrdersService.update — PATCH de envío (paso 5 B1)', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('PATCH a 20.000 (= costo de la tarifa): re-deriva la copia y cuadra el total', async () => {
+    // Paso 2 (unificación): `resolveExpectedRateCost` cotiza vía
+    // `quoteOrderShippingOptions` para toda tarifa (antes `flat` no hacía
+    // esta 2da lectura de la orden).
+    prisma.orders.findFirst
+      .mockResolvedValueOnce({ ...baseOrder })
+      .mockResolvedValueOnce({
+        addresses_orders_shipping_address_idToaddresses: { country_code: 'CO', city: 'Bogotá' },
+        order_items: [],
+      });
+    service.shippingCalculatorService = {
+      calculateRates: jest.fn().mockResolvedValue([{ method_id: 4, rate_id: 31, cost: 20000 }]),
+    };
     await service.update(10, { shipping_cost: 20000 });
     expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 20000, { store_id: 1 });
     const data = prisma.orders.update.mock.calls[0][0].data;
@@ -297,8 +408,21 @@ describe('OrdersService.update — PATCH de envío (paso 5 B1)', () => {
     prisma.shipping_rates.findFirst.mockResolvedValue({
       id: 31, shipping_method_id: 4, type: 'flat', base_cost: 10000, is_active: true,
     });
+    // Paso 2 (unificación): el bruto (11900) sale del cálculo único, no
+    // del atajo `chargeForRate(base_cost)`; `chargeForRate` sigue
+    // llamándose, pero desde `resolveShippingTaxChange` con el costo YA
+    // cotizado (11900), para decidir el modo inclusivo/agregado.
+    prisma.orders.findFirst
+      .mockResolvedValueOnce({ ...baseOrder })
+      .mockResolvedValueOnce({
+        addresses_orders_shipping_address_idToaddresses: { country_code: 'CO', city: 'Bogotá' },
+        order_items: [],
+      });
+    service.shippingCalculatorService = {
+      calculateRates: jest.fn().mockResolvedValue([{ method_id: 4, rate_id: 31, cost: 11900 }]),
+    };
     await service.update(10, { shipping_cost: 11900 });
-    expect(chargeForRate).toHaveBeenCalledWith(null, 31, 10000, { store_id: 1 });
+    expect(chargeForRate).toHaveBeenCalledWith(null, 31, 11900, { store_id: 1 });
     expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 11900, { store_id: 1 });
     const data = prisma.orders.update.mock.calls[0][0].data;
     expect(data).toMatchObject({
@@ -392,6 +516,21 @@ describe('OrdersService.assignShipping — propina, intacta y split (paso 5 B2)'
   afterEach(() => jest.restoreAllMocks());
 
   it('con propina 5.000: el total la conserva', async () => {
+    // Paso 2 (unificación): 2do `orders.findFirst` de
+    // `quoteOrderShippingOptions`, ahora también para `flat`.
+    prisma.orders.findFirst
+      .mockResolvedValueOnce({
+        id: 10, store_id: 1, state: 'created',
+        subtotal_amount: 10000, tax_amount: 800, discount_amount: 0,
+        tip_amount: 5000,
+      })
+      .mockResolvedValueOnce({
+        addresses_orders_shipping_address_idToaddresses: { country_code: 'CO', city: 'Bogotá' },
+        order_items: [],
+      });
+    service.shippingCalculatorService = {
+      calculateRates: jest.fn().mockResolvedValue([{ method_id: 4, rate_id: 31, cost: 15000 }]),
+    };
     await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31 });
     const data = prisma.orders.update.mock.calls[0][0].data;
     // 10000 + 800 - 0 + 15000 + 5000
