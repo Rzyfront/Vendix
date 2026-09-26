@@ -73,6 +73,7 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
       getDefaultLocationForProduct: jest.fn().mockResolvedValue(3),
       releaseReservation: jest.fn().mockResolvedValue(undefined),
       releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
+      releaseReservationQuantity: jest.fn().mockResolvedValue(0),
       updateStock: jest
         .fn()
         .mockResolvedValue({ cost_snapshot: { total_cost: 0 } }),
@@ -329,6 +330,7 @@ describe('OrderStockCommitService — descuento multi-ubicación', () => {
       getDefaultLocationForProduct: jest.fn().mockResolvedValue(1),
       releaseReservation: jest.fn().mockResolvedValue(undefined),
       releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
+      releaseReservationQuantity: jest.fn().mockResolvedValue(0),
       updateStock: jest
         .fn()
         .mockResolvedValue({ cost_snapshot: { total_cost: 0 } }),
@@ -393,27 +395,217 @@ describe('OrderStockCommitService — descuento multi-ubicación', () => {
     );
   });
 
-  it('libera TODAS las reservas de la línea, no solo la primera', async () => {
-    setup(10, SPLIT_LEVELS, [{ location_id: 1 }, { location_id: 2 }]);
+  it('libera la reserva completa de la línea (bounded a su propia cantidad) repartida en dos ubicaciones, no solo la primera', async () => {
+    setup(10, SPLIT_LEVELS, [
+      { location_id: 1, quantity: 8 },
+      { location_id: 2, quantity: 2 },
+    ]);
 
     await service.commitOrderDelivery(1, OPTS, txMock);
 
-    expect(stockLevelManagerMock.releaseReservation).toHaveBeenCalledTimes(2);
-    expect(stockLevelManagerMock.releaseReservation).toHaveBeenCalledWith(
-      100,
-      undefined,
-      1,
+    // Release/consume es UNA llamada acotada a la cantidad TOTAL de la línea
+    // (10) — no una por ubicación — y StockLevelManager es quien reparte
+    // internamente oldest-first entre las reservas.
+    expect(stockLevelManagerMock.releaseReservationQuantity).toHaveBeenCalledWith(
       'order',
       1,
+      100,
+      null,
+      10,
+      'consumed',
       txMock,
+      { decrementOnHand: false },
     );
-    expect(stockLevelManagerMock.releaseReservation).toHaveBeenCalledWith(
+    // La previsualización (para preferir ubicaciones en el allocator) sigue
+    // viendo AMBAS ubicaciones de la reserva, no solo la primera.
+    expect(allocatorMock.allocateForLine).toHaveBeenCalledWith(
+      7,
       100,
       undefined,
-      2,
-      'order',
-      1,
+      10,
+      [1, 2],
       txMock,
     );
+  });
+});
+
+/**
+ * No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md).
+ *
+ * Dos reglas nuevas sobre `processLine`:
+ *  - El release de reserva está acotado a la cantidad PROPIA de la línea, así
+ *    que dos líneas de la orden que reservan el MISMO producto/variante no se
+ *    pisan: comitear una nunca debe liberar la reserva de la otra.
+ *  - Una línea con `cancelled_at` no nulo nunca deduce stock, sin importar si
+ *    trackea inventario.
+ */
+describe('OrderStockCommitService — no-overselling guard (commitOrderLines / cancelled_at)', () => {
+  let service: OrderStockCommitService;
+  let txMock: any;
+  let stockLevelManagerMock: any;
+  let allocatorMock: any;
+  let reservationsStore: Array<{
+    id: number;
+    location_id: number;
+    quantity: number;
+    status: string;
+  }>;
+
+  const OPTS = { blockOnInsufficient: true };
+
+  /** Una orden con UNA sola línea (id 10) — la línea hermana (id 11, misma
+   * identidad de producto) nunca se carga en este `findUnique` porque
+   * `commitOrderLines([10])` la filtraría en la query real; su reserva
+   * (id 1002 en `reservationsStore`) solo debe sobrevivir intacta. */
+  const buildOrder = (cancelled = false) => ({
+    id: 1,
+    store_id: 7,
+    delivery_type: null,
+    stores: { organization_id: 1, industries: [] },
+    order_items: [
+      {
+        id: 10,
+        product_id: 100,
+        product_variant_id: null,
+        quantity: 1,
+        stock_units_consumed: null,
+        products: {
+          id: 100,
+          track_inventory: true,
+          product_type: 'simple',
+          name: 'Camiseta',
+        },
+        product_variants: null,
+        inventory_committed: false,
+        inventory_consumed_at_fire: false,
+        skip_kds: false,
+        cancelled_at: cancelled ? new Date() : null,
+      },
+    ],
+  });
+
+  beforeEach(() => {
+    reservationsStore = [
+      { id: 1001, location_id: 3, quantity: 1, status: 'active' }, // línea 10 (más antigua)
+      { id: 1002, location_id: 3, quantity: 1, status: 'active' }, // línea 11 hermana — NO se toca
+    ];
+
+    txMock = {
+      orders: {
+        findUnique: jest.fn().mockResolvedValue(buildOrder()),
+        findFirst: jest.fn().mockResolvedValue(buildOrder()),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 1, state: 'processing' }]),
+      order_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      stock_reservations: {
+        findMany: jest.fn(async () =>
+          reservationsStore.filter((r) => r.status === 'active'),
+        ),
+      },
+    };
+
+    stockLevelManagerMock = {
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(3),
+      releaseReservation: jest.fn().mockResolvedValue(undefined),
+      releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
+      // Fake fiel a la semántica real (oldest-first, acotado a `quantity`)
+      // para poder aserir el estado de `reservationsStore` después.
+      releaseReservationQuantity: jest.fn(
+        async (
+          _refType: string,
+          _refId: number,
+          _productId: number,
+          _variantId: number | null,
+          quantity: number,
+          status: string,
+        ) => {
+          let remaining = quantity;
+          let released = 0;
+          for (const r of reservationsStore) {
+            if (remaining <= 0) break;
+            if (r.status !== 'active') continue;
+            const take = Math.min(r.quantity, remaining);
+            if (take <= 0) continue;
+            if (take >= r.quantity) {
+              r.status = status;
+            } else {
+              r.quantity -= take;
+            }
+            released += take;
+            remaining -= take;
+          }
+          return released;
+        },
+      ),
+      updateStock: jest
+        .fn()
+        .mockResolvedValue({ cost_snapshot: { total_cost: 0 } }),
+    };
+
+    const realAllocator = new SellableStockAllocator({} as any);
+    allocatorMock = {
+      getSellableLevels: jest
+        .fn()
+        .mockResolvedValue([{ location_id: 3, quantity_available: 10 }]),
+      allocate: realAllocator.allocate.bind(realAllocator),
+      absorbShortfall: realAllocator.absorbShortfall.bind(realAllocator),
+      allocateForLine: jest.fn(async (_s, _p, _v, qty, preferred = []) =>
+        realAllocator.allocate(
+          qty,
+          [{ location_id: 3, quantity_available: 10 }],
+          preferred,
+        ),
+      ),
+    };
+
+    service = new OrderStockCommitService(
+      { withoutScope: jest.fn(() => txMock) } as unknown as StorePrismaService,
+      stockLevelManagerMock as unknown as StockLevelManager,
+      allocatorMock as unknown as SellableStockAllocator,
+      { isSerialized: jest.fn().mockResolvedValue(false) } as any,
+      {} as unknown as InventorySerialNumbersService,
+    );
+  });
+
+  it('commitOrderLines libera solo la cantidad propia de la línea; la reserva hermana sigue activa', async () => {
+    await service.commitOrderLines(1, [10], { ...OPTS, tx: txMock });
+
+    expect(stockLevelManagerMock.releaseReservationQuantity).toHaveBeenCalledWith(
+      'order',
+      1,
+      100,
+      null,
+      1,
+      'consumed',
+      txMock,
+      { decrementOnHand: false },
+    );
+
+    // Reserva de la línea propia (más antigua): liberada completa.
+    expect(reservationsStore.find((r) => r.id === 1001)?.status).toBe(
+      'consumed',
+    );
+    // Reserva de la línea HERMANA: intacta, con su propia cantidad.
+    const sibling = reservationsStore.find((r) => r.id === 1002);
+    expect(sibling?.status).toBe('active');
+    expect(sibling?.quantity).toBe(1);
+  });
+
+  it('no descuenta ni marca committed una línea cancelada (order_items.cancelled_at)', async () => {
+    txMock.orders.findUnique.mockResolvedValue(buildOrder(true));
+    txMock.orders.findFirst.mockResolvedValue(buildOrder(true));
+
+    const result = await service.commitOrderLines(1, [10], {
+      ...OPTS,
+      tx: txMock,
+    });
+
+    expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+    expect(stockLevelManagerMock.releaseReservationQuantity).not.toHaveBeenCalled();
+    expect(result.committedItemCount).toBe(0);
+
+    // Ninguna reserva se tocó — ni la propia ni la hermana.
+    expect(reservationsStore.every((r) => r.status === 'active')).toBe(true);
   });
 });

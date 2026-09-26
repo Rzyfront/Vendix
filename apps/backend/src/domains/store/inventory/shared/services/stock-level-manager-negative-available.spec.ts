@@ -1,4 +1,7 @@
-import { StockLevelManager } from './stock-level-manager.service';
+import {
+  StockLevelManager,
+  type ReservationRefType,
+} from './stock-level-manager.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from 'src/common/errors';
 
@@ -37,15 +40,24 @@ describe('StockLevelManager.reserveStock — disponible negativo (QUI-557)', () 
 
   /**
    * Llama a reserveStock con la firma posicional completa. `qty` es lo que se
-   * reserva; `allowNegative` es el nuevo opt-in del caller.
+   * reserva; `allowNegative` es el nuevo opt-in del caller. `refType` por
+   * defecto es `'order'` porque las pruebas del PISO (que deben fallar con
+   * INV_STOCK_001) son exactamente sobre órdenes — el caso que este plan
+   * protege. La única prueba que ejerce `allowNegative: true` pasa un
+   * `refType` distinto de `'order'` a propósito: ver el comentario en esa
+   * prueba.
    */
-  const reserve = (qty: number, allowNegative: boolean) =>
+  const reserve = (
+    qty: number,
+    allowNegative: boolean,
+    refType: ReservationRefType = 'order',
+  ) =>
     service.reserveStock(
       PRODUCT_ID,
       undefined, // variant_id
       LOCATION_ID,
       qty,
-      'order',
+      refType,
       608, // reserved_for_id
       1, // user_id
       false, // validate_availability — el caso que dejaba pasar el negativo
@@ -116,8 +128,16 @@ describe('StockLevelManager.reserveStock — disponible negativo (QUI-557)', () 
     }
   });
 
-  it('permite el negativo cuando el caller lo autoriza (oversell del POS)', async () => {
-    await expect(reserve(2, true)).resolves.toBeUndefined();
+  it('el flag allow_negative_available sigue existiendo para su caso de uso original (no ORDER)', async () => {
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md):
+    // el objetivo global es que una ORDEN nunca sobrevenda, así que esta
+    // prueba NO ejerce `reserved_for_type: 'order'` — lo haría deseable un
+    // disponible negativo justo en el caso que el plan cierra. El flag
+    // `allow_negative_available` sigue siendo un parámetro real del método
+    // (otros callers ya autorizados, ver comentario de `reserveStock`, lo
+    // siguen pasando); esta prueba solo prueba que el mecanismo del flag
+    // sigue vivo, con una referencia neutra ('transfer').
+    await expect(reserve(2, true, 'transfer')).resolves.toBeUndefined();
 
     expect(prismaMock.stock_reservations.create).toHaveBeenCalled();
     expect(prismaMock.stock_levels.update).toHaveBeenCalledWith(

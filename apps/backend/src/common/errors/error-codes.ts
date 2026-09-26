@@ -1313,6 +1313,15 @@ export const ErrorCodes = {
     devMessage:
       'Insufficient available stock to deliver order (no reservation and available stock is not enough)',
   },
+  // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md) — usado
+  // por StockValidatorService.assertLinesAvailable/assertIngredientsAvailable
+  // para bloquear ANTES de reservar/comprometer, nombrando cada línea/insumo
+  // con stock insuficiente en `details.items`.
+  INV_STOCK_INSUFFICIENT_LINES: {
+    code: 'INV_STOCK_INSUFFICIENT_LINES',
+    httpStatus: 409,
+    devMessage: 'Stock insuficiente para uno o más productos',
+  },
   POS_STOCK_INSUFFICIENT_001: {
     code: 'POS_STOCK_INSUFFICIENT_001',
     httpStatus: 409,
