@@ -47,7 +47,9 @@ interface FakeTransaction {
 describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
   let service: ProductionOrdersService;
   let stockLevelManager: jest.Mocked<Pick<StockLevelManager, 'updateStock' | 'getDefaultLocationForProduct'>>;
-  let stockValidatorService: jest.Mocked<Pick<StockValidatorService, 'assertIngredientsAvailable'>>;
+  let stockValidatorService: jest.Mocked<
+    Pick<StockValidatorService, 'assertIngredientsAvailable' | 'resolveInventoryPolicy'>
+  >;
   let eventEmitter: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let prismaMock: {
     production_orders: {
@@ -76,7 +78,14 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
     // step 6): resolves as available by default so the pre-existing smoke
     // test is unaffected; tests exercising the guard itself override this.
     stockValidatorService = {
-      assertIngredientsAvailable: jest.fn().mockResolvedValue(undefined),
+      assertIngredientsAvailable: jest.fn().mockResolvedValue([]),
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — default
+      // policy (strict oversell, permissive ingredient overuse) so the
+      // pre-existing smoke tests observe the SAME behavior as before this
+      // switch existed. Tests exercising the switch itself override this.
+      resolveInventoryPolicy: jest
+        .fn()
+        .mockResolvedValue({ allowOversell: false, allowIngredientOveruse: true }),
     } as any;
 
     eventEmitter = { emit: jest.fn() } as any;
@@ -470,6 +479,133 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
       // Nothing was consumed and the transaction never opened — the check
       // runs BEFORE `complete()` calls `this.prisma.$transaction`.
       expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('ingredient overuse switch (docs/plans/no-overselling-stock-guard-plan.md, step 9)', () => {
+    const buildOrder = (id: number) => ({
+      id,
+      store_id: 1,
+      product_id: 50,
+      recipe_id: 7,
+      planned_qty: new Prisma.Decimal(10),
+      produced_qty: null,
+      status: 'in_progress',
+      produced_at: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+      product: { id: 50, name: 'Salsa', sku: 'SAL-1', stock_unit: 'g', is_batch_produced: true },
+      recipe: {
+        id: 7,
+        yield_quantity: new Prisma.Decimal(10),
+        yield_unit: 'g',
+        waste_percent: new Prisma.Decimal(0),
+        preparation_notes: null,
+        items: [
+          {
+            id: 1,
+            recipe_id: 7,
+            component_product_id: 99,
+            quantity: new Prisma.Decimal(10),
+            waste_percent: new Prisma.Decimal(0),
+            is_optional: false,
+            component_product: { id: 99, name: 'Harina', sku: 'HAR-1', stock_unit: 'g' },
+          },
+        ],
+      },
+    });
+
+    it('switch ON: a shortage only warns, consumption writes allow_negative + validate_availability=false, response carries stock_warnings', async () => {
+      prismaMock.production_orders.findFirst.mockResolvedValue(
+        buildOrder(600) as any,
+      );
+      stockLevelManager.getDefaultLocationForProduct.mockResolvedValue(1);
+      stockLevelManager.updateStock.mockResolvedValue({
+        stock_level: { id: 1 } as any,
+        transaction: { id: 1 } as any,
+        previous_quantity: 0,
+        cost_snapshot: { unit_cost: 0.1, total_cost: 1.0, stock_value: 0 },
+      });
+
+      const shortageItems = [
+        {
+          product_id: 99,
+          product_variant_id: null,
+          product_name: 'Harina',
+          kind: 'ingredient' as const,
+          requested: 10,
+          available: 0,
+          used_by: ['Salsa'],
+        },
+      ];
+      stockValidatorService.resolveInventoryPolicy.mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: true,
+      });
+      stockValidatorService.assertIngredientsAvailable.mockResolvedValue(
+        shortageItems as any,
+      );
+
+      const txOrderUpdate = jest.fn().mockResolvedValue({
+        id: 600,
+        status: 'completed',
+        produced_qty: new Prisma.Decimal(10),
+        product: { id: 50, name: 'Salsa', sku: 'SAL-1', stock_unit: 'g' },
+        recipe: { id: 7, yield_quantity: new Prisma.Decimal(10), yield_unit: 'g', waste_percent: new Prisma.Decimal(0) },
+      });
+      prismaMock.$transaction.mockImplementation(async (cb: any) =>
+        cb({ production_orders: { update: txOrderUpdate } }),
+      );
+
+      const result = await service.complete(600, { produced_qty: 10 });
+
+      // The switch is on: assertIngredientsAvailable never throws, complete()
+      // proceeds to consume — and it must have been asked to allow overuse.
+      expect(
+        stockValidatorService.assertIngredientsAvailable,
+      ).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({ allowIngredientOveruse: true }),
+      );
+
+      const [consumeCall] = stockLevelManager.updateStock.mock.calls;
+      expect(consumeCall[0].movement_type).toBe('consumption');
+      // Full requested quantity is still consumed — no silent reduction.
+      expect(consumeCall[0].quantity_change).toBeCloseTo(-10, 4);
+      expect(consumeCall[0].validate_availability).toBe(false);
+      expect(consumeCall[0].allow_negative).toBe(true);
+
+      expect((result as any).stock_warnings).toEqual(shortageItems);
+    });
+
+    it('switch OFF: resolveInventoryPolicy(false) still blocks via the strict guard (no consumption)', async () => {
+      prismaMock.production_orders.findFirst.mockResolvedValue(
+        buildOrder(700) as any,
+      );
+      stockValidatorService.resolveInventoryPolicy.mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: false,
+      });
+      const insufficiencyError = new VendixHttpException(
+        ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+        'Insumo sin stock suficiente: Harina (requerido 10, disponible 0).',
+        { items: [] },
+      );
+      stockValidatorService.assertIngredientsAvailable.mockRejectedValueOnce(
+        insufficiencyError,
+      );
+
+      await expect(
+        service.complete(700, { produced_qty: 10 }),
+      ).rejects.toMatchObject({ errorCode: 'INV_STOCK_INSUFFICIENT_LINES' });
+
+      expect(
+        stockValidatorService.assertIngredientsAvailable,
+      ).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({ allowIngredientOveruse: false }),
+      );
       expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
     });
   });

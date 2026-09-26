@@ -655,6 +655,101 @@ describe('StockLevelManager', () => {
       expect(result.cost_snapshot!.unit_cost).toBe(1500);
       expect(result.cost_snapshot!.total_cost).toBe(15000);
     });
+
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — `allow_negative`
+    // is the single opt-in that skips the `Math.max(0, …)` residual clamp.
+    // Only the ingredient-overuse / oversell paths pass it, always paired
+    // with `validate_availability: false` (see the doc comment on
+    // `UpdateStockParams.allow_negative`).
+    describe('allow_negative (plan step 9)', () => {
+      const buildTx = () => ({
+        $queryRaw: (prismaService as any).$queryRaw,
+        stock_levels: prismaService.stock_levels,
+        inventory_movements: prismaService.inventory_movements,
+        products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
+        inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
+      });
+
+      beforeEach(() => {
+        prismaService.$transaction.mockImplementation((callback) =>
+          callback(buildTx()),
+        );
+        prismaService.products.findFirst.mockResolvedValue(mockProduct);
+        prismaService.inventory_locations.findFirst.mockResolvedValue(
+          mockLocation,
+        );
+        // Only 90 available/100 on hand — a consumption of 100 would go
+        // negative on both counters.
+        prismaService.stock_levels.findFirst.mockResolvedValue(mockStockLevel);
+        transactionsService.createTransaction.mockResolvedValue(
+          mockTransaction,
+        );
+        prismaService.products.update.mockResolvedValue(mockProduct);
+        prismaService.stock_levels.aggregate.mockResolvedValue({
+          _sum: { quantity_available: 0 },
+        });
+      });
+
+      it('writes NEGATIVE quantity_on_hand/available when allow_negative=true (no clamp)', async () => {
+        prismaService.stock_levels.update.mockResolvedValue({
+          ...mockStockLevel,
+          quantity_on_hand: -10,
+          quantity_available: -20,
+        });
+
+        await service.updateStock({
+          ...updateStockParams,
+          quantity_change: -110,
+          movement_type: 'consumption',
+          validate_availability: false,
+          allow_negative: true,
+        });
+
+        expect(prismaService.stock_levels.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              // 100 on_hand - 110 = -10; 90 available - 110 = -20. Neither
+              // is floored to 0.
+              quantity_on_hand: -10,
+              quantity_available: -20,
+            }),
+          }),
+        );
+        // The atomic `gte` floor never ran — `updateMany` is reserved for
+        // `validate_availability && quantity_change < 0`.
+        expect(prismaService.stock_levels.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('still clamps to 0 when allow_negative is omitted (every other caller)', async () => {
+        prismaService.stock_levels.update.mockResolvedValue({
+          ...mockStockLevel,
+          quantity_on_hand: 0,
+          quantity_available: 0,
+        });
+
+        await service.updateStock({
+          ...updateStockParams,
+          quantity_change: -110,
+          movement_type: 'consumption',
+          validate_availability: false,
+          // allow_negative omitted — default (residual-clamp) behavior.
+        });
+
+        expect(prismaService.stock_levels.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              quantity_on_hand: 0,
+              quantity_available: 0,
+            }),
+          }),
+        );
+      });
+    });
   });
 
   describe('reserveStock', () => {

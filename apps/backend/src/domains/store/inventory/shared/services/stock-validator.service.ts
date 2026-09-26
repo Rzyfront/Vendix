@@ -2,6 +2,7 @@ import {
   Injectable,
   ConflictException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
@@ -80,8 +81,23 @@ export interface AvailabilityResult {
  * - Validates effective tracking before checking stock
  * - Returns detailed validation results for cart operations
  */
+/** Resolved per-store inventory overselling policy (plan step 9). */
+export interface InventoryPolicy {
+  /** "Permitir sobreventa" — `store_settings.inventory.allow_negative_stock`. Default `false`. */
+  allowOversell: boolean;
+  /** "Permitir sobre-uso de insumos" — `store_settings.inventory.allow_ingredient_overuse`. Default `true` (missing/null). */
+  allowIngredientOveruse: boolean;
+}
+
+const DEFAULT_INVENTORY_POLICY: InventoryPolicy = {
+  allowOversell: false,
+  allowIngredientOveruse: true,
+};
+
 @Injectable()
 export class StockValidatorService {
+  private readonly logger = new Logger(StockValidatorService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly stockLevelManager: StockLevelManager,
@@ -331,6 +347,52 @@ export class StockValidatorService {
   }
 
   /**
+   * Resolves the per-store inventory overselling policy (plan step 9,
+   * 2026-09-26). Reads `store_settings.settings.inventory` directly (not
+   * through `mergeStoreSettingsWithDefaults`, whose deep-merge only skips
+   * `undefined` — an explicit persisted `null` would leak through as `null`
+   * instead of resolving to the field's default). Both keys are read with the
+   * exact rule the plan requires:
+   *
+   *   - `allow_negative_stock` ("Permitir sobreventa"): only an explicit
+   *     `true` turns it on; missing/null/false all resolve to `false`.
+   *   - `allow_ingredient_overuse` ("Permitir sobre-uso de insumos"): missing
+   *     or `null` resolves to `true`; an explicit `false` (and only that)
+   *     turns it off. `?? true` gets this right because `??` only substitutes
+   *     on `null`/`undefined`, never on a persisted `false`.
+   *
+   * Pass `tx` when called from inside an open transaction (kitchen-fire,
+   * production, order commit) so the read observes the same snapshot the
+   * caller is writing against; `storeId` should come from the order/location
+   * being processed, not only the ambient request context, so a cross-store
+   * job resolves the right store's policy. Never throws — any read failure
+   * degrades to the safe default (strict no-overselling, ingredient overuse
+   * allowed, i.e. today's pre-switch kitchen behavior).
+   */
+  async resolveInventoryPolicy(
+    storeId: number,
+    tx?: Prisma.TransactionClient,
+  ): Promise<InventoryPolicy> {
+    try {
+      const db: any = tx ?? this.prisma;
+      const row = await db.store_settings.findFirst({
+        where: { store_id: storeId },
+        select: { settings: true },
+      });
+      const inventory = (row?.settings as any)?.inventory ?? {};
+      return {
+        allowOversell: inventory.allow_negative_stock === true,
+        allowIngredientOveruse: inventory.allow_ingredient_overuse ?? true,
+      };
+    } catch (err) {
+      this.logger.warn(
+        `Failed to resolve inventory policy for store ${storeId}: ${(err as Error).message}. Falling back to defaults (allowOversell=false, allowIngredientOveruse=true).`,
+      );
+      return { ...DEFAULT_INVENTORY_POLICY };
+    }
+  }
+
+  /**
    * No-overselling guard for order lines (docs/plans/no-overselling-stock-guard-plan.md).
    *
    * Throws `INV_STOCK_INSUFFICIENT_LINES` naming every product that cannot
@@ -341,6 +403,12 @@ export class StockValidatorService {
    * `opts.orderId`, when given, credits the order's OWN active reservation
    * back into "available" — re-validating a line that already reserved its
    * stock must not count that reservation as a shortfall against itself.
+   *
+   * `opts.allowOversell` (plan step 9): when `true`, the shortfall does NOT
+   * throw — it is logged with `logger.warn` and returned instead, so the
+   * caller can reserve with `allow_negative_available=true` and surface the
+   * list as `stock_warnings`. Default `false` preserves the strict guard.
+   * Always returns the list of insufficient items (empty when none).
    */
   async assertLinesAvailable(
     lines: StockDemandLine[],
@@ -348,13 +416,21 @@ export class StockValidatorService {
       orderId?: number;
       locationId?: number;
       tx?: Prisma.TransactionClient;
+      allowOversell?: boolean;
     } = {},
-  ): Promise<void> {
+  ): Promise<InsufficientStockItem[]> {
     const items = await this.findInsufficientLines(lines, {
       ...opts,
       kind: 'product',
     });
-    if (items.length === 0) return;
+    if (items.length === 0) return [];
+
+    if (opts.allowOversell) {
+      this.logger.warn(
+        `Sobreventa permitida — ${this.buildProductInsufficientMessage(items)}`,
+      );
+      return items;
+    }
 
     throw new VendixHttpException(
       ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
@@ -368,16 +444,34 @@ export class StockValidatorService {
    * BOM explosion) already resolved recipe quantities into concrete
    * ingredient product demands — this service only checks catalog stock, it
    * never reads `recipe_items`.
+   *
+   * `opts.allowIngredientOveruse` (plan step 9): when `true`, a shortfall does
+   * NOT throw — it is logged with `logger.warn` and returned, so the caller
+   * can consume the FULL quantity anyway (via `updateStock({allow_negative:
+   * true})`) and surface the list as `stock_warnings`. Default `false`
+   * (callers must opt in via the resolved store policy) preserves the step-6
+   * blocking guard. Always returns the list of insufficient items.
    */
   async assertIngredientsAvailable(
     demands: StockDemandLine[],
-    opts: { locationId?: number; tx?: Prisma.TransactionClient } = {},
-  ): Promise<void> {
+    opts: {
+      locationId?: number;
+      tx?: Prisma.TransactionClient;
+      allowIngredientOveruse?: boolean;
+    } = {},
+  ): Promise<InsufficientStockItem[]> {
     const items = await this.findInsufficientLines(demands, {
       ...opts,
       kind: 'ingredient',
     });
-    if (items.length === 0) return;
+    if (items.length === 0) return [];
+
+    if (opts.allowIngredientOveruse) {
+      this.logger.warn(
+        `Sobre-uso de insumos permitido — ${this.buildIngredientInsufficientMessage(items)}`,
+      );
+      return items;
+    }
 
     throw new VendixHttpException(
       ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
@@ -401,6 +495,10 @@ export class StockValidatorService {
       locationId?: number;
       tx?: Prisma.TransactionClient;
       kind: 'product' | 'ingredient';
+      /** Unused here — accepted so callers can spread their own opts object as-is. */
+      allowOversell?: boolean;
+      /** Unused here — accepted so callers can spread their own opts object as-is. */
+      allowIngredientOveruse?: boolean;
     },
   ): Promise<InsufficientStockItem[]> {
     if (!lines || lines.length === 0) return [];

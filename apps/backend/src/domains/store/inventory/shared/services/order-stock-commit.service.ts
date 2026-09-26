@@ -62,6 +62,23 @@ export interface CommitOpts {
     requested: number;
     available: number;
   }) => void;
+  /**
+   * "Permitir sobreventa" (docs/plans/no-overselling-stock-guard-plan.md, step
+   * 9). Default `false` (undefined). ONLY the delivery/commit caller that
+   * already resolved `StockValidatorService.resolveInventoryPolicy(...).allowOversell
+   * === true` may set this `true`, and only paired with
+   * `blockOnInsufficient: false` — the two describe the SAME accepted-shortfall
+   * intent, they are not independent toggles.
+   *
+   * When `true`, the per-slice `updateStock` call in `processLine` is told
+   * `allow_negative: true`, so the existing non-blocking floor-0 absorb path
+   * (`absorbShortfall`, used today by dispatch delivery) writes the full
+   * deducted quantity and lets `quantity_on_hand` / `quantity_available` go
+   * NEGATIVE instead of clamping to 0. Dispatch delivery (and any other
+   * caller) that never sets this keeps writing the floor-0 clamp exactly as
+   * before — this flag changes nothing for them.
+   */
+  allowNegativeOnShortfall?: boolean;
 }
 
 export interface CommitResult {
@@ -204,6 +221,8 @@ export class OrderStockCommitService {
       reason?: string;
       posSelection?: any;
       afterCommit?: Array<() => void>;
+      allowNegativeOnShortfall?: boolean;
+      onShortfall?: CommitOpts['onShortfall'];
     },
   ): Promise<CommitResult> {
     const fullOpts: CommitOpts = {
@@ -214,6 +233,8 @@ export class OrderStockCommitService {
       userId: opts.userId,
       posSelection: opts.posSelection,
       afterCommit: opts.afterCommit,
+      allowNegativeOnShortfall: opts.allowNegativeOnShortfall,
+      onShortfall: opts.onShortfall,
     };
 
     if (!opts.tx) {
@@ -804,6 +825,7 @@ export class OrderStockCommitService {
           order_item_id: line.order_item_id ?? undefined,
           create_movement: true,
           afterCommit: opts.afterCommit,
+          allow_negative: opts.allowNegativeOnShortfall,
         },
         tx,
       );

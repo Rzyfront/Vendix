@@ -69,7 +69,10 @@ import { MovementsService } from '../../cash-registers/movements/movements.servi
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { AutoEntryService } from '../../accounting/auto-entries/auto-entry.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
-import { StockValidatorService } from '../../inventory/shared/services/stock-validator.service';
+import {
+  StockValidatorService,
+  type InsufficientStockItem,
+} from '../../inventory/shared/services/stock-validator.service';
 import { SellableStockAllocator } from '../../inventory/shared/services/sellable-stock-allocator.service';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { OrderEtaService } from '../services/order-eta.service';
@@ -3433,6 +3436,10 @@ export class OrderFlowService {
     //    caso idempotente NO retorna antes de sincronizar — `delivered_at`
     //    se usa como punto de sincronización (reconcilia cocina abajo).
     const alreadyDelivered = item.delivered_at != null;
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — collected only
+    // when the store's "Permitir sobreventa" switch is ON; additive to the
+    // response, never present (nor an empty array) otherwise.
+    const stockWarnings: InsufficientStockItem[] = [];
 
     if (!alreadyDelivered) {
       // 3. Compuerta de cocina para items preparados.
@@ -3460,8 +3467,27 @@ export class OrderFlowService {
       const stockEvents: Array<() => void> = [];
 
       await this.prisma.$transaction(async (tx) => {
+        const policy = await this.stockValidator?.resolveInventoryPolicy(
+          (order as any).store_id,
+          tx,
+        );
+        const allowOversell = policy?.allowOversell === true;
+
         await this.orderStockCommit.commitOrderLines(orderId, [orderItemId], {
-          blockOnInsufficient: true,
+          blockOnInsufficient: !allowOversell,
+          allowNegativeOnShortfall: allowOversell,
+          onShortfall: allowOversell
+            ? (shortfall) => {
+                stockWarnings.push({
+                  product_id: shortfall.product_id,
+                  product_variant_id: shortfall.product_variant_id,
+                  product_name: shortfall.product_name,
+                  kind: 'product',
+                  requested: shortfall.requested,
+                  available: shortfall.available,
+                });
+              }
+            : undefined,
           tx,
           userId: userId ?? undefined,
           reason: 'Entrega de item de orden',
@@ -3515,8 +3541,13 @@ export class OrderFlowService {
     );
 
     // 6. Devolver la vista de la orden actualizada (forma `getOrder`,
-    //    igual que `shipOrder` / `markKitchenOrderDelivered`).
-    return this.getOrder(orderId);
+    //    igual que `shipOrder` / `markKitchenOrderDelivered`). `stock_warnings`
+    //    se agrega SOLO si hubo sobreventa aceptada (step 9) — aditivo, nunca
+    //    presente (ni como arreglo vacío) en el camino estricto de siempre.
+    const updatedOrder = await this.getOrder(orderId);
+    return stockWarnings.length > 0
+      ? { ...updatedOrder, stock_warnings: stockWarnings }
+      : updatedOrder;
   }
 
   /**

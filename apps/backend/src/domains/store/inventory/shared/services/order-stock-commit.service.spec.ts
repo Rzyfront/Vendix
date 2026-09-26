@@ -397,6 +397,41 @@ describe('OrderStockCommitService — descuento multi-ubicación', () => {
     }));
   });
 
+  // docs/plans/no-overselling-stock-guard-plan.md step 9 — "Permitir
+  // sobreventa". Paired ALWAYS with `blockOnInsufficient: false`: the caller
+  // (order-flow `deliverOrderItem`) only sets this after resolving
+  // `StockValidatorService.resolveInventoryPolicy(...).allowOversell === true`.
+  it('allowNegativeOnShortfall=true: el updateStock del faltante recibe allow_negative=true', async () => {
+    setup(13);
+
+    await service.commitOrderDelivery(1, {
+      ...OPTS, blockOnInsufficient: false, allowNegativeOnShortfall: true,
+    }, txMock);
+
+    // Location 2 sólo tenía 4 disponibles; absorbShortfall cubre el resto
+    // (1 unidad) igual en esa ubicación — la escritura debe decir
+    // allow_negative:true para que StockLevelManager NO recorte a 0.
+    expect(stockLevelManagerMock.updateStock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ location_id: 2, allow_negative: true }),
+      txMock,
+    );
+  });
+
+  it('allowNegativeOnShortfall ausente (default): el updateStock del faltante NO pide allow_negative', async () => {
+    setup(13);
+
+    await service.commitOrderDelivery(1, {
+      ...OPTS, blockOnInsufficient: false,
+    }, txMock);
+
+    expect(stockLevelManagerMock.updateStock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ location_id: 2, allow_negative: undefined }),
+      txMock,
+    );
+  });
+
   it('línea que cabe en una ubicación mantiene UN solo updateStock (no regresión)', async () => {
     setup(5);
 

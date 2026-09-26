@@ -97,6 +97,28 @@ export interface UpdateStockParams {
    * puede ocurrir antes de que la estación abra sesión.
    */
   kds_session_id?: number | null;
+  /**
+   * Explicit opt-in (plan step 9, docs/plans/no-overselling-stock-guard-plan.md)
+   * to skip the `Math.max(0, …)` floor and let `quantity_on_hand` /
+   * `quantity_available` go NEGATIVE. Default `false` (undefined) — every
+   * existing caller keeps the current clamp-to-zero behavior unchanged.
+   *
+   * ONLY the two per-store overuse/oversell paths may pass `true`, and only
+   * after resolving the store's policy via
+   * `StockValidatorService.resolveInventoryPolicy`:
+   *   - Ingredient over-use (`allow_ingredient_overuse=true`): kitchen-fire
+   *     and production-orders consumption of a tracked ingredient.
+   *   - Oversell (`allow_negative_stock=true`): `OrderStockCommitService`
+   *     delivery/commit of a tracked product line.
+   *
+   * When `true`, callers MUST also pass `validate_availability: false` (or
+   * omit it) — the atomic `validate_availability && quantity_change < 0`
+   * branch enforces a `gte` floor via a conditional `updateMany` and throws
+   * `ConflictException` on an insufficient claim regardless of this flag, by
+   * design: those two conditions describe mutually exclusive intents ("block
+   * if short" vs "let it go negative").
+   */
+  allow_negative?: boolean;
 }
 
 export interface StockUpdateResult {
@@ -245,15 +267,23 @@ export class StockLevelManager {
     // idéntico al cero de "se agotó normal". Por eso no es inofensivo, pero
     // tampoco es lo que gobierna la venta.
     //
-    // `store_settings.inventory.allow_negative_stock` NO lo controla — nadie la
-    // lee (ver settings-schemas.dto.ts). Si algún día se quiere que el faltante
-    // quede registrado en vez de taparse, hay que tocar los cuatro sitios a la
-    // vez: aquí (~223 y ~992), movements.service.ts (~371, ~382),
-    // inventory-integration.service.ts (~228) y
-    // sellable-stock-allocator.service.ts (~108-130).
+    // `params.allow_negative` (plan step 9, 2026-09-26) es el ÚNICO opt-in que
+    // salta este recorte, y sólo lo pasan los dos caminos de sobre-uso/sobreventa
+    // ya resueltos vía `StockValidatorService.resolveInventoryPolicy` (kitchen-fire
+    // / production-orders para insumos, `OrderStockCommitService` para productos).
+    // `store_settings.inventory.allow_negative_stock` sigue sin controlar este
+    // sitio directamente — el caller lo resuelve y pasa `allow_negative`
+    // explícito; ver esos tres archivos. Si algún día se quiere el mismo
+    // comportamiento en los otros sitios de recorte, hay que tocarlos a la vez:
+    // movements.service.ts (~371, ~382), inventory-integration.service.ts (~228)
+    // y sellable-stock-allocator.service.ts (~108-130).
     const stockUpdateData: any = {
-      quantity_on_hand: Math.max(0, new_quantity_on_hand),
-      quantity_available: Math.max(0, new_quantity_available),
+      quantity_on_hand: params.allow_negative
+        ? new_quantity_on_hand
+        : Math.max(0, new_quantity_on_hand),
+      quantity_available: params.allow_negative
+        ? new_quantity_available
+        : Math.max(0, new_quantity_available),
       last_updated: new Date(),
       updated_at: new Date(),
     };

@@ -97,7 +97,7 @@ describe('StockValidatorService — no-overselling guard', () => {
         service.assertLinesAvailable([
           { product_id: PRODUCT_A, quantity: 999 },
         ]),
-      ).resolves.toBeUndefined();
+      ).resolves.toEqual([]);
 
       // Ni siquiera se consulta disponibilidad: un producto sin tracking es
       // ilimitado por definición (`vendix-product-variants`).
@@ -126,7 +126,7 @@ describe('StockValidatorService — no-overselling guard', () => {
           [{ product_id: PRODUCT_A, quantity: 2 }],
           { orderId: 900 },
         ),
-      ).resolves.toBeUndefined();
+      ).resolves.toEqual([]);
 
       expect(prismaMock.stock_reservations.aggregate).toHaveBeenCalledWith({
         where: {
@@ -208,6 +208,165 @@ describe('StockValidatorService — no-overselling guard', () => {
 
       // Sin orderId nunca — assertIngredientsAvailable no lo acepta.
       expect(prismaMock.stock_reservations.aggregate).not.toHaveBeenCalled();
+    });
+
+    it('allowIngredientOveruse=true: no lanza, advierte y devuelve los items en vez de bloquear', async () => {
+      const LIMON = 901;
+      prismaMock.products.findMany.mockResolvedValue([
+        {
+          id: LIMON,
+          store_id: STORE_ID,
+          track_inventory: true,
+          product_type: 'physical',
+          name: 'Limón',
+        },
+      ]);
+      allocatorMock.getSellableLevels.mockResolvedValue([
+        { location_id: 1, quantity_available: 0 },
+      ]);
+
+      const demands: StockDemandLine[] = [
+        { product_id: LIMON, quantity: 5, used_by: 'Mojito' },
+      ];
+
+      const items = await service.assertIngredientsAvailable(demands, {
+        allowIngredientOveruse: true,
+      });
+
+      expect(items).toEqual([
+        expect.objectContaining({
+          product_id: LIMON,
+          kind: 'ingredient',
+          requested: 5,
+          available: 0,
+        }),
+      ]);
+    });
+
+    it('allowIngredientOveruse=false (u omitido): sigue lanzando 409', async () => {
+      const LIMON = 902;
+      prismaMock.products.findMany.mockResolvedValue([
+        {
+          id: LIMON,
+          store_id: STORE_ID,
+          track_inventory: true,
+          product_type: 'physical',
+          name: 'Limón',
+        },
+      ]);
+      allocatorMock.getSellableLevels.mockResolvedValue([
+        { location_id: 1, quantity_available: 0 },
+      ]);
+
+      await expect(
+        service.assertIngredientsAvailable([
+          { product_id: LIMON, quantity: 5 },
+        ]),
+      ).rejects.toMatchObject({ errorCode: 'INV_STOCK_INSUFFICIENT_LINES' });
+    });
+  });
+
+  describe('assertLinesAvailable — allowOversell (plan step 9)', () => {
+    it('allowOversell=true: no lanza, advierte y devuelve los items en vez de bloquear', async () => {
+      prismaMock.products.findMany.mockResolvedValue([
+        {
+          id: PRODUCT_A,
+          store_id: STORE_ID,
+          track_inventory: true,
+          product_type: 'physical',
+          name: 'MODELO',
+        },
+      ]);
+      allocatorMock.getSellableLevels.mockResolvedValue([]);
+
+      const items = await service.assertLinesAvailable(
+        [{ product_id: PRODUCT_A, quantity: 3 }],
+        { allowOversell: true },
+      );
+
+      expect(items).toEqual([
+        expect.objectContaining({
+          product_id: PRODUCT_A,
+          kind: 'product',
+          requested: 3,
+          available: 0,
+        }),
+      ]);
+    });
+  });
+
+  describe('resolveInventoryPolicy (plan step 9)', () => {
+    const STORE_WITH_SETTINGS = 42;
+
+    it('sin fila de store_settings resuelve a los defaults (oversell OFF, overuse ON)', async () => {
+      prismaMock.store_settings = { findFirst: jest.fn().mockResolvedValue(null) };
+
+      const policy = await service.resolveInventoryPolicy(STORE_WITH_SETTINGS);
+
+      expect(policy).toEqual({ allowOversell: false, allowIngredientOveruse: true });
+    });
+
+    it('inventory.allow_ingredient_overuse=null resuelve a true (?? true, nunca ?? false)', async () => {
+      prismaMock.store_settings = {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: { inventory: { allow_ingredient_overuse: null, allow_negative_stock: null } },
+        }),
+      };
+
+      const policy = await service.resolveInventoryPolicy(STORE_WITH_SETTINGS);
+
+      expect(policy).toEqual({ allowOversell: false, allowIngredientOveruse: true });
+    });
+
+    it('inventory.allow_ingredient_overuse=false (explícito) se respeta', async () => {
+      prismaMock.store_settings = {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: { inventory: { allow_ingredient_overuse: false } },
+        }),
+      };
+
+      const policy = await service.resolveInventoryPolicy(STORE_WITH_SETTINGS);
+
+      expect(policy.allowIngredientOveruse).toBe(false);
+    });
+
+    it('inventory.allow_negative_stock=true (explícito) habilita allowOversell', async () => {
+      prismaMock.store_settings = {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: { inventory: { allow_negative_stock: true } },
+        }),
+      };
+
+      const policy = await service.resolveInventoryPolicy(STORE_WITH_SETTINGS);
+
+      expect(policy.allowOversell).toBe(true);
+    });
+
+    it('un error de lectura no propaga — cae a los defaults sin lanzar', async () => {
+      prismaMock.store_settings = {
+        findFirst: jest.fn().mockRejectedValue(new Error('conexión perdida')),
+      };
+
+      await expect(
+        service.resolveInventoryPolicy(STORE_WITH_SETTINGS),
+      ).resolves.toEqual({ allowOversell: false, allowIngredientOveruse: true });
+    });
+
+    it('usa el tx recibido (no this.prisma) cuando se lo pasan', async () => {
+      const txFindFirst = jest.fn().mockResolvedValue({
+        settings: { inventory: { allow_ingredient_overuse: false } },
+      });
+      const tx = { store_settings: { findFirst: txFindFirst } } as any;
+      prismaMock.store_settings = { findFirst: jest.fn().mockResolvedValue(null) };
+
+      const policy = await service.resolveInventoryPolicy(STORE_WITH_SETTINGS, tx);
+
+      expect(policy.allowIngredientOveruse).toBe(false);
+      expect(txFindFirst).toHaveBeenCalledWith({
+        where: { store_id: STORE_WITH_SETTINGS },
+        select: { settings: true },
+      });
+      expect(prismaMock.store_settings.findFirst).not.toHaveBeenCalled();
     });
   });
 });

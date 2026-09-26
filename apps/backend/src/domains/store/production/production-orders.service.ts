@@ -6,6 +6,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import {
   StockValidatorService,
   StockDemandLine,
+  type InsufficientStockItem,
 } from '../inventory/shared/services/stock-validator.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import {
@@ -292,6 +293,10 @@ export class ProductionOrdersService {
   // ----------------------------------------------------------------- complete
   async complete(id: number, dto: CompleteProductionOrderDto) {
     const order = await this.findOne(id);
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — the order's own
+    // `store_id` (not just the request context) so the resolved policy is
+    // always tied to the store that owns the recipe/stock being consumed.
+    const store_id = (order as { store_id: number }).store_id;
     if (order.status === 'completed' || order.status === 'cancelled') {
       throw new VendixHttpException(
         ErrorCodes.PRODUCTION_ORDER_INVALID_STATE,
@@ -349,9 +354,19 @@ export class ProductionOrdersService {
         used_by: order.product.name,
       });
     }
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — the store's
+    // "Permitir sobre-uso de insumos" switch. Default `true` (missing/null):
+    // a shortage only WARNS (`stock_warnings`) instead of blocking, and the
+    // consumption below is told to write NEGATIVE stock instead of the
+    // atomic floor throwing on the exact shortage this switch accepted.
+    const inventoryPolicy = await this.stockValidatorService.resolveInventoryPolicy(
+      store_id,
+    );
+    let stockWarnings: InsufficientStockItem[] = [];
     if (ingredientDemands.length > 0) {
-      await this.stockValidatorService.assertIngredientsAvailable(
+      stockWarnings = await this.stockValidatorService.assertIngredientsAvailable(
         ingredientDemands,
+        { allowIngredientOveruse: inventoryPolicy.allowIngredientOveruse },
       );
     }
 
@@ -392,12 +407,17 @@ export class ProductionOrdersService {
             source_module: 'production',
             user_id: undefined,
             create_movement: true,
-            // No-overselling guard (plan step 6) — the pre-tx check above
-            // already blocked an insufficient tracked ingredient; this is
-            // the defense-in-depth net against a concurrent consumer taking
-            // the same stock between that check and this write. No-op for
-            // untracked ingredients (`updateStock` skips them entirely).
-            validate_availability: true,
+            // No-overselling guard (plan step 6/9) — the pre-tx check above
+            // already blocked an insufficient tracked ingredient WHEN
+            // overuse is OFF; `validate_availability` is the defense-in-depth
+            // net against a concurrent consumer taking the same stock between
+            // that check and this write. No-op for untracked ingredients
+            // (`updateStock` skips them entirely). When the store's
+            // "Permitir sobre-uso de insumos" switch is ON, the guard above
+            // only WARNS, so this atomic floor must be OFF too and the write
+            // is told to go negative instead of clamping to 0.
+            validate_availability: !inventoryPolicy.allowIngredientOveruse,
+            allow_negative: inventoryPolicy.allowIngredientOveruse,
           },
           tx,
         );
@@ -482,7 +502,11 @@ export class ProductionOrdersService {
       );
     }
 
-    return updated.order;
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive: only
+    // present when overuse was actually accepted, never an empty array.
+    return stockWarnings.length > 0
+      ? { ...updated.order, stock_warnings: stockWarnings }
+      : updated.order;
   }
 
   // ------------------------------------------------------------------- cancel

@@ -7,6 +7,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import {
   StockValidatorService,
   StockDemandLine,
+  type InsufficientStockItem,
 } from '../inventory/shared/services/stock-validator.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
@@ -110,6 +111,13 @@ export interface FireOrderItemsResult {
   skipped_item_ids: number[];
   cogs_total: number;
   consumed_line_count: number;
+  /**
+   * docs/plans/no-overselling-stock-guard-plan.md step 9 — present ONLY when
+   * the store's "Permitir sobre-uso de insumos" switch was ON and at least
+   * one tracked ingredient was short. Additive: absent (never an empty
+   * array) on the strict/default path.
+   */
+  stock_warnings?: InsufficientStockItem[];
 }
 
 /**
@@ -190,6 +198,24 @@ export interface PreExplodedFireContext {
    * never set this — they get the in-tx check.
    */
   skipIngredientCheck?: boolean;
+  /**
+   * docs/plans/no-overselling-stock-guard-plan.md step 9 — the store's
+   * resolved "Permitir sobre-uso de insumos" policy, when the caller already
+   * resolved it OUTSIDE the transaction (the public `fireOrderItems`, paired
+   * with `skipIngredientCheck: true`). When omitted, `fireOrderItemsInTx`
+   * resolves it itself via `StockValidatorService.resolveInventoryPolicy`
+   * inside the passed-in `tx` — so direct callers (POS auto-fire, table
+   * close-out, split) get correct behavior without having to know about
+   * this flag.
+   */
+  allowIngredientOveruse?: boolean;
+  /**
+   * docs/plans/no-overselling-stock-guard-plan.md step 9 — shortage items
+   * already collected by the caller's OWN pre-tx `assertIngredientsAvailable`
+   * call (paired with `skipIngredientCheck: true`), so `fireOrderItemsInTx`
+   * can surface them on its return without re-running the query.
+   */
+  preCheckedStockWarnings?: InsufficientStockItem[];
 }
 
 /**
@@ -558,14 +584,22 @@ export class KitchenFireService {
         e.component_product_ids ?? [],
       ]),
     );
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — resolve the
+    // store's overuse policy ONCE, outside the tx, and reuse it below both
+    // for this pre-check and for the in-tx consumption (via `preComputed`).
+    const inventoryPolicy =
+      await this.stockValidatorService.resolveInventoryPolicy(store_id);
+    let preCheckedStockWarnings: InsufficientStockItem[] = [];
     if (preparedItems.length > 0) {
       const ingredientDemands = this.buildIngredientDemandLines(
         preparedItems,
         exclusionsByOrderItem,
       );
-      await this.stockValidatorService.assertIngredientsAvailable(
-        ingredientDemands,
-      );
+      preCheckedStockWarnings =
+        await this.stockValidatorService.assertIngredientsAvailable(
+          ingredientDemands,
+          { allowIngredientOveruse: inventoryPolicy.allowIngredientOveruse },
+        );
     }
 
     // 3b. Pre-resolve a default location_id per leaf product. Resolved
@@ -631,6 +665,11 @@ export class KitchenFireService {
       // de la tx. Re-ejecutar el mismo query adentro es correcto pero
       // redundante; el flag evita pagarlo dos veces.
       skipIngredientCheck: true,
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — carry the
+      // policy + any already-collected warnings so `fireOrderItemsInTx`
+      // doesn't re-resolve/re-query for the same demand.
+      allowIngredientOveruse: inventoryPolicy.allowIngredientOveruse,
+      preCheckedStockWarnings,
       itemNotesByOrderItem: (() => {
         const notesMap = new Map<number, string>();
         if (dto.item_notes && Array.isArray(dto.item_notes)) {
@@ -735,6 +774,11 @@ export class KitchenFireService {
       skipped_item_ids: skippedItemIds,
       cogs_total: Number(result.cogsTotal.toFixed(4)),
       consumed_line_count: result.consumedLineCount,
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive,
+      // present only when overuse was actually accepted.
+      ...(result.stockWarnings && result.stockWarnings.length > 0
+        ? { stock_warnings: result.stockWarnings }
+        : {}),
     };
   }
 
@@ -795,11 +839,21 @@ export class KitchenFireService {
     }>;
     cogsTotal: number;
     consumedLineCount: number;
+    stockWarnings?: InsufficientStockItem[];
   }> {
     const { order, preparedItems, recipeLessItems, locationByProduct, businessDate, user_id } =
       preComputed;
     const exclusionsByOrderItem =
       preComputed.exclusionsByOrderItem ?? new Map<number, number[]>();
+
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — reuse the
+    // caller's already-resolved policy (public `fireOrderItems`) or resolve
+    // it fresh, inside THIS tx, for direct callers (POS auto-fire, table
+    // close-out, split, resend) that never set it.
+    const allowIngredientOveruse =
+      preComputed.allowIngredientOveruse ??
+      (await this.stockValidatorService.resolveInventoryPolicy(store_id, tx))
+        .allowIngredientOveruse;
 
     const firedItemSnapshots: Array<{
       orderItemId: number;
@@ -868,14 +922,16 @@ export class KitchenFireService {
     // without going through the public `fireOrderItems` pre-check. When the
     // public method already validated the identical demand moments earlier
     // (`preComputed.skipIngredientCheck`), this re-query is skipped.
+    let stockWarnings: InsufficientStockItem[] =
+      preComputed.preCheckedStockWarnings ?? [];
     if (!preComputed.skipIngredientCheck && preparedItems.length > 0) {
       const ingredientDemands = this.buildIngredientDemandLines(
         preparedItems,
         exclusionsByOrderItem,
       );
-      await this.stockValidatorService.assertIngredientsAvailable(
+      stockWarnings = await this.stockValidatorService.assertIngredientsAvailable(
         ingredientDemands,
-        { tx },
+        { tx, allowIngredientOveruse },
       );
     }
 
@@ -959,12 +1015,19 @@ export class KitchenFireService {
               user_id,
               order_item_id: orderItem.id,
               create_movement: true,
-              // No-overselling guard (plan step 6) — the pre-consumption
+              // No-overselling guard (plan step 6/9) — the pre-consumption
               // check above already blocked an insufficient tracked
-              // ingredient; this is the defense-in-depth net against a
-              // concurrent fire taking the same stock in between. No-op for
-              // untracked ingredients (`updateStock` skips them entirely).
-              validate_availability: true,
+              // ingredient WHEN overuse is OFF; `validate_availability` is
+              // the defense-in-depth net against a concurrent fire taking
+              // the same stock in between. No-op for untracked ingredients
+              // (`updateStock` skips them entirely). When the store's
+              // "Permitir sobre-uso de insumos" switch is ON, the guard
+              // above only WARNS, so this atomic floor must be OFF too (it
+              // would otherwise throw ConflictException on the exact
+              // shortage the switch just accepted) and the write is told to
+              // go negative instead of clamping to 0.
+              validate_availability: !allowIngredientOveruse,
+              allow_negative: allowIngredientOveruse,
               kds_session_id: itemKdsSessionId,
             },
             tx,
@@ -1171,6 +1234,9 @@ export class KitchenFireService {
       firedItemSnapshots,
       cogsTotal,
       consumedLineCount,
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive,
+      // undefined/empty on the strict/default path.
+      stockWarnings,
     };
   }
 
