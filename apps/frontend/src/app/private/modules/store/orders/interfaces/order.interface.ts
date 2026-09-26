@@ -975,6 +975,68 @@ export interface OrderItemAvailableAction {
   reason?: string;
 }
 
+// ── Order Timeline (plan order-truth-and-invoice-tz, Step 7) ──────
+//
+// `GET /store/orders/:id/timeline` is a fork: an order written after the
+// `order_events` table existed returns `{legacy:false, events: OrderEvent[]}`
+// built ONLY from `order_events`; an order older than the change (no rows in
+// `order_events`) returns `{legacy:true, events: <raw audit_logs rows>}`,
+// rendered exactly as before. `events` is untyped `any[]` on the legacy arm
+// on purpose — that shape is the pre-existing `audit_logs` row (with its own
+// `action`/`old_values`/`new_values`/`users` fields), not `OrderEvent`.
+
+/** Closed union mirroring the backend's `OrderEventType` (order-history.types.ts). */
+export type OrderEventType =
+  | 'state_changed'
+  | 'payment_registered'
+  | 'payment_cancelled'
+  | 'refund_created'
+  | 'refund_resolved'
+  | 'customer_changed'
+  | 'item_delivered'
+  | 'item_cancelled'
+  | 'item_delivery_reverted'
+  | 'shipping_assigned'
+  | 'invoice_issued';
+
+/** Mirrors the backend's `OrderEventSource` (order-history.types.ts). */
+export type OrderEventSource = 'http' | 'webhook' | 'job' | 'listener' | 'system';
+
+export interface OrderEventActor {
+  user_id: number;
+  name: string;
+}
+
+/** One row from `order_events`, as mapped by `OrdersService.getTimeline`. */
+export interface OrderEvent {
+  id: number;
+  event_type: OrderEventType;
+  from_state: OrderState | null;
+  to_state: OrderState | null;
+  actor: OrderEventActor | null;
+  actor_source: OrderEventSource;
+  payment_id: number | null;
+  order_item_id: number | null;
+  amount: number | string | null;
+  payload: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface LegacyOrderTimelineResponse {
+  legacy: true;
+  /** Raw `audit_logs` rows — unchanged legacy shape. */
+  events: any[];
+}
+
+export interface EventOrderTimelineResponse {
+  legacy: false;
+  events: OrderEvent[];
+}
+
+export type OrderTimelineResponse =
+  | LegacyOrderTimelineResponse
+  | EventOrderTimelineResponse;
+
 export interface OrderActionConfig {
   id: string;
   label: string;

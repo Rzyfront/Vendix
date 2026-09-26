@@ -3,8 +3,9 @@ import {
   cancellationBody, isOrderItemCancellationPaid, shippingTaxModePrefix,
   lifecycleLookupState, kitchenStateForItem, isItemActionEnabled, isOrderCreateLog,
   isRefundAuditRow, isConfirmedStateTransition, buildOrderActionButtons,
+  orderStateLabel, orderEventLabel, orderEventActorLabel, isRefundOrderEvent,
 } from './order-details-page.component';
-import { Order, OrderItem } from '../../interfaces/order.interface';
+import { Order, OrderItem, OrderEvent } from '../../interfaces/order.interface';
 import {
   previewItemCancellation,
   rederivePercentageTip,
@@ -336,5 +337,91 @@ describe('B3 (release-855) — isOrderCreateLog / isRefundAuditRow / isConfirmed
     expect(isConfirmedStateTransition({ metadata: { method: 'FLOW' } }, null, 'processing')).toBeTrue();
     // Sin old_values y sin marca FLOW: no se puede confirmar la transición.
     expect(isConfirmedStateTransition({}, null, 'processing')).toBeFalse();
+  });
+});
+
+describe('order-truth-and-invoice-tz plan (Paso 7) — orderStateLabel / orderEventLabel / orderEventActorLabel / isRefundOrderEvent', () => {
+  const baseEvent = (overrides: Partial<OrderEvent>): OrderEvent => ({
+    id: 1,
+    event_type: 'customer_changed',
+    from_state: null,
+    to_state: null,
+    actor: null,
+    actor_source: 'system',
+    payment_id: null,
+    order_item_id: null,
+    amount: null,
+    payload: null,
+    created_at: '2026-09-01T00:00:00.000Z',
+    ...overrides,
+  });
+  const formatAmount = (amount: number | string | null | undefined) => `$${amount}`;
+
+  it('orderStateLabel traduce los estados conocidos y deja pasar el resto', () => {
+    expect(orderStateLabel('processing')).toBe('Procesando');
+    expect(orderStateLabel('finished')).toBe('Finalizada');
+    expect(orderStateLabel(null)).toBe('Desconocido');
+    expect(orderStateLabel(undefined)).toBe('Desconocido');
+    expect(orderStateLabel('unknown_state' as any)).toBe('unknown_state');
+  });
+
+  it('orderEventLabel arma "Estado: X → Y" para state_changed reusando orderStateLabel', () => {
+    const evt = baseEvent({ event_type: 'state_changed', from_state: 'pending_payment' as any, to_state: 'processing' as any });
+    expect(orderEventLabel(evt, formatAmount)).toBe('Estado: Pago Pendiente → Procesando');
+  });
+
+  it('orderEventLabel arma payment_registered con monto y método cuando el payload los trae', () => {
+    const evt = baseEvent({ event_type: 'payment_registered', amount: 5000, payload: { method: 'cash' } });
+    expect(orderEventLabel(evt, formatAmount)).toBe('Pago registrado — $5000 — cash');
+  });
+
+  it('orderEventLabel se degrada a la etiqueta simple sin monto ni método', () => {
+    const evt = baseEvent({ event_type: 'payment_registered' });
+    expect(orderEventLabel(evt, formatAmount)).toBe('Pago registrado');
+  });
+
+  it('orderEventLabel arma invoice_issued con el número de factura cuando el payload lo trae', () => {
+    expect(orderEventLabel(baseEvent({ event_type: 'invoice_issued', payload: { invoice_number: 'FE-001' } }), formatAmount))
+      .toBe('Factura emitida — FE-001');
+    expect(orderEventLabel(baseEvent({ event_type: 'invoice_issued' }), formatAmount)).toBe('Factura emitida');
+  });
+
+  it('orderEventLabel cubre el resto del mapa determinístico por event_type', () => {
+    const cases: Array<[OrderEvent['event_type'], string]> = [
+      ['payment_cancelled', 'Pago anulado'],
+      ['refund_created', 'Reembolso creado'],
+      ['refund_resolved', 'Reembolso resuelto'],
+      ['customer_changed', 'Cliente cambiado'],
+      ['item_delivered', 'Ítem entregado'],
+      ['item_cancelled', 'Ítem cancelado'],
+      ['item_delivery_reverted', 'Entrega de ítem revertida'],
+      ['shipping_assigned', 'Envío asignado'],
+    ];
+    for (const [event_type, label] of cases) {
+      expect(orderEventLabel(baseEvent({ event_type }), formatAmount)).toBe(label);
+    }
+  });
+
+  it('orderEventActorLabel usa el nombre del actor cuando existe', () => {
+    const evt = baseEvent({ actor: { user_id: 9, name: 'Ana Pérez' }, actor_source: 'http' });
+    expect(orderEventActorLabel(evt)).toBe('Ana Pérez');
+  });
+
+  it('orderEventActorLabel cae al label fijo por actor_source sin actor', () => {
+    expect(orderEventActorLabel(baseEvent({ actor: null, actor_source: 'system' }))).toBe('Sistema');
+    expect(orderEventActorLabel(baseEvent({ actor: null, actor_source: 'webhook' }))).toBe('Pasarela de pago');
+    expect(orderEventActorLabel(baseEvent({ actor: null, actor_source: 'job' }))).toBe('Proceso automático');
+    expect(orderEventActorLabel(baseEvent({ actor: null, actor_source: 'listener' }))).toBe('Cocina/Despacho');
+    expect(orderEventActorLabel(baseEvent({ actor: null, actor_source: 'http' }))).toBe('Sistema');
+  });
+
+  it('isRefundOrderEvent es true SOLO para refund_created/refund_resolved, nunca por colisión de nombre con un estado', () => {
+    expect(isRefundOrderEvent(baseEvent({ event_type: 'refund_created' }))).toBeTrue();
+    expect(isRefundOrderEvent(baseEvent({ event_type: 'refund_resolved' }))).toBeTrue();
+    // state_changed hacia un to_state que en el enum de refunds se llamaría
+    // igual ('processing'/'cancelled') NO activa el badge — a diferencia de
+    // la heurística legacy `isRefundAuditRow`, acá sólo manda el event_type.
+    expect(isRefundOrderEvent(baseEvent({ event_type: 'state_changed', to_state: 'processing' as any }))).toBeFalse();
+    expect(isRefundOrderEvent(baseEvent({ event_type: 'payment_cancelled' }))).toBeFalse();
   });
 });

@@ -31,6 +31,7 @@ import {
   RefundCoverageResult,
   FastTrackOrderDto,
   AssignShippingMethodDto,
+  OrderTimelineResponse,
 } from '../interfaces/order.interface';
 
 /**
@@ -331,17 +332,40 @@ export class StoreOrdersService {
     );
   }
 
-  getOrderTimeline(orderId: string): Observable<any[]> {
+  /**
+   * order-truth-and-invoice-tz plan, Step 7 — the backend now forks:
+   * `{legacy:false, events: OrderEvent[]}` for an order with `order_events`
+   * rows, `{legacy:true, events: <raw audit_logs>}` for one without (fallback,
+   * rendered exactly as before). This unwraps the `{success, data}` envelope
+   * and defensively falls back to `{legacy:true, events:[]}` for any other
+   * shape (envelope-unwrap failure, network error), matching the old
+   * fail-open behaviour of returning an empty history instead of crashing
+   * the order detail page.
+   */
+  getOrderTimeline(orderId: string): Observable<OrderTimelineResponse> {
     const url = `${this.apiUrl}/store/orders/${orderId}/timeline`;
 
     return this.http.get<any>(url).pipe(
-      map((r) => (Array.isArray(r?.data) ? r.data : Array.isArray(r) ? r : [])),
+      map((r) => {
+        const body = r && typeof r === 'object' && 'data' in r ? r.data : r;
+        if (body && typeof body === 'object' && Array.isArray(body.events)) {
+          return {
+            legacy: body.legacy !== false,
+            events: body.events,
+          } as OrderTimelineResponse;
+        }
+        // Defensive: a bare array is the pre-fork legacy shape.
+        if (Array.isArray(body)) {
+          return { legacy: true, events: body } as OrderTimelineResponse;
+        }
+        return { legacy: true, events: [] } as OrderTimelineResponse;
+      }),
       catchError((error) => {
         console.error('Error fetching order timeline:', error);
         // CP-POS-SVC-PERF-001 — never propagate as fatal: order detail
         // must render even when the timeline endpoint fails. The page
         // shows an empty history instead of a full crash.
-        return of([] as any[]);
+        return of({ legacy: true, events: [] } as OrderTimelineResponse);
       }),
     );
   }

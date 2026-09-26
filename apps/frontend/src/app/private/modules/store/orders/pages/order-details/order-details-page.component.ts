@@ -28,7 +28,7 @@ import { OrdersService } from '../../services/orders.service';
 // `payload.data.order_id` en el cliente.
 import { OrderDetailSseService } from '../../services/order-detail-sse.service';
 import { AddressPayload } from '../../../../../../shared/components';
-import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
+import { formatDateOnlyUTC, formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
 import { ShippingAddressModalComponent } from '../../components/shipping-address-modal/shipping-address-modal.component';
 import {
@@ -58,6 +58,9 @@ import {
   OrderTableSession,
   Address,
   OrderAvailableAction,
+  OrderEvent,
+  OrderEventType,
+  OrderEventSource,
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
@@ -486,6 +489,107 @@ export function isConfirmedStateTransition(
 }
 
 /**
+ * order-truth-and-invoice-tz plan, Step 7 — Spanish label for an
+ * `OrderState` value. Extracted as a pure function so `formatStatus()`
+ * (status badges, cancellation dialogs, legacy state-changed timeline rows)
+ * and `orderEventLabel()` below (new `order_events`-backed timeline) share
+ * ONE map instead of two copies drifting apart. Unknown values pass through
+ * as-is. Pure for spec sin TestBed.
+ */
+export function orderStateLabel(status: string | null | undefined): string {
+  if (!status) return 'Desconocido';
+  const labels: Record<string, string> = {
+    draft: 'Borrador',
+    created: 'Creada',
+    pending_payment: 'Pago Pendiente',
+    processing: 'Procesando',
+    shipped: 'Enviada',
+    delivered: 'Entregada',
+    cancelled: 'Cancelada',
+    refunded: 'Reembolsada',
+    finished: 'Finalizada',
+  };
+  return labels[status] || status;
+}
+
+/**
+ * order-truth-and-invoice-tz plan, Step 7 — deterministic label map by
+ * `event_type` for the order_events-backed timeline (`legacy:false`). Pure:
+ * takes the amount formatter as a parameter instead of reaching for
+ * `CurrencyFormatService` directly, so it is testable without Angular DI —
+ * same "pure for spec sin TestBed" convention as `isRefundAuditRow` above.
+ * Unlike `getTimelineLabel` (audit_logs), this never needs the
+ * `isRefundAuditRow` heuristic: `event_type` already says unambiguously
+ * whether a row is a refund.
+ */
+export function orderEventLabel(
+  evt: Pick<OrderEvent, 'event_type' | 'from_state' | 'to_state' | 'amount' | 'payload'>,
+  formatAmount: (amount: number | string | null | undefined) => string,
+): string {
+  if (evt.event_type === 'state_changed') {
+    return `Estado: ${orderStateLabel(evt.from_state)} → ${orderStateLabel(evt.to_state)}`;
+  }
+  if (evt.event_type === 'payment_registered') {
+    const amount = evt.amount != null ? formatAmount(evt.amount) : '';
+    const rawMethod = evt.payload?.['method'];
+    const method = typeof rawMethod === 'string' ? rawMethod : '';
+    const suffix = [amount, method].filter(Boolean).join(' — ');
+    return suffix ? `Pago registrado — ${suffix}` : 'Pago registrado';
+  }
+  if (evt.event_type === 'invoice_issued') {
+    const number = evt.payload?.['invoice_number'];
+    return number ? `Factura emitida — ${number}` : 'Factura emitida';
+  }
+  const labels: Partial<Record<OrderEventType, string>> = {
+    payment_cancelled: 'Pago anulado',
+    refund_created: 'Reembolso creado',
+    refund_resolved: 'Reembolso resuelto',
+    customer_changed: 'Cliente cambiado',
+    item_delivered: 'Ítem entregado',
+    item_cancelled: 'Ítem cancelado',
+    item_delivery_reverted: 'Entrega de ítem revertida',
+    shipping_assigned: 'Envío asignado',
+  };
+  return labels[evt.event_type] ?? evt.event_type;
+}
+
+/**
+ * order-truth-and-invoice-tz plan, Step 7 — actor text for a NEW
+ * `order_events` row: the user's full name when there is one, otherwise a
+ * fixed label by `actor_source`. `http` without a resolved user (should not
+ * normally happen — `record()` only sets `actor_source:'http'` when the
+ * request context had a user) still falls back to «Sistema» rather than a
+ * blank string. Pure for spec sin TestBed.
+ */
+export function orderEventActorLabel(
+  evt: Pick<OrderEvent, 'actor' | 'actor_source'>,
+): string {
+  const name = evt.actor?.name?.trim();
+  if (name) return name;
+  const sourceLabels: Record<OrderEventSource, string> = {
+    system: 'Sistema',
+    webhook: 'Pasarela de pago',
+    job: 'Proceso automático',
+    listener: 'Cocina/Despacho',
+    http: 'Sistema',
+  };
+  return sourceLabels[evt.actor_source] ?? 'Sistema';
+}
+
+/**
+ * order-truth-and-invoice-tz plan, Step 7 — the «Reembolso» badge on a NEW
+ * timeline row is driven ONLY by `event_type`, never by the
+ * `isRefundAuditRow` string-sniffing heuristic (that heuristic exists
+ * because legacy `audit_logs` rows have no closed event vocabulary; a closed
+ * `order_events.event_type` doesn't need it). Pure for spec sin TestBed.
+ */
+export function isRefundOrderEvent(
+  evt: Pick<OrderEvent, 'event_type'>,
+): boolean {
+  return evt.event_type === 'refund_created' || evt.event_type === 'refund_resolved';
+}
+
+/**
  * Local alias for the refund state enum (`refunds_state_enum`). Mirrors the 7
  * values defined in `apps/backend/prisma/schema.prisma`. Kept local to this
  * component — if a second surface needs the same labels, extract to a shared
@@ -678,6 +782,14 @@ export class OrderDetailsPageComponent {
    */
   dispatchNotes = signal<DispatchNote[]>([]);
   private rawTimeline = signal<any[]>([]);
+  /**
+   * order-truth-and-invoice-tz plan, Step 7 — mirrors
+   * `OrderTimelineResponse.legacy`. `true` (the safe default before the
+   * timeline loads) means `rawTimeline()` holds raw `audit_logs` rows
+   * (today's shape); `false` means it holds `OrderEvent[]`.
+   */
+  private timelineLegacy = signal<boolean>(true);
+  readonly isLegacyTimeline = computed<boolean>(() => this.timelineLegacy());
   isLoading = signal(false);
   error: string | null = null;
 
@@ -1570,6 +1682,20 @@ export class OrderDetailsPageComponent {
         date: order ? this.formatDate(order.created_at) : '',
       }];
     }
+    // order-truth-and-invoice-tz plan, Step 7 — `legacy:false` renders
+    // ONLY from `order_events` (OrderEvent[]): deterministic label map by
+    // `event_type` and store-timezone dates. `legacy:true` (orders older
+    // than the change) keeps the exact `audit_logs` rendering below.
+    if (!this.timelineLegacy()) {
+      const events = logs as OrderEvent[];
+      return events.map((evt, i) => ({
+        key: `evt-${evt.id ?? i}`,
+        label: this.getOrderEventLabel(evt),
+        status: i === events.length - 1 ? 'current' as const : 'completed' as const,
+        date: formatStoreDateTime(evt.created_at, this.settingsFacade.timezone()),
+        data: evt,
+      }));
+    }
     return logs.map((log, i) => ({
       key: `log-${i}`,
       label: this.getTimelineLabel(log),
@@ -2082,13 +2208,24 @@ export class OrderDetailsPageComponent {
             })),
           });
 
-          this.rawTimeline.set(
-            Array.isArray(timeline)
-              ? timeline
-              : Array.isArray((timeline as any)?.data)
-                ? (timeline as any).data
-                : [],
-          );
+          // order-truth-and-invoice-tz plan, Step 7 — `getOrderTimeline`
+          // normalizes to `{legacy, events}`. Defensive fallback (bare
+          // array / envelope leak) keeps the pre-fork behaviour: treat it
+          // as legacy `audit_logs` rows rather than crash the page.
+          const timelineResponse = timeline as any;
+          if (Array.isArray(timelineResponse)) {
+            this.timelineLegacy.set(true);
+            this.rawTimeline.set(timelineResponse);
+          } else {
+            this.timelineLegacy.set(timelineResponse?.legacy !== false);
+            this.rawTimeline.set(
+              Array.isArray(timelineResponse?.events)
+                ? timelineResponse.events
+                : Array.isArray(timelineResponse?.data)
+                  ? timelineResponse.data
+                  : [],
+            );
+          }
           this.isLoading.set(false);
 
           // Load payment methods if order can accept payment
@@ -4140,19 +4277,7 @@ export class OrderDetailsPageComponent {
   }
 
   formatStatus(status: string | undefined): string {
-    if (!status) return 'Desconocido';
-    const labels: Record<string, string> = {
-      draft: 'Borrador',
-      created: 'Creada',
-      pending_payment: 'Pago Pendiente',
-      processing: 'Procesando',
-      shipped: 'Enviada',
-      delivered: 'Entregada',
-      cancelled: 'Cancelada',
-      refunded: 'Reembolsada',
-      finished: 'Finalizada',
-    };
-    return labels[status] || status;
+    return orderStateLabel(status);
   }
 
   formatDate(dateString: string | undefined): string {
@@ -4225,6 +4350,25 @@ export class OrderDetailsPageComponent {
       return 'Evento de reembolso';
     }
     return actionLabels[action] || log.action || 'Evento';
+  }
+
+  /**
+   * order-truth-and-invoice-tz plan, Step 7 — thin delegator to the pure
+   * `orderEventLabel()` (spec-tested without TestBed); only the amount
+   * formatter needs `this.currencyService`.
+   */
+  getOrderEventLabel(evt: OrderEvent): string {
+    return orderEventLabel(evt, (amount) => this.currencyService.format(amount));
+  }
+
+  /** Thin delegator to the pure `orderEventActorLabel()`. */
+  getOrderEventActorLabel(evt: OrderEvent): string {
+    return orderEventActorLabel(evt);
+  }
+
+  /** Thin delegator to the pure `isRefundOrderEvent()`. */
+  isRefundOrderEvent(evt: OrderEvent): boolean {
+    return isRefundOrderEvent(evt);
   }
 
   parseVariantAttributes(raw: unknown): VariantAttribute[] {
