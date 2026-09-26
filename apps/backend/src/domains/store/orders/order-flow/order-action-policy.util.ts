@@ -271,13 +271,25 @@ export function canEditOrder(
 }
 
 /** `reactivate` — mirrors `OrderFlowService.reactivateOrder`'s only state
- * guard (`ORD_STATUS_001` unless `state === 'cancelled'`). The endpoint has
- * no `@Roles` gate (permission-only: `store:orders:order_flow:reactivate`),
- * so — unlike `cancel_payment` — this predicate does NOT take a role
- * context; the web's `isPrivilegedUser()` gate on the button is a UI
- * preference, not a server rule this file has to reproduce. */
+ * guard (`ORD_STATUS_001` unless `state === 'cancelled'`). */
 export function canReactivate(order: { state: string }): OrderActionResult {
   return { enabled: order.state === 'cancelled' };
+}
+
+/** `reactivate` now requires owner/admin — the endpoint gained the same
+ * `RolesGuard` + `@Roles('owner','admin','OWNER','ADMIN')` as `cancel_payment`
+ * (reactivating a cancelled order is an equally privileged reversal). Mirrors
+ * `canCancelPaymentAsRole`'s exact permissive-when-unresolved pattern: a
+ * caller that never resolved `ctx.roles` stays gated only by state —
+ * `RolesGuard` remains the real enforcement point at the HTTP layer. */
+export function canReactivateAsRole(
+  order: { state: string },
+  ctx: OrderActionRoleContext,
+): OrderActionResult {
+  if (ctx.roles && !isOwnerOrAdmin(ctx)) {
+    return { enabled: false, reason: 'FORBIDDEN' };
+  }
+  return canReactivate(order);
 }
 
 /** `fast_track` — mirrors `OrderFlowService.fastTrackOrder`'s pre-flight

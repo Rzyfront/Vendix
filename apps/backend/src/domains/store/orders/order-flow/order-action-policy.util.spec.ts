@@ -8,6 +8,7 @@ import {
   canConfirmDelivery,
   canEditOrder,
   canReactivate,
+  canReactivateAsRole,
   canFastTrack,
   canCreditPayment,
   canDispatchOrder,
@@ -455,6 +456,30 @@ describe('order-action-policy — canReactivate', () => {
     'disables outside cancelled: %s',
     (state) => expect(canReactivate({ state }).enabled).toBe(false),
   );
+});
+
+describe('order-action-policy — canReactivateAsRole', () => {
+  const eligible = { state: 'cancelled' };
+
+  it('permits owner/admin (case-insensitive)', () => {
+    expect(canReactivateAsRole(eligible, { roles: ['OWNER'] })).toEqual({ enabled: true });
+    expect(canReactivateAsRole(eligible, { roles: ['admin'] })).toEqual({ enabled: true });
+  });
+
+  it('forbids a non owner/admin role regardless of state eligibility', () => {
+    expect(canReactivateAsRole(eligible, { roles: ['cashier'] })).toEqual({
+      enabled: false,
+      reason: 'FORBIDDEN',
+    });
+  });
+
+  it('stays permissive (delegates to the state predicate) when roles are not resolved', () => {
+    expect(canReactivateAsRole(eligible, {})).toEqual({ enabled: true });
+  });
+
+  it('still disables outside cancelled, even for owner/admin', () => {
+    expect(canReactivateAsRole({ state: 'processing' }, { roles: ['owner'] }).enabled).toBe(false);
+  });
 });
 
 describe('order-action-policy — canFastTrack', () => {

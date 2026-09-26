@@ -27,10 +27,11 @@
  *     `shipped` (today's web never shows it there at all).
  *  2. `mark_delivered` removed from `processing` (dead action: `deliverOrder`
  *     requires `shipped` unless `force`; the web never rendered it either).
- *  3. `reactivate` — the endpoint has no role guard (permission-only), so the
- *     predicate does not gate by role; the web's `isPrivilegedUser()` check
- *     on the button is a UI preference, not a server rule to mirror (see the
- *     doc comment on `canReactivate` in `order-action-policy.util.ts`).
+ *  3. `reactivate` now requires owner/admin at BOTH the endpoint
+ *     (`RolesGuard` + `@Roles('owner','admin','OWNER','ADMIN')`, same as
+ *     `cancel_payment`) and the predicate (`canReactivateAsRole`, mirroring
+ *     `canCancelPaymentAsRole`'s exact pattern) — the web's
+ *     `isPrivilegedUser()` button gate is now backed by a real server rule.
  *
  * Explicitly OUT of this gate's scope (additive, not yet consumed by the
  * web's `availableActions` array — no removal, no regression risk):
@@ -69,7 +70,7 @@ import {
   canCancelPaymentAsRole,
   canCancel,
   canRefund,
-  canReactivate,
+  canReactivateAsRole,
   canConfirmDelivery,
   canEditOrder,
   canCreditPayment,
@@ -281,8 +282,14 @@ describe('order-actions-parity — finished (web ids: credit-payment|pay|cancel-
 });
 
 describe('order-actions-parity — cancelled (web id: reactivate[privileged])', () => {
-  it('SANCTIONED EXCEPTION: reactivate has no role gate at the predicate level (endpoint is permission-only, not @Roles) — the web\'s isPrivilegedUser() hides the BUTTON, not a server rule', () => {
-    expect(canReactivate({ state: 'cancelled' })).toEqual({ enabled: true });
+  it('REGRESSION FIX: reactivate now requires owner/admin — same RolesGuard/@Roles pair as cancel_payment', () => {
+    const order = { state: 'cancelled' };
+    expect(canReactivateAsRole(order, OWNER)).toEqual({ enabled: true });
+    expect(canReactivateAsRole(order, CASHIER)).toEqual({ enabled: false, reason: 'FORBIDDEN' });
+  });
+
+  it('stays state-gated for owner/admin too — only cancelled orders reactivate', () => {
+    expect(canReactivateAsRole({ state: 'processing' }, OWNER).enabled).toBe(false);
   });
 });
 

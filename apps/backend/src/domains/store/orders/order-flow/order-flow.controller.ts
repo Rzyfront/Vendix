@@ -503,6 +503,8 @@ export class OrderFlowController {
   @Post('reactivate')
   @Permissions('store:orders:order_flow:reactivate')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'OWNER', 'ADMIN')
   async reactivateOrder(
     @Param('orderId', ParseIntPipe) orderId: number,
     @Body() dto: ReactivateOrderDto,

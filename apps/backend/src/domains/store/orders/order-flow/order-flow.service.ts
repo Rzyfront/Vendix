@@ -17,7 +17,7 @@ import {
   canConfirmDelivery,
   canDeliverItem,
   canEditOrder,
-  canReactivate,
+  canReactivateAsRole,
   canFastTrack,
   canCreditPayment,
   canDispatchOrder,
@@ -2959,10 +2959,12 @@ export class OrderFlowService {
     }
 
     if (state === 'cancelled') {
+      // `reactivate` now requires owner/admin (same `RolesGuard` +
+      // `@Roles` as `cancel_payment`) — see `canReactivateAsRole`.
       actions.push({
         code: 'reactivate',
         label_key: 'ORD_ACTION_REACTIVATE',
-        ...canReactivate(snapshot),
+        ...canReactivateAsRole(snapshot, roleCtx),
       });
     }
 
