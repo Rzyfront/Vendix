@@ -89,17 +89,32 @@ export class RoutingService {
   private static readonly OSRM_BASE = 'https://router.project-osrm.org';
   /**
    * Public keyless Valhalla demo (FOSSGIS, same operator family as the OSRM
-   * demo). PRIMARY provider: unlike OSRM, Valhalla supports TRUE shortest-
-   * distance routing (`costing_options.auto.shortest: true`), which is what
-   * urban delivery wants — OSRM only optimizes by time and favours main roads.
+   * demo). PRIMARY provider, falling back to OSRM only on failure.
    */
   private static readonly VALHALLA_BASE = 'https://valhalla1.openstreetmap.de';
   /**
-   * Redis key prefix for cached directions payloads. `v2` = shortest-distance
-   * era (Valhalla primary); the bump orphans pre-shortest fastest-route entries
-   * so they age out via TTL instead of serving stale main-road geometry.
+   * Valhalla `costing_options.auto` sent on every request. Deliberately
+   * standard `auto` costing — NOT `{ shortest: true }`. `shortest: true`
+   * optimizes strictly for minimum distance regardless of road type, which
+   * routed delivery drivers down unpaved tracks, narrow residential streets,
+   * or other roads unfit for a vehicle just because they were a few meters
+   * shorter. Standard costing weighs road class/time like a real driver
+   * would, matching what OSRM's default `driving` profile already does (see
+   * `fetchFromOsrm`, which now also takes the PRIMARY route instead of the
+   * shortest alternative, for the same reason). Kept as a named constant
+   * (currently empty — Valhalla's own defaults) so a future deliberate
+   * costing tweak has one place to land instead of being buried in the
+   * request body literal.
    */
-  private static readonly CACHE_PREFIX = 'routing:directions:v2:';
+  private static readonly VALHALLA_AUTO_COSTING_OPTIONS = {};
+  /**
+   * Redis key prefix for cached directions payloads. `v3` = standard-costing
+   * era (no more `shortest: true` on Valhalla, no more shortest-alternative
+   * pick on OSRM); the bump orphans pre-v3 entries so stale shortest-route
+   * geometry ages out via TTL instead of being served after the routing
+   * policy changed.
+   */
+  private static readonly CACHE_PREFIX = 'routing:directions:v3:';
   /** Redis key prefix for the single-flight lock. */
   private static readonly LOCK_PREFIX = 'routing:lock:';
 
@@ -107,14 +122,14 @@ export class RoutingService {
 
   /**
    * Resolve street-following directions for an ordered list of waypoints,
-   * favouring the SHORTEST route (min distance), not OSRM's default fastest.
+   * using each provider's STANDARD driving route (Valhalla `auto` costing /
+   * OSRM `driving` profile) — not a shortest-distance optimization (see
+   * `VALHALLA_AUTO_COSTING_OPTIONS` for why that was dropped).
    *
-   * OSRM only returns alternative routes for 2-point requests (no via
-   * waypoints), so multi-stop routes are resolved LEG BY LEG (each consecutive
-   * pair) and stitched: per leg we ask for alternatives and keep the one with
-   * the smallest distance. Legs are cached individually, which also improves
-   * reuse — when the driver advances, only the first leg changes; the
-   * stop→stop legs stay cached.
+   * Multi-stop routes are resolved LEG BY LEG (each consecutive pair) and
+   * stitched, rather than sent as one multi-waypoint request. Legs are
+   * cached individually, which also improves reuse — when the driver
+   * advances, only the first leg changes; the stop→stop legs stay cached.
    *
    * @param coords OSRM-native `<lng>,<lat>;<lng>,<lat>;...` string (≥2 points),
    *   already shape-validated by the DTO. Ranges are re-validated here.
@@ -175,9 +190,9 @@ export class RoutingService {
   }
 
   /**
-   * Fetch one leg from the routing providers: Valhalla `shortest: true` first
-   * (true min-distance routing), falling back to OSRM (fastest, min-distance
-   * alternative picked) only if Valhalla is unreachable or errors.
+   * Fetch one leg from the routing providers: Valhalla (standard `auto`
+   * costing) first, falling back to OSRM (standard `driving` profile) only
+   * if Valhalla is unreachable or errors.
    */
   private async fetchLeg(coords: string): Promise<RoutingDirections> {
     try {
@@ -249,9 +264,9 @@ export class RoutingService {
 
   // ------------------------------------------------------------- Valhalla
   /**
-   * Resolve one leg via Valhalla with `shortest: true` — routing weighted by
-   * DISTANCE, not time. This is the only public keyless provider that honours
-   * "always take the shortest path" instead of preferring main roads.
+   * Resolve one leg via Valhalla with STANDARD `auto` costing (not
+   * `shortest: true` — see `VALHALLA_AUTO_COSTING_OPTIONS`). This mirrors a
+   * real driving route the same way OSRM's default `driving` profile does.
    */
   private async fetchFromValhalla(coords: string): Promise<RoutingDirections> {
     const locations = coords.split(';').map((point) => {
@@ -277,7 +292,9 @@ export class RoutingService {
         body: JSON.stringify({
           locations,
           costing: 'auto',
-          costing_options: { auto: { shortest: true } },
+          costing_options: {
+            auto: RoutingService.VALHALLA_AUTO_COSTING_OPTIONS,
+          },
           units: 'kilometers',
         }),
       });
@@ -364,12 +381,15 @@ export class RoutingService {
 
   // ----------------------------------------------------------------- OSRM
   private async fetchFromOsrm(coords: string): Promise<RoutingDirections> {
-    // `alternatives=true` (válido solo en requests de 2 puntos — por eso el
-    // ruteo por tramos de `directions()`): OSRM ordena por DURACIÓN y favorece
-    // vías principales; pidiendo alternativas podemos elegir la MÁS CORTA.
+    // Ruta ESTÁNDAR de OSRM (perfil `driving`, sin alternativas): la primaria
+    // que devuelve el motor, coherente con el costing `auto` estándar de
+    // Valhalla (ver `VALHALLA_AUTO_COSTING_OPTIONS`). Antes se pedían
+    // alternativas para elegir la de MENOR DISTANCIA, pero esa ruta más corta
+    // puede pasar por vías no aptas para reparto; la ruta por defecto pondera
+    // tiempo + tipo de vía, como tomaría un conductor real.
     const url =
       `${RoutingService.OSRM_BASE}/route/v1/driving/${coords}` +
-      `?overview=full&geometries=geojson&alternatives=true`;
+      `?overview=full&geometries=geojson`;
 
     const controller = new AbortController();
     const timeout = setTimeout(
@@ -415,10 +435,11 @@ export class RoutingService {
       );
     }
 
-    // Entre las rutas válidas devueltas (principal + alternativas), elige la de
-    // MENOR DISTANCIA — no la más rápida. El reparto urbano quiere el camino
-    // más corto, no la vía principal que OSRM prefiere por defecto.
-    const candidates = (json.routes ?? []).filter(
+    // Sin `alternatives=true`, OSRM devuelve solo la ruta PRIMARIA (la
+    // primera de `routes`) — la ruta estándar del perfil `driving`, coherente
+    // con el costing `auto` estándar de Valhalla. Ya no se elige la de menor
+    // distancia entre alternativas (ver comentario en la URL más arriba).
+    const route = (json.routes ?? []).find(
       (r): r is Required<OsrmRoute> =>
         !!r.geometry &&
         r.geometry.type === 'LineString' &&
@@ -426,15 +447,12 @@ export class RoutingService {
         typeof r.distance === 'number' &&
         typeof r.duration === 'number',
     );
-    if (candidates.length === 0) {
+    if (!route) {
       this.logger.warn(`OSRM returned a malformed route for "${coords}"`);
       throw new ServiceUnavailableException(
         'Routing provider returned an incomplete route',
       );
     }
-    const route = candidates.reduce((best, r) =>
-      r.distance < best.distance ? r : best,
-    );
 
     return {
       geometry: {

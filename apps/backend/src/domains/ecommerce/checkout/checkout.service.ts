@@ -335,14 +335,26 @@ export class CheckoutService {
    * Recalcula el costo de envío por distancia al confirmar, con el mismo
    * resolver del cotizador (`ShippingDistanceService`) y las coords de la
    * dirección final. Sin método-distancia/escala/coords, o con el motor
-   * caído, rige el precio de zona; si la distancia cae fuera de todos los
-   * rangos la selección ya no es válida (el cotizador nunca la habría
-   * ofrecido) y el checkout se rechaza con 400.
+   * caído, rige el precio de zona (con un warn estructurado — ver abajo);
+   * si la distancia cae fuera de todos los rangos MÁS ALLÁ de la tolerancia
+   * de borde (`matchTierWithTolerance`, ~0.2 km) la selección ya no es
+   * válida (el cotizador nunca la habría ofrecido) y el checkout se rechaza
+   * con 400.
+   *
+   * `toCoords` (origen y destino) es el MISMO helper que usa el cotizador
+   * (`ShippingCalculatorService.resolveQuoteDistances`): redondea a 6
+   * decimales antes de armar el string de ruteo, así que un comprador que
+   * confirma la MISMA dirección que cotizó cae en la misma llave de caché de
+   * `RoutingService` y mide la misma distancia — la tolerancia de borde de
+   * abajo cubre el resto (redondeo Decimal(10,8) del snapshot vs. el float
+   * de la cotización, o un proveedor de ruteo distinto entre ambas
+   * llamadas).
    */
   private async resolveConfirmShippingCost(
     rate: {
       type?: shipping_rate_type_enum | string | null;
       distance_tiers?: unknown;
+      shipping_method_id?: number;
       shipping_method?: {
         distance_pricing_enabled?: boolean | null;
         origin_latitude?: unknown;
@@ -363,23 +375,52 @@ export class CheckoutService {
     if (!distance || !method?.distance_pricing_enabled) return zone_cost;
     const tiers = ShippingDistanceService.parseTiers(rate.distance_tiers);
     if (!tiers) return zone_cost;
+
+    const logCtx = {
+      store_id: RequestContextService.getStoreId() ?? null,
+      shipping_method_id: rate.shipping_method_id ?? null,
+    };
     const origin = ShippingDistanceService.toCoords(
       method.origin_latitude,
       method.origin_longitude,
+      'confirm:origin',
     );
     const buyer = ShippingDistanceService.toCoords(
       address_snapshot?.latitude,
       address_snapshot?.longitude,
+      'confirm:buyer',
     );
-    if (!origin || !buyer) return zone_cost;
+    if (!origin || !buyer) {
+      this.logger.warn({
+        event: 'checkout.shipping_distance_unavailable',
+        ...logCtx,
+        reason: !origin ? 'origin_coords_missing' : 'buyer_coords_missing',
+      });
+      return zone_cost;
+    }
     let distanceKm: number | null;
     try {
       distanceKm = await distance.resolveDistanceKm(origin, buyer);
     } catch {
+      this.logger.warn({
+        event: 'checkout.shipping_distance_unavailable',
+        ...logCtx,
+        reason: 'routing_exception',
+      });
       return zone_cost;
     }
-    if (distanceKm == null) return zone_cost;
-    const tier = ShippingDistanceService.matchTier(tiers, distanceKm);
+    if (distanceKm == null) {
+      this.logger.warn({
+        event: 'checkout.shipping_distance_unavailable',
+        ...logCtx,
+        reason: 'routing_failed',
+      });
+      return zone_cost;
+    }
+    const tier = ShippingDistanceService.matchTierWithTolerance(
+      tiers,
+      distanceKm,
+    );
     if (!tier) {
       throw new VendixHttpException(
         ErrorCodes.ECOM_CHECKOUT_003,

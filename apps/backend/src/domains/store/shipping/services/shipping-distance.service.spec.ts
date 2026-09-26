@@ -33,6 +33,68 @@ describe('ShippingDistanceService', () => {
     });
   });
 
+  describe('matchTierWithTolerance (borde de confirmación)', () => {
+    it('dentro de un tramo: se comporta igual que matchTier', () => {
+      expect(ShippingDistanceService.matchTierWithTolerance(tiers, 3.2)?.price).toBe(
+        8000,
+      );
+      expect(ShippingDistanceService.matchTierWithTolerance(tiers, 0)?.price).toBe(
+        8000,
+      );
+    });
+
+    it('tramo abierto al final: nunca necesita tolerancia', () => {
+      expect(
+        ShippingDistanceService.matchTierWithTolerance(tiers, 999)?.price,
+      ).toBe(18000);
+    });
+
+    it('justo dentro de la tolerancia (0.2 km) por encima del to_km del último tramo cerrado usa ese tramo', () => {
+      const closed = tiers.slice(0, 2); // [0,5)=8000, [5,10)=12000 — sin tramo abierto
+      expect(
+        ShippingDistanceService.matchTierWithTolerance(closed, 10.1)?.price,
+      ).toBe(12000);
+      expect(
+        ShippingDistanceService.matchTierWithTolerance(closed, 10.2)?.price,
+      ).toBe(12000);
+    });
+
+    it('justo en el límite exacto (10.0) sigue rechazando: no hay excedente que tolerar', () => {
+      const closed = tiers.slice(0, 2);
+      // 10 cae fuera de [5,10) por el borde estricto `d < to_km`, y no hay
+      // exceso sobre 10 (distanceKm === to_km, no > to_km) — la tolerancia
+      // solo perdona lo que pasa DE LARGO del borde, no el borde mismo.
+      expect(
+        ShippingDistanceService.matchTierWithTolerance(closed, 10),
+      ).toBeNull();
+    });
+
+    it('más allá de la tolerancia (> 0.2 km) sigue rechazando', () => {
+      const closed = tiers.slice(0, 2);
+      expect(
+        ShippingDistanceService.matchTierWithTolerance(closed, 10.21),
+      ).toBeNull();
+      expect(
+        ShippingDistanceService.matchTierWithTolerance(closed, 50),
+      ).toBeNull();
+    });
+
+    it('tolerancia personalizada vía tercer argumento', () => {
+      const closed = tiers.slice(0, 2);
+      expect(
+        ShippingDistanceService.matchTierWithTolerance(closed, 10.4, 0.5)
+          ?.price,
+      ).toBe(12000);
+      expect(
+        ShippingDistanceService.matchTierWithTolerance(closed, 10.6, 0.5),
+      ).toBeNull();
+    });
+
+    it('escala vacía nunca matchea (ni con tolerancia)', () => {
+      expect(ShippingDistanceService.matchTierWithTolerance([], 0.1)).toBeNull();
+    });
+  });
+
   describe('parseTiers', () => {
     it('null/undefined/vacío/no-array → null (rige zona)', () => {
       expect(ShippingDistanceService.parseTiers(null)).toBeNull();
@@ -90,6 +152,75 @@ describe('ShippingDistanceService', () => {
       expect(ShippingDistanceService.toCoords(91, 0)).toBeNull();
       expect(ShippingDistanceService.toCoords(0, 181)).toBeNull();
       expect(ShippingDistanceService.toCoords('x', 0)).toBeNull();
+    });
+
+    describe('redondeo a 6 decimales (consistencia de llave cotización↔confirmación)', () => {
+      it('redondea un float largo (cotización) a 6 decimales', () => {
+        expect(
+          ShippingDistanceService.toCoords(4.7109894321, -74.0720901234),
+        ).toEqual({ latitude: 4.710989, longitude: -74.07209 });
+      });
+
+      it('un Decimal(10,8) con 8 decimales (confirmación) y su float equivalente producen la MISMA llave', () => {
+        // Decimal(10,8) llega como string con 8 decimales; el float de la
+        // cotización puede traer más ruido en la cola. Ambos deben colapsar
+        // a las mismas coords redondeadas (misma llave de caché de
+        // RoutingService) cuando representan el mismo punto físico.
+        const fromQuoteFloat = ShippingDistanceService.toCoords(
+          4.71098945123,
+          -74.07209012345,
+        );
+        const fromConfirmDecimalString = ShippingDistanceService.toCoords(
+          '4.71098945',
+          '-74.07209012',
+        );
+        expect(fromQuoteFloat).toEqual(fromConfirmDecimalString);
+      });
+
+      it('el redondeo no altera coordenadas ya cortas', () => {
+        expect(ShippingDistanceService.toCoords(4, -74)).toEqual({
+          latitude: 4,
+          longitude: -74,
+        });
+      });
+    });
+
+    describe('lat/lng invertido', () => {
+      it('detecta y corrige un par de Bogotá escrito al revés (lat↔lng)', () => {
+        // Correcto: lat≈4.71, lng≈-74.07. Invertido: lat=-74.07, lng=4.71.
+        expect(ShippingDistanceService.toCoords(-74.07, 4.71)).toEqual({
+          latitude: 4.71,
+          longitude: -74.07,
+        });
+      });
+
+      it('no toca un par ya correctamente orientado dentro de Colombia', () => {
+        expect(ShippingDistanceService.toCoords(4.71, -74.07)).toEqual({
+          latitude: 4.71,
+          longitude: -74.07,
+        });
+      });
+
+      it('|lat| > 90 fuera de Colombia incluso invertido sigue siendo inválido', () => {
+        // (91, 0) invertido da (0, 91): 91 no es una longitud de Colombia
+        // (-82..-66.8), así que NO hay corrección posible → null.
+        expect(ShippingDistanceService.toCoords(91, 0)).toBeNull();
+      });
+
+      it('un par fuera de Colombia en ambas orientaciones no se toca (no es un swap real)', () => {
+        // Nueva York, orientación correcta: no cae en el bbox de Colombia en
+        // ninguna de las dos orientaciones → se deja tal cual, sin swap.
+        expect(ShippingDistanceService.toCoords(40.7128, -74.006)).toEqual({
+          latitude: 40.7128,
+          longitude: -74.006,
+        });
+      });
+
+      it('acepta un label opcional para el warn sin afectar el resultado', () => {
+        expect(
+          ShippingDistanceService.toCoords(-74.07, 4.71, 'origin'),
+        ).toEqual({ latitude: 4.71, longitude: -74.07 });
+      });
     });
   });
 
