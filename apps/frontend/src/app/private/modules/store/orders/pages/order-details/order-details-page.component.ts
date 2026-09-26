@@ -57,6 +57,7 @@ import {
   OrderInvoiceSnapshot,
   OrderTableSession,
   Address,
+  OrderAvailableAction,
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
@@ -64,7 +65,6 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
 import { ResendDishModalComponent } from '../../../restaurant-ops/kds/components/resend-dish-modal/resend-dish-modal.component';
-import { canResendOrderItem } from './can-resend';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
 import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent, type PaymentSubmit } from '../../../../../../shared/components';
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
@@ -162,6 +162,26 @@ const SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES = new Set<string>([
   'direct_delivery',
   'dine_in',
 ]);
+
+/**
+ * order-truth-and-invoice-tz plan — texto corto en español para los codes
+ * de `reason` que `available_actions` puede traer y que NO están en
+ * `ERROR_MESSAGES` (`core/utils/error-messages.ts`, fuera del alcance de
+ * este archivo). `actionDisabledReason` primero busca en `ERROR_MESSAGES`
+ * y solo cae aquí para los codes ausentes de ese mapa; el genérico cubre
+ * cualquier code futuro no listado en ninguno de los dos.
+ */
+const ACTION_REASON_FALLBACK: Record<string, string> = {
+  FORBIDDEN: 'Solo un administrador o encargado puede realizar esta acción.',
+  SPLIT_ACCOUNT_LOCKED: 'Esta orden tiene una cuenta independiente activa; gestiona el cobro desde el panel de cuentas.',
+  ORDER_HAS_PENDING_KITCHEN_ITEMS: 'Hay platos pendientes en cocina. Espera a que se completen antes de finalizar.',
+  ORD_PAY_CREDIT_ORDER_001: 'Esta es una orden a crédito; usa Registrar Pago de crédito.',
+  ORD_PAYMENT_CANCEL_FINISHED_001: 'La orden ya está finalizada; usa un reembolso para devolver el dinero.',
+  ORD_PAYMENT_CANCEL_INVOICED_001: 'Esta orden ya tiene una factura electrónica emitida; no se puede anular el pago.',
+  ORD_FAST_TRACK_INVALID_STATE_001: 'La orden en su estado actual no admite procesar en cadena.',
+};
+
+const GENERIC_ACTION_DISABLED_REASON = 'No disponible en el estado actual de la orden.';
 
 export interface LifecycleStep {
   key: string;
@@ -279,26 +299,135 @@ export function kitchenStateForItem(
 }
 
 /**
- * B16 (release-855) — the old gate blocked delivery from kitchen for ANY
- * order in a terminal-ish state (`shipped`/`delivered`/`finished` included),
- * which orphaned counter/delivery items that never pass through a table
- * session: kitchen is their ONLY delivery surface, and it sits behind
- * `order.state==='processing'` for most of their life. Only `cancelled`/
- * `refunded` remain hard blocks — those really are terminal for the whole
- * order. Pure for spec sin TestBed.
+ * order-truth-and-invoice-tz plan (Objetivo 3) — reemplaza los predicados
+ * locales por ítem (el viejo `canDeliverItem` de B16, `canCancelItem`,
+ * `canReverseDeliveredItem`, `canResendOrderItem`). La visibilidad de cada
+ * botón de ítem viene ÚNICA Y EXCLUSIVAMENTE de `item.available_actions`
+ * (backend `computeItemActions`, que SIEMPRE devuelve los 4 codes por
+ * ítem: `deliver`/`cancel`/`reverse_delivered`/`resend`). Pura para spec
+ * sin TestBed.
  */
-export function canDeliverItem(
-  item: Pick<OrderItem, 'delivered_at' | 'cancelled_at' | 'kitchen_ticket_items'>,
-  orderState: OrderState | null | undefined,
+export function isItemActionEnabled(
+  item: Pick<OrderItem, 'available_actions'>,
+  code: 'deliver' | 'cancel' | 'reverse_delivered' | 'resend',
 ): boolean {
-  if (item.delivered_at) return false;
-  if (item.cancelled_at) return false;
-  if (orderState == null) return false;
-  const terminalStates: OrderState[] = ['cancelled', 'refunded'];
-  if (terminalStates.includes(orderState)) return false;
-  const ks = kitchenStateForItem(item);
-  if (ks == null) return true;
-  return ks.status === 'ready';
+  return !!item.available_actions?.some((a) => a.code === code && a.enabled === true);
+}
+
+/**
+ * order-truth-and-invoice-tz plan (Objetivos 3/11/12) — mapea
+ * `order.available_actions` (verdad única del backend, armada por
+ * `buildOrderAvailableActions` en `orders.service.ts` a partir de los
+ * predicados puros de `order-action-policy.util.ts`) a la configuración
+ * presentational de cada botón: label/icono/variante/orden. La web YA NO
+ * decide visibilidad ni habilitación propia — solo pinta lo que el backend
+ * envía, con `enabled:false` como deshabilitado y `reason` como motivo
+ * (tooltip). Ausencia de `available_actions` (respuesta vieja) devuelve
+ * `[]`: nunca cae a un predicado local. Pura para spec sin TestBed.
+ *
+ * Codes recibidos del backend pero NO mapeados aquí a propósito (no son
+ * parte de este arreglo de botones):
+ * - `assign_shipping` / `ship_with_tracking`: viven en la sección
+ *   `showShippingAssignment`/`canEditShipping`, una UI separada y
+ *   preexistente — fuera de este paso del plan.
+ * - `ready_for_pickup` cuando `order.state === 'processing'`: mismo code,
+ *   pero ahí significa "listo para recoger" atado al `shipping_method.type`
+ *   — vive en esa misma sección de envío, no en este arreglo. Solo se
+ *   mapea su ocurrencia en `pending_payment`
+ *   (`canReadyForPickupBeforePayment`).
+ * - `fast_track`: checkbox standalone (`canFastTrack`), nunca un botón.
+ */
+export function buildOrderActionButtons(
+  order: Pick<Order, 'state' | 'delivery_type' | 'available_actions'>,
+): OrderActionConfig[] {
+  const backendActions: OrderAvailableAction[] | undefined = order.available_actions;
+  if (!backendActions || backendActions.length === 0) return [];
+
+  const delivery = order.delivery_type || 'direct_delivery';
+
+  const BUTTON_IDS: Record<string, string> = {
+    edit_order: 'edit-order',
+    pay: 'pay',
+    credit_payment: 'credit-payment',
+    confirm_payment: 'confirm-payment',
+    dispatch_order: 'dispatch-order',
+    manual_ship: 'manual-ship',
+    ready_for_pickup: 'manual-ready-pickup',
+    direct_deliver: 'direct-deliver',
+    mark_delivered: 'deliver',
+    confirm_delivery: 'finish',
+    cancel_payment: 'cancel-payment',
+    refund: 'refund',
+    cancel: 'cancel',
+    reactivate: 'reactivate',
+  };
+
+  const configFor = (
+    code: string,
+  ): { label: string; icon: string; variant: OrderActionConfig['variant']; weight: number } | null => {
+    switch (code) {
+      case 'edit_order':
+        return { label: 'Modificar Orden', icon: 'edit', variant: 'info', weight: 10 };
+      case 'pay':
+        return { label: 'Registrar Pago', icon: 'credit-card', variant: 'primary', weight: 20 };
+      case 'credit_payment':
+        return { label: 'Registrar Pago', icon: 'credit-card', variant: 'primary', weight: 20 };
+      case 'confirm_payment':
+        return { label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary', weight: 20 };
+      case 'dispatch_order':
+        return { label: 'Despachar Orden', icon: 'truck', variant: 'primary', weight: 30 };
+      case 'manual_ship':
+        return { label: 'Despachar Orden', icon: 'truck', variant: 'primary', weight: 30 };
+      case 'ready_for_pickup':
+        // Ver nota de la función: solo la ocurrencia de `pending_payment`
+        // pertenece a este arreglo de botones.
+        if (order.state !== 'pending_payment') return null;
+        return { label: 'Lista para recogida', icon: 'package', variant: 'primary', weight: 30 };
+      case 'direct_deliver':
+        return { label: 'Entregar directamente', icon: 'package-check', variant: 'warning', weight: 32 };
+      case 'mark_delivered': {
+        const label = delivery === 'home_delivery'
+          ? 'Marcar como Entregado'
+          : delivery === 'pickup'
+            ? 'Confirmar recogida en tienda'
+            : 'Confirmar Entrega';
+        const icon = delivery === 'home_delivery' ? 'package-check' : delivery === 'pickup' ? 'user-check' : 'check-circle';
+        return { label, icon, variant: 'primary', weight: 40 };
+      }
+      case 'confirm_delivery':
+        return { label: 'Finalizar Orden', icon: 'check-circle', variant: 'success', weight: 45 };
+      case 'cancel_payment':
+        return { label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning', weight: 50 };
+      case 'refund':
+        return { label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning', weight: 60 };
+      case 'cancel':
+        return { label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger', weight: 90 };
+      case 'reactivate':
+        return { label: 'Reactivar Orden', icon: 'rotate-ccw', variant: 'warning', weight: 90 };
+      default:
+        return null;
+    }
+  };
+
+  return backendActions
+    .map((action) => {
+      const cfg = configFor(action.code);
+      if (!cfg) return null;
+      return {
+        weight: cfg.weight,
+        button: {
+          id: BUTTON_IDS[action.code] ?? action.code,
+          label: cfg.label,
+          icon: cfg.icon,
+          variant: cfg.variant,
+          enabled: action.enabled,
+          reason: action.reason,
+        } as OrderActionConfig,
+      };
+    })
+    .filter((entry): entry is { weight: number; button: OrderActionConfig } => entry !== null)
+    .sort((a, b) => a.weight - b.weight)
+    .map((entry) => entry.button);
 }
 
 /**
@@ -1066,9 +1195,19 @@ export class OrderDetailsPageComponent {
     return this.requiresShippingAddress() && !this.hasShippingAddress() && !terminal;
   });
 
+  /**
+   * order-truth-and-invoice-tz plan — `fast_track` viaja incondicionalmente
+   * en `order.available_actions` (código standalone, nunca un botón del
+   * arreglo — ver `buildOrderActionButtons`). Se prefiere su `enabled`
+   * cuando está presente; una respuesta vieja sin `available_actions` cae
+   * al predicado local previo (checkbox, no botón — no aplica la regla de
+   * "sin available_actions no se pinta nada").
+   */
   readonly canFastTrack = computed(() => {
     const o = this.order();
     if (!o) return false;
+    const backendEntry = o.available_actions?.find((a) => a.code === 'fast_track');
+    if (backendEntry) return backendEntry.enabled;
     if (['finished', 'cancelled', 'refunded'].includes(o.state)) return false;
     if (this.blockedByMissingShipping()) return false;
     return (o.order_items?.length ?? 0) > 0;
@@ -1217,36 +1356,41 @@ export class OrderDetailsPageComponent {
     ),
   );
 
+  /**
+   * order-truth-and-invoice-tz plan (Objetivos 3/11/12) — los botones de
+   * orden se pintan ÚNICA Y EXCLUSIVAMENTE desde `order.available_actions`
+   * (ver `buildOrderActionButtons`, función pura testeable sin TestBed). Se
+   * eliminan los predicados de visibilidad propios (switch por estado,
+   * `hasSuccessfulPayment()` como decisor, `isPrivilegedUser()` como gate de
+   * botón, `applyCancellationPolicy`): el backend ya los aplicó al calcular
+   * `enabled`/`reason` por code. Las alertas informativas que NO deciden
+   * botones (envío faltante, dirección faltante, pago online pendiente,
+   * cocina pendiente) se conservan, prependidas al arreglo del backend.
+   */
   readonly availableActions = computed<OrderActionConfig[]>(() => {
     const order = this.order();
     if (!order) return [];
 
-    if (this.blockedByMissingShipping()) {
-      return this.applyCancellationPolicy(order, [
-        {
-          id: 'info',
-          type: 'alert',
-          color: 'warning',
-          icon: 'alert-triangle',
-          label: 'Asigna un metodo de envio para continuar con el flujo.',
-        } as OrderActionConfig,
-        { id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' },
-      ]);
-    }
+    const alerts: OrderActionConfig[] = [];
 
-    const state = order.state;
-    const delivery = order.delivery_type || 'direct_delivery';
-    const channel = order.channel || 'pos';
-    const isShipping = delivery === 'home_delivery' || delivery === 'direct_delivery' || delivery === 'other';
-    const isPickup = delivery === 'pickup';
-    const hasPaid = this.hasSuccessfulPayment();
-    const actions: OrderActionConfig[] = [];
+    // Gate de envío: se conserva como alerta informativa (antes reemplazaba
+    // TODO el arreglo de botones; ahora el backend ya decide qué botón vive
+    // habilitado/deshabilitado, esto solo avisa).
+    if (this.blockedByMissingShipping()) {
+      alerts.push({
+        id: 'shipping-required-info',
+        type: 'alert',
+        color: 'warning',
+        icon: 'alert-triangle',
+        label: 'Asigna un metodo de envio para continuar con el flujo.',
+      } as OrderActionConfig);
+    }
 
     // Gate de dirección: para envíos a domicilio sin dirección, mostrar un
     // alert persistente. El botón de despacho sigue visible pero su handler
     // (openDispatchSelector) bloquea con un toast hasta que haya dirección.
     if (this.blockedByMissingAddress()) {
-      actions.push({
+      alerts.push({
         id: 'address-info',
         type: 'alert',
         color: 'warning',
@@ -1255,234 +1399,52 @@ export class OrderDetailsPageComponent {
       } as OrderActionConfig);
     }
 
-    switch (state) {
-      // `draft` (POS counter orders before confirmation) behaves exactly like
-      // `created`: register payment, modify (privileged), cancel. Fall-through.
-      case 'draft':
-      case 'created':
-        if (channel !== 'pos' || !hasPaid) {
-          actions.push({ id: 'pay', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
-        }
-        if (this.isPrivilegedUser()) {
-          actions.push({ id: 'edit-order', label: 'Modificar Orden', icon: 'edit', variant: 'info' });
-        }
-        actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
-        break;
-
-      case 'pending_payment': {
-        // Only an ONLINE payment pending confirmation (ecommerce) is a real
-        // "money not captured yet" risk. A contra-entrega (COD) — or an order
-        // with no online payment — collects on delivery by design, so its
-        // dispatch is a normal action with NO warning banner/alert.
-        const hasPendingOnline = this.hasPendingOnlinePayment();
-
-        actions.push({ id: 'confirm-payment', label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary' });
-        if (hasPendingOnline) {
-          actions.push({ id: 'info', label: 'Esperando confirmacion de pago', icon: 'clock', type: 'alert', color: 'warning' });
-        }
-
-        // Dispatch label/variant: warning only when an ONLINE payment is still
-        // pending. For COD / no online payment, dispatch is a normal primary
-        // action ("Despachar Orden").
-        const dispatchLabel = hasPendingOnline ? 'Despachar sin confirmar pago' : 'Despachar Orden';
-        const dispatchVariant: OrderActionConfig['variant'] = hasPendingOnline ? 'warning' : 'primary';
-
-        // Dispatching is allowed BEFORE the payment is confirmed so the route
-        // can carry the order (COD collects on delivery; online still uncaptured).
-        if (this.canOfferDispatch() && this.canGenerateRemision()) {
-          // Unified entry: one button → con/sin-remisión chooser.
-          actions.push({
-            id: 'dispatch-order',
-            label: dispatchLabel,
-            icon: 'truck',
-            variant: dispatchVariant,
-          });
-        } else if (this.canOfferDispatch() && isShipping) {
-          // direct_delivery: no remisión; manual ship.
-          actions.push({
-            id: 'manual-ship',
-            label: dispatchLabel,
-            icon: 'truck',
-            variant: dispatchVariant,
-          });
-        } else if (isPickup) {
-          // Pickup: can mark "ready to pick up" without payment (confirm dialog)
-          actions.push({
-            id: 'manual-ready-pickup',
-            label: 'Lista para recogida',
-            icon: 'package',
-            variant: 'primary',
-          });
-        }
-
-        actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
-
-        // Si es crédito, reemplazar "Confirmar Pago" por "Registrar Pago"
-        if (order.payment_form === '2') {
-          const idx = actions.findIndex(a => a.id === 'confirm-payment');
-          if (idx !== -1) {
-            actions[idx] = { id: 'credit-payment', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' };
-          }
-          const infoIdx = actions.findIndex(a => a.id === 'info');
-          if (infoIdx !== -1) actions.splice(infoIdx, 1);
-        }
-        break;
-      }
-
-      case 'processing':
-        if (this.isKitchenOrder() && !this.requiresDispatchFlow()) {
-          // Kitchen orders consumed in the store (mesa / mostrador / para
-          // llevar) skip shipping/dispatch entirely: once the kitchen
-          // finishes, the operator finalizes directly. Reuse the exact same
-          // `finish` action config/handler as `delivered` (backend allows
-          // `processing → finished`). Un domicilio NO entra aquí: su entrega
-          // la estampa el flujo de despacho (ver `requiresDispatchFlow`).
-          actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        } else if (this.canOfferDispatch() && this.canGenerateRemision()) {
-          // Domicilio de restaurante con platos aún en cocina: se avisa, no se
-          // bloquea. El despacho sigue siendo la única vía de entrega.
-          if (this.requiresDispatchFlow() && this.undeliveredKitchenItems().length > 0) {
-            actions.push({
-              id: 'kitchen-info',
-              type: 'alert',
-              color: 'info',
-              icon: 'chef-hat',
-              label: `Hay ${this.undeliveredKitchenItems().length} plato(s) en cocina sin entregar. Puedes despachar igual cuando el domiciliario los reciba.`,
-            } as OrderActionConfig);
-          }
-          // Unified dispatch entry point: ONE button opens the con/sin-remisión
-          // chooser. "Con remisión" runs the wizard (document + optional route)
-          // then ships the order; "sin remisión" just marks it shipped. Both
-          // paths converge with the order in `shipped` — no more duplicate
-          // "Despachar Orden" + "Generar Remisión" buttons.
-          actions.push({ id: 'dispatch-order', label: 'Despachar Orden', icon: 'truck', variant: 'primary' });
-          if (isPickup) {
-            // Pickup + paid: keep the "hand over at the counter now" shortcut
-            // (skip shipped → delivered → auto-finalize).
-            actions.push({
-              id: 'direct-deliver',
-              label: 'Entregar directamente',
-              icon: 'package-check',
-              variant: 'warning',
-            });
-          }
-        } else if (!hasPaid) {
-          // Re-auditoría 1060: sin fulfillment no hay nada que despachar,
-          // pero el paso por `shipped` es la ÚNICA vía de cobro (ofrece
-          // Registrar Pago y en `processing` no hay `pay`). Se etiqueta
-          // como cobro, nunca como despacho.
-          actions.push({ id: 'ship', label: 'Pasar a Cobro', icon: 'credit-card', variant: 'primary' });
-        } else {
-          // Pagada y sin fulfillment: finalizar directo (el backend permite
-          // processing → finished; sin filas de cocina el F2-guard pasa).
-          actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        }
-        if (this.isPrivilegedUser()) {
-          actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
-        }
-        actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
-        break;
-
-      case 'shipped':
-        if (!hasPaid) {
-          // Unpaid in shipped: open payment modal to register payment
-          actions.push({
-            id: 'pay',
-            label: 'Registrar Pago',
-            icon: 'credit-card',
-            variant: 'primary',
-          });
-        } else {
-          // Paid: standard deliver
-          if (delivery === 'home_delivery') {
-            actions.push({ id: 'deliver', label: 'Marcar como Entregado', icon: 'package-check', variant: 'primary' });
-          } else if (isPickup) {
-            actions.push({ id: 'deliver', label: 'Confirmar recogida en tienda', icon: 'user-check', variant: 'primary' });
-          } else {
-            actions.push({ id: 'deliver', label: 'Confirmar Entrega', icon: 'check-circle', variant: 'primary' });
-          }
-        }
-        break;
-
-      case 'delivered':
-        actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        // B8/B4 (release-855): entregado ya no implica pagado — un COD
-        // (contra entrega) llega aquí sin cobrar. `payOrder` acepta ahora
-        // `delivered`/`finished` (ver el claim ampliado en el backend), así
-        // que se ofrece "Registrar Pago" igual que en `shipped`.
-        if (!hasPaid) {
-          actions.push({ id: 'pay', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
-        } else if (this.isPrivilegedUser()) {
-          // `applyCancellationPolicy` (abajo) es la autoridad real: solo deja
-          // pasar el botón cuando `cancellation_policy.can_cancel_payment`
-          // es true (pago directo, sin factura ya emitida a la DIAN).
-          actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
-        }
-        // Paso 8 — sin saldo reembolsable no se ofrece el reembolso.
-        if (this.hasRefundableBalance()) {
-          actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
-        }
-        break;
-
-      case 'finished':
-        if (order.payment_form === '2' && Number(order.remaining_balance) > 0.01) {
-          actions.push({ id: 'credit-payment', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
-        } else if (!hasPaid) {
-          // B8/B4 (release-855): same reasoning as `delivered` above — a
-          // finished COD order with nothing settled yet still needs `pay`.
-          actions.push({ id: 'pay', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
-        } else if (this.isPrivilegedUser()) {
-          actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
-        }
-        // Paso 8 — sin saldo reembolsable no se ofrece el reembolso.
-        if (this.hasRefundableBalance()) {
-          actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
-        }
-        break;
-
-      case 'cancelled':
-        if (this.isPrivilegedUser()) {
-          actions.push({
-            id: 'reactivate',
-            label: 'Reactivar Orden',
-            icon: 'rotate-ccw',
-            variant: 'warning',
-          });
-        }
-        break;
-      case 'refunded':
-        break;
-    }
-
-    return this.applyCancellationPolicy(order, order.active_financial_split_id
-      ? actions.filter((action) => !['pay', 'credit-payment', 'edit-order'].includes(action.id))
-      : actions);
-  });
-
-  /** The server owns this policy, including legacy rows and settled gateways. */
-  private applyCancellationPolicy(
-    order: Order,
-    actions: OrderActionConfig[],
-  ): OrderActionConfig[] {
-    const policy = order.cancellation_policy;
-    const result = actions.filter((action) => {
-      if (action.id === 'cancel') return policy?.can_cancel === true;
-      if (action.id === 'cancel-payment') return policy?.can_cancel_payment === true;
-      return true;
-    });
+    // Solo un pago ONLINE pendiente de confirmación (ecommerce) es un riesgo
+    // real de "dinero no capturado". Un crédito no muestra este aviso (mismo
+    // criterio que el código previo: se ocultaba junto con confirm-payment).
     if (
-      result.length !== actions.length &&
-      (!policy || policy.reason_code)
+      order.state === 'pending_payment' &&
+      order.payment_form !== '2' &&
+      this.hasPendingOnlinePayment()
     ) {
-      result.push({
-        id: 'cancellation-info',
+      alerts.push({
+        id: 'info',
         type: 'alert',
         color: 'warning',
-        icon: 'alert-triangle',
-        label: this.cancellationPolicyMessage(order),
-      });
+        icon: 'clock',
+        label: 'Esperando confirmacion de pago',
+      } as OrderActionConfig);
     }
-    return result;
+
+    // Domicilio de restaurante con platos aún en cocina: se avisa, nunca se
+    // bloquea. El despacho sigue siendo la única vía de entrega.
+    if (
+      order.state === 'processing' &&
+      this.requiresDispatchFlow() &&
+      this.undeliveredKitchenItems().length > 0
+    ) {
+      alerts.push({
+        id: 'kitchen-info',
+        type: 'alert',
+        color: 'info',
+        icon: 'chef-hat',
+        label: `Hay ${this.undeliveredKitchenItems().length} plato(s) en cocina sin entregar. Puedes despachar igual cuando el domiciliario los reciba.`,
+      } as OrderActionConfig);
+    }
+
+    return [...alerts, ...buildOrderActionButtons(order)];
+  });
+
+  /**
+   * order-truth-and-invoice-tz plan — texto del tooltip para un botón con
+   * `enabled:false`. Busca primero en `ERROR_MESSAGES` (el mapa compartido
+   * de mensajes de error del front) y solo cae al diccionario local
+   * `ACTION_REASON_FALLBACK` para los codes que ese mapa no cubre; sin
+   * `reason` o sin match en ninguno, texto genérico.
+   */
+  actionDisabledReason(action: OrderActionConfig): string {
+    if (!action.reason) return GENERIC_ACTION_DISABLED_REASON;
+    return ERROR_MESSAGES[action.reason] ?? ACTION_REASON_FALLBACK[action.reason] ?? GENERIC_ACTION_DISABLED_REASON;
   }
 
   private cancellationPolicyMessage(order: Order | null): string {
@@ -4653,8 +4615,8 @@ export class OrderDetailsPageComponent {
    * Gestión avanzada de cocina = admin/encargado: sin el permiso, el botón
    * queda visible pero deshabilitado con motivo (patrón
    * `deliverDisabledReason` del KDS), nunca un 403 por sorpresa. Roles con
-   * permiso ven cero cambios. El predicado de negocio (`canResendOrderItem`)
-   * no se toca: el permiso se gatea en el llamador.
+   * permiso ven cero cambios. El predicado de negocio (`canResend`, backend
+   * `item.available_actions`) no se toca: el permiso se gatea en el llamador.
    */
   readonly canUseKitchenResend = computed(() =>
     this.hasNamedPermission('store:kitchen_fire:resend'),
@@ -4680,18 +4642,15 @@ export class OrderDetailsPageComponent {
 
   // ─── QUI-762 — reenviar un plato a cocina ─────────────────────────
   /**
-   * Espejo del predicado `KITCHEN_FIRE_NOT_RESENDABLE` del backend.
-   * Delegado a `canResendOrderItem` (helper puro testeable). Ver
-   * `can-resend.ts` para el contrato y `can-resend.spec.ts` para los
-   * 8 casos canónicos + 4 casos de borde.
+   * order-truth-and-invoice-tz plan — reemplaza el antiguo predicado local
+   * `canResendOrderItem` (`can-resend.ts`); la visibilidad viene de
+   * `item.available_actions` (code `resend`, backend `canResendItem`).
    *
    * El botón "Reenviar a cocina" se oculta cuando devuelve `false` —
    * no ofrezco acciones que el backend rechazaría con 422.
    */
   canResend(item: OrderItem): boolean {
-    // La regla de fila cancelada vive en `canResendOrderItem` (testeable):
-    // veta SALVO decisión reuse/waste, que es el remake post-cancelación.
-    return canResendOrderItem(item, this.order()?.state);
+    return isItemActionEnabled(item, 'resend');
   }
 
   /** Abre el modal con el ítem elegido. */
@@ -4731,29 +4690,13 @@ export class OrderDetailsPageComponent {
   readonly deliveringItemId = signal<number | null>(null);
 
   /**
-   * Espejo del predicado `DELIVER_ORDER_ITEM_NOT_DELIVERABLE` del backend.
-   * Ofrece la acción "Entregar" SOLO si:
-   *  - El ítem NO está entregado todavía (`delivered_at` IS NULL).
-   *  - La orden NO está cancelada/reembolsada (únicos estados verdaderamente
-   *    terminales para este gesto — B16, release-855). ANTES esta lista
-   *    también incluía `shipped`/`delivered`/`finished`, lo que bloqueaba
-   *    "Entregar" en un domicilio con platos: el flujo de despacho mueve la
-   *    ORDEN a `delivered`/`finished` cuando el domiciliario la recibe, pero
-   *    eso no es lo mismo que el mesero haya marcado los platos como
-   *    entregados en el KDS — con la lista vieja ese ítem quedaba sin
-   *    superficie para cerrarse nunca. La guarda real de "no marques un
-   *    ítem no listo" ya la da `kitchen_ticket_items[0].status === 'ready'`
-   *    abajo, así que el estado de la orden no necesita duplicarla.
-   *  - Si el ítem pasó por cocina, su `kitchen_ticket_items[0].status`
-   *    debe ser `ready`. En cualquier otro estado el backend responde 422;
-   *    no ofrezco un botón que sé que va a fallar.
-   *  - Si el ítem NUNCA pasó por cocina (cerveza, retail, etc.) es
-   *    entregable directo. Este es el caso que cubre T9p6: una orden
-   *    POS / para llevar / domicilio que NO tiene sesión de mesa no
-   *    tenía superficie de entrega hasta hoy.
+   * order-truth-and-invoice-tz plan — reemplaza el antiguo `canDeliverItem`
+   * (B16, release-855); la visibilidad viene de `item.available_actions`
+   * (code `deliver`, backend `canDeliverItem` en
+   * `order-action-policy.util.ts`).
    */
   canDeliver(item: OrderItem): boolean {
-    return canDeliverItem(item, this.order()?.state as OrderState | undefined);
+    return isItemActionEnabled(item, 'deliver');
   }
 
   /**
@@ -4842,28 +4785,12 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * Espejo del gate de mesa (`canRemoveItem` en
-   * `table-session-page.component.ts:701`). Ofrece "Cancelar" SOLO si:
-   *  - El ítem NO está ya cancelado (`cancelled_at` IS NULL).
-   *  - El ítem NO está entregado (hecho de servicio irreversible).
-   *  - Si pasó por cocina, su estado es `pending` (se cancela como merma
-   *    in-tx con SSE post-commit) o nunca fue disparado (exclusión directa
-   *    del total). En `in_preparation` / `ready` / `delivered` el backend
-   *    rechazaría, así que no ofrezco un botón que sé que va a fallar.
-   *
-   * Predicado inline (no `can-cancel.ts` aparte): reutiliza
-   * `kitchenStateFor` como única fuente de verdad del estado de cocina,
-   * igual que `canDeliver` — un helper extra duplicaría esa resolución
-   * y divergiría de ella.
+   * order-truth-and-invoice-tz plan — reemplaza el predicado local inline
+   * (espejo del gate de mesa); la visibilidad viene de
+   * `item.available_actions` (code `cancel`, backend `canCancelItem`).
    */
   canCancelItem(item: OrderItem): boolean {
-    if (isOrderItemCancellationPaid(this.order())) return false;
-    if (['finished', 'cancelled', 'refunded'].includes(this.order()?.state ?? '')) return false;
-    if (item.cancelled_at) return false;
-    if (item.delivered_at) return false;
-    const ks = this.kitchenStateFor(item);
-    if (ks == null) return true;
-    return ks.status === 'pending';
+    return isItemActionEnabled(item, 'cancel');
   }
 
   /**
@@ -4955,15 +4882,15 @@ export class OrderDetailsPageComponent {
   readonly reversingItemId = signal<number | null>(null);
 
   /**
-   * Ofrece "Reversar" a TODO ítem entregado no cancelado. El permiso
-   * (`store:orders:order_flow:cancel_delivered`) se gatea en el llamador:
-   * sin él, el botón queda visible pero deshabilitado con motivo en vez de
-   * ofrecer un 403 por sorpresa.
+   * order-truth-and-invoice-tz plan — reemplaza el predicado local inline;
+   * la visibilidad viene de `item.available_actions` (code
+   * `reverse_delivered`, backend `canReverseDeliveredItem`). El permiso
+   * (`store:orders:order_flow:cancel_delivered`) se sigue gateando en el
+   * llamador: sin él, el botón queda visible pero deshabilitado con motivo
+   * en vez de ofrecer un 403 por sorpresa.
    */
   canReverseDeliveredItem(item: OrderItem): boolean {
-    return !!item.delivered_at && !item.cancelled_at &&
-      !['finished', 'cancelled', 'refunded'].includes(this.order()?.state ?? '') &&
-      !isOrderItemCancellationPaid(this.order());
+    return isItemActionEnabled(item, 'reverse_delivered');
   }
 
   /**

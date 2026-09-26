@@ -1,10 +1,10 @@
 import {
   ORDER_DELIVERY_CONFIG, ORDER_DELIVERY_STEP_LABELS, pendingKitchenLabelsFromError,
   cancellationBody, isOrderItemCancellationPaid, shippingTaxModePrefix,
-  lifecycleLookupState, kitchenStateForItem, canDeliverItem, isOrderCreateLog,
-  isRefundAuditRow, isConfirmedStateTransition,
+  lifecycleLookupState, kitchenStateForItem, isItemActionEnabled, isOrderCreateLog,
+  isRefundAuditRow, isConfirmedStateTransition, buildOrderActionButtons,
 } from './order-details-page.component';
-import { Order } from '../../interfaces/order.interface';
+import { Order, OrderItem } from '../../interfaces/order.interface';
 import {
   previewItemCancellation,
   rederivePercentageTip,
@@ -165,7 +165,7 @@ describe('B13 (release-855) — lifecycleLookupState', () => {
   });
 });
 
-describe('B16 (release-855) — kitchenStateForItem / canDeliverItem', () => {
+describe('B16 (release-855) — kitchenStateForItem', () => {
   it('kitchenStateForItem retorna null sin filas de cocina', () => {
     expect(kitchenStateForItem({ kitchen_ticket_items: [] } as any)).toBeNull();
     expect(kitchenStateForItem({ kitchen_ticket_items: undefined } as any)).toBeNull();
@@ -183,41 +183,111 @@ describe('B16 (release-855) — kitchenStateForItem / canDeliverItem', () => {
     const item = { kitchen_ticket_items: [{ status: 'delivered', kitchen_ticket_id: 1 }] } as any;
     expect(kitchenStateForItem(item)).toEqual({ status: 'delivered', kitchen_ticket_id: 1 });
   });
+});
 
-  it('canDeliverItem bloquea un ítem ya entregado o cancelado', () => {
-    expect(canDeliverItem({ delivered_at: '2026-01-01', cancelled_at: null, kitchen_ticket_items: [] } as any, 'processing' as any)).toBeFalse();
-    expect(canDeliverItem({ delivered_at: null, cancelled_at: '2026-01-01', kitchen_ticket_items: [] } as any, 'processing' as any)).toBeFalse();
+describe('order-truth-and-invoice-tz plan (Objetivo 3) — isItemActionEnabled', () => {
+  it('lee el code correspondiente desde item.available_actions', () => {
+    const item = {
+      available_actions: [
+        { code: 'deliver', enabled: true },
+        { code: 'cancel', enabled: false, reason: 'ORD_ITEM_CANCEL_PAID_001' },
+        { code: 'reverse_delivered', enabled: false },
+        { code: 'resend', enabled: true },
+      ],
+    } as unknown as OrderItem;
+    expect(isItemActionEnabled(item, 'deliver')).toBeTrue();
+    expect(isItemActionEnabled(item, 'cancel')).toBeFalse();
+    expect(isItemActionEnabled(item, 'reverse_delivered')).toBeFalse();
+    expect(isItemActionEnabled(item, 'resend')).toBeTrue();
   });
 
-  it('canDeliverItem bloquea solo en estados terminales de orden (cancelled/refunded)', () => {
-    const item = { delivered_at: null, cancelled_at: null, kitchen_ticket_items: [] } as any;
-    expect(canDeliverItem(item, 'cancelled' as any)).toBeFalse();
-    expect(canDeliverItem(item, 'refunded' as any)).toBeFalse();
-    expect(canDeliverItem(item, null)).toBeFalse();
+  it('sin available_actions (respuesta vieja) no habilita ningún code — nunca cae a un predicado local', () => {
+    const item = {} as OrderItem;
+    expect(isItemActionEnabled(item, 'deliver')).toBeFalse();
+    expect(isItemActionEnabled(item, 'cancel')).toBeFalse();
+    expect(isItemActionEnabled(item, 'reverse_delivered')).toBeFalse();
+    expect(isItemActionEnabled(item, 'resend')).toBeFalse();
   });
 
-  it('B16 — mostrador/domicilio sin sesión de mesa: procesando + sin cocina se entrega directo', () => {
-    // Bebida u otro producto que nunca pasó por KDS: cocina no es su bloqueo.
-    const item = { delivered_at: null, cancelled_at: null, kitchen_ticket_items: [] } as any;
-    expect(canDeliverItem(item, 'processing' as any)).toBeTrue();
-    // shipped/delivered/finished ya NO son terminales para este gate — antes
-    // del fix orfanaban el ítem sin superficie de entrega.
-    expect(canDeliverItem(item, 'shipped' as any)).toBeTrue();
-    expect(canDeliverItem(item, 'delivered' as any)).toBeTrue();
-    expect(canDeliverItem(item, 'finished' as any)).toBeTrue();
+  it('ignora un code presente pero con enabled:false, y uno ausente del arreglo', () => {
+    const item = { available_actions: [{ code: 'deliver', enabled: false }] } as unknown as OrderItem;
+    expect(isItemActionEnabled(item, 'deliver')).toBeFalse();
+    expect(isItemActionEnabled(item, 'resend')).toBeFalse();
+  });
+});
+
+describe('order-truth-and-invoice-tz plan (Objetivos 3/11/12) — buildOrderActionButtons', () => {
+  it('sin available_actions (respuesta vieja) no pinta ningún botón', () => {
+    expect(buildOrderActionButtons({ state: 'created', available_actions: undefined } as any)).toEqual([]);
+    expect(buildOrderActionButtons({ state: 'created', available_actions: [] } as any)).toEqual([]);
   });
 
-  it('canDeliverItem exige cocina lista (status=ready) cuando el plato sí fue disparado', () => {
-    const firedNotReady = {
-      delivered_at: null, cancelled_at: null,
-      kitchen_ticket_items: [{ status: 'in_preparation' }],
+  it('pinta exactamente los botones del backend, en orden presentacional, e ignora codes ajenos al arreglo', () => {
+    const order = {
+      state: 'created',
+      available_actions: [
+        { code: 'cancel', label_key: 'ORD_ACTION_CANCEL', enabled: true },
+        { code: 'pay', label_key: 'ORD_ACTION_PAY', enabled: true },
+        { code: 'edit_order', label_key: 'ORD_ACTION_EDIT_ORDER', enabled: false, reason: 'FORBIDDEN' },
+        // assign_shipping no tiene botón en este arreglo — vive en la UI de envío.
+        { code: 'assign_shipping', label_key: 'ORD_ACTION_ASSIGN_SHIPPING', enabled: false },
+      ],
     } as any;
-    const firedReady = {
-      delivered_at: null, cancelled_at: null,
-      kitchen_ticket_items: [{ status: 'ready' }],
+    const buttons = buildOrderActionButtons(order);
+    expect(buttons.map((b) => b.id)).toEqual(['edit-order', 'pay', 'cancel']);
+    expect(buttons.find((b) => b.id === 'edit-order')).toEqual(
+      jasmine.objectContaining({ enabled: false, reason: 'FORBIDDEN' }),
+    );
+    expect(buttons.find((b) => b.id === 'pay')).toEqual(jasmine.objectContaining({ enabled: true }));
+  });
+
+  it('mapea ready_for_pickup a un botón solo en pending_payment, no en processing (esa vive en la UI de envío)', () => {
+    const pending = {
+      state: 'pending_payment',
+      available_actions: [{ code: 'ready_for_pickup', label_key: 'ORD_ACTION_READY_FOR_PICKUP', enabled: true }],
     } as any;
-    expect(canDeliverItem(firedNotReady, 'processing' as any)).toBeFalse();
-    expect(canDeliverItem(firedReady, 'processing' as any)).toBeTrue();
+    expect(buildOrderActionButtons(pending).map((b) => b.id)).toEqual(['manual-ready-pickup']);
+
+    const processing = {
+      state: 'processing',
+      available_actions: [{ code: 'ready_for_pickup', label_key: 'ORD_ACTION_READY_FOR_PICKUP', enabled: true }],
+    } as any;
+    expect(buildOrderActionButtons(processing)).toEqual([]);
+  });
+
+  it('etiqueta mark_delivered según delivery_type (home_delivery / pickup / otro)', () => {
+    const base = { state: 'shipped', available_actions: [{ code: 'mark_delivered', label_key: 'ORD_ACTION_MARK_DELIVERED', enabled: true }] };
+    expect(buildOrderActionButtons({ ...base, delivery_type: 'home_delivery' } as any)[0].label).toBe('Marcar como Entregado');
+    expect(buildOrderActionButtons({ ...base, delivery_type: 'pickup' } as any)[0].label).toBe('Confirmar recogida en tienda');
+    expect(buildOrderActionButtons({ ...base, delivery_type: 'direct_delivery' } as any)[0].label).toBe('Confirmar Entrega');
+  });
+
+  it('un mismo code repetido con distinto enabled/reason se traduce 1:1 a su botón (objetivo 12: pay + credit_payment simultáneos)', () => {
+    const order = {
+      state: 'finished',
+      available_actions: [
+        { code: 'pay', label_key: 'ORD_ACTION_PAY', enabled: false, reason: 'ORD_PAY_CREDIT_ORDER_001' },
+        { code: 'credit_payment', label_key: 'ORD_ACTION_CREDIT_PAYMENT', enabled: true },
+        { code: 'refund', label_key: 'ORD_ACTION_REFUND', enabled: true },
+      ],
+    } as any;
+    const buttons = buildOrderActionButtons(order);
+    // pay y credit_payment comparten peso presentacional: el orden de
+    // salida para pesos iguales sigue el orden del arreglo del backend
+    // (sort estable), por eso pay aparece primero aquí.
+    expect(buttons.map((b) => b.id)).toEqual(['pay', 'credit-payment', 'refund']);
+    expect(buttons.find((b) => b.id === 'pay')?.enabled).toBeFalse();
+    expect(buttons.find((b) => b.id === 'credit-payment')?.enabled).toBeTrue();
+  });
+
+  it('reactivate se pinta sin gate de rol propio — la verdad de rol ya la aplicó el backend', () => {
+    const order = {
+      state: 'cancelled',
+      available_actions: [{ code: 'reactivate', label_key: 'ORD_ACTION_REACTIVATE', enabled: true }],
+    } as any;
+    expect(buildOrderActionButtons(order)).toEqual([
+      jasmine.objectContaining({ id: 'reactivate', enabled: true }),
+    ]);
   });
 });
 

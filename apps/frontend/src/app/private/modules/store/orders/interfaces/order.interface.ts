@@ -75,6 +75,16 @@ export interface Order {
   order_number: string;
   state: OrderState;
   cancellation_policy?: OrderCancellationPolicy;
+  /**
+   * order-truth-and-invoice-tz plan (Objetivos 3/11/12) — verdad única de
+   * botones de orden. `orders.service.ts` `findOne` la arma con
+   * `buildOrderAvailableActions` (predicados puros de
+   * `order-action-policy.util.ts`). La web YA NO decide visibilidad propia:
+   * solo mapea `code` → label/icon/orden presentacional y pinta
+   * `enabled:false` como deshabilitado con `reason` como tooltip. Ausente
+   * (respuesta vieja) = no pintar botones, nunca un fallback local.
+   */
+  available_actions?: OrderAvailableAction[];
   /** Financial accounts share this physical order; they are not child orders. */
   active_financial_split_id?: number | null;
   channel?: OrderChannel;
@@ -441,6 +451,13 @@ export interface OrderItem {
    */
   refunded_qty?: number | null;
   refunded_amount?: number | string | null;
+  /**
+   * order-truth-and-invoice-tz plan — verdad única de botones por ítem.
+   * `computeItemActions` (backend) SIEMPRE devuelve los 4 codes
+   * (`deliver`/`cancel`/`reverse_delivered`/`resend`) para cada ítem; la web
+   * los lee vía `isItemActionEnabled` en lugar de sus propios predicados.
+   */
+  available_actions?: OrderItemAvailableAction[];
 }
 
 export interface Address {
@@ -943,6 +960,21 @@ export interface OrderFlowMetadata {
 
 // ── Order Detail UI Types ──────────────────────────────────────
 
+/** Order-level entry of `Order.available_actions` (backend-authored, plan order-truth-and-invoice-tz). */
+export interface OrderAvailableAction {
+  code: string;
+  label_key: string;
+  enabled: boolean;
+  reason?: string;
+}
+
+/** Item-level entry of `OrderItem.available_actions` (backend-authored, plan order-truth-and-invoice-tz). */
+export interface OrderItemAvailableAction {
+  code: string;
+  enabled: boolean;
+  reason?: string;
+}
+
 export interface OrderActionConfig {
   id: string;
   label: string;
@@ -952,6 +984,14 @@ export interface OrderActionConfig {
   color?: string;
   manualStateTarget?: OrderState;
   requiresConfirmation?: boolean;
+  /**
+   * order-truth-and-invoice-tz plan — mirrors the backend's
+   * `available_actions[].enabled`/`.reason` for this button's code.
+   * `undefined` = alert row (no backend code) or button rendered without a
+   * disabled state. `false` renders disabled with `reason` as tooltip.
+   */
+  enabled?: boolean;
+  reason?: string;
 }
 
 export interface OrderPaymentMethod {

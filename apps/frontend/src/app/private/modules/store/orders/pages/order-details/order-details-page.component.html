@@ -2195,7 +2195,8 @@
                               : 'primary'
                       "
                       [fullWidth]="true"
-                      [disabled]="isProcessingAction()"
+                      [disabled]="isProcessingAction() || action.enabled === false"
+                      [ariaLabel]="action.enabled === false ? actionDisabledReason(action) : ''"
                       (clicked)="executeAction(action.id)"
                     >
                       <app-icon
