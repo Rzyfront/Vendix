@@ -48,6 +48,8 @@ import { AuditService } from '@common/audit/audit.service';
 import { mockRequestContext } from 'src/testing/prisma-mock';
 import { buildOrder } from 'src/testing/money-fixtures';
 import * as tipUtil from '../../../common/utils/tip.util';
+// Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 /**
  * Tests for PaymentsService focused on the POS sale recalculation flow:
@@ -76,6 +78,8 @@ describe('PaymentsService', () => {
   let settingsService: SettingsService;
   let sessionsService: SessionsService;
   let movementsService: MovementsService;
+  // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+  let orderHistory: { record: jest.Mock };
   // F-157/F-166: handles tipados CONCRETOS del mock de TaxesService,
   // declarados en el ámbito del describe para que los tests los usen
   // DIRECTO por closure — nunca recuperados con `as jest.Mock` (eso
@@ -366,6 +370,13 @@ describe('PaymentsService', () => {
             log: jest.fn(),
           },
         },
+        // Plan order-truth-and-invoice-tz (Step 6) — writer único de
+        // order_events. Requerido (no @Optional en PaymentsService): sin
+        // este provider el módulo de test no compila.
+        {
+          provide: OrderHistoryService,
+          useValue: { record: jest.fn().mockResolvedValue(null) },
+        },
       ],
     }).compile();
 
@@ -381,6 +392,7 @@ describe('PaymentsService', () => {
     settingsService = module.get<SettingsService>(SettingsService);
     sessionsService = module.get<SessionsService>(SessionsService);
     movementsService = module.get<MovementsService>(MovementsService);
+    orderHistory = module.get<any>(OrderHistoryService);
   });
 
   it('should be defined', () => {
@@ -4299,6 +4311,29 @@ describe('PaymentsService', () => {
       });
       expect(result.order).toMatchObject({ id: 4242, status: 'finished' });
       expect(result).not.toHaveProperty('_leg_payments');
+
+      // Plan order-truth-and-invoice-tz (Step 6) — un payment_registered por
+      // tramo, dentro de la MISMA tx que crea la fila de pago.
+      expect(orderHistory.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          orderId: 4242,
+          storeId: 1,
+          organizationId: 1,
+          type: 'payment_registered',
+          amount: 20000,
+        }),
+      );
+      expect(orderHistory.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          orderId: 4242,
+          storeId: 1,
+          organizationId: 1,
+          type: 'payment_registered',
+          amount: 80000,
+        }),
+      );
     });
 
     it('emite un payment.received por tramo que suma el total y cuadra subtotal+impuesto', async () => {
@@ -4561,6 +4596,9 @@ describe('PaymentsService — resolveDeclaredGrossUnitPrice (B.1/F-186)', () => 
         { provide: InventorySerialNumbersService, useValue: {} },
         { provide: RequestContextService, useValue: {} },
         { provide: AuditService, useValue: {} },
+        // Plan order-truth-and-invoice-tz (Step 6) — requerido en el
+        // constructor de PaymentsService.
+        { provide: OrderHistoryService, useValue: { record: jest.fn() } },
       ],
     }).compile();
     service = module.get<PaymentsService>(PaymentsService);
