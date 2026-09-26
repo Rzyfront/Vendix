@@ -241,7 +241,7 @@ describe('ticket — gate de sección Reembolsos/NC (pasos 9+9b, CP-REFUND-FLOW-
         modelWith(),
       );
 
-      expect(compiler.compile).toHaveBeenCalledWith('<div>Mi diseño</div>', expect.anything(), 'dummy');
+      expect(compiler.compile).toHaveBeenCalledWith('<div>Mi diseño</div>', expect.anything(), 'dummy', undefined);
       expect(html).not.toContain('sec_refunds');
       expect(html).not.toContain('REEMBOLSOS');
     });

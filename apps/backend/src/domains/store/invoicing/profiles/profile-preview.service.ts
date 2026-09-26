@@ -659,14 +659,21 @@ export class ProfilePreviewService {
         ),
       });
       // Step 8 — fecha del papel en la zona de la tienda, no la del
-      // contenedor. Dentro del mismo try/catch «nunca lanza» del método: un
-      // fallo de resolución cae al default sin romper el preview.
-      const tz = input.profile.store_id != null
-        ? await resolveStoreTimezone(prisma, input.profile.store_id)
-        : await resolveOrganizationTimezone(
-            prisma.withoutScope(),
-            input.profile.organization_id,
-          );
+      // contenedor. Un fallo al resolver la zona no debe costar el papel:
+      // cae al default del compositor y el preview sigue pintando.
+      let tz: string | undefined;
+      try {
+        tz = input.profile.store_id != null
+          ? await resolveStoreTimezone(prisma, input.profile.store_id)
+          : await resolveOrganizationTimezone(
+              prisma.withoutScope(),
+              input.profile.organization_id,
+            );
+      } catch (tzError) {
+        this.logger.warn(
+          'Zona horaria del preview no resuelta: se usa la zona por defecto.',
+        );
+      }
       return composer.compose(definition, data, 'dummy', tz);
     } catch (error) {
       this.logger.warn(
