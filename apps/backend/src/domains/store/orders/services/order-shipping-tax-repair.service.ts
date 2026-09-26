@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { AuditService, AuditResource } from '@common/audit/audit.service';
@@ -7,6 +8,10 @@ import {
   RepairShippingTaxDto,
   RepairShippingTaxAction,
 } from '../dto/repair-shipping-tax.dto';
+import {
+  resolveInvoiceShippingTax,
+  describeShippingTaxIncoherence,
+} from '../../invoicing/invoicing.service';
 
 /** Copia del impuesto del envío tal como queda tras la reparación. */
 export interface RepairedShippingTaxCopy {
@@ -42,9 +47,13 @@ const LIVE_INVOICE_STATUSES = ['validated', 'sent', 'accepted'] as const;
  * - Permitida en cualquier estado salvo `cancelled`/`refunded`.
  * - Solo sin factura de venta vigente no borrador (409 si existe).
  * - `complete_rate` rellena name/type/rate desde `shipping_tax_rate_id`
- *   conservando el `amount`.
+ *   conservando el `amount`, y revalida el resultado con
+ *   `resolveInvoiceShippingTax` antes de escribir (409 si queda incoherente,
+ *   p.ej. `amount_not_below_cost`).
  * - `clear` deja la copia vacía y solo se permite si NO existe asiento de
- *   venta contabilizado con ese impuesto (409 si existe).
+ *   venta contabilizado con ese impuesto, sea cual sea su origen
+ *   (`invoice.validated` / `payment.received` / `credit_sale.created`; 409
+ *   si existe).
  * - Permiso `store:orders:update` (en el controlador), auditada con
  *   `auditService.logCustom`.
  */
@@ -113,6 +122,23 @@ export class OrderShippingTaxRepairService {
       dto.action === 'clear'
         ? await this.buildClearData(order.id)
         : await this.buildCompleteRateData(order);
+
+    // Paso 6 — `complete_rate` puede rellenar name/type/rate desde una
+    // tarifa cuyo `amount` (conservado, nunca recalculado) ya no es coherente
+    // con `shipping_cost` (p.ej. `shipping_tax_amount >= shipping_cost`). Se
+    // revalida con la MISMA guarda que `createFromOrder` aplicará al facturar
+    // (`resolveInvoiceShippingTax`) para no dejar "reparada" una copia que la
+    // guarda de facturación seguiría rechazando — éxito falso.
+    if (dto.action === 'complete_rate') {
+      const projection = resolveInvoiceShippingTax({ ...order, ...data });
+      if (!projection.applies && projection.reason !== 'none') {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_SHIPPING_TAX_REPAIR_BLOCKED_001,
+          `La orden #${order.id} quedaría con una copia de impuesto del envío incoherente: ${describeShippingTaxIncoherence(projection.reason)}.`,
+          { order_id: order.id, reason: projection.reason },
+        );
+      }
+    }
 
     const updated = await this.prisma.orders.updateMany({
       where: { id: order.id, store_id: order.store_id },
@@ -243,9 +269,18 @@ export class OrderShippingTaxRepairService {
 
   /**
    * `clear`: copia vacía, solo si NO existe asiento de venta contabilizado
-   * con ese impuesto. El asiento nace al aceptar la factura
-   * (`source_type='invoice.validated'`) y sobrevive a su anulación: si
-   * existe y está contabilizado, vaciar la copia reescribiría historia.
+   * con ese impuesto. El impuesto del envío puede haberse contabilizado por
+   * tres orígenes distintos (OR), cada uno con su propia forma de
+   * `source_id` (ver `vendix-auto-entries` / grep en
+   * `accounting-events.listener.ts`):
+   * - `invoice.validated` — nace al aceptar la factura de venta;
+   *   `source_id` = id de la factura (`invoices.id`).
+   * - `payment.received` — pago POS directo sin factura;
+   *   `source_id` = id del pago (`payments.id`, filtrado por `order_id`).
+   * - `credit_sale.created` — venta a crédito sin pago inmediato;
+   *   `source_id` = id de la ORDEN misma (no hay fila hija propia).
+   * Sobreviven a la anulación del documento que los originó: si cualquiera
+   * existe y está `posted`, vaciar la copia reescribiría historia.
    */
   private async buildClearData(order_id: number): Promise<{
     shipping_tax_rate_id: null;
@@ -254,33 +289,51 @@ export class OrderShippingTaxRepairService {
     shipping_tax_rate: null;
     shipping_tax_amount: number;
   }> {
-    const invoice_ids = (
-      await this.prisma.invoices.findMany({
+    const [sales_invoices, order_payments] = await Promise.all([
+      this.prisma.invoices.findMany({
         where: { order_id, invoice_type: 'sales_invoice' },
         select: { id: true },
-      })
-    ).map((row) => row.id);
+      }),
+      this.prisma.payments.findMany({
+        where: { order_id },
+        select: { id: true },
+      }),
+    ]);
+    const invoice_ids = sales_invoices.map((row) => row.id);
+    const payment_ids = order_payments.map((row) => row.id);
+
+    const origins: Prisma.accounting_entriesWhereInput[] = [
+      { source_type: 'credit_sale.created', source_id: order_id },
+    ];
     if (invoice_ids.length > 0) {
-      const entry = await this.prisma.accounting_entries.findFirst({
-        where: {
-          source_type: 'invoice.validated',
-          source_id: { in: invoice_ids },
-          status: 'posted',
-        },
-        select: { id: true, entry_number: true },
+      origins.push({
+        source_type: 'invoice.validated',
+        source_id: { in: invoice_ids },
       });
-      if (entry) {
-        throw new VendixHttpException(
-          ErrorCodes.ORD_SHIPPING_TAX_REPAIR_BLOCKED_001,
-          `La orden #${order_id} ya tiene el impuesto del envío contabilizado en el asiento ${entry.entry_number}: no se puede vaciar la copia.`,
-          {
-            order_id,
-            reason: 'posted_sale_entry',
-            entry_id: entry.id,
-            entry_number: entry.entry_number,
-          },
-        );
-      }
+    }
+    if (payment_ids.length > 0) {
+      origins.push({
+        source_type: 'payment.received',
+        source_id: { in: payment_ids },
+      });
+    }
+
+    const entry = await this.prisma.accounting_entries.findFirst({
+      where: { status: 'posted', OR: origins },
+      select: { id: true, entry_number: true, source_type: true },
+    });
+    if (entry) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_SHIPPING_TAX_REPAIR_BLOCKED_001,
+        `La orden #${order_id} ya tiene el impuesto del envío contabilizado en el asiento ${entry.entry_number} (origen: ${entry.source_type}): no se puede vaciar la copia.`,
+        {
+          order_id,
+          reason: 'posted_sale_entry',
+          entry_id: entry.id,
+          entry_number: entry.entry_number,
+          source_type: entry.source_type,
+        },
+      );
     }
     return {
       shipping_tax_rate_id: null,
