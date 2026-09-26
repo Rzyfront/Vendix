@@ -1065,6 +1065,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Order not found',
   },
+  ORD_SHIPPING_TAX_REPAIR_BLOCKED_001: {
+    code: 'ORD_SHIPPING_TAX_REPAIR_BLOCKED_001',
+    httpStatus: 409,
+    devMessage:
+      'Shipping tax repair is blocked for this order state, existing live invoice, or active credit notes',
+  },
   ORD_CREATE_001: {
     code: 'ORD_CREATE_001',
     httpStatus: 400,
@@ -3302,6 +3308,15 @@ export const ErrorCodes = {
     httpStatus: 412,
     devMessage:
       'Commerce is not VAT responsible (DIAN): cannot assign or charge IVA',
+  },
+  // Enforcement de escritura: lanza `FISCAL_INC_NOT_RESPONSIBLE_001` (HTTP 412)
+  // cuando el comercio NO declara O-33 en su RUT (impuesto nacional al consumo).
+  // `details` incluye `context`, `cta: '/admin/fiscal/wizard'` y `reason`.
+  FISCAL_INC_NOT_RESPONSIBLE_001: {
+    code: 'FISCAL_INC_NOT_RESPONSIBLE_001',
+    httpStatus: 412,
+    devMessage:
+      'Commerce is not INC responsible (DIAN): cannot assign or charge INC (Impuesto Nacional al Consumo)',
   },
   /**
    * Art. 616-1 ET / Res. 000165 de 2023: the POS electronic equivalent document
