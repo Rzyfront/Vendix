@@ -4327,6 +4327,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       1,
       'finished',
       expect.objectContaining({ total_paid: 100000, remaining_balance: 0 }),
+      { historyFromState: 'created' },
     );
 
     // Proyección a mesa: un solo llamado (first-wins) con el primer tramo.
@@ -4445,6 +4446,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       1,
       'shipped',
       expect.objectContaining({ total_paid: 100000, remaining_balance: 0 }),
+      { historyFromState: 'shipped' },
     );
     expect(h.cashMovement).toHaveBeenCalledTimes(2);
     expect(h.project).toHaveBeenCalledWith(1, 101);
@@ -4619,6 +4621,7 @@ describe('OrderFlowService.payOrder — B4/B8 delivered/finished sin pago liquid
       ORDER_ID,
       'delivered',
       expect.objectContaining({ total_paid: 59.5, remaining_balance: 0 }),
+      { historyFromState: 'delivered' },
     );
     expect(h.stateUpdates).toEqual([
       { state: 'delivered', metadata: expect.objectContaining({ total_paid: 59.5, remaining_balance: 0 }) },
@@ -4636,6 +4639,7 @@ describe('OrderFlowService.payOrder — B4/B8 delivered/finished sin pago liquid
       ORDER_ID,
       'finished',
       expect.objectContaining({ total_paid: 59.5, remaining_balance: 0 }),
+      { historyFromState: 'finished' },
     );
     expect(result.order).toEqual(expect.objectContaining({ state: 'finished' }));
   });
