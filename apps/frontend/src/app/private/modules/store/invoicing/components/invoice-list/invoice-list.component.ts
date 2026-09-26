@@ -44,7 +44,8 @@ import {
   TooltipComponent,
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
-import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
+import { formatStoreDate, formatStoreDateTime } from '../../../../../../shared/utils/date.util';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
 /**
  * COLOR DEL ESTADO DE LA FACTURA, en hexadecimal de 7 caracteres.
@@ -117,6 +118,7 @@ export class InvoiceListComponent {
 
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
 
   /** Custom cell template for the DIAN retry-status chip (Paso 13). */
   readonly retryStatusTemplate =
@@ -230,7 +232,8 @@ export class InvoiceListComponent {
       sortable: true,
       align: 'center',
       priority: 2,
-      transform: (val: any) => (val ? formatDateOnlyUTC(val) : ''),
+      transform: (val: any) =>
+        val ? formatStoreDate(val, this.storeSettingsFacade.timezone()) : '',
     },
     {
       key: 'status',
@@ -281,7 +284,7 @@ export class InvoiceListComponent {
         label: 'Fecha',
         icon: 'calendar',
         transform: (val: any) =>
-          val ? formatDateOnlyUTC(val) : '-',
+          val ? formatStoreDate(val, this.storeSettingsFacade.timezone()) : '-',
       },
       {
         key: 'invoice_type',
@@ -420,14 +423,17 @@ export class InvoiceListComponent {
 
   /**
    * next_retry_at is a real timestamp (the time matters: backoff of
-   * minutes/hours), so local-timezone display with explicit options is
-   * the correct pattern per vendix-date-timezone (formatDateOnlyUTC is
-   * only for date-only fields).
+   * minutes/hours), so store-timezone display with explicit options is
+   * the correct pattern per vendix-date-timezone (formatStoreDate/
+   * formatDateOnlyUTC are for date-only fields). Previously rendered in the
+   * BROWSER's local timezone (`toLocaleString` with no `timeZone`); now
+   * sourced from `StoreSettingsFacade.timezone()` so the retry ETA agrees
+   * with the store's clock rather than whoever is viewing the screen.
    */
   private formatRetryDateTime(value: string): string {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString('es-CO', {
+    return formatStoreDateTime(value, this.storeSettingsFacade.timezone(), {
       day: '2-digit',
       month: 'short',
       year: 'numeric',
