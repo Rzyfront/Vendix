@@ -65,11 +65,13 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-restaurant-table-qr` |
 | -- | `vendix-saas-billing` |
 | -- | `vendix-settings-system` |
+| -- | `vendix-shipping-distance-pricing` |
 | -- | `vendix-subscription-gate` |
 | -- | `vendix-trust-proxy-chain` |
 | -- | `vendix-vexi-agent` |
 | -- | `vendix-zoneless-signals` |
 | Accruing partner commissions or running partner payout batches | `vendix-saas-billing` |
+| Activating distance_pricing_enabled on a shipping method | `vendix-shipping-distance-pricing` |
 | Adaptar una plantilla de mensaje comercial a un cliente | `vendix-contactar-clientes` |
 | Adding @ArrayMaxSize bulk DTOs and client-side chunking | `vendix-bulk-operations` |
 | Adding MCP resources or tools | `vendix-mcp-server` |
@@ -207,6 +209,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Customer registration flow | `vendix-customer-auth` |
 | Debugging AI job failures | `vendix-ai-queue` |
 | Debugging AI request failures | `vendix-ai-platform-core` |
+| Debugging ECOM_CHECKOUT_003 errors on checkout | `vendix-shipping-distance-pricing` |
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
 | Debugging Prisma WhereUnique/AND errors in scoped queries | `vendix-prisma-scopes` |
 | Debugging a Vexi answer that claims a UI change it never confirmed | `vendix-vexi-agent` |
@@ -218,6 +221,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging an invoice that declares an obligation the merchant does not have | `vendix-dian-issuer-identity` |
 | Debugging embedding generation | `vendix-ai-embeddings-rag` |
 | Debugging free-plan invoices, pending credits, or proration flows | `vendix-saas-billing` |
+| Debugging inaccurate or inconsistent distance-based shipping cost | `vendix-shipping-distance-pricing` |
 | Debugging missing accounting entries | `vendix-auto-entries` |
 | Debugging over-quota bypass or double-count on provider retries | `vendix-redis-quota` |
 | Debugging records that appear one day or one month off in analytics | `vendix-analytics-metrics` |
@@ -255,6 +259,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing cac:PartyTaxScheme, cbc:TaxLevelCode or the issuer party block in UBL | `vendix-dian-issuer-identity` |
 | Editing dispatch_note customer_address snapshot or PATCH /store/dispatch-notes/:id/address | `vendix-address-geocoding` |
 | Editing dispatch_routes or dispatch_route_stops schema or service | `vendix-dispatch-routes` |
+| Editing distance tiers or shipping_rates.distance_tiers | `vendix-shipping-distance-pricing` |
 | Editing files in apps/backend/, creating modules, or working with Prisma | `vendix-backend` |
 | Editing industry gating so that only `restaurant` stores see restaurant_ops | `vendix-restaurant-ops` |
 | Editing industry rules in INDUSTRY_HIDDEN_MODULES | `vendix-panel-ui` |
@@ -484,6 +489,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with RAG pipeline | `vendix-ai-embeddings-rag` |
 | Working with ReportBuilder, buildReportBuffer, sendXlsxReport or buildReportFilename | `vendix-report-xlsx` |
 | Working with ReportDataAdapterService (summary/list/nested adaptation) | `vendix-report-xlsx` |
+| Working with RoutingService (Valhalla/OSRM directions) | `vendix-shipping-distance-pricing` |
 | Working with SSE endpoints for AI | `vendix-ai-streaming` |
 | Working with SubscriptionAccessService or SubscriptionResolverService | `vendix-subscription-gate` |
 | Working with SubscriptionBillingService or SubscriptionPaymentService | `vendix-saas-billing` |
@@ -508,6 +514,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with permissions-roles seed | `vendix-permissions` |
 | Working with product_type_enum='prepared' or the is_sellable/is_ingredient/is_combo/is_batch_produced flags | `vendix-restaurant-ops` |
 | Working with products that have variants but do not track stock | `vendix-product-variants` |
+| Working with resolveConfirmShippingCost in checkout.service.ts | `vendix-shipping-distance-pricing` |
 | Working with resolveLocalDateOnlyRange, dateOnlyPeriodSql or CostCoverage | `vendix-analytics-metrics` |
 | Working with service variants, booking duration, buffer, preparation time, or product_variant_id on bookings | `vendix-product-variants` |
 | Working with stock levels, inventory adjustments, or stock transfers | `vendix-inventory-stock` |
