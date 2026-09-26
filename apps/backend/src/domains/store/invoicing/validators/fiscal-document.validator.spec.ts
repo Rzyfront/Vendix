@@ -470,6 +470,25 @@ describe('FiscalDocumentValidator', () => {
       );
     });
 
+    /**
+     * Step 8 (order-truth-and-invoice-tz-plan.md) — `issue_date` puede llegar
+     * como medianoche UTC EXACTA: una fecha fiscal ya naive, guardada tal
+     * cual (no un instante). Reconvertirla con `localDateString` la corre un
+     * día hacia atrás en un huso negativo como `America/Bogota` — el primer
+     * día autorizado (2026-01-01) pasaría a leerse 2025-12-31, ANTES de
+     * `valid_from`, y una factura perfectamente válida se rechazaría.
+     * `fiscalIssueDate` la lee tal cual en ese caso; NUNCA la reconvierte.
+     */
+    it('NO corre un día hacia atrás una fecha-de-emisión guardada como medianoche UTC exacta', () => {
+      const report = validator.validate(
+        baseInput({ issue_date: new Date('2026-01-01T00:00:00Z') }),
+      );
+
+      expect(codesOf(report)).not.toContain(
+        'RESOLUTION_NOT_VALID_AT_ISSUE_DATE',
+      );
+    });
+
     it('denuncia un rango agotado', () => {
       const report = validator.validate(
         baseInput({

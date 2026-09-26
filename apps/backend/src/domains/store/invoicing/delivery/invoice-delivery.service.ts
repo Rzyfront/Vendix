@@ -31,6 +31,7 @@ import { DeliverInvoiceDto } from './dto/deliver-invoice.dto';
 import { writeInvoiceDeliveryEvent } from './invoice-delivery-events.writer';
 import {
   DEFAULT_STORE_TIMEZONE,
+  fiscalIssueDate,
   formatStoreDate,
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
@@ -453,9 +454,9 @@ export class InvoiceDeliveryService {
             ? 'CUFE-SHA384'
             : 'CUDE-SHA384';
 
-        const issue_date_iso = new Date(invoice.issue_date)
-          .toISOString()
-          .slice(0, 10);
+        // Step 8 — fecha fiscal en la zona de la tienda, no UTC contenedor.
+        // `tz` ya se resolvió arriba (B17) para este mismo `AttachedDocument`.
+        const issue_date_iso = fiscalIssueDate(new Date(invoice.issue_date), tz);
 
         const attached_document_xml = UblAttachedDocumentBuilder.build({
           id: invoice.invoice_number,

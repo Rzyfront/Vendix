@@ -52,6 +52,8 @@ import {
 } from './services/invoice-calculator.service';
 import { TrmService } from './services/trm.service';
 import {
+  DEFAULT_STORE_TIMEZONE,
+  fiscalIssueDate,
   localDateString,
   resolveOrganizationTimezone,
   resolveStoreTimezone,
@@ -937,7 +939,11 @@ export class InvoicingService {
   }> {
     const context = RequestContextService.getContext();
     const organization_id = Number(context?.organization_id ?? 0);
-    const year = new Date().getFullYear();
+    // Step 8 — año civil en la zona de la tienda, no la del contenedor.
+    const year = await this.resolveCivilYear(new Date(), {
+      store_id: context?.store_id ?? null,
+      organization_id: context?.organization_id ?? null,
+    });
 
     if (!organization_id) {
       return {
@@ -1167,6 +1173,38 @@ export class InvoicingService {
       throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
     }
     return context;
+  }
+
+  /**
+   * Año civil de `value` en la zona de la tienda (store-first,
+   * organización-fallback) — Step 8. Reemplaza `getFullYear()` crudo, que lee
+   * el año del CONTENEDOR (UTC) y no el de la tienda emisora: una factura
+   * hecha después de las 19:00 en Bogotá el 31-dic caía en el año siguiente.
+   *
+   * Usa la misma bifurcación fiscal que `cbc:IssueDate` (`fiscalIssueDate`):
+   * si `value` es un instante real se convierte a la zona; si es medianoche
+   * UTC exacta (fecha ya naive) se lee tal cual. Nunca lanza — ante
+   * cualquier fallo de resolución de tz cae al año en UTC, que es el
+   * comportamiento previo a este cambio.
+   */
+  private async resolveCivilYear(
+    value: Date,
+    context: { store_id?: number | bigint | null; organization_id?: number | bigint | null },
+  ): Promise<number> {
+    try {
+      const timezone =
+        context.store_id != null
+          ? await resolveStoreTimezone(this.prisma, Number(context.store_id))
+          : context.organization_id != null
+            ? await resolveOrganizationTimezone(
+                this.prisma.withoutScope(),
+                Number(context.organization_id),
+              )
+            : DEFAULT_STORE_TIMEZONE;
+      return Number(fiscalIssueDate(value, timezone).slice(0, 4));
+    } catch {
+      return value.getUTCFullYear();
+    }
   }
 
   private async resolveAccountingEntityIdForContext(context: {
@@ -1920,7 +1958,11 @@ export class InvoicingService {
         customer_id:
           invoice.customer_id != null ? Number(invoice.customer_id) : null,
         declared: dto.withholdings,
-        year: new Date(issue_date).getFullYear(),
+        // Step 8 — año civil de emisión en la zona de la tienda.
+        year: await this.resolveCivilYear(new Date(issue_date), {
+          store_id,
+          organization_id,
+        }),
       });
 
       // Se actualiza `withholding_amount` con el agregado de lo declarado y se
@@ -5841,7 +5883,11 @@ export class InvoicingService {
     try {
       const base = Number(params.base);
       const ivaAmount = Number(params.iva_amount);
-      const year = params.issue_date.getFullYear();
+      // Step 8 — año civil de emisión en la zona de la tienda.
+      const year = await this.resolveCivilYear(params.issue_date, {
+        store_id: params.store_id ?? null,
+        organization_id: params.organization_id ?? null,
+      });
 
       const [suffered, self] = await Promise.all([
         this.withholdingFlow.resolveSuffered({

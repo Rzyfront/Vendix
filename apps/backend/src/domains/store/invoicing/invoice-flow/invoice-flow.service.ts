@@ -71,9 +71,8 @@ import {
 } from 'src/common/interfaces/withholding-breakdown.interface';
 import {
   DEFAULT_STORE_TIMEZONE,
-  localDateString,
-  localOffsetString,
-  localTimeString,
+  fiscalIssueDate,
+  fiscalIssueTime,
   resolveOrganizationTimezone,
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
@@ -1237,17 +1236,12 @@ export class InvoiceFlowService {
    * ausencia del parámetro mantiene la lectura UTC.
    */
   private formatIssueDate(value: Date, timezone?: string): string {
-    const has_real_time =
-      value.getUTCHours() !== 0 ||
-      value.getUTCMinutes() !== 0 ||
-      value.getUTCSeconds() !== 0;
-    if (has_real_time && timezone) return localDateString(value, timezone);
-
-    return [
-      String(value.getUTCFullYear()).padStart(4, '0'),
-      String(value.getUTCMonth() + 1).padStart(2, '0'),
-      String(value.getUTCDate()).padStart(2, '0'),
-    ].join('-');
+    // Delegado a `fiscalIssueDate` (store-timezone.util.ts, Step 8) para que
+    // los demás lectores de la fecha fiscal (dian-events, invoice-delivery,
+    // fiscal-document.validator) compartan la MISMA bifurcación. El wrapper
+    // se conserva (en vez de reemplazar las llamadas internas) porque es
+    // privado y no cuesta nada mantenerlo.
+    return fiscalIssueDate(value, timezone);
   }
 
   /**
@@ -1265,29 +1259,9 @@ export class InvoiceFlowService {
     timezone: string,
     created_at?: Date | null,
   ): string {
-    const has_real_time =
-      value.getUTCHours() !== 0 ||
-      value.getUTCMinutes() !== 0 ||
-      value.getUTCSeconds() !== 0;
-    if (has_real_time) return localTimeString(value, timezone);
-
-    const civil_date = this.formatIssueDate(value);
-    if (created_at && localDateString(created_at, timezone) === civil_date) {
-      return localTimeString(created_at, timezone);
-    }
-
-    // Mediodía UTC como sonda del desfase: evita que un cambio de horario de
-    // verano en la medianoche misma etiquete la hora con el desfase del día
-    // contiguo. Colombia no lo tiene, pero el emisor no siempre será Colombia.
-    const probe = new Date(
-      Date.UTC(
-        value.getUTCFullYear(),
-        value.getUTCMonth(),
-        value.getUTCDate(),
-        12,
-      ),
-    );
-    return `00:00:00${localOffsetString(probe, timezone)}`;
+    // Delegado a `fiscalIssueTime` (store-timezone.util.ts, Step 8) — misma
+    // razón que `formatIssueDate`.
+    return fiscalIssueTime(value, timezone, created_at);
   }
 
   /** Timezone of the emitting tenant: store first, organization as fallback. */

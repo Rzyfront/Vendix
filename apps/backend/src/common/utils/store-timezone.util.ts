@@ -581,6 +581,77 @@ export function formatStoreTime(date: Date, tz: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Fiscal issue date/time (DIAN `cbc:IssueDate`/`cbc:IssueTime`, ISO shape)
+// ---------------------------------------------------------------------------
+
+/**
+ * `cbc:IssueDate` (ISO `YYYY-MM-DD`) en la zona de la tienda emisora.
+ *
+ * Relocated verbatim from `InvoiceFlowService.formatIssueDate` (Step 8,
+ * order-truth-and-invoice-tz-plan.md) so every fiscal-date read site — no sólo
+ * el de reenvío — comparte una sola fuente de verdad. La bifurcación NO se
+ * toca: es la misma que exige `fiscalIssueTime` y la que ya cablea el CUFE.
+ *
+ * - Con hora real (`getUTCHours/Minutes/Seconds !== 0`) el valor es un
+ *   instante genuino: se convierte a la fecha civil de `timezone`.
+ * - En medianoche UTC exacta el valor es una fecha de calendario guardada de
+ *   forma naive: se lee tal cual en UTC, NUNCA se reconvierte — hacerlo
+ *   correría un día hacia atrás en husos negativos como `America/Bogota`.
+ * - Sin `timezone` no hay conversión posible: se mantiene la lectura UTC.
+ */
+export function fiscalIssueDate(value: Date, timezone?: string): string {
+  const has_real_time =
+    value.getUTCHours() !== 0 ||
+    value.getUTCMinutes() !== 0 ||
+    value.getUTCSeconds() !== 0;
+  if (has_real_time && timezone) return localDateString(value, timezone);
+
+  return [
+    String(value.getUTCFullYear()).padStart(4, '0'),
+    String(value.getUTCMonth() + 1).padStart(2, '0'),
+    String(value.getUTCDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+/**
+ * `cbc:IssueTime` (`HH:mm:ss±HH:mm`) en la zona de la tienda emisora.
+ *
+ * Relocated verbatim from `InvoiceFlowService.formatIssueTime` (Step 8). Ver
+ * `fiscalIssueDate` para la bifurcación de fecha, que esta función reutiliza
+ * para decidir si `created_at` describe honestamente la misma fecha civil que
+ * se declara en `value`.
+ */
+export function fiscalIssueTime(
+  value: Date,
+  timezone: string,
+  created_at?: Date | null,
+): string {
+  const has_real_time =
+    value.getUTCHours() !== 0 ||
+    value.getUTCMinutes() !== 0 ||
+    value.getUTCSeconds() !== 0;
+  if (has_real_time) return localTimeString(value, timezone);
+
+  const civil_date = fiscalIssueDate(value);
+  if (created_at && localDateString(created_at, timezone) === civil_date) {
+    return localTimeString(created_at, timezone);
+  }
+
+  // Mediodía UTC como sonda del desfase: evita que un cambio de horario de
+  // verano en la medianoche misma etiquete la hora con el desfase del día
+  // contiguo. Colombia no lo tiene, pero el emisor no siempre será Colombia.
+  const probe = new Date(
+    Date.UTC(
+      value.getUTCFullYear(),
+      value.getUTCMonth(),
+      value.getUTCDate(),
+      12,
+    ),
+  );
+  return `00:00:00${localOffsetString(probe, timezone)}`;
+}
+
+// ---------------------------------------------------------------------------
 // Date range resolution (TZ-aware replacement for the UTC parseDateRange)
 // ---------------------------------------------------------------------------
 

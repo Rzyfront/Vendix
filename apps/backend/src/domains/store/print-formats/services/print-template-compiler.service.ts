@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  formatStoreDate,
+} from '../../../../common/utils/store-timezone.util';
 
 export interface CompilationResult {
   compiled: string;
@@ -86,7 +90,12 @@ export class PrintTemplateCompilerService {
   /**
    * Compila una plantilla con un modelo de datos seguro
    */
-  compile(template: string, data: any, mode: 'dummy' | 'tokenized' = 'dummy'): CompilationResult {
+  compile(
+    template: string,
+    data: any,
+    mode: 'dummy' | 'tokenized' = 'dummy',
+    tz?: string,
+  ): CompilationResult {
     if (!template) return { compiled: '', usedTokens: [] };
 
     const validation = this.validateSyntax(template);
@@ -107,7 +116,7 @@ export class PrintTemplateCompilerService {
       const collection = this.resolvePath(data, collectionPath);
       if (!Array.isArray(collection) || collection.length === 0) {
         if (mode === 'tokenized') {
-          return `<div class="vendix-token-each" data-token="each:${collectionPath}"><span class="vendix-token-pill">#each ${collectionPath}</span>${this.compileInner(innerTemplate, { '@index': 0, '@number': 1 }, usedTokens, mode)}</div>`;
+          return `<div class="vendix-token-each" data-token="each:${collectionPath}"><span class="vendix-token-pill">#each ${collectionPath}</span>${this.compileInner(innerTemplate, { '@index': 0, '@number': 1 }, usedTokens, mode, tz)}</div>`;
         }
         return '';
       }
@@ -122,7 +131,7 @@ export class PrintTemplateCompilerService {
             '@number': index + 1,
             ...item,
           };
-          return this.compileInner(innerTemplate, itemContext, usedTokens, mode);
+          return this.compileInner(innerTemplate, itemContext, usedTokens, mode, tz);
         })
         .join('');
     });
@@ -131,7 +140,7 @@ export class PrintTemplateCompilerService {
     result = this.processConditionals(result, data, usedTokens);
 
     // 3. Procesar tokens simples y helpers
-    result = this.processTokens(result, data, usedTokens, mode);
+    result = this.processTokens(result, data, usedTokens, mode, tz);
 
     // 4. Sanitizar HTML contra inyecciones de scripts y handlers maliciosos
     result = this.sanitizeHtml(result);
@@ -151,9 +160,15 @@ export class PrintTemplateCompilerService {
       .replace(/javascript:/gi, '');
   }
 
-  private compileInner(template: string, data: any, usedTokens: string[], mode: 'dummy' | 'tokenized' = 'dummy'): string {
+  private compileInner(
+    template: string,
+    data: any,
+    usedTokens: string[],
+    mode: 'dummy' | 'tokenized' = 'dummy',
+    tz?: string,
+  ): string {
     let res = this.processConditionals(template, data, usedTokens);
-    res = this.processTokens(res, data, usedTokens, mode);
+    res = this.processTokens(res, data, usedTokens, mode, tz);
     return res;
   }
 
@@ -189,7 +204,13 @@ export class PrintTemplateCompilerService {
     });
   }
 
-  private processTokens(template: string, data: any, usedTokens: string[], mode: 'dummy' | 'tokenized' = 'dummy'): string {
+  private processTokens(
+    template: string,
+    data: any,
+    usedTokens: string[],
+    mode: 'dummy' | 'tokenized' = 'dummy',
+    tz?: string,
+  ): string {
     // Soportar {{#raw}}...{{/raw}} o triple llave {{{raw_html}}} para contenido HTML explícito (ej: QR svg o base64 image tag)
     const rawTokenRegex = /\{\{\{([@a-zA-Z0-9_.]+)\}\}\}/g;
     let res = template.replace(rawTokenRegex, (_, tokenPath) => {
@@ -219,7 +240,8 @@ export class PrintTemplateCompilerService {
         case 'date':
           const d = new Date(rawVal);
           if (isNaN(d.getTime())) return this.escapeHtml(rawVal);
-          return d.toLocaleDateString('es-CO');
+          // Step 8 — fecha en la zona de la tienda, no la del contenedor.
+          return formatStoreDate(d, tz ?? DEFAULT_STORE_TIMEZONE);
         case 'upper':
           return this.escapeHtml(String(rawVal).toUpperCase());
         case 'lower':

@@ -637,7 +637,13 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       customer: null,
       invoice: { invoice_number: 'FV-2026-0099', issue_date: new Date('2026-08-15') },
     });
-    const prisma = { withholding_calculations: { findFirst } } as any;
+    const prisma = {
+      withholding_calculations: { findFirst },
+      // Step 8 — `fetchDocumentData` ahora resuelve la tz de la tienda
+      // (`resolveStoreTimezone`) para formatear `date_formatted`; sin fila
+      // cae al default (`DEFAULT_STORE_TIMEZONE`).
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as any;
     const p = new WithholdingPracticedDataProvider(prisma);
 
     const data = await p.fetchDocumentData(10, 99);
