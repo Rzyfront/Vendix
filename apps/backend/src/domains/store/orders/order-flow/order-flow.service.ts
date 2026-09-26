@@ -36,6 +36,8 @@ import {
   InternalServerErrorException,
   Logger,
   Optional,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
@@ -92,6 +94,8 @@ import {
   type NormalizedLeg,
   type PaymentLegMethodInfo,
 } from '../../payments/utils/payment-legs.util';
+import { PaymentError, LEGACY_TO_NEW } from '../../payments/utils/payment-errors';
+import { PaymentGatewayService } from '../../payments/services/payment-gateway.service';
 import { OrderHistoryService } from '../order-history/order-history.service';
 import type { OrderEventSource } from '../order-history/order-history.types';
 
@@ -253,6 +257,20 @@ export class OrderFlowService {
     // the hard floor per identity.
     @Optional() private readonly stockValidator?: StockValidatorService,
     @Optional() private readonly sellableStockAllocator?: SellableStockAllocator,
+    // Plan PLAN-pago-multimetodo-fixes paso 1 — objetivo 4: `createLegPayments`
+    // valida `bank_account_id` con el mismo gateway que usa el POS
+    // (`payments.service.ts:5275/5544`) antes de persistir el tramo.
+    // `forwardRef` porque `PaymentsModule` ya declara `forwardRef(() =>
+    // OrderFlowModule)` (payments.module.ts) — ciclo existente, mismo patrón
+    // que `RefundFlowService.paymentGatewayService`
+    // (order-flow/services/refund-flow.service.ts:149). `@Optional()` +
+    // posición final por la misma razón que el resto de dependencias
+    // tardías: no romper las ~20 construcciones posicionales de los specs
+    // históricos. Sin resolver (specs), un tramo con `bank_account_id`
+    // rechaza fail-closed en vez de confiar en el id crudo del navegador.
+    @Optional()
+    @Inject(forwardRef(() => PaymentGatewayService))
+    private readonly paymentGatewayService?: PaymentGatewayService,
   ) {}
 
   /**
@@ -1586,6 +1604,13 @@ export class OrderFlowService {
             type: row?.system_payment_method?.type ?? '',
             processing_mode:
               row?.system_payment_method?.processing_mode ?? null,
+            // Plan PLAN-pago-multimetodo-fixes paso 2 — mismo fallback que
+            // ya usa la respuesta del POS (payments.service.ts ~2088):
+            // nombre visible de la tienda, luego el del sistema, nunca vacío.
+            display_name:
+              (row as any)?.display_name ||
+              row?.system_payment_method?.display_name ||
+              'Unknown',
           };
         }
       } else {
@@ -1594,6 +1619,10 @@ export class OrderFlowService {
             type: paymentMethod.system_payment_method?.type ?? '',
             processing_mode:
               paymentMethod.system_payment_method?.processing_mode ?? null,
+            display_name:
+              (paymentMethod as any)?.display_name ||
+              paymentMethod.system_payment_method?.display_name ||
+              'Unknown',
           },
         };
       }
@@ -6707,76 +6736,128 @@ export class OrderFlowService {
   ): Promise<
     Array<{ payment: any; leg: NormalizedLeg; transactionId: string }>
   > {
-    const created: Array<{
-      payment: any;
-      leg: NormalizedLeg;
-      transactionId: string;
-    }> = [];
+    // Plan PLAN-pago-multimetodo-fixes paso 1 — objetivo 4: la cuenta
+    // bancaria de cada tramo se resuelve y valida ANTES de abrir la
+    // transacción (mismo gateway que ya usa el POS,
+    // `payments.service.ts:5275`/`:5544`), para rechazar una cuenta ajena a
+    // la tienda sin tocar `payments`. Fail-closed: si el gateway no resolvió
+    // por DI (specs históricas sin este dependiente) o falta `storeId` en el
+    // contexto, un tramo con `bank_account_id` se rechaza en vez de confiar
+    // en el id crudo que mandó el navegador.
+    const resolvedBankAccountIds = new Map<NormalizedLeg, number>();
     for (const leg of legs) {
-      const transactionId = await this.generateTransactionId();
-      // Ausente ⇒ pago exacto (igual que el escalar de hoy); nunca falsy.
-      const legReceived = leg.amount_received ?? leg.amount;
-      const payment = await this.prisma.payments.create({
-        data: {
-          order_id: orderId,
-          store_payment_method_id: leg.store_payment_method_id,
-          bank_account_id: leg.bank_account_id ?? null,
-          amount: leg.amount,
-          currency,
-          state: 'succeeded',
-          transaction_id: transactionId,
-          gateway_reference: leg.payment_reference ?? null,
-          paid_at: new Date(),
-          gateway_response: {
-            payment_type: 'direct',
-            amount_received: leg.amount_received,
-            change: leg.is_cash ? change : 0,
-            ...(leg.is_cash
-              ? { metadata: { amount_received: legReceived } }
-              : {}),
-          },
-        },
-      });
-      created.push({ payment, leg, transactionId });
-      // Plan order-truth-and-invoice-tz — un `payment_registered` por tramo.
-      // No corre dentro de una `$transaction` (cada `payments.create` de
-      // arriba tampoco), así que se pasa `this.prisma` como `tx` (regla del
-      // plan: fuera de transacción, cliente scopeado hace de `tx`).
-      if (historyCtx) {
-        await this.orderHistoryService?.record(this.prisma, {
-          orderId,
-          storeId: historyCtx.storeId,
-          organizationId: historyCtx.organizationId ?? null,
-          type: 'payment_registered',
-          paymentId: payment.id,
-          amount: leg.amount,
-        });
+      if (leg.bank_account_id == null) continue;
+      if (!this.paymentGatewayService || historyCtx?.storeId == null) {
+        throw this.wrapPaymentFailure(
+          'bank_account_invalid',
+          new VendixHttpException(
+            ErrorCodes.SYS_INTERNAL_001,
+            'No se pudo validar la cuenta bancaria del tramo: falta el contexto de tienda o el validador no está disponible.',
+            { store_payment_method_id: leg.store_payment_method_id },
+          ),
+        );
+      }
+      try {
+        const account =
+          await this.paymentGatewayService.resolveAndValidateBankAccount(
+            leg.bank_account_id,
+            historyCtx.storeId,
+            this.prisma,
+          );
+        resolvedBankAccountIds.set(leg, account.id);
+      } catch (err) {
+        if (err instanceof PaymentError) {
+          const mapped = LEGACY_TO_NEW[err.code];
+          throw this.wrapPaymentFailure(
+            'bank_account_invalid',
+            new VendixHttpException(mapped, err.message, err.details),
+          );
+        }
+        throw this.wrapPaymentFailure('bank_account_invalid', err as Error);
       }
     }
-    return created;
+
+    // Plan PLAN-pago-multimetodo-fixes paso 1 — objetivo 1: todos los tramos
+    // y su `payment_registered` corren en UNA sola `$transaction`. Si el
+    // segundo `payments.create` falla, Prisma revierte el primero y no queda
+    // ninguna fila `succeeded` huérfana (antes corrían fuera de transacción,
+    // uno por uno, con `this.prisma`).
+    return this.prisma.$transaction(async (tx) => {
+      const created: Array<{
+        payment: any;
+        leg: NormalizedLeg;
+        transactionId: string;
+      }> = [];
+      for (const leg of legs) {
+        const transactionId = await this.generateTransactionId();
+        // Ausente ⇒ pago exacto (igual que el escalar de hoy); nunca falsy.
+        const legReceived = leg.amount_received ?? leg.amount;
+        const payment = await tx.payments.create({
+          data: {
+            order_id: orderId,
+            store_payment_method_id: leg.store_payment_method_id,
+            bank_account_id:
+              resolvedBankAccountIds.get(leg) ?? leg.bank_account_id ?? null,
+            amount: leg.amount,
+            currency,
+            state: 'succeeded',
+            transaction_id: transactionId,
+            gateway_reference: leg.payment_reference ?? null,
+            paid_at: new Date(),
+            gateway_response: {
+              payment_type: 'direct',
+              amount_received: leg.amount_received,
+              change: leg.is_cash ? change : 0,
+              ...(leg.is_cash
+                ? { metadata: { amount_received: legReceived } }
+                : {}),
+            },
+          },
+        });
+        created.push({ payment, leg, transactionId });
+        // Plan order-truth-and-invoice-tz — un `payment_registered` por
+        // tramo, con el MISMO `tx` que el `payments.create` de arriba: si la
+        // transacción revierte, el evento revierte con ella.
+        if (historyCtx) {
+          await this.orderHistoryService?.record(tx, {
+            orderId,
+            storeId: historyCtx.storeId,
+            organizationId: historyCtx.organizationId ?? null,
+            type: 'payment_registered',
+            paymentId: payment.id,
+            amount: leg.amount,
+          });
+        }
+      }
+      return created;
+    });
   }
 
   /**
    * Compensación multimétodo — cancela TODAS las filas creadas en el intento
-   * con el mismo `cancellation_reason` (regla "un payment por intento").
+   * con el mismo `cancellation_reason` (regla "un payment por intento"), las
+   * `N` actualizaciones corren en una sola `$transaction` para que la
+   * compensación sea todo o nada.
    */
   private async cancelLegPayments(
     legPayments: Array<{ payment: any; leg: NormalizedLeg }>,
     cancellationReason: string,
   ): Promise<void> {
-    for (const { payment } of legPayments) {
-      await this.prisma.payments.update({
-        where: { id: payment.id },
-        data: {
-          state: 'cancelled',
-          updated_at: new Date(),
-          gateway_response: {
-            ...((payment.gateway_response as object) ?? {}),
-            cancellation_reason: cancellationReason,
+    await this.prisma.$transaction(async (tx) => {
+      for (const { payment } of legPayments) {
+        await tx.payments.update({
+          where: { id: payment.id },
+          data: {
+            state: 'cancelled',
+            updated_at: new Date(),
+            gateway_response: {
+              ...((payment.gateway_response as object) ?? {}),
+              cancellation_reason: cancellationReason,
+            },
           },
-        },
-      });
-    }
+        });
+      }
+    });
   }
 
   /**
@@ -6800,6 +6881,7 @@ export class OrderFlowService {
       store_payment_method_id: number;
       amount: number;
       change: number;
+      payment_method: string;
     }>;
   } {
     const payment = {
@@ -6815,6 +6897,7 @@ export class OrderFlowService {
         store_payment_method_id: leg.store_payment_method_id,
         amount: leg.amount,
         change: leg.is_cash ? change : 0,
+        payment_method: leg.display_name,
       })),
     };
   }

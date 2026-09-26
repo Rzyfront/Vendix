@@ -21,8 +21,8 @@ describe('normalizePaymentLegs', () => {
   const COD = 41;
 
   const methodsById: Record<number, PaymentLegMethodInfo> = {
-    [CASH]: { type: 'cash', processing_mode: 'DIRECT' },
-    [CASH_2]: { type: 'cash', processing_mode: 'DIRECT' },
+    [CASH]: { type: 'cash', processing_mode: 'DIRECT', display_name: 'Efectivo' },
+    [CASH_2]: { type: 'cash', processing_mode: 'DIRECT', display_name: 'Efectivo' },
     [TRANSFER]: { type: 'bank_transfer', processing_mode: 'ONLINE' },
     [CARD]: { type: 'card', processing_mode: 'DIRECT' },
     [WOMPI]: { type: 'wompi', processing_mode: 'ONLINE' },
@@ -58,6 +58,7 @@ describe('normalizePaymentLegs', () => {
         payment_reference: 'ref-1',
         bank_account_id: undefined,
         is_cash: false,
+        display_name: 'Unknown',
       },
     ]);
     expect(change).toBe(0);
@@ -223,5 +224,25 @@ describe('normalizePaymentLegs', () => {
         ),
       ErrorCodes.PAY_INVALID_AMOUNT_001.code,
     );
+  });
+
+  // Plan PLAN-pago-multimetodo-fixes paso 2 — `display_name` del tramo sale
+  // de `methodsById` (sin consultas nuevas) y alimenta `payments[].payment_method`
+  // de la respuesta de `flow/pay`.
+  it('display_name sale de methodsById por tramo; sin nombre en el mapa cae a Unknown', () => {
+    const { legs } = normalizePaymentLegs(
+      {
+        payments: [
+          { store_payment_method_id: CASH, amount: 20000, amount_received: 20000 },
+          { store_payment_method_id: TRANSFER, amount: 80000 },
+        ],
+      },
+      100000,
+      methodsById,
+    );
+    expect(legs.map((leg) => leg.display_name)).toEqual([
+      'Efectivo',
+      'Unknown',
+    ]);
   });
 });

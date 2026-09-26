@@ -4639,6 +4639,150 @@ describe('PaymentsService', () => {
       );
       expect(tx.payments.create).not.toHaveBeenCalled();
     });
+
+    /**
+     * Paso 3 del plan de pago multimétodo — la retención sufrida se
+     * reconoce UNA vez por orden: antes, cada tramo emitía `wh.lines`
+     * completo y la retención se contabilizaba N veces. Ahora se prorratea
+     * (`splitWithholdingLines`) proporcional al monto del tramo (20.000 /
+     * 80.000 ⇒ 1:4), con el residuo en el ÚLTIMO tramo.
+     */
+    describe('retención sufrida (cliente agente retenedor)', () => {
+      // Base 84.034 (subtotal de la venta): retefuente 2,5 % = 2.100,85;
+      // reteica 0,7 % = 588,24. `resolveSuffered` no se recalcula aquí — se
+      // mockea con el resultado que produciría la cadena de retenciones.
+      const WH_LINES = [
+        {
+          withholding_type: 'retefuente',
+          concept_code: 'RF-COMPRAS',
+          rate: 0.025,
+          base: 84034,
+          amount: 2100.85,
+          role: 'suffered',
+          account_role: 'withholding.suffered.retefuente_receivable',
+        },
+        {
+          withholding_type: 'reteica',
+          concept_code: 'RI-COMERCIO',
+          rate: 0.007,
+          base: 84034,
+          amount: 588.24,
+          role: 'suffered',
+          account_role: 'withholding.suffered.reteica_receivable',
+        },
+      ];
+
+      it('2 tramos: cada evento lleva su porción y Σ de los dos = wh.lines, al centavo', async () => {
+        arrangeMultiLegSale();
+        (service as any).withholdingFlow.resolveSuffered.mockResolvedValueOnce(
+          { lines: WH_LINES, uvt_value_used: 47065, counterparty_type: 'legal' },
+        );
+
+        await service.processPosPayment(buildMultiDto(), posUser);
+
+        const received = receivedPayloads();
+        expect(received).toHaveLength(2);
+
+        // Tramo 1 (efectivo, 20.000 de 100.000 ⇒ 1/5): floor hacia abajo.
+        expect(received[0].withholding_breakdown).toEqual([
+          expect.objectContaining({
+            concept_code: 'RF-COMPRAS',
+            withholding_type: 'retefuente',
+            amount: 420.17,
+          }),
+          expect.objectContaining({
+            concept_code: 'RI-COMERCIO',
+            withholding_type: 'reteica',
+            amount: 117.64,
+          }),
+        ]);
+        // Tramo 2 (transferencia, 80.000 ⇒ último): remanente exacto.
+        expect(received[1].withholding_breakdown).toEqual([
+          expect.objectContaining({
+            concept_code: 'RF-COMPRAS',
+            amount: 1680.68,
+          }),
+          expect.objectContaining({
+            concept_code: 'RI-COMERCIO',
+            amount: 470.6,
+          }),
+        ]);
+
+        // Σ por concepto entre los dos tramos = la línea original de wh.lines.
+        const cents = (n: number) => Math.round(n * 100);
+        const sumConcept = (concept: string) =>
+          received.reduce(
+            (sum, event) =>
+              sum +
+              cents(
+                (event.withholding_breakdown ?? []).find(
+                  (row: any) => row.concept_code === concept,
+                )?.amount ?? 0,
+              ),
+            0,
+          );
+        expect(sumConcept('RF-COMPRAS')).toBe(cents(2100.85));
+        expect(sumConcept('RI-COMERCIO')).toBe(cents(588.24));
+
+        // Σ total (las dos líneas, los dos tramos) = Σ wh.lines: la
+        // retención se reconoce una sola vez por orden, no N veces.
+        const totalReceived = received.reduce(
+          (sum, event) =>
+            sum +
+            (event.withholding_breakdown ?? []).reduce(
+              (lineSum: number, row: any) => lineSum + cents(row.amount),
+              0,
+            ),
+          0,
+        );
+        expect(totalReceived).toBe(cents(2100.85) + cents(588.24));
+
+        // La retención NO altera el reparto de venta ya garantizado por
+        // `resolvePaymentReceivedSaleFields`: cada evento sigue cumpliendo
+        // amount == (subtotal − descuento) + impuesto + flete + propina.
+        for (const event of received) {
+          expect(
+            cents(event.amount) + cents(event.discount_amount ?? 0),
+          ).toBe(
+            cents(event.subtotal_amount) +
+              cents(event.tax_amount) +
+              cents(event.shipping_amount ?? 0) +
+              cents(event.tip_amount ?? 0),
+          );
+        }
+
+        // Persistencia de `withholding_calculations`: UNA sola vez, con las
+        // líneas completas de la orden (no las porciones por tramo).
+        expect(
+          (service as any).withholdingFlow.persistWithholdingLines,
+        ).toHaveBeenCalledTimes(1);
+        expect(
+          (service as any).withholdingFlow.persistWithholdingLines,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({ lines: WH_LINES }),
+        );
+      });
+
+      it('regresión escalar: un solo tramo sigue enviando wh.lines intacto (sin prorratear)', async () => {
+        arrangeMultiLegSale();
+        (service as any).withholdingFlow.resolveSuffered.mockResolvedValueOnce(
+          { lines: WH_LINES, uvt_value_used: 47065, counterparty_type: 'legal' },
+        );
+
+        await service.processPosPayment(
+          buildMultiDto({
+            payments: undefined,
+            store_payment_method_id: CASH_METHOD_ID,
+            amount_received: 120000,
+          }),
+          posUser,
+        );
+
+        const received = receivedPayloads();
+        expect(received).toHaveLength(1);
+        expect(received[0].withholding_breakdown).toEqual(WH_LINES);
+      });
+    });
   });
 });
 

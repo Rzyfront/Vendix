@@ -32,6 +32,14 @@ export interface PaymentLegMethodInfo {
   type: string;
   /** `system_payment_methods.processing_mode` (`DIRECT`, `ONLINE`, `ON_DELIVERY`). */
   processing_mode?: string | null;
+  /**
+   * Nombre visible del método (mismo fallback que ya usa la respuesta del
+   * POS: `store_payment_methods.display_name` primero, luego
+   * `system_payment_methods.display_name`, nunca vacío). Opcional aquí
+   * porque el llamador construye el mapa; `normalizePaymentLegs` cae a
+   * `'Unknown'` si falta.
+   */
+  display_name?: string;
 }
 
 /** Un tramo tal como llega en el DTO (`payments[]`). */
@@ -65,6 +73,12 @@ export interface NormalizedLeg {
   bank_account_id?: number;
   /** True sólo en el (a lo sumo único) tramo en efectivo. */
   is_cash: boolean;
+  /**
+   * Nombre visible del método de este tramo (`payments[].payment_method` en
+   * la respuesta de `flow/pay`, igual que ya expone el POS). Sale de
+   * `methodsById`, sin consultas nuevas.
+   */
+  display_name: string;
 }
 
 export interface NormalizedPaymentLegs {
@@ -144,6 +158,7 @@ export function normalizePaymentLegs(
       payment_reference: raw.payment_reference,
       bank_account_id: raw.bank_account_id,
       is_cash: isCashMethod(method),
+      display_name: method.display_name || 'Unknown',
     };
   });
 

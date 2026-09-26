@@ -101,7 +101,10 @@ import {
   type ShippingTaxSnapshot,
 } from '../shipping/utils/shipping-tax.util';
 import { buildOrderSaleTaxPayload } from './utils/order-sale-tax-payload.util';
-import { resolvePaymentReceivedSaleFields } from './utils/payment-sale-share.util';
+import {
+  resolvePaymentReceivedSaleFields,
+  splitWithholdingLines,
+} from './utils/payment-sale-share.util';
 import type { PaymentReceivedSaleFields } from './utils/payment-sale-share.util';
 import {
   normalizePaymentLegs,
@@ -1758,7 +1761,15 @@ export class PaymentsService {
                 payment.leg_payments.length > 0
                   ? payment.leg_payments
                   : [payment];
-              for (const legPayment of emittedPayments) {
+              // La retención se reconoce UNA vez por orden: se prorratea
+              // entre los tramos en proporción a su monto (residuo en el
+              // último), igual que `sale_share`. Con un solo tramo (escalar
+              // o multimétodo de un solo pago) devuelve `wh.lines` intacto.
+              const withholdingByLeg = splitWithholdingLines(
+                wh.lines,
+                emittedPayments.map((legPayment) => Number(legPayment.amount)),
+              );
+              for (const [legIndex, legPayment] of emittedPayments.entries()) {
                 const share = legPayment.sale_share as
                   | PaymentReceivedSaleFields
                   | undefined;
@@ -1782,7 +1793,7 @@ export class PaymentsService {
                   tax_breakdown: share
                     ? (share.tax_breakdown ?? [])
                     : tax_breakdown,
-                  withholding_breakdown: wh.lines,
+                  withholding_breakdown: withholdingByLeg[legIndex] ?? [],
                   // Con descuento de orden: sólo su parte de BASE (4175); el
                   // impuesto ya viene neto del descuento (misma proyección que
                   // la factura). Sin descuento = `orders.discount_amount`.
