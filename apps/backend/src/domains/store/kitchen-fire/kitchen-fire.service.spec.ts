@@ -156,7 +156,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     Pick<StockLevelManager, 'updateStock' | 'getDefaultLocationForProduct'>
   >;
   let stockValidatorService: jest.Mocked<
-    Pick<StockValidatorService, 'assertIngredientsAvailable'>
+    Pick<StockValidatorService, 'assertIngredientsAvailable' | 'resolveInventoryPolicy'>
   >;
   let eventEmitter: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let prismaMock: any;
@@ -343,8 +343,16 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
     // step 6): resolves as available by default so the pre-existing smoke
     // tests are unaffected; tests exercising the guard itself override this.
+    // Step 9: `resolveInventoryPolicy` defaults to the strict/pre-switch
+    // policy (no oversell, ingredient overuse allowed only via warn) so the
+    // existing smoke tests keep exercising the step-6 blocking guard;
+    // tests exercising the step-9 switches override this per-case.
     stockValidatorService = {
-      assertIngredientsAvailable: jest.fn().mockResolvedValue(undefined),
+      assertIngredientsAvailable: jest.fn().mockResolvedValue([]),
+      resolveInventoryPolicy: jest.fn().mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: false,
+      }),
     } as any;
 
     eventEmitter = { emit: jest.fn() } as any;
@@ -1587,9 +1595,12 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       // demand — and resolved (an untracked ingredient / sufficient stock is
       // the validator's call, kitchen-fire only trusts its verdict).
       expect(stockValidatorService.assertIngredientsAvailable).toHaveBeenCalledTimes(1);
-      expect(stockValidatorService.assertIngredientsAvailable).toHaveBeenCalledWith([
-        expect.objectContaining({ product_id: 201, used_by: 'Plato 10' }),
-      ]);
+      expect(stockValidatorService.assertIngredientsAvailable).toHaveBeenCalledWith(
+        [expect.objectContaining({ product_id: 201, used_by: 'Plato 10' })],
+        // Plan step 9 — the pre-check now also carries the store's resolved
+        // "Permitir sobre-uso de insumos" policy alongside the demand array.
+        expect.objectContaining({ allowIngredientOveruse: expect.any(Boolean) }),
+      );
 
       // Consumption still happens — the guard passing does not short-circuit
       // the real per-leaf `updateStock` call, which validates again in-tx
