@@ -43,6 +43,7 @@ import { ErrorCodes } from '@common/errors/error-codes';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { isOrderFullyPaid } from '../../payments/services/payment-validator.service';
+import { canPay } from './order-action-policy.util';
 import {
   CancelOrderItemDto,
   CancelDeliveredOrderItemDto,
@@ -128,21 +129,24 @@ export class OrderFlowController {
     // no longer in the action list. The action-set lookup is read-only and
     // uses the same `getOrder`/`state` resolution as the rest of the flow.
     //
-    // QUI-POS-E2E: BUT `getAvailableActions` no incluye `pay` para `draft`
-    // (el SFM espera `created`+), aunque `OrderFlowService.payOrder` SÍ
-    // auto-promueve `draft → created` con `promoteDraftToCreated`. Si
-    // aplicáramos el gate ciegamente, los drafts POS nuevos no podrían
-    // pagarse nunca desde el editor (CP-POS-CREAR-EDITAR-COBRAR-001 happy
-    // path). Excluimos `draft` del gate y dejamos que `payOrder` haga la
-    // promoción idempotente.
-    const availableActions =
-      await this.orderFlowService.getAvailableActions(orderId);
-    const payAction = (availableActions as any[])?.find?.(
-      (a) => a?.code === 'pay',
-    );
+    // QUI-POS-E2E: BUT the `pay` predicate does not enable `draft` (el SFM
+    // espera `created`+), aunque `OrderFlowService.payOrder` SÍ auto-promueve
+    // `draft → created` con `promoteDraftToCreated`. Si aplicáramos el gate
+    // ciegamente, los drafts POS nuevos no podrían pagarse nunca desde el
+    // editor (CP-POS-CREAR-EDITAR-COBRAR-001 happy path). Excluimos `draft`
+    // del gate y dejamos que `payOrder` haga la promoción idempotente.
+    //
+    // order-truth-and-invoice-tz plan (B1b) — this used to peek at
+    // `getAvailableActions()` and look up its `pay` row, an extra query that
+    // ran the FULL action-list computation just to read one boolean. Now
+    // calls the pure `canPay` predicate directly on the already-fetched
+    // `orderRow` — the SAME predicate `OrderFlowService.payOrder`'s internal
+    // guard (and `getAvailableActions`'s own `pay` row) agree with, so this
+    // gate can never diverge from what the service actually allows.
     const orderRow = await this.orderFlowService.getOrder(orderId);
     const isDraft = orderRow?.state === 'draft';
-    const payEnabled = isDraft || !!payAction?.enabled;
+    const payDecision = canPay(orderRow);
+    const payEnabled = isDraft || payDecision.enabled;
 
     if (!payEnabled) {
       // The action gate runs before payOrder's locked validator. After a
@@ -163,10 +167,9 @@ export class OrderFlowController {
         undefined,
         {
           order_id: orderId,
-          available_actions: (availableActions as any[])?.map?.(
-            (a) => a?.code,
-          ),
-          reason: 'pay is not in the available actions for this order state',
+          reason:
+            payDecision.reason ??
+            'pay is not in the available actions for this order state',
         },
       );
     }

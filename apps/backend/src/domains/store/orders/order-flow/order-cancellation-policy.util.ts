@@ -81,14 +81,23 @@ export function hasNonDirectSettledPayment(
   });
 }
 
-/** States where B4 (release-855) allows `cancelPayment` to void a settled,
- * direct-only payment and land the order back on `delivered` so it can be
- * re-charged through `payOrder`. Does not replace the invoice/direct-method
- * checks that `OrderFlowService.cancelPayment` still runs — this is only the
+/** States where `cancelPayment` may void a settled, direct-only payment
+ * without collapsing the order back to `created` — the goods already left,
+ * so it lands back on the SAME state (`shipped` stays `shipped`, `delivered`
+ * stays `delivered`) so `payOrder` can re-charge it from there.
+ *
+ * B1b (order-truth-and-invoice-tz plan) widened this from B4 (release-855)'s
+ * original `{delivered, finished}`: `shipped` is now included (an unpaid
+ * shipped order — e.g. COD — must be able to void/re-collect its payment),
+ * and `finished` was REMOVED — once an order is finalized, a local payment
+ * void is no longer the right instrument; `cancelPayment` hard-rejects
+ * `finished` with `ORD_PAYMENT_CANCEL_FINISHED_001` and a refund is the only
+ * path back. Does not replace the invoice/direct-method checks that
+ * `OrderFlowService.cancelPayment` still runs — this is only the
  * state-eligibility half of the guard. */
-export const DELIVERED_FINISHED_PAYMENT_CANCELABLE_STATES = new Set([
+export const FULFILLED_PAYMENT_CANCELABLE_STATES = new Set([
+  'shipped',
   'delivered',
-  'finished',
 ]);
 
 /**
@@ -117,22 +126,25 @@ export function getCancellationBlocker(
 }
 
 /**
- * B4 (release-855) — `delivered`/`finished` money-only payment reversal
- * (see `OrderFlowService.cancelPayment`'s delivered/finished branch and
- * `DELIVERED_FINISHED_PAYMENT_CANCELABLE_STATES`). This is intentionally
- * advisory and NOT the full authority: it only knows the direct-vs-gateway
- * method signal available on this synchronous snapshot. It does NOT know
- * whether a sales invoice has already been issued to DIAN for the order —
- * that requires an async `invoices` lookup this pure/list-friendly function
- * cannot perform (it also backs the orders LIST endpoint, one call per
- * order). `OrderFlowService.cancelPayment` re-checks both conditions
- * authoritatively and can still reject with `ORD_PAYMENT_CANCEL_INVOICED_001`
- * even when this returns `true`.
+ * B4 (release-855) / B1b (order-truth-and-invoice-tz plan) — `shipped`/
+ * `delivered` money-only payment reversal (see `OrderFlowService
+ * .cancelPayment`'s fulfilled-state branch and
+ * `FULFILLED_PAYMENT_CANCELABLE_STATES`). `finished` is intentionally
+ * excluded here — it is a hard reject at the service (
+ * `ORD_PAYMENT_CANCEL_FINISHED_001`), never a policy `true`. This is
+ * intentionally advisory and NOT the full authority: it only knows the
+ * direct-vs-gateway method signal available on this synchronous snapshot. It
+ * does NOT know whether a sales invoice has already been issued to DIAN for
+ * the order — that requires an async `invoices` lookup this pure/list-
+ * friendly function cannot perform (it also backs the orders LIST endpoint,
+ * one call per order). `OrderFlowService.cancelPayment` re-checks both
+ * conditions authoritatively and can still reject with
+ * `ORD_PAYMENT_CANCEL_INVOICED_001` even when this returns `true`.
  */
-function canCancelDeliveredOrFinishedPayment(
+function canCancelFulfilledPayment(
   order: OrderCancellationSnapshot,
 ): boolean {
-  if (!DELIVERED_FINISHED_PAYMENT_CANCELABLE_STATES.has(order.state)) {
+  if (!FULFILLED_PAYMENT_CANCELABLE_STATES.has(order.state)) {
     return false;
   }
   const hasSettledPayment = (order.payments ?? []).some((payment) =>
@@ -155,7 +167,7 @@ export function getOrderCancellationPolicy(
     can_cancel: reason_code === null && CANCELABLE_STATES.has(order.state),
     can_cancel_payment:
       (reason_code === null && PAYMENT_CANCELABLE_STATES.has(order.state)) ||
-      canCancelDeliveredOrFinishedPayment(order),
+      canCancelFulfilledPayment(order),
     reason_code,
   };
 }

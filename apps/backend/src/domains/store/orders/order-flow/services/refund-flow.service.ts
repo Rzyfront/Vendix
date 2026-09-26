@@ -54,8 +54,13 @@ import {
   API_REVERSIBLE_REFUND_PROCESSORS,
   type EffectiveRefundChannel,
 } from './refund-channel.util';
+import { REFUNDABLE_ORDER_STATES } from '../order-action-policy.util';
 
-const REFUNDABLE_STATES = ['delivered', 'finished'];
+// order-truth-and-invoice-tz plan (B1b) — was a hand-synced local copy of
+// `['delivered', 'finished']`; now reuses the single source of truth in
+// `order-action-policy.util.ts` (`canRefund`/`getAvailableActions` read the
+// same array) so this guard can never drift from the read-side action list.
+const REFUNDABLE_STATES: ReadonlyArray<string> = REFUNDABLE_ORDER_STATES;
 
 /** ADR-12 — prefix of the deterministic `refund_transaction_id` placeholders
  * that `recordCancellationPendingRefunds` stamps on cancellation refunds.
