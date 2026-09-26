@@ -11,6 +11,7 @@ import {
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import {
   ControlValueAccessor,
@@ -225,17 +226,40 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
   private onTouched: () => void = () => {};
 
   /**
+   * B9 — whether `[value]` has ever carried a non-null id. Plain field (not a
+   * signal): it must NOT become a dependency of `syncValueInput` below — the
+   * effect is only allowed to depend on `this.value()`.
+   *
+   * Consumers that use this component as a CVA (`formControlName`/`ngModel`,
+   * the 5 form screens) never bind `[value]` at all, so it stays at its
+   * default `null` forever. Without this flag, that default is
+   * indistinguishable from "the caller explicitly cleared it", and the effect
+   * would `selected.set(null)` right after every `writeValue()`/`select()` —
+   * see the regression this fixes.
+   */
+  private receivedValueInput = false;
+
+  /**
    * B9 — mirrors `writeValue` for the non-CVA `value` input: resolves the
    * incoming id to a name once (skips when it already matches `selected()`,
    * so it never fights the user's own in-progress `select()`).
+   *
+   * Depends ONLY on `this.value()` — `selected()` is read via `untracked()`
+   * so this effect never re-runs just because CVA's `writeValue()`/`select()`
+   * changed `selected` (that used to make the effect re-fire, read the
+   * never-bound `value()` as `null`, and wipe out the CVA selection).
+   * While `[value]` has never carried a non-null id (CVA mode), the effect is
+   * a no-op: it never touches `selected` at all.
    */
   private readonly syncValueInput = effect(() => {
     const id = this.value();
     if (id == null) {
-      if (this.selected() !== null) this.selected.set(null);
+      if (!this.receivedValueInput) return; // CVA mode: `[value]` isn't bound — don't touch it.
+      if (untracked(() => this.selected()) !== null) this.selected.set(null);
       return;
     }
-    if (this.selected()?.id === id) return;
+    this.receivedValueInput = true;
+    if (untracked(() => this.selected())?.id === id) return;
     this.lookup
       .getById(id, { mode: this.lookupMode() })
       .pipe(takeUntilDestroyed(this.destroyRef))
