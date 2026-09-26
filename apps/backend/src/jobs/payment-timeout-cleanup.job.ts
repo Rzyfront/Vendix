@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { syncDenormalizedProductStock } from '../domains/store/inventory/shared/helpers/sync-product-stock.helper';
+import { OrderHistoryService } from '../domains/store/orders/order-history/order-history.service';
 
 @Injectable()
 export class PaymentTimeoutCleanupJob {
@@ -11,6 +12,8 @@ export class PaymentTimeoutCleanupJob {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly eventEmitter: EventEmitter2,
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    private readonly orderHistory: OrderHistoryService,
   ) {}
 
   /**
@@ -40,7 +43,12 @@ export class PaymentTimeoutCleanupJob {
             none: { state: 'succeeded' },
           },
         },
-        select: { id: true, order_number: true, store_id: true },
+        select: {
+          id: true,
+          order_number: true,
+          store_id: true,
+          stores: { select: { organization_id: true } },
+        },
         take: 50, // Process in batches
       });
 
@@ -138,6 +146,7 @@ export class PaymentTimeoutCleanupJob {
     id: number;
     order_number: string;
     store_id: number;
+    stores?: { organization_id: number | null } | null;
   }) {
     await this.prisma.$transaction(async (tx) => {
       // Find active reservations for this order
@@ -198,6 +207,19 @@ export class PaymentTimeoutCleanupJob {
             'Pago no completado - cancelación automática por timeout (2h)',
           updated_at: new Date(),
         },
+      });
+
+      // Plan order-truth-and-invoice-tz (Step 6) — job en background, sin
+      // actor HTTP: source explícito 'job'. `fromState` es literal porque el
+      // query de `staleOrders` ya filtró `state: 'pending_payment'`.
+      await this.orderHistory.record(tx, {
+        orderId: order.id,
+        storeId: order.store_id,
+        organizationId: order.stores?.organization_id ?? undefined,
+        type: 'state_changed',
+        fromState: 'pending_payment',
+        toState: 'cancelled',
+        source: 'job',
       });
 
       // Cancel any pending payments

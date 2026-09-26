@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { Prisma, payment_processing_mode_enum, table_status_enum } from '@prisma/client';
+import { Prisma, payment_processing_mode_enum, table_status_enum, order_state_enum } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
@@ -104,6 +104,7 @@ import {
   normalizePaymentLegs,
   type PaymentLegMethodInfo,
 } from './utils/payment-legs.util';
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -191,6 +192,8 @@ export class PaymentsService {
     // `@Optional()` por la misma razón; sin él una tarifa calculada sale sin
     // impuesto (fallo seguro: nunca se inventa un impuesto).
     @Optional() private readonly shippingCalculatorService?: ShippingCalculatorService,
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    private readonly orderHistory: OrderHistoryService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -1441,6 +1444,11 @@ export class PaymentsService {
             order.delivery_type === 'home_delivery' ||
               (hasSerialized && !isImmediateHandover),
             hasKitchenItems,
+            {
+              fromState: order.state,
+              storeId: order.store_id,
+              organizationId: order.stores?.organization_id,
+            },
           );
         } else if (isDigitalPayment) {
           // Digital methods (Wompi, wallet) — mark as pending, process AFTER commit
@@ -1452,6 +1460,11 @@ export class PaymentsService {
             order.delivery_type === 'home_delivery' ||
               (hasSerialized && !isImmediateHandover),
             hasKitchenItems,
+            {
+              fromState: order.state,
+              storeId: order.store_id,
+              organizationId: order.stores?.organization_id,
+            },
           );
         } else if (!createPosPaymentDto.is_draft) {
           // Credit sale - update order status
@@ -1464,6 +1477,11 @@ export class PaymentsService {
             order.delivery_type === 'home_delivery' ||
               (hasSerialized && !isImmediateHandover),
             hasKitchenItems,
+            {
+              fromState: order.state,
+              storeId: order.store_id,
+              organizationId: order.stores?.organization_id,
+            },
           );
         }
 
@@ -2195,9 +2213,18 @@ export class PaymentsService {
               'cancelled',
             );
             // Then revert order state
+            const revertFromState = result.order.state;
             await this.prisma.orders.update({
               where: { id: result.order.id },
               data: { state: 'created', updated_at: new Date() },
+            });
+            await this.orderHistory.record(this.prisma, {
+              orderId: result.order.id,
+              storeId: createPosPaymentDto.store_id,
+              organizationId: result.order.stores?.organization_id ?? undefined,
+              type: 'state_changed',
+              fromState: revertFromState,
+              toState: 'created' as order_state_enum,
             });
           } catch (revertErr) {
             this.logger.error(
@@ -3861,7 +3888,11 @@ export class PaymentsService {
 
     const session = await tx.table_sessions.findUnique({
       where: { id: tableSessionId },
-      include: { order: true },
+      include: {
+        order: {
+          include: { stores: { select: { organization_id: true } } },
+        },
+      },
     });
     if (!session) {
       throw new VendixHttpException(
@@ -4063,6 +4094,25 @@ export class PaymentsService {
       },
       include: { order_items: true, stores: true },
     });
+
+    // Plan order-truth-and-invoice-tz (Step 6) — sólo se registra si el
+    // cierre realmente trajo un customer_id nuevo y distinto del que ya
+    // tenía la orden de la mesa (una venta anónima repetida no es un cambio).
+    if (
+      dto.customer_id != null &&
+      dto.customer_id !== session.order?.customer_id
+    ) {
+      await this.orderHistory.record(tx, {
+        orderId: session.order_id,
+        storeId: dtoStoreId,
+        organizationId: session.order?.stores?.organization_id ?? undefined,
+        type: 'customer_changed',
+        payload: {
+          from_customer_id: session.order?.customer_id ?? null,
+          to_customer_id: dto.customer_id,
+        },
+      });
+    }
 
     // ----------------------------------------------------------------
     // Plan KDS fire-flows (B6): auto-fire the pending `prepared` items
@@ -4642,6 +4692,7 @@ export class PaymentsService {
             id: true, order_number: true, state: true,
             subtotal_amount: true, tax_amount: true,
             shipping_address_id: true,
+            stores: { select: { organization_id: true } },
           },
         })
       : null;
@@ -4671,6 +4722,14 @@ export class PaymentsService {
           `La orden ${orderLabel} cambió mientras se cobraba. Actualiza la lista de órdenes antes de intentarlo de nuevo.`,
         );
       }
+      await this.orderHistory.record(tx, {
+        orderId: existingOrder.id,
+        storeId: dtoStoreId,
+        organizationId: existingOrder.stores?.organization_id ?? undefined,
+        type: 'state_changed',
+        fromState: existingOrder.state as order_state_enum,
+        toState: 'created' as order_state_enum,
+      });
       const paid = await tx.payments.findFirst({
         where: {
           order_id: existingOrder.id,
@@ -5198,6 +5257,15 @@ export class PaymentsService {
       // Aditivo y seguro para N llamadas: re-lee el total fresco en `tx`.
       await this.applyOrderBalanceOnPayment(tx, order.id, leg.amount);
 
+      await this.orderHistory.record(tx, {
+        orderId: order.id,
+        storeId: dtoStoreId,
+        organizationId: order.stores?.organization_id ?? undefined,
+        type: 'payment_registered',
+        paymentId: payment.id,
+        amount: leg.amount,
+      });
+
       // Secuencial por construcción: en este punto sólo existen en `tx` los
       // tramos anteriores, así que son los únicos `prior_amounts` y el último
       // tramo toma el remanente exacto.
@@ -5462,6 +5530,15 @@ export class PaymentsService {
     // punto). El helper re-lee grand_total fresco dentro del `tx`.
     await this.applyOrderBalanceOnPayment(tx, order.id, payableAmount);
 
+    await this.orderHistory.record(tx, {
+      orderId: order.id,
+      storeId: dtoStoreId,
+      organizationId: order.stores?.organization_id ?? undefined,
+      type: 'payment_registered',
+      paymentId: payment.id,
+      amount: payableAmount,
+    });
+
     // La respuesta lee el vuelto de `payment.change` top-level, pero esta
     // rama directa sólo lo dejaba en `gateway_response.change` (la de
     // pasarela sí lo fija, arriba). Sin esto el vuelto nunca llegaba al
@@ -5537,6 +5614,14 @@ export class PaymentsService {
     paymentState: string,
     deferToFulfillment = false,
     hasKitchenItems = false,
+    // Plan order-truth-and-invoice-tz (Step 6) — el estado previo viene del
+    // objeto `order` en memoria del llamador (nunca de una relectura), y
+    // storeId/organizationId son obligatorios para OrderHistoryService.record.
+    historyCtx?: {
+      fromState: order_state_enum;
+      storeId: number;
+      organizationId?: number | null;
+    },
   ) {
     let orderState: string;
     const additionalData: any = { updated_at: new Date() };
@@ -5602,6 +5687,17 @@ export class PaymentsService {
         ...additionalData,
       },
     });
+
+    if (historyCtx) {
+      await this.orderHistory.record(tx, {
+        orderId,
+        storeId: historyCtx.storeId,
+        organizationId: historyCtx.organizationId ?? undefined,
+        type: 'state_changed',
+        fromState: historyCtx.fromState,
+        toState: orderState as order_state_enum,
+      });
+    }
   }
 
   /**
@@ -6039,6 +6135,16 @@ export class PaymentsService {
       payment.order_id,
       Number(payment.amount),
     );
+
+    // Plan order-truth-and-invoice-tz (Step 6).
+    await this.orderHistory.record(tx, {
+      orderId: payment.order_id,
+      storeId: staffUser.store_id,
+      organizationId: payment.orders?.stores?.organization_id ?? undefined,
+      type: 'payment_registered',
+      paymentId: payment.id,
+      amount: Number(payment.amount),
+    });
 
     // 3. Emit `payment.received` with the SAME shape as the POS fresh-sale
     //    path (payments.service.ts L1179) so the auto-entry listener maps

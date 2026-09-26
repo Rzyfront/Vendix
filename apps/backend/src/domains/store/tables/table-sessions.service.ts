@@ -34,6 +34,7 @@ import { resolvePriceUnitScale } from '../products/services/price-unit.util';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 import type { CancellationType } from './dto';
 import { ReassignTableSessionDto } from './dto/table-session.dto';
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 /**
  * QUI-INC — fila de impuesto COMPLETA de una línea de cuenta abierta: lo que
@@ -291,6 +292,9 @@ export class TableSessionsService {
       OrderFlowService,
       'cancelOrderItem' | 'deliverOrderItem'
     >,
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
+    private readonly orderHistory: OrderHistoryService,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -2526,6 +2530,19 @@ export class TableSessionsService {
       data: { customer_id: customerId, customer_alias: null, updated_at: new Date() },
     });
 
+    // Plan order-truth-and-invoice-tz (Step 6) — sólo se registra si el
+    // cliente vinculado realmente cambió (asignar el mismo cliente dos veces
+    // o desasignar una mesa ya anónima no es un cambio).
+    const priorCustomerId = session.order?.customer?.id ?? null;
+    if (priorCustomerId !== customerId) {
+      await this.orderHistory.record(this.prisma, {
+        orderId: session.order_id,
+        storeId,
+        type: 'customer_changed',
+        payload: { from_customer_id: priorCustomerId, to_customer_id: customerId },
+      });
+    }
+
     this.logger.log(
       `Table session customer ${
         customerId == null ? 'detached' : `set to ${customerId}`
@@ -2733,6 +2750,16 @@ export class TableSessionsService {
         order.id,
         Number(payment.amount),
       );
+
+      // Plan order-truth-and-invoice-tz (Step 6).
+      await this.orderHistory.record(tx, {
+        orderId: order.id,
+        storeId,
+        organizationId: order.stores?.organization_id ?? undefined,
+        type: 'payment_registered',
+        paymentId: payment.id,
+        amount: Number(payment.amount),
+      });
 
       // 6. Emit canonical `payment.received`. Shape mirrors the POS fresh-sale
       //    emit (payments.service.ts L1179) so the auto-entry listener + the

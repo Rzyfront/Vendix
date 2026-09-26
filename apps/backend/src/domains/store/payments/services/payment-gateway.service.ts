@@ -19,6 +19,7 @@ import { PaymentValidatorService } from './payment-validator.service';
 import { PaymentError, PaymentErrorCodes } from '../utils';
 import { BasePaymentProcessor } from '../interfaces/base-processor.interface';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
+import { OrderHistoryService } from '../../orders/order-history/order-history.service';
 
 @Injectable()
 export class PaymentGatewayService {
@@ -29,6 +30,11 @@ export class PaymentGatewayService {
     private validatorService: PaymentValidatorService,
     private s3Service: S3Service,
     @Optional() private readonly paymentEncryption?: PaymentEncryptionService,
+    // Plan order-truth-and-invoice-tz (Step 6). `@Optional()` matches this
+    // file's existing convention for tail deps so specs that construct this
+    // service positionally without it keep compiling; guarded at each call
+    // site below.
+    @Optional() private readonly orderHistory?: OrderHistoryService,
   ) {}
 
   /**
@@ -630,7 +636,10 @@ export class PaymentGatewayService {
   private async updateOrderStatus(orderId: number) {
     const order = await this.prisma.orders.findUnique({
       where: { id: orderId },
-      include: { payments: true },
+      include: {
+        payments: true,
+        stores: { select: { organization_id: true } },
+      },
     });
 
     if (!order) return;
@@ -639,6 +648,7 @@ export class PaymentGatewayService {
       .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
       .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
 
+    const previousState = order.state;
     let newState = order.state;
 
     if (totalPaid >= Number(order.grand_total)) {
@@ -658,6 +668,18 @@ export class PaymentGatewayService {
           state: newState,
           updated_at: new Date(),
         },
+      });
+      // Plan order-truth-and-invoice-tz (Step 6) — pasarela de pago
+      // (webhook/HTTP confirmado por el gateway, nunca directamente por el
+      // usuario), de ahí source:'webhook' explícito.
+      await this.orderHistory?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: (order as any).stores?.organization_id ?? undefined,
+        type: 'state_changed',
+        fromState: previousState,
+        toState: newState,
+        source: 'webhook',
       });
     }
   }
@@ -754,6 +776,7 @@ export class PaymentGatewayService {
       include: {
         payments: true,
         refunds: true,
+        stores: { select: { organization_id: true } },
       },
     });
 
@@ -770,12 +793,24 @@ export class PaymentGatewayService {
     const netAmount = totalPaid - totalRefunded;
 
     if (netAmount <= 0 && totalRefunded > 0) {
+      const previousState = order.state;
       await this.prisma.orders.update({
         where: { id: orderId },
         data: {
           state: 'refunded',
           updated_at: new Date(),
         },
+      });
+      // Plan order-truth-and-invoice-tz (Step 6) — mismo criterio de
+      // origen que `updateOrderStatus`: confirmación de pasarela.
+      await this.orderHistory?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: (order as any).stores?.organization_id ?? undefined,
+        type: 'state_changed',
+        fromState: previousState,
+        toState: 'refunded',
+        source: 'webhook',
       });
     }
   }
