@@ -6,6 +6,14 @@ import {
   canCancel,
   canAssignShipping,
   canConfirmDelivery,
+  canEditOrder,
+  canReactivate,
+  canFastTrack,
+  canCreditPayment,
+  canDispatchOrder,
+  canManualShip,
+  canReadyForPickupBeforePayment,
+  canDirectDeliver,
   canDeliverItem,
   canCancelItem,
   canReverseDeliveredItem,
@@ -405,5 +413,250 @@ describe('order-action-policy — computeOrderActions', () => {
     );
     const cancelPayment = actions.find((a) => a.code === 'cancel_payment');
     expect(cancelPayment).toEqual({ code: 'cancel_payment', enabled: false, reason: 'FORBIDDEN' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// order-truth-and-invoice-tz plan — Step 1b predicates (new order-level
+// action codes added alongside `getAvailableActions`'s rewrite).
+// ---------------------------------------------------------------------------
+
+describe('order-action-policy — canEditOrder', () => {
+  it.each(['draft', 'created'])('enables edit for owner/admin on %s', (state) =>
+    expect(canEditOrder(order({ state }), { roles: ['owner'] })).toEqual({ enabled: true }),
+  );
+
+  it.each(['pending_payment', 'processing', 'shipped', 'delivered', 'finished', 'cancelled'])(
+    'disables edit outside draft/created: %s',
+    (state) => expect(canEditOrder(order({ state }), { roles: ['owner'] }).enabled).toBe(false),
+  );
+
+  it('rejects a non-owner/admin role with FORBIDDEN', () => {
+    expect(canEditOrder(order({ state: 'draft' }), { roles: ['cashier'] })).toEqual({
+      enabled: false,
+      reason: 'FORBIDDEN',
+    });
+  });
+
+  it('rejects when the order is financial-split locked, even for owner', () => {
+    expect(
+      canEditOrder(order({ state: 'draft', active_financial_split_id: 9 }), { roles: ['owner'] }),
+    ).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+  });
+});
+
+describe('order-action-policy — canReactivate', () => {
+  it('enables only on cancelled', () => {
+    expect(canReactivate({ state: 'cancelled' })).toEqual({ enabled: true });
+  });
+
+  it.each(['draft', 'created', 'pending_payment', 'processing', 'shipped', 'delivered', 'finished'])(
+    'disables outside cancelled: %s',
+    (state) => expect(canReactivate({ state }).enabled).toBe(false),
+  );
+});
+
+describe('order-action-policy — canFastTrack', () => {
+  const FAST_TRACK_STATE = 'ORD_FAST_TRACK_INVALID_STATE_001';
+  const SHIP_REQUIRED_FOR_FLOW = 'ORD_SHIP_REQUIRED_FOR_FLOW_001';
+
+  it.each(['finished', 'cancelled', 'refunded'])('rejects a terminal state: %s', (state) =>
+    expect(canFastTrack({ state, delivery_type: 'direct_delivery', hasOrderItems: true })).toEqual({
+      enabled: false,
+      reason: FAST_TRACK_STATE,
+    }),
+  );
+
+  it('requires a shipping method for a non-direct-delivery order', () => {
+    expect(
+      canFastTrack({
+        state: 'processing',
+        delivery_type: 'shipping',
+        shipping_method_id: null,
+        hasOrderItems: true,
+      }),
+    ).toEqual({ enabled: false, reason: SHIP_REQUIRED_FOR_FLOW });
+  });
+
+  it('rejects an order with no items', () => {
+    expect(
+      canFastTrack({ state: 'processing', delivery_type: 'direct_delivery', hasOrderItems: false }),
+    ).toEqual({ enabled: false });
+  });
+
+  it('allows a direct_delivery order with items in a non-terminal state', () => {
+    expect(
+      canFastTrack({ state: 'pending_payment', delivery_type: 'direct_delivery', hasOrderItems: true }),
+    ).toEqual({ enabled: true });
+  });
+
+  it('allows a shipping order once a method is assigned', () => {
+    expect(
+      canFastTrack({
+        state: 'processing',
+        delivery_type: 'shipping',
+        shipping_method_id: 4,
+        hasOrderItems: true,
+      }),
+    ).toEqual({ enabled: true });
+  });
+});
+
+describe('order-action-policy — canCreditPayment', () => {
+  it('disables for a non-credit order (payment_form !== "2")', () => {
+    expect(canCreditPayment({ state: 'pending_payment', payment_form: '1' })).toEqual({
+      enabled: false,
+    });
+  });
+
+  it('disables when financial-split locked, even a credit order in pending_payment', () => {
+    expect(
+      canCreditPayment({ state: 'pending_payment', payment_form: '2', active_financial_split_id: 3 }),
+    ).toEqual({ enabled: false, reason: SPLIT_LOCKED });
+  });
+
+  it('enables unconditionally for a credit order in pending_payment', () => {
+    expect(canCreditPayment({ state: 'pending_payment', payment_form: '2' })).toEqual({
+      enabled: true,
+    });
+  });
+
+  it('enables in finished only while remaining_balance exceeds the 0.01 threshold', () => {
+    expect(canCreditPayment({ state: 'finished', payment_form: '2', remaining_balance: 50 })).toEqual({
+      enabled: true,
+    });
+    expect(canCreditPayment({ state: 'finished', payment_form: '2', remaining_balance: 0 })).toEqual({
+      enabled: false,
+    });
+  });
+
+  it('disables outside pending_payment/finished', () => {
+    expect(canCreditPayment({ state: 'processing', payment_form: '2' })).toEqual({ enabled: false });
+  });
+});
+
+function dispatchOrder(
+  overrides: Partial<{ state: string; delivery_type: string | null; isKitchenOrder: boolean }> = {},
+) {
+  return {
+    state: 'pending_payment',
+    delivery_type: 'direct_delivery',
+    isKitchenOrder: false,
+    ...overrides,
+  };
+}
+
+describe('order-action-policy — canDispatchOrder', () => {
+  it.each(['pending_payment', 'processing'])('enables for a home_delivery order in %s', (state) =>
+    expect(canDispatchOrder(dispatchOrder({ state, delivery_type: 'home_delivery' }))).toEqual({
+      enabled: true,
+    }),
+  );
+
+  it('enables for a kitchen order (mesa/mostrador) headed home', () => {
+    expect(
+      canDispatchOrder(dispatchOrder({ delivery_type: 'home_delivery', isKitchenOrder: true })),
+    ).toEqual({ enabled: true });
+  });
+
+  it('disables for a plain direct_delivery order with no kitchen involvement', () => {
+    expect(canDispatchOrder(dispatchOrder({ delivery_type: 'direct_delivery' })).enabled).toBe(false);
+  });
+
+  it('disables for a kitchen pickup order (nothing to route home)', () => {
+    expect(
+      canDispatchOrder(dispatchOrder({ delivery_type: 'pickup', isKitchenOrder: true })).enabled,
+    ).toBe(false);
+  });
+
+  it.each(['draft', 'created', 'shipped', 'delivered', 'finished', 'cancelled'])(
+    'disables outside pending_payment/processing: %s',
+    (state) =>
+      expect(canDispatchOrder(dispatchOrder({ state, delivery_type: 'home_delivery' })).enabled).toBe(
+        false,
+      ),
+  );
+});
+
+describe('order-action-policy — canManualShip', () => {
+  it('enables a kitchen "other" order in pending_payment that cannot generate a remisión', () => {
+    expect(canManualShip(dispatchOrder({ delivery_type: 'other', isKitchenOrder: true }))).toEqual({
+      enabled: true,
+    });
+  });
+
+  it('disables a home_delivery order (it can always generate a remisión instead)', () => {
+    expect(
+      canManualShip(dispatchOrder({ delivery_type: 'home_delivery', isKitchenOrder: true })).enabled,
+    ).toBe(false);
+  });
+
+  it('disables a pickup order', () => {
+    expect(canManualShip(dispatchOrder({ delivery_type: 'pickup', isKitchenOrder: true })).enabled).toBe(
+      false,
+    );
+  });
+
+  it('disables outside pending_payment', () => {
+    expect(
+      canManualShip(
+        dispatchOrder({ state: 'processing', delivery_type: 'other', isKitchenOrder: true }),
+      ).enabled,
+    ).toBe(false);
+  });
+});
+
+describe('order-action-policy — canReadyForPickupBeforePayment', () => {
+  it('enables a pickup order in pending_payment regardless of kitchen status', () => {
+    expect(canReadyForPickupBeforePayment(dispatchOrder({ delivery_type: 'pickup' }))).toEqual({
+      enabled: true,
+    });
+  });
+
+  it('disables a non-pickup order', () => {
+    expect(
+      canReadyForPickupBeforePayment(dispatchOrder({ delivery_type: 'home_delivery' })).enabled,
+    ).toBe(false);
+  });
+
+  it('disables outside pending_payment', () => {
+    expect(
+      canReadyForPickupBeforePayment(dispatchOrder({ state: 'processing', delivery_type: 'pickup' }))
+        .enabled,
+    ).toBe(false);
+  });
+});
+
+describe('order-action-policy — canDirectDeliver', () => {
+  it('enables a kitchen pickup order in processing (self-caught fix: was permanently disabled)', () => {
+    expect(
+      canDirectDeliver(
+        dispatchOrder({ state: 'processing', delivery_type: 'pickup', isKitchenOrder: true }),
+      ),
+    ).toEqual({ enabled: true });
+  });
+
+  it('disables a non-kitchen pickup order in processing (nothing was ever fired)', () => {
+    expect(
+      canDirectDeliver(
+        dispatchOrder({ state: 'processing', delivery_type: 'pickup', isKitchenOrder: false }),
+      ).enabled,
+    ).toBe(false);
+  });
+
+  it('disables a non-pickup order', () => {
+    expect(
+      canDirectDeliver(
+        dispatchOrder({ state: 'processing', delivery_type: 'home_delivery', isKitchenOrder: true }),
+      ).enabled,
+    ).toBe(false);
+  });
+
+  it('disables outside processing', () => {
+    expect(
+      canDirectDeliver(
+        dispatchOrder({ state: 'pending_payment', delivery_type: 'pickup', isKitchenOrder: true }),
+      ).enabled,
+    ).toBe(false);
   });
 });

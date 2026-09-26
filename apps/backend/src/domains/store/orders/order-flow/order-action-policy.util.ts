@@ -401,15 +401,21 @@ export function canReadyForPickupBeforePayment(order: DispatchFlowSnapshot): Ord
   return { enabled: normalizedDeliveryType(order) === 'pickup' };
 }
 
-/** `direct_deliver` — `processing` only: a pickup order that reached the
- * dispatch-wizard branch keeps the "hand over at the counter now" shortcut
- * alongside `dispatch_order` (both may be enabled at once — the web renders
- * them as two buttons, not a fallback chain, unlike the `pending_payment`
- * trio above). */
+/** `direct_deliver` — `processing` only, `pickup` only: the counter hand-off
+ * for a kitchen order that needed dispatch handling (fired to the kitchen)
+ * but will never generate a remisión (it isn't going home) — same
+ * offer-without-remisión shape as `canManualShip`, just scoped to
+ * `processing`/`pickup` instead of `pending_payment`. Self-caught fix
+ * (order-truth-and-invoice-tz plan, test-writing pass): the original draft
+ * ANDed with `canGenerateRemisionFlow` (same formula as `canDispatchOrder`),
+ * which is structurally `false` for every kitchen `pickup` order — the ONLY
+ * case `getAvailableActions` ever pushes this row for (see the
+ * `offersDispatchFlow` gate in the `processing` branch) — so the action was
+ * permanently disabled the one time it was ever shown. */
 export function canDirectDeliver(order: DispatchFlowSnapshot): OrderActionResult {
   if (order.state !== 'processing') return { enabled: false };
   if (normalizedDeliveryType(order) !== 'pickup') return { enabled: false };
-  return { enabled: canOfferDispatchFlow(order) && canGenerateRemisionFlow(order) };
+  return { enabled: canOfferDispatchFlow(order) && !canGenerateRemisionFlow(order) };
 }
 
 // ---------------------------------------------------------------------------
