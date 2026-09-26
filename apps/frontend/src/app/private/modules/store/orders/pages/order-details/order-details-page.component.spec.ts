@@ -1,6 +1,6 @@
 import {
   ORDER_DELIVERY_CONFIG, ORDER_DELIVERY_STEP_LABELS, pendingKitchenLabelsFromError,
-  cancellationBody, isOrderItemCancellationPaid,
+  cancellationBody, isOrderItemCancellationPaid, shippingTaxModePrefix,
 } from './order-details-page.component';
 import { Order } from '../../interfaces/order.interface';
 import {
@@ -135,5 +135,17 @@ describe('OrderDetailsPageComponent — platos pendientes al finalizar', () => {
   it('tolera errores sin una lista válida', () => {
     expect(pendingKitchenLabelsFromError({ details: { pending_items: null } })).toEqual([]);
     expect(pendingKitchenLabelsFromError(null)).toEqual([]);
+  });
+});
+
+describe('OrderDetailsPageComponent — prefijo del modo del impuesto del envío', () => {
+  it('dice "Base +" cuando el impuesto se agregó encima (is_inclusive=false)', () => {
+    expect(shippingTaxModePrefix(false)).toBe('Base +');
+  });
+
+  it('dice "Incluye" cuando va dentro del costo o la copia legacy no trae modo', () => {
+    expect(shippingTaxModePrefix(true)).toBe('Incluye');
+    expect(shippingTaxModePrefix(null)).toBe('Incluye');
+    expect(shippingTaxModePrefix(undefined)).toBe('Incluye');
   });
 });
