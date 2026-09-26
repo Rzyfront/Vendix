@@ -25,6 +25,7 @@ import {
   type VexiPosCartSnapshot,
 } from '../../../../core/services/vexi-pos-bridge.service';
 import { VexiUiContextService } from '../../../../core/services/vexi-ui-context.service';
+import { formatStockWarningSummary } from '../../../../core/utils/stock-shortage.util';
 import {
   VexiUiHostRegistry,
   type VexiUiAction,
@@ -2184,6 +2185,11 @@ export class PosComponent {
                 this.toastService.success(
                   `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
                 );
+                if (fireResult.stock_warnings?.length) {
+                  this.toastService.warning(
+                    formatStockWarningSummary(fireResult.stock_warnings),
+                  );
+                }
                 this.cartService
                   .clearCart()
                   .pipe(takeUntilDestroyed(this.destroyRef))
@@ -2284,6 +2290,11 @@ export class PosComponent {
                 this.toastService.success(
                   `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
                 );
+                if (fireResult.stock_warnings?.length) {
+                  this.toastService.warning(
+                    formatStockWarningSummary(fireResult.stock_warnings),
+                  );
+                }
                 this.cartService
                   .clearCart()
                   .pipe(takeUntilDestroyed(this.destroyRef))

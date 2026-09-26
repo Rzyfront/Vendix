@@ -48,6 +48,7 @@ import { PosOrderCreateResult } from '../../models/order.model';
 import { resolveLineUnits } from '../../utils/line-units.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
+import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
 import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
@@ -2260,6 +2261,11 @@ export class PosCheckoutShellComponent {
             this.toastService.success('Orden creada y enviada a cocina');
           } else {
             this.toastService.success('Orden creada');
+          }
+          if (fireRes?.stock_warnings?.length) {
+            this.toastService.warning(
+              formatStockWarningSummary(fireRes.stock_warnings),
+            );
           }
           this.finishPersistedDraft(orderId, orderItemIds, fired, fallbackOrder);
         },

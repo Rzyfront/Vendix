@@ -44,3 +44,35 @@ export function formatStockShortageSummary(items: InsufficientStockItem[]): stri
   const lines = formatStockShortageLines(items);
   return `${lines.join(' · ')} ${STOCK_SHORTAGE_HINT}`;
 }
+
+/**
+ * FORMATEO DE AVISOS "SE VENDIÓ/PREPARÓ SIN STOCK" (no bloqueante).
+ *
+ * A diferencia de `formatStockShortageSummary` (que describe un 409 que SÍ
+ * bloqueó la operación), esto formatea `stock_warnings` — la lista que fire,
+ * resend y producción devuelven cuando `allow_negative_stock` /
+ * `allow_ingredient_overuse` dejaron pasar la operación y el inventario quedó
+ * en negativo. Ver plan `no-overselling-stock-guard-plan.md` paso 9.
+ */
+export function formatStockWarningLine(item: InsufficientStockItem): string {
+  const deficit = Math.max(item.requested - item.available, 0);
+  const deficitLabel = deficit === 1 ? `falta ${deficit}` : `faltan ${deficit}`;
+  return `${item.product_name} (${deficitLabel})`;
+}
+
+/**
+ * Resumen listo para un toast de advertencia. Devuelve cadena vacía si
+ * `items` está vacío —el llamador decide si mostrar o no el toast.
+ */
+export function formatStockWarningSummary(items: InsufficientStockItem[]): string {
+  if (!items.length) return '';
+  const hasIngredient = items.some((item) => item.kind === 'ingredient');
+  const hasProduct = items.some((item) => item.kind === 'product');
+  const lead = hasIngredient && !hasProduct
+    ? 'Se usaron insumos sin stock'
+    : hasProduct && !hasIngredient
+      ? 'Se vendieron productos sin stock'
+      : 'Se usó inventario sin stock';
+  const lines = items.map(formatStockWarningLine);
+  return `${lead}: ${lines.join(', ')}. Quedaron en negativo.`;
+}

@@ -143,6 +143,37 @@
     </div>
   </div>
 
+  <!-- ── Sobreventa y sobre-uso de insumos ─────────────────────────── -->
+  <div class="space-y-3">
+    <div class="flex items-center gap-2 flex-wrap">
+      <app-icon name="shield-alert" size="16" class="text-text-secondary"></app-icon>
+      <h4 class="text-xs font-bold text-text-secondary uppercase tracking-wider">
+        Sobreventa y sobre-uso de insumos
+      </h4>
+      <app-badge variant="error" size="xs" badgeStyle="outline">Deja inventario en negativo</app-badge>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="space-y-2">
+        <app-setting-toggle
+          [formControl]="allowNegativeStockControl"
+          label="Permitir sobreventa"
+          description="Si está activo, se puede vender y entregar productos sin stock; el inventario queda en negativo. Si está apagado, Vendix bloquea y te dice qué producto no tiene stock."
+          (changed)="onFieldChange()"
+        ></app-setting-toggle>
+      </div>
+
+      <div class="space-y-2">
+        <app-setting-toggle
+          [formControl]="allowIngredientOveruseControl"
+          label="Permitir sobre-uso de insumos"
+          description="Si está activo, la cocina puede preparar platos aunque un insumo con inventario no tenga stock; el insumo queda en negativo para que lo cuadres en el conteo. Si está apagado, se bloquea y se indica qué insumo falta."
+          (changed)="onFieldChange()"
+        ></app-setting-toggle>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Valoración de inventario ──────────────────────────────────── -->
   <div class="space-y-3">
     <div class="flex items-center gap-2 flex-wrap">

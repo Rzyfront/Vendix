@@ -64,6 +64,7 @@ import {
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
+import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
@@ -4456,10 +4457,13 @@ export class OrderDetailsPageComponent {
       .fireOrderItems({ order_id: order.id, order_item_ids: ids })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (res) => {
           this.isFiringKitchen.set(false);
           this.clearKitchenSelection();
           this.toastService.success('Enviado a cocina');
+          if (res?.stock_warnings?.length) {
+            this.toastService.warning(formatStockWarningSummary(res.stock_warnings));
+          }
           // Re-fetch the order so the kitchen_ticket_items badges update.
           this.refreshOrder();
         },

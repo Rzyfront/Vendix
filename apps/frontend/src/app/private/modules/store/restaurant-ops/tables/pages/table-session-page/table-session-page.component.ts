@@ -67,7 +67,10 @@ import {
   readApiErrorRequestId,
   readInsufficientStockItems,
 } from '../../../../../../../core/utils/parse-api-error';
-import { formatStockShortageSummary } from '../../../../../../../core/utils/stock-shortage.util';
+import {
+  formatStockShortageSummary,
+  formatStockWarningSummary,
+} from '../../../../../../../core/utils/stock-shortage.util';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { AddItemsModalComponent } from '../../components/add-items-modal/add-items-modal.component';
@@ -1428,6 +1431,9 @@ export class TableSessionPageComponent implements OnInit {
             this.toastService.warning(
               'No se enviaron platos a cocina (puede que ya estuvieran enviados).',
             );
+          }
+          if (res?.stock_warnings?.length) {
+            this.toastService.warning(formatStockWarningSummary(res.stock_warnings));
           }
           // Refetch by SESSION id (the route param drives getSession → /store/table-sessions/:id).
           // Using order.id here previously triggered a 404 that — even with `silent: true` —
