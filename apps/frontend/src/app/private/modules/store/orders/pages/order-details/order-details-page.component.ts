@@ -234,6 +234,17 @@ export function cancellationBody(
 }
 
 /**
+ * Prefijo del modo del impuesto del envío (plan shipping-tax paso 15):
+ * "Incluye" cuando el impuesto va dentro de `shipping_cost`,
+ * "Base +" cuando se agregó encima. `null`/`undefined` (órdenes legacy
+ * sin copia del modo) se leen como incluido: el régimen anterior era
+ * solo-incluido. Pura para spec sin TestBed.
+ */
+export function shippingTaxModePrefix(isInclusive: unknown): 'Incluye' | 'Base +' {
+  return isInclusive === false ? 'Base +' : 'Incluye';
+}
+
+/**
  * Local alias for the refund state enum (`refunds_state_enum`). Mirrors the 7
  * values defined in `apps/backend/prisma/schema.prisma`. Kept local to this
  * component — if a second surface needs the same labels, extract to a shared
@@ -578,9 +589,10 @@ export class OrderDetailsPageComponent {
    */
   readonly tipAmount = computed(() => Number(this.order()?.tip_amount ?? 0));
   /**
-   * Impuesto del envío (copia congelada de la tarifa al vender). Va SIEMPRE
-   * incluido en `shipping_cost`, así que es una nota informativa: no suma al
-   * total. 0 = envío sin impuesto (tarifa sin impuesto o costo manual).
+   * Impuesto del envío (copia congelada de la tarifa al vender). Nota
+   * informativa fuera de la aritmética: no suma al total. 0 = envío sin
+   * impuesto (tarifa sin impuesto o costo manual). El modo (incluido /
+   * agregado) lo pinta `shippingTaxPrefix`.
    */
   readonly shippingTaxAmount = computed<number>(() => {
     const amount = Number(this.order()?.shipping_tax_amount ?? 0);
@@ -588,6 +600,18 @@ export class OrderDetailsPageComponent {
   });
   readonly shippingTaxLabel = computed<string>(
     () => this.order()?.shipping_tax_name?.trim() || 'impuesto',
+  );
+  /**
+   * Prefijo del modo del impuesto del envío ("Incluye" / "Base +").
+   * Lee `shipping_tax_is_inclusive` por cast (mismo patrón que
+   * `showDetailVatNote`): el campo viaja en `findOne` pero aún no está
+   * en la interfaz `Order`.
+   */
+  readonly shippingTaxPrefix = computed<string>(() =>
+    shippingTaxModePrefix(
+      (this.order() as unknown as { shipping_tax_is_inclusive?: unknown } | null)
+        ?.shipping_tax_is_inclusive,
+    ),
   );
   /**
    * Plan KDS fire-flows (F3): show the per-plate kitchen dispatch UI only
