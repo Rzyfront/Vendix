@@ -1,4 +1,5 @@
 import { hasPrivilegedRole } from './privileged-roles.util';
+import { getDefaultKeysForRoles } from './role-panel-defaults.util';
 
 type PanelUiNested = Record<string, Record<string, boolean>>;
 type PanelUiSeenKeys = Record<string, string[]>;
@@ -23,8 +24,11 @@ function isLegacyFlatPanelUi(panelUi: unknown): boolean {
  *  - Si `userPanelUi` viene en formato legacy plano se descarta por completo
  *    (sin intento de migrar valores) y se trata como si el usuario no
  *    tuviera config.
- *  - El merge soft aplica SOLO si el usuario tiene rol privilegiado
- *    (owner/admin/super_admin). Si no, devuelve la base tal cual.
+ *  - Roles privilegiados (owner/admin/super_admin): reciben todos los defaults
+ *    definidos para el app_type.
+ *  - Roles operativos/no privilegiados: reciben los defaults específicos de sus
+ *    roles (e.g. cashier -> pos, orders, products, customers; waiter -> tables, pos, orders).
+ *    Si el usuario tiene múltiples roles, se unen sus permisos.
  *  - User wins: si una key existe en `userPanelUi[appType]` (incluso con
  *    valor `false`), se respeta. Los defaults solo rellenan keys ausentes.
  *
@@ -45,19 +49,34 @@ export function mergePanelUiSoft(
       ? { ...userPanelUi }
       : {};
 
-  if (!defaults || !hasPrivilegedRole(userRoles)) {
+  if (!defaults) {
     return base;
   }
+
+  const isPrivileged = hasPrivilegedRole(userRoles);
 
   for (const [appType, defaultKeys] of Object.entries(defaults)) {
     if (!defaultKeys || typeof defaultKeys !== 'object') continue;
     const current = { ...(base[appType] || {}) };
-    for (const [key, value] of Object.entries(defaultKeys)) {
-      if (current[key] === undefined) {
-        current[key] = value;
+
+    if (isPrivileged) {
+      for (const [key, value] of Object.entries(defaultKeys)) {
+        if (current[key] === undefined) {
+          current[key] = value;
+        }
+      }
+      base[appType] = current;
+    } else {
+      const allowedKeys = getDefaultKeysForRoles(appType, userRoles);
+      if (allowedKeys.size > 0) {
+        for (const key of allowedKeys) {
+          if (current[key] === undefined) {
+            current[key] = defaultKeys[key] !== undefined ? defaultKeys[key] : true;
+          }
+        }
+        base[appType] = current;
       }
     }
-    base[appType] = current;
   }
 
   return base;

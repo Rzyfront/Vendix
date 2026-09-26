@@ -84,6 +84,8 @@ describe('MenuFilterService.diagnose', () => {
     userStoreType: ReturnType<typeof signal<string | null>>;
     isModuleVisible: jasmine.Spy;
     hasPermission: jasmine.Spy;
+    hasAnyRole: jasmine.Spy;
+    hasAnyPermission: jasmine.Spy;
     isOwner: jasmine.Spy;
     isAdmin: jasmine.Spy;
     getVisibleModules$: jasmine.Spy;
@@ -107,6 +109,8 @@ describe('MenuFilterService.diagnose', () => {
       userStoreType: signal<string | null>('physical'),
       isModuleVisible: jasmine.createSpy('isModuleVisible').and.returnValue(true),
       hasPermission: jasmine.createSpy('hasPermission').and.returnValue(true),
+      hasAnyRole: jasmine.createSpy('hasAnyRole').and.returnValue(true),
+      hasAnyPermission: jasmine.createSpy('hasAnyPermission').and.returnValue(true),
       isOwner: jasmine.createSpy('isOwner').and.returnValue(true),
       isAdmin: jasmine.createSpy('isAdmin').and.returnValue(true),
       getVisibleModules$: jasmine.createSpy('getVisibleModules$'),
@@ -235,3 +239,114 @@ describe('gating de contratos por industria (A.2, ADR-02)', () => {
     expect(getModulesHiddenByIndustries(null)).toEqual([]);
   });
 });
+
+describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
+  let service: MenuFilterService;
+  let authFacade: {
+    fiscalScope: ReturnType<typeof signal<string>>;
+    operatingScope: ReturnType<typeof signal<string>>;
+    activeFiscalAreas: ReturnType<typeof signal<string[]>>;
+    storeSettings: ReturnType<typeof signal<any>>;
+    userIndustries: ReturnType<typeof signal<string[]>>;
+    userStoreType: ReturnType<typeof signal<string | null>>;
+    isModuleVisible: jasmine.Spy;
+    hasPermission: jasmine.Spy;
+    hasAnyRole: jasmine.Spy;
+    hasAnyPermission: jasmine.Spy;
+    isOwner: jasmine.Spy;
+    isAdmin: jasmine.Spy;
+    getVisibleModules$: jasmine.Spy;
+    userStoreType$: unknown;
+    userIndustries$: unknown;
+    storeSettings$: unknown;
+    userOrganization$: unknown;
+    activeFiscalAreas$: unknown;
+  };
+
+  beforeEach(() => {
+    authFacade = {
+      fiscalScope: signal('STORE'),
+      operatingScope: signal('STORE'),
+      activeFiscalAreas: signal<string[]>([]),
+      storeSettings: signal<any>(null),
+      userIndustries: signal<string[]>(['retail']),
+      userStoreType: signal<string | null>('physical'),
+      isModuleVisible: jasmine.createSpy('isModuleVisible').and.returnValue(false),
+      hasPermission: jasmine.createSpy('hasPermission').and.returnValue(true),
+      hasAnyRole: jasmine.createSpy('hasAnyRole').and.returnValue(false),
+      hasAnyPermission: jasmine.createSpy('hasAnyPermission').and.returnValue(false),
+      isOwner: jasmine.createSpy('isOwner').and.returnValue(false),
+      isAdmin: jasmine.createSpy('isAdmin').and.returnValue(false),
+      getVisibleModules$: jasmine.createSpy('getVisibleModules$'),
+      userStoreType$: null,
+      userIndustries$: null,
+      storeSettings$: null,
+      userOrganization$: null,
+      activeFiscalAreas$: null,
+    };
+
+    TestBed.configureTestingModule({
+      providers: [
+        MenuFilterService,
+        { provide: AuthFacade, useValue: authFacade },
+        {
+          provide: SubscriptionAccessService,
+          useValue: { canUseAI: () => () => true },
+        },
+      ],
+    });
+    service = TestBed.inject(MenuFilterService);
+  });
+
+  it('un usuario operativo cajero con pos activo es enrutado a /admin/pos', () => {
+    authFacade.isModuleVisible.and.callFake((key: string) => key === 'pos');
+    const route = service.firstActiveModuleRoute([]);
+    expect(route).toBe('/admin/pos');
+  });
+
+  it('un usuario operativo con dashboard: true en panel_ui pero sin permisos omite el dashboard y es enrutado a /admin/pos', () => {
+    // Simular que el usuario tiene 'dashboard' y 'pos' en panel_ui, pero sin permisos para dashboard
+    authFacade.isModuleVisible.and.callFake(
+      (key: string) => key === 'dashboard' || key === 'pos',
+    );
+    const route = service.firstActiveModuleRoute([]);
+    expect(route).toBe('/admin/pos');
+  });
+
+  it('diagnose para /admin/dashboard devuelve visible: false con blockedBy: permission si no tiene acceso', () => {
+    authFacade.isOwner.and.returnValue(false);
+    authFacade.isAdmin.and.returnValue(false);
+    authFacade.hasAnyRole.and.returnValue(false);
+    authFacade.hasAnyPermission.and.returnValue(false);
+    const diagnosis = service.diagnose({
+      label: 'Panel Principal',
+      route: '/admin/dashboard',
+      icon: '',
+    } as any);
+    expect(diagnosis.visible).toBeFalse();
+    expect(diagnosis.blockedBy).toBe('permission');
+  });
+
+  it('un usuario operativo con solo pedidos es enrutado a la primera ruta de pedidos visible', () => {
+    authFacade.isModuleVisible.and.callFake(
+      (key: string) => key === 'orders' || key === 'orders_sales',
+    );
+    const route = service.firstActiveModuleRoute([]);
+    expect(route).toBe('/admin/orders/sales');
+  });
+
+  it('un usuario sin ningún módulo visible es llevado a /admin/no-access', () => {
+    authFacade.isModuleVisible.and.returnValue(false);
+    const route = service.firstActiveModuleRoute([]);
+    expect(route).toBe('/admin/no-access');
+  });
+
+  it('un propietario (owner) siempre tiene acceso al panel y no cae a /admin/no-access', () => {
+    authFacade.isOwner.and.returnValue(true);
+    authFacade.isModuleVisible.and.returnValue(false);
+    const route = service.firstActiveModuleRoute([]);
+    expect(route).not.toBe('/admin/no-access');
+  });
+});
+
+
