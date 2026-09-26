@@ -1220,7 +1220,7 @@
 // ≤992px (una columna) conserva alto fijo.
 .delivery-address-grid {
     display: grid;
-    grid-template-columns: 5fr 6fr;
+    grid-template-columns: 6fr 5fr;
     gap: 1rem;
     align-items: start;
     margin-top: 1rem;
@@ -1294,8 +1294,14 @@
     }
 }
 
+// Formulario primero (izquierda / arriba en mobile), mapa de apoyo después.
 .delivery-address-grid .address-form {
     margin-top: 0;
+    order: 1;
+}
+
+.delivery-address-grid .map-column {
+    order: 2;
 }
 
 // C.7: tarjeta de la dirección de la tienda para "recoger".

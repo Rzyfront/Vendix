@@ -186,9 +186,10 @@
             />
 
             @if (use_new_address()) {
-              <!-- C.3: mapa 50% enmarcado 9:16 tipo teléfono + formulario 50%.
-                   El teléfono va primero para que quede en el viewport inicial. -->
+              <!-- C.3: formulario (izquierda / arriba en mobile) + mapa de apoyo
+                   enmarcado 9:16 (derecha / abajo en mobile), vía `order` en SCSS. -->
               <div class="delivery-address-grid">
+              <div class="map-column">
               <div class="map-phone-frame">
               <app-address-map-picker
                 [center]="map_center()"
@@ -203,6 +204,7 @@
                   {{ addressWarning() }}
                 </p>
               }
+              </div>
               <form [formGroup]="address_form" class="address-form">
                 <app-input
                   label="Direccion"
