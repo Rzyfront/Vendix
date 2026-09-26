@@ -851,6 +851,31 @@ describe('StockLevelManager', () => {
   });
 
   describe('releaseReservationQuantity', () => {
+    it('puede liberar primero la reserva nueva de un claim de cobro fallido', async () => {
+      const tx: any = {
+        $queryRaw: (prismaService as any).$queryRaw,
+        stock_levels: prismaService.stock_levels,
+        stock_reservations: prismaService.stock_reservations,
+        products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
+      };
+      prismaService.stock_reservations.findMany.mockResolvedValue([
+        { id: 2, location_id: 1, quantity: 3, created_at: new Date() },
+      ]);
+      prismaService.stock_reservations.update.mockResolvedValue({} as any);
+      prismaService.stock_levels.findFirst.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.update.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.aggregate.mockResolvedValue({ _sum: { quantity_available: 90 } });
+
+      await service.releaseReservationQuantity(
+        'order', 1, 1, undefined, 3, 'cancelled', tx, { newestFirst: true },
+      );
+
+      expect(prismaService.stock_reservations.findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({ orderBy: [{ created_at: 'desc' }, { id: 'desc' }] }),
+      );
+    });
+
     it('relee la reserva después del lock para no liberar cantidad obsoleta', async () => {
       const tx: any = {
         $queryRaw: (prismaService as any).$queryRaw,

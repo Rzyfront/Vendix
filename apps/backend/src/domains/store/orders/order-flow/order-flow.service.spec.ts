@@ -106,9 +106,12 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
       // older reservation on the order.
       releaseReservationQuantity: jest.fn(async (
         _refType: string, _refId: number, productId: number,
+        _variantId: number | undefined, _quantity: number, _status: string,
+        _tx: any, options?: { newestFirst?: boolean },
       ) => {
-        const row = reservations.find((reservation) =>
+        const matching = reservations.filter((reservation) =>
           reservation.product_id === productId && reservation.status === 'active');
+        const row = options?.newestFirst ? matching.at(-1) : matching[0];
         if (row) row.status = 'consumed';
         events.push('release');
         return 1;
@@ -331,6 +334,22 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.stock.reserveStock.mock.calls[0][3]).toBe(3);
   });
 
+  it('promoción del borrador reparte el top-up entre bodegas vendibles', async () => {
+    const h = harness();
+    (h.service as any).sellableStockAllocator = {
+      allocateForLine: jest.fn().mockResolvedValue({
+        slices: [{ location_id: 11, quantity: 1 }, { location_id: 12, quantity: 1 }],
+        allocated: 2, available: 2, shortfall: 0,
+      }),
+    };
+
+    await h.service.payOrder(1, DTO);
+
+    expect(h.stock.reserveStock).toHaveBeenCalledTimes(2);
+    expect(h.stock.reserveStock.mock.calls.map((args: any[]) => [args[2], args[3]]))
+      .toEqual([[11, 1], [12, 1]]);
+  });
+
   it('faltante al promover bloquea antes de reservar o crear el pago', async () => {
     const h = harness();
     (h.service as any).stockValidator = {
@@ -369,6 +388,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
     expect(h.stock.releaseReservationQuantity).toHaveBeenCalledWith(
       'order', 1, 701, undefined, 2, 'cancelled', h.tx,
+      { newestFirst: true },
     );
     expect(h.reservations[0].status).toBe('consumed');
     expect(h.getState()).toBe('draft');
@@ -448,6 +468,28 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.stock.releaseReservation).not.toHaveBeenCalled();
     expect(h.reservations[0].status).toBe('active');
     expect(h.getState()).toBe('draft');
+  });
+
+  it('al compensar un top-up conserva la reserva anterior y libera sólo la nueva', async () => {
+    const h = harness();
+    h.reservations.push({ product_id: 701, status: 'active' });
+    h.tx.orders.findFirst.mockResolvedValueOnce({
+      id: 1, store_id: 4,
+      order_items: [{ product_id: 701, product_variant_id: null, quantity: 5,
+        products: { id: 701, name: 'MODELO', track_inventory: true, product_type: 'physical' } }],
+    });
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValueOnce(null);
+
+    await expect(h.service.payOrder(1, DTO)).rejects.toMatchObject({
+      errorCode: 'ORD_FLOW_PAYMENT_FAILED_001',
+    });
+
+    expect(h.stock.reserveStock.mock.calls[0][3]).toBe(3);
+    expect(h.stock.releaseReservationQuantity).toHaveBeenCalledWith(
+      'order', 1, 701, undefined, 3, 'cancelled', h.tx, { newestFirst: true },
+    );
+    expect(h.reservations[0].status).toBe('active');
+    expect(h.reservations[1].status).toBe('consumed');
   });
 
   it('ERR-33 postcommit conserva el pago succeeded y la reserva activa', async () => {

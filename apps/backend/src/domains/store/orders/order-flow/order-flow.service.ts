@@ -68,6 +68,7 @@ import { StockLevelManager } from '../../inventory/shared/services/stock-level-m
 import { AutoEntryService } from '../../accounting/auto-entries/auto-entry.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
 import { StockValidatorService } from '../../inventory/shared/services/stock-validator.service';
+import { SellableStockAllocator } from '../../inventory/shared/services/sellable-stock-allocator.service';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { OrderEtaService } from '../services/order-eta.service';
 import { KitchenFireService } from '../../kitchen-fire/kitchen-fire.service';
@@ -251,6 +252,7 @@ export class OrderFlowService {
     // no-op and `reserveStock`'s own `validate_availability` still enforces
     // the hard floor per identity.
     @Optional() private readonly stockValidator?: StockValidatorService,
+    @Optional() private readonly sellableStockAllocator?: SellableStockAllocator,
   ) {}
 
   /**
@@ -987,12 +989,6 @@ export class OrderFlowService {
           );
 
           for (const group of groups.values()) {
-            const location_id =
-              await this.stockLevelManager.getDefaultLocationForProduct(
-                group.product_id,
-                group.product_variant_id,
-              );
-
             const alreadyReserved = await tx.stock_reservations.aggregate({
               where: {
                 reserved_for_type: 'order',
@@ -1007,34 +1003,55 @@ export class OrderFlowService {
               group.demand - Number(alreadyReserved?._sum?.quantity ?? 0);
             if (toReserve <= 0) continue;
 
-            await this.stockLevelManager.reserveStock(
-              group.product_id,
-              group.product_variant_id,
-              location_id,
-              toReserve,
-              'order',
-              orderId,
-              userId,
-              true, // validate_availability: strict — assertLinesAvailable already guarded this in aggregate
-              tx,
-              undefined, // expires_at
-              false, // skip_reservation
-              undefined, // stock_units_consumed — `toReserve` is already expressed in stock units
-              // QUI-557 reversal: a payable order can never leave a negative
-              // available; the hard floor is enforced here too.
-              false,
+            const allocation = await this.sellableStockAllocator?.allocateForLine(
+              storeId, group.product_id, group.product_variant_id,
+              toReserve, [], tx,
             );
-
-            // Track only the DIFFERENCE this claim added — never the group's
-            // full demand — so a failed payment releases exactly what this
-            // attempt reserved and never an older reservation on the order
-            // (see `compensateClaimedDraftPayment`).
-            createdInTransaction.push({
-              productId: group.product_id,
-              variantId: group.product_variant_id,
-              locationId: location_id,
+            if (allocation && allocation.shortfall > 0) {
+              throw new VendixHttpException(
+                ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+                `Stock insuficiente para ${group.product_name}: requiere ${toReserve}, disponible ${allocation.available}.`,
+                { items: [{
+                  product_id: group.product_id,
+                  product_variant_id: group.product_variant_id ?? null,
+                  product_name: group.product_name,
+                  kind: 'product',
+                  requested: toReserve,
+                  available: allocation.available,
+                }] },
+              );
+            }
+            // Legacy direct-construction specs do not inject the allocator;
+            // Nest production always resolves it from OrderStockCommitModule.
+            const slices = allocation?.slices ?? [{
+              location_id: await this.stockLevelManager.getDefaultLocationForProduct(
+                group.product_id, group.product_variant_id,
+              ),
               quantity: toReserve,
-            });
+            }];
+            for (const slice of slices) {
+              await this.stockLevelManager.reserveStock(
+                group.product_id,
+                group.product_variant_id,
+                slice.location_id,
+                slice.quantity,
+                'order',
+                orderId,
+                userId,
+                true,
+                tx,
+                undefined,
+                false,
+                undefined, // quantity already expressed in stock units
+                false,
+              );
+              createdInTransaction.push({
+                productId: group.product_id,
+                variantId: group.product_variant_id,
+                locationId: slice.location_id,
+                quantity: slice.quantity,
+              });
+            }
           }
         }
 
@@ -7274,6 +7291,7 @@ export class OrderFlowService {
             reservation.quantity,
             'cancelled',
             tx,
+            { newestFirst: true },
           );
         }
         const restored = await tx.orders.updateMany({

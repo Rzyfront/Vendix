@@ -1184,7 +1184,7 @@ export class StockLevelManager {
     quantity: number,
     status: 'consumed' | 'cancelled',
     tx?: Prisma.TransactionClient,
-    options: { decrementOnHand?: boolean } = {},
+    options: { decrementOnHand?: boolean; newestFirst?: boolean } = {},
   ): Promise<number> {
     const execute = async (prisma: any): Promise<number> => {
       if (!(quantity > 0)) return 0;
@@ -1214,7 +1214,10 @@ export class StockLevelManager {
         where: {
           ...reservationWhere,
         },
-        orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+        orderBy: [
+          { created_at: options.newestFirst ? 'desc' : 'asc' },
+          { id: options.newestFirst ? 'desc' : 'asc' },
+        ],
       });
 
       if (reservations.length === 0) return 0;
