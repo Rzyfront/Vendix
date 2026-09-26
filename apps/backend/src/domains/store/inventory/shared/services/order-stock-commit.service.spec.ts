@@ -383,6 +383,20 @@ describe('OrderStockCommitService — descuento multi-ubicación', () => {
     expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
   });
 
+  it('no bloqueante reporta producto y faltante al caller para conciliación', async () => {
+    setup(13);
+    const onShortfall = jest.fn();
+
+    await service.commitOrderDelivery(1, {
+      ...OPTS, blockOnInsufficient: false, onShortfall,
+    }, txMock);
+
+    expect(onShortfall).toHaveBeenCalledWith(expect.objectContaining({
+      product_id: 100, product_name: 'producto 100',
+      requested: 13, available: 12,
+    }));
+  });
+
   it('línea que cabe en una ubicación mantiene UN solo updateStock (no regresión)', async () => {
     setup(5);
 

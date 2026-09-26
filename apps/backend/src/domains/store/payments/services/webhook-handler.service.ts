@@ -751,6 +751,11 @@ export class WebhookHandlerService {
         blockOnInsufficient: false,
         consumeSerials: true,
         reason: 'POS Sale (pago digital confirmado)',
+        onShortfall: (item) => this.logger.error(
+          `Order ${orderId}: faltante al confirmar pago digital — ${item.product_name} ` +
+          `(producto ${item.product_id}, variante ${item.product_variant_id ?? 'base'}): ` +
+          `requerido ${item.requested}, disponible ${item.available}. Conciliar inventario.`,
+        ),
       });
 
       await this.recordStockReconciliation(orderId, null);

@@ -54,6 +54,14 @@ export interface CommitOpts {
    * to resolve manual serial selection. Only meaningful with `consumeSerials`.
    */
   posSelection?: any;
+  /** Caller-owned reconciliation alert for an accepted non-blocking shortfall. */
+  onShortfall?: (item: {
+    product_id: number;
+    product_variant_id: number | null;
+    product_name: string;
+    requested: number;
+    available: number;
+  }) => void;
 }
 
 export interface CommitResult {
@@ -756,6 +764,13 @@ export class OrderStockCommitService {
           `${variant ? ` variant ${variant}` : ''} disponible ${allocation.available} requerido ${qty} ` +
           `loc ${fallbackLocationId} ref ${reservationRefId}; se deduce con piso 0.`,
       );
+      opts.onShortfall?.({
+        product_id: line.product_id,
+        product_variant_id: variant ?? null,
+        product_name: line.product_name ?? `producto ${line.product_id}`,
+        requested: qty,
+        available: allocation.available,
+      });
       slices = this.allocator.absorbShortfall(allocation, fallbackLocationId);
     }
 

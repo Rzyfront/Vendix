@@ -133,6 +133,14 @@ describe('DispatchNoteEventsListener — handleDelivered → OrderStockCommitSer
         consumeSerials: false,
       }),
     );
+    const alert = jest.spyOn((listener as any).logger, 'error').mockImplementation();
+    const opts = orderStockCommitMock.commitDispatchDelivery.mock.calls[0][1];
+    opts.onShortfall({
+      product_id: 1, product_variant_id: null, product_name: 'MODELO',
+      requested: 5, available: 2,
+    });
+    expect(alert).toHaveBeenCalledWith(expect.stringContaining('MODELO'));
+    expect(alert).toHaveBeenCalledWith(expect.stringContaining('requerido 5, disponible 2'));
     // El listener ya NO toca el stock manager directamente.
     expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
     expect(
