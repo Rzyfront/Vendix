@@ -155,4 +155,48 @@ describe('OrderFlowService.shipOrder — impuesto del envío', () => {
     // 10800 − 0 + 11900
     expect(new Prisma.Decimal(data.grand_total).toNumber()).toBe(22700);
   });
+
+  describe('paso 4 (unificación de envío) — quoteRateGross disponible', () => {
+    let quoteRateGross: jest.Mock;
+    beforeEach(() => {
+      quoteRateGross = jest.fn();
+      service.shippingCalculatorService = { quoteRateGross };
+      prisma.orders.findFirst.mockResolvedValue({
+        id: 10, store_id: 1, stores: { organization_id: 1 },
+        shipping_address_id: 3, shipping_address_snapshot: null,
+        order_items: [{
+          product_id: 55, quantity: 2, total_price: 20000, weight: null,
+          order_item_taxes: [], products: { weight: null, product_type: 'physical' },
+        }],
+      });
+      prisma.addresses = {
+        findFirst: jest.fn().mockResolvedValue({
+          country_code: 'CO', city: 'Bogotá', latitude: null, longitude: null,
+        }),
+      };
+    });
+
+    it('flat con umbral de envío gratis superado: cobra el resultado del cálculo único (0), no el atajo base_cost', async () => {
+      quoteRateGross.mockResolvedValue(0);
+      await service.shipOrder(10, { shipping_method_id: 4, shipping_rate_id: 31 });
+      expect(quoteRateGross).toHaveBeenCalledWith(
+        1, 31, expect.any(Array), expect.objectContaining({ country_code: 'CO', city: 'Bogotá' }),
+      );
+      expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 0, { store_id: 1 });
+      const data = prisma.orders.update.mock.calls[0][0].data;
+      expect(data).toMatchObject({ shipping_rate_id: 31, shipping_cost: 0 });
+    });
+
+    it('sin dirección resoluble en la orden: cae al atajo histórico base_cost', async () => {
+      prisma.orders.findFirst.mockResolvedValue({
+        id: 10, store_id: 1, stores: { organization_id: 1 },
+        shipping_address_id: null, shipping_address_snapshot: null,
+        order_items: [],
+      });
+      await service.shipOrder(10, { shipping_method_id: 4, shipping_rate_id: 31 });
+      expect(quoteRateGross).not.toHaveBeenCalled();
+      const data = prisma.orders.update.mock.calls[0][0].data;
+      expect(data).toMatchObject({ shipping_rate_id: 31, shipping_cost: 15000 });
+    });
+  });
 });

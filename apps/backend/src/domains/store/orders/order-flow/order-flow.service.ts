@@ -79,6 +79,7 @@ import { OrderEtaService } from '../services/order-eta.service';
 import { KitchenFireService } from '../../kitchen-fire/kitchen-fire.service';
 import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
 import { ShippingTaxService } from '../../shipping/services/shipping-tax.service';
+import { ShippingCalculatorService } from '../../shipping/shipping-calculator.service';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -274,6 +275,16 @@ export class OrderFlowService {
     @Optional()
     @Inject(forwardRef(() => PaymentGatewayService))
     private readonly paymentGatewayService?: PaymentGatewayService,
+    // Paso 4 (unificación del cálculo de envío —
+    // `vendix-shipping-distance-pricing`) — `shipOrder` cotiza la tarifa con
+    // el mismo cálculo único que orders/payments (umbral de envío gratis,
+    // costo por unidad/peso y distancia) en vez del atajo
+    // `chargeForRate(base_cost)`, que los ignoraba todos. `@Optional()` +
+    // posición final por la misma razón que el resto de dependencias
+    // tardías: no romper las ~20 construcciones posicionales de los specs
+    // históricos. Sin resolver (specs, o tarifa fuera de las opciones
+    // calculadas) `shipOrder` cae al atajo histórico.
+    @Optional() private readonly shippingCalculatorService?: ShippingCalculatorService,
   ) {}
 
   /**
@@ -2699,6 +2710,119 @@ export class OrderFlowService {
   }
 
   /**
+   * Paso 4 (unificación del cálculo de envío —
+   * `vendix-shipping-distance-pricing`) — costo que dicta una tarifa para
+   * ESTA orden en `shipOrder`, vía el mismo cálculo único que
+   * `OrdersService.resolveExpectedRateCost` /
+   * `PaymentsService.recalculatePosRateCost`
+   * (`ShippingCalculatorService.quoteRateGross`): umbral de envío gratis,
+   * costo por unidad/peso y precio por distancia sobre la dirección y las
+   * líneas de la orden. `null` si no hay calculador, no hay dirección
+   * resoluble o la tarifa no aparece entre las opciones calculadas (incluye
+   * `carrier_calculated`) — el llamador cae entonces al atajo histórico
+   * `chargeForRate(base_cost)` (paso 14).
+   */
+  private async resolveShipOrderRateCost(
+    orderId: number,
+    storeId: number,
+    rateId: number,
+  ): Promise<number | null> {
+    if (!this.shippingCalculatorService) return null;
+
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      select: {
+        id: true,
+        store_id: true,
+        stores: { select: { organization_id: true } },
+        shipping_address_id: true,
+        shipping_address_snapshot: true,
+        order_items: {
+          select: {
+            product_id: true,
+            quantity: true,
+            total_price: true,
+            weight: true,
+            order_item_taxes: { select: { tax_amount: true } },
+            products: { select: { weight: true, product_type: true } },
+          },
+        },
+      },
+    });
+    if (!order) return null;
+
+    let address: {
+      country_code?: string | null;
+      state_province?: string | null;
+      city?: string | null;
+      postal_code?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
+    } | null = null;
+    if (order.shipping_address_id) {
+      address = await this.prisma.addresses.findFirst({
+        where: { id: order.shipping_address_id },
+        select: {
+          country_code: true,
+          state_province: true,
+          city: true,
+          postal_code: true,
+          latitude: true,
+          longitude: true,
+        },
+      });
+    } else if (order.shipping_address_snapshot) {
+      address = order.shipping_address_snapshot as any;
+    }
+    if (!address?.country_code) return null;
+
+    const items = (order.order_items ?? [])
+      .filter((it: any) => typeof it?.product_id === 'number')
+      .map((it: any) => {
+        const line_tax = (it.order_item_taxes ?? []).reduce(
+          (sum: number, t: any) => sum + Number(t.tax_amount || 0),
+          0,
+        );
+        const quantity = Number(it.quantity || 0);
+        return {
+          product_id: it.product_id as number,
+          quantity,
+          // Bruto de la línea (base + impuesto), como el checkout.
+          price: Number(it.total_price || 0) + line_tax,
+          weight: it.weight
+            ? Number(it.weight)
+            : it.products?.weight
+              ? Number(it.products.weight) * quantity
+              : undefined,
+          product_type: it.products?.product_type || undefined,
+        };
+      });
+
+    try {
+      return await this.shippingCalculatorService.quoteRateGross(
+        storeId,
+        rateId,
+        items,
+        {
+          country_code: address.country_code,
+          state_province: address.state_province || undefined,
+          city: address.city || undefined,
+          postal_code: address.postal_code || undefined,
+          latitude:
+            address.latitude != null ? Number(address.latitude) : undefined,
+          longitude:
+            address.longitude != null ? Number(address.longitude) : undefined,
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `shipOrder: no se pudo recalcular la tarifa de envío #${rateId}: ${(error as Error)?.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Ship an order (processing -> shipped)
    *
    * `force` (ver {@link forceOrderState}) saltea las TRES precondiciones de
@@ -2762,21 +2886,37 @@ export class OrderFlowService {
         if (!rate || rate.shipping_method_id !== method.id) {
           throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
         }
-        // Paso 14 — la tarifa cobra el BRUTO del cálculo único (agregado ⇒
-        // base + impuesto, igual que el cotizador); `free` ⇒ 0. Sin
-        // `chargeForRate` (dobles viejos de specs) ⇒ `base_cost`.
-        shippingCost = Number(rate.base_cost);
+        // Paso 4 (unificación de envío) — se cotiza primero con el mismo
+        // cálculo único que orders/payments (umbral de envío gratis, costo
+        // por unidad/peso y distancia). `free` sigue cobrando 0 sin rutear
+        // (regla de `vendix-shipping-distance-pricing`). Solo si eso no
+        // resuelve nada (sin calculador, sin dirección resoluble en la
+        // orden, o tarifa fuera de las opciones calculadas) cae al atajo
+        // histórico (paso 14): BRUTO agregado vía `chargeForRate(base_cost)`,
+        // o `base_cost` sin `chargeForRate` (dobles viejos de specs).
         if (rate.type === 'free') {
           shippingCost = 0;
-        } else if (
-          this.shippingTaxService &&
-          typeof this.shippingTaxService.chargeForRate === 'function'
-        ) {
-          shippingCost = (
-            await this.shippingTaxService.chargeForRate(null, rate.id, shippingCost, {
-              store_id: order.store_id,
-            })
-          ).gross;
+        } else {
+          const quoted = await this.resolveShipOrderRateCost(
+            orderId,
+            order.store_id,
+            rate.id,
+          );
+          if (quoted != null) {
+            shippingCost = quoted;
+          } else {
+            shippingCost = Number(rate.base_cost);
+            if (
+              this.shippingTaxService &&
+              typeof this.shippingTaxService.chargeForRate === 'function'
+            ) {
+              shippingCost = (
+                await this.shippingTaxService.chargeForRate(null, rate.id, shippingCost, {
+                  store_id: order.store_id,
+                })
+              ).gross;
+            }
+          }
         }
       }
 
