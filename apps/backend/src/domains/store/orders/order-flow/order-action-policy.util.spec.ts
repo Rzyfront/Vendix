@@ -526,6 +526,31 @@ describe('order-action-policy — canFastTrack', () => {
       }),
     ).toEqual({ enabled: true });
   });
+
+  // Task B — fast track exempts pickup/dine_in from the shipping-method
+  // requirement too (mirrors OrderFlowService's widened
+  // SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES, fast-track-only).
+  it.each(['pickup', 'dine_in'])('allows %s with no shipping method assigned', (delivery_type) => {
+    expect(
+      canFastTrack({
+        state: 'processing',
+        delivery_type,
+        shipping_method_id: null,
+        hasOrderItems: true,
+      }),
+    ).toEqual({ enabled: true });
+  });
+
+  it('still rejects home_delivery with no shipping method — same error as always, NOT in the exempt set', () => {
+    expect(
+      canFastTrack({
+        state: 'processing',
+        delivery_type: 'home_delivery',
+        shipping_method_id: null,
+        hasOrderItems: true,
+      }),
+    ).toEqual({ enabled: false, reason: SHIP_REQUIRED_FOR_FLOW });
+  });
 });
 
 describe('order-action-policy — canCreditPayment', () => {

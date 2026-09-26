@@ -2500,7 +2500,12 @@ export class OrderFlowService {
    * estricto. Todo lo posterior (timestamps, `order.shipped`, logging) corre
    * idéntico, porque es este mismo código.
    */
-  async shipOrder(orderId: number, dto: ShipOrderDto, force = false) {
+  async shipOrder(
+    orderId: number,
+    dto: ShipOrderDto,
+    force = false,
+    opts: { allowExemptDeliveryTypes?: boolean } = {},
+  ) {
     const order = await this.getOrder(orderId);
 
     if (!force && order.state !== 'processing') {
@@ -2509,9 +2514,21 @@ export class OrderFlowService {
       );
     }
 
+    // `allowExemptDeliveryTypes` widens the direct_delivery-only exemption to
+    // the full `SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES` set (pickup/
+    // direct_delivery/dine_in). ONLY `fastTrackOrder` passes it — every other
+    // caller (manual ship endpoint, the auto-ship `force` path) keeps today's
+    // direct_delivery-only behavior unchanged.
+    const exemptFromShippingMethod =
+      order.delivery_type === 'direct_delivery' ||
+      !!(
+        opts.allowExemptDeliveryTypes &&
+        order.delivery_type &&
+        SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES.has(order.delivery_type)
+      );
     if (
       !force &&
-      order.delivery_type !== 'direct_delivery' &&
+      !exemptFromShippingMethod &&
       !order.shipping_method_id &&
       !dto.shipping_method_id
     ) {
@@ -6296,8 +6313,12 @@ export class OrderFlowService {
       );
     }
 
+    // Widened exemption (fast-track only, see `shipOrder`'s
+    // `allowExemptDeliveryTypes`): pickup/direct_delivery/dine_in orders
+    // never need a shipping method to complete pay→ship→deliver→finish.
     if (
-      order.delivery_type !== 'direct_delivery' &&
+      (!order.delivery_type ||
+        !SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES.has(order.delivery_type)) &&
       !order.shipping_method_id
     ) {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001);
@@ -6346,9 +6367,13 @@ export class OrderFlowService {
       });
     }
 
-    // 2) Ship (processing → shipped)
+    // 2) Ship (processing → shipped) — fast track alone is allowed to skip
+    // the shipping method for pickup/dine_in (see the widened precheck
+    // above and `shipOrder`'s `allowExemptDeliveryTypes`).
     if (current.state === 'processing') {
-      await this.shipOrder(orderId, dto.ship ?? {});
+      await this.shipOrder(orderId, dto.ship ?? {}, false, {
+        allowExemptDeliveryTypes: true,
+      });
       stepsExecuted.push('ship');
       current = await this.getOrder(orderId);
     }

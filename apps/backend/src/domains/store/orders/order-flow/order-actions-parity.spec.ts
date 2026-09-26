@@ -55,15 +55,15 @@
  *  - `fast_track`: never part of the web's `availableActions` array — it is
  *    a standalone checkbox (`canFastTrack` computed). NOT gated here.
  *
- * Pre-existing, OUT-OF-SCOPE finding (not fixed here — frontend is read-only
- * for this task): the web's `blockedByMissingShipping`/`canFastTrack` use a
- * WIDER `SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES` set (`pickup`, `direct_delivery`,
- * `dine_in`) than the real `fastTrackOrder` endpoint guard, which only exempts
- * `direct_delivery` (`order-flow.service.ts:6140-6144`). `canFastTrack` here
- * mirrors the ENDPOINT exactly (byte-for-byte), so it is intentionally
- * stricter than the web's checkbox for `pickup`/`dine_in` orders with no
- * shipping method — a pre-existing web/backend inconsistency, not introduced
- * by this plan.
+ * REGRESSION FIX (Task B): `fastTrackOrder`'s endpoint guard now exempts the
+ * full `SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES` set (`pickup`, `direct_delivery`,
+ * `dine_in`) instead of `direct_delivery` alone, closing the gap this note
+ * used to document against the web's wider `canFastTrack`/
+ * `blockedByMissingShipping` checkbox. The widened exemption is fast-track-only:
+ * `shipOrder`'s own guard for every OTHER caller, and `payOrder`'s auto-finish
+ * branch, are both untouched (see `shipOrder`'s `allowExemptDeliveryTypes` param,
+ * only ever passed `true` from inside `fastTrackOrder`). `canFastTrack` here
+ * mirrors the endpoint's new rule byte-for-byte.
  */
 import {
   canPay,

@@ -303,11 +303,19 @@ export interface FastTrackSnapshot {
   hasOrderItems?: boolean;
 }
 const FAST_TRACK_TERMINAL_STATES = new Set(['finished', 'cancelled', 'refunded']);
+/** Mirrors `OrderFlowService`'s `SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES`
+ * (fast-track's widened rule — pickup/dine_in orders never need a shipping
+ * method, same as direct_delivery already didn't). Keep this literal set in
+ * sync with that one; it isn't exported from the service. */
+const FAST_TRACK_SHIPPING_EXEMPT_DELIVERY_TYPES = new Set(['pickup', 'direct_delivery', 'dine_in']);
 export function canFastTrack(order: FastTrackSnapshot): OrderActionResult {
   if (FAST_TRACK_TERMINAL_STATES.has(order.state)) {
     return { enabled: false, reason: ErrorCodes.ORD_FAST_TRACK_INVALID_STATE_001.code };
   }
-  if (order.delivery_type !== 'direct_delivery' && !order.shipping_method_id) {
+  if (
+    (!order.delivery_type || !FAST_TRACK_SHIPPING_EXEMPT_DELIVERY_TYPES.has(order.delivery_type)) &&
+    !order.shipping_method_id
+  ) {
     return { enabled: false, reason: ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001.code };
   }
   if (!order.hasOrderItems) return { enabled: false };

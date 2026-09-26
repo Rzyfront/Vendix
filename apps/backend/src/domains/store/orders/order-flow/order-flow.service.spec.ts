@@ -4673,3 +4673,126 @@ describe('OrderFlowService.payOrder — B4/B8 delivered/finished sin pago liquid
     expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
   });
 });
+
+// Task B — fast track amplía la exención de método de envío a
+// `SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES` (pickup/direct_delivery/dine_in),
+// pero SOLO dentro del camino de fast track: `shipOrder`'s guard normal (sin
+// `allowExemptDeliveryTypes`) y el auto-finish de `payOrder` quedan intactos.
+describe('OrderFlowService.shipOrder — allowExemptDeliveryTypes (Task B, solo fast track)', () => {
+  const buildService = (order: Record<string, unknown>) => {
+    const prismaMock: any = {
+      orders: {
+        findFirst: jest.fn(async () => ({ id: 1, store_id: 4, stores: { organization_id: null } })),
+      },
+    };
+    const service = new OrderFlowService(
+      prismaMock, { emit: jest.fn() } as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any,
+    );
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+    jest.spyOn(service as any, 'updateOrderState').mockImplementation(
+      async (_id: number, nextState: string, metadata: Record<string, unknown> = {}) => ({
+        id: 1, state: nextState, ...metadata,
+      }),
+    );
+    return { service, prismaMock };
+  };
+
+  const baseOrder = (delivery_type: string) => ({
+    id: 1, state: 'processing', delivery_type, shipping_method_id: null,
+    shipping_cost: 0, grand_total: 100, payments: [],
+  });
+
+  it('sin flag: pickup sin método sigue rechazando ORD_SHIP_REQUIRED_001 — comportamiento normal intacto', async () => {
+    const { service } = buildService(baseOrder('pickup'));
+    const error: any = await service.shipOrder(1, {} as any).catch((e) => e);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_SHIP_REQUIRED_001');
+  });
+
+  it('con allowExemptDeliveryTypes: pickup sin método SÍ despacha', async () => {
+    const { service } = buildService(baseOrder('pickup'));
+    const result: any = await service.shipOrder(1, {} as any, false, { allowExemptDeliveryTypes: true });
+    expect(result.state).toBe('shipped');
+  });
+
+  it('con allowExemptDeliveryTypes: dine_in sin método SÍ despacha', async () => {
+    const { service } = buildService(baseOrder('dine_in'));
+    const result: any = await service.shipOrder(1, {} as any, false, { allowExemptDeliveryTypes: true });
+    expect(result.state).toBe('shipped');
+  });
+
+  it('con allowExemptDeliveryTypes: home_delivery sin método SIGUE rechazando — fuera del exempt set', async () => {
+    const { service } = buildService(baseOrder('home_delivery'));
+    const error: any = await service
+      .shipOrder(1, {} as any, false, { allowExemptDeliveryTypes: true })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_SHIP_REQUIRED_001');
+  });
+});
+
+describe('OrderFlowService.fastTrackOrder — pickup/dine_in sin método de envío (Task B)', () => {
+  const buildService = () => {
+    const prismaMock: any = {
+      orders: { findFirst: jest.fn(async () => ({ id: 1, state: 'finished' })) },
+    };
+    const service = new OrderFlowService(
+      prismaMock, { emit: jest.fn() } as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any,
+    );
+    return { service };
+  };
+
+  const orderRow = (delivery_type: string, state: string) => ({
+    id: 1, state, store_id: 4, order_number: 'O-1',
+    delivery_type, shipping_method_id: null, payments: [] as Array<{ state: string }>,
+  });
+
+  // Simula la cadena pay→ship→deliver→finish reemplazando cada paso por un
+  // stub que sólo avanza el estado — el propósito de este test es el
+  // precheck y la llamada a shipOrder que SÍ cambian en esta tarea, no
+  // re-probar payOrder/deliverOrder/confirmDelivery (ya cubiertos aparte).
+  const stubChain = (service: any, delivery_type: string) => {
+    let state = 'created';
+    jest.spyOn(service, 'getOrder').mockImplementation(async () => orderRow(delivery_type, state));
+    const payOrder = jest.spyOn(service, 'payOrder').mockImplementation(async () => { state = 'processing'; return {} as any; });
+    const shipOrder = jest.spyOn(service, 'shipOrder').mockImplementation(async () => { state = 'shipped'; return {} as any; });
+    const deliverOrder = jest.spyOn(service, 'deliverOrder').mockImplementation(async () => { state = 'delivered'; return {} as any; });
+    const confirmDelivery = jest.spyOn(service, 'confirmDelivery').mockImplementation(async () => { state = 'finished'; return {} as any; });
+    return { payOrder, shipOrder, deliverOrder, confirmDelivery, getState: () => state };
+  };
+
+  it('pickup sin shipping_method_id: el precheck ampliado pasa y la cadena llega a finished', async () => {
+    const { service } = buildService();
+    const chain = stubChain(service, 'pickup');
+    await service.fastTrackOrder(1, {
+      payment: { store_payment_method_id: 1, payment_type: PaymentType.DIRECT },
+    } as any);
+    expect(chain.payOrder).toHaveBeenCalledTimes(1);
+    expect(chain.shipOrder).toHaveBeenCalledWith(1, {}, false, { allowExemptDeliveryTypes: true });
+    expect(chain.deliverOrder).toHaveBeenCalledTimes(1);
+    expect(chain.confirmDelivery).toHaveBeenCalledTimes(1);
+    expect(chain.getState()).toBe('finished');
+  });
+
+  it('dine_in sin shipping_method_id: el precheck ampliado pasa y la cadena llega a finished', async () => {
+    const { service } = buildService();
+    const chain = stubChain(service, 'dine_in');
+    await service.fastTrackOrder(1, {
+      payment: { store_payment_method_id: 1, payment_type: PaymentType.DIRECT },
+    } as any);
+    expect(chain.shipOrder).toHaveBeenCalledWith(1, {}, false, { allowExemptDeliveryTypes: true });
+    expect(chain.getState()).toBe('finished');
+  });
+
+  it('home_delivery sin shipping_method_id: sigue rechazando con el mismo error de siempre, antes de pagar', async () => {
+    const { service } = buildService();
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(orderRow('home_delivery', 'created'));
+    const payOrder = jest.spyOn(service as any, 'payOrder').mockResolvedValue(undefined);
+    const error: any = await service.fastTrackOrder(1, {} as any).catch((e) => e);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_SHIP_REQUIRED_FOR_FLOW_001');
+    expect(payOrder).not.toHaveBeenCalled();
+  });
+});
