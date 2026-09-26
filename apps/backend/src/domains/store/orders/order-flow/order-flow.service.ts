@@ -5050,6 +5050,13 @@ export class OrderFlowService {
     stopId?: number;
     currency?: string;
     paymentMethod?: string;
+    /**
+     * Origen del `order_events`. Los dos llamadores reales son listeners
+     * (`DispatchNoteEventsListener` y `PaymentFromDispatchRouteListener`),
+     * así que el default es `'listener'`; un llamador HTTP futuro debe
+     * pasarlo explícito.
+     */
+    source?: OrderEventSource;
   }): Promise<void> {
     // 1. Resolve the REAL COD order id from the dispatch note (store-scoped).
     const dispatchNote = await this.prisma.dispatch_notes.findFirst({
@@ -5087,6 +5094,7 @@ export class OrderFlowService {
         total_paid: true,
         remaining_balance: true,
         customer_id: true,
+        stores: { select: { organization_id: true } },
       },
     });
     if (!order) {
@@ -5104,32 +5112,57 @@ export class OrderFlowService {
     // 4. Record the payment row + decrement the balance, mirroring
     //    registerCreditPayment. payments has no store_id column (scoped via the
     //    orders relation), so order_id is sufficient for tenant isolation.
-    await this.prisma.payments.create({
-      data: {
-        order_id: order.id,
-        customer_id: order.customer_id ?? undefined,
+    //
+    //    Plan order-truth-and-invoice-tz — payment row, balance and its
+    //    `payment_registered` share ONE transaction: if any of the three
+    //    fails, none persists (the event never outlives its payment). This
+    //    helper never transitions `orders.state` (the reconciler does), so
+    //    no `state_changed` is recorded here.
+    const paymentMethod = input.paymentMethod ?? 'cash';
+    await this.prisma.$transaction(async (tx) => {
+      const payment = await tx.payments.create({
+        data: {
+          order_id: order.id,
+          customer_id: order.customer_id ?? undefined,
+          amount: applied,
+          currency: input.currency ?? order.currency ?? 'COP',
+          state: 'succeeded',
+          gateway_reference: input.correlationKey,
+          paid_at: new Date(),
+          gateway_response: {
+            payment_type:
+              input.stopId != null ? 'dispatch_route' : 'dispatch_note',
+            dispatch_note_id: input.dispatchNoteId,
+            stop_id: input.stopId ?? null,
+            payment_method: paymentMethod,
+            collected_amount: input.amount,
+          },
+        },
+      });
+
+      await tx.orders.updateMany({
+        where: { id: order.id, store_id: input.storeId },
+        data: {
+          total_paid: Math.round(newTotalPaid * 100) / 100,
+          remaining_balance: Math.round(newRemaining * 100) / 100,
+        },
+      });
+
+      await this.orderHistoryService?.record(tx, {
+        orderId: order.id,
+        storeId: input.storeId,
+        organizationId: order.stores?.organization_id ?? null,
+        type: 'payment_registered',
+        paymentId: payment.id,
         amount: applied,
-        currency: input.currency ?? order.currency ?? 'COP',
-        state: 'succeeded',
-        gateway_reference: input.correlationKey,
-        paid_at: new Date(),
-        gateway_response: {
-          payment_type:
-            input.stopId != null ? 'dispatch_route' : 'dispatch_note',
+        source: input.source ?? 'listener',
+        payload: {
+          payment_method: paymentMethod,
+          correlation_key: input.correlationKey,
           dispatch_note_id: input.dispatchNoteId,
           stop_id: input.stopId ?? null,
-          payment_method: input.paymentMethod ?? 'cash',
-          collected_amount: input.amount,
         },
-      },
-    });
-
-    await this.prisma.orders.updateMany({
-      where: { id: order.id, store_id: input.storeId },
-      data: {
-        total_paid: Math.round(newTotalPaid * 100) / 100,
-        remaining_balance: Math.round(newRemaining * 100) / 100,
-      },
+      });
     });
 
     this.logger.log(
