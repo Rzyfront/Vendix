@@ -193,9 +193,15 @@
               <app-address-map-picker
                 [center]="map_center()"
                 (located)="onMapLocated($event)"
-                (mapReady)="onMapReady()"
+                (locateRequested)="onLocateRequested()"
               />
               </div>
+              @if (addressWarning()) {
+                <p class="address-map-warning" role="status">
+                  <app-icon name="alert-triangle" [size]="14" />
+                  {{ addressWarning() }}
+                </p>
+              }
               <form [formGroup]="address_form" class="address-form">
                 <app-input
                   label="Direccion"
@@ -463,8 +469,14 @@
                   <app-address-map-picker
                     [center]="map_center()"
                     (located)="onMapLocated($event)"
-                    (mapReady)="onMapReady()"
+                    (locateRequested)="onLocateRequested()"
                   />
+                  @if (addressWarning()) {
+                    <p class="address-map-warning" role="status">
+                      <app-icon name="alert-triangle" [size]="14" />
+                      {{ addressWarning() }}
+                    </p>
+                  }
                   <form [formGroup]="address_form" class="address-form">
                     <app-input
                       label="Direccion"
@@ -1090,9 +1102,6 @@
                 (bookingStep !== null &&
                   step() === bookingStep &&
                   !allBookingSlotsSelected) ||
-                (step() === 1 &&
-                  !cartHasOnlyServices &&
-                  !canProceedFromAddress()) ||
                 (step() === paymentStep &&
                   !cartHasOnlyServices &&
                   shipping_options().length === 0) ||

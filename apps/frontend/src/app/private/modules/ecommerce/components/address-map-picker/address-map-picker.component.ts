@@ -39,6 +39,44 @@ const LOAD_TIMEOUT_MS = 12000;
 const BASEMAP_STYLE = 'https://tiles.openfreemap.org/styles/bright';
 
 /**
+ * Custom "locate me" map control. Renders identically to MapLibre's native
+ * `GeolocateControl` (reuses its `.maplibregl-ctrl-geolocate` /
+ * `.maplibregl-ctrl-icon` classes from the already-loaded maplibre-gl.css) but
+ * NEVER calls `navigator.geolocation` itself — it only reports the click via
+ * `onClick`. This lets the parent decide whether to show a priming
+ * permission modal BEFORE the browser's own permission prompt, which the
+ * native control has no hook for. GPS must never fire without this explicit
+ * user gesture.
+ */
+class LocateButtonControl {
+  private container: HTMLDivElement | null = null;
+
+  constructor(private readonly onClick: () => void) {}
+
+  onAdd(): HTMLElement {
+    this.container = document.createElement('div');
+    this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'maplibregl-ctrl-geolocate';
+    button.setAttribute('aria-label', 'Ubicarme');
+    button.setAttribute('title', 'Ubicarme');
+    const icon = document.createElement('span');
+    icon.className = 'maplibregl-ctrl-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    button.appendChild(icon);
+    button.addEventListener('click', () => this.onClick());
+    this.container.appendChild(button);
+    return this.container;
+  }
+
+  onRemove(): void {
+    this.container?.parentNode?.removeChild(this.container);
+    this.container = null;
+  }
+}
+
+/**
  * MapLibre-based location picker shown ABOVE the shipping-address form. The map
  * is ALWAYS visible (it does not wait for GPS permission): with no located point
  * it frames Colombia, and it centers on a real coordinate whenever one arrives —
@@ -78,6 +116,12 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
    * manual flow waiting for a map that will never load.
    */
   readonly mapReady = output<void>();
+  /**
+   * Emitted when the user clicks the "locate me" control. Reports the gesture
+   * only — the parent owns the actual `navigator.geolocation` call (and any
+   * priming permission modal) so GPS never fires without this explicit click.
+   */
+  readonly locateRequested = output<void>();
 
   readonly mapContainer =
     viewChild.required<ElementRef<HTMLDivElement>>('mapContainer');
@@ -134,30 +178,15 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       );
       // Fullscreen: lets the customer expand the map to place the pin precisely.
       this.map.addControl(new this.maplibregl.FullscreenControl(), 'top-right');
-      // Geolocate ("recenter on me"): one click re-centers on the live GPS
-      // position, drops the delivery marker there and re-emits so the parent
-      // re-geocodes. showUserLocation/showAccuracyCircle OFF so the blue dot +
-      // accuracy circle do not sit on top of the map and block dragging the
-      // green marker.
-      const geolocate = new this.maplibregl.GeolocateControl({
-        // timeout + maximumAge keep the "locate me" button fast: reuse a recent
-        // fix and never hang waiting for a perfect one.
-        positionOptions: {
-          enableHighAccuracy: true,
-          timeout: 6000,
-          maximumAge: 30000,
-        },
-        trackUserLocation: false,
-        showUserLocation: false,
-        showAccuracyCircle: false,
-      });
-      this.map.addControl(geolocate, 'top-right');
-      geolocate.on('geolocate', (pos: any) => {
-        const coord = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        this.ensureMarker(coord);
-        this.map.flyTo({ center: [coord.lng, coord.lat], zoom: POINT_ZOOM });
-        this.emitFromMarker();
-      });
+      // "Ubicarme": reports the gesture via `locateRequested` only — it never
+      // calls navigator.geolocation itself. The parent owns the actual GPS
+      // request so it can show a priming permission modal first when the
+      // browser permission is still undecided. GPS must NEVER fire without
+      // this explicit click.
+      this.map.addControl(
+        new LocateButtonControl(() => this.locateRequested.emit()),
+        'top-right',
+      );
       this.map.addControl(
         new this.maplibregl.AttributionControl({ compact: true }),
         'bottom-right',
