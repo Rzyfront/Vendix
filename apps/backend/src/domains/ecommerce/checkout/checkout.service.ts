@@ -336,19 +336,22 @@ export class CheckoutService {
    * resolver del cotizador (`ShippingDistanceService`) y las coords de la
    * dirección final. Sin método-distancia/escala/coords, o con el motor
    * caído, rige el precio de zona (con un warn estructurado — ver abajo);
-   * si la distancia cae fuera de todos los rangos MÁS ALLÁ de la tolerancia
-   * de borde (`matchTierWithTolerance`, ~0.2 km) la selección ya no es
-   * válida (el cotizador nunca la habría ofrecido) y el checkout se rechaza
-   * con 400.
+   * si la distancia cae fuera de todos los rangos (`matchTier`, SIN
+   * tolerancia de borde) la selección ya no es válida (el cotizador nunca la
+   * habría ofrecido) y el checkout se rechaza con 400 `ECOM_CHECKOUT_003` —
+   * rechazo estricto, deliberado: no hay margen de tolerancia por diseño de
+   * negocio, así que un comprador justo en el borde de un tramo (o fuera de
+   * él) debe volver a cotizar en vez de recibir una tarifa que el cotizador
+   * nunca ofreció.
    *
    * `toCoords` (origen y destino) es el MISMO helper que usa el cotizador
    * (`ShippingCalculatorService.resolveQuoteDistances`): redondea a 6
    * decimales antes de armar el string de ruteo, así que un comprador que
    * confirma la MISMA dirección que cotizó cae en la misma llave de caché de
-   * `RoutingService` y mide la misma distancia — la tolerancia de borde de
-   * abajo cubre el resto (redondeo Decimal(10,8) del snapshot vs. el float
-   * de la cotización, o un proveedor de ruteo distinto entre ambas
-   * llamadas).
+   * `RoutingService` y mide la misma distancia — eso reduce el ruido de
+   * redondeo Decimal(10,8) del snapshot vs. el float de la cotización, o de
+   * un proveedor de ruteo distinto entre ambas llamadas, pero no reemplaza
+   * el rechazo estricto: fuera de rango es fuera de rango.
    */
   private async resolveConfirmShippingCost(
     rate: {
@@ -417,10 +420,7 @@ export class CheckoutService {
       });
       return zone_cost;
     }
-    const tier = ShippingDistanceService.matchTierWithTolerance(
-      tiers,
-      distanceKm,
-    );
+    const tier = ShippingDistanceService.matchTier(tiers, distanceKm);
     if (!tier) {
       throw new VendixHttpException(
         ErrorCodes.ECOM_CHECKOUT_003,

@@ -63,42 +63,6 @@ export class ShippingDistanceService {
   }
 
   /**
-   * Como `matchTier`, pero con tolerancia (por defecto 0.2 km) SOLO por
-   * encima del `to_km` del tramo cerrado más alto de la escala. Uso: la
-   * confirmación del checkout re-rutea con las coords del snapshot y puede
-   * medir unos metros más que la cotización (redondeo, proveedor alterno,
-   * geometría ligeramente distinta) — sin esta tolerancia, un comprador justo
-   * en el borde de un tramo recibiría un 400 espurio en vez de la tarifa que
-   * ya vio cotizada. Fuera de la tolerancia el rechazo se mantiene: no abre
-   * el tramo hacia arriba de forma indefinida, solo absorbe el ruido de
-   * medición entre dos corridas del motor de ruteo.
-   */
-  static matchTierWithTolerance(
-    tiers: DistanceTier[],
-    distanceKm: number,
-    toleranceKm = 0.2,
-  ): DistanceTier | null {
-    const direct = ShippingDistanceService.matchTier(tiers, distanceKm);
-    if (direct) return direct;
-
-    let highestClosedTier: DistanceTier | null = null;
-    for (const tier of tiers) {
-      if (tier.to_km == null) continue;
-      if (highestClosedTier == null || tier.to_km > highestClosedTier.to_km!) {
-        highestClosedTier = tier;
-      }
-    }
-    if (
-      highestClosedTier &&
-      distanceKm > highestClosedTier.to_km! &&
-      distanceKm - highestClosedTier.to_km! <= toleranceKm
-    ) {
-      return highestClosedTier;
-    }
-    return null;
-  }
-
-  /**
    * Normaliza el JSON crudo de `distance_tiers` a tramos ordenados, o `null`
    * cuando no hay escala utilizable (ausente, vacía o corrupta → rige zona).
    */

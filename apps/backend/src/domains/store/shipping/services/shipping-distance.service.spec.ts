@@ -33,68 +33,6 @@ describe('ShippingDistanceService', () => {
     });
   });
 
-  describe('matchTierWithTolerance (borde de confirmación)', () => {
-    it('dentro de un tramo: se comporta igual que matchTier', () => {
-      expect(ShippingDistanceService.matchTierWithTolerance(tiers, 3.2)?.price).toBe(
-        8000,
-      );
-      expect(ShippingDistanceService.matchTierWithTolerance(tiers, 0)?.price).toBe(
-        8000,
-      );
-    });
-
-    it('tramo abierto al final: nunca necesita tolerancia', () => {
-      expect(
-        ShippingDistanceService.matchTierWithTolerance(tiers, 999)?.price,
-      ).toBe(18000);
-    });
-
-    it('justo dentro de la tolerancia (0.2 km) por encima del to_km del último tramo cerrado usa ese tramo', () => {
-      const closed = tiers.slice(0, 2); // [0,5)=8000, [5,10)=12000 — sin tramo abierto
-      expect(
-        ShippingDistanceService.matchTierWithTolerance(closed, 10.1)?.price,
-      ).toBe(12000);
-      expect(
-        ShippingDistanceService.matchTierWithTolerance(closed, 10.2)?.price,
-      ).toBe(12000);
-    });
-
-    it('justo en el límite exacto (10.0) sigue rechazando: no hay excedente que tolerar', () => {
-      const closed = tiers.slice(0, 2);
-      // 10 cae fuera de [5,10) por el borde estricto `d < to_km`, y no hay
-      // exceso sobre 10 (distanceKm === to_km, no > to_km) — la tolerancia
-      // solo perdona lo que pasa DE LARGO del borde, no el borde mismo.
-      expect(
-        ShippingDistanceService.matchTierWithTolerance(closed, 10),
-      ).toBeNull();
-    });
-
-    it('más allá de la tolerancia (> 0.2 km) sigue rechazando', () => {
-      const closed = tiers.slice(0, 2);
-      expect(
-        ShippingDistanceService.matchTierWithTolerance(closed, 10.21),
-      ).toBeNull();
-      expect(
-        ShippingDistanceService.matchTierWithTolerance(closed, 50),
-      ).toBeNull();
-    });
-
-    it('tolerancia personalizada vía tercer argumento', () => {
-      const closed = tiers.slice(0, 2);
-      expect(
-        ShippingDistanceService.matchTierWithTolerance(closed, 10.4, 0.5)
-          ?.price,
-      ).toBe(12000);
-      expect(
-        ShippingDistanceService.matchTierWithTolerance(closed, 10.6, 0.5),
-      ).toBeNull();
-    });
-
-    it('escala vacía nunca matchea (ni con tolerancia)', () => {
-      expect(ShippingDistanceService.matchTierWithTolerance([], 0.1)).toBeNull();
-    });
-  });
-
   describe('parseTiers', () => {
     it('null/undefined/vacío/no-array → null (rige zona)', () => {
       expect(ShippingDistanceService.parseTiers(null)).toBeNull();
