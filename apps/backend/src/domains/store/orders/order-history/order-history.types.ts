@@ -1,4 +1,4 @@
-import type { order_state_enum } from '@prisma/client';
+import type { Prisma, order_state_enum } from '@prisma/client';
 
 /**
  * Plan order-truth-and-invoice-tz — Objetivo 5/6.
@@ -49,5 +49,5 @@ export interface RecordOrderEventInput {
   paymentId?: number | null;
   orderItemId?: number | null;
   amount?: number | string | null;
-  payload?: Record<string, unknown> | null;
+  payload?: Prisma.InputJsonObject | null;
 }
