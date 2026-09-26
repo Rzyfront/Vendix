@@ -88,6 +88,8 @@ import {
   type NormalizedLeg,
   type PaymentLegMethodInfo,
 } from '../../payments/utils/payment-legs.util';
+import { OrderHistoryService } from '../order-history/order-history.service';
+import type { OrderEventSource } from '../order-history/order-history.types';
 
 type OrderState = order_state_enum;
 type DraftReservationKey = {
@@ -222,7 +224,32 @@ export class OrderFlowService {
     // manual). En prod siempre resuelve vía `forwardRef(() => OrdersModule)`
     // en `order-flow.module.ts` — mismo patrón que los listeners KDS.
     @Optional() private readonly orderSse?: OrderSseService,
+    // Plan order-truth-and-invoice-tz — Paso 6. Único escritor de
+    // `order_events` (ver `OrderHistoryModule`). `@Optional()` por la misma
+    // razón que el resto de dependencias tardías: no romper las specs
+    // históricas que construyen el servicio a mano con una lista corta de
+    // args. Cuando no resuelve (specs), cada llamada usa `?.record(...)` y
+    // se vuelve un no-op silencioso — nunca lanza y nunca cambia el
+    // resultado del flujo (regla del plan). En prod siempre resuelve vía
+    // `OrderHistoryModule` (ver `order-flow.module.ts`).
+    @Optional() private readonly orderHistoryService?: OrderHistoryService,
   ) {}
+
+  /**
+   * Plan order-truth-and-invoice-tz — mapea el `opts.source` interno de
+   * `updateOrderState` (string libre, usado también para el payload del
+   * evento `order.status_changed`) al `OrderEventSource` cerrado de
+   * `order_events`. Los callers HTTP no pasan `source` — `record` ya
+   * resuelve 'http'/'system' por su cuenta a partir del contexto de
+   * petición. Los que sí lo pasan son puentes no-HTTP: el bridge KDS
+   * (`kitchen_bridge`) y el job de auto-finalización (`job`).
+   */
+  private mapUpdateStateSource(source?: string): OrderEventSource | undefined {
+    if (source === 'kitchen_bridge' || source === 'listener') return 'listener';
+    if (source === 'job') return 'job';
+    if (source === 'webhook') return 'webhook';
+    return undefined;
+  }
 
   /** The fire transaction is the source of truth; never restock the sold dish. */
   private async disposeConsumedPreparedLeaves(
@@ -594,8 +621,15 @@ export class OrderFlowService {
 
     const previous_order = await this.prisma.orders.findUnique({
       where: { id: orderId },
-      select: { state: true, store_id: true, order_number: true },
+      select: {
+        state: true,
+        store_id: true,
+        order_number: true,
+        stores: { select: { organization_id: true } },
+      },
     });
+    const previousOrganizationId = previous_order?.stores?.organization_id ?? null;
+    const historySource = this.mapUpdateStateSource(opts?.source);
 
     if (
       previous_order?.state === 'delivered' &&
@@ -650,6 +684,17 @@ export class OrderFlowService {
                 },
                 payments: true,
               },
+            });
+
+            await this.orderHistoryService?.record(tx, {
+              orderId,
+              storeId: updated_order.store_id,
+              organizationId:
+                updated_order.stores?.organization_id ?? previousOrganizationId,
+              type: 'state_changed',
+              fromState: previous_order?.state,
+              toState: newState,
+              source: historySource,
             });
 
             return { updated_order, commit };
@@ -712,6 +757,16 @@ export class OrderFlowService {
         order_items: { include: { products: true, product_variants: true } },
         payments: true,
       },
+    });
+
+    await this.orderHistoryService?.record(this.prisma, {
+      orderId,
+      storeId: updated_order.store_id,
+      organizationId: previousOrganizationId,
+      type: 'state_changed',
+      fromState: previous_order?.state,
+      toState: newState,
+      source: historySource,
     });
 
     this.eventEmitter.emit('order.status_changed', {
