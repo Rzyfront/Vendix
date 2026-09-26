@@ -220,7 +220,6 @@ describe('PaymentGatewayService', () => {
           type: 'state_changed',
           fromState: 'created',
           toState: 'processing',
-          source: 'webhook',
         }),
       );
     });

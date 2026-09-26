@@ -679,7 +679,6 @@ export class PaymentGatewayService {
         type: 'state_changed',
         fromState: previousState,
         toState: newState,
-        source: 'webhook',
       });
     }
   }
@@ -810,7 +809,6 @@ export class PaymentGatewayService {
         type: 'state_changed',
         fromState: previousState,
         toState: 'refunded',
-        source: 'webhook',
       });
     }
   }
