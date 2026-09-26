@@ -5543,6 +5543,22 @@ export class OrderFlowService {
                 updated_at: new Date(),
               },
             });
+            // Plan order-truth-and-invoice-tz — un `item_cancelled` por
+            // ítem cancelado en cascada (mismo shape que `cancelOrderItem`
+            // + `cascade: true`). El `state_changed` de la orden ya se
+            // registró tras el claim; no se duplica.
+            await this.orderHistoryService?.record(tx, {
+              orderId,
+              storeId: freshOrder.store_id,
+              organizationId: freshOrder.stores?.organization_id,
+              type: 'item_cancelled',
+              orderItemId: item.id,
+              payload: {
+                reason: dto.reason.trim(),
+                cancellation_type: 'after_fire_waste',
+                cascade: true,
+              },
+            });
             continue;
           }
           // El ticket ya no está pending: cae a la rama avanzada (la
@@ -5607,6 +5623,18 @@ export class OrderFlowService {
             cancellation_reason: dto.reason.trim(),
             cancellation_type: cancellationType,
             updated_at: new Date(),
+          },
+        });
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: freshOrder.store_id,
+          organizationId: freshOrder.stores?.organization_id,
+          type: 'item_cancelled',
+          orderItemId: item.id,
+          payload: {
+            reason: dto.reason.trim(),
+            cancellation_type: cancellationType,
+            cascade: true,
           },
         });
       }
