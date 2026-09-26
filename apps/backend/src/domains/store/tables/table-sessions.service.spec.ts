@@ -118,9 +118,16 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       updateStock: jest.fn(),
     };
     const stockValidator = {
-      assertLinesAvailable: jest.fn().mockResolvedValue(undefined),
+      assertLinesAvailable: jest.fn().mockResolvedValue([]),
       resolveEffectiveTracking: jest.fn((product, variant) =>
         variant?.track_inventory_override ?? product?.track_inventory ?? false),
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — strict default
+      // (allowOversell=false) preserves every pre-existing assertion
+      // byte-for-byte; the oversell-path tests override this per-case.
+      resolveInventoryPolicy: jest.fn().mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: true,
+      }),
     };
     const sellableStockAllocator = {
       allocateForLine: jest.fn(async (_storeId, _productId, _variantId, quantity) => ({
@@ -684,7 +691,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
 
       expect((service as any).stockValidator.assertLinesAvailable).toHaveBeenCalledWith(
         [expect.objectContaining({ product_id: 51, quantity: 2 })],
-        { tx: prismaMock },
+        { tx: prismaMock, allowOversell: false },
       );
       expect((service as any).stockLevelManager.reserveStock).toHaveBeenCalledWith(
         51, undefined, 1, 2, 'order', 100, USER_ID,

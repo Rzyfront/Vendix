@@ -12,7 +12,11 @@ import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
-import { StockValidatorService, StockDemandLine } from '../inventory/shared/services/stock-validator.service';
+import {
+  StockValidatorService,
+  StockDemandLine,
+  type InsufficientStockItem,
+} from '../inventory/shared/services/stock-validator.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import type { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import {
@@ -72,6 +76,12 @@ export interface TableSessionView {
   guest_count: number | null;
   /** Only present in the response that creates a session, never persisted. */
   previous_table_status?: table_status_enum;
+  /**
+   * docs/plans/no-overselling-stock-guard-plan.md step 9 — additive, only
+   * present when the store's "Permitir sobreventa" switch accepted a real
+   * shortfall while reserving the appended items. Never an empty array.
+   */
+  stock_warnings?: InsufficientStockItem[];
   order?: {
     id: number;
     state: string;
@@ -807,6 +817,11 @@ export class TableSessionsService {
     // F-094 punto 2 — timeout/maxWait explícitos (default 5 s): mismo valor
     // que `payments.service.ts:1769` para el mismo tipo de transacción con
     // trabajo variable por línea (N ítems, exclusiones, KDS).
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive to the
+    // response, only when the store's "Permitir sobreventa" switch accepted
+    // a real shortfall. Declared outside the tx so it survives into the
+    // final return below.
+    const stockWarnings: InsufficientStockItem[] = [];
     await this.prisma.$transaction(async (tx) => {
       // SplitOrderService locks this same source row before freezing account
       // allocations. Take that lock BEFORE inserting any line, then re-check
@@ -882,7 +897,16 @@ export class TableSessionsService {
               product_name: product.name,
             }];
       });
-      await this.stockValidator.assertLinesAvailable(stockDemands, { tx });
+      const inventoryPolicy = await this.stockValidator.resolveInventoryPolicy(
+        storeId,
+        tx,
+      );
+      const allowOversell = inventoryPolicy.allowOversell === true;
+      const shortages = await this.stockValidator.assertLinesAvailable(
+        stockDemands,
+        { tx, allowOversell },
+      );
+      if (shortages.length > 0) stockWarnings.push(...shortages);
 
       for (const item of dto.items) {
         const product = productMap.get(item.product_id)!;
@@ -1031,21 +1055,46 @@ export class TableSessionsService {
             [],
             tx,
           );
+          let reserveSlices = allocation.slices;
           if (allocation.shortfall > 0) {
-            throw new VendixHttpException(
-              ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
-              `No hay existencias suficientes de ${product.name}.`,
-              { items: [{
-                product_id: item.product_id,
-                product_variant_id: item.product_variant_id ?? null,
-                product_name: product.name,
-                kind: 'product',
-                requested: item.quantity,
-                available: allocation.available,
-              }] },
+            if (!allowOversell) {
+              throw new VendixHttpException(
+                ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+                `No hay existencias suficientes de ${product.name}.`,
+                { items: [{
+                  product_id: item.product_id,
+                  product_variant_id: item.product_variant_id ?? null,
+                  product_name: product.name,
+                  kind: 'product',
+                  requested: item.quantity,
+                  available: allocation.available,
+                }] },
+              );
+            }
+            this.logger.warn(
+              `Sobreventa permitida — ${product.name}: requiere ${item.quantity}, disponible ${allocation.available}.`,
+            );
+            stockWarnings.push({
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id ?? null,
+              product_name: product.name,
+              kind: 'product',
+              requested: item.quantity,
+              available: allocation.available,
+            });
+            const fallbackLocationId =
+              allocation.slices[0]?.location_id ??
+              (await this.stockLevelManager.getDefaultLocationForProduct(
+                item.product_id,
+                item.product_variant_id ?? undefined,
+                tx,
+              ));
+            reserveSlices = this.sellableStockAllocator.absorbShortfall(
+              allocation,
+              fallbackLocationId,
             );
           }
-          for (const slice of allocation.slices) {
+          for (const slice of reserveSlices) {
             await this.stockLevelManager.reserveStock(
               item.product_id,
               item.product_variant_id ?? undefined,
@@ -1054,12 +1103,12 @@ export class TableSessionsService {
               'order',
               session.order_id,
               RequestContextService.getContext()?.user_id ?? undefined,
-              true,
+              !allowOversell,
               tx,
               undefined,
               false,
               undefined,
-              false,
+              allowOversell,
             );
           }
         }
@@ -1150,7 +1199,10 @@ export class TableSessionsService {
     this.logger.log(
       `Items appended: session=${sessionId} order=${session.order_id} lines=${dto.items.length}`,
     );
-    return this.findOne(sessionId);
+    const view = await this.findOne(sessionId);
+    return stockWarnings.length > 0
+      ? { ...view, stock_warnings: stockWarnings }
+      : view;
   }
 
   // -------------------------------------------------------------- remove

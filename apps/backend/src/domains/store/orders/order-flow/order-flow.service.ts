@@ -706,14 +706,27 @@ export class OrderFlowService {
     // transaction commits (never on rollback).
     if (newState === 'finished' || newState === 'delivered') {
       const stockEvents: Array<() => void> = [];
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive to
+      // the response, only when the store's "Permitir sobreventa" switch
+      // accepted a real shortfall during this commit.
+      const stockWarnings: InsufficientStockItem[] = [];
       try {
         const { updated_order, commit } = await this.prisma.$transaction(
           async (tx) => {
+            const inventoryPolicy = await this.stockValidator?.resolveInventoryPolicy(
+              previous_order?.store_id as number,
+              tx,
+            );
+            const allowOversell = inventoryPolicy?.allowOversell === true;
             const commit = await this.orderStockCommit.commitOrderDelivery(
               orderId,
               {
                 movementType: 'sale',
-                blockOnInsufficient: true,
+                blockOnInsufficient: !allowOversell,
+                allowNegativeOnShortfall: allowOversell,
+                onShortfall: allowOversell
+                  ? (item) => stockWarnings.push({ ...item, kind: 'product' })
+                  : undefined,
                 consumeSerials: true,
                 reason:
                   newState === 'finished' ? 'Order completed' : 'Order delivered',
@@ -786,7 +799,9 @@ export class OrderFlowService {
           });
         }
 
-        return updated_order;
+        return stockWarnings.length > 0
+          ? { ...updated_order, stock_warnings: stockWarnings }
+          : updated_order;
       } catch (error) {
         // The commit failed → the state write was rolled back with it, so the
         // order is still in its previous state. Business rules
@@ -999,6 +1014,15 @@ export class OrderFlowService {
           // BEFORE `payOrder` writes a payment row (the caller's try/catch
           // around this call wraps and rethrows as a typed 409 without
           // inserting anything).
+          // docs/plans/no-overselling-stock-guard-plan.md step 9 — a store
+          // with "Permitir sobreventa" active does not block this claim on a
+          // shortfall; it logs a warning and reserves the full demand anyway
+          // (allow_negative_available), same contract as the other seams.
+          const inventoryPolicy = await this.stockValidator?.resolveInventoryPolicy(
+            storeId,
+            tx,
+          );
+          const allowOversell = inventoryPolicy?.allowOversell === true;
           await this.stockValidator?.assertLinesAvailable(
             Array.from(groups.values()).map((g) => ({
               product_id: g.product_id,
@@ -1006,7 +1030,7 @@ export class OrderFlowService {
               quantity: g.demand,
               product_name: g.product_name,
             })),
-            { orderId, tx },
+            { orderId, tx, allowOversell },
           );
 
           for (const group of groups.values()) {
@@ -1028,7 +1052,7 @@ export class OrderFlowService {
               storeId, group.product_id, group.product_variant_id,
               toReserve, [], tx,
             );
-            if (allocation && allocation.shortfall > 0) {
+            if (allocation && allocation.shortfall > 0 && !allowOversell) {
               throw new VendixHttpException(
                 ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
                 `Stock insuficiente para ${group.product_name}: requiere ${toReserve}, disponible ${allocation.available}.`,
@@ -1042,14 +1066,29 @@ export class OrderFlowService {
                 }] },
               );
             }
+            if (allocation && allocation.shortfall > 0 && allowOversell) {
+              this.logger.warn(
+                `Sobreventa permitida — ${group.product_name}: requiere ${toReserve}, disponible ${allocation.available}.`,
+              );
+            }
             // Legacy direct-construction specs do not inject the allocator;
             // Nest production always resolves it from OrderStockCommitModule.
-            const slices = allocation?.slices ?? [{
-              location_id: await this.stockLevelManager.getDefaultLocationForProduct(
-                group.product_id, group.product_variant_id,
-              ),
-              quantity: toReserve,
-            }];
+            const slices = allocation
+              ? (allocation.shortfall > 0 && allowOversell
+                  ? this.sellableStockAllocator!.absorbShortfall(
+                      allocation,
+                      allocation.slices[0]?.location_id ??
+                        (await this.stockLevelManager.getDefaultLocationForProduct(
+                          group.product_id, group.product_variant_id, tx,
+                        )),
+                    )
+                  : allocation.slices)
+              : [{
+                  location_id: await this.stockLevelManager.getDefaultLocationForProduct(
+                    group.product_id, group.product_variant_id,
+                  ),
+                  quantity: toReserve,
+                }];
             for (const slice of slices) {
               await this.stockLevelManager.reserveStock(
                 group.product_id,
@@ -1059,12 +1098,12 @@ export class OrderFlowService {
                 'order',
                 orderId,
                 userId,
-                true,
+                !allowOversell,
                 tx,
                 undefined,
                 false,
                 undefined, // quantity already expressed in stock units
-                false,
+                allowOversell,
               );
               createdInTransaction.push({
                 productId: group.product_id,
@@ -2200,8 +2239,20 @@ export class OrderFlowService {
       // QUI-557): a financial-split source order is a real sale closing out
       // — it must block on insufficient stock like every other delivery
       // commit, not silently oversell with a floor of 0.
+      // Step 9: unless the store's "Permitir sobreventa" switch is active,
+      // in which case it logs and lets the commit go through negative.
+      const inventoryPolicy = await this.stockValidator?.resolveInventoryPolicy(order.store_id);
+      const allowOversell = inventoryPolicy?.allowOversell === true;
       await this.orderStockCommit.commitOrderDelivery(orderId, {
-        movementType: 'sale', blockOnInsufficient: true, consumeSerials: true,
+        movementType: 'sale',
+        blockOnInsufficient: !allowOversell,
+        allowNegativeOnShortfall: allowOversell,
+        onShortfall: allowOversell
+          ? (item) => this.logger.warn(
+              `Sobreventa permitida — orden #${orderId} split source, ${item.product_name}: requiere ${item.requested}, disponible ${item.available}.`,
+            )
+          : undefined,
+        consumeSerials: true,
         reason: 'POS Sale (cuentas financieras cobradas)', userId: actorUserId ?? context?.user_id,
       });
     }

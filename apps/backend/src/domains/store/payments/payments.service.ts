@@ -13,6 +13,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import {
   StockValidatorService,
   StockDemandLine,
+  type InsufficientStockItem,
 } from '../inventory/shared/services/stock-validator.service';
 import {
   OrderStockCommitService,
@@ -1070,9 +1071,20 @@ export class PaymentsService {
         // draft reaches flow/pay. Payment will only top up a missing delta.
 
         // 1.5. BLOCKING stock validation using stock_levels (source of truth)
-        // Validate ALL items before any reservation occurs
-        // Oversell is intentionally not controlled by the public POS payload.
-        const allowOversell = false;
+        // Validate ALL items before any reservation occurs.
+        // docs/plans/no-overselling-stock-guard-plan.md step 9: oversell is
+        // NOT controlled by the public POS payload (still true) — it is the
+        // per-store "Permitir sobreventa" switch, resolved server-side from
+        // `store_settings.inventory.allow_negative_stock` for THIS order's
+        // store, inside the same tx that reserves/commits stock.
+        const inventoryPolicy = await this.stockValidatorService.resolveInventoryPolicy(
+          order.store_id,
+          tx,
+        );
+        const allowOversell = inventoryPolicy.allowOversell === true;
+        // Additive to the response (2030+): only present when a shortfall was
+        // accepted under the oversell switch, never as an empty array.
+        const stockWarnings: InsufficientStockItem[] = [];
 
         // no-overselling-stock-guard plan, Step 4 (POS): a prepared dish
         // that is about to be fired to the kitchen (skip_kds=false, restaurant
@@ -1183,13 +1195,17 @@ export class PaymentsService {
           });
         }
 
-        // BLOCK: if not allowing oversell, throw before any payment/reservation
-        // happens naming every product that cannot cover the summed demand.
-        if (!allowOversell && stockDemandLines.length > 0) {
-          await this.stockValidatorService.assertLinesAvailable(
+        // BLOCK (default, allowOversell=false): throw before any
+        // payment/reservation happens, naming every product that cannot
+        // cover the summed demand. WARN (allowOversell=true): the validator
+        // logs and returns the shortfall instead of throwing — collected
+        // below as `stock_warnings`, additive to the response.
+        if (stockDemandLines.length > 0) {
+          const shortages = await this.stockValidatorService.assertLinesAvailable(
             stockDemandLines,
-            { orderId: order.id, tx },
+            { orderId: order.id, tx, allowOversell },
           );
+          if (shortages.length > 0) stockWarnings.push(...shortages);
         }
 
         // QUI-559: no "default location" fallback here any more. Picking an
@@ -1262,34 +1278,64 @@ export class PaymentsService {
                 tx,
               );
 
+            let reserveSlices = allocation.slices;
             if (allocation.shortfall > 0) {
-              // §1.5 already proved the sellable set covers this line, so a gap
-              // here means another sale took the units in between. That is a
-              // real, user-facing condition — not an infrastructure hiccup — so
-              // it aborts the payment instead of leaving the order partially
-              // reserved and failing later at the delivery commit.
-              throw new VendixHttpException(
-                ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
-                `Stock insuficiente para ${product.name}: requiere ${unitsToReserve} unidades, disponible ${allocation.available}.`,
-                { items: [{
-                  product_id: item.product_id,
-                  product_variant_id: item.product_variant_id ?? null,
-                  product_name: product.name,
-                  kind: 'product',
-                  requested: unitsToReserve,
-                  available: allocation.available,
-                }] },
+              if (!allowOversell) {
+                // §1.5 already proved the sellable set covers this line, so a gap
+                // here means another sale took the units in between. That is a
+                // real, user-facing condition — not an infrastructure hiccup — so
+                // it aborts the payment instead of leaving the order partially
+                // reserved and failing later at the delivery commit.
+                throw new VendixHttpException(
+                  ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+                  `Stock insuficiente para ${product.name}: requiere ${unitsToReserve} unidades, disponible ${allocation.available}.`,
+                  { items: [{
+                    product_id: item.product_id,
+                    product_variant_id: item.product_variant_id ?? null,
+                    product_name: product.name,
+                    kind: 'product',
+                    requested: unitsToReserve,
+                    available: allocation.available,
+                  }] },
+                );
+              }
+              // "Permitir sobreventa" ON (step 9): reserve the FULL
+              // `unitsToReserve` anyway — the uncovered remainder lands on
+              // the largest sellable location (or the store's default one)
+              // via `allow_negative_available`, letting `quantity_available`
+              // go negative instead of blocking the sale.
+              this.logger.warn(
+                `Sobreventa permitida en POS — ${product.name}: requiere ${unitsToReserve}, disponible ${allocation.available}.`,
+              );
+              stockWarnings.push({
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id ?? null,
+                product_name: product.name,
+                kind: 'product',
+                requested: unitsToReserve,
+                available: allocation.available,
+              });
+              const fallbackLocationId =
+                allocation.slices[0]?.location_id ??
+                (await this.stockLevelManager.getDefaultLocationForProduct(
+                  item.product_id,
+                  item.product_variant_id ?? undefined,
+                  tx,
+                ));
+              reserveSlices = this.sellableStockAllocator.absorbShortfall(
+                allocation,
+                fallbackLocationId,
               );
             }
 
-            if (!allocation.slices.length) {
+            if (!reserveSlices.length) {
               // Nothing to reserve (a zero-unit line). Nothing to roll back
               // either — release the savepoint and move on.
               await tx.$executeRawUnsafe('RELEASE SAVEPOINT stock_reserve_sp');
               continue;
             }
 
-            for (const slice of allocation.slices) {
+            for (const slice of reserveSlices) {
               await this.stockLevelManager.reserveStock(
                 item.product_id,
                 item.product_variant_id || undefined,
@@ -1298,13 +1344,14 @@ export class PaymentsService {
                 'order',
                 order.id,
                 user?.id,
-                true, // Strict floor also protects races after the aggregate check.
+                !allowOversell, // Strict floor also protects races after the aggregate check.
                 tx,
                 undefined, // expires_at
                 false, // skip_reservation
                 // The slice quantity IS the real stock-unit count: the pack
                 // multiplier was already applied when computing unitsToReserve.
                 slice.quantity,
+                allowOversell, // allow_negative_available (step 9)
               );
             }
 
@@ -2123,6 +2170,15 @@ export class PaymentsService {
             : undefined,
           nextAction: payment?.nextAction,
           _digitalPaymentPending: isDigitalPayment || false,
+          // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive,
+          // ONLY present when the "Permitir sobreventa" switch accepted a
+          // real product-line shortfall. Never an empty array on the strict
+          // (default) path. Ingredient-overuse warnings from a kitchen fire
+          // are surfaced by `kitchen_fire` itself (kitchen-fire.service.ts),
+          // not duplicated here.
+          ...(stockWarnings.length > 0
+            ? { stock_warnings: stockWarnings }
+            : {}),
         };
         // Red de seguridad para la contención real de varias cajas cobrando a
         // la vez, NO el arreglo del P2028: ese vino de quitar las lecturas
@@ -4462,20 +4518,30 @@ export class PaymentsService {
     // Costo manual: si el costo cobrado no es el de la tarifa, el envío NO
     // sale de ella ⇒ copia vacía (contrato: un costo manual no lleva
     // impuesto). Misma regla que `costComesFromRate` de
-    // `OrdersService.assignShipping`:
-    //  - `flat`: el costo esperado es el BRUTO del cálculo único (paso 14;
-    //    agregado ⇒ base + impuesto, igual que el cotizador).
-    //  - calculadas (`weight_based`, `price_based`, `free`): se RECALCULA en
-    //    el servidor con `ShippingCalculatorService.calculateRates` (la misma
-    //    lógica del checkout y de `assignShipping`) sobre la dirección y las
-    //    líneas de esta venta; se toma la opción de ESTA tarifa.
-    //  - `carrier_calculated`: el calculador no la soporta (no hay cotización
-    //    determinista), así que nunca aparece entre las opciones ⇒ copia
-    //    vacía. Igual para cualquier tarifa sin dirección resoluble o que el
-    //    calculador no devuelva.
-    // Sin `chargeForRate` (dobles viejos de specs) ⇒ `base_cost`, el
-    // comportamiento previo al paso.
+    // `OrdersService.assignShipping`. Unificado (ver
+    // `vendix-shipping-distance-pricing`): TODOS los tipos (`flat`,
+    // `weight_based`, `price_based`, `free`) intentan primero el mismo
+    // cálculo único —`ShippingCalculatorService.quoteRateGross()` vía
+    // `recalculatePosRateCost` (umbral de envío gratis, costo por
+    // unidad/peso y precio por distancia)— sobre la dirección y las líneas
+    // de esta venta. Ya no hay atajo `flat = base_cost` que ignorara todo
+    // eso.
+    //  - Sin calculador, sin dirección resoluble, o la tarifa fuera de las
+    //    opciones (incluye `carrier_calculated`, que el calculador no
+    //    cotiza) ⇒ `quoteRateGross` devuelve `null`.
+    //  - Solo entonces `flat` cae al viejo atajo (paso 14 histórico):
+    //    `chargeForRate(base_cost).gross`, o `base_cost` sin
+    //    `chargeForRate` (dobles viejos de specs). Las calculadas quedan
+    //    sin costo esperado (`null` ⇒ manual), igual que antes del paso.
+    const quoted = await this.recalculatePosRateCost(
+      tx,
+      dto,
+      store_id,
+      rate.id,
+      order_items,
+    );
     const flat_charge =
+      quoted == null &&
       rate.type === 'flat' &&
       this.shippingTaxService &&
       typeof this.shippingTaxService.chargeForRate === 'function'
@@ -4487,11 +4553,13 @@ export class PaymentsService {
           )
         : null;
     const expected_cost =
-      rate.type === 'flat'
-        ? flat_charge
-          ? flat_charge.gross
-          : Number(rate.base_cost ?? 0)
-        : await this.recalculatePosRateCost(tx, dto, store_id, rate.id, order_items);
+      quoted != null
+        ? quoted
+        : rate.type === 'flat'
+          ? flat_charge
+            ? flat_charge.gross
+            : Number(rate.base_cost ?? 0)
+          : null;
     const isManualCost =
       expected_cost == null ||
       differsByAtLeastCents(shipping_cost, expected_cost, 1);
@@ -4503,9 +4571,10 @@ export class PaymentsService {
           })
         : { ...EMPTY_SHIPPING_TAX };
     // Paso 14 — el modo viaja con la copia (modo de la tarifa cuando hay
-    // impuesto, null si no). `flat` reutiliza el cobro de arriba; las
-    // calculadas lo evalúan sobre el costo cobrado (el modo vive en la
-    // fila de la tarifa, así que el precio de entrada no lo mueve).
+    // impuesto, null si no). `flat` sin `quoteRateGross` reutiliza el cobro
+    // del atajo; el resto (incluida una `flat` resuelta por
+    // `quoteRateGross`) lo evalúa sobre el costo cobrado (el modo vive en
+    // la fila de la tarifa, así que el precio de entrada no lo mueve).
     let is_inclusive: boolean | null = null;
     if (snapshot.shipping_tax_amount > 0) {
       const mode_charge =
@@ -4526,9 +4595,12 @@ export class PaymentsService {
 
   /**
    * Costo de la tarifa `rate_id` recalculado en el servidor para esta venta
-   * POS (dirección + líneas). `null` si no hay dirección resoluble, no hay
-   * calculador o la tarifa no es una opción aplicable (incluye
-   * `carrier_calculated`, que el calculador no cotiza).
+   * POS (dirección + líneas), vía el mismo cálculo único que orders/checkout
+   * (`ShippingCalculatorService.quoteRateGross`). `null` si no hay dirección
+   * resoluble, no hay calculador o la tarifa no es una opción aplicable
+   * (incluye `carrier_calculated`, que el calculador no cotiza). Aplica a
+   * CUALQUIER tipo de tarifa, incluida `flat` (el llamador cae al atajo
+   * histórico solo si esto devuelve `null`).
    */
   private async recalculatePosRateCost(
     tx: any,
@@ -4544,11 +4616,20 @@ export class PaymentsService {
       state_province?: string | null;
       city?: string | null;
       postal_code?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
     } | null = null;
     if (dto.shipping_address_id) {
       address = await tx.addresses.findFirst({
         where: { id: dto.shipping_address_id },
-        select: { country_code: true, state_province: true, city: true, postal_code: true },
+        select: {
+          country_code: true,
+          state_province: true,
+          city: true,
+          postal_code: true,
+          latitude: true,
+          longitude: true,
+        },
       });
     } else if (dto.shipping_address_snapshot) {
       address = dto.shipping_address_snapshot as any;
@@ -4594,18 +4675,21 @@ export class PaymentsService {
       });
 
     try {
-      const options = await this.shippingCalculatorService.calculateRates(
+      return await this.shippingCalculatorService.quoteRateGross(
         store_id,
+        rate_id,
         items,
         {
           country_code: address.country_code,
           state_province: address.state_province || undefined,
           city: address.city || undefined,
           postal_code: address.postal_code || undefined,
+          latitude:
+            address.latitude != null ? Number(address.latitude) : undefined,
+          longitude:
+            address.longitude != null ? Number(address.longitude) : undefined,
         },
       );
-      const match = options.find((o) => o.rate_id === rate_id);
-      return match ? Number(match.cost) : null;
     } catch (error) {
       this.logger.warn(
         `POS: no se pudo recalcular la tarifa de envío #${rate_id}: ${(error as Error)?.message}`,

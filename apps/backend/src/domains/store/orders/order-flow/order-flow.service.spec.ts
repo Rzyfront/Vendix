@@ -328,14 +328,22 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
       ],
     });
     h.tx.stock_reservations.aggregate.mockResolvedValueOnce({ _sum: { quantity: 2 } });
-    const validator = { assertLinesAvailable: jest.fn().mockResolvedValue(undefined) };
+    const validator = {
+      assertLinesAvailable: jest.fn().mockResolvedValue([]),
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — strict
+      // default (allowOversell=false) preserves this assertion byte-for-byte.
+      resolveInventoryPolicy: jest.fn().mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: true,
+      }),
+    };
     (h.service as any).stockValidator = validator;
 
     await h.service.payOrder(1, DTO);
 
     expect(validator.assertLinesAvailable).toHaveBeenCalledWith(
       [expect.objectContaining({ product_id: 701, quantity: 5 })],
-      { orderId: 1, tx: h.tx },
+      { orderId: 1, tx: h.tx, allowOversell: false },
     );
     expect(h.stock.reserveStock).toHaveBeenCalledTimes(1);
     expect(h.stock.reserveStock.mock.calls[0][3]).toBe(3);
@@ -364,6 +372,12 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
         new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
           'Stock insuficiente para MODELO', { items: [{ product_name: 'MODELO', requested: 2, available: 0 }] }),
       ),
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — strict
+      // default (allowOversell=false): the guard above still throws.
+      resolveInventoryPolicy: jest.fn().mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: true,
+      }),
     };
 
     const error = await h.service.payOrder(1, DTO).catch((failure) => failure);

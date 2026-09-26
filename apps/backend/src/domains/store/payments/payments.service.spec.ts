@@ -111,6 +111,12 @@ describe('PaymentsService', () => {
   let assertLinesAvailableMock: jest.MockedFunction<
     StockValidatorService['assertLinesAvailable']
   >;
+  // docs/plans/no-overselling-stock-guard-plan.md step 9 — strict default
+  // (allowOversell=false) preserves every pre-existing assertion byte-for-
+  // byte; the oversell-path tests override this per-case.
+  let resolveInventoryPolicyMock: jest.MockedFunction<
+    StockValidatorService['resolveInventoryPolicy']
+  >;
   let reserveStockMock: jest.MockedFunction<StockLevelManager['reserveStock']>;
   let allocateForLineMock: jest.MockedFunction<SellableStockAllocator['allocateForLine']>;
 
@@ -253,9 +259,15 @@ describe('PaymentsService', () => {
     // this per-case with `.mockRejectedValueOnce(...)`.
     assertLinesAvailableMock = jest
       .fn()
-      .mockResolvedValue(undefined) as jest.MockedFunction<
+      .mockResolvedValue([]) as jest.MockedFunction<
       StockValidatorService['assertLinesAvailable']
     >;
+    resolveInventoryPolicyMock = jest
+      .fn()
+      .mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: true,
+      }) as jest.MockedFunction<StockValidatorService['resolveInventoryPolicy']>;
     reserveStockMock = jest.fn().mockResolvedValue(undefined) as jest.MockedFunction<
       StockLevelManager['reserveStock']
     >;
@@ -350,6 +362,7 @@ describe('PaymentsService', () => {
           useValue: {
             assertLinesAvailable: assertLinesAvailableMock,
             assertIngredientsAvailable: jest.fn().mockResolvedValue(undefined),
+            resolveInventoryPolicy: resolveInventoryPolicyMock,
           },
         },
         {
@@ -3502,7 +3515,7 @@ describe('PaymentsService', () => {
       )).rejects.toMatchObject({ errorCode: 'INV_STOCK_INSUFFICIENT_LINES' });
       expect(assertLinesAvailableMock).toHaveBeenCalledWith(
         [expect.objectContaining({ product_id: 501, quantity: 1 })],
-        { orderId: 4242, tx },
+        { orderId: 4242, tx, allowOversell: false },
       );
       expect(tx.order_items.findMany).not.toHaveBeenCalled();
     });
@@ -3532,7 +3545,7 @@ describe('PaymentsService', () => {
       )).rejects.toThrow('stop-after-reserve');
       expect(reserveStockMock).toHaveBeenCalledWith(
         501, undefined, 77, 1, 'order', 4242, expect.anything(),
-        true, tx, undefined, false, 1,
+        true, tx, undefined, false, 1, false,
       );
     });
 
