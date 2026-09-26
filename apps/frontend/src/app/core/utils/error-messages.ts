@@ -332,6 +332,15 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INV_PERM_001: 'No tiene permisos para acceder al inventario.',
   INV_CONTEXT_001: 'Debe seleccionar una organizacion.',
   INV_STOCK_001: 'Stock insuficiente.',
+  // No overselling — guardia de reserva/entrega (order-stock-commit.service.ts).
+  // Este canned copy es sólo el respaldo: el backend ya manda el mensaje
+  // humano en español con el producto y las cantidades (ver
+  // isPresentableApiMessage en parse-api-error.ts), así que normalmente lo que
+  // ve el operador es ESE texto, no éste.
+  INV_STOCK_002:
+    'No se puede entregar: no hay stock suficiente para uno o más productos.',
+  INV_STOCK_INSUFFICIENT_LINES:
+    'No hay stock suficiente para uno o más productos o insumos. Quítalos de la orden o desactiva «Maneja inventario» en el producto.',
   INV_LOC_001: 'Ubicacion no encontrada.',
   INV_ADJ_001: 'Ajuste no encontrado.',
   INV_BULK_001: 'El archivo esta vacio o no contiene datos validos.',

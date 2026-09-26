@@ -1,7 +1,9 @@
-import { firstValueFrom, of } from 'rxjs';
+import { firstValueFrom, of, throwError } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
 import { PosPaymentService } from './pos-payment.service';
 import { CartState } from '../models/cart.model';
 import { PosShippingSaleData } from '../models/shipping.model';
+import { PaymentMethod, PaymentRequest } from '../models/payment.model';
 
 describe('PosPaymentService.processShippingSale — adopted order reference', () => {
   let service: PosPaymentService;
@@ -319,5 +321,106 @@ describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada mul
 
     expect(flowPayOrder).not.toHaveBeenCalled();
     expect(processPaymentForExistingOrder).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Sin sobreventa — `rethrowApiError` (usado por `processPayment` y el resto
+ * de métodos de cobro) preserva `stockShortages` normalizado además de
+ * `errorCode`/`details`, para que el POS pueda listar cada producto o insumo
+ * faltante en vez de sólo el string de `userMessage`.
+ */
+describe('PosPaymentService.processPayment — sin sobreventa (INV_STOCK_INSUFFICIENT_LINES)', () => {
+  let service: PosPaymentService;
+  let post: jasmine.Spy;
+
+  const request: PaymentRequest = {
+    orderId: 'ORD-1',
+    amount: 20000,
+    paymentMethod: { id: '1', type: 'cash' } as PaymentMethod,
+    cashReceived: 20000,
+  };
+
+  beforeEach(() => {
+    post = jasmine.createSpy('post');
+    service = new PosPaymentService(
+      { post } as any,
+      { getUserId: () => 1, getStoreIdOrThrow: () => 1, getStoreId: () => 1 } as any,
+      { isEnabled: false, getRegisterId: () => null } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+  });
+
+  it('adjunta stockShortages normalizado desde details.items[] del 409', async () => {
+    post.and.returnValue(
+      throwError(() => new HttpErrorResponse({
+        status: 409,
+        statusText: 'Conflict',
+        url: 'https://api.vendix.com/api/store/payments/pos',
+        error: {
+          statusCode: 409,
+          error_code: 'INV_STOCK_INSUFFICIENT_LINES',
+          message:
+            'Sin stock suficiente: MODELO (pedido 1, disponible 0). Quítalo de la orden o desactiva «Maneja inventario» en el producto.',
+          details: {
+            items: [
+              {
+                product_id: 501,
+                product_variant_id: null,
+                product_name: 'MODELO',
+                kind: 'product',
+                requested: 1,
+                available: 0,
+              },
+            ],
+          },
+        },
+      })),
+    );
+
+    let caught: any;
+    try {
+      await firstValueFrom(service.processPayment(request));
+      fail('expected processPayment to reject');
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught.errorCode).toBe('INV_STOCK_INSUFFICIENT_LINES');
+    expect(caught.stockShortages).toEqual([
+      {
+        product_id: 501,
+        product_variant_id: null,
+        product_name: 'MODELO',
+        kind: 'product',
+        requested: 1,
+        available: 0,
+      },
+    ]);
+    expect(caught.message).toContain('MODELO');
+  });
+
+  it('no adjunta stockShortages cuando el error no trae faltantes', async () => {
+    post.and.returnValue(
+      throwError(() => new HttpErrorResponse({
+        status: 400,
+        statusText: 'Bad Request',
+        url: 'https://api.vendix.com/api/store/payments/pos',
+        error: { statusCode: 400, error_code: 'POS_CUSTOMER_REQUIRED_001', message: 'Customer required' },
+      })),
+    );
+
+    let caught: any;
+    try {
+      await firstValueFrom(service.processPayment(request));
+      fail('expected processPayment to reject');
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught.errorCode).toBe('POS_CUSTOMER_REQUIRED_001');
+    expect(caught.stockShortages).toBeUndefined();
   });
 });

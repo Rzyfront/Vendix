@@ -4,7 +4,10 @@ import { Observable, of, throwError, Subject } from 'rxjs';
 import { catchError, map, timeout, delay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
-import { parseApiError } from '../../../../../core/utils/parse-api-error';
+import {
+  parseApiError,
+  type InsufficientStockItem,
+} from '../../../../../core/utils/parse-api-error';
 import { PaymentMethodsCatalogService } from '../../../../../shared/services/payment-methods-catalog.service';
 import { PosCashRegisterService } from './pos-cash-register.service';
 import { CartItem, CartState } from '../models/cart.model';
@@ -111,6 +114,12 @@ function buildShippingNotes(
  * backend `message`, and otherwise uses `DEFAULT_ERROR_MESSAGE`) and rethrows
  * an `Error` with `errorCode` and `details` attached as own properties so the
  * caller can do `if (err.errorCode === 'POS_CUSTOMER_REQUIRED_001') ...`.
+ *
+ * No-overselling guard (`INV_STOCK_INSUFFICIENT_LINES` / `INV_STOCK_002`):
+ * also attaches `stockShortages` — the same normalized list `parseApiError`
+ * already computes — so a caller can render the itemized product/insumo
+ * list instead of just the flat `userMessage` string, without re-parsing
+ * `details` itself.
  */
 function rethrowApiError<T = never>(error: unknown): Observable<T> {
   const parsed = parseApiError(error);
@@ -118,10 +127,14 @@ function rethrowApiError<T = never>(error: unknown): Observable<T> {
     errorCode: string | null;
     details: unknown;
     devMessage: string | null;
+    stockShortages?: InsufficientStockItem[];
   };
   wrapped.errorCode = parsed.errorCode;
   wrapped.details = parsed.details;
   wrapped.devMessage = parsed.devMessage;
+  if (parsed.stockShortages?.length) {
+    wrapped.stockShortages = parsed.stockShortages;
+  }
   // Preserve the original HttpErrorResponse so consumers that need the
   // raw status (network errors, retry policies) still have it.
   (wrapped as any).cause = error;
