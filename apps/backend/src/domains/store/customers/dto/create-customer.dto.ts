@@ -113,6 +113,15 @@ export class CreateCustomerDto {
     description: 'Tax regime (fiscal classification)',
     enum: tax_regime_enum,
   })
+  // El modal de clientes precarga este control con `customer.tax_regime ?? ''`
+  // y siempre reenvía el formulario completo: un cliente sin régimen guardado
+  // vuelve como '' en cada PATCH, y `@IsEnum` la rechaza con 400 aunque nadie
+  // haya tocado el campo. `''` no es un valor DIAN válido, así que se
+  // normaliza a `null` (igual que `verification_digit`/`ciiu_code`) antes de
+  // validar.
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? null : value,
+  )
   @IsOptional()
   @IsEnum(tax_regime_enum, {
     message: 'tax_regime debe ser uno de los regímenes tributarios válidos',
@@ -123,6 +132,14 @@ export class CreateCustomerDto {
     description: 'Person type for withholding resolution',
     enum: persona_type_enum,
   })
+  // Mismo problema que `tax_regime`: el modal reenvía '' cuando el cliente no
+  // tiene tipo de persona clasificado. `@IsOptional()` ignora los validadores
+  // de esta propiedad (incluido `@JuridicaNameRule`) cuando el valor es
+  // `null`/`undefined`, y la regla jurídica ya es un no-op cuando
+  // `person_type !== 'JURIDICA'`, así que normalizar a `null` es seguro.
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? null : value,
+  )
   @IsOptional()
   @IsEnum(persona_type_enum, {
     message: "person_type debe ser 'NATURAL' o 'JURIDICA'",
