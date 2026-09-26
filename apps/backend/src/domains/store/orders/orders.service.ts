@@ -4582,6 +4582,23 @@ export class OrdersService {
       delivery_type: deliveryType,
     });
 
+    // Plan order-truth-and-invoice-tz — solo si el envío realmente cambió
+    // (mismo `shippingUnchanged` que decide la copia de impuesto arriba);
+    // reenviar el mismo método/tarifa/costo es un no-op y no es un evento.
+    if (!shippingUnchanged) {
+      await this.orderHistoryService?.record(this.prisma, {
+        orderId,
+        storeId,
+        organizationId: context?.organization_id ?? null,
+        type: 'shipping_assigned',
+        payload: {
+          shipping_method_id: method.id,
+          shipping_rate_id: resolvedRateId,
+          shipping_cost: shippingCost,
+        },
+      });
+    }
+
     return updated;
   }
 
