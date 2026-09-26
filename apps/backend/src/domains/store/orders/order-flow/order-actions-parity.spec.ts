@@ -73,6 +73,7 @@ import {
   canConfirmDelivery,
   canEditOrder,
   canCreditPayment,
+  canCollectViaShip,
   OrderActionSnapshot,
   OrderActionRoleContext,
 } from './order-action-policy.util';
@@ -187,6 +188,29 @@ describe('order-actions-parity — processing (web ids: finish|dispatch-order+di
     // read, not re-asserted structurally here (no predicate exists for a
     // code that was deliberately deleted).
     expect(true).toBe(true);
+  });
+
+  it('REGRESSION FIX: collect_payment ("ship"/"Pasar a Cobro") is offered — unpaid, no dispatch/fulfillment flow, matches the web\'s removed `else if (!hasPaid) push ship` branch', () => {
+    const order = baseOrder({ state: 'processing' });
+    expect(canCollectViaShip(order)).toEqual({ enabled: true });
+  });
+
+  it('collect_payment disables once paid (finish is the surface instead)', () => {
+    const order = baseOrder({ state: 'processing', payments: [directPayment(100)] });
+    expect(canCollectViaShip(order)).toEqual({ enabled: false, reason: 'ORD_PAY_ALREADY_PAID_001' });
+  });
+
+  it('collect_payment does not apply when the order has a dispatch/fulfillment flow (home_delivery or kitchen) — dispatch_order/direct_deliver/finish own that case instead', () => {
+    expect(
+      canCollectViaShip({ ...baseOrder({ state: 'processing' }), delivery_type: 'home_delivery' }),
+    ).toEqual({ enabled: false });
+    expect(
+      canCollectViaShip({
+        ...baseOrder({ state: 'processing' }),
+        delivery_type: 'direct_delivery',
+        isKitchenOrder: true,
+      }),
+    ).toEqual({ enabled: false });
   });
 });
 

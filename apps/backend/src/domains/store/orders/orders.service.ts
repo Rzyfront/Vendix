@@ -71,6 +71,7 @@ import {
   canManualShip,
   canReadyForPickupBeforePayment,
   canDirectDeliver,
+  canCollectViaShip,
   computeItemActions,
   OrderActionSnapshot,
 } from './order-flow/order-action-policy.util';
@@ -1714,6 +1715,16 @@ export class OrdersService {
             ...canDirectDeliver(snapshot),
           });
         }
+      } else {
+        // Restores the web's removed `ship` button ("Pasar a Cobro", commit
+        // cbebc40db8f) — see `canCollectViaShip`'s doc comment in
+        // `order-action-policy.util.ts`. Same `!offersDispatchFlow` presence
+        // gate as the dispatch trio above, mirroring `getAvailableActions`.
+        actions.push({
+          code: 'collect_payment',
+          label_key: 'ORD_ACTION_COLLECT_PAYMENT',
+          ...canCollectViaShip(snapshot),
+        });
       }
 
       if (!requiresDispatch) {

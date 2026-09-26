@@ -418,6 +418,32 @@ export function canDirectDeliver(order: DispatchFlowSnapshot): OrderActionResult
   return { enabled: canOfferDispatchFlow(order) && !canGenerateRemisionFlow(order) };
 }
 
+/** `collect_payment` — restores the web's removed `ship` button ("Pasar a
+ * Cobro", commit cbebc40db8f). `pay` is structurally excluded from
+ * `processing` (see `PAYABLE_STATES` above — `payOrder`'s own atomic claim
+ * only accepts `draft`/`created`/`shipped`/`pending_payment`/`delivered`/
+ * `finished` as the order's PRE-claim state, never `processing`), so a
+ * `processing` order with NO dispatch/fulfillment flow at all —
+ * `!canOfferDispatchFlow` (same formula `dispatch_order`/`direct_deliver`
+ * use: not `home_delivery` AND never fired to the kitchen) — has no other
+ * surface to reach `shipped` (where `pay` opens back up) than `shipOrder`.
+ * Business rule from the owner: it must ALWAYS be possible to register a
+ * payment on a non-finished order. Same split-lock gate as `canPay`. */
+export function canCollectViaShip(
+  order: OrderActionSnapshot & DispatchFlowSnapshot,
+): OrderActionResult {
+  if (order.state !== 'processing') return { enabled: false };
+  if (canOfferDispatchFlow(order)) return { enabled: false };
+  if (isFinancialSplitLocked(order)) {
+    return { enabled: false, reason: FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED.code };
+  }
+  const settlement = toSettlementSnapshot(order);
+  if (isOrderFullyPaid(settlement, getSettledOrderAmount(settlement))) {
+    return { enabled: false, reason: ErrorCodes.ORD_PAY_ALREADY_PAID_001.code };
+  }
+  return { enabled: true };
+}
+
 // ---------------------------------------------------------------------------
 // Item-level predicates
 // ---------------------------------------------------------------------------

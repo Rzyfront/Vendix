@@ -354,6 +354,7 @@ export function buildOrderActionButtons(
     manual_ship: 'manual-ship',
     ready_for_pickup: 'manual-ready-pickup',
     direct_deliver: 'direct-deliver',
+    collect_payment: 'ship',
     mark_delivered: 'deliver',
     confirm_delivery: 'finish',
     cancel_payment: 'cancel-payment',
@@ -385,6 +386,12 @@ export function buildOrderActionButtons(
         return { label: 'Lista para recogida', icon: 'package', variant: 'primary', weight: 30 };
       case 'direct_deliver':
         return { label: 'Entregar directamente', icon: 'package-check', variant: 'warning', weight: 32 };
+      case 'collect_payment':
+        // Restaura el viejo boton "Pasar a Cobro" (commit cbebc40db8f): una
+        // orden `processing` sin fulfillment (ni domicilio ni cocina) no
+        // tiene otra via a `shipped`, donde `pay` vuelve a estar disponible.
+        // Mismo id/handler que el `ship` original (`openShipModal`).
+        return { label: 'Pasar a Cobro', icon: 'credit-card', variant: 'primary', weight: 30 };
       case 'mark_delivered': {
         const label = delivery === 'home_delivery'
           ? 'Marcar como Entregado'

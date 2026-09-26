@@ -24,6 +24,7 @@ import {
   canManualShip,
   canReadyForPickupBeforePayment,
   canDirectDeliver,
+  canCollectViaShip,
   OrderActionSnapshot,
 } from './order-action-policy.util';
 import { OrderSseService } from '../services/order-sse.service';
@@ -2895,6 +2896,17 @@ export class OrderFlowService {
             ...canDirectDeliver(snapshot),
           });
         }
+      } else {
+        // Restores the web's removed `ship` button ("Pasar a Cobro", commit
+        // cbebc40db8f) — see `canCollectViaShip`'s doc comment. Presence
+        // mirrors the same `!offersDispatchFlow` gate the dispatch trio
+        // above uses (same applicability semantics: only pushed when this
+        // order has no dispatch/fulfillment flow at all).
+        actions.push({
+          code: 'collect_payment',
+          label_key: 'ORD_ACTION_COLLECT_PAYMENT',
+          ...canCollectViaShip(snapshot),
+        });
       }
 
       // `confirm_delivery` also serves the web's `finish` button for a

@@ -14,6 +14,7 @@ import {
   canManualShip,
   canReadyForPickupBeforePayment,
   canDirectDeliver,
+  canCollectViaShip,
   canDeliverItem,
   canCancelItem,
   canReverseDeliveredItem,
@@ -658,5 +659,55 @@ describe('order-action-policy — canDirectDeliver', () => {
         dispatchOrder({ state: 'pending_payment', delivery_type: 'pickup', isKitchenOrder: true }),
       ).enabled,
     ).toBe(false);
+  });
+});
+
+function collectOrder(
+  overrides: Partial<OrderActionSnapshot & { delivery_type: string | null; isKitchenOrder: boolean }> = {},
+) {
+  return {
+    state: 'processing',
+    grand_total: 100,
+    payments: [],
+    refunds: [],
+    delivery_type: 'direct_delivery',
+    isKitchenOrder: false,
+    ...overrides,
+  };
+}
+
+describe('order-action-policy — canCollectViaShip', () => {
+  it('enables a direct_delivery, non-kitchen, unpaid order in processing — restores the web\'s removed `ship` ("Pasar a Cobro")', () => {
+    expect(canCollectViaShip(collectOrder())).toEqual({ enabled: true });
+  });
+
+  it('enables a pickup/other, non-kitchen, unpaid order in processing (same "no fulfillment" formula, independent of delivery_type)', () => {
+    expect(canCollectViaShip(collectOrder({ delivery_type: 'pickup' }))).toEqual({ enabled: true });
+    expect(canCollectViaShip(collectOrder({ delivery_type: 'other' }))).toEqual({ enabled: true });
+  });
+
+  it('disables a home_delivery order — always offers `dispatch_order` instead (canOfferDispatchFlow is true)', () => {
+    expect(canCollectViaShip(collectOrder({ delivery_type: 'home_delivery' })).enabled).toBe(false);
+  });
+
+  it('disables a kitchen order — offers `dispatch_order`/`direct_deliver`/`confirm_delivery` instead', () => {
+    expect(canCollectViaShip(collectOrder({ isKitchenOrder: true })).enabled).toBe(false);
+  });
+
+  it('disables when financial-split locked, even with no fulfillment', () => {
+    expect(canCollectViaShip(collectOrder({ active_financial_split_id: 7 }))).toEqual({
+      enabled: false,
+      reason: SPLIT_LOCKED,
+    });
+  });
+
+  it('disables once fully paid (mirrors `canPay`\'s already-paid reason)', () => {
+    expect(
+      canCollectViaShip(collectOrder({ payments: [directPayment(100)] })),
+    ).toEqual({ enabled: false, reason: ALREADY_PAID });
+  });
+
+  it('disables outside processing', () => {
+    expect(canCollectViaShip(collectOrder({ state: 'pending_payment' })).enabled).toBe(false);
   });
 });

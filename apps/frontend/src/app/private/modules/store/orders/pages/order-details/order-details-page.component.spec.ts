@@ -289,6 +289,25 @@ describe('order-truth-and-invoice-tz plan (Objetivos 3/11/12) — buildOrderActi
       jasmine.objectContaining({ id: 'reactivate', enabled: true }),
     ]);
   });
+
+  it('mapea collect_payment al botón "ship" ("Pasar a Cobro") — restaura el botón removido en commit cbebc40db8f', () => {
+    const order = {
+      state: 'processing',
+      delivery_type: 'direct_delivery',
+      available_actions: [
+        { code: 'collect_payment', label_key: 'ORD_ACTION_COLLECT_PAYMENT', enabled: true },
+      ],
+    } as any;
+    expect(buildOrderActionButtons(order)).toEqual([
+      jasmine.objectContaining({
+        id: 'ship',
+        label: 'Pasar a Cobro',
+        icon: 'credit-card',
+        variant: 'primary',
+        enabled: true,
+      }),
+    ]);
+  });
 });
 
 describe('B3 (release-855) — isOrderCreateLog / isRefundAuditRow / isConfirmedStateTransition', () => {
