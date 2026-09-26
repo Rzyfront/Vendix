@@ -2,7 +2,6 @@ import { assertNoActiveFinancialSplit } from '../shared/financial-split-policy';
 import { lockOrderLifecycle } from './order-lifecycle-lock.util';
 import {
   getCancellationBlocker,
-  getOrderCancellationPolicy,
   SETTLED_PAYMENT_STATES,
   CANCELABLE_ORDER_STATES,
   hasNonDirectSettledPayment,
@@ -11,8 +10,21 @@ import {
 import {
   canPay,
   canCancelPayment,
+  canCancelPaymentAsRole,
   canRefund,
+  canCancel,
+  canAssignShipping,
+  canConfirmDelivery,
   canDeliverItem,
+  canEditOrder,
+  canReactivate,
+  canFastTrack,
+  canCreditPayment,
+  canDispatchOrder,
+  canManualShip,
+  canReadyForPickupBeforePayment,
+  canDirectDeliver,
+  OrderActionSnapshot,
 } from './order-action-policy.util';
 import { OrderSseService } from '../services/order-sse.service';
 import {
@@ -2593,6 +2605,8 @@ export class OrderFlowService {
     const deliveryType = order.delivery_type;
     const hasMethod = !!order.shipping_method_id;
     const isDirectDelivery = deliveryType === 'direct_delivery';
+    const isPickupDelivery = (deliveryType || 'direct_delivery') === 'pickup';
+    const requiresDispatch = deliveryType === 'home_delivery';
     // B1b (order-truth-and-invoice-tz plan) — an active financial split
     // locks every economic mutation (pay/credit_payment/edit_order) until
     // the split itself is cancelled; mirrors `assertNoActiveFinancialSplit`,
@@ -2600,55 +2614,126 @@ export class OrderFlowService {
     // never checked this before, so a split order could show `pay: true`
     // and then 409 at the endpoint — parity fix.
     const activeFinancialSplit = !!order.active_financial_split_id;
-    const splitReason = activeFinancialSplit
-      ? FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED.code
-      : undefined;
 
-    if (state === 'created') {
+    // B1b — one extra small, order-scoped, indexed read for refund-aware
+    // `isOrderFullyPaid` (`canPay`), plus a single `order_items` +
+    // `kitchen_ticket_items` read that supplies BOTH the web's
+    // `isKitchenOrder` signal (dispatch/`fast_track` predicates) and
+    // `confirm_delivery`'s F2 pending-kitchen gate — replacing what would
+    // otherwise be two separate queries. Cheap: this is a detail-page read
+    // path, not a hot loop.
+    const [refunds, itemsWithKitchen] = await Promise.all([
+      this.prisma.refunds.findMany({
+        where: { order_id: orderId },
+        select: { state: true, amount: true },
+      }),
+      this.prisma.order_items.findMany({
+        where: { order_id: orderId },
+        select: {
+          kitchen_ticket_items: { select: { status: true }, orderBy: { id: 'desc' } },
+        },
+      }),
+    ]);
+    const isKitchenOrder = itemsWithKitchen.some((item) => item.kitchen_ticket_items.length > 0);
+    const hasPendingKitchen = itemsWithKitchen.some((item) =>
+      item.kitchen_ticket_items.some((k) => k.status !== 'delivered' && k.status !== 'cancelled'),
+    );
+    const offersDispatchFlow = requiresDispatch || isKitchenOrder;
+
+    const snapshot: OrderActionSnapshot & {
+      delivery_type?: string | null;
+      shipping_method_id?: number | null;
+      payment_form?: string | null;
+      isKitchenOrder?: boolean;
+      hasOrderItems?: boolean;
+      remaining_balance?: Prisma.Decimal | number | string | null;
+    } = {
+      ...order,
+      refunds,
+      hasPendingKitchen,
+      isKitchenOrder,
+      hasOrderItems: (order.order_items ?? []).length > 0,
+    };
+    const roleCtx = { roles: RequestContextService.getRoles() };
+
+    // `draft` (POS counter orders before confirmation) behaves exactly like
+    // `created` — mirrors the web's `case 'draft': case 'created':` fall-through.
+    if (state === 'draft' || state === 'created') {
       actions.push({
-        code: 'pay',
-        label_key: 'ORD_ACTION_PAY',
-        enabled: !activeFinancialSplit,
-        ...(splitReason ? { reason: splitReason } : {}),
+        code: 'edit_order',
+        label_key: 'ORD_ACTION_EDIT_ORDER',
+        ...canEditOrder(snapshot, roleCtx),
       });
+      actions.push({ code: 'pay', label_key: 'ORD_ACTION_PAY', ...canPay(snapshot) });
       if (!hasMethod && !isDirectDelivery) {
         actions.push({
           code: 'assign_shipping',
           label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
-          enabled: true,
+          ...canAssignShipping(snapshot),
         });
       }
-      actions.push({
-        code: 'cancel',
-        label_key: 'ORD_ACTION_CANCEL',
-        enabled: true,
-      });
+      actions.push({ code: 'cancel', label_key: 'ORD_ACTION_CANCEL', ...canCancel(snapshot) });
     }
 
     if (state === 'pending_payment') {
-      actions.push({
-        code: 'confirm_payment',
-        label_key: 'ORD_ACTION_CONFIRM_PAYMENT',
-        enabled: true,
-      });
+      const isCreditOrder = order.payment_form === '2';
+      if (isCreditOrder) {
+        actions.push({
+          code: 'credit_payment',
+          label_key: 'ORD_ACTION_CREDIT_PAYMENT',
+          ...canCreditPayment(snapshot),
+        });
+      } else {
+        actions.push({
+          code: 'confirm_payment',
+          label_key: 'ORD_ACTION_CONFIRM_PAYMENT',
+          enabled: true,
+        });
+      }
+
+      // `cancel_payment` here has always delegated to
+      // `getOrderCancellationPolicy` (unchanged) — the only change is the
+      // role gate `canCancelPaymentAsRole` now applies, matching the
+      // `@Roles('owner','admin')` guard the `/cancel-payment` endpoint has
+      // always enforced regardless of order state (STATE gap #2).
       actions.push({
         code: 'cancel_payment',
         label_key: 'ORD_ACTION_CANCEL_PAYMENT',
-        enabled: !activeFinancialSplit,
-        ...(splitReason ? { reason: splitReason } : {}),
+        ...canCancelPaymentAsRole(snapshot, roleCtx),
       });
+
       if (!hasMethod && !isDirectDelivery) {
         actions.push({
           code: 'assign_shipping',
           label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
-          enabled: true,
+          ...canAssignShipping(snapshot),
         });
       }
-      actions.push({
-        code: 'cancel',
-        label_key: 'ORD_ACTION_CANCEL',
-        enabled: true,
-      });
+      actions.push({ code: 'cancel', label_key: 'ORD_ACTION_CANCEL', ...canCancel(snapshot) });
+
+      // Dispatch-before-payment trio (web: `dispatch-order` / `manual-ship` /
+      // `manual-ready-pickup`, mutually exclusive by `delivery_type` — see
+      // `order-action-policy.util.ts`'s dispatch-flow section). Only surfaced
+      // at all when the order could plausibly offer one of the three — a
+      // plain non-kitchen `direct_delivery`/mesa order shows none of them,
+      // exactly like the web.
+      if (offersDispatchFlow || isPickupDelivery) {
+        actions.push({
+          code: 'dispatch_order',
+          label_key: 'ORD_ACTION_DISPATCH_ORDER',
+          ...canDispatchOrder(snapshot),
+        });
+        actions.push({
+          code: 'manual_ship',
+          label_key: 'ORD_ACTION_MANUAL_SHIP',
+          ...canManualShip(snapshot),
+        });
+        actions.push({
+          code: 'ready_for_pickup',
+          label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+          ...canReadyForPickupBeforePayment(snapshot),
+        });
+      }
     }
 
     if (state === 'processing') {
@@ -2656,7 +2741,7 @@ export class OrderFlowService {
         actions.push({
           code: 'assign_shipping',
           label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
-          enabled: true,
+          ...canAssignShipping(snapshot),
         });
         actions.push({
           code: 'ready_for_pickup',
@@ -2699,10 +2784,44 @@ export class OrderFlowService {
       // this action; the web never showed it either. Advertising it here
       // was a phantom action the endpoint would always reject.
 
+      // B1b — additive dispatch pair (web: `dispatch-order` +, for a pickup
+      // order in that same branch, `direct-deliver`). Independent of the
+      // pre-existing `ready_for_pickup`/`ship_with_tracking` block above,
+      // which is left untouched (different signal: the ASSIGNED method's
+      // own `type`, not the kitchen/home-delivery fulfillment axis).
+      if (offersDispatchFlow) {
+        actions.push({
+          code: 'dispatch_order',
+          label_key: 'ORD_ACTION_DISPATCH_ORDER',
+          ...canDispatchOrder(snapshot),
+        });
+        if (isPickupDelivery) {
+          actions.push({
+            code: 'direct_deliver',
+            label_key: 'ORD_ACTION_DIRECT_DELIVER',
+            ...canDirectDeliver(snapshot),
+          });
+        }
+      }
+
+      // `confirm_delivery` also serves the web's `finish` button for a
+      // kitchen order consumed in-store (mesa/mostrador/para-llevar) or a
+      // paid order with no fulfillment left to dispatch — `canConfirmDelivery`
+      // (F2-guard-aware) is the authority; a `home_delivery` order always
+      // finishes through the dispatch flow instead, so it is skipped here
+      // when dispatch applies, mirroring the web's mutual exclusion.
+      if (!requiresDispatch) {
+        actions.push({
+          code: 'confirm_delivery',
+          label_key: 'ORD_ACTION_CONFIRM_DELIVERY',
+          ...canConfirmDelivery(snapshot),
+        });
+      }
+
       actions.push({
         code: 'cancel',
         label_key: 'ORD_ACTION_CANCEL',
-        enabled: true,
+        ...canCancel(snapshot),
       });
     }
 
@@ -2718,7 +2837,15 @@ export class OrderFlowService {
       actions.push({
         code: 'confirm_delivery',
         label_key: 'ORD_ACTION_CONFIRM_DELIVERY',
-        enabled: true,
+        ...canConfirmDelivery(snapshot),
+      });
+    }
+
+    if (state === 'cancelled') {
+      actions.push({
+        code: 'reactivate',
+        label_key: 'ORD_ACTION_REACTIVATE',
+        ...canReactivate(snapshot),
       });
     }
 
@@ -2728,11 +2855,7 @@ export class OrderFlowService {
     // advertising it for `delivered` was a parity gap: a `finished` order
     // could be refunded at the endpoint but the action never appeared here.
     if (state === 'delivered' || state === 'finished') {
-      actions.push({
-        code: 'refund',
-        label_key: 'ORD_ACTION_REFUND',
-        enabled: true,
-      });
+      actions.push({ code: 'refund', label_key: 'ORD_ACTION_REFUND', ...canRefund(snapshot) });
     }
 
     // B4 (release-855) / B1b (order-truth-and-invoice-tz plan) — `shipped`,
@@ -2740,9 +2863,7 @@ export class OrderFlowService {
     // lands on `shipped`/`delivered` unpaid — see the widened claim in
     // `payOrder`) nor "cannot touch payment again". Money and fulfillment
     // are independent axes in these states, so `pay`/`cancel_payment` are
-    // surfaced here on their own merits, bypassing the generic
-    // `getOrderCancellationPolicy` (which only knows about
-    // pending_payment/processing) — see `FULFILLED_PAYMENT_CANCELABLE_STATES`.
+    // surfaced here on their own merits — see `FULFILLED_PAYMENT_CANCELABLE_STATES`.
     // `finished` is `pay`-eligible but NEVER `cancel_payment`-eligible: B1b
     // makes that a hard reject (`ORD_PAYMENT_CANCEL_FINISHED_001`) — a
     // refund is the only way to reverse money once an order is finalized.
@@ -2752,60 +2873,68 @@ export class OrderFlowService {
       const hasSettledPayment = (order.payments ?? []).some((p) =>
         SETTLED_PAYMENT_STATES.has(p.state),
       );
-      // Guardia de crédito (mismo contrato que `payOrder`'s precheck): una
-      // venta a crédito no ofrece `pay` (cobro de contado) en estos
-      // estados — el abono va por el flujo de crédito
-      // (`registerCreditPayment`), que no tiene una acción propia en este
-      // arreglo hoy.
+      // Guardia de crédito (mismo contrato que el precheck de `payOrder` —
+      // NO se toca ese método; ver restricción del coordinador): una venta a
+      // crédito no ofrece `pay` (cobro de contado) en estos tres estados —
+      // el abono va por `credit_payment` / `registerCreditPayment`. Solo
+      // sobre-escribe cuando `canPay` ya habría dicho `true`, preservando la
+      // prioridad de motivo previa (ya-pagado/split ganan sobre crédito,
+      // igual que el código anterior).
       const isCreditOrder = order.payment_form === '2';
-
+      const payResult = canPay(snapshot);
       actions.push({
         code: 'pay',
         label_key: 'ORD_ACTION_PAY',
-        enabled: !hasSettledPayment && !isCreditOrder && !activeFinancialSplit,
-        ...(hasSettledPayment
-          ? { reason: ErrorCodes.ORD_PAY_ALREADY_PAID_001.code }
-          : isCreditOrder
-            ? { reason: ErrorCodes.ORD_PAY_CREDIT_ORDER_001.code }
-            : splitReason
-              ? { reason: splitReason }
-              : {}),
+        ...(payResult.enabled && isCreditOrder
+          ? { enabled: false, reason: ErrorCodes.ORD_PAY_CREDIT_ORDER_001.code }
+          : payResult),
       });
 
+      if (isCreditOrder && state === 'finished') {
+        // Web only offers `credit-payment` for `finished` among these three
+        // states (`shipped`/`delivered` credit orders fall through to the
+        // disabled `pay` row above, same as the web's `!hasPaid` branch).
+        actions.push({
+          code: 'credit_payment',
+          label_key: 'ORD_ACTION_CREDIT_PAYMENT',
+          ...canCreditPayment(snapshot),
+        });
+      }
+
+      // B4 row-presence rule preserved 1:1: `cancel_payment` is only
+      // advertised at all once there is something settled to cancel.
       if (hasSettledPayment) {
-        let cancelPaymentReason: string | undefined;
-        if (state === 'finished') {
-          cancelPaymentReason = ErrorCodes.ORD_PAYMENT_CANCEL_FINISHED_001.code;
-        } else if (activeFinancialSplit) {
-          cancelPaymentReason = splitReason;
-        } else if (hasNonDirectSettledPayment(order.payments)) {
-          cancelPaymentReason = 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001';
-        } else {
-          const blockingInvoice =
-            await this.findBlockingSalesInvoiceForPaymentCancel(orderId);
-          if (blockingInvoice) {
-            cancelPaymentReason = ErrorCodes.ORD_PAYMENT_CANCEL_INVOICED_001.code;
-          }
-        }
+        const hasIssuedSalesInvoice =
+          state !== 'finished' &&
+          FULFILLED_PAYMENT_CANCELABLE_STATES.has(state) &&
+          !hasNonDirectSettledPayment(order.payments)
+            ? !!(await this.findBlockingSalesInvoiceForPaymentCancel(orderId))
+            : undefined;
         actions.push({
           code: 'cancel_payment',
           label_key: 'ORD_ACTION_CANCEL_PAYMENT',
-          enabled: !cancelPaymentReason,
-          ...(cancelPaymentReason ? { reason: cancelPaymentReason } : {}),
+          ...canCancelPaymentAsRole({ ...snapshot, hasIssuedSalesInvoice }, roleCtx),
         });
       }
     }
 
-    const policy = getOrderCancellationPolicy(order);
-    return actions.map((action) => {
-      if (action.code !== 'cancel' && action.code !== 'cancel_payment') return action;
-      // shipped/delivered/finished already computed their own cancel_payment
-      // above; the generic policy (pending_payment/processing only) must not
-      // overwrite it back to disabled.
-      if (isPayEligibleFulfilledState) return action;
-      const enabled = action.code === 'cancel' ? policy.can_cancel : policy.can_cancel_payment;
-      return { ...action, enabled, ...(policy.reason_code ? { reason: policy.reason_code } : {}) };
+    // fast_track — independent of the state switch above (mirrors the web's
+    // standalone `canFastTrack()` checkbox, not part of its `availableActions`
+    // array either).
+    actions.push({
+      code: 'fast_track',
+      label_key: 'ORD_ACTION_FAST_TRACK',
+      ...canFastTrack(snapshot),
     });
+
+    // NOTE: `cancel` and `cancel_payment` above are already fully computed by
+    // `canCancel`/`canCancelPaymentAsRole` (which delegate to
+    // `getOrderCancellationPolicy` for the states that need it) — no further
+    // post-processing pass is applied here. An earlier version of this
+    // method re-ran the generic policy over the finished list as a final
+    // step; that would have clobbered `cancel_payment`'s new role gate for
+    // `pending_payment`/`processing` right back to the plain policy result.
+    return actions;
   }
 
   /**

@@ -3815,13 +3815,24 @@ describe('OrderFlowService.getAvailableActions — B4 (release-855) delivered/fi
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
+    // `roles: ['owner']` — B1b (order-truth-and-invoice-tz plan) wired
+    // `getAvailableActions`'s `cancel_payment` through `canCancelPaymentAsRole`,
+    // matching the `/cancel-payment` endpoint's `@Roles('owner','admin')`
+    // guard. Without a privileged role here every `cancel_payment` assertion
+    // below would see `FORBIDDEN` instead of the state/settlement reason
+    // under test — see the dedicated role-gating test below for the
+    // non-privileged case.
+    mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7, roles: ['owner'] } as any);
 
     prismaMock = createPrismaMock({
       invoices: ['findFirst'],
       shipping_methods: ['findFirst'],
+      refunds: ['findMany'],
+      order_items: ['findMany'],
     });
     prismaMock.invoices.findFirst.mockResolvedValue(null);
+    prismaMock.refunds.findMany.mockResolvedValue([]);
+    prismaMock.order_items.findMany.mockResolvedValue([]);
 
     service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
@@ -3903,6 +3914,30 @@ describe('OrderFlowService.getAvailableActions — B4 (release-855) delivered/fi
       expect(actions.find((a) => a.code === 'pay')).toMatchObject({ enabled: true });
     },
   );
+
+  // B1b (order-truth-and-invoice-tz plan, STATE gap #2) — `cancel_payment`
+  // must be role-gated the same way the `/cancel-payment` endpoint's
+  // `RolesGuard` + `@Roles('owner','admin')` already are, regardless of
+  // order state. A non-privileged role sees `FORBIDDEN`, never the
+  // underlying settlement reason.
+  it('disables `cancel_payment` with FORBIDDEN for a non-owner/admin role', async () => {
+    mockRequestContext({
+      store_id: 100, organization_id: 1, user_id: 7, roles: ['cashier'],
+    } as any);
+    const order = deliveredOrder([
+      buildPayment({
+        state: 'succeeded',
+        store_payment_method: { system_payment_method: { type: 'cash', processing_mode: 'DIRECT' } },
+      }),
+    ]);
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+
+    const actions = await service.getAvailableActions(ORDER_ID);
+
+    expect(actions.find((a) => a.code === 'cancel_payment')).toMatchObject({
+      enabled: false, reason: 'FORBIDDEN',
+    });
+  });
 });
 
 /**

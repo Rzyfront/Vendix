@@ -25,6 +25,14 @@ import {
  * call the SAME predicate, so a `getAvailableActions` response can never
  * advertise an action its own endpoint would then reject, and no endpoint
  * can reject an action the response called `enabled: true`.
+ *
+ * Final order-level action code list (Step 1b — `getAvailableActions`):
+ * `pay`, `credit_payment`, `confirm_payment`, `cancel_payment`, `edit_order`,
+ * `assign_shipping`, `dispatch_order`, `manual_ship`, `ready_for_pickup`,
+ * `ship_with_tracking`, `direct_deliver`, `mark_delivered`, `confirm_delivery`
+ * (also serves the web's `finish` button), `refund`, `cancel`, `reactivate`,
+ * `fast_track`. Item-level codes (unchanged, see `ITEM_ACTION_PREDICATES`):
+ * `deliver`, `cancel`, `reverse_delivered`, `resend`.
  */
 
 export interface OrderActionResult {
@@ -242,6 +250,166 @@ export function canConfirmDelivery(order: OrderActionSnapshot): OrderActionResul
     return { enabled: false, reason: 'ORDER_HAS_PENDING_KITCHEN_ITEMS' };
   }
   return { enabled: true };
+}
+
+/** `edit_order` — POS navigation-only action (no dedicated write endpoint to
+ * mirror; `editOrderInPos()` just routes to `/admin/pos?editOrder=id`). Gate
+ * mirrors the web's `isPrivilegedUser()` + state switch (`draft`/`created`
+ * only) + the split filter applied to the whole action list at the end of
+ * `availableActions`. */
+const EDITABLE_ORDER_STATES = new Set(['draft', 'created']);
+export function canEditOrder(
+  order: OrderActionSnapshot,
+  ctx: OrderActionRoleContext,
+): OrderActionResult {
+  if (!EDITABLE_ORDER_STATES.has(order.state)) return { enabled: false };
+  if (!isOwnerOrAdmin(ctx)) return { enabled: false, reason: 'FORBIDDEN' };
+  if (isFinancialSplitLocked(order)) {
+    return { enabled: false, reason: FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED.code };
+  }
+  return { enabled: true };
+}
+
+/** `reactivate` — mirrors `OrderFlowService.reactivateOrder`'s only state
+ * guard (`ORD_STATUS_001` unless `state === 'cancelled'`). The endpoint has
+ * no `@Roles` gate (permission-only: `store:orders:order_flow:reactivate`),
+ * so — unlike `cancel_payment` — this predicate does NOT take a role
+ * context; the web's `isPrivilegedUser()` gate on the button is a UI
+ * preference, not a server rule this file has to reproduce. */
+export function canReactivate(order: { state: string }): OrderActionResult {
+  return { enabled: order.state === 'cancelled' };
+}
+
+/** `fast_track` — mirrors `OrderFlowService.fastTrackOrder`'s pre-flight
+ * guards, in the SAME order it throws them: terminal state, then the
+ * shipping-required-for-flow gate. `hasOrderItems` is resolved by the caller
+ * (mirrors the web's `canFastTrack`'s `order_items.length > 0`). */
+export interface FastTrackSnapshot {
+  state: string;
+  delivery_type?: string | null;
+  shipping_method_id?: number | null;
+  hasOrderItems?: boolean;
+}
+const FAST_TRACK_TERMINAL_STATES = new Set(['finished', 'cancelled', 'refunded']);
+export function canFastTrack(order: FastTrackSnapshot): OrderActionResult {
+  if (FAST_TRACK_TERMINAL_STATES.has(order.state)) {
+    return { enabled: false, reason: ErrorCodes.ORD_FAST_TRACK_INVALID_STATE_001.code };
+  }
+  if (order.delivery_type !== 'direct_delivery' && !order.shipping_method_id) {
+    return { enabled: false, reason: ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001.code };
+  }
+  if (!order.hasOrderItems) return { enabled: false };
+  return { enabled: true };
+}
+
+/** `credit_payment` — mirrors `OrderFlowService.registerCreditPayment`'s own
+ * guards (`payment_form !== '2'` / `remaining_balance <= 0` → 400), narrowed
+ * to the two states the web actually offers the button in:
+ * `pending_payment` (any credit order — a fresh credit sale always owes its
+ * full balance) and `finished` (only once `remaining_balance > 0.01`, same
+ * threshold the web uses to hide it once the last installment lands). */
+export interface CreditPaymentSnapshot {
+  state: string;
+  payment_form?: string | null;
+  remaining_balance?: Prisma.Decimal | number | string | null;
+}
+export function canCreditPayment(
+  order: CreditPaymentSnapshot & { active_financial_split_id?: number | null },
+): OrderActionResult {
+  if (order.payment_form !== '2') return { enabled: false };
+  if (order.active_financial_split_id) {
+    return { enabled: false, reason: FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED.code };
+  }
+  if (order.state === 'pending_payment') return { enabled: true };
+  if (order.state === 'finished') {
+    return { enabled: Number(order.remaining_balance ?? 0) > 0.01 };
+  }
+  return { enabled: false };
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch/fulfillment flow — `dispatch_order` / `manual_ship` /
+// `direct_deliver` / the `pending_payment`-side of `ready_for_pickup`.
+//
+// Pure mirror of the web's `isKitchenOrder` / `requiresDispatchFlow` /
+// `canOfferDispatch` / `canGenerateRemision` computeds
+// (order-details-page.component.ts). `isKitchenOrder` is an ASYNC fact the
+// caller resolves (any order_item ever fired to the kitchen — a
+// `kitchen_ticket_items` row exists for it, regardless of its current
+// status); this file stays pure/synchronous.
+//
+// `processing`'s pre-existing `ready_for_pickup`/`ship_with_tracking` split
+// (keyed off the ASSIGNED shipping method's `type` column) is a different,
+// older signal and is intentionally left untouched in
+// `OrderFlowService.getAvailableActions` — these new predicates are
+// ADDITIVE, not a replacement.
+// ---------------------------------------------------------------------------
+
+export interface DispatchFlowSnapshot {
+  state: string;
+  delivery_type?: string | null;
+  isKitchenOrder?: boolean;
+}
+
+function normalizedDeliveryType(order: DispatchFlowSnapshot): string {
+  return order.delivery_type || 'direct_delivery';
+}
+function requiresDispatchFlow(order: DispatchFlowSnapshot): boolean {
+  return normalizedDeliveryType(order) === 'home_delivery';
+}
+function canOfferDispatchFlow(order: DispatchFlowSnapshot): boolean {
+  return requiresDispatchFlow(order) || !!order.isKitchenOrder;
+}
+function canGenerateRemisionFlow(order: DispatchFlowSnapshot): boolean {
+  if (normalizedDeliveryType(order) === 'direct_delivery') return false;
+  return !order.isKitchenOrder || requiresDispatchFlow(order);
+}
+const DISPATCHABLE_ORDER_STATES = new Set(['pending_payment', 'processing']);
+
+/** `dispatch_order` — the unified con/sin-remisión chooser button. Valid in
+ * both `pending_payment` (dispatch before payment confirms/collects) and
+ * `processing` (standard post-payment dispatch). */
+export function canDispatchOrder(order: DispatchFlowSnapshot): OrderActionResult {
+  if (!DISPATCHABLE_ORDER_STATES.has(order.state)) return { enabled: false };
+  return { enabled: canOfferDispatchFlow(order) && canGenerateRemisionFlow(order) };
+}
+
+/** `manual_ship` — `pending_payment` only: a shipping/direct-delivery/other
+ * order that can offer dispatch but cannot generate a remisión (a kitchen
+ * order not going home) ships directly instead of through the wizard. */
+export function canManualShip(order: DispatchFlowSnapshot): OrderActionResult {
+  if (order.state !== 'pending_payment') return { enabled: false };
+  const delivery = normalizedDeliveryType(order);
+  const isShippingDelivery =
+    delivery === 'home_delivery' || delivery === 'direct_delivery' || delivery === 'other';
+  return {
+    enabled: canOfferDispatchFlow(order) && !canGenerateRemisionFlow(order) && isShippingDelivery,
+  };
+}
+
+/** `ready_for_pickup` (pending_payment side) — a `pickup` order in
+ * `pending_payment` always falls through to this fallback: `canGenerateRemisionFlow`
+ * is structurally false for `pickup` whenever `isKitchenOrder` is true (so
+ * `dispatch_order` never fires) and `isShippingDelivery` excludes `pickup` (so
+ * `manual_ship` never fires either) — leaving this the only remaining option
+ * for every pickup order, independent of kitchen status. Mirrors the web's
+ * unconditional `else if (isPickup)` branch. Shares its action CODE with
+ * `processing`'s pre-existing method-type-keyed `ready_for_pickup` (see file
+ * header) — same label, two different eligibility rules per state. */
+export function canReadyForPickupBeforePayment(order: DispatchFlowSnapshot): OrderActionResult {
+  if (order.state !== 'pending_payment') return { enabled: false };
+  return { enabled: normalizedDeliveryType(order) === 'pickup' };
+}
+
+/** `direct_deliver` — `processing` only: a pickup order that reached the
+ * dispatch-wizard branch keeps the "hand over at the counter now" shortcut
+ * alongside `dispatch_order` (both may be enabled at once — the web renders
+ * them as two buttons, not a fallback chain, unlike the `pending_payment`
+ * trio above). */
+export function canDirectDeliver(order: DispatchFlowSnapshot): OrderActionResult {
+  if (order.state !== 'processing') return { enabled: false };
+  if (normalizedDeliveryType(order) !== 'pickup') return { enabled: false };
+  return { enabled: canOfferDispatchFlow(order) && canGenerateRemisionFlow(order) };
 }
 
 // ---------------------------------------------------------------------------
