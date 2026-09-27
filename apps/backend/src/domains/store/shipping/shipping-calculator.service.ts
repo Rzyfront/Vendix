@@ -22,6 +22,13 @@ export interface AddressDTO {
   country_code: string;
   state_province?: string;
   city?: string;
+  /**
+   * Línea de dirección escrita. Solo se lee para el fallback de geocoding en
+   * `resolveQuoteDistances` (`ShippingDistanceService.resolveBuyerCoords`)
+   * cuando el comprador no manda `latitude`/`longitude` — `ShippingAddressDto`
+   * ya la trae.
+   */
+  address_line1?: string;
   postal_code?: string;
   latitude?: number;
   longitude?: number;
@@ -406,6 +413,14 @@ export class ShippingCalculatorService {
    * `store_id` + `shipping_method_id` + motivo para que el caso sea
    * diagnosticable — antes fallaba en silencio y solo un `docker logs` con
    * suerte de timing lo mostraba.
+   *
+   * Sin `latitude`/`longitude` del comprador, se intenta UNA vez
+   * `ShippingDistanceService.resolveBuyerCoords` (forward-geocode de
+   * `address_line1`/`city`/`state_province`) antes de rendirse a zona, con
+   * el origen del PRIMER método candidato como `bias` — el mismo campo y el
+   * mismo bias que usa `CheckoutService.resolveConfirmShippingCost`, para
+   * que cotización y confirmación midan desde el mismo punto (el `forward`
+   * cachea por dirección normalizada).
    */
   private async resolveQuoteDistances(
     storeId: number,
@@ -437,21 +452,8 @@ export class ShippingCalculatorService {
     }
     if (candidates.length === 0) return distances;
 
-    const buyer = ShippingDistanceService.toCoords(
-      address.latitude,
-      address.longitude,
-      'buyer',
-    );
-    if (!buyer) {
-      for (const { methodId } of candidates) {
-        this.logger.warn(
-          `Distancia no calculable (store_id=${storeId}, shipping_method_id=${methodId}): ` +
-            'coords de destino ausentes o inválidas; se cobra tarifa de zona.',
-        );
-      }
-      return distances;
-    }
-
+    // Orígenes primero: hacen falta tanto para rutear como para el `bias`
+    // del geocode del comprador cuando no manda coords.
     const origins = new Map<
       string,
       { coords: DistanceCoords; methodIds: number[] }
@@ -473,6 +475,38 @@ export class ShippingCalculatorService {
       const entry = origins.get(key);
       if (entry) entry.methodIds.push(methodId);
       else origins.set(key, { coords: origin, methodIds: [methodId] });
+    }
+
+    let buyer = ShippingDistanceService.toCoords(
+      address.latitude,
+      address.longitude,
+      'buyer',
+    );
+    if (!buyer) {
+      const bias = origins.values().next().value?.coords;
+      const resolved = await this.distanceService.resolveBuyerCoords(
+        {
+          address_line1: address.address_line1,
+          city: address.city,
+          state_province: address.state_province,
+          country_code: address.country_code,
+          latitude: address.latitude,
+          longitude: address.longitude,
+        },
+        bias ? { lat: bias.latitude, lng: bias.longitude } : undefined,
+      );
+      if (resolved) {
+        buyer = { latitude: resolved.latitude, longitude: resolved.longitude };
+      }
+    }
+    if (!buyer) {
+      for (const { methodId } of candidates) {
+        this.logger.warn(
+          `Distancia no calculable (store_id=${storeId}, shipping_method_id=${methodId}, reason=buyer_geocode_failed): ` +
+            'coords de destino ausentes o no geocodificables; se cobra tarifa de zona.',
+        );
+      }
+      return distances;
     }
 
     for (const [key, { coords: origin, methodIds }] of origins) {

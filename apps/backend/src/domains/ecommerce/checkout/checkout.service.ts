@@ -352,6 +352,16 @@ export class CheckoutService {
    * redondeo Decimal(10,8) del snapshot vs. el float de la cotización, o de
    * un proveedor de ruteo distinto entre ambas llamadas, pero no reemplaza
    * el rechazo estricto: fuera de rango es fuera de rango.
+   *
+   * Sin coords en el snapshot, se intenta `ShippingDistanceService.
+   * resolveBuyerCoords` con los MISMOS campos y el MISMO bias (origen del
+   * método) que usa el cotizador (`resolveQuoteDistances`) — el `forward`
+   * cachea por dirección normalizada, así que esta llamada es un HIT del
+   * mismo resultado que ya vio la cotización. Cuando el geocode resuelve, el
+   * punto se escribe de vuelta en `address_snapshot.latitude/longitude`
+   * (mismo objeto que luego persiste `orders.shipping_address_snapshot`),
+   * así la orden queda con coords aunque el comprador nunca las haya
+   * mandado.
    */
   private async resolveConfirmShippingCost(
     rate: {
@@ -365,6 +375,10 @@ export class CheckoutService {
       } | null;
     },
     address_snapshot: {
+      address_line1?: unknown;
+      city?: unknown;
+      state_province?: unknown;
+      country_code?: unknown;
       latitude?: unknown;
       longitude?: unknown;
     } | null,
@@ -388,16 +402,58 @@ export class CheckoutService {
       method.origin_longitude,
       'confirm:origin',
     );
-    const buyer = ShippingDistanceService.toCoords(
+    if (!origin) {
+      this.logger.warn({
+        event: 'checkout.shipping_distance_unavailable',
+        ...logCtx,
+        reason: 'origin_coords_missing',
+      });
+      return zone_cost;
+    }
+
+    let buyer = ShippingDistanceService.toCoords(
       address_snapshot?.latitude,
       address_snapshot?.longitude,
       'confirm:buyer',
     );
-    if (!origin || !buyer) {
+    if (!buyer) {
+      const resolved = await distance.resolveBuyerCoords(
+        {
+          address_line1: address_snapshot?.address_line1 as
+            | string
+            | undefined,
+          city: address_snapshot?.city as string | undefined,
+          state_province: address_snapshot?.state_province as
+            | string
+            | undefined,
+          country_code: address_snapshot?.country_code as string | undefined,
+          latitude: address_snapshot?.latitude,
+          longitude: address_snapshot?.longitude,
+        },
+        { lat: origin.latitude, lng: origin.longitude },
+      );
+      if (resolved) {
+        buyer = { latitude: resolved.latitude, longitude: resolved.longitude };
+        // Persistencia trivial: `address_snapshot` es el MISMO objeto que
+        // luego se escribe tal cual como `orders.shipping_address_snapshot`
+        // (ver los `prisma.orders.create` de checkout/whatsapp checkout más
+        // abajo). Solo se escribe cuando el punto vino del geocode — un pin
+        // de cliente ya está en el snapshot y no hace falta tocarlo.
+        if (address_snapshot && resolved.source === 'geocoded') {
+          (
+            address_snapshot as { latitude?: unknown; longitude?: unknown }
+          ).latitude = resolved.latitude;
+          (
+            address_snapshot as { latitude?: unknown; longitude?: unknown }
+          ).longitude = resolved.longitude;
+        }
+      }
+    }
+    if (!buyer) {
       this.logger.warn({
         event: 'checkout.shipping_distance_unavailable',
         ...logCtx,
-        reason: !origin ? 'origin_coords_missing' : 'buyer_coords_missing',
+        reason: 'buyer_geocode_failed',
       });
       return zone_cost;
     }

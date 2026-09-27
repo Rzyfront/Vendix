@@ -1,5 +1,9 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { RoutingService } from '../../../ecommerce/routing/routing.service';
+import {
+  GeocodePrecision,
+  GeocodingService,
+} from '../../../ecommerce/geocoding/geocoding.service';
 
 /** Un tramo de la escala de km (`shipping_rates.distance_tiers`). */
 export interface DistanceTier {
@@ -12,6 +16,28 @@ export interface DistanceTier {
 export interface DistanceCoords {
   latitude: number;
   longitude: number;
+}
+
+/** Dirección mínima que `resolveBuyerCoords` necesita para geocodificar. */
+export interface BuyerAddressInput {
+  address_line1?: string | null;
+  city?: string | null;
+  state_province?: string | null;
+  country_code?: string | null;
+  latitude?: unknown;
+  longitude?: unknown;
+}
+
+export interface ResolvedBuyerCoords extends DistanceCoords {
+  /** Precisión reportada por el geocoder; ausente cuando `source === 'client'`. */
+  precision?: GeocodePrecision;
+  /**
+   * `'client'`: el pin/coords que mandó el comprador (SIEMPRE gana, puede ser
+   * un pin confirmado por el usuario). `'geocoded'`: no había coords y se
+   * resolvieron por `GeocodingService.forward` a partir de la dirección
+   * escrita.
+   */
+  source: 'client' | 'geocoded';
 }
 
 /**
@@ -41,7 +67,10 @@ export class ShippingDistanceService {
     maxLng: -66.8,
   };
 
-  constructor(@Optional() private readonly routing?: RoutingService) {}
+  constructor(
+    @Optional() private readonly routing?: RoutingService,
+    @Optional() private readonly geocoding?: GeocodingService,
+  ) {}
 
   /**
    * Matcher puro: primer tramo con `from_km <= d` y (`to_km == null` o
@@ -188,6 +217,65 @@ export class ShippingDistanceService {
     } catch (err) {
       this.logger.warn(
         `Ruteo origen→comprador falló, se cobra zona: ${err instanceof Error ? err.message : err}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Resuelve las coords del comprador para el cobro por distancia: el pin/
+   * coords que el comprador ya mandó SIEMPRE gana (puede ser un pin
+   * confirmado a mano, más confiable que un forward-geocode). Solo cuando no
+   * hay coords utilizables se intenta `GeocodingService.forward` con la
+   * dirección escrita (`address_line1` + `city` + `state_province`), con
+   * `bias` (típicamente el origen del método) para desambiguar candidatos.
+   *
+   * Usar el MISMO helper desde el cotizador y la confirmación (con los
+   * mismos campos de entrada y el mismo bias) es lo que mantiene ambos
+   * midiendo desde el mismo punto: `GeocodingService.forward` cachea por la
+   * dirección normalizada, así que la segunda llamada (confirmación) es un
+   * HIT del mismo resultado que ya vio el cotizador.
+   *
+   * `null` ante cualquier fallo (sin `GeocodingService` inyectado, país
+   * distinto de Colombia/vacío, sin `address_line1`, o el geocoder no
+   * resuelve la dirección) — el llamador cobra zona.
+   */
+  async resolveBuyerCoords(
+    address: BuyerAddressInput,
+    bias?: { lat: number; lng: number },
+  ): Promise<ResolvedBuyerCoords | null> {
+    const client = ShippingDistanceService.toCoords(
+      address?.latitude,
+      address?.longitude,
+      'buyer',
+    );
+    if (client) return { ...client, source: 'client' };
+
+    if (!this.geocoding) return null;
+
+    const country = (address?.country_code ?? '').trim().toUpperCase();
+    if (country && country !== 'CO') return null;
+
+    const line1 = (address?.address_line1 ?? '').trim();
+    if (!line1) return null;
+
+    try {
+      const result = await this.geocoding.forward(
+        line1,
+        address?.city ?? undefined,
+        address?.state_province ?? undefined,
+        bias ? { bias } : undefined,
+      );
+      const coords = ShippingDistanceService.toCoords(
+        result?.lat,
+        result?.lng,
+        'buyer:geocoded',
+      );
+      if (!coords) return null;
+      return { ...coords, precision: result?.precision, source: 'geocoded' };
+    } catch (err) {
+      this.logger.warn(
+        `Forward geocode del comprador falló, se cobra zona: ${err instanceof Error ? err.message : err}`,
       );
       return null;
     }
