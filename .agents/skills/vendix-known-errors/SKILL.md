@@ -61,6 +61,7 @@ No gobierna las convenciones de cada dominio — para eso están los skills de �
 | Una precarga pisa datos ya tecleados por el usuario | **`setValue` no marca `dirty`**: no sirve para distinguir «lo puso el usuario» de «lo puso el código». |
 | `takeUntilDestroyed()` lanza fuera de un contexto de inyección | Pasarle el `destroyRef` explícito. |
 | Detección de cambios corriendo sin parar | **`transition: all`** reinicia el ciclo. Enumerar las propiedades a animar. |
+| La app se congela al abrir un dropdown o tocar un filtro (pestaña colgada, sin error en consola) | **Referencia fresca por ciclo en un binding**: un getter que devuelve `[]`/`{}` nuevo en cada pasada alimenta `[ngModel]` → `writeValue` → `signal.set` (o un input signal), que en Zoneless agenda otro ciclo → ticks infinitos. Usar constantes estables y fields `readonly`, nunca literales en el template ni en getters evaluados por CD. |
 | Un valor de moneda parpadea o muestra otro formato | **`CurrencyPipe` impuro**: hay una carrera. Formatear en un `computed()`. |
 | Un modal proyectado con `ng-content` conserva estado viejo al reabrirse | **El contenido proyectado no se destruye** con el modal. Usar una señal-época para forzar el remount. |
 | Un `@defer` nunca sale del skeleton | En una **pestaña oculta** el viewport nunca entra. No es un cuelgue. |
