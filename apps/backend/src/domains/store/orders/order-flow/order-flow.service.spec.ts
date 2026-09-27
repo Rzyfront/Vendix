@@ -864,7 +864,7 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
       cancelTicketInTx: jest.fn().mockResolvedValue(undefined),
       emitTicketCancelledEvent: jest.fn().mockResolvedValue(undefined),
     };
-    const emitter = { emit: jest.fn() };
+    const emitter = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
     const service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
       emitter as any,
@@ -2048,7 +2048,7 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
     ticketRows?: Array<{ status: string }>;
     orderTickets?: Array<{ status: string }>;
   }) => {
-    const eventEmitter = { emit: jest.fn() };
+    const eventEmitter = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
     const kitchenFireService = {
       emitTicketUpdatedEvent: jest.fn().mockResolvedValue(undefined),
     };
@@ -2834,7 +2834,7 @@ describe('D.2 — cancelación de una línea prepared ya consumida', () => {
         }),
       updateStock: jest.fn().mockResolvedValue({}),
     };
-    const events = { emit: jest.fn() };
+    const events = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
     const accounting = {
       onPreparedDishDisposition: jest.fn().mockImplementation(async () => {
         if (options.accountingFailure) throw new Error('Ledger unavailable');
@@ -3127,7 +3127,7 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
     // callback contra el mismo `prismaMock` para que `tx.payments` sea el
     // mock que estos tests ya assertan sobre `prismaMock.payments`.
     prismaMock.$transaction = jest.fn(async (callback: any) => callback(prismaMock));
-    const emitter = { emit: jest.fn() };
+    const emitter = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
     const service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
       emitter as any,
@@ -3196,7 +3196,7 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
     // emite `payment.received`: `emitLegPaymentReceivedEvents` sólo se llama
     // desde el camino de éxito de cada rama, nunca desde `cancelLegPayments`.
     expect(
-      emitter.emit.mock.calls.filter((c: any[]) => c[0] === 'payment.received'),
+      emitter.emitAsync.mock.calls.filter((c: any[]) => c[0] === 'payment.received'),
     ).toHaveLength(0);
   });
 
@@ -3268,7 +3268,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
   let movements: { createManualMovement: jest.Mock };
   let audit: { log: jest.Mock; logCustom: jest.Mock };
   let stock: { releaseReservationsByReference: jest.Mock };
-  let emitter: { emit: jest.Mock };
+  let emitter: { emit: jest.Mock; emitAsync: jest.Mock };
   let refundFlow: { recordCancellationPendingRefunds: jest.Mock; recordCancellationCashRefund: jest.Mock; completeCancellationCashRefund: jest.Mock; emitCancellationCashRefund: jest.Mock };
 
   /** Orden cancelable (estado `processing`) con los pagos que se le pasen. */
@@ -3336,7 +3336,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     stock = {
       releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
     };
-    emitter = { emit: jest.fn() };
+    emitter = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
     refundFlow = {
       recordCancellationPendingRefunds: jest.fn().mockResolvedValue(undefined),
       recordCancellationCashRefund: jest.fn().mockResolvedValue({
@@ -3691,7 +3691,7 @@ describe('OrderFlowService.cancelPayment — B4 (release-855) delivered/finished
   const ORDER_ID = 9001;
   let service: OrderFlowService;
   let prismaMock: PrismaMock;
-  let emitter: { emit: jest.Mock };
+  let emitter: { emit: jest.Mock; emitAsync: jest.Mock };
 
   const directCashPayment = (overrides: Record<string, unknown> = {}) =>
     buildPayment({
@@ -3733,7 +3733,7 @@ describe('OrderFlowService.cancelPayment — B4 (release-855) delivered/finished
     prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, state: 'delivered' });
     prismaMock.orders.findFirst.mockResolvedValue({ id: ORDER_ID, state: 'delivered', payments: [] });
 
-    emitter = { emit: jest.fn() };
+    emitter = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
 
     service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
@@ -3943,7 +3943,7 @@ describe('OrderFlowService.reversePaymentCashMovements — resolución de sesió
 
     service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
-      { emit: jest.fn() } as any,
+      { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
       {} as any,
       sessionsService as any,
       movementsService as any,
@@ -4045,7 +4045,7 @@ describe('OrderFlowService.getAvailableActions — B4 (release-855) delivered/fi
 
     service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
-      { emit: jest.fn() } as any,
+      { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
       {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
       { log: jest.fn(), logCustom: jest.fn() } as any,
       undefined, undefined, undefined, undefined,
@@ -4160,7 +4160,7 @@ describe('OrderFlowService.confirmPayment — B8 (release-855) settles the balan
   const ORDER_ID = 9001;
   let service: OrderFlowService;
   let prismaMock: PrismaMock;
-  let emitter: { emit: jest.Mock };
+  let emitter: { emit: jest.Mock; emitAsync: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -4206,7 +4206,7 @@ describe('OrderFlowService.confirmPayment — B8 (release-855) settles the balan
     prismaMock.payments.update.mockResolvedValue({});
     prismaMock.payments.updateMany.mockResolvedValue({ count: 1 });
 
-    emitter = { emit: jest.fn() };
+    emitter = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
 
     service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
@@ -4259,7 +4259,7 @@ describe('OrderFlowService.confirmPayment — B8 (release-855) settles the balan
 
     await service.confirmPayment(ORDER_ID);
 
-    const paymentReceivedCalls = emitter.emit.mock.calls.filter(
+    const paymentReceivedCalls = emitter.emitAsync.mock.calls.filter(
       (call: any[]) => call[0] === 'payment.received',
     );
     expect(paymentReceivedCalls).toHaveLength(1);
@@ -4288,7 +4288,7 @@ describe('OrderFlowService.confirmPayment — B8 (release-855) settles the balan
 
     await service.confirmPayment(ORDER_ID, { source: 'webhook' });
 
-    const paymentReceivedCalls = emitter.emit.mock.calls.filter(
+    const paymentReceivedCalls = emitter.emitAsync.mock.calls.filter(
       (call: any[]) => call[0] === 'payment.received',
     );
     expect(paymentReceivedCalls).toHaveLength(0);
@@ -4314,7 +4314,7 @@ describe('OrderFlowService.confirmPayment — B8 (release-855) settles the balan
 
     await service.confirmPayment(ORDER_ID);
 
-    const paymentReceivedCalls = emitter.emit.mock.calls.filter(
+    const paymentReceivedCalls = emitter.emitAsync.mock.calls.filter(
       (call: any[]) => call[0] === 'payment.received',
     );
     expect(paymentReceivedCalls).toHaveLength(0);
@@ -4362,7 +4362,7 @@ describe('OrderFlowService.registerCreditPayment — table projection (B.2/T5)',
         update: jest.fn(async () => ({})),
       },
     };
-    const eventEmitter: any = { emit: jest.fn() };
+    const eventEmitter: any = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
     const service = new OrderFlowService(
       prismaMock, eventEmitter, {} as any, {} as any, {} as any,
       {} as any, {} as any, {} as any, {} as any,
@@ -4574,7 +4574,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
         })),
     };
 
-    const emitter = { emit: jest.fn() };
+    const emitter = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
     const service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
       emitter as any,
@@ -4750,7 +4750,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
 
     // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received` por
     // tramo, cada uno con su monto y su método (no un solo evento agregado).
-    const paymentReceivedCalls = h.emitter.emit.mock.calls.filter(
+    const paymentReceivedCalls = h.emitter.emitAsync.mock.calls.filter(
       (call: any[]) => call[0] === 'payment.received',
     );
     expect(paymentReceivedCalls).toHaveLength(2);
@@ -4849,7 +4849,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     expect(result).not.toHaveProperty('payments');
 
     // PLAN-pago-multimetodo-pendientes paso 2 — pago escalar: 1 solo emit.
-    const paymentReceivedCalls = h.emitter.emit.mock.calls.filter(
+    const paymentReceivedCalls = h.emitter.emitAsync.mock.calls.filter(
       (call: any[]) => call[0] === 'payment.received',
     );
     expect(paymentReceivedCalls).toHaveLength(1);
@@ -4867,7 +4867,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       payment_type: PaymentType.ONLINE,
     });
 
-    const paymentReceivedCalls = h.emitter.emit.mock.calls.filter(
+    const paymentReceivedCalls = h.emitter.emitAsync.mock.calls.filter(
       (call: any[]) => call[0] === 'payment.received',
     );
     expect(paymentReceivedCalls).toHaveLength(0);
@@ -5063,7 +5063,7 @@ describe('OrderFlowService.payOrder — B4/B8 delivered/finished sin pago liquid
 
     const service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
-      { emit: jest.fn() } as any,
+      { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
       {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
       { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
     );
@@ -5197,7 +5197,7 @@ describe('OrderFlowService.shipOrder — allowExemptDeliveryTypes (Task B, solo 
       },
     };
     const service = new OrderFlowService(
-      prismaMock, { emit: jest.fn() } as any, {} as any, {} as any, {} as any, {} as any,
+      prismaMock, { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any, {} as any, {} as any, {} as any, {} as any,
       {} as any, {} as any, {} as any,
     );
     jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
@@ -5249,7 +5249,7 @@ describe('OrderFlowService.fastTrackOrder — pickup/dine_in sin método de env�
       orders: { findFirst: jest.fn(async () => ({ id: 1, state: 'finished' })) },
     };
     const service = new OrderFlowService(
-      prismaMock, { emit: jest.fn() } as any, {} as any, {} as any, {} as any, {} as any,
+      prismaMock, { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any, {} as any, {} as any, {} as any, {} as any,
       {} as any, {} as any, {} as any,
     );
     return { service };

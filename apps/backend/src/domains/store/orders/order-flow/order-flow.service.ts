@@ -8004,8 +8004,18 @@ export class OrderFlowService {
         user_id: RequestContextService.getUserId() ?? null,
       });
 
+      // En serie: el listener contable numera el asiento con MAX+1, así que
+      // dos tramos emitidos a la vez chocan en `entry_number` (P2002).
       for (const payload of payloads) {
-        this.eventEmitter.emit('payment.received', payload);
+        try {
+          await this.eventEmitter.emitAsync('payment.received', payload);
+        } catch (error) {
+          this.logger.error(
+            `[payment.received listener failed] order=${orderId} payment=${payload.payment_id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
       }
 
       if (this.withholdingFlow) {
