@@ -1157,9 +1157,11 @@ describe('FiscalDocumentValidator', () => {
   // ---------------------------------------------------------------------------
   // FAU08 / CAU08 / DAU08 · descuento de documento sin `cac:AllowanceCharge`
   //
-  // `buildMonetaryTotal` escribe SIEMPRE `cbc:AllowanceTotalAmount`, pero sólo
-  // el constructor de la factura y el del documento equivalente emiten el grupo
-  // `cac:AllowanceCharge` que lo respalda.
+  // `buildMonetaryTotal` escribe SIEMPRE `cbc:AllowanceTotalAmount`. Desde
+  // P2(b), el constructor de la factura, el del documento equivalente Y el de
+  // la nota crédito emiten el grupo `cac:AllowanceCharge` que lo respalda —
+  // la nota débito y el documento soporte son los únicos que siguen sin
+  // emitirlo.
   // ---------------------------------------------------------------------------
 
   describe('FAU08 · AllowanceTotalAmount respaldado', () => {
@@ -1171,7 +1173,7 @@ describe('FiscalDocumentValidator', () => {
       total_amount: '2280.00',
     };
 
-    it('bloquea una nota crédito con descuento de pie', () => {
+    it('NO bloquea una nota crédito con descuento de pie: P2(b) ya emite `cac:AllowanceCharge` de documento (nota TOTAL que copia un descuento de orden de la factura padre)', () => {
       const report = validator.validate(
         baseInput({
           document_type: 'credit_note',
@@ -1180,17 +1182,8 @@ describe('FiscalDocumentValidator', () => {
         }),
       );
 
-      const finding = report.blockers.find(
-        (f) => f.code === 'ALLOWANCE_TOTAL_UNBACKED',
-      );
-      expect(finding).toBeDefined();
-      expect(finding!.category).toBe('arithmetic');
-      expect(finding!.dian_rule?.id).toBe('CAU08');
-      expect(finding!.details).toMatchObject({
-        allowance_total_amount: '100.00',
-        line_discounts_total: '0.00',
-        emits_allowance_charge: false,
-      });
+      expect(codesOf(report)).not.toContain('ALLOWANCE_TOTAL_UNBACKED');
+      expect(report.emittable).toBe(true);
     });
 
     it('bloquea una nota débito con descuento de pie, citando DAU08', () => {
