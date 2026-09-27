@@ -6,6 +6,7 @@ import { RequestContextService } from '../../../../common/context/request-contex
 import { S3Service } from '../../../../common/services/s3.service';
 import { QrService } from '../../../../common/services/qr.service';
 import { InvoicePdfBuilder, InvoicePdfData } from './invoice-pdf.builder';
+import { resolveAcquirerIdentity } from '../utils/acquirer-identity.resolver';
 import {
   PRINT_FORMATS,
   PrintFormat,
@@ -69,7 +70,10 @@ const INVOICE_PDF_INCLUDE = {
       id: true,
       first_name: true,
       last_name: true,
+      legal_name: true,
       email: true,
+      document_type: true,
+      verification_digit: true,
     },
   },
 };
@@ -181,6 +185,16 @@ export class InvoicePdfService {
         ? `${customer.first_name} ${customer.last_name}`
         : 'Consumidor Final');
 
+    // Identidad efectiva del adquiriente — MISMA función y MISMA precedencia
+    // (ficha → snapshot) que `invoice-flow.service.ts` usa para validar y
+    // emitir. Antes el PDF sólo sabía imprimir «NIT/CC» a secas, sin el tipo
+    // real ni el DV, e ignoraba el correo persistido en el snapshot cuando la
+    // factura no tenía `customer` vinculado.
+    const acquirer_identity = resolveAcquirerIdentity({
+      snapshot: invoice,
+      customer: customer ?? undefined,
+    });
+
     const resolution = invoice.resolution;
 
     const pdf_data: InvoicePdfData = {
@@ -218,8 +232,10 @@ export class InvoicePdfService {
       // Cliente
       customer_name,
       customer_tax_id: invoice.customer_tax_id || undefined,
+      customer_document_type: acquirer_identity.document_type_literal ?? undefined,
+      customer_verification_digit: acquirer_identity.verification_digit ?? undefined,
       customer_address,
-      customer_email: customer?.email || undefined,
+      customer_email: acquirer_identity.email ?? undefined,
 
       // Factura
       invoice_number: invoice.invoice_number,

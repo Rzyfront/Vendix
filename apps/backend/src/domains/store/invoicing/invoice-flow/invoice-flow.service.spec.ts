@@ -1,6 +1,7 @@
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { InvoiceFlowService } from './invoice-flow.service';
+import { CustomerFiscalIdentityValidator } from '../validators/customer-fiscal-identity.validator';
 
 describe('InvoiceFlowService support documents', () => {
   const requestContext = {
@@ -666,6 +667,232 @@ describe('InvoiceFlowService support documents', () => {
       );
 
       expect(numberGenerator.generateNextNumber).not.toHaveBeenCalled();
+    });
+  });
+
+  // Incidente Óptica Panorama SAS (NIT 800214345-7) / Pollo Árabe: una factura
+  // MANUAL (`customer_id` NULL) cuyo snapshot trae NIT/31 + DV 7 + correo salió
+  // transmitida a la DIAN como Cédula + persona natural, sin DV ni correo.
+  // `resolveAcquirerIdentity` (`utils/acquirer-identity.resolver.ts`) es ahora la
+  // fuente ÚNICA que alimenta TANTO `buildAcquirerIdentityInput` (la puerta de
+  // `validate()`, vía `CustomerFiscalIdentityValidator` REAL — sin mockear en
+  // este bloque, a propósito) COMO la construcción de `provider_data` dentro de
+  // `send()`. Este describe ejercita los DOS puntos de entrada reales sobre la
+  // MISMA factura — no llama a `resolveAcquirerIdentity` dos veces por su
+  // cuenta, que sería la prueba tautológica que ya se documentó como
+  // antipatrón — y comprueba que lo que el validador real aprueba es
+  // exactamente lo que la emisión transmite.
+  describe('Paridad real — incidente Óptica Panorama SAS: validate() real y send() coinciden', () => {
+    const buildIncidentInvoice = (overrides: any) => ({
+      id: overrides.id,
+      organization_id: 1,
+      store_id: 2,
+      accounting_entity_id: 77,
+      invoice_number: 'FV-500',
+      invoice_type: 'sales_invoice',
+      customer_id: null,
+      customer: null,
+      supplier_id: null,
+      supplier: null,
+      // El snapshot de la factura MANUAL — sin ficha vinculada — es la ÚNICA
+      // fuente de identidad. Antes de este fix, `send()` no leía estos campos
+      // salvo `customer_name`/`customer_tax_id`/`customer_address`.
+      customer_name: 'Óptica Panorama SAS',
+      customer_tax_id: '800214345',
+      customer_document_type: '31',
+      customer_verification_digit: '7',
+      customer_email: 'facturacion@opticapanorama.co',
+      customer_phone: null,
+      customer_tax_regime: null,
+      customer_fiscal_responsibilities: ['O-48'],
+      customer_address: null,
+      subtotal_amount: { toString: () => '1000.00' },
+      discount_amount: { toString: () => '0.00' },
+      tax_amount: { toString: () => '190.00' },
+      withholding_amount: { toString: () => '0.00' },
+      total_amount: { toString: () => '1190.00' },
+      currency: 'COP',
+      issue_date: new Date('2026-03-10T10:00:00.000Z'),
+      due_date: new Date('2026-03-20T00:00:00.000Z'),
+      invoice_items: [
+        {
+          id: 1,
+          description: 'Consulta óptica',
+          quantity: { toString: () => '1' },
+          unit_price: { toString: () => '1000.00' },
+          discount_amount: { toString: () => '0.00' },
+          tax_amount: { toString: () => '190.00' },
+          total_amount: { toString: () => '1190.00' },
+        },
+      ],
+      invoice_taxes: [
+        {
+          tax_name: 'IVA',
+          tax_rate: { toString: () => '19' },
+          taxable_amount: { toString: () => '1000.00' },
+          tax_amount: { toString: () => '190.00' },
+        },
+      ],
+      resolution: {
+        id: 7001,
+        resolution_number: '18760000001',
+        prefix: 'FV',
+        range_from: 1,
+        range_to: 999999999,
+        valid_from: new Date('2020-01-01T00:00:00.000Z'),
+        valid_to: new Date('2035-01-01T00:00:00.000Z'),
+        is_active: true,
+      },
+      related_invoice: null,
+      notes: null,
+      financial_account_id: null,
+      ...overrides,
+    });
+
+    it('validate() (validador real) aprueba la factura y send() transmite NIT/31 + DV 7 + jurídica + correo — nunca CC', async () => {
+      const findFirst = jest.fn().mockImplementation(async ({ where }: any) =>
+        where.id === 501
+          ? buildIncidentInvoice({ id: 501, status: 'draft' })
+          : buildIncidentInvoice({ id: 502, status: 'validated' }),
+      );
+      const update = jest.fn().mockImplementation(async ({ where, data }: any) => ({
+        ...buildIncidentInvoice({ id: where.id, status: 'validated' }),
+        ...data,
+      }));
+
+      const { service, provider } = createService({
+        prisma: { invoices: { findFirst, update } },
+      });
+      // ÚNICO mock reemplazado por la implementación REAL: el resto de la
+      // infraestructura (Prisma, proveedor, cola de reintentos…) sigue
+      // simulada — lo que se ejercita de verdad es la puerta de identidad.
+      (service as any).acquirerIdentity = new CustomerFiscalIdentityValidator();
+      // El default de `createService` deja `sendInvoice` sin resolver (a
+      // diferencia de `sendSupportDocument`); esta factura es `sales_invoice`,
+      // así que necesita su propia respuesta de aceptación simulada.
+      provider.sendInvoice.mockResolvedValue({
+        success: true,
+        tracking_id: 'track-fv-500',
+        cufe: 'a'.repeat(96),
+        qr_code: 'qr',
+        xml_document: '<xml/>',
+        provider_data: { mock: true },
+      });
+
+      // ENTRADA REAL 1 — `validate()`. Si el validador real siguiera viendo
+      // esto como Cédula/persona natural incompleta no habría bloqueante que
+      // lo delate (el tipo SÍ está declarado), pero de haber cualquier
+      // discrepancia con lo que `send()` transmite, este test la vuelve visible
+      // comparando ambos resultados sobre la MISMA factura.
+      await expect(
+        RequestContextService.run(requestContext, () => service.validate(501)),
+      ).resolves.toBeDefined();
+
+      // ENTRADA REAL 2 — `send()`.
+      await RequestContextService.run(requestContext, () => service.send(502));
+
+      expect(provider.sendInvoice).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customer_tax_id: '800214345',
+          // El snapshot trae el CÓDIGO DIAN ('31'); `resolveAcquirerIdentity`
+          // lo normaliza al LITERAL canónico ('NIT') antes de que
+          // `DianDirectProvider`/`UblCommonBuilder` lo consuman — nunca el
+          // código crudo ni, sobre todo, el 'CC' que inventaba el defecto.
+          customer_document_type: 'NIT',
+          customer_verification_digit: '7',
+          customer_person_type: 'JURIDICA',
+          customer_email: 'facturacion@opticapanorama.co',
+          customer_name: 'Óptica Panorama SAS',
+        }),
+      );
+    });
+
+    // Requisito #4 del incidente: cuando el adquiriente NOMINATIVO no tiene
+    // dirección propia, `send()` ya no debe poder caer en la dirección FISCAL
+    // de la propia tienda sin que `validate()` lo haya bloqueado antes.
+    // `buildAcquirerIdentityInput` alimenta `other_addresses` con el universo
+    // REAL de direcciones del cliente (`invoice.customer.addresses`, aquí
+    // vacío) — deliberadamente SIN la dirección de la tienda — así que
+    // `CustomerFiscalIdentityValidator.checkAddress` (mecanismo preexistente,
+    // antes nunca alimentado) encuentra el arreglo poblado y ningún rescate:
+    // ADDRESS_UNRESOLVABLE bloquea ANTES de numerar/transmitir.
+    it('adquiriente nominativo con ficha vinculada SIN ninguna dirección propia: validate() real bloquea con ADDRESS_UNRESOLVABLE', async () => {
+      const linkedCustomerNoAddress = {
+        id: 601,
+        organization_id: 1,
+        store_id: 2,
+        accounting_entity_id: 77,
+        invoice_number: 'FV-600',
+        invoice_type: 'sales_invoice',
+        status: 'draft',
+        customer_id: 300,
+        customer: {
+          id: 300,
+          legal_name: 'Cliente Sin Dirección SAS',
+          document_type: 'NIT',
+          document_number: '900555666',
+          verification_digit: '1',
+          // Ficha REAL, vinculada, sin ninguna fila de dirección.
+          addresses: [],
+        },
+        supplier_id: null,
+        supplier: null,
+        customer_name: null,
+        customer_tax_id: null,
+        customer_document_type: null,
+        customer_verification_digit: null,
+        customer_email: null,
+        customer_phone: null,
+        customer_tax_regime: null,
+        customer_fiscal_responsibilities: null,
+        customer_address: null,
+        subtotal_amount: { toString: () => '1000.00' },
+        discount_amount: { toString: () => '0.00' },
+        tax_amount: { toString: () => '190.00' },
+        withholding_amount: { toString: () => '0.00' },
+        total_amount: { toString: () => '1190.00' },
+        currency: 'COP',
+        issue_date: new Date('2026-03-10T10:00:00.000Z'),
+        due_date: new Date('2026-03-20T00:00:00.000Z'),
+        invoice_items: [
+          {
+            id: 1,
+            description: 'Servicio',
+            quantity: { toString: () => '1' },
+            unit_price: { toString: () => '1000.00' },
+            discount_amount: { toString: () => '0.00' },
+            tax_amount: { toString: () => '190.00' },
+            total_amount: { toString: () => '1190.00' },
+          },
+        ],
+        invoice_taxes: [
+          {
+            tax_name: 'IVA',
+            tax_rate: { toString: () => '19' },
+            taxable_amount: { toString: () => '1000.00' },
+            tax_amount: { toString: () => '190.00' },
+          },
+        ],
+        resolution: null,
+        related_invoice: null,
+        notes: null,
+      };
+
+      const { service } = createService({
+        prisma: {
+          invoices: {
+            findFirst: jest.fn().mockResolvedValue(linkedCustomerNoAddress),
+          },
+        },
+      });
+      (service as any).acquirerIdentity = new CustomerFiscalIdentityValidator();
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.validate(601)),
+      ).rejects.toMatchObject({
+        errorCode: 'INVOICING_VALIDATE_001',
+        message: expect.stringMatching(/no tiene dirección fiscal propia/i),
+      });
     });
   });
 });

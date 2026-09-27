@@ -33,6 +33,7 @@ import {
   dianSum,
 } from '../../utils/dian-money.util';
 import { dianPartyId, onlyDigits } from '../../../../../common/utils/nit.util';
+import { normalizeAcquirerDocumentType } from '../../utils/acquirer-identity.resolver';
 import { resolveIssuerFiscalIdentity } from '../../utils/fiscal-issuer.util';
 import { DianSoapClient, WsSecurityCredentials } from './dian-soap.client';
 import { DianXmlSignerService } from './dian-xml-signer.service';
@@ -2388,12 +2389,23 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       );
     }
 
-    // Literal from `users.document_type` — keep the source-of-truth string so
-    // `@schemeName` carries the canonical type name. Un adquiriente identificado
-    // con número y nombre pero sin tipo declarado es una cédula: es el documento
-    // que tiene una persona natural colombiana por defecto, y el tipo se deriva
-    // —no se inventa— del hecho de que el número existe.
-    const document_type_literal = declared_type || 'CC';
+    // Literal from `users.document_type`. YA NO se completa con 'CC' cuando
+    // falta: eso era la mitad exacta del incidente Óptica Panorama SAS / Pollo
+    // Árabe — un NIT de persona jurídica sin tipo declarado salía transmitido
+    // como Cédula de persona natural. `CustomerFiscalIdentityValidator` (vía
+    // `acquirer-rail.resolver.ts` en creación e
+    // `INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED` acá en emisión) ya debería
+    // haber bloqueado esto antes de llegar aquí; este throw es defensa en
+    // profundidad para cualquier documento que alcance `send()` sin haber
+    // pasado por esa puerta.
+    if (!declared_type) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED,
+        'No se puede emitir: el adquiriente tiene identificación y nombre pero no tipo de documento (CC, NIT, CE, …). Complétalo en la ficha del cliente antes de emitir.',
+        { role, document_number: declared_number },
+      );
+    }
+    const document_type_literal = declared_type;
 
     // CASCADA DE RESPALDO — dirección fiscal → otra del cliente → tienda.
     const resolved_address = await this.resolveAcquirerAddressForDocument({
@@ -2633,11 +2645,17 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
    *
    *   '1' / 'JURIDICA' / 'juridica'  → 'JURIDICA'
    *   '2' / 'NATURAL'  / 'natural'   → 'NATURAL'
-   *   absent                          → derive from the document type literal
-   *                                    (NIT → 'JURIDICA', else 'NATURAL');
-   *                                    mirrors the historical fallback so an
-   *                                    unset person_type still produces a
-   *                                    structurally sound customer block.
+   *   absent                          → derive from the document type's DIAN
+   *                                    CODE (31 → 'JURIDICA', else 'NATURAL'),
+   *                                    not from the literal. `document_type`
+   *                                    can legitimately arrive as either
+   *                                    vocabulary (see
+   *                                    `normalizeAcquirerDocumentType`); a
+   *                                    raw '31' compared against the literal
+   *                                    `'NIT'` never matched, which is the
+   *                                    other half of the Óptica Panorama SAS /
+   *                                    Pollo Árabe incident (NIT persona
+   *                                    jurídica emitida como natural).
    */
   private translatePersonTypeToStructural(
     raw: string | undefined,
@@ -2647,7 +2665,8 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     if (normalized === '1' || normalized === 'JURIDICA') return 'JURIDICA';
     if (normalized === '2' || normalized === 'NATURAL') return 'NATURAL';
     if (normalized) return null;
-    return document_type_literal === 'NIT' ? 'JURIDICA' : 'NATURAL';
+    const { code } = normalizeAcquirerDocumentType(document_type_literal);
+    return code === '31' ? 'JURIDICA' : 'NATURAL';
   }
 
   private normalizeDocumentType(document_type?: string): string {

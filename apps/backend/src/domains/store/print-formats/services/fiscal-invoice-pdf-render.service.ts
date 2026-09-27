@@ -12,6 +12,7 @@ import {
   PrintFormat,
 } from '../../settings/interfaces/store-settings.interface';
 import { RESOLUTION_PUBLIC_SELECT } from '../../invoicing/utils/technical-key.util';
+import { resolveAcquirerIdentity } from '../../invoicing/utils/acquirer-identity.resolver';
 import {
   resolveFiscalIssuerForPrint,
   FiscalIssuerPrintIdentity,
@@ -74,7 +75,10 @@ const FISCAL_INVOICE_PDF_RENDER_INCLUDE = {
       id: true,
       first_name: true,
       last_name: true,
+      legal_name: true,
       email: true,
+      document_type: true,
+      verification_digit: true,
     },
   },
 };
@@ -155,6 +159,13 @@ export function buildFiscalInvoicePdfData(
       ? `${customer.first_name} ${customer.last_name}`
       : 'Consumidor Final');
 
+  // Misma identidad efectiva (ficha → snapshot) que `InvoicePdfService` y que
+  // `invoice-flow.service.ts`; ver el JSDoc de `acquirer-identity.resolver.ts`.
+  const acquirer_identity = resolveAcquirerIdentity({
+    snapshot: invoice,
+    customer: customer ?? undefined,
+  });
+
   return {
     // Emisor
     company_name: issuer.legal_name,
@@ -192,8 +203,10 @@ export function buildFiscalInvoicePdfData(
     // Cliente
     customer_name,
     customer_tax_id: invoice.customer_tax_id || undefined,
+    customer_document_type: acquirer_identity.document_type_literal ?? undefined,
+    customer_verification_digit: acquirer_identity.verification_digit ?? undefined,
     customer_address: formatCustomerAddress(invoice.customer_address),
-    customer_email: customer?.email || undefined,
+    customer_email: acquirer_identity.email ?? undefined,
 
     // Factura
     invoice_number: invoice.invoice_number,

@@ -1,4 +1,6 @@
 import { onlyDigits } from '@common/utils/nit.util';
+import { VendixHttpException } from '@common/errors/vendix-http.exception';
+import { ErrorCodes } from '@common/errors/error-codes';
 import {
   DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER,
   DIAN_FINAL_CONSUMER_NAME,
@@ -123,9 +125,21 @@ const FINAL_CONSUMER_IDENTITY: AcquirerRailIdentity = Object.freeze({
 });
 
 /**
- * Decide el carril del adquiriente. Función pura: sin I/O, sin excepciones —
- * SIEMPRE hay una identidad completa que devolver, porque `final_consumer` es
- * el destino de todo lo que no alcanza a ser nominativo.
+ * Decide el carril del adquiriente. Sin I/O — SIEMPRE hay una identidad
+ * completa que devolver para `final_consumer`, porque ese carril es el
+ * destino de todo lo que no alcanza a ser nominativo.
+ *
+ * YA NO es incondicionalmente libre de excepciones: un adquiriente nominativo
+ * (número Y nombre reales) sin tipo de identificación declarado LANZA en vez
+ * de inventar `'CC'`. Antes, `(input.document_type ?? '').trim() || 'CC'`
+ * completaba en silencio y esta identidad a medias se persistía en
+ * `invoices.customer_document_type` — de ahí viajaba intacta hasta
+ * `DianDirectProvider.buildCustomerData`, que repetía el mismo `|| 'CC'` y
+ * transmitía a la DIAN una Cédula de Ciudadanía para un adquiriente cuyo
+ * documento real era un NIT (incidente Óptica Panorama SAS / Pollo Árabe).
+ * Lanzar AQUÍ —antes de que `InvoicingService.createFromOrder` numere el
+ * documento— es estrictamente mejor que dejar que la emisión lo descubra con
+ * el consecutivo ya tomado.
  */
 export function resolveAcquirerRail(
   input: AcquirerRailInput,
@@ -145,12 +159,19 @@ export function resolveAcquirerRail(
     return { rail: 'final_consumer', identity: FINAL_CONSUMER_IDENTITY };
   }
 
+  const document_type = (input.document_type ?? '').trim();
+  if (!document_type) {
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED,
+      'No se puede emitir: el adquiriente tiene número de identificación y nombre pero no tiene tipo de documento (CC, NIT, CE, …). Complétalo en la ficha del cliente antes de facturar, o emite la venta como Consumidor Final si el comprador no se identifica.',
+      { document_number, has_name: true },
+    );
+  }
+
   return {
     rail: 'nominative_minimal',
     identity: {
-      // Réplica exacta de `dian-direct.provider.ts:2394` — una cédula es el
-      // documento por defecto cuando el tipo no se declaró.
-      document_type: (input.document_type ?? '').trim() || 'CC',
+      document_type,
       document_number,
       name,
     },

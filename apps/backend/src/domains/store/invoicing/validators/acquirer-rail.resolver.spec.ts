@@ -4,6 +4,8 @@ import {
   DIAN_FINAL_CONSUMER_NAME,
   DIAN_FINAL_CONSUMER_TYPE_CODE,
 } from './customer-fiscal-identity.validator';
+import { VendixHttpException } from '@common/errors/vendix-http.exception';
+import { ErrorCodes } from '@common/errors/error-codes';
 
 describe('resolveAcquirerRail', () => {
   it('entrada completamente vacía resuelve a consumidor final', () => {
@@ -71,14 +73,38 @@ describe('resolveAcquirerRail', () => {
     expect(result.rail).toBe('final_consumer');
   });
 
-  it('nombre y número completos, sin tipo declarado, derivan document_type a CC', () => {
+  it('nombre y número completos, sin tipo declarado, BLOQUEA en vez de inventar CC (incidente Óptica Panorama)', () => {
+    // Antes: `document_type: (input.document_type ?? '').trim() || 'CC'` — así
+    // se transmitió una Cédula de Ciudadanía para un NIT real. Ahora debe
+    // bloquear ANTES de tomar el consecutivo, con el código de error fijado
+    // (no basta con `instanceof VendixHttpException`).
+    let caught: unknown;
+    try {
+      resolveAcquirerRail({
+        document_number: '800214345',
+        legal_name: 'Óptica Panorama SAS',
+      });
+      fail('esperaba que resolveAcquirerRail lanzara');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(VendixHttpException);
+    expect((caught as VendixHttpException).errorCode).toBe(
+      ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED.code,
+    );
+  });
+
+  it('nombre y número completos CON tipo declarado (NIT) no bloquea y preserva el tipo tal cual', () => {
     const result = resolveAcquirerRail({
-      document_number: '1118860776',
-      legal_name: 'Juan Pérez',
+      document_type: 'NIT',
+      document_number: '800214345',
+      legal_name: 'Óptica Panorama SAS',
     });
 
     expect(result.rail).toBe('nominative_minimal');
-    expect(result.identity.document_type).toBe('CC');
+    expect(result.identity.document_type).toBe('NIT');
+    expect(result.identity.document_number).toBe('800214345');
   });
 
   it('nombre literal "Consumidor Final" con número real resuelve a nominativo — el número manda', () => {

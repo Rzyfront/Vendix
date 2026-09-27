@@ -2174,6 +2174,20 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Invoice validation failed',
   },
+  /**
+   * Adquiriente nominativo (tiene número Y nombre) sin tipo de identificación
+   * declarado. Antes se completaba con 'CC' en silencio en
+   * `acquirer-rail.resolver.ts` (persistencia) y `dian-direct.provider.ts`
+   * (emisión) — así se transmitió a la DIAN una Cédula de Ciudadanía para un
+   * NIT real (incidente Óptica Panorama SAS / Pollo Árabe). Ahora bloquea
+   * ANTES de tomar el consecutivo en vez de inventar el tipo.
+   */
+  INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED: {
+    code: 'INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED',
+    httpStatus: 400,
+    devMessage:
+      'Nominative acquirer (has document number and name) without a declared document type',
+  },
   INVOICING_STATUS_001: {
     code: 'INVOICING_STATUS_001',
     httpStatus: 400,
