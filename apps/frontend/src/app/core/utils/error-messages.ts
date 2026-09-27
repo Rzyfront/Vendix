@@ -128,6 +128,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ECOM_CHECKOUT_001: 'Error en el proceso de compra.',
   ECOM_CHECKOUT_002: 'Metodo de pago invalido.',
   ECOM_CHECKOUT_003: 'Metodo de envio invalido.',
+  ECOM_CHECKOUT_PENDING_SHIPPING_001:
+    'Esta tienda no recibe pedidos por WhatsApp. Marca tu ubicación en el mapa para calcular el envío.',
   // Ecommerce checkout — validación cliente de dirección de envío
   ECOM_CHECKOUT_ADDR_REQUIRED_001:
     'Completa la dirección de envío para continuar.',
@@ -288,6 +290,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ORD_SHIP_INVALID_METHOD_001: 'El método de envío no pertenece a esta tienda.',
   ORD_SHIP_RATE_MISMATCH_001:
     'La tarifa seleccionada no corresponde al método de envío.',
+  ORD_SHIP_CHARGED_COST_CHANGE_001:
+    'La orden ya tiene pagos aplicados: no se puede cambiar el costo de envío. Elige una tarifa con el mismo costo o revierte el pago primero.',
   // Respaldo estático: la impresión masiva ya muestra el mensaje dinámico del
   // backend ("Ninguna de las 20 órdenes … 12 canceladas, 8 no encontradas"),
   // que es más útil. Este texto solo aparece si ese detalle no llega.
