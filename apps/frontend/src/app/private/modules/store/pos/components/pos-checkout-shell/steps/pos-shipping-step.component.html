@@ -67,7 +67,7 @@
             </p>
           }
           <button type="button" class="no-methods-link" (click)="addressEditing.set(true)">Editar dirección</button>
-        } @else if (addressId() && !addressEditing() && addressValid()) {
+        } @else if (addressId() && !addressEditing() && addressValid() && hasResolvedLocation()) {
           <div class="address-preview">
             <span>{{ addressSummary() }}</span>
             <button type="button" class="no-methods-link" (click)="beginNewAddress()">Usar otra dirección</button>
@@ -86,7 +86,16 @@
                state_province o phone_number nulos en Prisma. Se precarga el
                mismo formulario con initialAddress() (la dirección guardada)
                en vez de forzar "Usar otra dirección" hacia un formulario
-               vacío, avisando qué falta completar. -->
+               vacío, avisando qué falta completar.
+               GAP 1 (2026-09-27): también se cae aquí cuando la dirección es
+               sintácticamente completa (`addressValid()`) pero SIN ubicación
+               resuelta (`!hasResolvedLocation()` — sin coords ni geocode, o
+               un geocode 'area' que `ensureSavedAddressCoords` ya descarta):
+               antes esa combinación caía en el branch de solo-resumen sin
+               ninguna vía para marcar el mapa; ahora este mismo formulario
+               precargado (con su `app-address-map-picker` interno) es esa
+               vía, en vez de dejar al cajero atascado en "Marca la ubicación
+               en el mapa…" sin ningún mapa a la vista. -->
           @if (addressId() && !addressValid()) {
             <div class="address-help address-help--warning" role="alert">
               <app-icon name="alert-triangle" [size]="16"></app-icon>

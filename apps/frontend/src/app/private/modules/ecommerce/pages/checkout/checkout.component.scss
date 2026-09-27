@@ -617,21 +617,28 @@
     }
 }
 
-// Owner directive (change #2): razon visible junto al boton Continuar
-// mientras el domicilio no tiene coords + tarifa resuelta. Nunca aparece
-// para recoger en tienda ni carritos solo-servicio.
+// Owner directive (change #2): razon visible ENCIMA de la botonera
+// Volver/Continuar mientras el domicilio no tiene coords + tarifa resuelta.
+// Nunca aparece para recoger en tienda ni carritos solo-servicio.
+// Visual (2026-09-27): caja de aviso informativo coherente con
+// `.address-map-warning` (mismo fondo suave + borde + icono), en vez del
+// texto plano anterior.
 .checkout-block-reason {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    margin: 0.5rem 0 0;
-    color: var(--color-warning, #f59e0b);
+    gap: 0.5rem;
+    margin: 0 0 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--color-warning-light, rgba(245, 158, 11, 0.1));
+    border: 1px solid var(--color-warning, #f59e0b);
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
     font-size: var(--fs-sm);
-    text-align: center;
-    justify-content: center;
+    text-align: left;
 
     app-icon {
         flex-shrink: 0;
+        color: var(--color-warning, #f59e0b);
     }
 }
 

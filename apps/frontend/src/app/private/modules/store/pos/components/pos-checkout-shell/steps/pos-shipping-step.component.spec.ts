@@ -857,6 +857,48 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(calculate).not.toHaveBeenCalled();
   });
 
+  // GAP 1 (2026-09-27, `vendix-address-geocoding` / `vendix-shipping-distance-pricing`
+  // parity fix) — the SAVED-address coords backfill (`ensureSavedAddressCoords`,
+  // triggered by `loadDefaultAddress` for a fresh sale with no `shippingContext`)
+  // must reject an 'area' (city/vereda centroid) geocode exactly like the
+  // new-address form's own forward-geocode does (see "BUG 2" above): never
+  // write it to latitude/longitude, never PATCH `updateCustomerAddress` (that
+  // would poison the customer's saved address with a centroid forever), and
+  // leave `hasResolvedLocation()` false so the cashier still has to mark the map.
+  it("saved-address backfill — 'area' precision is not persisted and the location gate stays shut", () => {
+    const geocoding = TestBed.inject(GeocodingService) as unknown as { forward: jasmine.Spy };
+    geocoding.forward = jasmine.createSpy('forward').and.returnValue(
+      of({ lat: 11.5444, lng: -72.907, precision: 'area', label: 'Riohacha, La Guajira' }),
+    );
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = {
+      ...state.customer!,
+      addresses: [
+        {
+          id: 501,
+          address_line1: 'Vereda Xyzqwerty Km 99 Via Inexistente',
+          city: 'Riohacha',
+          state_province: 'La Guajira',
+          country_code: 'CO',
+          type: 'shipping',
+          is_primary: true,
+          latitude: null,
+          longitude: null,
+        },
+      ],
+    };
+    mount(state);
+
+    expect(geocoding.forward).toHaveBeenCalled();
+    expect(component.addressId()).toBe(501);
+    expect(component.address()?.latitude).toBeNull();
+    expect(component.address()?.longitude).toBeNull();
+    expect(component.hasResolvedLocation()).toBeFalse();
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+  });
+
   it('B6 — cambiar de tarifa en el selector actualiza el costo de envío', () => {
     mount();
     component.selectShippingMethod(firstMethod);

@@ -709,6 +709,14 @@ export class PosShippingStepComponent {
       next: (res) => {
         this.savedAddressGeocodeInFlight.delete(id);
         if (res?.lat == null || res?.lng == null) return;
+        // 'area' = city/neighbourhood centroid — NOT a resolved point (GAP 1,
+        // 2026-09-27, mirrors the ecommerce checkout's own
+        // `ensureSavedAddressCoords` and commit 28947e899). Never persisted:
+        // writing a centroid into the customer's saved address would poison
+        // it permanently. Leaving `latitude`/`longitude` untouched keeps
+        // `hasResolvedLocation()` false, so the cashier marks the map
+        // instead of silently charging/shipping from a city centroid.
+        if (res.precision === 'area') return;
         // The cashier may have switched to a different address while the
         // request was in flight — never apply a stale geocode result.
         if (this.addressId() !== id) return;

@@ -176,6 +176,17 @@ export class CheckoutComponent implements OnInit {
   readonly addressWarning = signal<string | null>(null);
 
   /**
+   * GAP 2 (2026-09-27) — static prompt shown next to the
+   * `app-address-map-picker` rendered alongside a SAVED address that has no
+   * resolved coordinate (`!hasResolvedCoords()`, see template). A plain
+   * constant (not a signal) since the wording never varies — visibility is
+   * entirely controlled by the block's own `!hasResolvedCoords()` gate, so
+   * this never needs to react on its own.
+   */
+  readonly savedAddressMapWarningText =
+    'No pudimos ubicar esta dirección automáticamente. Marca tu ubicación en el mapa para calcular la tarifa de envío.';
+
+  /**
    * Paso 8 (precision UX) — how precise the LAST resolved coordinate is,
    * per the backend's `ForwardGeocodeResult.precision`. `null` while nothing
    * has resolved yet. Purely informational: it never blocks Continuar/submit.
@@ -1236,7 +1247,7 @@ export class CheckoutComponent implements OnInit {
   private async requestGeolocation(): Promise<void> {
     try {
       const coords = await this.geolocation.getPrecisePosition();
-      this.setMapCoords(coords);
+      this.onMapLocated(coords);
     } catch {
       // Permission denied / unsupported / timeout → stay on the manual form.
       this.toast.info(
@@ -1249,12 +1260,21 @@ export class CheckoutComponent implements OnInit {
   /**
    * Marker moved by the user (drag/click) or GPS resolved: the map is only
    * ever a SINK for the written address — a coordinate arriving here must
-   * NEVER rewrite address_line1/city/department/etc. Only latitude/longitude
-   * are updated, plus `coords_version` so the shipping quote re-evaluates by
-   * distance. Also clears any pending `addressWarning`, since the customer
-   * just placed a valid point manually.
+   * NEVER rewrite address_line1/city/department/etc. Routes by the active
+   * address mode (GAP 2, 2026-09-27): the new-address form writes
+   * latitude/longitude on `address_form` (`setMapCoords`) — a SAVED address
+   * has no form to write into, so a pin/GPS fix placed on ITS map (rendered
+   * only while `!hasResolvedCoords()`) persists straight to the saved
+   * address instead (`setSavedAddressCoords`).
    */
   onMapLocated(coords: { lat: number; lng: number }): void {
+    if (!this.use_new_address()) {
+      const id = this.selected_address_id();
+      if (id != null) {
+        this.setSavedAddressCoords(id, coords);
+        return;
+      }
+    }
     this.setMapCoords(coords);
   }
 
@@ -1275,6 +1295,60 @@ export class CheckoutComponent implements OnInit {
     // H2: mover el pin / aceptar GPS invalida la cotización sellada (las
     // coords entran a la clave).
     this.bumpCoordsVersion();
+  }
+
+  /**
+   * GAP 2 (2026-09-27) — persists a manually-placed pin or GPS fix for a
+   * SAVED address that has no resolved coordinate. Never touches address
+   * text fields (coords-only sink, same contract as `setMapCoords`). Uses
+   * the SAME `updateAddress` call `ensureSavedAddressCoords` uses so the
+   * confirm step quotes from the SAME persisted point (Release-853 paso
+   * 11 — lo mostrado = lo cobrado). The override/`coords_version` bump only
+   * happens on persistence success — if the PUT fails, `hasResolvedCoords()`
+   * stays false and the map/warning keep showing so the buyer can retry.
+   */
+  private setSavedAddressCoords(
+    id: number,
+    coords: { lat: number; lng: number },
+  ): void {
+    const saved = this.addresses().find((a) => a.id === id);
+    if (!saved) return;
+    this.map_center.set(coords);
+    this.account_service
+      .updateAddress(id, {
+        address_line1: saved.address_line1,
+        address_line2: saved.address_line2 ?? undefined,
+        city: saved.city,
+        state_province: saved.state_province ?? undefined,
+        country_code: saved.country_code,
+        postal_code: saved.postal_code ?? undefined,
+        phone_number: saved.phone_number ?? undefined,
+        latitude: coords.lat,
+        longitude: coords.lng,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.addresses.update((list) =>
+            list.map((a) =>
+              a.id === id
+                ? { ...a, latitude: coords.lat, longitude: coords.lng }
+                : a,
+            ),
+          );
+          this.savedCoordsOverride.update((m) => ({
+            ...m,
+            [id]: coords,
+          }));
+          this.bumpCoordsVersion();
+        },
+        error: () => {
+          this.toast.warning(
+            'No pudimos guardar la ubicación en tu dirección. Intenta de nuevo.',
+            'Aviso',
+          );
+        },
+      });
   }
 
   selectPaymentMethod(method_id: number): void {
@@ -1748,12 +1822,29 @@ export class CheckoutComponent implements OnInit {
         next: (res) => {
           const lat = res?.lat;
           const lng = res?.lng;
-          if (lat == null || lng == null) {
+          // 'area' = city/neighbourhood centroid — treated exactly like an
+          // unresolved geocode (commit 28947e899 applies this to new
+          // addresses; GAP 1, 2026-09-27, closes the same hole for the
+          // saved-address backfill). NEVER persisted: writing a centroid
+          // into a customer's saved address would poison it permanently —
+          // every future order from that address would silently quote/ship
+          // from the wrong point. The map rendered next to this saved
+          // address (GAP 2, `!hasResolvedCoords()`) is what lets the buyer
+          // resolve it for real.
+          if (lat == null || lng == null || res?.precision === 'area') {
             this.savedGeocodeInFlight.delete(id);
             return;
           }
-          // Store precision for display (badge only renders for the
-          // "new address" form/map, which is where this signal is read).
+          // A manual pin/GPS fix (GAP 2 map) may have already resolved this
+          // SAME address while this request was in flight — the buyer-placed
+          // point already won; never clobber it with a stale background
+          // geocode result.
+          if (this.savedCoordsOverride()[id]) {
+            this.savedGeocodeInFlight.delete(id);
+            return;
+          }
+          // Store precision for display (the badge also renders next to the
+          // saved-address map, GAP 2, while `!hasResolvedCoords()`).
           this.geocodePrecision.set(res.precision ?? null);
           this.geocodeLabel.set(res.label ?? null);
           this.account_service

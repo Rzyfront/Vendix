@@ -185,11 +185,75 @@
               (addNewClicked)="onServiceNewAddressClicked()"
             />
 
+            @if (!use_new_address() && selected_address_id() != null && !hasResolvedCoords()) {
+              <!-- GAP 2 (2026-09-27): dirección guardada sin coords y sin
+                   geocode resuelto — sin este mapa, `shippingBlockedReason()`
+                   pide "Marca el punto en el mapa" pero no había ningún mapa
+                   que marcar para una dirección guardada.
+                   Visual (2026-09-27): el aviso SIEMPRE va encima del mapa,
+                   nunca debajo. -->
+              <div class="address-map-warning" role="status">
+                <p class="address-map-warning__text">
+                  <app-icon name="alert-triangle" [size]="14" />
+                  {{ savedAddressMapWarningText }}
+                </p>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  class="address-map-warning__action"
+                  (clicked)="useAutoLocation()"
+                >
+                  <app-icon slot="icon" name="navigation" [size]="14"></app-icon>
+                  Usar mi ubicación automática
+                </app-button>
+              </div>
+              <div
+                class="address-map-anchor"
+                [class.address-map-anchor--highlight]="mapHighlight()"
+              >
+                <div class="map-phone-frame">
+                  <app-address-map-picker
+                    [center]="map_center()"
+                    [delegateLocate]="true"
+                    (located)="onMapLocated($event)"
+                    (locateRequested)="onLocateRequested()"
+                  />
+                </div>
+              </div>
+              @if (precisionBadge(); as badge) {
+                <p
+                  class="address-precision-badge address-precision-badge--{{ badge.tone }}"
+                  role="status"
+                >
+                  <app-icon [name]="badge.icon" [size]="14" />
+                  <span>{{ badge.text }}</span>
+                </p>
+              }
+            }
+
             @if (use_new_address()) {
               <!-- C.3: formulario (izquierda / arriba en mobile) + mapa de apoyo
                    enmarcado 9:16 (derecha / abajo en mobile), vía `order` en SCSS. -->
               <div class="delivery-address-grid">
               <div class="map-column">
+              @if (addressWarning()) {
+                <!-- Visual (2026-09-27): el aviso SIEMPRE va encima del mapa. -->
+                <div class="address-map-warning" role="status">
+                  <p class="address-map-warning__text">
+                    <app-icon name="alert-triangle" [size]="14" />
+                    {{ addressWarning() }}
+                  </p>
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    class="address-map-warning__action"
+                    (clicked)="useAutoLocation()"
+                  >
+                    <app-icon slot="icon" name="navigation" [size]="14"></app-icon>
+                    Usar mi ubicación automática
+                  </app-button>
+                </div>
+              }
               <div
                 class="address-map-anchor"
                 [class.address-map-anchor--highlight]="mapHighlight()"
@@ -218,23 +282,6 @@
                     }
                   </span>
                 </p>
-              }
-              @if (addressWarning()) {
-                <div class="address-map-warning" role="status">
-                  <p class="address-map-warning__text">
-                    <app-icon name="alert-triangle" [size]="14" />
-                    {{ addressWarning() }}
-                  </p>
-                  <app-button
-                    variant="outline"
-                    size="sm"
-                    class="address-map-warning__action"
-                    (clicked)="useAutoLocation()"
-                  >
-                    <app-icon slot="icon" name="navigation" [size]="14"></app-icon>
-                    Usar mi ubicación automática
-                  </app-button>
-                </div>
               }
               </div>
               <form [formGroup]="address_form" class="address-form">
@@ -500,7 +547,67 @@
                   (addNewClicked)="onServiceNewAddressClicked()"
                 />
 
+                @if (!use_new_address() && selected_address_id() != null && !hasResolvedCoords()) {
+                  <!-- GAP 2 (2026-09-27): mismo hueco que en el paso de
+                       entrega — sin este mapa una dirección guardada sin
+                       coords no tiene forma de resolverse aquí.
+                       Visual (2026-09-27): el aviso SIEMPRE va encima del mapa. -->
+                  <div class="address-map-warning" role="status">
+                    <p class="address-map-warning__text">
+                      <app-icon name="alert-triangle" [size]="14" />
+                      {{ savedAddressMapWarningText }}
+                    </p>
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      class="address-map-warning__action"
+                      (clicked)="useAutoLocation()"
+                    >
+                      <app-icon slot="icon" name="navigation" [size]="14"></app-icon>
+                      Usar mi ubicación automática
+                    </app-button>
+                  </div>
+                  <div
+                    class="address-map-anchor"
+                    [class.address-map-anchor--highlight]="mapHighlight()"
+                  >
+                    <app-address-map-picker
+                      [center]="map_center()"
+                      [delegateLocate]="true"
+                      (located)="onMapLocated($event)"
+                      (locateRequested)="onLocateRequested()"
+                    />
+                  </div>
+                  @if (precisionBadge(); as badge) {
+                    <p
+                      class="address-precision-badge address-precision-badge--{{ badge.tone }}"
+                      role="status"
+                    >
+                      <app-icon [name]="badge.icon" [size]="14" />
+                      <span>{{ badge.text }}</span>
+                    </p>
+                  }
+                }
+
                 @if (use_new_address()) {
+                  @if (addressWarning()) {
+                    <!-- Visual (2026-09-27): el aviso SIEMPRE va encima del mapa. -->
+                    <div class="address-map-warning" role="status">
+                      <p class="address-map-warning__text">
+                        <app-icon name="alert-triangle" [size]="14" />
+                        {{ addressWarning() }}
+                      </p>
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        class="address-map-warning__action"
+                        (clicked)="useAutoLocation()"
+                      >
+                        <app-icon slot="icon" name="navigation" [size]="14"></app-icon>
+                        Usar mi ubicación automática
+                      </app-button>
+                    </div>
+                  }
                   <div
                     class="address-map-anchor"
                     [class.address-map-anchor--highlight]="mapHighlight()"
@@ -527,23 +634,6 @@
                         }
                       </span>
                     </p>
-                  }
-                  @if (addressWarning()) {
-                    <div class="address-map-warning" role="status">
-                      <p class="address-map-warning__text">
-                        <app-icon name="alert-triangle" [size]="14" />
-                        {{ addressWarning() }}
-                      </p>
-                      <app-button
-                        variant="outline"
-                        size="sm"
-                        class="address-map-warning__action"
-                        (clicked)="useAutoLocation()"
-                      >
-                        <app-icon slot="icon" name="navigation" [size]="14"></app-icon>
-                        Usar mi ubicación automática
-                      </app-button>
-                    </div>
                   }
                   <form [formGroup]="address_form" class="address-form">
                     <app-input
@@ -1134,6 +1224,21 @@
           }
         </div>
 
+        @if (
+          step() === 1 &&
+          !cartHasOnlyServices &&
+          shippingBlockedReason();
+          as blockReason
+        ) {
+          <!-- Visual (2026-09-27): aviso informativo ENCIMA de la botonera
+               Volver/Continuar, coherente con el estilo de
+               `.address-map-warning`. -->
+          <p class="checkout-block-reason" role="status">
+            <app-icon name="alert-circle" [size]="14"></app-icon>
+            {{ blockReason }}
+          </p>
+        }
+
         <!-- Botonera de acciones: vive debajo de la card de resumen para que
              Continuar / Confirmar queden siempre visibles junto al total. -->
         <div class="checkout-actions checkout-actions--summary">
@@ -1217,17 +1322,6 @@
                     : (cartHasOnlyServices ? "Confirmar Reserva" : "Confirmar Pedido")
               }}
             </app-button>
-          }
-          @if (
-            step() === 1 &&
-            !cartHasOnlyServices &&
-            shippingBlockedReason();
-            as blockReason
-          ) {
-            <p class="checkout-block-reason" role="status">
-              <app-icon name="alert-circle" [size]="14"></app-icon>
-              {{ blockReason }}
-            </p>
           }
         </div>
       </div>
