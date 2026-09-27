@@ -56,7 +56,11 @@ import {
   RouteStopSequenceInput,
 } from '../dispatch-routes/utils/route-stop-calc';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { hasKitchenLinesAwaitingHandoff } from '../orders/order-flow/order-action-policy.util';
+import {
+  kitchenHandoffBlocker,
+  describeKitchenHandoffBlocker,
+} from '../orders/order-flow/order-action-policy.util';
+import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import {
   resolveOrderLineTaxTotal,
   roundMoney2,
@@ -2004,6 +2008,10 @@ export class DispatchNotesService {
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },
       include: {
+        // H3 fix: the kitchen hand-off guard below needs to know whether
+        // THIS store is currently a restaurant before requiring a
+        // never-fired prepared line to reach the kitchen.
+        stores: { select: { industries: true } },
         order_items: {
           include: {
             products: { select: { product_type: true } },
@@ -2052,8 +2060,20 @@ export class DispatchNotesService {
     const kitchenCandidates = requestedItemIds
       ? order.order_items.filter((item) => requestedItemIds.has(item.id))
       : order.order_items;
-    if (hasKitchenLinesAwaitingHandoff(kitchenCandidates)) {
-      throw new VendixHttpException(ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS);
+    // H3 fix: only require the kitchen hand-off when the store is CURRENTLY
+    // a restaurant — a store that dropped the industry but kept legacy
+    // prepared/skip_kds:false catalog rows must still be able to remisionar
+    // those orders. A line with a real (fired) ticket keeps blocking
+    // regardless of the flag; a `cancelled` ticket blocks with its own
+    // explanatory message instead of the generic one.
+    const kitchenBlocker = kitchenHandoffBlocker(kitchenCandidates, {
+      isRestaurant: storeIsRestaurant((order as any).stores?.industries),
+    });
+    if (kitchenBlocker) {
+      throw new VendixHttpException(
+        ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
+        describeKitchenHandoffBlocker(kitchenBlocker),
+      );
     }
 
     // A dispatch note (remisión) only makes sense for orders that are being

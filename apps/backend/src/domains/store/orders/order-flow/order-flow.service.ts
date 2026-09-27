@@ -27,6 +27,8 @@ import {
   canDirectDeliver,
   canCollectViaShip,
   hasKitchenLinesAwaitingHandoff,
+  describeKitchenHandoffBlocker,
+  kitchenHandoffBlocker,
   OrderActionSnapshot,
 } from './order-action-policy.util';
 import { OrderSseService } from '../services/order-sse.service';
@@ -535,7 +537,11 @@ export class OrderFlowService {
     const order = await client.orders.findFirst({
       where: { id: orderId },
       include: {
-        stores: { select: { id: true, name: true, store_code: true, organization_id: true } },
+        // `industries` added for the H3 fix — kitchen hand-off gates
+        // (`assertKitchenReadyForWholeOrder`, `deliverOrderItem`) must know
+        // whether THIS store is currently a restaurant before requiring a
+        // never-fired prepared line to reach the kitchen.
+        stores: { select: { id: true, name: true, store_code: true, organization_id: true, industries: true } },
         payments: {
           include: { store_payment_method: {
             select: { system_payment_method: {
@@ -618,21 +624,37 @@ export class OrderFlowService {
 
   /** Whole-order fulfillment is never allowed to use a retail line as a
    * shortcut around an un-fired or undelivered prepared line. Item-level
-   * delivery has its own guard and remains available for retail lines. */
-  private async assertKitchenReadyForWholeOrder(orderId: number): Promise<void> {
+   * delivery has its own guard and remains available for retail lines.
+   *
+   * H3 fix: `isRestaurant` gates whether a never-fired prepared line blocks
+   * at all (see `kitchenHandoffBlocker`) — a store that dropped the
+   * `restaurant` industry but kept legacy prepared/skip_kds:false catalog
+   * rows must still be able to ship/deliver/finish those orders. A line with
+   * a REAL kitchen ticket keeps blocking regardless of the flag; a
+   * `cancelled` ticket blocks with its own explanatory message instead of the
+   * generic one. */
+  private async assertKitchenReadyForWholeOrder(
+    orderId: number,
+    isRestaurant: boolean,
+  ): Promise<void> {
     const items = await this.prisma.order_items.findMany({
       where: { order_id: orderId },
       select: {
         cancelled_at: true,
         skip_kds: true,
+        product_name: true,
         products: { select: { product_type: true } },
         kitchen_ticket_items: {
           select: { status: true }, orderBy: { id: 'desc' }, take: 1,
         },
       },
     });
-    if (hasKitchenLinesAwaitingHandoff(items)) {
-      throw new VendixHttpException(ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS);
+    const blocker = kitchenHandoffBlocker(items, { isRestaurant });
+    if (blocker) {
+      throw new VendixHttpException(
+        ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
+        describeKitchenHandoffBlocker(blocker),
+      );
     }
   }
 
@@ -3264,7 +3286,10 @@ export class OrderFlowService {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
-    await this.assertKitchenReadyForWholeOrder(orderId);
+    await this.assertKitchenReadyForWholeOrder(
+      orderId,
+      storeIsRestaurant((order as any).stores?.industries),
+    );
 
     if (!order.shipping_method_id && dto.shipping_method_id) {
       const method = await this.prisma.shipping_methods.findFirst({
@@ -3496,7 +3521,15 @@ export class OrderFlowService {
       }),
     ]);
     const isKitchenOrder = itemsWithKitchen.some((item) => item.kitchen_ticket_items.length > 0);
-    const hasPendingKitchen = hasKitchenLinesAwaitingHandoff(itemsWithKitchen);
+    // H3 fix: the same restaurant gate `assertKitchenReadyForWholeOrder`
+    // enforces on write must back this READ-ONLY hint — otherwise a
+    // non-restaurant store's legacy prepared/skip_kds:false line would
+    // advertise `dispatch_order`/`ready_for_pickup`/`ship_with_tracking` as
+    // `enabled: true` here while the endpoint kept rejecting it (parity gap
+    // the file header explicitly forbids).
+    const hasPendingKitchen = hasKitchenLinesAwaitingHandoff(itemsWithKitchen, {
+      isRestaurant: storeIsRestaurant((order as any).stores?.industries),
+    });
     const offersDispatchFlow = requiresDispatch || isKitchenOrder;
 
     const snapshot: OrderActionSnapshot & {
@@ -3845,7 +3878,10 @@ export class OrderFlowService {
       );
     }
 
-    await this.assertKitchenReadyForWholeOrder(orderId);
+    await this.assertKitchenReadyForWholeOrder(
+      orderId,
+      storeIsRestaurant((order as any).stores?.industries),
+    );
 
     if (!force) {
       this.validateTransition(order.state as OrderState, 'delivered');
@@ -4053,6 +4089,11 @@ export class OrderFlowService {
         skip_kds: item.skip_kds,
         latestKitchenStatus: kitchenStatus,
         delivered_at: null,
+        // H3 fix: a never-fired prepared line only requires the kitchen
+        // hand-off when the store is CURRENTLY a restaurant (see
+        // `canDeliverItem`/`kitchenHandoffBlocker`). A line with an actual
+        // ticket keeps requiring `ready` either way.
+        isRestaurant: storeIsRestaurant((order as any).stores?.industries),
       });
       if (!kitchenGate.enabled) {
         throw new VendixHttpException(
@@ -5241,7 +5282,10 @@ export class OrderFlowService {
       );
     }
 
-    await this.assertKitchenReadyForWholeOrder(orderId);
+    await this.assertKitchenReadyForWholeOrder(
+      orderId,
+      storeIsRestaurant((order as any).stores?.industries),
+    );
 
     this.validateTransition(order.state as OrderState, 'finished');
     const updatedOrder = await this.updateOrderState(orderId, 'finished', {
