@@ -7,7 +7,7 @@ import {Component,
   computed, effect } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, ParamMap, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -53,6 +53,34 @@ interface OrderPaymentMethodOption {
   id: number;
   display_name: string | null;
   system_payment_method: { display_name: string };
+}
+
+/**
+ * Paso 4 del plan dashboard-sales-filters-pin-multiselect-sse: pin "Fijar" en
+ * el header del dropdown de filtros. Misma semántica que `fix_period` del
+ * dashboard (QUI-847): escribe su key en `FilterValues` (`'true'` | `null`),
+ * NO cuenta como filtro activo, y persiste el set completo de filtros por
+ * tienda en localStorage. Debe coincidir con el `key` del `[headerPin]` del
+ * template.
+ */
+const SALES_FILTERS_PIN_KEY = 'pin_filters';
+
+/** Prefijo de la key de localStorage donde se recuerda el set fijado. */
+const SALES_FILTERS_STORAGE_PREFIX = 'vendix_sales_filters_';
+
+/**
+ * Forma serializada en localStorage del set de filtros fijado. Solo filtros
+ * (sin page/limit/sort): al restaurar se arranca en página 1.
+ */
+interface PinnedSalesFilters {
+  search?: string;
+  status?: string[];
+  channel?: string[];
+  payment_status?: string[];
+  payment_method_id?: number;
+  date_range?: string;
+  table_id?: number;
+  dispatchable?: boolean;
 }
 
 @Component({
@@ -113,9 +141,11 @@ export class OrdersListComponent {
   readonly loading = signal(false);
   readonly totalItems = signal(0);
   readonly searchTerm = signal('');
-  readonly selectedStatus = signal('');
-  readonly selectedChannel = signal('');
-  readonly selectedPaymentStatus = signal('');
+  // Paso 4: multi-select — `[]` = sin filtro (nunca se guarda `[]` en
+  // `_filters`; vacío viaja como `undefined` al backend y a la URL).
+  readonly selectedStatus = signal<string[]>([]);
+  readonly selectedChannel = signal<string[]>([]);
+  readonly selectedPaymentStatus = signal<string[]>([]);
   readonly selectedPaymentMethod = signal('');
   readonly paymentMethods = signal<OrderPaymentMethodOption[]>([]);
   readonly selectedDateRange = signal('');
@@ -205,9 +235,8 @@ export class OrdersListComponent {
     {
       key: 'status',
       label: 'Estado',
-      type: 'select',
+      type: 'multi-select',
       options: [
-        { value: '', label: 'Todos los Estados' },
         { value: 'draft', label: 'Borrador' },
         { value: 'created', label: 'Creada' },
         { value: 'pending_payment', label: 'Pago Pendiente' },
@@ -222,7 +251,7 @@ export class OrdersListComponent {
     {
       key: 'channel',
       label: 'Canal',
-      type: 'select',
+      type: 'multi-select',
       // El backend acepta más canales (whatsapp, agent, marketplace — ver
       // channelMap en formatChannel / colorMap en columns), pero el filtro
       // solo exponía pos + ecommerce. Tienda con ventas por WhatsApp
@@ -230,7 +259,6 @@ export class OrdersListComponent {
       // whatsapp que es el único que el usuario quiere exponer; agent y
       // marketplace siguen llegando en la lista pero no se pueden filtrar.
       options: [
-        { value: '', label: 'Todos los Canales' },
         { value: 'pos', label: 'Punto de Venta' },
         { value: 'ecommerce', label: 'Tienda Online' },
         { value: 'whatsapp', label: 'WhatsApp' },
@@ -239,9 +267,8 @@ export class OrdersListComponent {
     {
       key: 'payment_status',
       label: 'Estado de Pago',
-      type: 'select',
+      type: 'multi-select',
       options: [
-        { value: '', label: 'Todos los Estados de Pago' },
         { value: 'pending', label: 'Pendiente' },
         { value: 'authorized', label: 'Autorizado' },
         { value: 'captured', label: 'Capturado' },
@@ -568,10 +595,12 @@ export class OrdersListComponent {
       .subscribe((qp) => {
         const incoming: OrderQuery = {
           search: qp.get('search') ?? '',
-          status: (qp.get('status') as OrderState) || undefined,
-          channel: (qp.get('channel') as OrderChannel) || undefined,
-          payment_status:
-            (qp.get('payment_status') as PaymentStatus) || undefined,
+          status: this.parseMultiParam<OrderState>(qp, 'status'),
+          channel: this.parseMultiParam<OrderChannel>(qp, 'channel'),
+          payment_status: this.parseMultiParam<PaymentStatus>(
+            qp,
+            'payment_status',
+          ),
           payment_method_id: qp.get('payment_method_id')
             ? Number(qp.get('payment_method_id'))
             : undefined,
@@ -587,6 +616,14 @@ export class OrdersListComponent {
           sort_order: this._filters.sort_order ?? 'desc',
         };
 
+        // Paso 4: en el primer emit, si la URL no trae filtros y hay un set
+        // fijado para la tienda, se restaura ANTES del primer fetch (la URL
+        // manda cuando trae filtros).
+        let pinRestored = false;
+        if (!initialQueryHandled) {
+          pinRestored = this.applyPinRestoreIfUrlEmpty(qp, incoming);
+        }
+
         // Guard contra loop + bypass para el primer emit (carga inicial):
         //   - Primer emit: `_filters` puede ser igual a `incoming` (URL limpia
         //     sin params), pero todavía necesitamos sincronizar signals y
@@ -601,9 +638,11 @@ export class OrdersListComponent {
         // Sincronizar signals + _filters
         this._filters = { ...this._filters, ...incoming };
         this.searchTerm.set(this._filters.search ?? '');
-        this.selectedStatus.set(this._filters.status ?? '');
-        this.selectedChannel.set(this._filters.channel ?? '');
-        this.selectedPaymentStatus.set(this._filters.payment_status ?? '');
+        this.selectedStatus.set(this.asArray(this._filters.status));
+        this.selectedChannel.set(this.asArray(this._filters.channel));
+        this.selectedPaymentStatus.set(
+          this.asArray(this._filters.payment_status),
+        );
         this.selectedPaymentMethod.set(
           this._filters.payment_method_id != null
             ? String(this._filters.payment_method_id)
@@ -617,6 +656,33 @@ export class OrdersListComponent {
         );
         this.dispatchableFilter.set(!!this._filters.dispatchable);
         this.filterValues.set(this.filtersToFilterValues(this._filters));
+        if (pinRestored) {
+          // El pin restaurado se marca en el round-trip (QUI-744: la key
+          // viaja junto al resto de la forma) y se refleja en la URL para
+          // mantener el invariante "URL = filtros visibles". El emit que
+          // genera `updateQuery` lo absorbe el guard `filtersEqual` (mismo
+          // contenido), así que no hay doble fetch.
+          this.filterValues.update((v) => ({
+            ...v,
+            [SALES_FILTERS_PIN_KEY]: 'true',
+          }));
+          this.updateQuery({
+            search: this._filters.search || null,
+            status: this._filters.status,
+            channel: this._filters.channel,
+            payment_status: this._filters.payment_status,
+            payment_method_id: this._filters.payment_method_id,
+            date_range: this._filters.date_range,
+            table_id: this._filters.table_id,
+            dispatchable: this._filters.dispatchable ?? null,
+            page: null,
+          });
+        } else if (this.isPinned()) {
+          // Navegación por URL (back/forward/deep-link) con pin activo: el
+          // set visible cambió, así que el snapshot fijado se actualiza para
+          // no restaurar un set obsoleto en la próxima entrada.
+          this.persistPinnedFilters(true);
+        }
 
         this.loadOrders();
       });
@@ -738,18 +804,54 @@ export class OrdersListComponent {
   }
 
   /**
+   * Normaliza un valor single-o-array a un array nuevo (nunca muta el
+   * original). Puente entre `FilterValues` multi, la unión
+   * `X | X[]` de `OrderQuery` y los signals `string[]`.
+   */
+  private asArray<T>(value: T | T[] | null | undefined): T[] {
+    if (value == null) return [];
+    return Array.isArray(value) ? [...value] : [value];
+  }
+
+  /**
+   * Parsea un param multi-valor desde la URL. Acepta params repetidos
+   * (`?channel=whatsapp&channel=ecommerce`, vía `getAll`) y coma
+   * (`?channel=whatsapp,ecommerce`, como la serializa `updateQuery`), con
+   * split+trim, sin vacíos y con dedupe preservando orden. Vacío → `undefined`.
+   */
+  private parseMultiParam<T extends string>(
+    qp: ParamMap,
+    key: string,
+  ): T[] | undefined {
+    const parts = qp
+      .getAll(key)
+      .flatMap((v) => v.split(','))
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (parts.length === 0) return undefined;
+    return [...new Set(parts)] as T[];
+  }
+
+  /**
    * Mapea un `OrderQuery` (estado del backend) a un `FilterValues` (lo que
    * entiende el `<app-options-dropdown>`). Usado en la rehidratación desde URL
-   * para que el dropdown muestre los filtros activos al re-entrar.
+   * para que el dropdown muestre los filtros activos al re-entrar. Los
+   * multi-select viajan como arrays (`null` = sin filtro); la key del pin se
+   * preserva para que el sync effect del dropdown (QUI-744) no la pierda.
    */
   private filtersToFilterValues(f: OrderQuery): FilterValues {
+    const toFilterArray = <T>(v: T | T[] | undefined): T[] | null => {
+      if (v == null) return null;
+      return Array.isArray(v) ? [...v] : [v];
+    };
     return {
-      status: f.status ?? null,
-      channel: f.channel ?? null,
-      payment_status: f.payment_status ?? null,
+      status: toFilterArray(f.status),
+      channel: toFilterArray(f.channel),
+      payment_status: toFilterArray(f.payment_status),
       payment_method_id: f.payment_method_id != null ? String(f.payment_method_id) : null,
       date_range: f.date_range ?? null,
       table_id: f.table_id != null ? String(f.table_id) : null,
+      [SALES_FILTERS_PIN_KEY]: this.isPinned() ? 'true' : null,
     };
   }
 
@@ -761,7 +863,9 @@ export class OrdersListComponent {
    * Approach C: unión de keys + comparación estricta. Robusto ante keys que
    * faltan en uno de los dos lados, y `undefined === undefined` cuenta como
    * igual (consistente con cómo `incoming` se construye — keys con `|| undefined`
-   * siguen presentes en el objeto, no ausentes).
+   * siguen presentes en el objeto, no ausentes). Los arrays se comparan por
+   * contenido sin importar el orden (`?status=b,a` ≡ `['a','b']`), para que
+   * un reordenamiento no dispare un fetch redundante.
    */
   private filtersEqual(current: OrderQuery, incoming: OrderQuery): boolean {
     const keys = new Set([
@@ -769,7 +873,17 @@ export class OrdersListComponent {
       ...Object.keys(incoming),
     ]);
     for (const k of keys) {
-      if ((current as Record<string, unknown>)[k] !== (incoming as Record<string, unknown>)[k]) {
+      const a = (current as Record<string, unknown>)[k];
+      const b = (incoming as Record<string, unknown>)[k];
+      if (Array.isArray(a) || Array.isArray(b)) {
+        if (!Array.isArray(a) || !Array.isArray(b)) return false;
+        if (a.length !== b.length) return false;
+        const sortedA = [...a].sort();
+        const sortedB = [...b].sort();
+        if (!sortedA.every((v, i) => v === sortedB[i])) return false;
+        continue;
+      }
+      if (a !== b) {
         return false;
       }
     }
@@ -778,16 +892,19 @@ export class OrdersListComponent {
 
   /**
    * Escribe en la URL los params del patch. Convención `null = unset`:
-   * pasar `null` o `''` ELIMINA la clave de la URL (Angular la quita); pasar
-   * un valor lo serializa a string. `replaceUrl: true` evita acumular entradas
-   * de history por cada cambio de filtro. `queryParamsHandling: 'merge'`
-   * preserva otros params que no estemos tocando.
+   * pasar `null`, `''` o un array vacío ELIMINA la clave de la URL (Angular
+   * la quita); pasar un valor lo serializa a string y un array no vacío con
+   * coma (`?channel=whatsapp,ecommerce`). `replaceUrl: true` evita acumular
+   * entradas de history por cada cambio de filtro. `queryParamsHandling:
+   * 'merge'` preserva otros params que no estemos tocando.
    */
   private updateQuery(patch: Partial<Record<keyof OrderQuery, unknown>>): void {
     const next: Record<string, string | null> = {};
     for (const [k, v] of Object.entries(patch)) {
       if (v == null || v === '') {
         next[k] = null;
+      } else if (Array.isArray(v)) {
+        next[k] = v.length > 0 ? v.join(',') : null;
       } else {
         next[k] = String(v);
       }
@@ -804,9 +921,9 @@ export class OrdersListComponent {
   readonly hasFilters = computed(() =>
     !!(
       this.searchTerm() ||
-      this.selectedStatus() ||
-      this.selectedChannel() ||
-      this.selectedPaymentStatus() ||
+      this.selectedStatus().length > 0 ||
+      this.selectedChannel().length > 0 ||
+      this.selectedPaymentStatus().length > 0 ||
       this.selectedPaymentMethod() ||
       this.selectedDateRange() ||
       this.dispatchableFilter() ||
@@ -837,13 +954,29 @@ export class OrdersListComponent {
     this.loadOrders();
     // Persistir en URL para que sobreviva a back/forward y deep-link.
     this.updateQuery({ search: term || null });
+    // Con pin activo, el snapshot fijado sigue al set visible.
+    if (this.isPinned()) this.persistPinnedFilters(true);
   }
 
   onFilterChange(values: FilterValues): void {
+    // QUI-744: round-trip EXACTO — se devuelve la forma emitida tal cual
+    // (incluida la key del pin) para que el sync effect del dropdown no pise
+    // el estado local. Solo se DERIVA de ella; nunca se normaliza aquí.
     this.filterValues.set(values);
-    this.selectedStatus.set((values['status'] as string) || '');
-    this.selectedChannel.set((values['channel'] as string) || '');
-    this.selectedPaymentStatus.set((values['payment_status'] as string) || '');
+    // Multi-select: array vacío = sin filtro (viaja `undefined` a `_filters`
+    // para no mandar `[]` al backend ni a la URL).
+    const status = this.asArray<string>(values['status']).filter(
+      (v) => v !== '',
+    );
+    const channel = this.asArray<string>(values['channel']).filter(
+      (v) => v !== '',
+    );
+    const paymentStatus = this.asArray<string>(values['payment_status']).filter(
+      (v) => v !== '',
+    );
+    this.selectedStatus.set(status);
+    this.selectedChannel.set(channel);
+    this.selectedPaymentStatus.set(paymentStatus);
     this.selectedPaymentMethod.set((values['payment_method_id'] as string) || '');
     this.selectedDateRange.set((values['date_range'] as string) || '');
     // Carril B - B2: '' = sin filtro (viaja undefined al backend para no
@@ -851,15 +984,14 @@ export class OrdersListComponent {
     // de la mesa como string.
     this.selectedTable.set((values['table_id'] as string) || '');
 
-    this._filters.status = this.selectedStatus()
-      ? (this.selectedStatus() as OrderState)
-      : undefined;
-    this._filters.channel = this.selectedChannel()
-      ? (this.selectedChannel() as OrderChannel)
-      : undefined;
-    this._filters.payment_status = this.selectedPaymentStatus()
-      ? (this.selectedPaymentStatus() as PaymentStatus)
-      : undefined;
+    this._filters.status =
+      status.length > 0 ? ([...status] as OrderState[]) : undefined;
+    this._filters.channel =
+      channel.length > 0 ? ([...channel] as OrderChannel[]) : undefined;
+    this._filters.payment_status =
+      paymentStatus.length > 0
+        ? ([...paymentStatus] as PaymentStatus[])
+        : undefined;
     this._filters.payment_method_id = this.selectedPaymentMethod()
       ? Number(this.selectedPaymentMethod())
       : undefined;
@@ -881,18 +1013,25 @@ export class OrdersListComponent {
       date_range: this._filters.date_range,
       table_id: this._filters.table_id,
     });
+    // El pin viaja en las MISMAS FilterValues: al marcarlo se persiste el
+    // set actual, al desmarcarlo se borra; con pin activo, cada cambio
+    // re-persiste (igual que `persistFixedPeriod` del dashboard).
+    this.persistPinnedFilters(values[SALES_FILTERS_PIN_KEY] === 'true');
   }
 
   clearFilters(): void {
     this.searchTerm.set('');
-    this.selectedStatus.set('');
-    this.selectedChannel.set('');
-    this.selectedPaymentStatus.set('');
+    this.selectedStatus.set([]);
+    this.selectedChannel.set([]);
+    this.selectedPaymentStatus.set([]);
     this.selectedPaymentMethod.set('');
     this.selectedDateRange.set('');
     this.dispatchableFilter.set(false);
     this.selectedTable.set('');
+    // Reset total: `{}` también suelta el pin (el sync effect del dropdown
+    // lo desmarca al copiar la forma vacía).
     this.filterValues.set({});
+    this.persistPinnedFilters(false);
 
     this._filters.search = '';
     this._filters.status = undefined;
@@ -927,9 +1066,9 @@ export class OrdersListComponent {
     // colisión en el where de Prisma (state: 'processing' ya lo cubre
     // dispatchable; selectedStatus vacío evita un AND contradictorio).
     if (next) {
-      this.selectedStatus.set('');
+      this.selectedStatus.set([]);
       this._filters.status = undefined;
-      this.filterValues.update(v => ({ ...v, status: '' }));
+      this.filterValues.update((v) => ({ ...v, status: null }));
     }
     this._filters.page = 1;
     this.loadOrders();
@@ -938,6 +1077,139 @@ export class OrdersListComponent {
       dispatchable: next || null,
       status: this._filters.status,
     });
+    // Con pin activo, el snapshot fijado sigue al set visible.
+    if (this.isPinned()) this.persistPinnedFilters(true);
+  }
+
+  // ── Pin "Fijar" (paso 4, patrón QUI-847 del dashboard) ─────────────
+
+  /** El pin vive en `filterValues` bajo su propia key (`'true'` | ausente). */
+  private isPinned(): boolean {
+    return this.filterValues()[SALES_FILTERS_PIN_KEY] === 'true';
+  }
+
+  /**
+   * Store actual vía el signal canónico del facade (ya resuelto en memoria;
+   * lectura síncrona, sin suscripción). `null` si la sesión aún no cargó.
+   */
+  private currentStoreId(): string | null {
+    const id = this.authFacade.userStore()?.id;
+    return id == null ? null : String(id);
+  }
+
+  /** Lee el set fijado para la tienda; `null` si no hay o está corrupto. */
+  private readPinnedFilters(): PinnedSalesFilters | null {
+    if (typeof localStorage === 'undefined') return null;
+    const storeId = this.currentStoreId();
+    if (!storeId) return null;
+    try {
+      const raw = localStorage.getItem(
+        `${SALES_FILTERS_STORAGE_PREFIX}${storeId}`,
+      );
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as PinnedSalesFilters;
+      if (!parsed || typeof parsed !== 'object') return null;
+      return parsed;
+    } catch {
+      // Valor corrupto o storage no disponible: se ignora y se sigue con
+      // los filtros de la URL (vacío = sin filtros).
+      return null;
+    }
+  }
+
+  /**
+   * Persiste el set COMPLETO de filtros visibles solo si el pin está
+   * marcado. Al desmarcarlo se borra la key: la próxima entrada arranca sin
+   * filtros (salvo que la URL traiga). Best-effort: si el storage falla, el
+   * filtrado sigue funcionando.
+   */
+  private persistPinnedFilters(fixed: boolean): void {
+    if (typeof localStorage === 'undefined') return;
+    const storeId = this.currentStoreId();
+    if (!storeId) return;
+    const key = `${SALES_FILTERS_STORAGE_PREFIX}${storeId}`;
+    try {
+      if (!fixed) {
+        localStorage.removeItem(key);
+        return;
+      }
+      const f = this._filters;
+      const state: PinnedSalesFilters = {};
+      if (f.search) state.search = f.search;
+      const status = this.asArray(f.status);
+      if (status.length > 0) state.status = [...status];
+      const channel = this.asArray(f.channel);
+      if (channel.length > 0) state.channel = [...channel];
+      const paymentStatus = this.asArray(f.payment_status);
+      if (paymentStatus.length > 0) state.payment_status = [...paymentStatus];
+      if (f.payment_method_id != null)
+        state.payment_method_id = f.payment_method_id;
+      if (f.date_range) state.date_range = f.date_range;
+      if (f.table_id != null) state.table_id = f.table_id;
+      if (f.dispatchable) state.dispatchable = true;
+      localStorage.setItem(key, JSON.stringify(state));
+    } catch {
+      // Storage lleno o no disponible: fijar es best-effort, no rompe el filtro.
+    }
+  }
+
+  /** `true` cuando ningún param de filtro trae contenido no-blanco. */
+  private urlHasNoFilters(qp: ParamMap): boolean {
+    const has = (k: string): boolean =>
+      qp.getAll(k).some((v) => v.trim().length > 0);
+    return !(
+      has('search') ||
+      has('status') ||
+      has('channel') ||
+      has('payment_status') ||
+      has('payment_method_id') ||
+      has('date_range') ||
+      has('table_id') ||
+      has('dispatchable')
+    );
+  }
+
+  /**
+   * Restaura el set fijado sobre `incoming` (mutación in-place) cuando la URL
+   * no trae filtros y hay pin guardado. Valida y coerciona cada campo para
+   * no inyectar basura del storage en `_filters`. Retorna si restauró.
+   */
+  private applyPinRestoreIfUrlEmpty(
+    qp: ParamMap,
+    incoming: OrderQuery,
+  ): boolean {
+    if (!this.urlHasNoFilters(qp)) return false;
+    const pinned = this.readPinnedFilters();
+    if (!pinned) return false;
+    const cleanArray = (v: unknown): string[] | undefined => {
+      if (!Array.isArray(v)) return undefined;
+      const clean = [
+        ...new Set(
+          v.filter(
+            (x): x is string => typeof x === 'string' && x.length > 0,
+          ),
+        ),
+      ];
+      return clean.length > 0 ? clean : undefined;
+    };
+    const cleanId = (v: unknown): number | undefined =>
+      typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
+    const cleanText = (v: unknown): string | undefined =>
+      typeof v === 'string' && v.length > 0 ? v : undefined;
+    Object.assign(incoming, {
+      search: cleanText(pinned.search) ?? '',
+      status: cleanArray(pinned.status) as OrderState[] | undefined,
+      channel: cleanArray(pinned.channel) as OrderChannel[] | undefined,
+      payment_status: cleanArray(pinned.payment_status) as
+        | PaymentStatus[]
+        | undefined,
+      payment_method_id: cleanId(pinned.payment_method_id),
+      date_range: cleanText(pinned.date_range),
+      table_id: cleanId(pinned.table_id),
+      dispatchable: pinned.dispatchable === true ? true : undefined,
+      page: 1,
+    });
+    return true;
   }
 
   onActionClick(action: string): void {
