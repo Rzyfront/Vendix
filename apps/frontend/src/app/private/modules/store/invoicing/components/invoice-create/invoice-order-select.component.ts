@@ -23,6 +23,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { formatStoreDate } from '../../../../../../shared/utils/date.util';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import {
   InvoiceOrderLookupService,
   InvoiceOrderOption,
@@ -195,6 +197,7 @@ export class InvoiceOrderSelectComponent implements ControlValueAccessor {
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly elementRef = inject(ElementRef);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly storeSettingsFacade = inject(StoreSettingsFacade);
 
   readonly placeholder = input<string>('Número de pedido, cliente o id...');
   readonly error = input<string | undefined>(undefined);
@@ -308,9 +311,10 @@ export class InvoiceOrderSelectComponent implements ControlValueAccessor {
 
   describe(order: InvoiceOrderOption): string {
     const state = ORDER_STATE_LABELS[order.state] ?? order.state;
-    return [order.customerName, state, formatDate(order.createdAt)]
-      .filter(Boolean)
-      .join(' · ');
+    const date = order.createdAt
+      ? formatStoreDate(order.createdAt, this.storeSettingsFacade.timezone())
+      : '';
+    return [order.customerName, state, date].filter(Boolean).join(' · ');
   }
 
   formatCurrency(value: number): string {
@@ -328,14 +332,4 @@ export class InvoiceOrderSelectComponent implements ControlValueAccessor {
       this.onTouched();
     }
   }
-}
-
-/**
- * `created_at` recortado a fecha. Se parte la cadena ISO en vez de construir un
- * `Date`: `new Date('2026-08-15')` es medianoche UTC y en Bogotá se pinta como
- * el día 14 (ver `vendix-date-timezone`).
- */
-function formatDate(value: string): string {
-  if (!value) return '';
-  return value.split('T')[0] ?? '';
 }

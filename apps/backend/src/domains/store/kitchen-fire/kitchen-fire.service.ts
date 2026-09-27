@@ -1,9 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RecipesService, BomExplosionLine } from '../recipes/recipes.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import {
+  StockValidatorService,
+  StockDemandLine,
+  type InsufficientStockItem,
+} from '../inventory/shared/services/stock-validator.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
@@ -11,6 +16,7 @@ import { FireOrderItemsDto, KitchenTicketQueryDto, ResendOrderItemsDto } from '.
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { KdsSessionsService } from '../kds/sessions/kds-sessions.service';
 import { roundMoney2 } from '../taxes/utils/final-price.util';
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 /** Historical delivered_* values are read-only aliases of the canonical decisions. */
 const POST_CANCEL_REMAKE_TYPES = new Set([
@@ -106,6 +112,13 @@ export interface FireOrderItemsResult {
   skipped_item_ids: number[];
   cogs_total: number;
   consumed_line_count: number;
+  /**
+   * docs/plans/no-overselling-stock-guard-plan.md step 9 — present ONLY when
+   * the store's "Permitir sobre-uso de insumos" switch was ON and at least
+   * one tracked ingredient was short. Additive: absent (never an empty
+   * array) on the strict/default path.
+   */
+  stock_warnings?: InsufficientStockItem[];
 }
 
 /**
@@ -177,6 +190,40 @@ export interface PreExplodedFireContext {
    * Notas de preparación actualizadas por `order_item_id` al confirmar el envío.
    */
   itemNotesByOrderItem?: Map<number, string>;
+  /**
+   * No-overselling guard (plan step 6) — `true` when the caller (the public
+   * `fireOrderItems`) already ran `assertIngredientsAvailable` against this
+   * EXACT demand moments earlier, outside the transaction, so
+   * `fireOrderItemsInTx` skips the redundant re-query. Callers that invoke
+   * `fireOrderItemsInTx` directly (POS auto-fire, table close-out, split)
+   * never set this — they get the in-tx check.
+   */
+  skipIngredientCheck?: boolean;
+  /**
+   * docs/plans/no-overselling-stock-guard-plan.md step 9 — the store's
+   * resolved "Permitir sobre-uso de insumos" policy, when the caller already
+   * resolved it OUTSIDE the transaction (the public `fireOrderItems`, paired
+   * with `skipIngredientCheck: true`). When omitted, `fireOrderItemsInTx`
+   * resolves it itself via `StockValidatorService.resolveInventoryPolicy`
+   * inside the passed-in `tx` — so direct callers (POS auto-fire, table
+   * close-out, split) get correct behavior without having to know about
+   * this flag.
+   */
+  allowIngredientOveruse?: boolean;
+  /**
+   * docs/plans/no-overselling-stock-guard-plan.md step 9 — shortage items
+   * already collected by the caller's OWN pre-tx `assertIngredientsAvailable`
+   * call (paired with `skipIngredientCheck: true`), so `fireOrderItemsInTx`
+   * can surface them on its return without re-running the query.
+   */
+  preCheckedStockWarnings?: InsufficientStockItem[];
+  /**
+   * Historial de orden — extras del evento `kitchen_fired` que
+   * `fireOrderItemsInTx` registra en `order_events`. Solo el resend (camino
+   * waste/remake) lo fija, con `resend: true`; el fire normal y los auto-fire
+   * lo omiten.
+   */
+  historyExtras?: { resend: true; reason?: string };
 }
 
 /**
@@ -244,10 +291,48 @@ export class KitchenFireService {
     private readonly prisma: StorePrismaService,
     private readonly recipesService: RecipesService,
     private readonly stockLevelManager: StockLevelManager,
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+    // step 6) — tracked ingredients are validated BEFORE being consumed.
+    private readonly stockValidatorService: StockValidatorService,
     private readonly eventEmitter: EventEmitter2,
     private readonly sseService: NotificationsSseService,
     private readonly kdsSessionsService: KdsSessionsService,
+    // Historial de orden (`order_events`): opcional como en los demás
+    // escritores (OrderFlowService) — sin él el fire funciona igual y los
+    // specs que construyen el servicio a mano no necesitan cablearlo.
+    @Optional() private readonly orderHistoryService?: OrderHistoryService,
   ) {}
+
+  /**
+   * Registra `kitchen_fired` en `order_events` DENTRO del `tx` que creó los
+   * tickets: si el fire hace rollback, el evento nunca existió. No-op sin
+   * tickets o sin `OrderHistoryService` cableado.
+   */
+  private async recordKitchenFiredEvent(
+    tx: Prisma.TransactionClient,
+    evt: {
+      orderId: number;
+      storeId: number;
+      ticketIds: number[];
+      orderItemIds: number[];
+      kdsIds: number[];
+      extras?: Record<string, Prisma.InputJsonValue>;
+    },
+  ): Promise<void> {
+    if (!this.orderHistoryService || evt.ticketIds.length === 0) return;
+    await this.orderHistoryService.record(tx, {
+      orderId: evt.orderId,
+      storeId: evt.storeId,
+      organizationId: RequestContextService.getContext()?.organization_id ?? null,
+      type: 'kitchen_fired',
+      payload: {
+        ticket_ids: evt.ticketIds,
+        order_item_ids: evt.orderItemIds,
+        kds_ids: evt.kdsIds,
+        ...(evt.extras ?? {}),
+      },
+    });
+  }
 
   /** Fecha de negocio 'YYYY-MM-DD' en tz de la tienda, desplazada por la hora de corte (default 3 AM → un ticket a la 1 AM cuenta para el día anterior). Configurable vía store_settings.settings.operations.ticket_closing_hour (con fallback legado a restaurant_ops.business_day_cutoff_hour). */
   private async getBusinessDate(store_id: number): Promise<string> {
@@ -261,6 +346,47 @@ export class KitchenFireService {
     return new Intl.DateTimeFormat('en-CA', {
       timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
     }).format(shifted);
+  }
+
+  /**
+   * No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+   * step 6) — flattens the ALREADY-EXPLODED BOM of every prepared item being
+   * fired into ingredient demand lines, net of confirmed exclusions
+   * (QUI-655). Pure/no DB access: reused verbatim by the pre-tx check in
+   * `fireOrderItems` and the in-tx check in `fireOrderItemsInTx` so both can
+   * never diverge on what is actually about to be consumed.
+   *
+   * `used_by` carries the dish name so a shared ingredient's error names
+   * every dish demanding it (`StockValidatorService.assertIngredientsAvailable`
+   * sums the demand per ingredient across all dishes before deciding).
+   */
+  private buildIngredientDemandLines(
+    items: Array<{
+      orderItem: { id: number; quantity: any; product_name: string };
+      bomLines: BomExplosionLine[];
+    }>,
+    exclusionsByOrderItem: Map<number, number[]>,
+  ): StockDemandLine[] {
+    const demands: StockDemandLine[] = [];
+    for (const { orderItem, bomLines } of items) {
+      const orderQty = Number(orderItem.quantity || 0);
+      if (!Number.isFinite(orderQty) || orderQty <= 0) continue;
+      const excluded = exclusionsByOrderItem.get(orderItem.id);
+      const excludedSet = excluded && excluded.length > 0 ? new Set(excluded) : null;
+      const effectiveBomLines = excludedSet
+        ? bomLines.filter((l) => !excludedSet.has(l.component_product_id))
+        : bomLines;
+      for (const line of effectiveBomLines) {
+        const consumedQty = Math.round(line.quantity * orderQty);
+        if (!Number.isFinite(consumedQty) || consumedQty <= 0) continue;
+        demands.push({
+          product_id: line.component_product_id,
+          quantity: consumedQty,
+          used_by: orderItem.product_name,
+        });
+      }
+    }
+    return demands;
   }
 
   // ---------------------------------------------------------------- fire
@@ -489,6 +615,36 @@ export class KitchenFireService {
       preparedItems.push({ orderItem: item, recipeId: recipe.id, bomLines });
     }
 
+    // 3a. No-overselling guard (plan step 6) — validate tracked ingredients
+    // BEFORE opening the transaction. Built from the exclusions confirmed in
+    // THIS request (available now — `splitLinesForExclusions` already ran),
+    // so the check honors the same "sin salsa" exclusions the tx will
+    // actually consume. If insufficient, nothing is consumed and no
+    // kitchen_ticket is created (no tx was even opened yet).
+    const exclusionsByOrderItem = new Map<number, number[]>(
+      remappedExclusions.map((e) => [
+        e.order_item_id,
+        e.component_product_ids ?? [],
+      ]),
+    );
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — resolve the
+    // store's overuse policy ONCE, outside the tx, and reuse it below both
+    // for this pre-check and for the in-tx consumption (via `preComputed`).
+    const inventoryPolicy =
+      await this.stockValidatorService.resolveInventoryPolicy(store_id);
+    let preCheckedStockWarnings: InsufficientStockItem[] = [];
+    if (preparedItems.length > 0) {
+      const ingredientDemands = this.buildIngredientDemandLines(
+        preparedItems,
+        exclusionsByOrderItem,
+      );
+      preCheckedStockWarnings =
+        await this.stockValidatorService.assertIngredientsAvailable(
+          ingredientDemands,
+          { allowIngredientOveruse: inventoryPolicy.allowIngredientOveruse },
+        );
+    }
+
     // 3b. Pre-resolve a default location_id per leaf product. Resolved
     //     OUTSIDE the transaction because getDefaultLocationForProduct
       //     uses the outer scoped client; the resulting id is just a
@@ -543,15 +699,20 @@ export class KitchenFireService {
       locationByProduct,
       businessDate,
       user_id,
-      // QUI-655 — exclusiones confirmadas en el modal, indexadas por item. Se
-      // arman aca (fuera de la transaccion) porque el filtrado del BOM ocurre
-      // dentro y no debe pagar el costo de recorrer el DTO por linea.
-      exclusionsByOrderItem: new Map(
-        remappedExclusions.map((e) => [
-          e.order_item_id,
-          e.component_product_ids ?? [],
-        ]),
-      ),
+      // QUI-655 — exclusiones confirmadas en el modal, indexadas por item.
+      // Reutiliza el mapa armado arriba para el chequeo 3a (misma fuente de
+      // verdad, una sola construccion).
+      exclusionsByOrderItem,
+      // No-overselling guard (plan step 6) — 3a ya validó este MISMO demand
+      // (mismos preparedItems + exclusionsByOrderItem) momentos antes, fuera
+      // de la tx. Re-ejecutar el mismo query adentro es correcto pero
+      // redundante; el flag evita pagarlo dos veces.
+      skipIngredientCheck: true,
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — carry the
+      // policy + any already-collected warnings so `fireOrderItemsInTx`
+      // doesn't re-resolve/re-query for the same demand.
+      allowIngredientOveruse: inventoryPolicy.allowIngredientOveruse,
+      preCheckedStockWarnings,
       itemNotesByOrderItem: (() => {
         const notesMap = new Map<number, string>();
         if (dto.item_notes && Array.isArray(dto.item_notes)) {
@@ -656,6 +817,11 @@ export class KitchenFireService {
       skipped_item_ids: skippedItemIds,
       cogs_total: Number(result.cogsTotal.toFixed(4)),
       consumed_line_count: result.consumedLineCount,
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive,
+      // present only when overuse was actually accepted.
+      ...(result.stockWarnings && result.stockWarnings.length > 0
+        ? { stock_warnings: result.stockWarnings }
+        : {}),
     };
   }
 
@@ -716,11 +882,21 @@ export class KitchenFireService {
     }>;
     cogsTotal: number;
     consumedLineCount: number;
+    stockWarnings?: InsufficientStockItem[];
   }> {
     const { order, preparedItems, recipeLessItems, locationByProduct, businessDate, user_id } =
       preComputed;
     const exclusionsByOrderItem =
       preComputed.exclusionsByOrderItem ?? new Map<number, number[]>();
+
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — reuse the
+    // caller's already-resolved policy (public `fireOrderItems`) or resolve
+    // it fresh, inside THIS tx, for direct callers (POS auto-fire, table
+    // close-out, split, resend) that never set it.
+    const allowIngredientOveruse =
+      preComputed.allowIngredientOveruse ??
+      (await this.stockValidatorService.resolveInventoryPolicy(store_id, tx))
+        .allowIngredientOveruse;
 
     const firedItemSnapshots: Array<{
       orderItemId: number;
@@ -783,6 +959,24 @@ export class KitchenFireService {
       openSessionByKds.set(kdsId, session?.id ?? null);
     }
 
+    // No-overselling guard (plan step 6) — validate tracked ingredients
+    // BEFORE consuming anything, inside THIS tx. Covers the direct callers
+    // (POS auto-fire, table close-out, split) that invoke `fireOrderItemsInTx`
+    // without going through the public `fireOrderItems` pre-check. When the
+    // public method already validated the identical demand moments earlier
+    // (`preComputed.skipIngredientCheck`), this re-query is skipped.
+    let stockWarnings: InsufficientStockItem[] =
+      preComputed.preCheckedStockWarnings ?? [];
+    if (!preComputed.skipIngredientCheck && preparedItems.length > 0) {
+      const ingredientDemands = this.buildIngredientDemandLines(
+        preparedItems,
+        exclusionsByOrderItem,
+      );
+      stockWarnings = await this.stockValidatorService.assertIngredientsAvailable(
+        ingredientDemands,
+        { tx, allowIngredientOveruse },
+      );
+    }
 
     for (const ctxItem of preparedItems) {
       const { orderItem, bomLines } = ctxItem;
@@ -864,7 +1058,19 @@ export class KitchenFireService {
               user_id,
               order_item_id: orderItem.id,
               create_movement: true,
-              validate_availability: false,
+              // No-overselling guard (plan step 6/9) — the pre-consumption
+              // check above already blocked an insufficient tracked
+              // ingredient WHEN overuse is OFF; `validate_availability` is
+              // the defense-in-depth net against a concurrent fire taking
+              // the same stock in between. No-op for untracked ingredients
+              // (`updateStock` skips them entirely). When the store's
+              // "Permitir sobre-uso de insumos" switch is ON, the guard
+              // above only WARNS, so this atomic floor must be OFF too (it
+              // would otherwise throw ConflictException on the exact
+              // shortage the switch just accepted) and the write is told to
+              // go negative instead of clamping to 0.
+              validate_availability: !allowIngredientOveruse,
+              allow_negative: allowIngredientOveruse,
               kds_session_id: itemKdsSessionId,
             },
             tx,
@@ -1059,6 +1265,18 @@ export class KitchenFireService {
       }
     }
 
+    // Historial de orden: un `kitchen_fired` por fire (cubre las N estaciones),
+    // en el MISMO tx que creó los tickets. Cubre el fire manual y los
+    // auto-fire (POS, cierre de mesa, split) que delegan aquí.
+    await this.recordKitchenFiredEvent(tx, {
+      orderId: order.id,
+      storeId: store_id,
+      ticketIds,
+      orderItemIds: firedOrderItemIds,
+      kdsIds: [...snapshotsByKds.keys()].sort((a, b) => a - b),
+      extras: preComputed.historyExtras,
+    });
+
     return {
       // `ticketId` es el ticket PRIMARIO del fire (la estacion de menor id).
       // Se conserva porque el evento `kitchen.fired` y el payload SSE siguen
@@ -1071,6 +1289,9 @@ export class KitchenFireService {
       firedItemSnapshots,
       cogsTotal,
       consumedLineCount,
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive,
+      // undefined/empty on the strict/default path.
+      stockWarnings,
     };
   }
 
@@ -1496,7 +1717,10 @@ export class KitchenFireService {
           }
           fallbackReuseIds.push(...ctx.skippedItemIds);
         }
-        return this.fireOrderItemsInTx(tx, store_id, ctx);
+        return this.fireOrderItemsInTx(tx, store_id, {
+          ...ctx,
+          historyExtras: { resend: true, reason: dto.reason },
+        });
       });
       if (wasteResult) {
         wasteTicketIds = wasteResult.ticketIds;
@@ -1626,6 +1850,25 @@ export class KitchenFireService {
           });
           ids.push(ticket.id);
         }
+
+        // Historial de orden: reimpresión sin consumo = `kitchen_fired` con
+        // `resend: true`, en el mismo tx que creó los tickets nuevos.
+        await this.recordKitchenFiredEvent(tx, {
+          orderId: order.id,
+          storeId: store_id,
+          ticketIds: ids,
+          orderItemIds: plainItems
+            .filter((it) => it.product_id)
+            .map((it) => it.id),
+          kdsIds: [...snapshotsByKds.keys()].sort((a, b) => a - b),
+          extras: {
+            resend: true,
+            ...(dto.reason ? { reason: dto.reason } : {}),
+            ...(oldTicketIdsToCancel.length > 0
+              ? { cancelled_ticket_ids: oldTicketIdsToCancel }
+              : {}),
+          },
+        });
         return ids;
       },
     );
@@ -2363,6 +2606,79 @@ export class KitchenFireService {
     return { ticket, store_id };
   }
 
+  /**
+   * Ids de `kitchen_ticket_items` del ticket cuyo par (producto, variante)
+   * NO tiene receta activa en la tabla FRESCA `recipes` (misma regla
+   * exacta→base→null que `fireOrderItems` / `prepareFireContext`). Única
+   * fuente del guard `KITCHEN_TICKET_NO_RECIPE`; lo usa `startPreparation`.
+   */
+  private async findRecipeLessTicketItemIds(ticket: {
+    items?: Array<{
+      id: number;
+      product_id: number | null;
+      product_variant_id?: number | null;
+    }> | null;
+  }): Promise<number[]> {
+    const recipeLessItemIds: number[] = [];
+    // Recetas-por-variante (paso 5): el guard es por par (producto, variante),
+    // no por producto — `.some(is_active)` dejaba pasar una línea cuya variante
+    // no tiene receta mientras OTRA variante sí la tuviera (y no distingue la
+    // base heredada de la exacta). Un único `findMany` sobre la tabla fresca
+    // (sin N+1 por línea) y resolución en memoria con la misma regla del fire.
+    const ticketProductIds = [
+      ...new Set(
+        (ticket.items ?? [])
+          .map((i) => i.product_id)
+          .filter((v): v is number => v != null),
+      ),
+    ];
+    type FreshRecipeRow = {
+      id: number;
+      product_id: number;
+      product_variant_id: number | null;
+      is_active: boolean;
+    };
+    const freshRecipes =
+      ticketProductIds.length > 0
+        ? ((await this.prisma.recipes.findMany({
+            where: { product_id: { in: ticketProductIds }, is_active: true },
+            select: {
+              id: true,
+              product_id: true,
+              product_variant_id: true,
+              is_active: true,
+            },
+          })) as FreshRecipeRow[])
+        : [];
+    const exactRecipeByPair = new Map<string, FreshRecipeRow>();
+    const baseRecipeByProduct = new Map<number, FreshRecipeRow>();
+    for (const r of freshRecipes) {
+      if (r.is_active !== true) continue;
+      if (r.product_variant_id != null) {
+        exactRecipeByPair.set(
+          this.recipeKey(r.product_id, r.product_variant_id),
+          r,
+        );
+      } else {
+        baseRecipeByProduct.set(r.product_id, r);
+      }
+    }
+    for (const item of ticket.items ?? []) {
+      if (!item.product_id) continue;
+      const hasActiveRecipe =
+        this.resolveRecipeForVariant(
+          exactRecipeByPair,
+          baseRecipeByProduct,
+          item.product_id,
+          item.product_variant_id ?? null,
+        ) != null;
+      if (!hasActiveRecipe) {
+        recipeLessItemIds.push(item.id);
+      }
+    }
+    return recipeLessItemIds;
+  }
+
   // ---------------------------------------------------------------- mutations
   /**
    * pending → in_preparation. Cascades item status, used by the KDS
@@ -2443,63 +2759,7 @@ export class KitchenFireService {
     // (or missing) is released by retrying `start` as soon as the recipe is
     // reactivated/created — no re-fire needed and no refresh endpoint: the
     // board just retries `POST /tickets/:id/start`, which re-reads here.
-    const recipeLessItemIds: number[] = [];
-    // Recetas-por-variante (paso 5): el guard es por par (producto, variante),
-    // no por producto — `.some(is_active)` dejaba pasar una línea cuya variante
-    // no tiene receta mientras OTRA variante sí la tuviera (y no distingue la
-    // base heredada de la exacta). Un único `findMany` sobre la tabla fresca
-    // (sin N+1 por línea) y resolución en memoria con la misma regla del fire.
-    const ticketProductIds = [
-      ...new Set(
-        (ticket.items ?? [])
-          .map((i) => i.product_id)
-          .filter((v): v is number => v != null),
-      ),
-    ];
-    type FreshRecipeRow = {
-      id: number;
-      product_id: number;
-      product_variant_id: number | null;
-      is_active: boolean;
-    };
-    const freshRecipes =
-      ticketProductIds.length > 0
-        ? ((await this.prisma.recipes.findMany({
-            where: { product_id: { in: ticketProductIds }, is_active: true },
-            select: {
-              id: true,
-              product_id: true,
-              product_variant_id: true,
-              is_active: true,
-            },
-          })) as FreshRecipeRow[])
-        : [];
-    const exactRecipeByPair = new Map<string, FreshRecipeRow>();
-    const baseRecipeByProduct = new Map<number, FreshRecipeRow>();
-    for (const r of freshRecipes) {
-      if (r.is_active !== true) continue;
-      if (r.product_variant_id != null) {
-        exactRecipeByPair.set(
-          this.recipeKey(r.product_id, r.product_variant_id),
-          r,
-        );
-      } else {
-        baseRecipeByProduct.set(r.product_id, r);
-      }
-    }
-    for (const item of ticket.items ?? []) {
-      if (!item.product_id) continue;
-      const hasActiveRecipe =
-        this.resolveRecipeForVariant(
-          exactRecipeByPair,
-          baseRecipeByProduct,
-          item.product_id,
-          item.product_variant_id ?? null,
-        ) != null;
-      if (!hasActiveRecipe) {
-        recipeLessItemIds.push(item.id);
-      }
-    }
+    const recipeLessItemIds = await this.findRecipeLessTicketItemIds(ticket);
     if (recipeLessItemIds.length > 0) {
       throw new VendixHttpException(
         ErrorCodes.KITCHEN_TICKET_NO_RECIPE,
@@ -2595,6 +2855,13 @@ export class KitchenFireService {
     if (ticket.status === 'ready') {
       return ticket;
     }
+
+    // Guard de receta (`findRecipeLessTicketItemIds`) deliberadamente NO
+    // aplicado aquí: `markDelivered` rechaza `pending` (KITCHEN_TICKET_NOT_READY)
+    // y `OrderFlowService.deliverOrderItem` exige `ready` para un `prepared`,
+    // así que `pending → ready` es hoy la ÚNICA salida de un plato sin receta
+    // hacia la entrega. Cerrarla dejaría el plato atascado (solo cancelable)
+    // hasta que exista una entrega directa desde `pending` para esos tickets.
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const t = await tx.kitchen_tickets.update({
@@ -2727,23 +2994,38 @@ export class KitchenFireService {
       );
     }
     // Paso 3 (takeaway-only KDS): en cocina solo se entregan platos
-    // para llevar. Si ALGUNA fila no-cancelada del ticket no es takeaway
-    // (`order_item.is_takeaway != true`, ya incluido vía
-    // KITCHEN_TICKET_INCLUDE), el ticket completo se bloquea: un ticket
-    // mixto o de mesa no se entrega por partes desde cocina.
-    const nonTakeaway = (ticket.items ?? []).filter(
-      (it) => it.status !== 'cancelled' && it.order_item?.is_takeaway !== true,
-    );
-    if (nonTakeaway.length > 0) {
-      throw new VendixHttpException(
-        ErrorCodes.KITCHEN_TICKET_NOT_TAKEAWAY,
-        undefined,
-        {
-          from: ticket.status,
-          to: 'delivered',
-          hint: 'Solo los platos para llevar se entregan en cocina',
-        },
+    // para llevar CUANDO la orden tiene una sesión de mesa ABIERTA — ese es
+    // el caso que este guard protege: un plato de mesa lo entrega el mesero
+    // vía la sesión, no cocina, así que un ticket con filas no-takeaway se
+    // bloquea completo (mixto o de mesa no se entrega por partes desde
+    // cocina).
+    //
+    // B16 (release-855): esta guarda bloqueaba TAMBIÉN mostrador/domicilio
+    // sin sesión de mesa — órdenes cuyos ítems simplemente nunca llevaron
+    // `is_takeaway=true` estampado porque no hay mesero que las entregue vía
+    // sesión. Sin sesión abierta, cocina es la ÚNICA superficie de entrega;
+    // bloquearla dejaba el plato sin forma de cerrarse nunca. La guarda
+    // ahora solo se aplica cuando existe una sesión de mesa abierta para
+    // esta orden.
+    const openTableSession = await this.prisma.table_sessions.findFirst({
+      where: { order_id: ticket.order_id, closed_at: null },
+      select: { id: true },
+    });
+    if (openTableSession) {
+      const nonTakeaway = (ticket.items ?? []).filter(
+        (it) => it.status !== 'cancelled' && it.order_item?.is_takeaway !== true,
       );
+      if (nonTakeaway.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.KITCHEN_TICKET_NOT_TAKEAWAY,
+          undefined,
+          {
+            from: ticket.status,
+            to: 'delivered',
+            hint: 'Solo los platos para llevar se entregan en cocina',
+          },
+        );
+      }
     }
     // ticket.status is `ready` or `in_preparation` — both valid.
     // If still in_preparation, bump to ready first (sets ready_at).

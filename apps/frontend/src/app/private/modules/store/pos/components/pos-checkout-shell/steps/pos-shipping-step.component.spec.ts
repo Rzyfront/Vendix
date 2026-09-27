@@ -82,7 +82,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
         { provide: PosShippingService, useValue: { getShippingMethods: () => methods, calculateShipping: calculate } },
         { provide: CustomersService, useValue: customers },
         { provide: ToastService, useValue: { show: () => {} } },
-        { provide: CurrencyFormatService, useValue: { currencySymbol: signal('$'), loadCurrency: () => {} } },
+        { provide: CurrencyFormatService, useValue: { currencySymbol: signal('$'), loadCurrency: () => {}, format: (v: number) => `$${v}` } },
         { provide: CountryService, useValue: { getCountries: () => of([{ code: 'CO', name: 'Colombia' }]), getDefaultCountry: () => ({ code: 'CO' }) } },
         { provide: DianMunicipalityLookupService, useValue: { resolveByName: () => of(null), setBaseUrl: () => {} } },
         { provide: GeocodingService, useValue: { forward: () => of(null), reverse: () => of(null) } },
@@ -561,6 +561,49 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(calculate).not.toHaveBeenCalled();
     expect(component.shippingTaxBreakdown()).toBeNull();
     expect(fixture.nativeElement.textContent).not.toContain('Base envío');
+  });
+
+  // B6 — backend puede devolver varias tarifas aplicables por método; antes
+  // el `.find()` se quedaba con la primera y descartaba el resto. Con 2+
+  // tarifas para el método activo debe aparecer el selector y cambiar de
+  // tarifa debe actualizar el costo.
+  it('B6 — una sola tarifa no muestra selector', () => {
+    mount();
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    latestQuote().next([quote(1, 7000, 201)]);
+    fixture.detectChanges();
+    expect(component.rateOptions().length).toBe(1);
+    expect(fixture.debugElement.query(By.css('app-selector'))).toBeFalsy();
+  });
+
+  it('B6 — dos tarifas para el método activo muestran el selector y preseleccionan la primera', () => {
+    mount();
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    latestQuote().next([quote(1, 7000, 201), quote(1, 9500, 202)]);
+    // El selector vive en el sub-paso terminal «Costo».
+    component.goToShipSubStep(component.shipSubSteps().length - 1);
+    fixture.detectChanges();
+    expect(component.rateOptions().length).toBe(2);
+    expect(fixture.debugElement.query(By.css('app-selector'))).toBeTruthy();
+    expect(component.shippingRateId()).toBe(201);
+    expect(component.shippingCost()).toBe(7000);
+  });
+
+  it('B6 — cambiar de tarifa en el selector actualiza el costo de envío', () => {
+    mount();
+    component.selectShippingMethod(firstMethod);
+    fixture.detectChanges();
+    latestQuote().next([quote(1, 7000, 201), quote(1, 9500, 202)]);
+    fixture.detectChanges();
+
+    component.onRateSelected(202);
+    fixture.detectChanges();
+
+    expect(component.shippingRateId()).toBe(202);
+    expect(component.shippingCost()).toBe(9500);
+    expect(component.totalWithShipping()).toBe(10500);
   });
 });
 

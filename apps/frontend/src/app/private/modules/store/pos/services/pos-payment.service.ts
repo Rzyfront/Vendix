@@ -4,7 +4,10 @@ import { Observable, of, throwError, Subject } from 'rxjs';
 import { catchError, map, timeout, delay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
-import { parseApiError } from '../../../../../core/utils/parse-api-error';
+import {
+  parseApiError,
+  type InsufficientStockItem,
+} from '../../../../../core/utils/parse-api-error';
 import { PaymentMethodsCatalogService } from '../../../../../shared/services/payment-methods-catalog.service';
 import { PosCashRegisterService } from './pos-cash-register.service';
 import { CartItem, CartState } from '../models/cart.model';
@@ -22,6 +25,11 @@ import {
 } from '../models/shipping.model';
 import { PosApiService } from './pos-api.service';
 import type { TableStatus } from '../../restaurant-ops/tables/interfaces';
+// B15(2) — cobro multimétodo sobre una orden adoptada: reusa el mismo
+// `flow/pay` que ya usa `pos-payment-step.component.ts` para el borrador
+// reabierto (`editingOrderId`). Servicio compartido, solo se CONSUME aquí
+// (no se edita `order-flow.service.ts` ni el controlador backend).
+import { StoreOrdersService } from '../../orders/services/store-orders.service';
 
 export interface PosSalePaymentResponse {
   /** flow/pay reuses the checkout step but has no success flag. */
@@ -71,6 +79,29 @@ export type {
 } from '../models/payment.model';
 
 /**
+ * B7 — la nota de envío viajaba SOLO en `internal_notes`, columna que
+ * `order-flow.service.ts` reescribe como metadata JSON (`_flow_metadata`) en
+ * la primera transición de estado; los proveedores de impresión (p.ej.
+ * `dispatch-ticket.provider.ts`) leen `order.notes`, una columna DISTINTA que
+ * el backend ya acepta (`CreatePosPaymentDto.notes`) pero que el POS nunca
+ * poblaba. Se arma aquí, en un solo lugar, para venta con envío y borrador:
+ * la nota de entrega (etiquetada, para no confundirla con la nota general
+ * del carrito) + la nota del carrito si también existe. `internal_notes` NO
+ * se toca — sigue recibiendo lo mismo que hoy.
+ */
+function buildShippingNotes(
+  cartNotes: string | null | undefined,
+  deliveryNotes: string | null | undefined,
+): string {
+  const parts: string[] = [];
+  const cart = (cartNotes || '').trim();
+  const delivery = (deliveryNotes || '').trim();
+  if (cart) parts.push(cart);
+  if (delivery) parts.push(`Nota de envío: ${delivery}`);
+  return parts.join(' | ');
+}
+
+/**
  * CP-POS-CREAR-EDITAR-COBRAR-001 / B.3 + vendix-error-handling:
  * rethrow normalized HTTP errors instead of swallowing them into
  * `of({ success: false, message })`. The previous shape buried a real 4xx
@@ -83,6 +114,12 @@ export type {
  * backend `message`, and otherwise uses `DEFAULT_ERROR_MESSAGE`) and rethrows
  * an `Error` with `errorCode` and `details` attached as own properties so the
  * caller can do `if (err.errorCode === 'POS_CUSTOMER_REQUIRED_001') ...`.
+ *
+ * No-overselling guard (`INV_STOCK_INSUFFICIENT_LINES` / `INV_STOCK_002`):
+ * also attaches `stockShortages` — the same normalized list `parseApiError`
+ * already computes — so a caller can render the itemized product/insumo
+ * list instead of just the flat `userMessage` string, without re-parsing
+ * `details` itself.
  */
 function rethrowApiError<T = never>(error: unknown): Observable<T> {
   const parsed = parseApiError(error);
@@ -90,10 +127,14 @@ function rethrowApiError<T = never>(error: unknown): Observable<T> {
     errorCode: string | null;
     details: unknown;
     devMessage: string | null;
+    stockShortages?: InsufficientStockItem[];
   };
   wrapped.errorCode = parsed.errorCode;
   wrapped.details = parsed.details;
   wrapped.devMessage = parsed.devMessage;
+  if (parsed.stockShortages?.length) {
+    wrapped.stockShortages = parsed.stockShortages;
+  }
   // Preserve the original HttpErrorResponse so consumers that need the
   // raw status (network errors, retry policies) still have it.
   (wrapped as any).cause = error;
@@ -145,6 +186,7 @@ export class PosPaymentService {
     private cashRegisterService: PosCashRegisterService,
     private paymentMethodsCatalog: PaymentMethodsCatalogService,
     private posApi: PosApiService,
+    private ordersService: StoreOrdersService,
   ) {}
 
   /**
@@ -694,6 +736,8 @@ export class PosPaymentService {
       register_id: register_id,
       seller_user_id: user_id,
       internal_notes: shippingData.deliveryNotes || cartState.notes || '',
+      // B7 — canal que SÍ sobrevive al ticket de despacho (`order.notes`).
+      notes: buildShippingNotes(cartState.notes, shippingData.deliveryNotes) || undefined,
       update_inventory: true,
       coupon_id: cartState.appliedCoupon?.id,
       coupon_code: cartState.appliedCoupon?.code,
@@ -718,18 +762,31 @@ export class PosPaymentService {
       // el saldo y dejar la orden en `pending_payment` hasta el recaudo.
       sale_data['requires_payment'] = true;
       sale_data['payment_form'] = '1'; // DIAN: contado
-      sale_data['store_payment_method_id'] = parseInt(
-        paymentRequest.paymentMethod.id,
-      );
-      sale_data['amount_received'] = Number(
-        parseFloat(
-          (paymentRequest.cashReceived || totalWithShipping).toString(),
-        ).toFixed(2),
-      );
-      sale_data['payment_reference'] = paymentRequest.reference || '';
-      // QUI-728 (E.1) — misma cuenta de destino en la venta con envío.
-      if (paymentRequest.bank_account_id != null) {
-        sale_data['bank_account_id'] = paymentRequest.bank_account_id;
+      // B11 — cobro multimétodo de contado con envío: mismo patrón que
+      // `processSaleWithPayment` (2+ tramos ⇒ `payments[]`, se omiten las
+      // claves escalares de método). El collector ya impide que un tramo sea
+      // contra entrega (`directMethods` excluye `CASH_ON_DELIVERY`).
+      const multiPayments = (
+        paymentRequest as { payments?: PosPaymentLeg[] }
+      ).payments;
+      const hasMultiPayments =
+        Array.isArray(multiPayments) && multiPayments.length >= 2;
+      if (hasMultiPayments) {
+        sale_data['payments'] = multiPayments;
+      } else {
+        sale_data['store_payment_method_id'] = parseInt(
+          paymentRequest.paymentMethod.id,
+        );
+        sale_data['amount_received'] = Number(
+          parseFloat(
+            (paymentRequest.cashReceived || totalWithShipping).toString(),
+          ).toFixed(2),
+        );
+        sale_data['payment_reference'] = paymentRequest.reference || '';
+        // QUI-728 (E.1) — misma cuenta de destino en la venta con envío.
+        if (paymentRequest.bank_account_id != null) {
+          sale_data['bank_account_id'] = paymentRequest.bank_account_id;
+        }
       }
     }
 
@@ -1014,6 +1071,10 @@ export class PosPaymentService {
       ...(register_id ? { register_id } : {}),
       seller_user_id: user_id,
       internal_notes: shipping?.deliveryNotes || cartState.notes || '',
+      // B7 — el borrador también debe conservar la nota de envío en el canal
+      // que el ticket de despacho lee (`order.notes`), no solo en
+      // `internal_notes` (reescrita luego como metadata JSON).
+      notes: buildShippingNotes(cartState.notes, shipping?.deliveryNotes) || undefined,
       update_inventory: false,
     };
 
@@ -1134,13 +1195,17 @@ export class PosPaymentService {
    * envelope (`{ success, order, payment, message, change, nextAction }`) so
    * the POS UI doesn't need to know which branch ran.
    *
-   * MULTIMÉTODO — NO APLICA AQUÍ (documentado, sin tocar): `POST
-   * /store/payments` (`CreatePaymentDto`) no declara `payments[]`, así que
-   * los tramos no pueden viajar por esta ruta (`forbidNonWhitelisted` los
-   * rechazaría con 400). Una orden adoptada cobrada desde el modo multi del
-   * collector cae al camino escalar (método del primer tramo por el total).
-   * Habilitar multi en adoptadas exige soporte en el backend o una guarda en
-   * el step; decisión pendiente fuera de este paso.
+   * MULTIMÉTODO (B15.2) — `POST /store/payments` (`CreatePaymentDto`) NO
+   * declara `payments[]`; con 2+ tramos esta función ahora enruta a
+   * `POST /store/orders/:id/flow/pay` (`PayOrderDto.payments`, el MISMO
+   * endpoint que `pos-payment-step.component.ts` ya usa para el borrador
+   * reabierto — ver su rama `editingOrderId`). `OrderFlowService.payOrder`
+   * cierra la mesa por su cuenta (`projectPaidOrderToTable`, resuelto desde
+   * `table_sessions.findFirst({order_id, closed_at: null})`), así que NO
+   * hace falta reenviar `tableSessionId`/`tableId` en esta rama — a
+   * diferencia de `/store/payments`, que sí los necesita en `metadata`
+   * porque no conoce la orden por dentro.
+   * Con 1 tramo se conserva el camino escalar de siempre (sin cambios).
    */
   private chargeAdoptedOrder(
     cartState: CartState,
@@ -1152,6 +1217,45 @@ export class PosPaymentService {
   ): Observable<any> {
     const orderId = cartState.linkedOrderId as number;
     const orderNumber = cartState.linkedOrderNumber;
+
+    const multiPayments = (
+      paymentRequest as { payments?: PosPaymentLeg[] }
+    ).payments;
+    if (Array.isArray(multiPayments) && multiPayments.length >= 2) {
+      return this.ordersService
+        .flowPayOrder(String(orderId), {
+          // Requerido por `PayOrderDto` aunque `payments[]` gana en el
+          // cálculo (`normalizePaymentLegs`): se manda el del primer tramo.
+          store_payment_method_id: multiPayments[0].store_payment_method_id,
+          payment_type: 'direct',
+          payments: multiPayments,
+        } as any)
+        .pipe(
+          map((response: any) => {
+            const data = response ?? {};
+            const payment = data.payment;
+            return {
+              success: true,
+              order: {
+                id: orderId,
+                order_number: orderNumber,
+                status: data.order?.state,
+              },
+              payment: payment
+                ? {
+                    ...payment,
+                    paymentMethod: paymentRequest.paymentMethod,
+                    transactionId: payment.transaction_id ?? payment.transactionId,
+                  }
+                : undefined,
+              payments: data.payments,
+              message: data.message ?? 'Pago aplicado a la orden adoptada',
+              change: payment?.change ?? data.change,
+              nextAction: payment?.nextAction ?? data.nextAction,
+            };
+          }),
+        );
+    }
 
     const amount = Number(cartState.summary.total.toFixed(2));
     // Hotfix post-PR-576: el valor hardcoded 'COP' rompía tiendas con

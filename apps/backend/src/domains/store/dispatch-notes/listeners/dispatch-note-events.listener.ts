@@ -643,6 +643,11 @@ export class DispatchNoteEventsListener {
           consumeSerials: false,
           reason: `Despacho remisión #${dispatch_note.id}`,
           userId: userId ?? undefined,
+          onShortfall: (item) => this.logger.error(
+            `[delivered] Remisión #${dispatch_note.id}: faltante de ${item.product_name} ` +
+            `(producto ${item.product_id}, variante ${item.product_variant_id ?? 'base'}): ` +
+            `requerido ${item.requested}, disponible ${item.available}. Conciliar inventario.`,
+          ),
         },
       );
 

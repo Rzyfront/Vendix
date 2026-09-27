@@ -4,6 +4,7 @@
 // exporta la clase directamente. Ver `@common/pdf/pdfkit` para el detalle.
 import { PDFDocument } from '@common/pdf/pdfkit';
 import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
+import { assertSafeTimezone } from '@common/utils/store-timezone.util';
 import { PrintFormat } from '../../settings/interfaces/store-settings.interface';
 
 export interface InvoicePdfData {
@@ -129,6 +130,16 @@ export interface InvoicePdfData {
    * all formats.
    */
   format?: PrintFormat;
+
+  /**
+   * Store IANA timezone (B17), used ONLY by {@link drawFooter}'s "Documento
+   * generado el ..." stamp — the one `new Date()` in this builder that is a
+   * real render-time instant, not a value already formatted upstream (every
+   * other date field above arrives pre-formatted as `DD/MM/YYYY` text).
+   * Defaults to `America/Bogota` (`assertSafeTimezone`'s fallback) when the
+   * caller omits it.
+   */
+  tz?: string;
 }
 
 export interface InvoicePdfItem {
@@ -442,7 +453,7 @@ export class InvoicePdfBuilder {
         }
 
         // --- Footer ---
-        this.drawFooter(doc, L);
+        this.drawFooter(doc, L, data.tz);
 
         const range = doc.bufferedPageRange();
         pages = range.count;
@@ -1399,15 +1410,22 @@ export class InvoicePdfBuilder {
     doc.strokeColor('#000000');
   }
 
-  private static drawFooter(doc: PDFKit.PDFDocument, L: PdfLayout): void {
+  private static drawFooter(
+    doc: PDFKit.PDFDocument,
+    L: PdfLayout,
+    tz?: string,
+  ): void {
     const now = new Date();
-    const date_str = now.toLocaleDateString('es-CO', {
+    // B17 — antes formateaba en la zona del contenedor (sin `timeZone`); el
+    // sello "Documento generado el ..." ahora usa la de la tienda.
+    const date_str = new Intl.DateTimeFormat('es-CO', {
+      timeZone: assertSafeTimezone(tz),
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-    });
+    }).format(now);
 
     doc.moveDown(L.footer_gap);
     doc

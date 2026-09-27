@@ -64,10 +64,11 @@ export class PrintLayoutComposerService {
     definition: PrintFormatDefinition,
     data: StandardPrintDataModel,
     mode: 'dummy' | 'tokenized' = 'dummy',
+    tz?: string,
   ): string {
     // Si la definición incluye una plantilla custom completa, se compila directamente
     if (definition.custom_template && definition.custom_template.trim().length > 0) {
-      const compiledCustom = this.compiler.compile(definition.custom_template, data, mode);
+      const compiledCustom = this.compiler.compile(definition.custom_template, data, mode, tz);
       return this.wrapInHtmlDocument(definition, compiledCustom.compiled);
     }
 
@@ -79,7 +80,7 @@ export class PrintLayoutComposerService {
     const rendered: Array<{ section: any; html: string }> = [];
 
     for (const section of sortedSections) {
-      const sectionHtml = this.renderSection(section, definition, data, mode);
+      const sectionHtml = this.renderSection(section, definition, data, mode, tz);
       if (sectionHtml) {
         rendered.push({ section, html: sectionHtml });
       }
@@ -132,9 +133,10 @@ export class PrintLayoutComposerService {
     definition: PrintFormatDefinition,
     data: StandardPrintDataModel,
     mode: 'dummy' | 'tokenized' = 'dummy',
+    tz?: string,
   ): string {
     if (section.custom_content) {
-      return `<div class="print-section section-${section.type}" data-section-id="${section.id || section.type}">${this.compiler.compile(section.custom_content, data, mode).compiled}</div>`;
+      return `<div class="print-section section-${section.type}" data-section-id="${section.id || section.type}">${this.compiler.compile(section.custom_content, data, mode, tz).compiled}</div>`;
     }
 
     switch (section.type) {

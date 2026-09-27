@@ -19,6 +19,7 @@ import { PaymentValidatorService } from './payment-validator.service';
 import { PaymentError, PaymentErrorCodes } from '../utils';
 import { BasePaymentProcessor } from '../interfaces/base-processor.interface';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
+import { OrderHistoryService } from '../../orders/order-history/order-history.service';
 
 @Injectable()
 export class PaymentGatewayService {
@@ -29,6 +30,11 @@ export class PaymentGatewayService {
     private validatorService: PaymentValidatorService,
     private s3Service: S3Service,
     @Optional() private readonly paymentEncryption?: PaymentEncryptionService,
+    // Plan order-truth-and-invoice-tz (Step 6). `@Optional()` matches this
+    // file's existing convention for tail deps so specs that construct this
+    // service positionally without it keep compiling; guarded at each call
+    // site below.
+    @Optional() private readonly orderHistory?: OrderHistoryService,
   ) {}
 
   /**
@@ -267,8 +273,8 @@ export class PaymentGatewayService {
         });
 
         if (payment) {
-          await this.createRefundRecord(payment, result, reason);
-          await this.updateOrderAfterRefund(payment.order_id);
+          const refund = await this.createRefundRecord(payment, result, reason);
+          await this.updateOrderAfterRefund(payment.order_id, refund);
         }
       }
 
@@ -630,7 +636,10 @@ export class PaymentGatewayService {
   private async updateOrderStatus(orderId: number) {
     const order = await this.prisma.orders.findUnique({
       where: { id: orderId },
-      include: { payments: true },
+      include: {
+        payments: true,
+        stores: { select: { organization_id: true } },
+      },
     });
 
     if (!order) return;
@@ -639,6 +648,7 @@ export class PaymentGatewayService {
       .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
       .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
 
+    const previousState = order.state;
     let newState = order.state;
 
     if (totalPaid >= Number(order.grand_total)) {
@@ -658,6 +668,17 @@ export class PaymentGatewayService {
           state: newState,
           updated_at: new Date(),
         },
+      });
+      // Plan order-truth-and-invoice-tz (Step 6) — pasarela de pago
+      // (webhook/HTTP confirmado por el gateway, nunca directamente por el
+      // usuario), de ahí source:'webhook' explícito.
+      await this.orderHistory?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: (order as any).stores?.organization_id ?? undefined,
+        type: 'state_changed',
+        fromState: previousState,
+        toState: newState,
       });
     }
   }
@@ -748,34 +769,110 @@ export class PaymentGatewayService {
     });
   }
 
-  private async updateOrderAfterRefund(orderId: number) {
+  private async updateOrderAfterRefund(
+    orderId: number,
+    refund?: {
+      id: number;
+      payment_id: number | null;
+      amount: Prisma.Decimal | number | string;
+      state: refunds_state_enum;
+      refund_transaction_id: string | null;
+      reason?: string | null;
+    },
+  ) {
     const order = await this.prisma.orders.findUnique({
       where: { id: orderId },
       include: {
         payments: true,
         refunds: true,
+        stores: { select: { organization_id: true } },
       },
     });
 
     if (!order) return;
 
+    // `refund_created` SIEMPRE que el carril de pasarela crea la fila de
+    // `refunds`, en cualquier estado inicial (incluido `processing` cuando la
+    // pasarela responde `pending`). Shape espejo de
+    // `RefundFlowService.recordCancellationPendingRefunds`: el reembolso vuelve
+    // por el riel original del pago (`refund_method: 'original_payment'`).
+    if (refund) {
+      await this.orderHistory?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: (order as any).stores?.organization_id ?? undefined,
+        type: 'refund_created',
+        paymentId: refund.payment_id ?? null,
+        amount: refund.amount?.toString() ?? null,
+        payload: {
+          reason: refund.reason ?? null,
+          refund_id: refund.id,
+          refund_method: 'original_payment',
+          initial_state: refund.state,
+          payout_channel: 'gateway',
+        },
+      });
+    }
+
+    // Plan order-truth-and-invoice-tz — refund_resolved (shape espejo de
+    // `RefundFlowService.resolveRefund`). Solo cuando la pasarela dejó el
+    // reembolso en estado TERMINAL (`completed`/`failed`); un `processing`
+    // (pasarela respondió `pending`) aún no está resuelto y no se registra.
+    // Carril HTTP (`PaymentsService.refundPayment` ← controller): sin
+    // `source` explícito, `record` resuelve 'http'/'system' por contexto.
+    if (
+      refund &&
+      (refund.state === refunds_state_enum.completed ||
+        refund.state === refunds_state_enum.failed)
+    ) {
+      await this.orderHistory?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: (order as any).stores?.organization_id ?? undefined,
+        type: 'refund_resolved',
+        paymentId: refund.payment_id ?? null,
+        amount: refund.amount.toString(),
+        payload: {
+          refund_id: refund.id,
+          target_state: refund.state,
+          payout_reference: refund.refund_transaction_id ?? null,
+          payout_channel: 'gateway',
+        },
+      });
+    }
+
     const totalPaid = order.payments
       .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
       .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
 
+    // `refunds` no tiene columna `status`: el estado vive en `state`
+    // (`refunds_state_enum`) y el éxito terminal es `completed`. Filtrar por
+    // `r.status === 'succeeded'` dejaba `totalRefunded` siempre en 0 y la orden
+    // nunca pasaba a `refunded` por el carril de pasarela.
     const totalRefunded = order.refunds
-      .filter((r: any) => r.status === 'succeeded')
-      .reduce((sum: number, r: any) => sum + Number(r.amount), 0);
+      .filter((r) => r.state === refunds_state_enum.completed)
+      .reduce((sum: number, r) => sum + Number(r.amount), 0);
 
     const netAmount = totalPaid - totalRefunded;
 
-    if (netAmount <= 0 && totalRefunded > 0) {
+    if (netAmount <= 0 && totalRefunded > 0 && order.state !== 'refunded') {
+      const previousState = order.state;
       await this.prisma.orders.update({
         where: { id: orderId },
         data: {
           state: 'refunded',
           updated_at: new Date(),
         },
+      });
+      // Plan order-truth-and-invoice-tz (Step 6) — mismo criterio de
+      // origen que `updateOrderStatus`: confirmación de pasarela.
+      await this.orderHistory?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: (order as any).stores?.organization_id ?? undefined,
+        type: 'state_changed',
+        fromState: previousState,
+        toState: 'refunded',
       });
     }
   }

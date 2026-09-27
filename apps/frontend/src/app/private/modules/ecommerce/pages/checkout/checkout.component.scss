@@ -582,6 +582,27 @@
     font-size: var(--fs-sm);
 }
 
+// Direccion escrita no localizable en el mapa (forward-geocode null/error):
+// aviso NO bloqueante bajo el mapa. El pin se puede mover a mano; si no, se
+// cotiza por tarifa estandar de zona (ver forwardGeocodeFromForm).
+.address-map-warning {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.5rem 0 0;
+    padding: 0.5rem 0.75rem;
+    background: var(--color-warning-light, rgba(245, 158, 11, 0.1));
+    border: 1px solid var(--color-warning, #f59e0b);
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    font-size: var(--fs-sm);
+
+    app-icon {
+        color: var(--color-warning, #f59e0b);
+        flex-shrink: 0;
+    }
+}
+
 // Sin cobertura de envio: estado vacio ACCIONABLE. Reemplaza al cartel de
 // error sin salida que dejaba al comprador con el boton deshabilitado.
 .shipping-coverage-empty {
@@ -1199,7 +1220,7 @@
 // ≤992px (una columna) conserva alto fijo.
 .delivery-address-grid {
     display: grid;
-    grid-template-columns: 5fr 6fr;
+    grid-template-columns: 6fr 5fr;
     gap: 1rem;
     align-items: start;
     margin-top: 1rem;
@@ -1273,8 +1294,14 @@
     }
 }
 
+// Formulario primero (izquierda / arriba en mobile), mapa de apoyo después.
 .delivery-address-grid .address-form {
     margin-top: 0;
+    order: 1;
+}
+
+.delivery-address-grid .map-column {
+    order: 2;
 }
 
 // C.7: tarjeta de la dirección de la tienda para "recoger".

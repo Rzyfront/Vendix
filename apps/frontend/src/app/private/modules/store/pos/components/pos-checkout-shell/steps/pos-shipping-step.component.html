@@ -173,6 +173,18 @@
               </div>
             }
 
+            @if (!isPickupMethod() && !manualCostOverride() && rateOptions().length > 1) {
+              <div class="cost-divider"></div>
+              <div class="rate-select" aria-label="Tarifas disponibles para este método">
+                <app-selector
+                  [options]="rateSelectorOptions()"
+                  [value]="shippingRateId()"
+                  (valueChange)="onRateSelected($event)"
+                  size="sm"
+                ></app-selector>
+              </div>
+            }
+
             @if (!isPickupMethod() && calculatedShippingCost() !== null) {
               <div class="cost-divider"></div>
               <div class="cost-row cost-row--toggle">

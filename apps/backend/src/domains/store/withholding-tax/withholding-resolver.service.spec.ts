@@ -251,4 +251,148 @@ describe('WithholdingResolverService.evaluate (pure core)', () => {
       expect(riva.account_role).toBe('withholding.suffered.reteiva_receivable');
     });
   });
+
+  /**
+   * Step 1 — plan `docs/plans/PLAN-pago-multimetodo-pendientes.md`.
+   *
+   * Fixtures mirroring `prisma/seeds/withholding-tax.seed.ts` (rate,
+   * min_uvt_threshold, applies_to, supplier_type_filter idénticos). UVT fijado
+   * en el valor 2025 real del seed ($49.799) — con el UVT 2026 ($52.374) los
+   * tres montos de aceptación del plan cruzan los mismos umbrales, así que la
+   * elección de año no cambia ninguna aserción.
+   */
+  describe('CASO 2 — suffered por operación (Step 1, RTE_COMPRAS/RTE_SERV_GEN/gate)', () => {
+    const UVT_2025 = 49799;
+
+    const commonTenant: TenantFiscalProfile = {
+      tax_regime: 'COMUN',
+      is_self_withholder: false,
+    };
+    const agentCustomer2: CustomerFiscalProfile = {
+      is_withholding_agent: true,
+      tax_regime: 'COMUN',
+      person_type: 'JURIDICA',
+    };
+
+    const RTE_COMPRAS: EvaluableConcept = {
+      id: 10,
+      code: 'RTE_COMPRAS',
+      rate: 0.025,
+      min_uvt_threshold: 27,
+      withholding_type: 'retefuente',
+      applies_to: 'purchase',
+      supplier_type_filter: 'any',
+      account_code: null,
+    };
+    const RTE_SERV_GEN: EvaluableConcept = {
+      id: 11,
+      code: 'RTE_SERV_GEN',
+      rate: 0.04,
+      min_uvt_threshold: 4,
+      withholding_type: 'retefuente',
+      applies_to: 'service',
+      supplier_type_filter: 'any',
+      account_code: null,
+    };
+    // `withholding_type: 'retefuente'` igual que RTE_COMPRAS — así compite en
+    // el MISMO bucket de desempate cuando ningún `appliesTo` los separa
+    // (justo lo que hacían los 4 call sites antes de este Step 1).
+    const RTE_HONOR_PN: EvaluableConcept = {
+      id: 12,
+      code: 'RTE_HONOR_PN',
+      rate: 0.1,
+      min_uvt_threshold: 0,
+      withholding_type: 'retefuente',
+      applies_to: 'fees',
+      supplier_type_filter: 'persona_natural',
+      account_code: null,
+    };
+
+    it('bien 1.500.000 (appliesTo=purchase) ⇒ RTE_COMPRAS 37.500', () => {
+      const lines = resolver.evaluate({
+        role: 'suffered',
+        base: 1_500_000,
+        uvtValue: UVT_2025,
+        concepts: [RTE_COMPRAS, RTE_HONOR_PN],
+        appliesTo: 'purchase',
+        tenant: commonTenant,
+        customer: agentCustomer2,
+      });
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({
+        concept_code: 'RTE_COMPRAS',
+        amount: 37_500,
+      });
+    });
+
+    it('bien 1.000.000, bajo el umbral 27 UVT (≈1.344.573) ⇒ sin retefuente', () => {
+      const lines = resolver.evaluate({
+        role: 'suffered',
+        base: 1_000_000,
+        uvtValue: UVT_2025,
+        concepts: [RTE_COMPRAS],
+        appliesTo: 'purchase',
+        tenant: commonTenant,
+        customer: agentCustomer2,
+      });
+      expect(lines).toHaveLength(0);
+    });
+
+    it('servicio 300.000 (appliesTo=service) ⇒ RTE_SERV_GEN 12.000', () => {
+      // RTE_SERV_DEC queda fuera de este fixture a propósito: el seed real lo
+      // define con los MISMOS criterios de match que RTE_SERV_GEN (rate,
+      // threshold, applies_to y supplier_type_filter idénticos), así que el
+      // desempate por código ('RTE_SERV_DEC' < 'RTE_SERV_GEN') elegiría
+      // SIEMPRE RTE_SERV_DEC — un problema de datos del seed preexistente y
+      // ajeno a este Step 1 (documentado en el informe final).
+      const lines = resolver.evaluate({
+        role: 'suffered',
+        base: 300_000,
+        uvtValue: UVT_2025,
+        concepts: [RTE_SERV_GEN],
+        appliesTo: 'service',
+        tenant: commonTenant,
+        customer: agentCustomer2,
+      });
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({
+        concept_code: 'RTE_SERV_GEN',
+        amount: 12_000,
+      });
+    });
+
+    it('RTE_HONOR_PN nunca gana en suffered, ni sin appliesTo (regresión de la causa raíz)', () => {
+      // Antes del gate (c): `specificity: supplier_type_filter !== 'any' ? 1 : 0`
+      // premiaba a RTE_HONOR_PN sobre RTE_COMPRAS en el desempate por
+      // `withholding_type` ('retefuente' en ambos) cuando el caller no pasaba
+      // `appliesTo` — exactamente los 4 call sites antes de este Step 1.
+      const lines = resolver.evaluate({
+        role: 'suffered',
+        base: 1_500_000,
+        uvtValue: UVT_2025,
+        concepts: [RTE_COMPRAS, RTE_HONOR_PN],
+        // appliesTo omitido a propósito: reproduce el bug de los call sites.
+        tenant: commonTenant,
+        customer: agentCustomer2,
+      });
+      expect(lines).toHaveLength(1);
+      expect(lines[0].concept_code).toBe('RTE_COMPRAS');
+      expect(lines.some((l) => l.concept_code === 'RTE_HONOR_PN')).toBe(
+        false,
+      );
+    });
+
+    it('practiced NO cambia: supplier_type_filter sigue filtrando por el proveedor (decisión #3)', () => {
+      const lines = resolver.evaluate({
+        role: 'practiced',
+        base: 1_500_000,
+        uvtValue: UVT_2025,
+        concepts: [RTE_HONOR_PN],
+        tenant: agentTenant,
+        supplier: { tax_regime: 'COMUN', person_type: 'NATURAL' },
+      });
+      expect(lines).toHaveLength(1);
+      expect(lines[0].concept_code).toBe('RTE_HONOR_PN');
+    });
+  });
 });

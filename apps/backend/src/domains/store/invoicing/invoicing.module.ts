@@ -40,12 +40,14 @@ import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
 import { ProfilesController } from './profiles/profiles.controller';
 import { ProfilesModule } from './profiles/profiles.module';
 import { InvoiceDeliveryModule } from './delivery/invoice-delivery.module';
+import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 
 @Module({
   imports: [
     ResponseModule,
     PrismaModule,
     S3Module,
+    OrderHistoryModule,
     InvoiceProviderModule,
     DianDirectModule,
     WithholdingTaxModule,

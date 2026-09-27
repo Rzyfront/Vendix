@@ -7,9 +7,14 @@ import {
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { Prisma, payment_processing_mode_enum, table_status_enum } from '@prisma/client';
+import { Prisma, payment_processing_mode_enum, table_status_enum, order_state_enum } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import {
+  StockValidatorService,
+  StockDemandLine,
+  type InsufficientStockItem,
+} from '../inventory/shared/services/stock-validator.service';
 import {
   OrderStockCommitService,
   CommitResult,
@@ -22,7 +27,6 @@ import { TaxFiscalType } from '../taxes/dto';
 import { truncMoney } from '../taxes/utils/tax-inclusive-math.util';
 import { LocationsService } from '../inventory/locations/locations.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
-import { sellableStockLevelsWhere } from '../inventory/shared/helpers/pos-stock-scope.helper';
 import {
   CreatePaymentDto,
   CreateOrderPaymentDto,
@@ -98,12 +102,16 @@ import {
   type ShippingTaxSnapshot,
 } from '../shipping/utils/shipping-tax.util';
 import { buildOrderSaleTaxPayload } from './utils/order-sale-tax-payload.util';
-import { resolvePaymentReceivedSaleFields } from './utils/payment-sale-share.util';
+import {
+  resolvePaymentReceivedSaleFields,
+  splitWithholdingLines,
+} from './utils/payment-sale-share.util';
 import type { PaymentReceivedSaleFields } from './utils/payment-sale-share.util';
 import {
   normalizePaymentLegs,
   type PaymentLegMethodInfo,
 } from './utils/payment-legs.util';
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -145,6 +153,9 @@ export class PaymentsService {
     private prisma: StorePrismaService,
     private paymentGateway: PaymentGatewayService,
     private readonly stockLevelManager: StockLevelManager,
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+    // step 4) — sums per-product demand (not per-line) before reserving.
+    private readonly stockValidatorService: StockValidatorService,
     // Canonical, uniform delivery-commit (skips + reservation consume +
     // availability BLOCK + serial consume + updateStock + inventory_committed).
     private readonly orderStockCommit: OrderStockCommitService,
@@ -191,6 +202,8 @@ export class PaymentsService {
     // `@Optional()` por la misma razón; sin él una tarifa calculada sale sin
     // impuesto (fallo seguro: nunca se inventa un impuesto).
     @Optional() private readonly shippingCalculatorService?: ShippingCalculatorService,
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    @Optional() private readonly orderHistory?: OrderHistoryService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -1053,18 +1066,38 @@ export class PaymentsService {
           discount_amount: 0,
         };
 
-        // CP-POS-SVC-PERF-001 / A.4 — pure drafts (Guardar borrador) must NOT
-        // touch stock_levels or stock_reservations. The cashier reserves at
-        // flow/pay when actually charging. Forcing drafts through the
-        // reservation path was the dominant cost of the slow-Guardar bug.
-        if (createPosPaymentDto.is_draft) {
-          // §1.5 + §1.6 of stock validation/reservation are skipped entirely.
-        } else {
+        // A saved draft promises stock just like an open table. Reserve on
+        // entry so a second cashier cannot sell the same units before this
+        // draft reaches flow/pay. Payment will only top up a missing delta.
 
         // 1.5. BLOCKING stock validation using stock_levels (source of truth)
-        // Validate ALL items before any reservation occurs
-        // Oversell is intentionally not controlled by the public POS payload.
-        const allowOversell = false;
+        // Validate ALL items before any reservation occurs.
+        // docs/plans/no-overselling-stock-guard-plan.md step 9: oversell is
+        // NOT controlled by the public POS payload (still true) — it is the
+        // per-store "Permitir sobreventa" switch, resolved server-side from
+        // `store_settings.inventory.allow_negative_stock` for THIS order's
+        // store, inside the same tx that reserves/commits stock.
+        const inventoryPolicy = await this.stockValidatorService.resolveInventoryPolicy(
+          order.store_id,
+          tx,
+        );
+        const allowOversell = inventoryPolicy.allowOversell === true;
+        // Additive to the response (2030+): only present when a shortfall was
+        // accepted under the oversell switch, never as an empty array.
+        const stockWarnings: InsufficientStockItem[] = [];
+
+        // no-overselling-stock-guard plan, Step 4 (POS): a prepared dish
+        // that is about to be fired to the kitchen (skip_kds=false, restaurant
+        // store) is NOT validated against its OWN stock row here — the thing
+        // that can run out is its ingredients, and those are validated at
+        // fire time (`KitchenFireService.fireOrderItemsInTx`, invoked further
+        // below in this SAME transaction, still before any payment row is
+        // created). Only skip_kds=true lines (and non-restaurant /
+        // non-prepared products) consume their own stock, so only those are
+        // checked here. `order.stores` is a full include (see
+        // `createOrUpdateOrderFromPos`), so `industries` is already loaded —
+        // no extra query needed inside this transactional window.
+        const restaurantMode = storeIsRestaurant(order.stores?.industries);
 
         // `track_inventory` es el mismo valor para los dos bucles de stock y
         // para toda la transacción, así que consultarlo por ítem —dos veces por
@@ -1077,6 +1110,7 @@ export class PaymentsService {
           id: number;
           track_inventory: boolean;
           name: string;
+          product_type: string | null;
         };
         const stockProductIds = Array.from(
           new Set(
@@ -1089,7 +1123,12 @@ export class PaymentsService {
           (stockProductIds.length
             ? await tx.products.findMany({
                 where: { id: { in: stockProductIds } },
-                select: { id: true, track_inventory: true, name: true },
+                select: {
+                  id: true,
+                  track_inventory: true,
+                  name: true,
+                  product_type: true,
+                },
               })
             : []
           ).map((row: StockProductRow): [number, StockProductRow] => [
@@ -1097,35 +1136,50 @@ export class PaymentsService {
             row,
           ]),
         );
+        const stockVariantIds = Array.from(new Set(order.order_items
+          .map((item) => item.product_variant_id)
+          .filter((id): id is number => id != null)));
+        const stockVariantById = new Map(
+          (stockVariantIds.length > 0
+            ? await tx.product_variants.findMany({
+                where: { id: { in: stockVariantIds } },
+                select: { id: true, track_inventory_override: true },
+              })
+            : []).map((row) => [row.id, row.track_inventory_override]),
+        );
 
-        for (const item of order.order_items) {
+        // A line is exempt from ITS OWN stock check when it is a prepared
+        // dish headed to the kitchen — see comment above `restaurantMode`.
+        const isFiredToKitchenLine = (item: {
+          product_id?: number | null;
+          skip_kds?: boolean | null;
+        }): boolean => {
+          if (!item.product_id) return false;
+          const product = stockProductById.get(item.product_id);
+          return (
+            restaurantMode &&
+            product?.product_type === 'prepared' &&
+            item.skip_kds !== true
+          );
+        };
+
+        // no-overselling-stock-guard plan, Step 4: lines of the SAME
+        // product+variant are summed before comparing against available
+        // stock (`StockValidatorService.assertLinesAvailable`) — two lines
+        // of 6 units each against a stock of 10 now block (12 > 10) instead
+        // of each passing individually against the same 10.
+        const stockDemandLines: StockDemandLine[] = [];
+        for (const item of order.order_items as Array<{
+          product_id?: number | null;
+          product_variant_id?: number | null;
+          quantity: number;
+          stock_units_consumed?: number | null;
+          skip_kds?: boolean | null;
+        }>) {
           if (!item.product_id) continue;
+          if (isFiredToKitchenLine(item)) continue;
 
           const product = stockProductById.get(item.product_id);
-
-          if (!product?.track_inventory) continue;
-
-          // Get actual available stock from stock_levels table (source of truth)
-          // Aggregate across store-local, sellable locations only.
-          // POS canal MUST exclude central warehouse and non-sellable types
-          // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
-          //
-          // QUI-559: the predicate is no longer written inline here — it comes
-          // from `sellableStockLevelsWhere`, the same helper that drives what
-          // the POS grid displays and what the delivery commit may deduct.
-          // Three copies of this filter is how they drifted apart.
-          const stockAggregate = await tx.stock_levels.aggregate({
-            where: {
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id ?? null,
-              ...sellableStockLevelsWhere(order.store_id),
-            },
-            _sum: {
-              quantity_available: true,
-            },
-          });
-
-          const available = stockAggregate._sum.quantity_available ?? 0;
 
           const requiredStock =
             typeof item.stock_units_consumed === 'number' &&
@@ -1133,20 +1187,25 @@ export class PaymentsService {
               ? item.stock_units_consumed
               : item.quantity;
 
-          // BLOCK: If not allowing oversell and required units exceed available, throw immediately.
-          if (!allowOversell && requiredStock > available) {
-            const variantInfo = item.product_variant_id
-              ? ` (variant ${item.product_variant_id})`
-              : '';
-            const packageHint =
-              requiredStock !== item.quantity
-                ? ` (${item.quantity} x ${requiredStock / Math.max(item.quantity, 1)} unid/empaque)`
-                : '';
-            throw new VendixHttpException(
-              ErrorCodes.POS_STOCK_INSUFFICIENT_001,
-              `Stock insuficiente para ${product.name}${variantInfo}: requiere ${requiredStock} unidades${packageHint}, disponible ${available}.`,
-            );
-          }
+          stockDemandLines.push({
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? undefined,
+            quantity: requiredStock,
+            product_name: product?.name,
+          });
+        }
+
+        // BLOCK (default, allowOversell=false): throw before any
+        // payment/reservation happens, naming every product that cannot
+        // cover the summed demand. WARN (allowOversell=true): the validator
+        // logs and returns the shortfall instead of throwing — collected
+        // below as `stock_warnings`, additive to the response.
+        if (stockDemandLines.length > 0) {
+          const shortages = await this.stockValidatorService.assertLinesAvailable(
+            stockDemandLines,
+            { orderId: order.id, tx, allowOversell },
+          );
+          if (shortages.length > 0) stockWarnings.push(...shortages);
         }
 
         // QUI-559: no "default location" fallback here any more. Picking an
@@ -1154,11 +1213,44 @@ export class PaymentsService {
         // reservation land somewhere the commit would not draw from. The
         // allocator resolves the real sellable locations; if none covers the
         // line, that is a stock error, not a location-resolution problem.
+        const demandByIdentity = new Map<string, number>();
+        for (const line of stockDemandLines) {
+          const key = `${line.product_id}:${line.product_variant_id ?? 'base'}`;
+          demandByIdentity.set(key, (demandByIdentity.get(key) ?? 0) + line.quantity);
+        }
+        const processedIdentities = new Set<string>();
         for (const item of order.order_items) {
           if (!item.product_id) continue;
 
           const product = stockProductById.get(item.product_id);
-          if (!product?.track_inventory) continue;
+          if (!product || product.product_type === 'service') continue;
+          const effectiveTracking = item.product_variant_id != null
+            ? (stockVariantById.get(item.product_variant_id) ?? product.track_inventory)
+            : product.track_inventory;
+          if (!effectiveTracking) continue;
+          // Same exemption as §1.5 above: a prepared dish fired to the
+          // kitchen reserves nothing against its OWN stock row — only its
+          // ingredients move, at fire time.
+          if (isFiredToKitchenLine(item)) continue;
+          const identity = `${item.product_id}:${item.product_variant_id ?? 'base'}`;
+          if (processedIdentities.has(identity)) continue;
+          processedIdentities.add(identity);
+
+          const reserved = await tx.stock_reservations.aggregate({
+            where: {
+              reserved_for_type: 'order',
+              reserved_for_id: order.id,
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id ?? null,
+              status: 'active',
+            },
+            _sum: { quantity: true },
+          });
+          const unitsToReserve = Math.max(
+            0,
+            (demandByIdentity.get(identity) ?? 0) - Number(reserved._sum.quantity ?? 0),
+          );
+          if (unitsToReserve === 0) continue;
           try {
             // Use savepoint to isolate stock reservation errors from the main transaction.
             // PostgreSQL aborts the entire transaction on any error; a savepoint lets us
@@ -1169,13 +1261,6 @@ export class PaymentsService {
             // (>0), pasarlo como override al reservador para descontar la
             // cantidad real de unidades de stock (empaque por tarifa, cuando el
             // packSize resuelto de la tarifa/override es > 1).
-            const stockUnitsConsumed =
-              typeof item.stock_units_consumed === 'number' &&
-              item.stock_units_consumed > 0
-                ? item.stock_units_consumed
-                : undefined;
-            const unitsToReserve = stockUnitsConsumed ?? item.quantity;
-
             // QUI-559: reserve ACROSS the store's sellable locations instead of
             // picking the single one with the highest availability. The
             // validation above approved an aggregate total; reserving from one
@@ -1193,26 +1278,64 @@ export class PaymentsService {
                 tx,
               );
 
+            let reserveSlices = allocation.slices;
             if (allocation.shortfall > 0) {
-              // §1.5 already proved the sellable set covers this line, so a gap
-              // here means another sale took the units in between. That is a
-              // real, user-facing condition — not an infrastructure hiccup — so
-              // it aborts the payment instead of leaving the order partially
-              // reserved and failing later at the delivery commit.
-              throw new VendixHttpException(
-                ErrorCodes.POS_STOCK_INSUFFICIENT_001,
-                `Stock insuficiente al reservar el producto ${item.product_id}: requiere ${unitsToReserve} unidades, disponible ${allocation.available}.`,
+              if (!allowOversell) {
+                // §1.5 already proved the sellable set covers this line, so a gap
+                // here means another sale took the units in between. That is a
+                // real, user-facing condition — not an infrastructure hiccup — so
+                // it aborts the payment instead of leaving the order partially
+                // reserved and failing later at the delivery commit.
+                throw new VendixHttpException(
+                  ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+                  `Stock insuficiente para ${product.name}: requiere ${unitsToReserve} unidades, disponible ${allocation.available}.`,
+                  { items: [{
+                    product_id: item.product_id,
+                    product_variant_id: item.product_variant_id ?? null,
+                    product_name: product.name,
+                    kind: 'product',
+                    requested: unitsToReserve,
+                    available: allocation.available,
+                  }] },
+                );
+              }
+              // "Permitir sobreventa" ON (step 9): reserve the FULL
+              // `unitsToReserve` anyway — the uncovered remainder lands on
+              // the largest sellable location (or the store's default one)
+              // via `allow_negative_available`, letting `quantity_available`
+              // go negative instead of blocking the sale.
+              this.logger.warn(
+                `Sobreventa permitida en POS — ${product.name}: requiere ${unitsToReserve}, disponible ${allocation.available}.`,
+              );
+              stockWarnings.push({
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id ?? null,
+                product_name: product.name,
+                kind: 'product',
+                requested: unitsToReserve,
+                available: allocation.available,
+              });
+              const fallbackLocationId =
+                allocation.slices[0]?.location_id ??
+                (await this.stockLevelManager.getDefaultLocationForProduct(
+                  item.product_id,
+                  item.product_variant_id ?? undefined,
+                  tx,
+                ));
+              reserveSlices = this.sellableStockAllocator.absorbShortfall(
+                allocation,
+                fallbackLocationId,
               );
             }
 
-            if (!allocation.slices.length) {
+            if (!reserveSlices.length) {
               // Nothing to reserve (a zero-unit line). Nothing to roll back
               // either — release the savepoint and move on.
               await tx.$executeRawUnsafe('RELEASE SAVEPOINT stock_reserve_sp');
               continue;
             }
 
-            for (const slice of allocation.slices) {
+            for (const slice of reserveSlices) {
               await this.stockLevelManager.reserveStock(
                 item.product_id,
                 item.product_variant_id || undefined,
@@ -1221,13 +1344,14 @@ export class PaymentsService {
                 'order',
                 order.id,
                 user?.id,
-                false, // Already validated above against stock_levels source of truth.
+                !allowOversell, // Strict floor also protects races after the aggregate check.
                 tx,
                 undefined, // expires_at
                 false, // skip_reservation
                 // The slice quantity IS the real stock-unit count: the pack
                 // multiplier was already applied when computing unitsToReserve.
                 slice.quantity,
+                allowOversell, // allow_negative_available (step 9)
               );
             }
 
@@ -1240,23 +1364,11 @@ export class PaymentsService {
               );
             } catch {}
 
-            // QUI-559: a stock error is a business answer, not an incident.
-            // Swallowing it here let the payment succeed with the line
-            // unreserved, and the delivery commit then rejected the whole sale
-            // with an opaque INV_STOCK_002. Re-throw so the cashier gets the
-            // real reason and the transaction rolls back cleanly; genuine
-            // infrastructure hiccups keep the previous tolerant behaviour.
-            if (error instanceof VendixHttpException) {
-              throw error;
-            }
-
-            this.logger.warn(
-              `Stock reservation failed for product ${item.product_id} in order #${order.id}: ${error.message}`,
-            );
+            // A failed reservation is never optional: otherwise the draft or
+            // payment survives without the stock it promised.
+            throw error;
           }
         }
-
-        } // end A.4 is_draft skip
 
         // 1.6. Persist promotions from the server-recalculated snapshot.
         // Backend already validated each promotion via `quoteDiscounts` and
@@ -1441,6 +1553,11 @@ export class PaymentsService {
             order.delivery_type === 'home_delivery' ||
               (hasSerialized && !isImmediateHandover),
             hasKitchenItems,
+            {
+              fromState: order.state,
+              storeId: order.store_id,
+              organizationId: order.stores?.organization_id,
+            },
           );
         } else if (isDigitalPayment) {
           // Digital methods (Wompi, wallet) — mark as pending, process AFTER commit
@@ -1452,6 +1569,11 @@ export class PaymentsService {
             order.delivery_type === 'home_delivery' ||
               (hasSerialized && !isImmediateHandover),
             hasKitchenItems,
+            {
+              fromState: order.state,
+              storeId: order.store_id,
+              organizationId: order.stores?.organization_id,
+            },
           );
         } else if (!createPosPaymentDto.is_draft) {
           // Credit sale - update order status
@@ -1464,6 +1586,11 @@ export class PaymentsService {
             order.delivery_type === 'home_delivery' ||
               (hasSerialized && !isImmediateHandover),
             hasKitchenItems,
+            {
+              fromState: order.state,
+              storeId: order.store_id,
+              organizationId: order.stores?.organization_id,
+            },
           );
         }
 
@@ -1578,6 +1705,13 @@ export class PaymentsService {
               tax_amount_item: true,
               weight: true,
               price_unit_quantity: true,
+              // Retención sufrida POR TIPO DE OPERACIÓN (bienes vs
+              // servicios, decisión del dueño 2026-09-26): el catálogo, no
+              // un valor por defecto, ya decidió esto al crear la orden
+              // (`orders.service.ts`: `item.product_id ? product.product_type
+              // : item.item_type || 'custom'`). `prepared`/`custom`/null
+              // cuentan como bienes en `resolveSufferedByOperation`.
+              item_type: true,
               // `is_inclusive` NO se lee acá, a propósito: `total_price` sale
               // de `unitBasePrice`, que es el NETO en las dos ramas
               // (`finalUnitPrice / (1 + total_rate)` en la rama custom,
@@ -1620,6 +1754,12 @@ export class PaymentsService {
           // tenant.is_withholding_agent=false or no customer_id → lines:[]; we
           // degrade to an empty resolution on any failure so the sale never
           // breaks because of withholding.
+          //
+          // Retención POR TIPO DE OPERACIÓN (decisión del dueño 2026-09-26):
+          // bienes y servicios se agrupan aparte, cada uno con su propia base
+          // e IVA, en vez de resolver una única tarifa para toda la orden
+          // (que antes siempre premiaba `RTE_HONOR_PN` — ver
+          // `WithholdingResolverService.evaluate` gate `suffered` (c)).
           let wh: WithholdingResolution = {
             lines: [],
             uvt_value_used: 0,
@@ -1629,19 +1769,30 @@ export class PaymentsService {
             const customer_id = order.customer_id
               ? Number(order.customer_id)
               : null;
-            wh = await this.withholdingFlow.resolveSuffered({
+            const withholdingItems = orderItemsWithTaxes.map((item) => ({
+              product_type: item.item_type,
+              base: Number(item.total_price || 0),
+              // Mismo agregado que antes viajaba como `order.tax_amount`
+              // (todos los tipos de la línea, no sólo IVA), ahora repartido
+              // por línea para que cada grupo aporte SU parte al `ivaAmount`
+              // que usa reteIVA.
+              ivaAmount: (item.order_item_taxes || []).reduce(
+                (sum, tax) => sum + Number(tax.tax_amount || 0),
+                0,
+              ),
+            }));
+            wh = await this.withholdingFlow.resolveSufferedByOperation({
               organization_id: order.stores?.organization_id,
               store_id: createPosPaymentDto.store_id,
               customer_id,
-              base: Number(order.subtotal_amount || 0),
-              ivaAmount: Number(order.tax_amount || 0),
+              items: withholdingItems,
               // Sin `client` las 6 lecturas de la cadena salen por una segunda
               // conexión del pool mientras esta transacción sostiene locks.
               client: tx,
             });
           } catch (error) {
             this.logger.warn(
-              `resolveSuffered failed for order ${order.id}; degrading to no withholding: ${
+              `resolveSufferedByOperation failed for order ${order.id}; degrading to no withholding: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             );
@@ -1681,7 +1832,15 @@ export class PaymentsService {
                 payment.leg_payments.length > 0
                   ? payment.leg_payments
                   : [payment];
-              for (const legPayment of emittedPayments) {
+              // La retención se reconoce UNA vez por orden: se prorratea
+              // entre los tramos en proporción a su monto (residuo en el
+              // último), igual que `sale_share`. Con un solo tramo (escalar
+              // o multimétodo de un solo pago) devuelve `wh.lines` intacto.
+              const withholdingByLeg = splitWithholdingLines(
+                wh.lines,
+                emittedPayments.map((legPayment) => Number(legPayment.amount)),
+              );
+              for (const [legIndex, legPayment] of emittedPayments.entries()) {
                 const share = legPayment.sale_share as
                   | PaymentReceivedSaleFields
                   | undefined;
@@ -1705,7 +1864,7 @@ export class PaymentsService {
                   tax_breakdown: share
                     ? (share.tax_breakdown ?? [])
                     : tax_breakdown,
-                  withholding_breakdown: wh.lines,
+                  withholding_breakdown: withholdingByLeg[legIndex] ?? [],
                   // Con descuento de orden: sólo su parte de BASE (4175); el
                   // impuesto ya viene neto del descuento (misma proyección que
                   // la factura). Sin descuento = `orders.discount_amount`.
@@ -1740,6 +1899,9 @@ export class PaymentsService {
               organization_id: order.stores?.organization_id,
               store_id: createPosPaymentDto.store_id,
               invoice_id: null,
+              // PR #858 hallazgo 2 — la factura de esta orden enlaza estas
+              // filas (les pone `invoice_id`) en vez de duplicar la sufrida.
+              order_id: order.id,
               customer_id: order.customer_id
                 ? Number(order.customer_id)
                 : null,
@@ -1805,6 +1967,9 @@ export class PaymentsService {
               organization_id: order.stores?.organization_id,
               store_id: createPosPaymentDto.store_id,
               invoice_id: null,
+              // PR #858 hallazgo 2 — la factura de esta orden enlaza estas
+              // filas (les pone `invoice_id`) en vez de duplicar la sufrida.
+              order_id: order.id,
               customer_id: order.customer_id
                 ? Number(order.customer_id)
                 : null,
@@ -2035,6 +2200,15 @@ export class PaymentsService {
             : undefined,
           nextAction: payment?.nextAction,
           _digitalPaymentPending: isDigitalPayment || false,
+          // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive,
+          // ONLY present when the "Permitir sobreventa" switch accepted a
+          // real product-line shortfall. Never an empty array on the strict
+          // (default) path. Ingredient-overuse warnings from a kitchen fire
+          // are surfaced by `kitchen_fire` itself (kitchen-fire.service.ts),
+          // not duplicated here.
+          ...(stockWarnings.length > 0
+            ? { stock_warnings: stockWarnings }
+            : {}),
         };
         // Red de seguridad para la contención real de varias cajas cobrando a
         // la vez, NO el arreglo del P2028: ese vino de quitar las lecturas
@@ -2195,9 +2369,18 @@ export class PaymentsService {
               'cancelled',
             );
             // Then revert order state
+            const revertFromState = result.order.state;
             await this.prisma.orders.update({
               where: { id: result.order.id },
               data: { state: 'created', updated_at: new Date() },
+            });
+            await this.orderHistory?.record(this.prisma, {
+              orderId: result.order.id,
+              storeId: createPosPaymentDto.store_id,
+              organizationId: result.order.stores?.organization_id ?? undefined,
+              type: 'state_changed',
+              fromState: revertFromState,
+              toState: 'created' as order_state_enum,
             });
           } catch (revertErr) {
             this.logger.error(
@@ -3861,7 +4044,11 @@ export class PaymentsService {
 
     const session = await tx.table_sessions.findUnique({
       where: { id: tableSessionId },
-      include: { order: true },
+      include: {
+        order: {
+          include: { stores: { select: { organization_id: true } } },
+        },
+      },
     });
     if (!session) {
       throw new VendixHttpException(
@@ -4063,6 +4250,25 @@ export class PaymentsService {
       },
       include: { order_items: true, stores: true },
     });
+
+    // Plan order-truth-and-invoice-tz (Step 6) — sólo se registra si el
+    // cierre realmente trajo un customer_id nuevo y distinto del que ya
+    // tenía la orden de la mesa (una venta anónima repetida no es un cambio).
+    if (
+      dto.customer_id != null &&
+      dto.customer_id !== session.order?.customer_id
+    ) {
+      await this.orderHistory?.record(tx, {
+        orderId: session.order_id,
+        storeId: dtoStoreId,
+        organizationId: session.order?.stores?.organization_id ?? undefined,
+        type: 'customer_changed',
+        payload: {
+          from_customer_id: session.order?.customer_id ?? null,
+          to_customer_id: dto.customer_id,
+        },
+      });
+    }
 
     // ----------------------------------------------------------------
     // Plan KDS fire-flows (B6): auto-fire the pending `prepared` items
@@ -4342,20 +4548,30 @@ export class PaymentsService {
     // Costo manual: si el costo cobrado no es el de la tarifa, el envío NO
     // sale de ella ⇒ copia vacía (contrato: un costo manual no lleva
     // impuesto). Misma regla que `costComesFromRate` de
-    // `OrdersService.assignShipping`:
-    //  - `flat`: el costo esperado es el BRUTO del cálculo único (paso 14;
-    //    agregado ⇒ base + impuesto, igual que el cotizador).
-    //  - calculadas (`weight_based`, `price_based`, `free`): se RECALCULA en
-    //    el servidor con `ShippingCalculatorService.calculateRates` (la misma
-    //    lógica del checkout y de `assignShipping`) sobre la dirección y las
-    //    líneas de esta venta; se toma la opción de ESTA tarifa.
-    //  - `carrier_calculated`: el calculador no la soporta (no hay cotización
-    //    determinista), así que nunca aparece entre las opciones ⇒ copia
-    //    vacía. Igual para cualquier tarifa sin dirección resoluble o que el
-    //    calculador no devuelva.
-    // Sin `chargeForRate` (dobles viejos de specs) ⇒ `base_cost`, el
-    // comportamiento previo al paso.
+    // `OrdersService.assignShipping`. Unificado (ver
+    // `vendix-shipping-distance-pricing`): TODOS los tipos (`flat`,
+    // `weight_based`, `price_based`, `free`) intentan primero el mismo
+    // cálculo único —`ShippingCalculatorService.quoteRateGross()` vía
+    // `recalculatePosRateCost` (umbral de envío gratis, costo por
+    // unidad/peso y precio por distancia)— sobre la dirección y las líneas
+    // de esta venta. Ya no hay atajo `flat = base_cost` que ignorara todo
+    // eso.
+    //  - Sin calculador, sin dirección resoluble, o la tarifa fuera de las
+    //    opciones (incluye `carrier_calculated`, que el calculador no
+    //    cotiza) ⇒ `quoteRateGross` devuelve `null`.
+    //  - Solo entonces `flat` cae al viejo atajo (paso 14 histórico):
+    //    `chargeForRate(base_cost).gross`, o `base_cost` sin
+    //    `chargeForRate` (dobles viejos de specs). Las calculadas quedan
+    //    sin costo esperado (`null` ⇒ manual), igual que antes del paso.
+    const quoted = await this.recalculatePosRateCost(
+      tx,
+      dto,
+      store_id,
+      rate.id,
+      order_items,
+    );
     const flat_charge =
+      quoted == null &&
       rate.type === 'flat' &&
       this.shippingTaxService &&
       typeof this.shippingTaxService.chargeForRate === 'function'
@@ -4367,11 +4583,13 @@ export class PaymentsService {
           )
         : null;
     const expected_cost =
-      rate.type === 'flat'
-        ? flat_charge
-          ? flat_charge.gross
-          : Number(rate.base_cost ?? 0)
-        : await this.recalculatePosRateCost(tx, dto, store_id, rate.id, order_items);
+      quoted != null
+        ? quoted
+        : rate.type === 'flat'
+          ? flat_charge
+            ? flat_charge.gross
+            : Number(rate.base_cost ?? 0)
+          : null;
     const isManualCost =
       expected_cost == null ||
       differsByAtLeastCents(shipping_cost, expected_cost, 1);
@@ -4383,9 +4601,10 @@ export class PaymentsService {
           })
         : { ...EMPTY_SHIPPING_TAX };
     // Paso 14 — el modo viaja con la copia (modo de la tarifa cuando hay
-    // impuesto, null si no). `flat` reutiliza el cobro de arriba; las
-    // calculadas lo evalúan sobre el costo cobrado (el modo vive en la
-    // fila de la tarifa, así que el precio de entrada no lo mueve).
+    // impuesto, null si no). `flat` sin `quoteRateGross` reutiliza el cobro
+    // del atajo; el resto (incluida una `flat` resuelta por
+    // `quoteRateGross`) lo evalúa sobre el costo cobrado (el modo vive en
+    // la fila de la tarifa, así que el precio de entrada no lo mueve).
     let is_inclusive: boolean | null = null;
     if (snapshot.shipping_tax_amount > 0) {
       const mode_charge =
@@ -4406,9 +4625,12 @@ export class PaymentsService {
 
   /**
    * Costo de la tarifa `rate_id` recalculado en el servidor para esta venta
-   * POS (dirección + líneas). `null` si no hay dirección resoluble, no hay
-   * calculador o la tarifa no es una opción aplicable (incluye
-   * `carrier_calculated`, que el calculador no cotiza).
+   * POS (dirección + líneas), vía el mismo cálculo único que orders/checkout
+   * (`ShippingCalculatorService.quoteRateGross`). `null` si no hay dirección
+   * resoluble, no hay calculador o la tarifa no es una opción aplicable
+   * (incluye `carrier_calculated`, que el calculador no cotiza). Aplica a
+   * CUALQUIER tipo de tarifa, incluida `flat` (el llamador cae al atajo
+   * histórico solo si esto devuelve `null`).
    */
   private async recalculatePosRateCost(
     tx: any,
@@ -4424,11 +4646,20 @@ export class PaymentsService {
       state_province?: string | null;
       city?: string | null;
       postal_code?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
     } | null = null;
     if (dto.shipping_address_id) {
       address = await tx.addresses.findFirst({
         where: { id: dto.shipping_address_id },
-        select: { country_code: true, state_province: true, city: true, postal_code: true },
+        select: {
+          country_code: true,
+          state_province: true,
+          city: true,
+          postal_code: true,
+          latitude: true,
+          longitude: true,
+        },
       });
     } else if (dto.shipping_address_snapshot) {
       address = dto.shipping_address_snapshot as any;
@@ -4474,18 +4705,21 @@ export class PaymentsService {
       });
 
     try {
-      const options = await this.shippingCalculatorService.calculateRates(
+      return await this.shippingCalculatorService.quoteRateGross(
         store_id,
+        rate_id,
         items,
         {
           country_code: address.country_code,
           state_province: address.state_province || undefined,
           city: address.city || undefined,
           postal_code: address.postal_code || undefined,
+          latitude:
+            address.latitude != null ? Number(address.latitude) : undefined,
+          longitude:
+            address.longitude != null ? Number(address.longitude) : undefined,
         },
       );
-      const match = options.find((o) => o.rate_id === rate_id);
-      return match ? Number(match.cost) : null;
     } catch (error) {
       this.logger.warn(
         `POS: no se pudo recalcular la tarifa de envío #${rate_id}: ${(error as Error)?.message}`,
@@ -4642,6 +4876,7 @@ export class PaymentsService {
             id: true, order_number: true, state: true,
             subtotal_amount: true, tax_amount: true,
             shipping_address_id: true,
+            stores: { select: { organization_id: true } },
           },
         })
       : null;
@@ -4671,6 +4906,14 @@ export class PaymentsService {
           `La orden ${orderLabel} cambió mientras se cobraba. Actualiza la lista de órdenes antes de intentarlo de nuevo.`,
         );
       }
+      await this.orderHistory?.record(tx, {
+        orderId: existingOrder.id,
+        storeId: dtoStoreId,
+        organizationId: existingOrder.stores?.organization_id ?? undefined,
+        type: 'state_changed',
+        fromState: existingOrder.state as order_state_enum,
+        toState: 'created' as order_state_enum,
+      });
       const paid = await tx.payments.findFirst({
         where: {
           order_id: existingOrder.id,
@@ -5198,6 +5441,15 @@ export class PaymentsService {
       // Aditivo y seguro para N llamadas: re-lee el total fresco en `tx`.
       await this.applyOrderBalanceOnPayment(tx, order.id, leg.amount);
 
+      await this.orderHistory?.record(tx, {
+        orderId: order.id,
+        storeId: dtoStoreId,
+        organizationId: order.stores?.organization_id ?? undefined,
+        type: 'payment_registered',
+        paymentId: payment.id,
+        amount: leg.amount,
+      });
+
       // Secuencial por construcción: en este punto sólo existen en `tx` los
       // tramos anteriores, así que son los únicos `prior_amounts` y el último
       // tramo toma el remanente exacto.
@@ -5462,6 +5714,15 @@ export class PaymentsService {
     // punto). El helper re-lee grand_total fresco dentro del `tx`.
     await this.applyOrderBalanceOnPayment(tx, order.id, payableAmount);
 
+    await this.orderHistory?.record(tx, {
+      orderId: order.id,
+      storeId: dtoStoreId,
+      organizationId: order.stores?.organization_id ?? undefined,
+      type: 'payment_registered',
+      paymentId: payment.id,
+      amount: payableAmount,
+    });
+
     // La respuesta lee el vuelto de `payment.change` top-level, pero esta
     // rama directa sólo lo dejaba en `gateway_response.change` (la de
     // pasarela sí lo fija, arriba). Sin esto el vuelto nunca llegaba al
@@ -5537,6 +5798,14 @@ export class PaymentsService {
     paymentState: string,
     deferToFulfillment = false,
     hasKitchenItems = false,
+    // Plan order-truth-and-invoice-tz (Step 6) — el estado previo viene del
+    // objeto `order` en memoria del llamador (nunca de una relectura), y
+    // storeId/organizationId son obligatorios para OrderHistoryService.record.
+    historyCtx?: {
+      fromState: order_state_enum;
+      storeId: number;
+      organizationId?: number | null;
+    },
   ) {
     let orderState: string;
     const additionalData: any = { updated_at: new Date() };
@@ -5602,6 +5871,17 @@ export class PaymentsService {
         ...additionalData,
       },
     });
+
+    if (historyCtx) {
+      await this.orderHistory?.record(tx, {
+        orderId,
+        storeId: historyCtx.storeId,
+        organizationId: historyCtx.organizationId ?? undefined,
+        type: 'state_changed',
+        fromState: historyCtx.fromState,
+        toState: orderState as order_state_enum,
+      });
+    }
   }
 
   /**
@@ -6039,6 +6319,16 @@ export class PaymentsService {
       payment.order_id,
       Number(payment.amount),
     );
+
+    // Plan order-truth-and-invoice-tz (Step 6).
+    await this.orderHistory?.record(tx, {
+      orderId: payment.order_id,
+      storeId: staffUser.store_id,
+      organizationId: payment.orders?.stores?.organization_id ?? undefined,
+      type: 'payment_registered',
+      paymentId: payment.id,
+      amount: Number(payment.amount),
+    });
 
     // 3. Emit `payment.received` with the SAME shape as the POS fresh-sale
     //    path (payments.service.ts L1179) so the auto-entry listener maps

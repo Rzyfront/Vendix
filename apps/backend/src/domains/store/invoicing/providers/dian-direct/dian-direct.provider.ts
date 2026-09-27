@@ -91,6 +91,8 @@ import {
 import {
   DEFAULT_STORE_TIMEZONE,
   localOffsetString,
+  resolveOrganizationTimezone,
+  resolveStoreTimezone,
 } from '../../../../../common/utils/store-timezone.util';
 
 type DianConfigurationType =
@@ -2762,7 +2764,36 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       // La firma se estampa con el instante que el propio documento declara, no
       // con el reloj de pared. Ver `resolveSigningInstant`.
       this.resolveSigningInstant(xml),
+      // Step 8 — la civil date/hora de `xades:SigningTime` se estampa en la
+      // zona de la TIENDA EMISORA, no siempre Bogotá. `config` ya trae
+      // `store_id`/`organization_id`, así que no hace falta ensanchar la
+      // firma pública de `signXml` ni de sus 7 llamadores.
+      await this.resolveConfigTimezone(config),
     );
+  }
+
+  /**
+   * Zona horaria de la tienda (o de la organización si la factura es a nivel
+   * organización) dueña de `config`, para `xades:SigningTime` (Step 8).
+   * Nunca lanza: `dian-signing-instant.spec.ts` ejercita `signXml` sobre un
+   * `DianDirectProvider` armado a mano (`Object.create(...)`) sin `prisma` —
+   * un fallo de resolución cae a `DEFAULT_STORE_TIMEZONE`, que es
+   * exactamente el default que ya tenía `formatColombianTime`.
+   */
+  private async resolveConfigTimezone(
+    config: DianConfigDecrypted,
+  ): Promise<string> {
+    try {
+      if (config.store_id != null) {
+        return await resolveStoreTimezone(this.prisma, config.store_id);
+      }
+      return await resolveOrganizationTimezone(
+        this.prisma.withoutScope(),
+        config.organization_id,
+      );
+    } catch {
+      return DEFAULT_STORE_TIMEZONE;
+    }
   }
 
   /**

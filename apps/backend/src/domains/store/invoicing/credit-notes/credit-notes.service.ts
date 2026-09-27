@@ -242,6 +242,10 @@ export class CreditNotesService {
         issue_date: true,
         note_concept_code: true,
         created_at: true,
+        // El frontend compara `n.refund_id === refund.id` para resaltar la NC
+        // ya vinculada a un reembolso puntual (order-details-page.component.ts).
+        // Sin esta columna esa comparación siempre da `undefined === id`.
+        refund_id: true,
       },
       orderBy: { id: 'asc' },
     });

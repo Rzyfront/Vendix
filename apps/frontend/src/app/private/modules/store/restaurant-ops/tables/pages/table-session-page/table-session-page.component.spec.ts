@@ -9,7 +9,8 @@ import { KitchenTicketsService, KdsSseService } from '../../../kds/services';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { DialogService, ToastService } from '../../../../../../../shared/components';
-import type { Table, TableSession, TableSessionOrderItem } from '../../interfaces';
+import type { Table, TableSession, TableSessionOrderItem, TableSessionAddItem } from '../../interfaces';
+import type { TablePaymentSubmit } from '../../components/table-payment-modal/table-payment-modal.component';
 
 describe('TableSessionPageComponent waiter delivery', () => {
   let component: TableSessionPageComponent;
@@ -63,7 +64,7 @@ describe('TableSessionPageComponent waiter delivery', () => {
   });
 
   beforeEach(async () => {
-    api = jasmine.createSpyObj('TablesService', ['markItemDelivered', 'updateItemNotes', 'getOrderReassignmentEvidence', 'getSession', 'getFloorMap']);
+    api = jasmine.createSpyObj('TablesService', ['markItemDelivered', 'updateItemNotes', 'getOrderReassignmentEvidence', 'getSession', 'getFloorMap', 'addItems', 'payTableSession']);
     floorTables = signal<Table[]>([]);
     Object.defineProperty(api, 'floorTables', { value: floorTables });
     api.getFloorMap.and.returnValue(of([]));
@@ -304,6 +305,106 @@ describe('TableSessionPageComponent waiter delivery', () => {
       component.openEditItemNote(itm);
       await Promise.resolve();
       expect(api.updateItemNotes).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Sin sobreventa — `INV_STOCK_INSUFFICIENT_LINES` / `INV_STOCK_002`.
+   *
+   * `TablesService.handleError` (no editable desde este componente) colapsa
+   * HOY todo error a un string plano ya redactado en español por el backend,
+   * así que `onAddItems`/`onPay` sólo necesitan seguir mostrándolo tal cual
+   * — cero regresión. `describeAddOrPayError` además sabe listar cada
+   * faltante si algún día `err` llega como objeto con `details` estructurado
+   * (el mismo contrato que `pos-payment.service.ts` ya preserva), así que esa
+   * rama forward-compatible también se prueba aquí.
+   */
+  describe('stock shortage errors (addItems/fire/pay)', () => {
+    it('onAddItems muestra el string ya redactado por TablesService.handleError', () => {
+      component.session.set(session([]));
+      // TablesService.handleError siempre re-lanza un string (ver
+      // tables.service.ts): se simula con un observable que emite error.
+      const error$ = new Subject<TableSession>();
+      api.addItems.and.returnValue(error$.asObservable());
+
+      component.onAddItems([{ product_id: 1, quantity: 1 } as TableSessionAddItem]);
+      error$.error('Sin stock suficiente: MODELO (pedido 1, disponible 0). Quítalo de la orden o desactiva «Maneja inventario» en el producto.');
+
+      expect(toast.error).toHaveBeenCalledOnceWith(
+        'Sin stock suficiente: MODELO (pedido 1, disponible 0). Quítalo de la orden o desactiva «Maneja inventario» en el producto.',
+      );
+      expect(component.isAddingItems()).toBeFalse();
+    });
+
+    it('onAddItems lista los faltantes cuando el error llega estructurado (forward-compatible)', () => {
+      component.session.set(session([]));
+      const error$ = new Subject<TableSession>();
+      api.addItems.and.returnValue(error$.asObservable());
+
+      component.onAddItems([{ product_id: 1, quantity: 1 } as TableSessionAddItem]);
+      error$.error({
+        message: 'fallback',
+        details: {
+          items: [
+            {
+              product_id: 501,
+              product_variant_id: null,
+              product_name: 'MODELO',
+              kind: 'product',
+              requested: 1,
+              available: 0,
+            },
+          ],
+        },
+      });
+
+      expect(toast.error).toHaveBeenCalledOnceWith(
+        'MODELO — pedido 1, disponible 0 Quítalo de la orden o desactiva «Maneja inventario» en el producto.',
+      );
+    });
+
+    it('onPay muestra el string ya redactado por TablesService.handleError', () => {
+      component.session.set(session([]));
+      const error$ = new Subject<TableSession>();
+      api.payTableSession.and.returnValue(error$.asObservable());
+
+      component.onPay({ store_payment_method_id: 3 } as TablePaymentSubmit);
+      error$.error('No se puede entregar: no hay stock suficiente para uno o más productos.');
+
+      expect(toast.error).toHaveBeenCalledOnceWith(
+        'No se puede entregar: no hay stock suficiente para uno o más productos.',
+      );
+      expect(component.isPaying()).toBeFalse();
+    });
+
+    it('onKitchenMutationError lista los faltantes cuando details.items llega estructurado', () => {
+      (component as any).onKitchenMutationError({
+        code: 'INV_STOCK_INSUFFICIENT_LINES',
+        message: 'fallback',
+        details: {
+          items: [
+            {
+              product_id: 88,
+              product_variant_id: null,
+              product_name: 'Limón',
+              kind: 'ingredient',
+              requested: 3,
+              available: 1,
+              used_by: ['Mojito'],
+            },
+          ],
+        },
+      });
+
+      expect(toast.error).toHaveBeenCalledOnceWith(
+        'Limón (insumo, usado en Mojito) — requerido 3, disponible 1 Quítalo de la orden o desactiva «Maneja inventario» en el producto.',
+      );
+    });
+
+    it('onKitchenMutationError mantiene el string plano de siempre (sin cambios)', () => {
+      (component as any).onKitchenMutationError('Error de red');
+
+      expect(toast.error).toHaveBeenCalledOnceWith('Error de red');
     });
   });
 });

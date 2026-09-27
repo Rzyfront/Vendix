@@ -63,6 +63,12 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import {
+  formatDateOnlyUTC,
+  formatStoreDate,
+  formatStoreDateTime,
+} from '../../../../../../shared/utils/date.util';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
 @Component({
   selector: 'vendix-invoice-detail',
@@ -184,12 +190,12 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs">
                 @if (cont.declaredAt) {
                   <div [ngClass]="cont.expired ? 'text-error' : 'text-warning'">
-                    Declarada: {{ cont.declaredAt | date:'dd/MM/yyyy HH:mm' }}
+                    Declarada: {{ formatInvoiceDateTime(cont.declaredAt) }}
                   </div>
                 }
                 @if (cont.deadline) {
                   <div [ngClass]="cont.expired ? 'text-error' : 'text-warning'">
-                    Vence: {{ cont.deadline | date:'dd/MM/yyyy HH:mm' }}
+                    Vence: {{ formatInvoiceDateTime(cont.deadline) }}
                   </div>
                 }
               </div>
@@ -352,7 +358,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs text-text-secondary">
                 <div>Intentos: {{ retry.attempts }} de {{ retry.max_attempts }}</div>
                 @if (retry.next_retry_at) {
-                  <div>Próximo intento: {{ retry.next_retry_at | date:'dd/MM/yyyy HH:mm' }}</div>
+                  <div>Próximo intento: {{ formatInvoiceDateTime(retry.next_retry_at) }}</div>
                 }
               </div>
               @if (retry.last_error) {
@@ -445,13 +451,13 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             <div class="rounded-lg border border-border px-3 py-2">
               <p class="text-[11px] uppercase tracking-wide text-text-secondary">Emisión</p>
               <p class="text-sm font-medium text-text-primary">
-                {{ inv.issue_date | date:'dd/MM/yyyy':'UTC' }}
+                {{ formatInvoiceDate(inv.issue_date) }}
               </p>
             </div>
             <div class="rounded-lg border border-border px-3 py-2">
               <p class="text-[11px] uppercase tracking-wide text-text-secondary">Vencimiento</p>
               <p class="text-sm font-medium text-text-primary">
-                {{ inv.due_date ? (inv.due_date | date:'dd/MM/yyyy':'UTC') : 'Contado' }}
+                {{ inv.due_date ? formatInvoiceDate(inv.due_date) : 'Contado' }}
               </p>
             </div>
             <div class="rounded-lg border border-border px-3 py-2">
@@ -1036,7 +1042,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                         >
                       </div>
                       <p class="text-xs text-text-secondary">
-                        {{ (event.issued_at || event.created_at) | date:'dd/MM/yyyy HH:mm' }}
+                        {{ formatInvoiceDateTime(event.issued_at || event.created_at) }}
                         @if (event.event_number) {
                           <span> · N° {{ event.event_number }}</span>
                         }
@@ -1234,6 +1240,7 @@ export class InvoiceDetailComponent {
   private invoicingService = inject(InvoicingService);
   private toast = inject(ToastService);
   private printService = inject(DocumentPrintService);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
 
   private readonly storeRejection = this.store.selectSignal(selectDianRejection);
   private readonly hydratedInvoice = this.store.selectSignal(selectCurrentInvoice);
@@ -1843,6 +1850,28 @@ export class InvoiceDetailComponent {
     return Number(value) === 0 ? '0%' : String(value);
   }
 
+  /**
+   * `issue_date`/`due_date`-shaped civil date (`DD/MM/YYYY`) in the store's
+   * timezone. See `formatStoreDate` in `date.util.ts` for the UTC-midnight
+   * bifurcation this applies (order-truth-and-invoice-tz-plan, Step 9).
+   * Public because the template invokes it (AOT does not allow `private`).
+   */
+  formatInvoiceDate(value: string | Date | null | undefined): string {
+    if (!value) return '';
+    return formatStoreDate(value, this.storeSettingsFacade.timezone());
+  }
+
+  /**
+   * Real-instant date + time (`DD/MM/YYYY HH:mm`) in the store's timezone —
+   * for columns that always carry a genuine instant (contingency deadlines,
+   * DIAN retry timestamps, DIAN event timestamps), never `issue_date`/
+   * `due_date`. Public because the template invokes it.
+   */
+  formatInvoiceDateTime(value: string | Date | null | undefined): string {
+    if (!value) return '';
+    return formatStoreDateTime(value, this.storeSettingsFacade.timezone());
+  }
+
   readonly resolutionBanner = computed(() => {
     const res = this.detail()?.resolution;
     if (!res) return null;
@@ -1896,7 +1925,7 @@ export class InvoiceDetailComponent {
           ? 'Sin vigencia registrada'
           : expiring
             ? `Vence en ${days_left} día${days_left === 1 ? '' : 's'}`
-            : `Vigente hasta ${new Date(res.valid_to!).toLocaleDateString('es-CO')}`,
+            : `Vigente hasta ${formatDateOnlyUTC(res.valid_to!)}`,
       validityTone: tone(expired ? 'bad' : expiring || days_left === null ? 'warn' : 'ok'),
     };
   });

@@ -54,8 +54,14 @@ import {
   API_REVERSIBLE_REFUND_PROCESSORS,
   type EffectiveRefundChannel,
 } from './refund-channel.util';
+import { REFUNDABLE_ORDER_STATES } from '../order-action-policy.util';
+import { OrderHistoryService } from '../../order-history/order-history.service';
 
-const REFUNDABLE_STATES = ['delivered', 'finished'];
+// order-truth-and-invoice-tz plan (B1b) — was a hand-synced local copy of
+// `['delivered', 'finished']`; now reuses the single source of truth in
+// `order-action-policy.util.ts` (`canRefund`/`getAvailableActions` read the
+// same array) so this guard can never drift from the read-side action list.
+const REFUNDABLE_STATES: ReadonlyArray<string> = REFUNDABLE_ORDER_STATES;
 
 /** ADR-12 — prefix of the deterministic `refund_transaction_id` placeholders
  * that `recordCancellationPendingRefunds` stamps on cancellation refunds.
@@ -159,6 +165,12 @@ export class RefundFlowService {
     // resuelve (mismo módulo, sin ciclo). Donde falta, el caché no se
     // re-agrega — todos los llamados van con `?.` por eso.
     @Optional() private readonly coverageService?: RefundCoverageService,
+    // Plan order-truth-and-invoice-tz — Paso 6. Único escritor de
+    // `order_events`. `@Optional()` por el mismo motivo que los tres de
+    // arriba: no romper los specs históricos que construyen el servicio a
+    // mano. En prod siempre resuelve vía `OrderHistoryModule` (importado en
+    // `order-flow.module.ts`, mismo módulo que provee este servicio).
+    @Optional() private readonly orderHistoryService?: OrderHistoryService,
   ) {}
 
   /** Cash cancellation uses the same refund document and ceiling as returns,
@@ -169,6 +181,8 @@ export class RefundFlowService {
     tx: Prisma.TransactionClient,
     order: {
       id: number;
+      store_id: number;
+      stores?: { organization_id: number | null } | null;
       grand_total: Prisma.Decimal;
       tax_amount: Prisma.Decimal;
       shipping_cost: Prisma.Decimal;
@@ -203,6 +217,18 @@ export class RefundFlowService {
         processed_at: null,
       },
     });
+    // Plan order-truth-and-invoice-tz — Paso 6. Reembolso documental de la
+    // cancelación (no cambia `orders.state`: cancelOrder ya registra su
+    // propio `state_changed` a 'cancelled' en el mismo tx).
+    await this.orderHistoryService?.record(tx, {
+      orderId: order.id,
+      storeId: order.store_id,
+      organizationId: order.stores?.organization_id ?? null,
+      type: 'refund_created',
+      paymentId: paymentIds.length === 1 ? paymentIds[0] : null,
+      amount: breakdown.amount.toString(),
+      payload: { reason, refund_id: refund.id, refund_method: 'cash' },
+    });
     return { refund, breakdown };
   }
 
@@ -225,6 +251,8 @@ export class RefundFlowService {
     tx: Prisma.TransactionClient,
     order: {
       id: number;
+      store_id: number;
+      stores?: { organization_id: number | null } | null;
       grand_total: Prisma.Decimal;
       tax_amount: Prisma.Decimal;
       shipping_cost: Prisma.Decimal;
@@ -307,6 +335,15 @@ export class RefundFlowService {
           requested_at: new Date(),
           processed_at: null,
         },
+      });
+      await this.orderHistoryService?.record(tx, {
+        orderId: order.id,
+        storeId: order.store_id,
+        organizationId: order.stores?.organization_id ?? null,
+        type: 'refund_created',
+        paymentId: leg.payment_id ?? null,
+        amount: breakdown.amount.toString(),
+        payload: { reason, refund_id: refund.id, refund_method: 'original_payment', ar_payment_id: leg.ar_payment_id ?? null },
       });
       created.push({ refund, breakdown });
     }
@@ -575,6 +612,25 @@ export class RefundFlowService {
           },
         });
 
+        // Plan order-truth-and-invoice-tz — Paso 6. `refund_created` primero;
+        // el `state_changed` a 'refunded' (si aplica) se registra más abajo,
+        // junto a la escritura de `orders.state`.
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: order.store_id,
+          organizationId: order.stores?.organization_id ?? null,
+          type: 'refund_created',
+          paymentId: linkedPaymentId,
+          amount: calculation.total_refund.toString(),
+          actorUserId: userId,
+          payload: {
+            reason: dto.reason,
+            refund_id: refund.id,
+            refund_method: dto.refund_method,
+            is_full_refund: calculation.is_full_refund,
+          },
+        });
+
         // Unidades de stock que mueve cada línea devuelta. Devolver 1 bulto de
         // 50 repone 50 unidades: la cantidad devuelta cuenta presentaciones y
         // el inventario vive en la unidad mínima. Se resuelve una sola vez y lo
@@ -803,6 +859,14 @@ export class RefundFlowService {
               state: 'refunded',
               updated_at: new Date(),
             },
+          });
+          await this.orderHistoryService?.record(tx, {
+            orderId,
+            storeId: order.store_id,
+            organizationId: order.stores?.organization_id ?? null,
+            type: 'state_changed',
+            fromState: fresh.state,
+            toState: 'refunded',
           });
         }
 
@@ -1987,6 +2051,25 @@ export class RefundFlowService {
           data: updateData,
         });
         if (claim.count !== 1) throw new VendixHttpException(ErrorCodes.REF_RESOLUTION_CONFLICT_001);
+        // Plan order-truth-and-invoice-tz — Paso 6. Resolución manual del
+        // refund (completed o failed); el `state_changed` de la orden (si
+        // esta rama promueve) se registra junto a esa escritura, más abajo.
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: order.store_id,
+          organizationId: order.stores.organization_id,
+          type: 'refund_resolved',
+          paymentId: refund.payment_id ?? null,
+          amount: refund.amount.toString(),
+          actorUserId: userId,
+          payload: {
+            refund_id: refundId,
+            target_state: targetState,
+            resolution_notes: trimmedNotes,
+            payout_reference: targetState === 'completed' ? reference : null,
+            payout_channel: targetState === 'completed' ? payoutChannel : null,
+          },
+        });
         if (targetState === 'completed') {
           const payload: ManualRefundDeliveryPayload = {
             version: 1, refund_id: refundId, order_id: orderId,
@@ -2035,6 +2118,14 @@ export class RefundFlowService {
             await tx.orders.update({
               where: { id: orderId },
               data: { state: 'refunded', updated_at: new Date() },
+            });
+            await this.orderHistoryService?.record(tx, {
+              orderId,
+              storeId: order.store_id,
+              organizationId: order.stores.organization_id,
+              type: 'state_changed',
+              fromState: order.state,
+              toState: 'refunded',
             });
           }
         } else {

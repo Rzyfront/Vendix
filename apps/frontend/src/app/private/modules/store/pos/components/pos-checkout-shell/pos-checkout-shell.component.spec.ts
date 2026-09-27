@@ -952,6 +952,86 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     });
   }
 
+  /**
+   * B12 — la sesión de mesa cacheada (`currentTableSession`) puede sobrevivir
+   * a una venta ya cobrada/guardada (ver `pos.component.ts` `onStartNewSale` /
+   * `onCreateOrderConfirmed`). Reusarla a ciegas revienta
+   * `addItemsToTableSession` con `TABLE_SESSION_ORDER_NOT_DRAFT`. `onSaveDraft`
+   * debe refrescarla contra el servidor antes de reusarla.
+   */
+  it('B12 — sesión de mesa cacheada aún en draft: se refresca y se reusa', () => {
+    restaurantMode.set(true);
+    (integrationMock as any).currentTableSession = () => ({
+      id: 77,
+      order_id: 900,
+      table_id: 15,
+    });
+    const freshSession = {
+      id: 77,
+      order_id: 900,
+      table_id: 15,
+      closed_at: null,
+      order: { id: 900, state: 'draft' },
+    };
+    const refreshTableSession = jasmine
+      .createSpy('refreshTableSession')
+      .and.returnValue(of(freshSession));
+    const clearTableSession = jasmine.createSpy('clearTableSession');
+    Object.assign(TestBed.inject(PosRestaurantIntegrationService), {
+      refreshTableSession,
+      clearTableSession,
+    });
+    const append = spyOn<any>(component, 'appendToTableAndFire').and.stub();
+    fixture.componentRef.setInput('cartState', {
+      items: [{ product: { id: '900' }, quantity: 1 }],
+    });
+    fixture.detectChanges();
+
+    component.onSaveDraft();
+
+    expect(refreshTableSession).toHaveBeenCalledOnceWith(77);
+    expect(append).toHaveBeenCalledOnceWith(component.cartState() as any, freshSession);
+    expect(clearTableSession).not.toHaveBeenCalled();
+  });
+
+  it('B12 — sesión de mesa cacheada con orden ya no draft: se descarta y sigue el flujo normal', () => {
+    restaurantMode.set(true);
+    (integrationMock as any).currentTableSession = () => ({
+      id: 78,
+      order_id: 901,
+      table_id: 16,
+    });
+    const staleSession = {
+      id: 78,
+      order_id: 901,
+      table_id: 16,
+      closed_at: null,
+      // La venta anterior ya cobró/cerró esta orden: ya no es draft.
+      order: { id: 901, state: 'completed' },
+    };
+    const refreshTableSession = jasmine
+      .createSpy('refreshTableSession')
+      .and.returnValue(of(staleSession));
+    const clearTableSession = jasmine.createSpy('clearTableSession');
+    Object.assign(TestBed.inject(PosRestaurantIntegrationService), {
+      refreshTableSession,
+      clearTableSession,
+    });
+    const append = spyOn<any>(component, 'appendToTableAndFire').and.stub();
+    const createRetail = spyOn<any>(component, 'createRetailDraft').and.stub();
+    fixture.componentRef.setInput('cartState', {
+      items: [{ product: { id: '901' }, quantity: 1 }],
+    });
+    fixture.detectChanges();
+
+    component.onSaveDraft();
+
+    expect(refreshTableSession).toHaveBeenCalledOnceWith(78);
+    expect(clearTableSession).toHaveBeenCalledTimes(1);
+    expect(append).not.toHaveBeenCalled();
+    expect(createRetail).toHaveBeenCalledOnceWith(component.cartState() as any);
+  });
+
   it('la confirmación del borrador usa el snapshot completo releído, no solo el id', () => {
     const persisted = {
       id: 1132,

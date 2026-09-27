@@ -25,6 +25,21 @@ export interface DistanceCoords {
 @Injectable()
 export class ShippingDistanceService {
   private readonly logger = new Logger(ShippingDistanceService.name);
+  /** Logger para los métodos `static` (no pueden usar `this.logger`). */
+  private static readonly staticLogger = new Logger(
+    ShippingDistanceService.name,
+  );
+
+  /**
+   * Bbox aproximado de Colombia, usado SOLO para detectar lat/lng invertido
+   * (heurística geográfica, no un límite de cobertura de negocio).
+   */
+  private static readonly COLOMBIA_BBOX = {
+    minLat: -4.3,
+    maxLat: 13.5,
+    minLng: -82,
+    maxLng: -66.8,
+  };
 
   constructor(@Optional() private readonly routing?: RoutingService) {}
 
@@ -77,35 +92,84 @@ export class ShippingDistanceService {
   }
 
   /**
-   * Normaliza coordenadas (Decimal de Prisma, string o number) con rangos
-   * WGS84, o `null` cuando no son utilizables.
+   * Normaliza coordenadas (Decimal de Prisma, string o number): valida rango
+   * WGS84, detecta y corrige lat/lng invertido, y redondea a 6 decimales
+   * (~0.1 m). Es el ÚNICO punto de normalización de coordenadas — lo usan
+   * tanto el cotizador (`ShippingCalculatorService`) como la confirmación
+   * (`CheckoutService.resolveConfirmShippingCost`), para origen y destino
+   * por igual, así que un mismo punto siempre produce las mismas coords (y
+   * por lo tanto la misma llave de caché de `RoutingService`) sin importar
+   * si viene del float completo de la cotización o del `Decimal(10,8)`
+   * redondeado del snapshot de confirmación.
+   *
+   * `label` es solo para el mensaje de warn cuando se detecta un swap (p.ej.
+   * `"origin"` / `"buyer"`) — no afecta el resultado.
+   *
+   * @returns `null` cuando no son utilizables.
    */
   static toCoords(
     latitude: unknown,
     longitude: unknown,
+    label?: string,
   ): DistanceCoords | null {
-    const lat = Number(latitude);
-    const lng = Number(longitude);
     if (
       latitude == null ||
       longitude == null ||
       latitude === '' ||
-      longitude === '' ||
-      !Number.isFinite(lat) ||
-      !Number.isFinite(lng) ||
-      lat < -90 ||
-      lat > 90 ||
-      lng < -180 ||
-      lng > 180
+      longitude === ''
     ) {
       return null;
     }
-    return { latitude: lat, longitude: lng };
+    let lat = Number(latitude);
+    let lng = Number(longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return null;
+    }
+
+    // lat/lng invertido: en Colombia, lat≈4.7 y lng≈-74.1 escritos al revés
+    // (lat≈-74.1, lng≈4.7) siguen cayendo cada uno dentro del rango WGS84
+    // individual (-90..90 / -180..180), así que la validación de rango NO lo
+    // detecta. La señal es geográfica: el par ORIGINAL cae fuera del bbox de
+    // Colombia mientras el INTERCAMBIADO sí cae dentro. Esto también cubre
+    // el caso |lat| > 90 (literalmente inválido como latitud): el bbox de
+    // Colombia es mucho más angosto que el rango WGS84, así que un valor
+    // fuera de rango solo "corrige" si el intercambio aterriza en Colombia;
+    // si no, sigue cayendo en el `return null` de más abajo.
+    if (
+      !ShippingDistanceService.isWithinColombiaBbox(lat, lng) &&
+      ShippingDistanceService.isWithinColombiaBbox(lng, lat)
+    ) {
+      ShippingDistanceService.staticLogger.warn(
+        `lat/lng invertido detectado${label ? ` (${label})` : ''}: ` +
+          `(${lat}, ${lng}) fuera del bbox de Colombia, (${lng}, ${lat}) sí — se corrige intercambiando`,
+      );
+      [lat, lng] = [lng, lat];
+    }
+
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return null;
+    }
+    return {
+      latitude: ShippingDistanceService.round6(lat),
+      longitude: ShippingDistanceService.round6(lng),
+    };
+  }
+
+  /** `true` cuando `(lat, lng)` cae dentro del bbox aproximado de Colombia. */
+  private static isWithinColombiaBbox(lat: number, lng: number): boolean {
+    const b = ShippingDistanceService.COLOMBIA_BBOX;
+    return lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng;
+  }
+
+  /** Redondea a 6 decimales (~0.1 m de precisión GPS). */
+  private static round6(value: number): number {
+    return Math.round(value * 1e6) / 1e6;
   }
 
   /**
    * Distancia real por calles (km) entre el origen del método y el comprador,
-   * vía `RoutingService` (Valhalla shortest + fallback OSRM + caché Redis).
+   * vía `RoutingService` (Valhalla costing `auto` estándar + fallback OSRM
+   * (primera ruta) + caché Redis).
    * `null` ante cualquier fallo: el llamador cobra zona.
    */
   async resolveDistanceKm(

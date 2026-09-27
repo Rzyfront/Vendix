@@ -356,6 +356,45 @@ export class AnalyticsController {
     ]);
   }
 
+  @Get('sales/tips-by-waiter')
+  @Permissions('store:analytics:read')
+  async getTipsByWaiter(@Query() query: SalesAnalyticsQueryDto) {
+    const result = await this.sales_analytics_service.getTipsByWaiter(query);
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+      'Propinas por mesero obtenidas correctamente',
+      undefined,
+      { truncated: result.meta.truncated },
+    );
+  }
+
+  @Get('sales/tips-by-waiter/export')
+  @Permissions('store:analytics:read')
+  async exportTipsByWaiter(
+    @Query() query: SalesAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const result =
+      await this.sales_analytics_service.getTipsByWaiterForExport(query);
+
+    const summaryColumns: ReportColumn[] = [
+      { key: 'waiter_name', header: 'Mesero', type: 'text' },
+      { key: 'waiter_email', header: 'Correo', type: 'text' },
+      { key: 'tipped_orders_count', header: 'Órdenes con propina', type: 'number' },
+      { key: 'total_tips', header: 'Total propinas', type: 'currency' },
+      { key: 'avg_tip', header: 'Propina promedio', type: 'currency' },
+      { key: 'last_tip_date', header: 'Última propina', type: 'date', tz },
+    ];
+
+    await this.emitReport(res, 'propinas_por_mesero', tz, [
+      this.toSheet('Propinas por mesero', summaryColumns, result.summary, tz),
+    ]);
+  }
+
   // ==================== PRODUCTS ANALYTICS ====================
 
   @Get('products/summary')

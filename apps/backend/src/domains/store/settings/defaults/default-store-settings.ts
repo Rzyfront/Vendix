@@ -103,6 +103,12 @@ export function getDefaultStoreSettings(): StoreSettings {
       // Low-stock alerts evaluate the main location only by default; override
       // to `all_locations` to aggregate stock across the entire store.
       low_stock_alerts_scope: 'main_location',
+      // docs/plans/no-overselling-stock-guard-plan.md (step 9, 2026-09-26) —
+      // default true so no store's kitchen changes behavior on deploy: Pollo
+      // Arabe (store 105) cooks today with 18 of 24 tracked ingredients at 0.
+      // Missing/null must resolve to `true` (see mergeStoreSettingsWithDefaults
+      // and StockValidatorService.resolveInventoryPolicy) — never `?? false`.
+      allow_ingredient_overuse: true,
     },
     checkout: {
       require_customer_data: true,

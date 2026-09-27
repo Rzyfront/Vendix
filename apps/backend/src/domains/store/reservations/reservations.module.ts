@@ -17,6 +17,7 @@ import { OrdersModule } from '../orders/orders.module';
 import { S3Module } from '@common/services/s3.module';
 import { ProductsModule } from '../products/products.module';
 import { TablesModule } from '../tables/tables.module';
+import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { TablesModule } from '../tables/tables.module';
     ProductsModule,
     TablesModule,
     AppointmentQueueModule,
+    OrderHistoryModule,
   ],
   controllers: [
     ProvidersController,

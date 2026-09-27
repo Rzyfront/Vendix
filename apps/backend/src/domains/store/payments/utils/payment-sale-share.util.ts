@@ -17,6 +17,7 @@
  * o pagos que exceden lo que queda por reconocer.
  */
 import type { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
+import type { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
 import { buildOrderSaleTaxPayload } from './order-sale-tax-payload.util';
 
 export interface PaymentSaleShareInput {
@@ -141,6 +142,111 @@ export function computePaymentSaleShare(
         }
       : {}),
   };
+}
+
+/**
+ * Reparte cada línea de `wh.lines` (retención sufrida de la orden) entre los
+ * tramos de un cobro multimétodo, proporcional al monto de cada tramo
+ * (`legAmounts`), con el residuo en centavos en el ÚLTIMO tramo — mismo
+ * criterio que `sale_share` (ver `resolvePaymentReceivedSaleFields`/`take`):
+ * así el tramo que completa la orden absorbe el redondeo y Σ porciones =
+ * línea original, al centavo, por tipo/concepto.
+ *
+ * La retención se reconoce UNA vez por orden (regla de negocio): sin este
+ * reparto, cada tramo emitía `wh.lines` completo y la retención se
+ * contabilizaba N veces (una por tramo).
+ *
+ * `legAmounts.length <= 1` (pago escalar, o un solo tramo) devuelve las
+ * líneas intactas envueltas en un arreglo de un elemento — el payload
+ * histórico no cambia.
+ *
+ * Pura: no toca Prisma ni el `amount`/`base`/`rate` de cada línea (esos
+ * describen la retención tal como se calculó una sola vez; sólo el `amount`
+ * que ve CADA asiento se prorratea aquí).
+ */
+export function splitWithholdingLines(
+  lines: WithholdingLine[] | undefined,
+  legAmounts: number[],
+): WithholdingLine[][] {
+  if (!lines || lines.length === 0) return legAmounts.map(() => []);
+  if (legAmounts.length <= 1) return [lines];
+
+  const weights = legAmounts.map((amount) => toCents(amount));
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  const lastIndex = weights.length - 1;
+
+  // Por línea: porción de cada tramo (salvo el último) por proporción entera
+  // hacia abajo; el último tramo toma el remanente exacto. `floor(x) <= x`
+  // por tramo previo garantiza que el remanente del último nunca sea
+  // negativo mientras todos los montos de tramo sean positivos (lo que ya
+  // garantiza `normalizePaymentLegs`).
+  const centsByLinePerLeg = lines.map((line) => {
+    const lineCents = toCents(line.amount);
+    if (lineCents <= 0 || totalWeight <= 0) return weights.map(() => 0);
+    const portions = weights.map((weight, index) =>
+      index === lastIndex ? 0 : Math.floor((lineCents * weight) / totalWeight),
+    );
+    portions[lastIndex] =
+      lineCents - portions.slice(0, lastIndex).reduce((a, b) => a + b, 0);
+    return portions;
+  });
+
+  return legAmounts.map((_, legIndex) =>
+    lines
+      .map((line, lineIndex) => ({
+        ...line,
+        amount: fromCents(centsByLinePerLeg[lineIndex][legIndex]),
+      }))
+      .filter((line) => line.amount > 0),
+  );
+}
+
+/**
+ * Escala la retención sufrida de la ORDEN a la porción que cubre ESTE cobro
+ * (PR #858 hallazgo 3): con abonos previos, `payOrder` cobra
+ * `grand_total − settledAmount`, pero la retención se resuelve sobre todos
+ * los ítems. Sin escalar, el último cobro reconocía la retención completa.
+ *
+ * `portion` = Σ montos de los tramos de este cobro; `total` = `grand_total`.
+ * Factor = portion / total, en centavos:
+ *   · el total retenido del cobro es `round(Σ líneas × factor)` y se reparte
+ *     entre las líneas por mayor residuo (`allocate`, mismo criterio que
+ *     `computePaymentSaleShare`), así Σ porciones = total escalado al centavo;
+ *   · la `base` de cada línea se escala con el mismo factor (redondeo al
+ *     centavo), porque la fila persistida la suma el certificado;
+ *   · `rate` no cambia.
+ *
+ * Identidad: `portion >= total`, o `total <= 0` (sin dato para prorratear),
+ * devuelve las MISMAS líneas, sin tocar — un cobro por el total produce
+ * exactamente el resultado histórico. Líneas que quedan en 0 se descartan.
+ *
+ * Pura: no toca Prisma.
+ */
+export function prorateWithholdingLines(
+  lines: WithholdingLine[] | undefined,
+  portion: number,
+  total: number,
+): WithholdingLine[] {
+  if (!lines || lines.length === 0) return [];
+  const portionCents = toCents(portion);
+  const totalCents = toCents(total);
+  if (totalCents <= 0 || portionCents >= totalCents) return lines;
+  if (portionCents <= 0) return [];
+
+  const lineCents = lines.map((line) => Math.max(0, toCents(line.amount)));
+  const whTotal = lineCents.reduce((a, b) => a + b, 0);
+  const target = Math.round((whTotal * portionCents) / totalCents);
+  const shares = allocate(target, lineCents);
+
+  return lines
+    .map((line, index) => ({
+      ...line,
+      base: fromCents(
+        Math.round((toCents(line.base) * portionCents) / totalCents),
+      ),
+      amount: fromCents(shares[index]),
+    }))
+    .filter((line) => line.amount > 0);
 }
 
 /** Campos de venta del evento `payment.received` para un pago de la orden. */

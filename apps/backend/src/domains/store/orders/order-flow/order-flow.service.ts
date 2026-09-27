@@ -2,10 +2,32 @@ import { assertNoActiveFinancialSplit } from '../shared/financial-split-policy';
 import { lockOrderLifecycle } from './order-lifecycle-lock.util';
 import {
   getCancellationBlocker,
-  getOrderCancellationPolicy,
   SETTLED_PAYMENT_STATES,
   CANCELABLE_ORDER_STATES,
+  hasNonDirectSettledPayment,
+  FULFILLED_PAYMENT_CANCELABLE_STATES,
+  PAYMENT_CANCELABLE_STATES,
 } from './order-cancellation-policy.util';
+import {
+  canPay,
+  canCancelPayment,
+  canCancelPaymentAsRole,
+  canRefund,
+  canCancel,
+  canAssignShipping,
+  canConfirmDelivery,
+  canDeliverItem,
+  canEditOrder,
+  canReactivateAsRole,
+  canFastTrack,
+  canCreditPayment,
+  canDispatchOrder,
+  canManualShip,
+  canReadyForPickupBeforePayment,
+  canDirectDeliver,
+  canCollectViaShip,
+  OrderActionSnapshot,
+} from './order-action-policy.util';
 import { OrderSseService } from '../services/order-sse.service';
 import {
   Injectable,
@@ -15,6 +37,8 @@ import {
   InternalServerErrorException,
   Logger,
   Optional,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
@@ -23,6 +47,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { resolveTip } from '@common/utils/tip.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { FinancialSplitErrors } from 'src/common/errors/financial-split-error-codes';
 import {
   PayOrderDto,
   PaymentType,
@@ -45,10 +70,17 @@ import { MovementsService } from '../../cash-registers/movements/movements.servi
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { AutoEntryService } from '../../accounting/auto-entries/auto-entry.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
+import {
+  StockValidatorService,
+  type InsufficientStockItem,
+} from '../../inventory/shared/services/stock-validator.service';
+import { SellableStockAllocator } from '../../inventory/shared/services/sellable-stock-allocator.service';
+import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { OrderEtaService } from '../services/order-eta.service';
 import { KitchenFireService } from '../../kitchen-fire/kitchen-fire.service';
 import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
 import { ShippingTaxService } from '../../shipping/services/shipping-tax.service';
+import { ShippingCalculatorService } from '../../shipping/shipping-calculator.service';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -67,12 +99,34 @@ import {
   type NormalizedLeg,
   type PaymentLegMethodInfo,
 } from '../../payments/utils/payment-legs.util';
+import { PaymentError, LEGACY_TO_NEW } from '../../payments/utils/payment-errors';
+import { PaymentGatewayService } from '../../payments/services/payment-gateway.service';
+import { OrderHistoryService } from '../order-history/order-history.service';
+import type { OrderEventSource } from '../order-history/order-history.types';
+import {
+  prorateWithholdingLines,
+  resolvePaymentReceivedSaleFields,
+  type PaymentReceivedSaleFields,
+} from '../../payments/utils/payment-sale-share.util';
+import type { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
+import { resolvePaymentInvoiceBranch } from '../../accounting/auto-entries/payment-invoice-branch.util';
+import { buildOrderSaleTaxPayload } from '../../payments/utils/order-sale-tax-payload.util';
+import { buildPaymentReceivedEvents } from '../../payments/utils/payment-received-event.util';
+import {
+  WithholdingFlowService,
+  type WithholdingResolution,
+} from '../../withholding-tax/withholding-flow.service';
 
 type OrderState = order_state_enum;
 type DraftReservationKey = {
   productId: number;
   variantId: number | undefined;
   locationId: number;
+  /** Stock units THIS claim added on top of whatever was already reserved
+   * for the order/identity. Bounds `compensateClaimedDraftPayment`'s release
+   * so a failed payment never releases an older reservation on the order
+   * (docs/plans/no-overselling-stock-guard-plan.md step 4). */
+  quantity: number;
 };
 
 type ConsumedLeafDisposition = {
@@ -201,7 +255,75 @@ export class OrderFlowService {
     // manual). En prod siempre resuelve vía `forwardRef(() => OrdersModule)`
     // en `order-flow.module.ts` — mismo patrón que los listeners KDS.
     @Optional() private readonly orderSse?: OrderSseService,
+    // Plan order-truth-and-invoice-tz — Paso 6. Único escritor de
+    // `order_events` (ver `OrderHistoryModule`). `@Optional()` por la misma
+    // razón que el resto de dependencias tardías: no romper las specs
+    // históricas que construyen el servicio a mano con una lista corta de
+    // args. Cuando no resuelve (specs), cada llamada usa `?.record(...)` y
+    // se vuelve un no-op silencioso — nunca lanza y nunca cambia el
+    // resultado del flujo (regla del plan). En prod siempre resuelve vía
+    // `OrderHistoryModule` (ver `order-flow.module.ts`).
+    @Optional() private readonly orderHistoryService?: OrderHistoryService,
+    // docs/plans/no-overselling-stock-guard-plan.md step 4 —
+    // `promoteDraftToCreated`'s strict guard. `@Optional()` + trailing
+    // position for the same reason as the deps above: ~20 positional `new
+    // OrderFlowService(...)` constructions in order-flow.service.spec.ts /
+    // order-flow-forced-state.spec.ts must not break. In prod always
+    // resolves (`orders.module.ts` provides `StockValidatorService`
+    // directly). When undefined (legacy specs), the strict pre-check is a
+    // no-op and `reserveStock`'s own `validate_availability` still enforces
+    // the hard floor per identity.
+    @Optional() private readonly stockValidator?: StockValidatorService,
+    @Optional() private readonly sellableStockAllocator?: SellableStockAllocator,
+    // Plan PLAN-pago-multimetodo-fixes paso 1 — objetivo 4: `createLegPayments`
+    // valida `bank_account_id` con el mismo gateway que usa el POS
+    // (`payments.service.ts:5275/5544`) antes de persistir el tramo.
+    // `forwardRef` porque `PaymentsModule` ya declara `forwardRef(() =>
+    // OrderFlowModule)` (payments.module.ts) — ciclo existente, mismo patrón
+    // que `RefundFlowService.paymentGatewayService`
+    // (order-flow/services/refund-flow.service.ts:149). `@Optional()` +
+    // posición final por la misma razón que el resto de dependencias
+    // tardías: no romper las ~20 construcciones posicionales de los specs
+    // históricos. Sin resolver (specs), un tramo con `bank_account_id`
+    // rechaza fail-closed en vez de confiar en el id crudo del navegador.
+    @Optional()
+    @Inject(forwardRef(() => PaymentGatewayService))
+    private readonly paymentGatewayService?: PaymentGatewayService,
+    // Paso 4 (unificación del cálculo de envío —
+    // `vendix-shipping-distance-pricing`) — `shipOrder` cotiza la tarifa con
+    // el mismo cálculo único que orders/payments (umbral de envío gratis,
+    // costo por unidad/peso y distancia) en vez del atajo
+    // `chargeForRate(base_cost)`, que los ignoraba todos. `@Optional()` +
+    // posición final por la misma razón que el resto de dependencias
+    // tardías: no romper las ~20 construcciones posicionales de los specs
+    // históricos. Sin resolver (specs, o tarifa fuera de las opciones
+    // calculadas) `shipOrder` cae al atajo histórico.
+    @Optional() private readonly shippingCalculatorService?: ShippingCalculatorService,
+    // Plan PLAN-pago-multimetodo-pendientes paso 2 — `payment.received` para
+    // cobros directos de `payOrder`/`confirmPayment` reconoce retención
+    // sufrida igual que el POS (`payments.service.ts`).
+    // `@Optional()` + posición final por la misma razón que el resto de
+    // dependencias tardías: no romper las ~20 construcciones posicionales de
+    // los specs históricos. Sin resolver, `emitLegPaymentReceivedEvents`
+    // degrada a retención vacía (`logger.warn`), nunca falla el cobro.
+    @Optional() private readonly withholdingFlow?: WithholdingFlowService,
   ) {}
+
+  /**
+   * Plan order-truth-and-invoice-tz — mapea el `opts.source` interno de
+   * `updateOrderState` (string libre, usado también para el payload del
+   * evento `order.status_changed`) al `OrderEventSource` cerrado de
+   * `order_events`. Los callers HTTP no pasan `source` — `record` ya
+   * resuelve 'http'/'system' por su cuenta a partir del contexto de
+   * petición. Los que sí lo pasan son puentes no-HTTP: el bridge KDS
+   * (`kitchen_bridge`) y el job de auto-finalización (`job`).
+   */
+  private mapUpdateStateSource(source?: string): OrderEventSource | undefined {
+    if (source === 'kitchen_bridge' || source === 'listener') return 'listener';
+    if (source === 'job') return 'job';
+    if (source === 'webhook') return 'webhook';
+    return undefined;
+  }
 
   /** The fire transaction is the source of truth; never restock the sold dish. */
   private async disposeConsumedPreparedLeaves(
@@ -381,11 +503,6 @@ export class OrderFlowService {
     return locked;
   }
 
-  private assertCancellationAllowed(order: Parameters<typeof getCancellationBlocker>[0]): void {
-    const blocker = getCancellationBlocker(order);
-    if (blocker) throw new VendixHttpException(ErrorCodes[blocker]);
-  }
-
   private async assertNoOpenTableForDraft(
     order: { id: number; store_id: number; state: order_state_enum },
     client: Prisma.TransactionClient | StorePrismaService = this.prisma,
@@ -509,7 +626,14 @@ export class OrderFlowService {
     orderId: number,
     newState: OrderState,
     metadata: Record<string, any> = {},
-    opts?: { source?: string; deliveredReversalOwner?: 'forced' },
+    opts?: {
+      source?: string;
+      deliveredReversalOwner?: 'forced';
+      /** `payOrder` pre-claims the row into `processing` before this write;
+       * the history must show the state the user actually saw (the
+       * pre-claim one), not the transient claim. */
+      historyFromState?: OrderState | null;
+    },
   ) {
     // Filter out non-schema fields and store them in internal_notes as JSON metadata
     const schemaFields: Record<string, any> = {
@@ -573,8 +697,15 @@ export class OrderFlowService {
 
     const previous_order = await this.prisma.orders.findUnique({
       where: { id: orderId },
-      select: { state: true, store_id: true, order_number: true },
+      select: {
+        state: true,
+        store_id: true,
+        order_number: true,
+        stores: { select: { organization_id: true } },
+      },
     });
+    const previousOrganizationId = previous_order?.stores?.organization_id ?? null;
+    const historySource = this.mapUpdateStateSource(opts?.source);
 
     if (
       previous_order?.state === 'delivered' &&
@@ -585,27 +716,48 @@ export class OrderFlowService {
       throw new VendixHttpException(ErrorCodes.ORD_DELIVERED_REVERSAL_OWNER_001);
     }
 
-    // `finished` is the only state that mutates inventory. Route the stock
-    // deduction through the canonical OrderStockCommitService and make the
-    // commit + state write ATOMIC: the deduction runs FIRST inside the same
-    // $transaction, so if it throws (INV_STOCK_002 / SERIAL_REQUIRED_001) the
-    // state write is rolled back and the order stays in its previous state.
-    // All the skip rules (service / !track_inventory / consumed-at-fire /
-    // already-committed / restaurant-prepared-pending-fire) live inside the
-    // canonical service — they are NOT replicated here. Side-effect events are
-    // emitted only AFTER the transaction commits (never on rollback).
-    if (newState === 'finished') {
+    // `finished` AND `delivered` mutate inventory (docs/plans/
+    // no-overselling-stock-guard-plan.md step 5: consume on delivery, not
+    // only on finish — `deliverOrder`, `markKitchenOrderDelivered` and
+    // `forceOrderState('delivered')` all funnel through this method). Route
+    // the stock deduction through the canonical OrderStockCommitService and
+    // make the commit + state write ATOMIC: the deduction runs FIRST inside
+    // the same $transaction, so if it throws (INV_STOCK_002 /
+    // SERIAL_REQUIRED_001) the state write is rolled back and the order
+    // stays in its previous state. All the skip rules (service /
+    // !track_inventory / consumed-at-fire / already-committed /
+    // restaurant-prepared-pending-fire) live inside the canonical service —
+    // they are NOT replicated here. `commitOrderDelivery`'s per-item
+    // `inventory_committed` claim makes running it again from `finished`
+    // (after an order already committed at `delivered`) an idempotent no-op:
+    // no double deduction. Side-effect events are emitted only AFTER the
+    // transaction commits (never on rollback).
+    if (newState === 'finished' || newState === 'delivered') {
       const stockEvents: Array<() => void> = [];
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive to
+      // the response, only when the store's "Permitir sobreventa" switch
+      // accepted a real shortfall during this commit.
+      const stockWarnings: InsufficientStockItem[] = [];
       try {
         const { updated_order, commit } = await this.prisma.$transaction(
           async (tx) => {
+            const inventoryPolicy = await this.stockValidator?.resolveInventoryPolicy(
+              previous_order?.store_id as number,
+              tx,
+            );
+            const allowOversell = inventoryPolicy?.allowOversell === true;
             const commit = await this.orderStockCommit.commitOrderDelivery(
               orderId,
               {
                 movementType: 'sale',
-                blockOnInsufficient: true,
+                blockOnInsufficient: !allowOversell,
+                allowNegativeOnShortfall: allowOversell,
+                onShortfall: allowOversell
+                  ? (item) => stockWarnings.push({ ...item, kind: 'product' })
+                  : undefined,
                 consumeSerials: true,
-                reason: 'Order completed',
+                reason:
+                  newState === 'finished' ? 'Order completed' : 'Order delivered',
                 afterCommit: stockEvents,
                 userId: RequestContextService.getUserId(),
               },
@@ -629,6 +781,17 @@ export class OrderFlowService {
                 },
                 payments: true,
               },
+            });
+
+            await this.orderHistoryService?.record(tx, {
+              orderId,
+              storeId: updated_order.store_id,
+              organizationId:
+                updated_order.stores?.organization_id ?? previousOrganizationId,
+              type: 'state_changed',
+              fromState: opts?.historyFromState ?? previous_order?.state,
+              toState: newState,
+              source: historySource,
             });
 
             return { updated_order, commit };
@@ -664,7 +827,9 @@ export class OrderFlowService {
           });
         }
 
-        return updated_order;
+        return stockWarnings.length > 0
+          ? { ...updated_order, stock_warnings: stockWarnings }
+          : updated_order;
       } catch (error) {
         // The commit failed → the state write was rolled back with it, so the
         // order is still in its previous state. Business rules
@@ -676,7 +841,7 @@ export class OrderFlowService {
           throw error;
         }
         this.logger.error(
-          `Failed to finish order #${orderId}: ${error.message}`,
+          `Failed to ${newState === 'finished' ? 'finish' : 'deliver'} order #${orderId}: ${error.message}`,
         );
         throw error;
       }
@@ -691,6 +856,16 @@ export class OrderFlowService {
         order_items: { include: { products: true, product_variants: true } },
         payments: true,
       },
+    });
+
+    await this.orderHistoryService?.record(this.prisma, {
+      orderId,
+      storeId: updated_order.store_id,
+      organizationId: previousOrganizationId,
+      type: 'state_changed',
+      fromState: opts?.historyFromState ?? previous_order?.state,
+      toState: newState,
+      source: historySource,
     });
 
     this.eventEmitter.emit('order.status_changed', {
@@ -770,6 +945,7 @@ export class OrderFlowService {
         const order = await tx.orders.findFirst({
           where: { id: orderId, store_id: storeId },
           include: {
+            stores: { select: { industries: true } },
             order_items: {
               include: {
                 products: {
@@ -780,7 +956,9 @@ export class OrderFlowService {
                     product_type: true,
                   },
                 },
-                product_variants: { select: { id: true } },
+                product_variants: {
+                  select: { id: true, name: true, track_inventory_override: true },
+                },
               },
             },
           },
@@ -791,68 +969,177 @@ export class OrderFlowService {
         }
 
         const userId = RequestContextService.getUserId();
+        const isRestaurant = storeIsRestaurant((order as any).stores?.industries);
 
         // 3) Reserve stock. The lock is held for the entire loop.
+        //
+        // docs/plans/no-overselling-stock-guard-plan.md step 4 (reverses
+        // QUI-557): the previous dedup only checked whether ANY active
+        // reservation existed for (order, product, variant) — when two
+        // sibling lines shared the same product/variant, the first line's
+        // check found nothing and reserved its quantity; the second line's
+        // check then found the FIRST line's row and skipped its OWN quantity
+        // entirely, silently under-reserving the order. Fix: aggregate
+        // demand per (product_id, product_variant_id) across every sibling
+        // line, subtract what is ALREADY actively reserved for this order
+        // under that identity, and reserve only the resulting DIFFERENCE.
+        //
+        // Kitchen dishes (`isRestaurant && product_type==='prepared' &&
+        // !skip_kds`) are excluded: their ingredients are validated/consumed
+        // at fire by kitchen-fire.service.ts, never by their own
+        // finished-good stock. Lines already `inventory_consumed_at_fire`
+        // are excluded too — their stock was already deducted, not reserved.
+        type ReservationGroup = {
+          product_id: number;
+          product_variant_id: number | undefined;
+          demand: number; // total stock units this order needs reserved
+          product_name: string;
+        };
+        const groups = new Map<string, ReservationGroup>();
+
         for (const item of order.order_items) {
-          if (
-            !item.products?.track_inventory ||
-            item.products?.product_type === 'service'
-          ) {
-            continue;
-          }
+          const product = item.products;
+          if (!product || product.product_type === 'service') continue;
 
-          const skip = item.inventory_consumed_at_fire === true;
+          const effectiveTracking =
+            item.product_variants?.track_inventory_override ??
+            product.track_inventory ??
+            false;
+          if (!effectiveTracking) continue;
 
-          const location_id =
-            await this.stockLevelManager.getDefaultLocationForProduct(
-              item.product_id,
-              item.product_variant_id || undefined,
-            );
+          if (item.inventory_consumed_at_fire === true) continue;
 
-          // Anti-duplicate: skip if an active reservation for this order+item
-          // already exists (e.g. a previous promote attempt that committed the
-          // reservations but failed before the state change).
-          const existing = await tx.stock_reservations.findFirst({
-            where: {
-              reserved_for_type: 'order',
-              reserved_for_id: orderId,
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id ?? null,
-              status: 'active',
-            },
-            select: { id: true },
-          });
+          const isKitchenDish =
+            isRestaurant && product.product_type === 'prepared' && !item.skip_kds;
+          if (isKitchenDish) continue;
+
+          const variantId = item.product_variant_id ?? undefined;
+          const key = `${item.product_id}-${variantId ?? 'null'}`;
+          const qty = item.stock_units_consumed ?? item.quantity;
+          const productName = item.product_variants?.name
+            ? `${product.name} - ${item.product_variants.name}`
+            : product.name;
+
+          const existing = groups.get(key);
           if (existing) {
-            continue;
-          }
-
-          await this.stockLevelManager.reserveStock(
-            item.product_id,
-            item.product_variant_id || undefined,
-            location_id,
-            item.quantity,
-            'order',
-            orderId,
-            userId,
-            false, // validate_availability: NEVER block a payment on stock
-            tx,
-            undefined, // expires_at
-            skip, // skip_reservation: already consumed at fire
-            undefined, // stock_units_consumed
-            // QUI-557: cobrar nunca se bloquea por stock, así que este flujo
-            // autoriza el disponible negativo de forma explícita. El piso duro
-            // de `reserveStock` sigue protegiendo a los demás callers.
-            true,
-          );
-          // reserveStock returns void and skip_reservation creates no row.
-          // Track only identities first reserved by THIS draft claim so a
-          // failed payment cannot release an older reservation on the order.
-          if (!skip) {
-            createdInTransaction.push({
-              productId: item.product_id,
-              variantId: item.product_variant_id || undefined,
-              locationId: location_id,
+            existing.demand += qty;
+          } else {
+            groups.set(key, {
+              product_id: item.product_id,
+              product_variant_id: variantId,
+              demand: qty,
+              product_name: productName,
             });
+          }
+        }
+
+        if (groups.size > 0) {
+          // Strict guard (reverses QUI-557): a draft/table order is only
+          // payable when the order's TOTAL demand per identity is covered by
+          // sellable stock plus its own already-reserved quantity. Throws
+          // `INV_STOCK_INSUFFICIENT_LINES` naming every short product in one
+          // shot — must run BEFORE any reservation write in this loop and
+          // BEFORE `payOrder` writes a payment row (the caller's try/catch
+          // around this call wraps and rethrows as a typed 409 without
+          // inserting anything).
+          // docs/plans/no-overselling-stock-guard-plan.md step 9 — a store
+          // with "Permitir sobreventa" active does not block this claim on a
+          // shortfall; it logs a warning and reserves the full demand anyway
+          // (allow_negative_available), same contract as the other seams.
+          const inventoryPolicy = await this.stockValidator?.resolveInventoryPolicy(
+            storeId,
+            tx,
+          );
+          const allowOversell = inventoryPolicy?.allowOversell === true;
+          await this.stockValidator?.assertLinesAvailable(
+            Array.from(groups.values()).map((g) => ({
+              product_id: g.product_id,
+              product_variant_id: g.product_variant_id ?? null,
+              quantity: g.demand,
+              product_name: g.product_name,
+            })),
+            { orderId, tx, allowOversell },
+          );
+
+          for (const group of groups.values()) {
+            const alreadyReserved = await tx.stock_reservations.aggregate({
+              where: {
+                reserved_for_type: 'order',
+                reserved_for_id: orderId,
+                product_id: group.product_id,
+                product_variant_id: group.product_variant_id ?? null,
+                status: 'active',
+              },
+              _sum: { quantity: true },
+            });
+            const toReserve =
+              group.demand - Number(alreadyReserved?._sum?.quantity ?? 0);
+            if (toReserve <= 0) continue;
+
+            const allocation = await this.sellableStockAllocator?.allocateForLine(
+              storeId, group.product_id, group.product_variant_id,
+              toReserve, [], tx,
+            );
+            if (allocation && allocation.shortfall > 0 && !allowOversell) {
+              throw new VendixHttpException(
+                ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+                `Stock insuficiente para ${group.product_name}: requiere ${toReserve}, disponible ${allocation.available}.`,
+                { items: [{
+                  product_id: group.product_id,
+                  product_variant_id: group.product_variant_id ?? null,
+                  product_name: group.product_name,
+                  kind: 'product',
+                  requested: toReserve,
+                  available: allocation.available,
+                }] },
+              );
+            }
+            if (allocation && allocation.shortfall > 0 && allowOversell) {
+              this.logger.warn(
+                `Sobreventa permitida — ${group.product_name}: requiere ${toReserve}, disponible ${allocation.available}.`,
+              );
+            }
+            // Legacy direct-construction specs do not inject the allocator;
+            // Nest production always resolves it from OrderStockCommitModule.
+            const slices = allocation
+              ? (allocation.shortfall > 0 && allowOversell
+                  ? this.sellableStockAllocator!.absorbShortfall(
+                      allocation,
+                      allocation.slices[0]?.location_id ??
+                        (await this.stockLevelManager.getDefaultLocationForProduct(
+                          group.product_id, group.product_variant_id, tx,
+                        )),
+                    )
+                  : allocation.slices)
+              : [{
+                  location_id: await this.stockLevelManager.getDefaultLocationForProduct(
+                    group.product_id, group.product_variant_id,
+                  ),
+                  quantity: toReserve,
+                }];
+            for (const slice of slices) {
+              await this.stockLevelManager.reserveStock(
+                group.product_id,
+                group.product_variant_id,
+                slice.location_id,
+                slice.quantity,
+                'order',
+                orderId,
+                userId,
+                !allowOversell,
+                tx,
+                undefined,
+                false,
+                undefined, // quantity already expressed in stock units
+                allowOversell,
+              );
+              createdInTransaction.push({
+                productId: group.product_id,
+                variantId: group.product_variant_id,
+                locationId: slice.location_id,
+                quantity: slice.quantity,
+              });
+            }
           }
         }
 
@@ -903,14 +1190,26 @@ export class OrderFlowService {
    * - Direct payment: goes to finished
    * - Online payment: goes to pending_payment
    *
-   * Round 1 MAJOR #11: cada rechazo de negocio (estado ilegal, método
-   * desconocido, monto recibido menor, falta de stock del finish, cocina
+   * Round 1 MAJOR #11: cada rechazo de negocio por CONFLICTO DE ESTADO
+   * (estado ilegal, método desconocido, falta de stock del finish, cocina
    * pendiente, etc.) se traduce a `ORD_FLOW_PAYMENT_FAILED_001` con el
    * código tipado original en `details.cause_code`. El cliente ve un
    * 409 con un único código de superficie (`ORD_FLOW_PAYMENT_FAILED_001`)
    * y el `cause_code` lo mapea a la causa real para soporte y la UI.
+   *
+   * PLAN-pago-multimetodo-pendientes paso 3: esto NO aplica a un rechazo de
+   * VALIDACIÓN de payload (Σ de tramos ≠ total, método no directo, más de
+   * un tramo en efectivo, monto recibido menor al tramo en efectivo, cuenta
+   * bancaria inválida/ajena) — esos ya vienen tipados de
+   * `normalizePaymentLegs`/`resolveAndValidateBankAccount` y se relanzan tal
+   * cual: 400 con su propio `error_code` (`PAY_MULTI_TENDER_*`,
+   * `PAY_INVALID_AMOUNT_001`, `PAY_VALIDATE_001`), nunca el 409 genérico.
    */
-  async payOrder(orderId: number, dto: PayOrderDto) {
+  async payOrder(
+    orderId: number,
+    dto: PayOrderDto,
+    options?: { strictKitchenPending?: boolean },
+  ) {
     // A.2 CP-facturacion-fixes — charge-time shipping gate (ADR-02). Creation stays
     // open (whatsapp/assisted orders choose the method later), but a physical order
     // that needs dispatch cannot be CHARGED without a shipping method: assign it
@@ -978,12 +1277,58 @@ export class OrderFlowService {
     // en vez de quedar varada en `processing`. El pago compensado con su
     // motivo se conserva.
     const preClaimRow = await this.prisma.orders
-      .findFirst({ where: { id: orderId }, select: { state: true } });
+      .findFirst({ where: { id: orderId }, select: { state: true, payment_form: true } });
     const preClaimState = (preClaimRow?.state as OrderState | undefined) ?? null;
+    // B8/B4 — `delivered`/`finished` sólo son cobrables SIN pago liquidado
+    // (COD huérfana o pago anulado por `cancelPayment`). Una orden ya pagada
+    // en esos estados conserva el contrato previo: 409 tipado sin tocar el
+    // estado (doble submit, reintentos de red).
+    if (preClaimState === 'delivered' || preClaimState === 'finished') {
+      // Guardia de crédito — ANTES del claim de estado (que mueve la orden a
+      // `processing`): una venta a crédito (`payment_form === '2'`, ver
+      // `registerCreditPayment`) que ya salió/terminó no puede cobrarse de
+      // contado por este método. Hacerlo dejaría la CxC/cuotas de crédito
+      // abiertas mientras la orden queda marcada como pagada de contado. NO
+      // se toca `pending_payment` (comportamiento preexistente, fuera de
+      // alcance): esta guardia sólo aplica a `delivered`/`finished`.
+      if (preClaimRow?.payment_form === '2') {
+        throw new VendixHttpException(ErrorCodes.ORD_PAY_CREDIT_ORDER_001, undefined, {
+          order_id: orderId,
+          state: preClaimState,
+        });
+      }
+      const settledCount = await this.prisma.payments.count({
+        where: { order_id: orderId, state: { in: ['succeeded', 'captured'] } },
+      });
+      if (settledCount > 0) {
+        throw this.wrapPaymentFailure('state_not_payable', {
+          message: `Cannot pay order in state '${preClaimState}': it already has a settled payment.`,
+          state: preClaimState,
+          reason: 'already_settled',
+        });
+      }
+    }
+    // B8/B4 — `delivered`/`finished` also claimable: an ecommerce COD order
+    // can reach `delivered`/`finished` with its balance still outstanding
+    // (see checkout.service.ts ON_DELIVERY fix), and `cancelPayment` can send
+    // a fully-delivered order back through here to be re-charged after
+    // voiding its legs. The `isOrderFullyPaid` guard right after the claim
+    // (below) is what actually rejects a double-charge on an order that is
+    // ALREADY settled — widening this list only makes the row claimable; it
+    // does not by itself let an already-paid order be charged again.
     const claim = await this.prisma.orders.updateMany({
       where: {
         id: orderId,
-        state: { in: ['draft', 'created', 'shipped', 'pending_payment'] },
+        state: {
+          in: [
+            'draft',
+            'created',
+            'shipped',
+            'pending_payment',
+            'delivered',
+            'finished',
+          ],
+        },
       },
       data: { state: 'processing', updated_at: new Date() },
     });
@@ -1308,11 +1653,21 @@ export class OrderFlowService {
     // online crea un pago `pending` y admite pasarela, así que no normaliza.
     // El escalar reutiliza el `paymentMethod` ya cargado (sin `findMany`
     // extra); con `payments[]` los métodos se cargan por `id IN (...)` bajo
-    // el scope de tienda. Los errores del normalizador se envuelven para
-    // preservar la superficie histórica `ORD_FLOW_PAYMENT_FAILED_001` con el
-    // código tipado en `cause_code` (contrato que ve la app móvil).
+    // el scope de tienda. PLAN-pago-multimetodo-pendientes paso 3 — el
+    // contrato de la app móvil distingue las dos superficies: un payload
+    // inválido (montos, método no permitido, Σ≠total) es un rechazo de
+    // VALIDACIÓN y sale como 400 con su propio `error_code`
+    // (`PAY_MULTI_TENDER_*`/`PAY_INVALID_AMOUNT_001`), tal cual lo tipa el
+    // normalizador — ya NO se envuelve. Sólo un conflicto de ESTADO del
+    // flujo (orden no cobrable, cocina pendiente, finish bloqueado, etc.)
+    // sigue siendo 409 `ORD_FLOW_PAYMENT_FAILED_001` con la causa tipada en
+    // `details.cause_code`.
+    const isPreClaimDeliveredOrFinished =
+      preClaimState === 'delivered' || preClaimState === 'finished';
     const isImmediateCharge =
-      preClaimState === 'shipped' || dto.payment_type === PaymentType.DIRECT;
+      preClaimState === 'shipped' ||
+      isPreClaimDeliveredOrFinished ||
+      dto.payment_type === PaymentType.DIRECT;
     let legs: NormalizedLeg[] = [];
     let change = 0;
     let legMethodTypes: Record<number, string> = {};
@@ -1333,6 +1688,20 @@ export class OrderFlowService {
             type: row?.system_payment_method?.type ?? '',
             processing_mode:
               row?.system_payment_method?.processing_mode ?? null,
+            // Plan PLAN-pago-multimetodo-fixes paso 2 — mismo fallback que
+            // ya usa la respuesta del POS (payments.service.ts ~2088):
+            // nombre visible de la tienda, luego el del sistema, nunca vacío.
+            display_name:
+              (row as any)?.display_name ||
+              row?.system_payment_method?.display_name ||
+              'Unknown',
+            // PR #858 hallazgo 1 — etiqueta CONTABLE, separada de la de UI:
+            // `payment.received` la lleva como `payment_method` y
+            // `resolveCashBankKey` elige Caja/Bancos con ella. Un efectivo
+            // que la tienda renombró «Caja» no debe caer en Bancos. Misma
+            // fuente que el POS (`payments.service.ts` ~1880).
+            accounting_method:
+              row?.system_payment_method?.display_name || 'Unknown',
           };
         }
       } else {
@@ -1341,6 +1710,12 @@ export class OrderFlowService {
             type: paymentMethod.system_payment_method?.type ?? '',
             processing_mode:
               paymentMethod.system_payment_method?.processing_mode ?? null,
+            display_name:
+              (paymentMethod as any)?.display_name ||
+              paymentMethod.system_payment_method?.display_name ||
+              'Unknown',
+            accounting_method:
+              paymentMethod.system_payment_method?.display_name || 'Unknown',
           },
         };
       }
@@ -1356,6 +1731,18 @@ export class OrderFlowService {
         legs = normalized.legs;
         change = normalized.change;
       } catch (err) {
+        // PLAN-pago-multimetodo-pendientes paso 3 — el normalizador ya tipa
+        // el rechazo (`PAY_MULTI_TENDER_SUM_MISMATCH`,
+        // `PAY_MULTI_TENDER_METHOD_NOT_ALLOWED`,
+        // `PAY_MULTI_TENDER_MULTIPLE_CASH`, `PAY_INVALID_AMOUNT_001`, …): es
+        // un rechazo de VALIDACIÓN de payload, no un conflicto de estado del
+        // flujo. Se relanza tal cual SIN envolver para que la superficie sea
+        // 400 con su propio `error_code` — mismo criterio que la guarda
+        // `payment_type: 'online' + payments[]` de arriba (~:1537). Sólo un
+        // error no tipado (infra) cae al 409 genérico de `wrapPaymentFailure`.
+        if (err instanceof VendixHttpException) {
+          throw err;
+        }
         throw this.wrapPaymentFailure('multi_tender_legs', err as Error);
       }
     }
@@ -1370,12 +1757,13 @@ export class OrderFlowService {
         order.currency,
         legs,
         change,
+        { storeId: order.store_id, organizationId: order.stores?.organization_id },
       );
       paymentPersisted = true;
 
       // The claim temporarily moved shipped -> processing. Restore its
       // logistics state and persist the settled balance with the payment.
-      await this.updateOrderState(orderId, 'shipped', settledBalanceMetadata);
+      await this.updateOrderState(orderId, 'shipped', settledBalanceMetadata, { historyFromState: preClaimState });
 
       // Round 1 MAJOR #13 — cupón en `flow/pay` (shipped):
       // si la orden trae `coupon_id` y no existe `coupon_uses` aún,
@@ -1407,11 +1795,181 @@ export class OrderFlowService {
       // Compute and persist ETA
       await this.computeAndPersistEta(orderId, new Date());
 
+      // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received` por
+      // tramo, SÓLO en el camino de éxito (el `updateOrderState` de arriba ya
+      // terminó bien).
+      await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
+
       // Contra entrega de una orden POS: el pago de este cobro la deja saldada.
       await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.shipped');
       // La proyección a mesa es first-wins e idempotente (`markSessionPaid`
       // reclama con `paid_at IS NULL`): un solo llamado con el primer tramo
       // basta y conserva el comportamiento escalar.
+      await this.projectPaidOrderToTable(orderId, legPayments[0].payment.id);
+
+      return {
+        order: updatedOrder,
+        ...this.buildLeggedPaymentResponse(legPayments, change),
+      };
+    }
+
+    // B1b (order-truth-and-invoice-tz plan) — `delivered` orders settle
+    // money ONLY. The goods already left; finishing (stock commit,
+    // `order.completed`, the POS invoice) is a SEPARATE, explicit action
+    // (`confirm_delivery`/`finishOrder`), not a side effect of collecting a
+    // payment. Mirrors the `shipped` branch above (register the legs without
+    // driving the state machine through `validateTransition`) but, unlike
+    // `shipped`, deliberately does NOT call `emitPosSaleCompletedIfFullyPaid`
+    // here — invoicing a `delivered` payment now would emit before the sale
+    // is actually closed; the finalize step is what has to trigger it.
+    if (preClaimState === 'delivered') {
+      const legPayments = await this.createLegPayments(
+        orderId,
+        order.currency,
+        legs,
+        change,
+        { storeId: order.store_id, organizationId: order.stores?.organization_id },
+      );
+      paymentPersisted = true;
+
+      await this.commitCouponUseForOrder(orderId);
+
+      let updatedOrder;
+      try {
+        updatedOrder = await this.updateOrderState(orderId, 'delivered', {
+          paid_at: new Date(),
+          ...settledBalanceMetadata,
+        }, { historyFromState: preClaimState });
+      } catch (e) {
+        // Same contract as every other branch: a state-write failure after
+        // the legs were created compensates instead of leaving them orphaned.
+        await this.cancelLegPayments(legPayments, 'finish_blocked');
+        paymentCompensated = true;
+        await this.restorePreClaimState(orderId, preClaimState);
+        throw this.wrapPaymentFailure(
+          'finish_blocked',
+          { order_id: orderId },
+          (e as any)?.errorCode ?? 'n/a',
+        );
+      }
+
+      // Void the COD pending marker(s) so they never count as a second,
+      // parallel settlement of the same order (analytics/cash-register
+      // dedupe by `payments.state`, not by count).
+      const pendingMarkerPayments = (order.payments ?? []).filter(
+        (p: any) => p.state === 'pending',
+      );
+      if (pendingMarkerPayments.length > 0) {
+        await this.prisma.payments.updateMany({
+          where: { id: { in: pendingMarkerPayments.map((p: any) => p.id) } },
+          data: { state: 'cancelled', updated_at: new Date() },
+        });
+      }
+
+      this.logger.log(
+        `Order #${orderId} payment registered while delivered (settled, awaiting finalize)`,
+      );
+
+      // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received` por
+      // tramo, SÓLO en el camino de éxito (el `updateOrderState` de arriba ya
+      // terminó bien). A diferencia de `shipped`/`finished`, esta rama no
+      // llama a `emitPosSaleCompletedIfFullyPaid` (la venta aún no se cierra
+      // aquí), pero el pago SÍ existe y debe reconocer su caja/banco.
+      await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
+
+      for (const { payment, leg } of legPayments) {
+        this.recordPayOrderCashMovement(
+          order.store_id,
+          orderId,
+          leg.amount,
+          legMethodTypes[leg.store_payment_method_id] ?? '',
+          payment.id,
+        ).catch(() => {});
+      }
+
+      await this.projectPaidOrderToTable(orderId, legPayments[0].payment.id);
+
+      return {
+        order: updatedOrder,
+        ...this.buildLeggedPaymentResponse(legPayments, change),
+      };
+    }
+
+    // B8/B4 — `finished` orders without a succeeded payment: an ecommerce
+    // COD order whose `payment.pending` marker never got replaced (checkout
+    // persisted `remaining_balance = grand_total`, see checkout.service.ts
+    // ON_DELIVERY fix). `isOrderFullyPaid` above already rejected any order
+    // that is genuinely settled, so reaching here means this charge is
+    // legitimate. Unchanged by B1b: a `finished` order that receives its
+    // orphaned payment simply keeps its state.
+    if (preClaimState === 'finished') {
+      const legPayments = await this.createLegPayments(
+        orderId,
+        order.currency,
+        legs,
+        change,
+        { storeId: order.store_id, organizationId: order.stores?.organization_id },
+      );
+      paymentPersisted = true;
+
+      await this.commitCouponUseForOrder(orderId);
+
+      let updatedOrder;
+      try {
+        updatedOrder = await this.updateOrderState(orderId, 'finished', {
+          paid_at: new Date(),
+          finished_at: new Date(),
+          ...settledBalanceMetadata,
+        }, { historyFromState: preClaimState });
+      } catch (e) {
+        // Mismo contrato que el cobro directo: el finish falló tras crear los
+        // tramos → se compensan y la orden vuelve a su estado previo.
+        await this.cancelLegPayments(legPayments, 'finish_blocked');
+        paymentCompensated = true;
+        await this.restorePreClaimState(orderId, preClaimState);
+        throw this.wrapPaymentFailure(
+          'finish_blocked',
+          { order_id: orderId },
+          (e as any)?.errorCode ?? 'n/a',
+        );
+      }
+
+      // Void the COD pending marker(s) so they never count as a second,
+      // parallel settlement of the same order (analytics/cash-register
+      // dedupe by `payments.state`, not by count).
+      const pendingMarkerPayments = (order.payments ?? []).filter(
+        (p: any) => p.state === 'pending',
+      );
+      if (pendingMarkerPayments.length > 0) {
+        await this.prisma.payments.updateMany({
+          where: { id: { in: pendingMarkerPayments.map((p: any) => p.id) } },
+          data: { state: 'cancelled', updated_at: new Date() },
+        });
+      }
+
+      this.logger.log(
+        `Order #${orderId} payment registered while finished (orphaned/COD) -> finished`,
+      );
+
+      for (const { payment, leg } of legPayments) {
+        this.recordPayOrderCashMovement(
+          order.store_id,
+          orderId,
+          leg.amount,
+          legMethodTypes[leg.store_payment_method_id] ?? '',
+          payment.id,
+        ).catch(() => {});
+      }
+
+      // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received` por
+      // tramo, SÓLO en el camino de éxito (el `updateOrderState` de arriba ya
+      // terminó bien).
+      await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
+
+      await this.emitPosSaleCompletedIfFullyPaid(
+        orderId,
+        `pay_order.${preClaimState}`,
+      );
       await this.projectPaidOrderToTable(orderId, legPayments[0].payment.id);
 
       return {
@@ -1430,6 +1988,7 @@ export class OrderFlowService {
         order.currency,
         legs,
         change,
+        { storeId: order.store_id, organizationId: order.stores?.organization_id },
       );
       paymentPersisted = true;
 
@@ -1452,6 +2011,7 @@ export class OrderFlowService {
             paid_at: new Date(),
             ...settledBalanceMetadata,
           },
+          { historyFromState: preClaimState },
         );
 
         this.logger.log(
@@ -1472,6 +2032,10 @@ export class OrderFlowService {
         // Compute and persist ETA
         await this.computeAndPersistEta(orderId, new Date());
 
+        // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received`
+        // por tramo, SÓLO en el camino de éxito.
+        await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
+
         await this.emitPosSaleCompletedIfFullyPaid(
           orderId,
           'pay_order.processing',
@@ -1484,31 +2048,89 @@ export class OrderFlowService {
         };
       }
 
-      // F2-guard (fast-track "other vía"): a direct payment normally finishes
-      // a direct_delivery/other order in one shot. `fastTrackOrder` reaches
-      // `finished` through THIS branch (not via `confirmDelivery`), so the
-      // guard must live here too. It is still an explicit operator action, so
-      // we THROW — consistent with the manual `confirmDelivery` path. The
-      // payment row was already created above; the caller surfaces the 422 and
-      // the operator finishes once the kitchen delivers.
+      // F2-guard (fast-track "other vía"): a direct_delivery/other order
+      // whose kitchen has not handed off every fired item cannot go
+      // straight to `finished` from this branch. B13: from the normal
+      // "pagar" call (order detail / `/flow/pay`), that used to CANCEL the
+      // just-created payment and fail the whole charge — the cashier saw a
+      // rejected sale for a plate that was already in the kitchen. The
+      // fixed behavior keeps the payment and lands the order in
+      // `processing` (paid, pending delivery), same shape as the
+      // `requiresFulfillment` branch above; the kitchen keeps owning
+      // delivery through the normal `deliverOrderItem`/`confirmDelivery`
+      // path once it hands the items off.
+      //
+      // `fastTrackOrder` reaches this same branch (not via
+      // `confirmDelivery`) and its one-shot state machine (pay → ship →
+      // deliver → finish, see ~5410) DOES depend on the previous
+      // throw-and-abort: without it, a `processing` order with kitchen
+      // items still pending would fall into fastTrackOrder's
+      // `current.state === 'processing'` step and get auto-`shipOrder`'d
+      // and auto-delivered, bypassing the kitchen entirely (the exact
+      // double-discount/bypass risk B13 is fixing, just moved one level
+      // up). So `fastTrackOrder` opts into the OLD strict behavior via
+      // `options.strictKitchenPending`, preserving its existing contract;
+      // only the direct "pagar" call gets the new lenient one.
       if (await this.hasPendingKitchenItems(orderId)) {
-        // Los pagos `succeeded` ya están creados arriba. Los cancelamos TODOS
-        // con el mismo motivo para mantener la regla "un payment por intento
-        // de cobro" y propagamos como `ORD_FLOW_PAYMENT_FAILED_001` con el
-        // código tipado original como causa.
-        await this.cancelLegPayments(legPayments, 'kitchen_items_pending');
-        paymentCompensated = true;
-        // El claim del inicio ya movió la orden a `processing`. Sin restaurar,
-        // queda varada en `processing` con el pago anulado: ni cobrable (el
-        // claim sólo acepta draft/created/shipped/pending_payment) ni cerrable.
-        if (preClaimState !== 'draft') {
-          await this.restorePreClaimState(orderId, preClaimState);
+        if (options?.strictKitchenPending) {
+          // Los pagos `succeeded` ya están creados arriba. Los cancelamos TODOS
+          // con el mismo motivo para mantener la regla "un payment por intento
+          // de cobro" y propagamos como `ORD_FLOW_PAYMENT_FAILED_001` con el
+          // código tipado original como causa.
+          await this.cancelLegPayments(legPayments, 'kitchen_items_pending');
+          paymentCompensated = true;
+          // El claim del inicio ya movió la orden a `processing`. Sin restaurar,
+          // queda varada en `processing` con el pago anulado: ni cobrable (el
+          // claim sólo acepta draft/created/shipped/pending_payment) ni cerrable.
+          if (preClaimState !== 'draft') {
+            await this.restorePreClaimState(orderId, preClaimState);
+          }
+          throw this.wrapPaymentFailure(
+            'kitchen_pending',
+            { order_id: orderId },
+            ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS.code,
+          );
         }
-        throw this.wrapPaymentFailure(
-          'kitchen_pending',
-          { order_id: orderId },
-          ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS.code,
+
+        this.validateTransition(order.state as OrderState, 'processing');
+        const updatedOrder = await this.updateOrderState(
+          orderId,
+          'processing',
+          {
+            paid_at: new Date(),
+            ...settledBalanceMetadata,
+          },
+          { historyFromState: preClaimState },
         );
+
+        this.logger.log(
+          `Order #${orderId} paid directly with pending kitchen items, moved to processing`,
+        );
+
+        for (const { payment, leg } of legPayments) {
+          this.recordPayOrderCashMovement(
+            order.store_id,
+            orderId,
+            leg.amount,
+            legMethodTypes[leg.store_payment_method_id] ?? '',
+            payment.id,
+          ).catch(() => {});
+        }
+
+        await this.computeAndPersistEta(orderId, new Date());
+        // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received`
+        // por tramo, SÓLO en el camino de éxito.
+        await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
+        await this.emitPosSaleCompletedIfFullyPaid(
+          orderId,
+          'pay_order.processing_kitchen_pending',
+        );
+        await this.projectPaidOrderToTable(orderId, legPayments[0].payment.id);
+
+        return {
+          order: updatedOrder,
+          ...this.buildLeggedPaymentResponse(legPayments, change),
+        };
       }
 
       this.validateTransition(order.state as OrderState, 'finished');
@@ -1527,7 +2149,7 @@ export class OrderFlowService {
           paid_at: new Date(),
           finished_at: new Date(),
           ...settledBalanceMetadata,
-        });
+        }, { historyFromState: preClaimState });
       } catch (e) {
         if (e instanceof VendixHttpException) {
           await this.cancelLegPayments(
@@ -1545,11 +2167,7 @@ export class OrderFlowService {
           // SIEMPRE `ORD_FLOW_PAYMENT_FAILED_001`. El código tipado original
           // (p.ej. `INV_STOCK_002` / `SERIAL_REQUIRED_001`) viaja en
           // `details.cause_code` para que la UI y soporte puedan pivotar.
-          throw this.wrapPaymentFailure(
-            'finish_blocked',
-            { order_id: orderId },
-            (e as any).errorCode ?? 'n/a',
-          );
+          throw this.wrapPaymentFailure('finish_blocked', e);
         }
         // Error de infra (no Vendix): envolvemos también, pero sin un
         // cause_code tipado. La restauración aplica igual: el claim ya se
@@ -1578,6 +2196,12 @@ export class OrderFlowService {
 
       // Compute and persist ETA
       await this.computeAndPersistEta(orderId, new Date());
+
+      // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received` por
+      // tramo, SÓLO en el camino de éxito (el `updateOrderState` de arriba ya
+      // terminó bien; las ramas compensadas arriba (`finish_blocked*`,
+      // `kitchen_items_pending`) ya salieron por `throw` y nunca llegan acá).
+      await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
 
       await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.finished');
       await this.projectPaidOrderToTable(orderId, legPayments[0].payment.id);
@@ -1610,6 +2234,8 @@ export class OrderFlowService {
       const updatedOrder = await this.updateOrderState(
         orderId,
         'pending_payment',
+        {},
+        { historyFromState: preClaimState },
       );
 
       this.logger.log(
@@ -1702,14 +2328,30 @@ export class OrderFlowService {
     });
     if (current?.channel === 'pos' && current.delivery_type === 'direct_delivery' &&
         !current.order_items.some((line) => line.products?.requires_serial_numbers)) {
+      // docs/plans/no-overselling-stock-guard-plan.md step 5 (reverses
+      // QUI-557): a financial-split source order is a real sale closing out
+      // — it must block on insufficient stock like every other delivery
+      // commit, not silently oversell with a floor of 0.
+      // Step 9: unless the store's "Permitir sobreventa" switch is active,
+      // in which case it logs and lets the commit go through negative.
+      const inventoryPolicy = await this.stockValidator?.resolveInventoryPolicy(order.store_id);
+      const allowOversell = inventoryPolicy?.allowOversell === true;
       await this.orderStockCommit.commitOrderDelivery(orderId, {
-        movementType: 'sale', blockOnInsufficient: false, consumeSerials: true,
+        movementType: 'sale',
+        blockOnInsufficient: !allowOversell,
+        allowNegativeOnShortfall: allowOversell,
+        onShortfall: allowOversell
+          ? (item) => this.logger.warn(
+              `Sobreventa permitida — orden #${orderId} split source, ${item.product_name}: requiere ${item.requested}, disponible ${item.available}.`,
+            )
+          : undefined,
+        consumeSerials: true,
         reason: 'POS Sale (cuentas financieras cobradas)', userId: actorUserId ?? context?.user_id,
       });
     }
   }
 
-  async confirmPayment(orderId: number) {
+  async confirmPayment(orderId: number, opts?: { source?: OrderEventSource }) {
     const initial = await this.getOrder(orderId);
     assertNoActiveFinancialSplit(initial);
     const afterCommit: Array<() => Promise<void>> = [];
@@ -1717,7 +2359,12 @@ export class OrderFlowService {
       await lockOrderLifecycle(tx, orderId, initial.store_id);
       const order = await this.getOrder(orderId, tx);
       if (!['pending_payment', 'shipped'].includes(order.state)) {
-        return { order, applied: false, previousState: order.state };
+        return {
+          order,
+          applied: false,
+          previousState: order.state,
+          confirmedPaymentId: null as number | null,
+        };
       }
       const pendingPayment = order.payments.find((p) => p.state === 'pending');
       if (pendingPayment) {
@@ -1725,16 +2372,70 @@ export class OrderFlowService {
           where: { id: pendingPayment.id, state: 'pending' },
           data: { state: 'succeeded', paid_at: new Date(), updated_at: new Date() },
         });
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: order.store_id,
+          organizationId: order.stores?.organization_id,
+          type: 'payment_registered',
+          paymentId: pendingPayment.id,
+          amount: pendingPayment.amount.toString(),
+          source: opts?.source,
+        });
       }
       await this.commitCouponUseForOrder(orderId, tx, afterCommit);
+
+      // B8 (release-855): checkout now persists `remaining_balance =
+      // grand_total` up front (it used to default to 0, silently). This
+      // must settle the balance here too, or a confirmed online/gateway
+      // payment would leave the order permanently reading "still owes the
+      // full total". Recompute from `order.payments` (loaded before this
+      // transaction) plus the leg just flipped above — same settled-states
+      // definition as `payOrder`'s `settledBalanceMetadata`.
+      const settledAfterConfirm = order.payments.reduce((sum, payment) => {
+        const effectiveState =
+          payment.id === pendingPayment?.id ? 'succeeded' : payment.state;
+        return ['succeeded', 'captured'].includes(effectiveState)
+          ? sum.plus(payment.amount)
+          : sum;
+      }, new Prisma.Decimal(0));
+      const remainingAfterConfirm = Prisma.Decimal.max(
+        new Prisma.Decimal(order.grand_total).minus(settledAfterConfirm),
+        new Prisma.Decimal(0),
+      );
+      await tx.orders.updateMany({
+        where: { id: orderId, store_id: order.store_id },
+        data: {
+          total_paid: settledAfterConfirm.toNumber(),
+          remaining_balance: remainingAfterConfirm.toNumber(),
+        },
+      });
+
       if (order.state === 'pending_payment') {
         const claim = await tx.orders.updateMany({
           where: { id: orderId, store_id: order.store_id, state: 'pending_payment' },
           data: { state: 'processing', completed_at: new Date(), updated_at: new Date() },
         });
         if (claim.count !== 1) throw new BadRequestException('La orden cambió durante la confirmación.');
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: order.store_id,
+          organizationId: order.stores?.organization_id,
+          type: 'state_changed',
+          fromState: 'pending_payment',
+          toState: 'processing',
+          source: opts?.source,
+        });
       }
-      return { order: await this.getOrder(orderId, tx), applied: true, previousState: order.state };
+      return {
+        order: await this.getOrder(orderId, tx),
+        applied: true,
+        previousState: order.state,
+        // PLAN-pago-multimetodo-pendientes paso 2 — id del pago que ESTA
+        // llamada confirmó (pending → succeeded), para emitir su
+        // `payment.received` después del commit. `null` cuando la orden ya
+        // no traía un pago `pending` (no-op de re-confirmación).
+        confirmedPaymentId: pendingPayment?.id ?? null,
+      };
     });
 
     // A gateway callback and the staff confirm endpoint both land here. The
@@ -1774,6 +2475,73 @@ export class OrderFlowService {
       }
     }
     for (const effect of afterCommit) await effect();
+
+    // PLAN-pago-multimetodo-pendientes paso 2 — `payment.received` para el
+    // pago que ESTA llamada confirmó (pending → succeeded).
+    //
+    // DESVIACIÓN reportada: se omite a propósito cuando `opts?.source ===
+    // 'webhook'`. `WebhookHandlerService.updatePaymentStatus` YA emite
+    // `payment.received` para el mismo pago vía `emitPaymentReceivedAccounting`
+    // ANTES de llamar a `confirmPayment(orderId, { source: 'webhook' })`
+    // (ver `webhook-handler.service.ts` ~250-320): emitir aquí también
+    // duplicaría el evento para todo pago confirmado por pasarela. El
+    // dedupe de `AutoEntryService` (clave `source_type`+`source_id`) sólo
+    // detecta y descarta el duplicado — no lo previene — y está documentado
+    // como sensible a condiciones de carrera; evitar la doble emisión es más
+    // conservador y respeta la regla del plan ("todo cobro directo succeeded
+    // reconoce su caja/banco EXACTAMENTE una vez"). El llamador de planta
+    // (`POST flow/confirm-payment`, `order-flow.controller.ts`) no pasa
+    // `opts`, así que sigue recibiendo el evento normalmente.
+    if (
+      result.applied &&
+      result.confirmedPaymentId != null &&
+      opts?.source !== 'webhook'
+    ) {
+      try {
+        const confirmedPayment = result.order.payments.find(
+          (p: any) => p.id === result.confirmedPaymentId,
+        );
+        if (confirmedPayment) {
+          const methodRow = await this.prisma.store_payment_methods.findFirst({
+            where: { id: confirmedPayment.store_payment_method_id },
+            select: {
+              system_payment_method: { select: { display_name: true } },
+            },
+          });
+          // PR #858 hallazgo 1 — este tramo sólo alimenta `payment.received`
+          // (no hay respuesta con nombre visible): va la etiqueta CONTABLE
+          // del sistema, nunca el nombre renombrable de la tienda.
+          const accounting_method =
+            methodRow?.system_payment_method?.display_name || 'Unknown';
+          const sale_share = await resolvePaymentReceivedSaleFields(
+            this.prisma,
+            {
+              order_id: orderId,
+              payment_id: confirmedPayment.id,
+              amount: Number(confirmedPayment.amount),
+            },
+          );
+          await this.emitLegPaymentReceivedEvents(orderId, result.order, [
+            {
+              payment: { ...confirmedPayment, sale_share },
+              leg: {
+                amount: Number(confirmedPayment.amount),
+                accounting_method,
+              } as unknown as NormalizedLeg,
+            },
+          ]);
+        }
+      } catch (error) {
+        // Mismo contrato que `emitLegPaymentReceivedEvents`: nunca convertir
+        // un pago ya confirmado en un error HTTP.
+        this.logger.error(
+          `[confirmPayment payment.received failed] order=${orderId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
     // Después del commit: el pago online quedó `succeeded`. Sólo si la
     // confirmación se aplicó — un no-op (orden ya confirmada o cancelada) no es
     // una venta nueva que facturar.
@@ -1831,10 +2599,92 @@ export class OrderFlowService {
   }
 
   /**
-   * Cancel payment of an order that has an active payment attempt
-   * (pending_payment/processing -> created)
-   * Privileged reverse transition — bypasses normal state machine
-   * Only admin/owner can perform this action
+   * B4 (release-855) — the same "does this order have an electronic sales
+   * invoice already on its way to/accepted by DIAN" question `orders.service
+   * .ts:findActiveSalesInvoice` answers, duplicated here (not imported)
+   * because `OrdersService` already depends on `OrderFlowService`
+   * (`forceOrderState`) — importing it back would create a circular
+   * provider dependency. `draft` is the only status that still allows a
+   * local payment cancellation; anything transmitted (`validated`/`sent`/
+   * `accepted`) or `rejected` (DIAN bounced it, but it was still submitted)
+   * must go through a credit note instead.
+   */
+  private async findBlockingSalesInvoiceForPaymentCancel(
+    orderId: number,
+    client: Prisma.TransactionClient | StorePrismaService = this.prisma,
+  ): Promise<{ id: number; status: string } | null> {
+    const activeInvoice = await client.invoices.findFirst({
+      where: {
+        order_id: orderId,
+        invoice_type: 'sales_invoice',
+        status: { notIn: ['voided', 'cancelled'] },
+      },
+      select: { id: true, status: true },
+      orderBy: { id: 'desc' },
+    });
+    return activeInvoice && activeInvoice.status !== 'draft' ? activeInvoice : null;
+  }
+
+  private async assertNoIssuedSalesInvoiceForPaymentCancel(
+    orderId: number,
+    client: Prisma.TransactionClient | StorePrismaService = this.prisma,
+  ): Promise<void> {
+    const blockingInvoice = await this.findBlockingSalesInvoiceForPaymentCancel(
+      orderId,
+      client,
+    );
+    if (blockingInvoice) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_PAYMENT_CANCEL_INVOICED_001,
+        undefined,
+        { order_id: orderId, invoice_id: blockingInvoice.id, invoice_status: blockingInvoice.status },
+      );
+    }
+  }
+
+  /**
+   * Cancel payment of an order.
+   * - `pending_payment`/`processing` -> `created`. Owner rule: «cancelar el
+   *   pago» corrects a wrongly registered payment method so it can be
+   *   re-registered; it is NOT blocked by committed/consumed stock (that
+   *   blocker, `ORD_CANCEL_STOCK_COMMITTED_001`, belongs to cancelOrder
+   *   only). Same guards as the fulfilled branch: direct-only settled legs
+   *   and no issued sales invoice. Stock is untouched here, and re-paying
+   *   never deducts twice: `payOrder` accepts `created` and funnels the
+   *   finish through `commitOrderDelivery`, whose per-line atomic claim on
+   *   `order_items.inventory_committed` skips lines already delivered
+   *   (`deliverOrderItem`) or consumed at fire. `processing` cannot be kept
+   *   as-is because the `payOrder` state claim does not admit it (that
+   *   claim IS the double-click serializer), so `created` is the only
+   *   re-chargeable target; `pending_payment` goes to `created` too since
+   *   no payment is pending any more after the void.
+   * - B4 (release-855) / B1b (order-truth-and-invoice-tz plan): `shipped`/
+   *   `delivered` -> SAME state (never collapses `shipped` back to
+   *   `created`, never collapses either back to `delivered` from `shipped`),
+   *   ONLY when every settled payment is a direct method (cash/card/
+   *   bank_transfer — never online/gateway) and there is no sales invoice
+   *   already issued to DIAN. The order keeps its items/stock exactly as
+   *   they are (goods already left); only money bookkeeping resets so
+   *   `payOrder` can re-charge it. See
+   *   `assertNoIssuedSalesInvoiceForPaymentCancel` and
+   *   `hasNonDirectSettledPayment`.
+   * - `finished` -> HARD REJECT (`ORD_PAYMENT_CANCEL_FINISHED_001`, B1b).
+   *   Once an order is finalized a local payment void is no longer the
+   *   right instrument; a refund is the only path back.
+   * Privileged reverse transition — bypasses normal state machine.
+   * Only admin/owner can perform this action.
+   *
+   * Accounting reversal: once the cancellation is persisted (after the
+   * transaction commits, same as every other domain event this service
+   * emits), this method fires `this.eventEmitter.emit('payment.voided', …)`
+   * once per payment that was `succeeded` at cancel time — never for a
+   * `pending` marker (a COD placeholder never posted an auto-entry, so
+   * there is nothing to reverse). Payload contract (consumed by a dedicated
+   * accounting listener, not owned by this file):
+   * `{ store_id, organization_id, order_id, payment_id, amount,
+   * payment_method, user_id, reason: 'payment_cancelled' }`. This method
+   * only announces the reversal; it does not itself create the reversing
+   * journal entry.
    */
   async cancelPayment(
     orderId: number,
@@ -1844,52 +2694,183 @@ export class OrderFlowService {
     const order = await this.getOrder(orderId);
     assertNoActiveFinancialSplit(order);
 
-    if (!['pending_payment', 'processing'].includes(order.state)) {
+    // B1b — hard boundary: once finished, only a refund reverses money.
+    if (order.state === 'finished') {
+      throw new VendixHttpException(ErrorCodes.ORD_PAYMENT_CANCEL_FINISHED_001);
+    }
+
+    const isFulfilledCancel = FULFILLED_PAYMENT_CANCELABLE_STATES.has(
+      order.state,
+    );
+    if (!['pending_payment', 'processing'].includes(order.state) && !isFulfilledCancel) {
       throw new BadRequestException(
-        `Cannot cancel payment for order in state '${order.state}'. Order must be in 'pending_payment' or 'processing' state.`,
+        `Cannot cancel payment for order in state '${order.state}'. Order must be in 'pending_payment', 'processing', 'shipped' or 'delivered' state.`,
       );
     }
 
+    // Cheap read-side guards before taking the lifecycle lock; re-checked
+    // again inside the transaction against the freshly-locked row. Same
+    // pair for every cancelable state (`canCancelPayment` mirrors it).
+    if (hasNonDirectSettledPayment(order.payments)) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
+      );
+    }
+    await this.assertNoIssuedSalesInvoiceForPaymentCancel(orderId);
+
+    let cancelledPaymentIds: number[] = [];
+    // Captured inside the transaction (fresh `payments` + their resolved
+    // `store_payment_method.system_payment_method.type`) and emitted AFTER
+    // commit — only the legs that were actually `succeeded` carry an
+    // accounting entry to reverse.
+    let voidedSucceededPayments: Array<{
+      id: number;
+      amount: number;
+      payment_method: string | null;
+    }> = [];
     await this.prisma.$transaction(async (tx) => {
       await lockOrderLifecycle(tx, orderId, order.store_id);
       const freshOrder = await this.getOrder(orderId, tx);
-      if (!['pending_payment', 'processing'].includes(freshOrder.state)) {
+
+      // Re-check under the lock: a concurrent request could have finished
+      // the order between the read above and here.
+      if (freshOrder.state === 'finished') {
+        throw new VendixHttpException(ErrorCodes.ORD_PAYMENT_CANCEL_FINISHED_001);
+      }
+
+      const freshIsFulfilledCancel =
+        FULFILLED_PAYMENT_CANCELABLE_STATES.has(freshOrder.state);
+      if (
+        !['pending_payment', 'processing'].includes(freshOrder.state) &&
+        !freshIsFulfilledCancel
+      ) {
         throw new BadRequestException('La orden cambió de estado; actualiza antes de anular el pago.');
       }
-      this.assertCancellationAllowed(freshOrder);
-      const activePayment = freshOrder.payments.find(
+
+      // Re-run under the lock: a concurrent request could have changed the
+      // payment mix or triggered invoicing between the read above and here.
+      // No stock check: committed stock blocks cancelOrder, never the
+      // payment cancel (owner rule, see docblock).
+      if (hasNonDirectSettledPayment(freshOrder.payments)) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
+        );
+      }
+      await this.assertNoIssuedSalesInvoiceForPaymentCancel(orderId, tx);
+
+      // (a) B4 — void EVERY succeeded/pending payment of the order, not just
+      // the first match: with multi-tender (`payments[]`) a partial `.find`
+      // left the other succeeded legs standing, which double-collects on
+      // re-charge. `pending` also voids (e.g. a stale COD marker).
+      const activePayments = freshOrder.payments.filter(
         (p) => p.state === 'succeeded' || p.state === 'pending',
       );
-      if (!activePayment) throw new BadRequestException('No active payment found for this order');
-
-      // Mark payment as cancelled with metadata
-      await tx.payments.update({
-        where: { id: activePayment.id },
-        data: {
-          state: 'cancelled',
-          updated_at: new Date(),
-          gateway_response: {
-            ...(typeof activePayment.gateway_response === 'object' &&
-            activePayment.gateway_response !== null
-              ? (activePayment.gateway_response as Record<string, any>)
-              : {}),
-            cancelled_by: cancelledBy,
-            cancelled_at: new Date().toISOString(),
-            cancellation_reason: dto.reason || 'Payment cancelled by admin',
+      if (activePayments.length === 0) {
+        throw new BadRequestException('No active payment found for this order');
+      }
+      cancelledPaymentIds = activePayments.map((p) => p.id);
+      voidedSucceededPayments = activePayments
+        .filter((p) => p.state === 'succeeded')
+        .map((p) => ({
+          id: p.id,
+          amount: Number(p.amount),
+          payment_method:
+            p.store_payment_method?.system_payment_method?.type ?? null,
+        }));
+      for (const activePayment of activePayments) {
+        await tx.payments.update({
+          where: { id: activePayment.id },
+          data: {
+            state: 'cancelled',
+            updated_at: new Date(),
+            gateway_response: {
+              ...(typeof activePayment.gateway_response === 'object' &&
+              activePayment.gateway_response !== null
+                ? (activePayment.gateway_response as Record<string, any>)
+                : {}),
+              cancelled_by: cancelledBy,
+              cancelled_at: new Date().toISOString(),
+              cancellation_reason: dto.reason || 'Payment cancelled by admin',
+            },
           },
-        },
-      });
+        });
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: freshOrder.store_id,
+          organizationId: freshOrder.stores?.organization_id,
+          type: 'payment_cancelled',
+          paymentId: activePayment.id,
+          amount: activePayment.amount.toString(),
+        });
+      }
 
-      // Bypass state machine — revert order to 'created'
-      await tx.orders.update({
-        where: { id: orderId },
-        data: {
-          state: 'created',
-          completed_at: null,
-          updated_at: new Date(),
-        },
-      });
+      if (freshIsFulfilledCancel) {
+        // B4/B1b — NOT `created`, and NOT collapsed to `delivered` either:
+        // the goods already left (stock stays exactly as committed), so the
+        // order stays in the SAME state it was in (`shipped` stays
+        // `shipped`, `delivered` stays `delivered`) unpaid, and `payOrder`
+        // re-charges it from there (see the widened claim above).
+        await tx.orders.update({
+          where: { id: orderId },
+          data: {
+            state: freshOrder.state,
+            completed_at: null,
+            total_paid: 0,
+            remaining_balance: freshOrder.grand_total,
+            updated_at: new Date(),
+          },
+        });
+      } else {
+        // Bypass state machine — revert order to 'created'. Every
+        // succeeded/pending leg was just voided, so the money bookkeeping
+        // resets too (same as the fulfilled branch): `registerCreditPayment`
+        // and `applyDispatchCodPayment` add onto the stored `total_paid`, so
+        // leaving the old value would double-count the next collection.
+        await tx.orders.update({
+          where: { id: orderId },
+          data: {
+            state: 'created',
+            completed_at: null,
+            total_paid: 0,
+            remaining_balance: freshOrder.grand_total,
+            updated_at: new Date(),
+          },
+        });
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: freshOrder.store_id,
+          organizationId: freshOrder.stores?.organization_id,
+          type: 'state_changed',
+          fromState: freshOrder.state,
+          toState: 'created',
+        });
+      }
     });
+
+    // Accounting reversal — one `payment.voided` per payment that was
+    // `succeeded` (never for a voided `pending` marker; see docblock
+    // above). Emitted after commit, same pattern as `order.shipped` etc.
+    const organizationIdForVoidEvent = order.stores?.organization_id ?? null;
+    if (organizationIdForVoidEvent && voidedSucceededPayments.length > 0) {
+      const cancelingUserId = RequestContextService.getUserId() ?? null;
+      for (const voided of voidedSucceededPayments) {
+        this.eventEmitter.emit('payment.voided', {
+          store_id: order.store_id,
+          organization_id: organizationIdForVoidEvent,
+          order_id: orderId,
+          payment_id: voided.id,
+          amount: voided.amount,
+          payment_method: voided.payment_method,
+          user_id: cancelingUserId,
+          reason: 'payment_cancelled',
+        });
+      }
+    }
+
+    // B4 — la anulación devuelve a caja lo que el cobro original registró
+    // como venta: sin esto, "anular y volver a cobrar" en efectivo contaba la
+    // venta dos veces en el cuadre de la sesión.
+    await this.reversePaymentCashMovements(order.store_id, orderId, cancelledPaymentIds);
 
     // Return updated order with all includes
     const updatedOrder = await this.prisma.orders.findFirst({
@@ -1908,6 +2889,119 @@ export class OrderFlowService {
   }
 
   /**
+   * Paso 4 (unificación del cálculo de envío —
+   * `vendix-shipping-distance-pricing`) — costo que dicta una tarifa para
+   * ESTA orden en `shipOrder`, vía el mismo cálculo único que
+   * `OrdersService.resolveExpectedRateCost` /
+   * `PaymentsService.recalculatePosRateCost`
+   * (`ShippingCalculatorService.quoteRateGross`): umbral de envío gratis,
+   * costo por unidad/peso y precio por distancia sobre la dirección y las
+   * líneas de la orden. `null` si no hay calculador, no hay dirección
+   * resoluble o la tarifa no aparece entre las opciones calculadas (incluye
+   * `carrier_calculated`) — el llamador cae entonces al atajo histórico
+   * `chargeForRate(base_cost)` (paso 14).
+   */
+  private async resolveShipOrderRateCost(
+    orderId: number,
+    storeId: number,
+    rateId: number,
+  ): Promise<number | null> {
+    if (!this.shippingCalculatorService) return null;
+
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      select: {
+        id: true,
+        store_id: true,
+        stores: { select: { organization_id: true } },
+        shipping_address_id: true,
+        shipping_address_snapshot: true,
+        order_items: {
+          select: {
+            product_id: true,
+            quantity: true,
+            total_price: true,
+            weight: true,
+            order_item_taxes: { select: { tax_amount: true } },
+            products: { select: { weight: true, product_type: true } },
+          },
+        },
+      },
+    });
+    if (!order) return null;
+
+    let address: {
+      country_code?: string | null;
+      state_province?: string | null;
+      city?: string | null;
+      postal_code?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
+    } | null = null;
+    if (order.shipping_address_id) {
+      address = await this.prisma.addresses.findFirst({
+        where: { id: order.shipping_address_id },
+        select: {
+          country_code: true,
+          state_province: true,
+          city: true,
+          postal_code: true,
+          latitude: true,
+          longitude: true,
+        },
+      });
+    } else if (order.shipping_address_snapshot) {
+      address = order.shipping_address_snapshot as any;
+    }
+    if (!address?.country_code) return null;
+
+    const items = (order.order_items ?? [])
+      .filter((it: any) => typeof it?.product_id === 'number')
+      .map((it: any) => {
+        const line_tax = (it.order_item_taxes ?? []).reduce(
+          (sum: number, t: any) => sum + Number(t.tax_amount || 0),
+          0,
+        );
+        const quantity = Number(it.quantity || 0);
+        return {
+          product_id: it.product_id as number,
+          quantity,
+          // Bruto de la línea (base + impuesto), como el checkout.
+          price: Number(it.total_price || 0) + line_tax,
+          weight: it.weight
+            ? Number(it.weight)
+            : it.products?.weight
+              ? Number(it.products.weight) * quantity
+              : undefined,
+          product_type: it.products?.product_type || undefined,
+        };
+      });
+
+    try {
+      return await this.shippingCalculatorService.quoteRateGross(
+        storeId,
+        rateId,
+        items,
+        {
+          country_code: address.country_code,
+          state_province: address.state_province || undefined,
+          city: address.city || undefined,
+          postal_code: address.postal_code || undefined,
+          latitude:
+            address.latitude != null ? Number(address.latitude) : undefined,
+          longitude:
+            address.longitude != null ? Number(address.longitude) : undefined,
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `shipOrder: no se pudo recalcular la tarifa de envío #${rateId}: ${(error as Error)?.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Ship an order (processing -> shipped)
    *
    * `force` (ver {@link forceOrderState}) saltea las TRES precondiciones de
@@ -1918,7 +3012,12 @@ export class OrderFlowService {
    * estricto. Todo lo posterior (timestamps, `order.shipped`, logging) corre
    * idéntico, porque es este mismo código.
    */
-  async shipOrder(orderId: number, dto: ShipOrderDto, force = false) {
+  async shipOrder(
+    orderId: number,
+    dto: ShipOrderDto,
+    force = false,
+    opts: { allowExemptDeliveryTypes?: boolean } = {},
+  ) {
     const order = await this.getOrder(orderId);
 
     if (!force && order.state !== 'processing') {
@@ -1927,9 +3026,21 @@ export class OrderFlowService {
       );
     }
 
+    // `allowExemptDeliveryTypes` widens the direct_delivery-only exemption to
+    // the full `SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES` set (pickup/
+    // direct_delivery/dine_in). ONLY `fastTrackOrder` passes it — every other
+    // caller (manual ship endpoint, the auto-ship `force` path) keeps today's
+    // direct_delivery-only behavior unchanged.
+    const exemptFromShippingMethod =
+      order.delivery_type === 'direct_delivery' ||
+      !!(
+        opts.allowExemptDeliveryTypes &&
+        order.delivery_type &&
+        SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES.has(order.delivery_type)
+      );
     if (
       !force &&
-      order.delivery_type !== 'direct_delivery' &&
+      !exemptFromShippingMethod &&
       !order.shipping_method_id &&
       !dto.shipping_method_id
     ) {
@@ -1954,21 +3065,37 @@ export class OrderFlowService {
         if (!rate || rate.shipping_method_id !== method.id) {
           throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
         }
-        // Paso 14 — la tarifa cobra el BRUTO del cálculo único (agregado ⇒
-        // base + impuesto, igual que el cotizador); `free` ⇒ 0. Sin
-        // `chargeForRate` (dobles viejos de specs) ⇒ `base_cost`.
-        shippingCost = Number(rate.base_cost);
+        // Paso 4 (unificación de envío) — se cotiza primero con el mismo
+        // cálculo único que orders/payments (umbral de envío gratis, costo
+        // por unidad/peso y distancia). `free` sigue cobrando 0 sin rutear
+        // (regla de `vendix-shipping-distance-pricing`). Solo si eso no
+        // resuelve nada (sin calculador, sin dirección resoluble en la
+        // orden, o tarifa fuera de las opciones calculadas) cae al atajo
+        // histórico (paso 14): BRUTO agregado vía `chargeForRate(base_cost)`,
+        // o `base_cost` sin `chargeForRate` (dobles viejos de specs).
         if (rate.type === 'free') {
           shippingCost = 0;
-        } else if (
-          this.shippingTaxService &&
-          typeof this.shippingTaxService.chargeForRate === 'function'
-        ) {
-          shippingCost = (
-            await this.shippingTaxService.chargeForRate(null, rate.id, shippingCost, {
-              store_id: order.store_id,
-            })
-          ).gross;
+        } else {
+          const quoted = await this.resolveShipOrderRateCost(
+            orderId,
+            order.store_id,
+            rate.id,
+          );
+          if (quoted != null) {
+            shippingCost = quoted;
+          } else {
+            shippingCost = Number(rate.base_cost);
+            if (
+              this.shippingTaxService &&
+              typeof this.shippingTaxService.chargeForRate === 'function'
+            ) {
+              shippingCost = (
+                await this.shippingTaxService.chargeForRate(null, rate.id, shippingCost, {
+                  store_id: order.store_id,
+                })
+              ).gross;
+            }
+          }
         }
       }
 
@@ -2117,50 +3244,135 @@ export class OrderFlowService {
     const deliveryType = order.delivery_type;
     const hasMethod = !!order.shipping_method_id;
     const isDirectDelivery = deliveryType === 'direct_delivery';
+    const isPickupDelivery = (deliveryType || 'direct_delivery') === 'pickup';
+    const requiresDispatch = deliveryType === 'home_delivery';
+    // B1b (order-truth-and-invoice-tz plan) — an active financial split
+    // locks every economic mutation (pay/credit_payment/edit_order) until
+    // the split itself is cancelled; mirrors `assertNoActiveFinancialSplit`,
+    // which every one of these endpoints already calls. `getAvailableActions`
+    // never checked this before, so a split order could show `pay: true`
+    // and then 409 at the endpoint — parity fix.
+    const activeFinancialSplit = !!order.active_financial_split_id;
 
-    if (state === 'created') {
+    // B1b — one extra small, order-scoped, indexed read for refund-aware
+    // `isOrderFullyPaid` (`canPay`), plus a single `order_items` +
+    // `kitchen_ticket_items` read that supplies BOTH the web's
+    // `isKitchenOrder` signal (dispatch/`fast_track` predicates) and
+    // `confirm_delivery`'s F2 pending-kitchen gate — replacing what would
+    // otherwise be two separate queries. Cheap: this is a detail-page read
+    // path, not a hot loop.
+    const [refunds, itemsWithKitchen] = await Promise.all([
+      this.prisma.refunds.findMany({
+        where: { order_id: orderId },
+        select: { state: true, amount: true },
+      }),
+      this.prisma.order_items.findMany({
+        where: { order_id: orderId },
+        select: {
+          kitchen_ticket_items: { select: { status: true }, orderBy: { id: 'desc' } },
+        },
+      }),
+    ]);
+    const isKitchenOrder = itemsWithKitchen.some((item) => item.kitchen_ticket_items.length > 0);
+    const hasPendingKitchen = itemsWithKitchen.some((item) =>
+      item.kitchen_ticket_items.some((k) => k.status !== 'delivered' && k.status !== 'cancelled'),
+    );
+    const offersDispatchFlow = requiresDispatch || isKitchenOrder;
+
+    const snapshot: OrderActionSnapshot & {
+      delivery_type?: string | null;
+      shipping_method_id?: number | null;
+      payment_form?: string | null;
+      isKitchenOrder?: boolean;
+      hasOrderItems?: boolean;
+      remaining_balance?: Prisma.Decimal | number | string | null;
+    } = {
+      ...order,
+      refunds,
+      hasPendingKitchen,
+      isKitchenOrder,
+      hasOrderItems: (order.order_items ?? []).length > 0,
+    };
+    const roleCtx = { roles: RequestContextService.getRoles() };
+
+    // `draft` (POS counter orders before confirmation) behaves exactly like
+    // `created` — mirrors the web's `case 'draft': case 'created':` fall-through.
+    if (state === 'draft' || state === 'created') {
       actions.push({
-        code: 'pay',
-        label_key: 'ORD_ACTION_PAY',
-        enabled: true,
+        code: 'edit_order',
+        label_key: 'ORD_ACTION_EDIT_ORDER',
+        ...canEditOrder(snapshot, roleCtx),
       });
+      actions.push({ code: 'pay', label_key: 'ORD_ACTION_PAY', ...canPay(snapshot) });
       if (!hasMethod && !isDirectDelivery) {
         actions.push({
           code: 'assign_shipping',
           label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
-          enabled: true,
+          ...canAssignShipping(snapshot),
         });
       }
-      actions.push({
-        code: 'cancel',
-        label_key: 'ORD_ACTION_CANCEL',
-        enabled: true,
-      });
+      actions.push({ code: 'cancel', label_key: 'ORD_ACTION_CANCEL', ...canCancel(snapshot) });
     }
 
     if (state === 'pending_payment') {
-      actions.push({
-        code: 'confirm_payment',
-        label_key: 'ORD_ACTION_CONFIRM_PAYMENT',
-        enabled: true,
-      });
+      const isCreditOrder = order.payment_form === '2';
+      if (isCreditOrder) {
+        actions.push({
+          code: 'credit_payment',
+          label_key: 'ORD_ACTION_CREDIT_PAYMENT',
+          ...canCreditPayment(snapshot),
+        });
+      } else {
+        actions.push({
+          code: 'confirm_payment',
+          label_key: 'ORD_ACTION_CONFIRM_PAYMENT',
+          enabled: true,
+        });
+      }
+
+      // `cancel_payment` here has always delegated to
+      // `getOrderCancellationPolicy` (unchanged) — the only change is the
+      // role gate `canCancelPaymentAsRole` now applies, matching the
+      // `@Roles('owner','admin')` guard the `/cancel-payment` endpoint has
+      // always enforced regardless of order state (STATE gap #2).
       actions.push({
         code: 'cancel_payment',
         label_key: 'ORD_ACTION_CANCEL_PAYMENT',
-        enabled: true,
+        ...canCancelPaymentAsRole(snapshot, roleCtx),
       });
+
       if (!hasMethod && !isDirectDelivery) {
         actions.push({
           code: 'assign_shipping',
           label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
-          enabled: true,
+          ...canAssignShipping(snapshot),
         });
       }
-      actions.push({
-        code: 'cancel',
-        label_key: 'ORD_ACTION_CANCEL',
-        enabled: true,
-      });
+      actions.push({ code: 'cancel', label_key: 'ORD_ACTION_CANCEL', ...canCancel(snapshot) });
+
+      // Dispatch-before-payment trio (web: `dispatch-order` / `manual-ship` /
+      // `manual-ready-pickup`, mutually exclusive by `delivery_type` — see
+      // `order-action-policy.util.ts`'s dispatch-flow section). Only surfaced
+      // at all when the order could plausibly offer one of the three — a
+      // plain non-kitchen `direct_delivery`/mesa order shows none of them,
+      // exactly like the web.
+      if (offersDispatchFlow || isPickupDelivery) {
+        actions.push({
+          code: 'dispatch_order',
+          label_key: 'ORD_ACTION_DISPATCH_ORDER',
+          ...canDispatchOrder(snapshot),
+        });
+        actions.push({
+          code: 'manual_ship',
+          label_key: 'ORD_ACTION_MANUAL_SHIP',
+          ...canManualShip(snapshot),
+        });
+        actions.push({
+          code: 'ready_for_pickup',
+          label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+          ...canReadyForPickupBeforePayment(snapshot),
+        });
+      }
     }
 
     if (state === 'processing') {
@@ -2168,7 +3380,7 @@ export class OrderFlowService {
         actions.push({
           code: 'assign_shipping',
           label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
-          enabled: true,
+          ...canAssignShipping(snapshot),
         });
         actions.push({
           code: 'ready_for_pickup',
@@ -2205,18 +3417,73 @@ export class OrderFlowService {
         }
       }
 
-      if (isDirectDelivery) {
+      // NOTE (order-truth-and-invoice-tz plan, Step 1): `mark_delivered` was
+      // dropped from here — `deliverOrder` strictly requires `shipped`
+      // (unless `force`), so a `processing` order can never actually accept
+      // this action; the web never showed it either. Advertising it here
+      // was a phantom action the endpoint would always reject.
+
+      // B1b — additive dispatch pair (web: `dispatch-order` +, for a pickup
+      // order in that same branch, `direct-deliver`). Independent of the
+      // pre-existing `ready_for_pickup`/`ship_with_tracking` block above,
+      // which is left untouched (different signal: the ASSIGNED method's
+      // own `type`, not the kitchen/home-delivery fulfillment axis).
+      if (offersDispatchFlow) {
         actions.push({
-          code: 'mark_delivered',
-          label_key: 'ORD_ACTION_MARK_DELIVERED',
-          enabled: true,
+          code: 'dispatch_order',
+          label_key: 'ORD_ACTION_DISPATCH_ORDER',
+          ...canDispatchOrder(snapshot),
+        });
+        if (isPickupDelivery) {
+          actions.push({
+            code: 'direct_deliver',
+            label_key: 'ORD_ACTION_DIRECT_DELIVER',
+            ...canDirectDeliver(snapshot),
+          });
+        }
+      } else {
+        // Restores the web's removed `ship` button ("Pasar a Cobro", commit
+        // cbebc40db8f) — see `canCollectViaShip`'s doc comment. Presence
+        // mirrors the same `!offersDispatchFlow` gate the dispatch trio
+        // above uses (same applicability semantics: only pushed when this
+        // order has no dispatch/fulfillment flow at all).
+        actions.push({
+          code: 'collect_payment',
+          label_key: 'ORD_ACTION_COLLECT_PAYMENT',
+          ...canCollectViaShip(snapshot),
         });
       }
+
+      // `confirm_delivery` also serves the web's `finish` button for a
+      // kitchen order consumed in-store (mesa/mostrador/para-llevar) or a
+      // paid order with no fulfillment left to dispatch — `canConfirmDelivery`
+      // (F2-guard-aware) is the authority; a `home_delivery` order always
+      // finishes through the dispatch flow instead, so it is skipped here
+      // when dispatch applies, mirroring the web's mutual exclusion.
+      if (!requiresDispatch) {
+        actions.push({
+          code: 'confirm_delivery',
+          label_key: 'ORD_ACTION_CONFIRM_DELIVERY',
+          ...canConfirmDelivery(snapshot),
+        });
+      }
+
+      // Parity fix (order-actions-parity spec): the web has ALWAYS shown
+      // `cancel-payment` in `processing` (gated only by `isPrivilegedUser()`)
+      // and objective 12 explicitly lists `processing` among the
+      // `cancel_payment`-eligible states — `canCancelPayment` already
+      // delegates to `getOrderCancellationPolicy` for this state (unchanged
+      // policy), this method just never pushed the row.
+      actions.push({
+        code: 'cancel_payment',
+        label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+        ...canCancelPaymentAsRole(snapshot, roleCtx),
+      });
 
       actions.push({
         code: 'cancel',
         label_key: 'ORD_ACTION_CANCEL',
-        enabled: true,
+        ...canCancel(snapshot),
       });
     }
 
@@ -2232,21 +3499,107 @@ export class OrderFlowService {
       actions.push({
         code: 'confirm_delivery',
         label_key: 'ORD_ACTION_CONFIRM_DELIVERY',
-        enabled: true,
-      });
-      actions.push({
-        code: 'refund',
-        label_key: 'ORD_ACTION_REFUND',
-        enabled: true,
+        ...canConfirmDelivery(snapshot),
       });
     }
 
-    const policy = getOrderCancellationPolicy(order);
-    return actions.map((action) => {
-      if (action.code !== 'cancel' && action.code !== 'cancel_payment') return action;
-      const enabled = action.code === 'cancel' ? policy.can_cancel : policy.can_cancel_payment;
-      return { ...action, enabled, ...(policy.reason_code ? { reason: policy.reason_code } : {}) };
+    if (state === 'cancelled') {
+      // `reactivate` now requires owner/admin (same `RolesGuard` +
+      // `@Roles` as `cancel_payment`) — see `canReactivateAsRole`.
+      actions.push({
+        code: 'reactivate',
+        label_key: 'ORD_ACTION_REACTIVATE',
+        ...canReactivateAsRole(snapshot, roleCtx),
+      });
+    }
+
+    // B1b — `refund` is valid on `delivered` AND `finished` (mirrors
+    // `refund-flow.service.ts`'s `REFUNDABLE_STATES` and the web's own
+    // `hasRefundableBalance`, which already treat them identically). Only
+    // advertising it for `delivered` was a parity gap: a `finished` order
+    // could be refunded at the endpoint but the action never appeared here.
+    if (state === 'delivered' || state === 'finished') {
+      actions.push({ code: 'refund', label_key: 'ORD_ACTION_REFUND', ...canRefund(snapshot) });
+    }
+
+    // B4 (release-855) / B1b (order-truth-and-invoice-tz plan) — `shipped`,
+    // `delivered` and `finished` no longer imply "already paid" (a COD order
+    // lands on `shipped`/`delivered` unpaid — see the widened claim in
+    // `payOrder`) nor "cannot touch payment again". Money and fulfillment
+    // are independent axes in these states, so `pay`/`cancel_payment` are
+    // surfaced here on their own merits — see `FULFILLED_PAYMENT_CANCELABLE_STATES`.
+    // `finished` is `pay`-eligible but NEVER `cancel_payment`-eligible: B1b
+    // makes that a hard reject (`ORD_PAYMENT_CANCEL_FINISHED_001`) — a
+    // refund is the only way to reverse money once an order is finalized.
+    const isPayEligibleFulfilledState =
+      state === 'shipped' || state === 'delivered' || state === 'finished';
+    if (isPayEligibleFulfilledState) {
+      const hasSettledPayment = (order.payments ?? []).some((p) =>
+        SETTLED_PAYMENT_STATES.has(p.state),
+      );
+      // Guardia de crédito (mismo contrato que el precheck de `payOrder` —
+      // NO se toca ese método; ver restricción del coordinador): una venta a
+      // crédito no ofrece `pay` (cobro de contado) en estos tres estados —
+      // el abono va por `credit_payment` / `registerCreditPayment`. Solo
+      // sobre-escribe cuando `canPay` ya habría dicho `true`, preservando la
+      // prioridad de motivo previa (ya-pagado/split ganan sobre crédito,
+      // igual que el código anterior).
+      const isCreditOrder = order.payment_form === '2';
+      const payResult = canPay(snapshot);
+      actions.push({
+        code: 'pay',
+        label_key: 'ORD_ACTION_PAY',
+        ...(payResult.enabled && isCreditOrder
+          ? { enabled: false, reason: ErrorCodes.ORD_PAY_CREDIT_ORDER_001.code }
+          : payResult),
+      });
+
+      if (isCreditOrder && state === 'finished') {
+        // Web only offers `credit-payment` for `finished` among these three
+        // states (`shipped`/`delivered` credit orders fall through to the
+        // disabled `pay` row above, same as the web's `!hasPaid` branch).
+        actions.push({
+          code: 'credit_payment',
+          label_key: 'ORD_ACTION_CREDIT_PAYMENT',
+          ...canCreditPayment(snapshot),
+        });
+      }
+
+      // B4 row-presence rule preserved 1:1: `cancel_payment` is only
+      // advertised at all once there is something settled to cancel.
+      if (hasSettledPayment) {
+        const hasIssuedSalesInvoice =
+          state !== 'finished' &&
+          (FULFILLED_PAYMENT_CANCELABLE_STATES.has(state) ||
+            PAYMENT_CANCELABLE_STATES.has(state)) &&
+          !hasNonDirectSettledPayment(order.payments)
+            ? !!(await this.findBlockingSalesInvoiceForPaymentCancel(orderId))
+            : undefined;
+        actions.push({
+          code: 'cancel_payment',
+          label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+          ...canCancelPaymentAsRole({ ...snapshot, hasIssuedSalesInvoice }, roleCtx),
+        });
+      }
+    }
+
+    // fast_track — independent of the state switch above (mirrors the web's
+    // standalone `canFastTrack()` checkbox, not part of its `availableActions`
+    // array either).
+    actions.push({
+      code: 'fast_track',
+      label_key: 'ORD_ACTION_FAST_TRACK',
+      ...canFastTrack(snapshot),
     });
+
+    // NOTE: `cancel` and `cancel_payment` above are already fully computed by
+    // `canCancel`/`canCancelPaymentAsRole` (which delegate to
+    // `getOrderCancellationPolicy` for the states that need it) — no further
+    // post-processing pass is applied here. An earlier version of this
+    // method re-ran the generic policy over the finished list as a final
+    // step; that would have clobbered `cancel_payment`'s new role gate for
+    // `pending_payment`/`processing` right back to the plain policy result.
+    return actions;
   }
 
   /**
@@ -2430,10 +3783,34 @@ export class OrderFlowService {
       );
     }
 
+    // 1b. B1b (order-truth-and-invoice-tz plan) — a `cancelled`/`refunded`
+    // order can never accept a delivery stamp: the money/inventory behind
+    // the line was already voided, so marking it "delivered" after the fact
+    // would misrepresent what happened. `item_type: null` restricts this
+    // call to ONLY the order-state axis of `canDeliverItem` (the shared
+    // predicate — see `order-action-policy.util.ts` — also backs
+    // `getItemActions`); the kitchen-readiness message below still owns its
+    // own wording.
+    const orderStateGate = canDeliverItem({
+      order_state: order.state,
+      delivered_at: null,
+      item_type: null,
+    });
+    if (!orderStateGate.enabled) {
+      throw new VendixHttpException(
+        ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE,
+        `No se puede marcar como entregado un ítem de una orden en estado '${order.state}'.`,
+      );
+    }
+
     // 2. Idempotencia del stamp: la primera entrega es la que ocurrió. El
     //    caso idempotente NO retorna antes de sincronizar — `delivered_at`
     //    se usa como punto de sincronización (reconcilia cocina abajo).
     const alreadyDelivered = item.delivered_at != null;
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — collected only
+    // when the store's "Permitir sobreventa" switch is ON; additive to the
+    // response, never present (nor an empty array) otherwise.
+    const stockWarnings: InsufficientStockItem[] = [];
 
     if (!alreadyDelivered) {
       // 3. Compuerta de cocina para items preparados.
@@ -2447,20 +3824,75 @@ export class OrderFlowService {
         }
       }
 
-      // 4. Stamp de entrega — la `where` con `order_id: orderId` es la barrera
-      //    de scope: si alguien intenta entregar el item de otra orden, el
-      //    updateMany no toca filas.
+      // 4. docs/plans/no-overselling-stock-guard-plan.md step 5 — consume
+      //    THIS item's stock atomically with the delivery stamp.
+      //    `commitOrderLines` runs FIRST inside the same tx; its own skip
+      //    rules (untracked / service / already consumed at fire / already
+      //    committed / restaurant prepared-pending-fire) decide whether
+      //    there is anything to deduct. A shortfall throws INV_STOCK_002 and
+      //    rolls back the stamp — `delivered_at` stays null. La `where` con
+      //    `order_id: orderId` es la barrera de scope: si alguien intenta
+      //    entregar el item de otra orden, el updateMany no toca filas.
       const now = new Date();
       const userId = RequestContextService.getUserId() ?? null;
+      const stockEvents: Array<() => void> = [];
 
-      await this.prisma.order_items.updateMany({
-        where: { id: orderItemId, order_id: orderId },
-        data: {
-          delivered_at: now,
-          delivered_by_user_id: userId,
-          updated_at: now,
-        },
+      await this.prisma.$transaction(async (tx) => {
+        const policy = await this.stockValidator?.resolveInventoryPolicy(
+          (order as any).store_id,
+          tx,
+        );
+        const allowOversell = policy?.allowOversell === true;
+
+        await this.orderStockCommit.commitOrderLines(orderId, [orderItemId], {
+          blockOnInsufficient: !allowOversell,
+          allowNegativeOnShortfall: allowOversell,
+          onShortfall: allowOversell
+            ? (shortfall) => {
+                stockWarnings.push({
+                  product_id: shortfall.product_id,
+                  product_variant_id: shortfall.product_variant_id,
+                  product_name: shortfall.product_name,
+                  kind: 'product',
+                  requested: shortfall.requested,
+                  available: shortfall.available,
+                });
+              }
+            : undefined,
+          tx,
+          userId: userId ?? undefined,
+          reason: 'Entrega de item de orden',
+          afterCommit: stockEvents,
+        });
+
+        await tx.order_items.updateMany({
+          where: { id: orderItemId, order_id: orderId },
+          data: {
+            delivered_at: now,
+            delivered_by_user_id: userId,
+            updated_at: now,
+          },
+        });
+
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: order.store_id,
+          organizationId: order.stores?.organization_id,
+          type: 'item_delivered',
+          orderItemId,
+          actorUserId: userId,
+        });
       });
+
+      for (const publish of stockEvents) {
+        try {
+          publish();
+        } catch (error) {
+          this.logger.warn(
+            `Stock committed; notification failed: ${(error as Error).message}`,
+          );
+        }
+      }
 
       this.logger.log(
         `Order item #${orderItemId} of order #${orderId} delivered by user #${userId}`,
@@ -2480,8 +3912,13 @@ export class OrderFlowService {
     );
 
     // 6. Devolver la vista de la orden actualizada (forma `getOrder`,
-    //    igual que `shipOrder` / `markKitchenOrderDelivered`).
-    return this.getOrder(orderId);
+    //    igual que `shipOrder` / `markKitchenOrderDelivered`). `stock_warnings`
+    //    se agrega SOLO si hubo sobreventa aceptada (step 9) — aditivo, nunca
+    //    presente (ni como arreglo vacío) en el camino estricto de siempre.
+    const updatedOrder = await this.getOrder(orderId);
+    return stockWarnings.length > 0
+      ? { ...updatedOrder, stock_warnings: stockWarnings }
+      : updatedOrder;
   }
 
   /**
@@ -2729,6 +4166,10 @@ export class OrderFlowService {
       where: { id: orderItemId, order_id: orderId },
       select: {
         id: true,
+        product_id: true,
+        product_variant_id: true,
+        quantity: true,
+        stock_units_consumed: true,
         product_name: true,
         inventory_consumed_at_fire: true,
         products: { select: { product_type: true } },
@@ -2922,6 +4363,27 @@ export class OrderFlowService {
         }
       }
 
+      // docs/plans/no-overselling-stock-guard-plan.md step 7 — an
+      // undelivered, never-committed line's active stock reservation must
+      // be released back to sellable, or the cancelled line keeps holding
+      // stock hostage forever. Safe no-op when there is nothing to release:
+      // untracked products, kitchen dishes excluded from Step 3/4's own
+      // reservation (their reservation never existed — ingredients are
+      // handled above via `disposeConsumedPreparedLeaves`), and lines whose
+      // stock was already consumed/released by the branches above.
+      const releaseQty = orderItem.stock_units_consumed ?? orderItem.quantity;
+      if (orderItem.product_id != null && releaseQty > 0 && !orderItem.inventory_consumed_at_fire) {
+        await this.stockLevelManager.releaseReservationQuantity(
+          'order',
+          orderId,
+          orderItem.product_id,
+          orderItem.product_variant_id ?? undefined,
+          releaseQty,
+          'cancelled',
+          tx,
+        );
+      }
+
       // Soft cancel: el ítem queda VISIBLE marcado como cancelado, pero
       // EXCLUIDO de los totales. Motivo + tipo contable persistidos para
       // auditoría y para que el KDS / detalle de orden los muestre.
@@ -2933,6 +4395,15 @@ export class OrderFlowService {
           cancellation_type: resolvedType,
           updated_at: new Date(),
         },
+      });
+
+      await this.orderHistoryService?.record(tx, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: order.stores?.organization_id,
+        type: 'item_cancelled',
+        orderItemId,
+        payload: { reason: reason.trim(), cancellation_type: resolvedType },
       });
 
       // Recálculo excluyendo cancelados (`cancelled_at IS NULL`).
@@ -3108,6 +4579,8 @@ export class OrderFlowService {
         product_variant_id: true,
         product_name: true,
         quantity: true,
+        stock_units_consumed: true,
+        inventory_committed: true,
         delivered_at: true,
         cancelled_at: true,
         inventory_consumed_at_fire: true,
@@ -3208,28 +4681,56 @@ export class OrderFlowService {
           tx, orderId, orderItemId, preparedOrganizationId, order.store_id,
           trimmedReason, destination === 'restock' ? 'reuse' : 'waste', preparedLeaves,
         );
-      } else if (destination === 'restock' && orderItem.product_id != null) {
-        const locationId =
-          await this.stockLevelManager.getDefaultLocationForProduct(
+      } else if (orderItem.product_id != null) {
+        // docs/plans/no-overselling-stock-guard-plan.md step 7 — you only
+        // return what you actually took out. Gate on `inventory_committed`
+        // (was this line's stock ever really deducted?), not on
+        // `delivered_at`/`quantity`: a delivered-but-never-committed line
+        // (untracked product, or a legacy order delivered before this plan
+        // shipped commit-on-delivery) never removed anything from on_hand —
+        // adding stock back would fabricate units that were never taken.
+        const restockQty =
+          orderItem.stock_units_consumed ?? orderItem.quantity;
+        if (orderItem.inventory_committed) {
+          if (destination === 'restock') {
+            const locationId =
+              await this.stockLevelManager.getDefaultLocationForProduct(
+                orderItem.product_id,
+                orderItem.product_variant_id ?? undefined,
+              );
+            await this.stockLevelManager.updateStock(
+              {
+                product_id: orderItem.product_id,
+                variant_id: orderItem.product_variant_id ?? undefined,
+                location_id: locationId,
+                quantity_change: restockQty,
+                movement_type: 'return',
+                reason: `Reversa entrega ítem orden — restock (${trimmedReason})`,
+                source_module: 'order_item_cancel_delivered',
+                // NO order_item_id: la reversa no debe crear un hijo que
+                // apunte al order_item cancelado (FK onDelete: Restrict).
+                create_movement: true,
+                validate_availability: false,
+              },
+              tx,
+            );
+          }
+          // destination === 'waste': stock was already deducted at commit
+          // and stays consumed (merma) — nothing to undo here.
+        } else if (restockQty > 0) {
+          // Never committed — nothing was deducted, only (maybe) reserved.
+          // Release that reservation (regardless of destination) instead of
+          // either inventing stock or leaving it held forever.
+          await this.stockLevelManager.releaseReservationQuantity(
+            'order',
+            orderId,
             orderItem.product_id,
             orderItem.product_variant_id ?? undefined,
+            restockQty,
+            'cancelled',
+            tx,
           );
-        await this.stockLevelManager.updateStock(
-          {
-            product_id: orderItem.product_id,
-            variant_id: orderItem.product_variant_id ?? undefined,
-            location_id: locationId,
-            quantity_change: orderItem.quantity,
-            movement_type: 'return',
-            reason: `Reversa entrega ítem orden — restock (${trimmedReason})`,
-            source_module: 'order_item_cancel_delivered',
-            // NO order_item_id: la reversa no debe crear un hijo que
-            // apunte al order_item cancelado (FK onDelete: Restrict).
-            create_movement: true,
-            validate_availability: false,
-          },
-          tx,
-        );
+        }
       }
 
       // Soft cancel: el ítem queda VISIBLE marcado como cancelado, pero
@@ -3243,6 +4744,16 @@ export class OrderFlowService {
           cancellation_type: cancellationType,
           updated_at: new Date(),
         },
+      });
+
+      await this.orderHistoryService?.record(tx, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: order.stores?.organization_id,
+        type: 'item_delivery_reverted',
+        orderItemId,
+        actorUserId: userId,
+        payload: { reason: trimmedReason, destination },
       });
 
       // Recálculo excluyendo cancelados (`cancelled_at IS NULL`) — mismo
@@ -3565,10 +5076,15 @@ export class OrderFlowService {
         const floorRank = RECONCILE_LADDER.indexOf(floorState);
         const shippedRank = RECONCILE_LADDER.indexOf('shipped');
         if (currentRank >= shippedRank && currentRank > floorRank) {
-          await this.updateOrderState(order_id, floorState, {
-            reverted_from_dispatch: true,
-            reverted_at: new Date().toISOString(),
-          });
+          await this.updateOrderState(
+            order_id,
+            floorState,
+            {
+              reverted_from_dispatch: true,
+              reverted_at: new Date().toISOString(),
+            },
+            { source: 'listener' },
+          );
           this.logger.log(
             `[reconcileOrderFromDispatch] order #${order_id} reverted '${currentState}' → '${floorState}' (no active remisión) (store #${store_id})`,
           );
@@ -3633,11 +5149,16 @@ export class OrderFlowService {
         const from = RECONCILE_LADDER[rank - 1];
         const to = RECONCILE_LADDER[rank];
         this.validateTransition(from, to);
-        await this.updateOrderState(order_id, to, {
-          reconciled_from_dispatch: true,
-          reconciled_at: new Date().toISOString(),
-          ...(to === 'finished' ? { finished_at: new Date() } : {}),
-        });
+        await this.updateOrderState(
+          order_id,
+          to,
+          {
+            reconciled_from_dispatch: true,
+            reconciled_at: new Date().toISOString(),
+            ...(to === 'finished' ? { finished_at: new Date() } : {}),
+          },
+          { source: 'listener' },
+        );
       }
 
       this.logger.log(
@@ -3709,6 +5230,13 @@ export class OrderFlowService {
     stopId?: number;
     currency?: string;
     paymentMethod?: string;
+    /**
+     * Origen del `order_events`. Los dos llamadores reales son listeners
+     * (`DispatchNoteEventsListener` y `PaymentFromDispatchRouteListener`),
+     * así que el default es `'listener'`; un llamador HTTP futuro debe
+     * pasarlo explícito.
+     */
+    source?: OrderEventSource;
   }): Promise<void> {
     // 1. Resolve the REAL COD order id from the dispatch note (store-scoped).
     const dispatchNote = await this.prisma.dispatch_notes.findFirst({
@@ -3746,6 +5274,7 @@ export class OrderFlowService {
         total_paid: true,
         remaining_balance: true,
         customer_id: true,
+        stores: { select: { organization_id: true } },
       },
     });
     if (!order) {
@@ -3763,32 +5292,57 @@ export class OrderFlowService {
     // 4. Record the payment row + decrement the balance, mirroring
     //    registerCreditPayment. payments has no store_id column (scoped via the
     //    orders relation), so order_id is sufficient for tenant isolation.
-    await this.prisma.payments.create({
-      data: {
-        order_id: order.id,
-        customer_id: order.customer_id ?? undefined,
+    //
+    //    Plan order-truth-and-invoice-tz — payment row, balance and its
+    //    `payment_registered` share ONE transaction: if any of the three
+    //    fails, none persists (the event never outlives its payment). This
+    //    helper never transitions `orders.state` (the reconciler does), so
+    //    no `state_changed` is recorded here.
+    const paymentMethod = input.paymentMethod ?? 'cash';
+    await this.prisma.$transaction(async (tx) => {
+      const payment = await tx.payments.create({
+        data: {
+          order_id: order.id,
+          customer_id: order.customer_id ?? undefined,
+          amount: applied,
+          currency: input.currency ?? order.currency ?? 'COP',
+          state: 'succeeded',
+          gateway_reference: input.correlationKey,
+          paid_at: new Date(),
+          gateway_response: {
+            payment_type:
+              input.stopId != null ? 'dispatch_route' : 'dispatch_note',
+            dispatch_note_id: input.dispatchNoteId,
+            stop_id: input.stopId ?? null,
+            payment_method: paymentMethod,
+            collected_amount: input.amount,
+          },
+        },
+      });
+
+      await tx.orders.updateMany({
+        where: { id: order.id, store_id: input.storeId },
+        data: {
+          total_paid: Math.round(newTotalPaid * 100) / 100,
+          remaining_balance: Math.round(newRemaining * 100) / 100,
+        },
+      });
+
+      await this.orderHistoryService?.record(tx, {
+        orderId: order.id,
+        storeId: input.storeId,
+        organizationId: order.stores?.organization_id ?? null,
+        type: 'payment_registered',
+        paymentId: payment.id,
         amount: applied,
-        currency: input.currency ?? order.currency ?? 'COP',
-        state: 'succeeded',
-        gateway_reference: input.correlationKey,
-        paid_at: new Date(),
-        gateway_response: {
-          payment_type:
-            input.stopId != null ? 'dispatch_route' : 'dispatch_note',
+        source: input.source ?? 'listener',
+        payload: {
+          payment_method: paymentMethod,
+          correlation_key: input.correlationKey,
           dispatch_note_id: input.dispatchNoteId,
           stop_id: input.stopId ?? null,
-          payment_method: input.paymentMethod ?? 'cash',
-          collected_amount: input.amount,
         },
-      },
-    });
-
-    await this.prisma.orders.updateMany({
-      where: { id: order.id, store_id: input.storeId },
-      data: {
-        total_paid: Math.round(newTotalPaid * 100) / 100,
-        remaining_balance: Math.round(newRemaining * 100) / 100,
-      },
+      });
     });
 
     this.logger.log(
@@ -3968,8 +5522,8 @@ export class OrderFlowService {
       // recibida (`succeeded`/`captured`) no-efectivo deriva abajo a un
       // reembolso `requested` y el pago original queda como hecho histórico.
       // Solo el bloqueo de inventario/entrega sigue siendo fatal aquí;
-      // `cancelPayment` conserva la política completa (incluido ERR-38) vía
-      // assertCancellationAllowed.
+      // `cancelPayment` exige piernas directas y sin factura emitida, pero
+      // NUNCA lo bloquea el stock (regla del dueño).
       const cancelBlocker = getCancellationBlocker(freshOrder);
       if (cancelBlocker !== null && cancelBlocker !== 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001') {
         throw new VendixHttpException(ErrorCodes[cancelBlocker]);
@@ -4109,6 +5663,15 @@ export class OrderFlowService {
         throw notCancelableError();
       }
 
+      await this.orderHistoryService?.record(tx, {
+        orderId,
+        storeId: freshOrder.store_id,
+        organizationId: freshOrder.stores?.organization_id,
+        type: 'state_changed',
+        fromState: previousState,
+        toState: 'cancelled',
+      });
+
       // Winner (ADR-12, cash-only): cancel pending attempts plus the
       // succeeded CASH legs the cash-out just returned — the same SQL-verified
       // set, never the include. Non-cash received rows (`succeeded`/`captured`)
@@ -4158,6 +5721,22 @@ export class OrderFlowService {
                 cancellation_reason: dto.reason.trim(),
                 cancellation_type: 'after_fire_waste',
                 updated_at: new Date(),
+              },
+            });
+            // Plan order-truth-and-invoice-tz — un `item_cancelled` por
+            // ítem cancelado en cascada (mismo shape que `cancelOrderItem`
+            // + `cascade: true`). El `state_changed` de la orden ya se
+            // registró tras el claim; no se duplica.
+            await this.orderHistoryService?.record(tx, {
+              orderId,
+              storeId: freshOrder.store_id,
+              organizationId: freshOrder.stores?.organization_id,
+              type: 'item_cancelled',
+              orderItemId: item.id,
+              payload: {
+                reason: dto.reason.trim(),
+                cancellation_type: 'after_fire_waste',
+                cascade: true,
               },
             });
             continue;
@@ -4224,6 +5803,18 @@ export class OrderFlowService {
             cancellation_reason: dto.reason.trim(),
             cancellation_type: cancellationType,
             updated_at: new Date(),
+          },
+        });
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId: freshOrder.store_id,
+          organizationId: freshOrder.stores?.organization_id,
+          type: 'item_cancelled',
+          orderItemId: item.id,
+          payload: {
+            reason: dto.reason.trim(),
+            cancellation_type: cancellationType,
+            cascade: true,
           },
         });
       }
@@ -4870,10 +6461,15 @@ export class OrderFlowService {
         // updateOrderState enforces VALID_TRANSITIONS; both 'delivered' and
         // 'processing' allow the move to 'finished'. The auto_finished/
         // auto_finished_at metadata is preserved in internal_notes as before.
-        await this.updateOrderState(orderId, 'finished', {
-          auto_finished: true,
-          auto_finished_at: new Date().toISOString(),
-        });
+        await this.updateOrderState(
+          orderId,
+          'finished',
+          {
+            auto_finished: true,
+            auto_finished_at: new Date().toISOString(),
+          },
+          { source: 'job' },
+        );
         finishedCount++;
         this.logger.log(`Order #${orderId} auto-finished`);
       } catch (error) {
@@ -5240,6 +6836,7 @@ export class OrderFlowService {
       },
     });
 
+    let shouldFinish = false;
     if (remaining.length === 0 && newRemaining <= 0.01) {
       // F2-guard (AUTOMATIC path): mirror `registerCreditPayment` — the
       // forgiveness is recorded regardless, but we do NOT finish the order
@@ -5252,8 +6849,7 @@ export class OrderFlowService {
         );
       } else {
         this.validateTransition(order.state as OrderState, 'finished');
-        orderUpdate.state = 'finished';
-        orderUpdate.completed_at = new Date();
+        shouldFinish = true;
       }
     }
 
@@ -5261,6 +6857,19 @@ export class OrderFlowService {
       where: { id: orderId },
       data: orderUpdate,
     });
+
+    if (shouldFinish) {
+      // docs/plans/no-overselling-stock-guard-plan.md step 5 — never write
+      // `state: 'finished'` directly: `updateOrderState` is the only path
+      // that runs the atomic stock commit before the state write. A
+      // shortfall throws INV_STOCK_002 and the order stays open (the
+      // installment forgiveness above still stands — it is credit
+      // bookkeeping, independent of whether stock allows the order to
+      // close).
+      await this.updateOrderState(orderId, 'finished', {
+        finished_at: new Date(),
+      });
+    }
 
     this.logger.log(
       `Installment #${installmentId} forgiven for order #${orderId}`,
@@ -5417,8 +7026,12 @@ export class OrderFlowService {
       );
     }
 
+    // Widened exemption (fast-track only, see `shipOrder`'s
+    // `allowExemptDeliveryTypes`): pickup/direct_delivery/dine_in orders
+    // never need a shipping method to complete pay→ship→deliver→finish.
     if (
-      order.delivery_type !== 'direct_delivery' &&
+      (!order.delivery_type ||
+        !SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES.has(order.delivery_type)) &&
       !order.shipping_method_id
     ) {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001);
@@ -5437,7 +7050,14 @@ export class OrderFlowService {
           ErrorCodes.ORD_FAST_TRACK_PAYMENT_REQUIRED_001,
         );
       }
-      await this.payOrder(orderId, dto.payment);
+      // B13 — fastTrackOrder's one-shot state machine (pay → ship → deliver →
+      // finish, below) depends on payOrder's OLD strict throw when kitchen
+      // items are still pending: without it, `current.state === 'processing'`
+      // would fall into the `ship` step and auto-deliver/auto-finish an order
+      // whose kitchen never handed the items off. The direct "pagar" call
+      // (order detail / `/flow/pay`) does NOT pass this flag and gets the new
+      // lenient `processing` (paid) behavior instead — see payOrder above.
+      await this.payOrder(orderId, dto.payment, { strictKitchenPending: true });
       stepsExecuted.push('pay');
     }
 
@@ -5460,9 +7080,13 @@ export class OrderFlowService {
       });
     }
 
-    // 2) Ship (processing → shipped)
+    // 2) Ship (processing → shipped) — fast track alone is allowed to skip
+    // the shipping method for pickup/dine_in (see the widened precheck
+    // above and `shipOrder`'s `allowExemptDeliveryTypes`).
     if (current.state === 'processing') {
-      await this.shipOrder(orderId, dto.ship ?? {});
+      await this.shipOrder(orderId, dto.ship ?? {}, false, {
+        allowExemptDeliveryTypes: true,
+      });
       stepsExecuted.push('ship');
       current = await this.getOrder(orderId);
     }
@@ -5571,65 +7195,168 @@ export class OrderFlowService {
     currency: string,
     legs: NormalizedLeg[],
     change: number,
+    historyCtx?: { storeId: number; organizationId?: number | null },
   ): Promise<
     Array<{ payment: any; leg: NormalizedLeg; transactionId: string }>
   > {
-    const created: Array<{
-      payment: any;
-      leg: NormalizedLeg;
-      transactionId: string;
-    }> = [];
+    // Plan PLAN-pago-multimetodo-fixes paso 1 — objetivo 4: la cuenta
+    // bancaria de cada tramo se resuelve y valida ANTES de abrir la
+    // transacción (mismo gateway que ya usa el POS,
+    // `payments.service.ts:5275`/`:5544`), para rechazar una cuenta ajena a
+    // la tienda sin tocar `payments`. Fail-closed: si el gateway no resolvió
+    // por DI (specs históricas sin este dependiente) o falta `storeId` en el
+    // contexto, un tramo con `bank_account_id` se rechaza en vez de confiar
+    // en el id crudo que mandó el navegador.
+    const resolvedBankAccountIds = new Map<NormalizedLeg, number>();
     for (const leg of legs) {
-      const transactionId = await this.generateTransactionId();
-      // Ausente ⇒ pago exacto (igual que el escalar de hoy); nunca falsy.
-      const legReceived = leg.amount_received ?? leg.amount;
-      const payment = await this.prisma.payments.create({
-        data: {
-          order_id: orderId,
-          store_payment_method_id: leg.store_payment_method_id,
-          bank_account_id: leg.bank_account_id ?? null,
-          amount: leg.amount,
-          currency,
-          state: 'succeeded',
-          transaction_id: transactionId,
-          gateway_reference: leg.payment_reference ?? null,
-          paid_at: new Date(),
-          gateway_response: {
-            payment_type: 'direct',
-            amount_received: leg.amount_received,
-            change: leg.is_cash ? change : 0,
-            ...(leg.is_cash
-              ? { metadata: { amount_received: legReceived } }
-              : {}),
-          },
-        },
-      });
-      created.push({ payment, leg, transactionId });
+      if (leg.bank_account_id == null) continue;
+      if (!this.paymentGatewayService || historyCtx?.storeId == null) {
+        throw this.wrapPaymentFailure(
+          'bank_account_invalid',
+          new VendixHttpException(
+            ErrorCodes.SYS_INTERNAL_001,
+            'No se pudo validar la cuenta bancaria del tramo: falta el contexto de tienda o el validador no está disponible.',
+            { store_payment_method_id: leg.store_payment_method_id },
+          ),
+        );
+      }
+      try {
+        const account =
+          await this.paymentGatewayService.resolveAndValidateBankAccount(
+            leg.bank_account_id,
+            historyCtx.storeId,
+            this.prisma,
+          );
+        resolvedBankAccountIds.set(leg, account.id);
+      } catch (err) {
+        // PLAN-pago-multimetodo-pendientes paso 3 — cuenta bancaria inválida
+        // (inexistente, inactiva o ajena a la tienda/organización) es un
+        // rechazo de VALIDACIÓN de payload, no un conflicto de estado del
+        // cobro. Se relanza SIN envolver, mismo criterio que el POS
+        // (`payments.service.ts` ~:239-241, :282-284, :336-338, :368-370):
+        // el gateway tipa `PaymentError`, se mapea con `LEGACY_TO_NEW` y sale
+        // como 400 `PAY_VALIDATE_001`. Un error no tipado (infra del
+        // gateway) sí cae al 409 genérico de `wrapPaymentFailure` — igual
+        // que la falta de contexto de tienda/validador arriba, que sigue
+        // envuelta como `SYS_INTERNAL_001` / 500.
+        if (err instanceof PaymentError) {
+          const mapped = LEGACY_TO_NEW[err.code];
+          throw new VendixHttpException(mapped, err.message, err.details);
+        }
+        throw this.wrapPaymentFailure('bank_account_invalid', err as Error);
+      }
     }
-    return created;
+
+    // Plan PLAN-pago-multimetodo-fixes paso 1 — objetivo 1: todos los tramos
+    // y su `payment_registered` corren en UNA sola `$transaction`. Si el
+    // segundo `payments.create` falla, Prisma revierte el primero y no queda
+    // ninguna fila `succeeded` huérfana (antes corrían fuera de transacción,
+    // uno por uno, con `this.prisma`).
+    return this.prisma.$transaction(async (tx) => {
+      const created: Array<{
+        payment: any;
+        leg: NormalizedLeg;
+        transactionId: string;
+      }> = [];
+      for (const leg of legs) {
+        const transactionId = await this.generateTransactionId();
+        // Ausente ⇒ pago exacto (igual que el escalar de hoy); nunca falsy.
+        const legReceived = leg.amount_received ?? leg.amount;
+        const payment = await tx.payments.create({
+          data: {
+            order_id: orderId,
+            store_payment_method_id: leg.store_payment_method_id,
+            bank_account_id:
+              resolvedBankAccountIds.get(leg) ?? leg.bank_account_id ?? null,
+            amount: leg.amount,
+            currency,
+            state: 'succeeded',
+            transaction_id: transactionId,
+            gateway_reference: leg.payment_reference ?? null,
+            paid_at: new Date(),
+            gateway_response: {
+              payment_type: 'direct',
+              amount_received: leg.amount_received,
+              change: leg.is_cash ? change : 0,
+              ...(leg.is_cash
+                ? { metadata: { amount_received: legReceived } }
+                : {}),
+            },
+          },
+        });
+        created.push({ payment, leg, transactionId });
+        // Plan order-truth-and-invoice-tz — un `payment_registered` por
+        // tramo, con el MISMO `tx` que el `payments.create` de arriba: si la
+        // transacción revierte, el evento revierte con ella.
+        if (historyCtx) {
+          await this.orderHistoryService?.record(tx, {
+            orderId,
+            storeId: historyCtx.storeId,
+            organizationId: historyCtx.organizationId ?? null,
+            type: 'payment_registered',
+            paymentId: payment.id,
+            amount: leg.amount,
+          });
+        }
+        // PLAN-pago-multimetodo-pendientes paso 2 — porción de venta del
+        // evento `payment.received`, calculada SECUENCIALMENTE (mismo patrón
+        // que `processMultiLegDirectPayment` del POS,
+        // `payments.service.ts:5450`): en este punto de la transacción sólo
+        // existen los tramos ANTERIORES, así que son los únicos
+        // `prior_amounts` posibles y el último tramo toma el remanente
+        // exacto. Calcularlo por lote DESPUÉS de crear todos los tramos
+        // rompería esta garantía: cada uno vería a sus hermanos como
+        // "previos" y la Σ de porciones dejaría de cuadrar con la orden.
+        //
+        // Envuelto en try/catch: esto es enriquecimiento de LECTURA para el
+        // evento que se emite más tarde (`emitLegPaymentReceivedEvents`),
+        // nunca el registro del cobro en sí. Un fallo acá (p.ej. un mock de
+        // test sin `orders.findUnique`, o una lectura que revienta) degrada
+        // a `sale_share: undefined` — el payload cae íntegro a los totales
+        // de la orden (mismo contrato que el pago escalar) — pero JAMÁS debe
+        // abortar la transacción que ya está creando la fila `succeeded`.
+        try {
+          (payment as any).sale_share = await resolvePaymentReceivedSaleFields(
+            tx,
+            { order_id: orderId, payment_id: payment.id, amount: Number(leg.amount) },
+          );
+        } catch (error) {
+          this.logger.warn(
+            `resolvePaymentReceivedSaleFields failed for order ${orderId} payment ${payment.id}; payment.received usará los totales de la orden: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+      return created;
+    });
   }
 
   /**
    * Compensación multimétodo — cancela TODAS las filas creadas en el intento
-   * con el mismo `cancellation_reason` (regla "un payment por intento").
+   * con el mismo `cancellation_reason` (regla "un payment por intento"), las
+   * `N` actualizaciones corren en una sola `$transaction` para que la
+   * compensación sea todo o nada.
    */
   private async cancelLegPayments(
     legPayments: Array<{ payment: any; leg: NormalizedLeg }>,
     cancellationReason: string,
   ): Promise<void> {
-    for (const { payment } of legPayments) {
-      await this.prisma.payments.update({
-        where: { id: payment.id },
-        data: {
-          state: 'cancelled',
-          updated_at: new Date(),
-          gateway_response: {
-            ...((payment.gateway_response as object) ?? {}),
-            cancellation_reason: cancellationReason,
+    await this.prisma.$transaction(async (tx) => {
+      for (const { payment } of legPayments) {
+        await tx.payments.update({
+          where: { id: payment.id },
+          data: {
+            state: 'cancelled',
+            updated_at: new Date(),
+            gateway_response: {
+              ...((payment.gateway_response as object) ?? {}),
+              cancellation_reason: cancellationReason,
+            },
           },
-        },
-      });
-    }
+        });
+      }
+    });
   }
 
   /**
@@ -5653,6 +7380,7 @@ export class OrderFlowService {
       store_payment_method_id: number;
       amount: number;
       change: number;
+      payment_method: string;
     }>;
   } {
     const payment = {
@@ -5668,6 +7396,7 @@ export class OrderFlowService {
         store_payment_method_id: leg.store_payment_method_id,
         amount: leg.amount,
         change: leg.is_cash ? change : 0,
+        payment_method: leg.display_name,
       })),
     };
   }
@@ -5708,6 +7437,112 @@ export class OrderFlowService {
       });
     } catch {
       // Non-critical: don't fail the payment if movement recording fails
+    }
+  }
+
+  /**
+   * B4 — contra-movimiento de caja de los pagos anulados por `cancelPayment`.
+   * Solo revierte pagos que SÍ dejaron un movimiento `sale` en caja (si la
+   * caja estaba apagada o el pago era no-efectivo sin rastreo, no hay nada
+   * que revertir). No crítico, igual que `recordPayOrderCashMovement`.
+   *
+   * Resolución de sesión por movimiento (ya no siempre la del operador que
+   * anula, que dejaba la venta contada doble si ese admin no tenía caja
+   * abierta):
+   * 1. La sesión ORIGINAL del movimiento `sale` (`movement.session_id`), si
+   *    sigue `open` — el contra-movimiento cae en el mismo cuadre que la
+   *    venta que revierte.
+   * 2. Si esa sesión ya cerró, la sesión activa del operador que anula
+   *    (`getActiveSession(userId)`).
+   * 3. Si tampoco hay una sesión activa del operador, no hay dónde asentar
+   *    el refund: se deja constancia explícita con `logger.warn` (antes
+   *    salía en silencio y la venta original quedaba contada en el cuadre
+   *    sin su reversa) y se continúa con los demás movimientos.
+   *
+   * El `user_id` que queda en el movimiento de reversa es siempre el del
+   * operador que anula (RequestContextService.getUserId()), sin importar en
+   * qué sesión caiga.
+   */
+  private async reversePaymentCashMovements(
+    storeId: number,
+    orderId: number,
+    paymentIds: number[],
+  ): Promise<void> {
+    if (paymentIds.length === 0) return;
+    try {
+      const userId = RequestContextService.getUserId();
+      if (!userId) return;
+      const saleMovements = await this.prisma.cash_register_movements.findMany({
+        where: {
+          order_id: orderId,
+          type: 'sale',
+          payment_id: { in: paymentIds },
+        },
+        select: {
+          session_id: true,
+          payment_id: true,
+          amount: true,
+          payment_method: true,
+        },
+      });
+      if (saleMovements.length === 0) return;
+
+      const originalSessionIds = Array.from(
+        new Set(saleMovements.map((m) => m.session_id)),
+      );
+      const originalSessions = await this.prisma.cash_register_sessions.findMany({
+        where: { id: { in: originalSessionIds } },
+        select: { id: true, status: true },
+      });
+      const originalSessionStatusById = new Map(
+        originalSessions.map((s) => [s.id, s.status]),
+      );
+
+      // Lazily resolved and cached: most calls only revert a single
+      // operator's own sale, so we avoid the extra query unless an
+      // original session actually turns out closed.
+      let operatorSessionResolved = false;
+      let operatorSessionId: number | null = null;
+      const resolveOperatorSessionId = async (): Promise<number | null> => {
+        if (!operatorSessionResolved) {
+          const session = await this.sessionsService.getActiveSession(userId);
+          operatorSessionId = session?.id ?? null;
+          operatorSessionResolved = true;
+        }
+        return operatorSessionId;
+      };
+
+      for (const movement of saleMovements) {
+        const originalStatus = originalSessionStatusById.get(movement.session_id);
+        let targetSessionId: number | null =
+          originalStatus === 'open' ? movement.session_id : null;
+
+        if (!targetSessionId) {
+          targetSessionId = await resolveOperatorSessionId();
+        }
+
+        if (!targetSessionId) {
+          this.logger.warn(
+            `reversePaymentCashMovements: sin sesión de caja abierta para revertir la venta ` +
+              `de la orden #${orderId}, pago #${movement.payment_id ?? 'n/a'} ` +
+              `(sesión original #${movement.session_id} ya cerrada y el operador #${userId} ` +
+              `no tiene sesión activa). La venta original queda sin reversar en el cuadre.`,
+          );
+          continue;
+        }
+
+        await this.movementsService.recordRefundMovement(targetSessionId, {
+          store_id: storeId,
+          user_id: userId,
+          amount: Number(movement.amount),
+          payment_method: movement.payment_method ?? '',
+          order_id: orderId,
+          payment_id: movement.payment_id ?? undefined,
+          reference: 'payment_cancelled',
+        });
+      }
+    } catch {
+      // Non-critical: la anulación ya quedó persistida.
     }
   }
 
@@ -6015,8 +7850,13 @@ export class OrderFlowService {
     }
   }
 
-  /** Release only identities reserved by this draft claim, then reopen it for
-   * retry. Both effects commit together; never release an older order reserve. */
+  /** Release only the quantity reserved by this draft claim, then reopen it
+   * for retry. Both effects commit together; never release an older order
+   * reserve. Bounded by `reservation.quantity` (docs/plans/no-overselling-
+   * stock-guard-plan.md step 4): `promoteDraftToCreated` may have topped up
+   * an identity that already carried an older reservation (e.g. a second
+   * line of the same product placed earlier by `create`/`addItems`) — a
+   * full-identity release here would wipe that older reservation too. */
   private async compensateClaimedDraftPayment(
     orderId: number,
     storeId: number,
@@ -6025,13 +7865,15 @@ export class OrderFlowService {
     await this.prisma.$transaction(
       async (tx) => {
         for (const reservation of reservations) {
-          await this.stockLevelManager.releaseReservation(
-            reservation.productId,
-            reservation.variantId,
-            reservation.locationId,
+          await this.stockLevelManager.releaseReservationQuantity(
             'order',
             orderId,
+            reservation.productId,
+            reservation.variantId,
+            reservation.quantity,
+            'cancelled',
             tx,
+            { newestFirst: true },
           );
         }
         const restored = await tx.orders.updateMany({
@@ -6044,6 +7886,250 @@ export class OrderFlowService {
       },
       { timeout: 30_000 },
     );
+  }
+
+  /**
+   * Emite `payment.received` por cada tramo/pago de un cobro directo de
+   * `payOrder`/`confirmPayment` — MISMA forma y MISMAS fuentes de datos que
+   * el emisor de referencia del POS (`payments.service.ts` ~1674-1891):
+   * lee `order_items` con sus impuestos tipados, arma `sale_tax` con
+   * `buildOrderSaleTaxPayload` como respaldo, resuelve la retención sufrida
+   * POR TIPO DE OPERACIÓN (`resolveSufferedByOperation`, decisión del dueño
+   * 2026-09-26) UNA vez por orden y arma los payloads con
+   * `buildPaymentReceivedEvents` (cada pago usa su propio `sale_share`,
+   * prorrateado SECUENCIALMENTE por `createLegPayments` al crearse).
+   *
+   * SÓLO se invoca desde el camino de ÉXITO de cada rama de `payOrder`/
+   * `confirmPayment` (después de que el `updateOrderState` que cierra el
+   * cobro terminó bien), nunca desde una compensación (`cancelLegPayments`):
+   * una carga compensada no debe dejar ni evento emitido ni retención
+   * persistida.
+   *
+   * Decisión de diseño (retención + huérfanos en compensación): la
+   * retención se resuelve y persiste ACÁ — después del commit del estado —
+   * y NO dentro de la transacción de `createLegPayments`. Si se persistiera
+   * ahí (junto con los `payments.create` de cada tramo) y el `updateOrderState`
+   * posterior fallara, `cancelLegPayments` sólo anula los `payments`
+   * (los marca `cancelled`); nunca toca `withholding_calculations`, así que
+   * las filas de retención de una venta que nunca se cerró quedarían
+   * huérfanas. Persistir aquí, gateado por el mismo punto de llamada que el
+   * evento, garantiza la regla: carga compensada = sin retención persistida
+   * y sin evento.
+   *
+   * Orden interno (PR #858 hallazgos 3 y 5): se prorratea la retención a la
+   * porción de este cobro, se PERSISTE y recién entonces se emite, con sólo
+   * las líneas persistidas.
+   *
+   * Envuelta en try/catch que sólo loguea — mismo contrato que
+   * `emitPosSaleCompletedIfFullyPaid`: un fallo leyendo impuestos o
+   * resolviendo retención nunca debe convertir un cobro ya exitoso en un
+   * error HTTP, y ninguna especificación histórica con mocks incompletos
+   * puede romperse por esto.
+   */
+  private async emitLegPaymentReceivedEvents(
+    orderId: number,
+    order: Awaited<ReturnType<OrderFlowService['getOrder']>>,
+    legPayments: Array<{ payment: any; leg: NormalizedLeg }>,
+  ): Promise<void> {
+    try {
+      if (!legPayments || legPayments.length === 0) return;
+      // Con 2+ tramos, un tramo sin `sale_share` caería a los totales de la
+      // orden y cada tramo reconocería el ingreso completo. Sin asiento es
+      // mejor que ingreso duplicado: se registra el error y no se emite.
+      if (
+        legPayments.length > 1 &&
+        legPayments.some(({ payment }) => !(payment as any).sale_share)
+      ) {
+        this.logger.error(
+          `[emitLegPaymentReceivedEvents skipped] order=${orderId}: tramo sin sale_share en cobro multitramo; payment.received no emitido`,
+        );
+        return;
+      }
+      const orderItemsWithTaxes = await this.prisma.order_items.findMany({
+        where: { order_id: orderId, cancelled_at: null },
+        select: {
+          total_price: true,
+          quantity: true,
+          tax_amount_item: true,
+          weight: true,
+          price_unit_quantity: true,
+          item_type: true,
+          order_item_taxes: {
+            select: { tax_type: true, tax_amount: true, tax_rate: true },
+          },
+        },
+      });
+      const sale_tax = buildOrderSaleTaxPayload({
+        product_tax_rows: orderItemsWithTaxes.flatMap((item) =>
+          (item.order_item_taxes || []).map((tax) => ({
+            ...tax,
+            taxable_amount: Number(item.total_price || 0),
+          })),
+        ),
+        order: order as any,
+        order_items: orderItemsWithTaxes as any,
+      });
+
+      let wh: WithholdingResolution = {
+        lines: [],
+        uvt_value_used: 0,
+        counterparty_type: null,
+      };
+      // PR #858 — orden ya facturada (factura aceptada a medio pagar y luego
+      // se cobra el resto): `onPaymentReceived` toma la rama «con factura» e
+      // IGNORA la retención, y la factura ya la registró. Retener aquí dejaba
+      // una fila sin asiento que el certificado contaba dos veces. Mismo
+      // criterio que el asiento (`resolvePaymentInvoiceBranch`). Si la
+      // comprobación falla se conserva el comportamiento previo.
+      let orderAlreadyInvoiced = false;
+      try {
+        const branch = await resolvePaymentInvoiceBranch(this.prisma as any, {
+          order_id: orderId,
+          organization_id: order.stores?.organization_id,
+        });
+        orderAlreadyInvoiced = branch.has_invoice;
+      } catch (error) {
+        this.logger.warn(
+          `[emitLegPaymentReceivedEvents] order=${orderId}: no se pudo comprobar si la orden ya está facturada; se sigue sin ese corte: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      if (orderAlreadyInvoiced) {
+        this.logger.log(
+          `[emitLegPaymentReceivedEvents] order=${orderId}: orden ya facturada; payment.received se emite sin retención.`,
+        );
+      } else if (this.withholdingFlow) {
+        try {
+          const customer_id = order.customer_id
+            ? Number(order.customer_id)
+            : null;
+          const withholdingItems = orderItemsWithTaxes.map((item) => ({
+            product_type: item.item_type,
+            base: Number(item.total_price || 0),
+            // PR #858 hallazgo 4 — reteIVA se calcula sobre el IVA de la
+            // operación, no sobre todos los impuestos de la línea: INC/ICA
+            // no entran. `tax_type` nulo = IVA (filas legadas sin tipar,
+            // regla de `vendix-tax-typing`).
+            ivaAmount: (item.order_item_taxes || [])
+              .filter((tax) => (tax.tax_type ?? 'iva') === 'iva')
+              .reduce((sum, tax) => sum + Number(tax.tax_amount || 0), 0),
+          }));
+          wh = await this.withholdingFlow.resolveSufferedByOperation({
+            organization_id: order.stores?.organization_id,
+            store_id: order.store_id,
+            customer_id,
+            items: withholdingItems,
+          });
+        } catch (error) {
+          this.logger.warn(
+            `resolveSufferedByOperation failed for order ${orderId}; degrading to no withholding: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          wh = { lines: [], uvt_value_used: 0, counterparty_type: null };
+        }
+      } else {
+        this.logger.warn(
+          `WithholdingFlowService no disponible para la orden ${orderId}; payment.received se emite sin retención.`,
+        );
+      }
+
+      // PR #858 hallazgo 3 — con abonos previos este cobro cubre sólo
+      // `grand_total − settledAmount`, pero `wh` se resolvió sobre TODOS los
+      // ítems. Se escala a la porción de este cobro (Σ tramos / grand_total)
+      // ANTES de repartir entre tramos; un cobro por el total es identidad.
+      const portion = legPayments.reduce(
+        (sum, { leg }) => sum + Number(leg.amount || 0),
+        0,
+      );
+      const proratedLines = prorateWithholdingLines(
+        wh.lines,
+        portion,
+        Number((order as any).grand_total || 0),
+      );
+
+      // PR #858 hallazgo 5 — persistir ANTES de emitir: un débito en la 1355
+      // sin filas `withholding_calculations` que lo respalden es peor que un
+      // evento sin retención. Sólo se emite lo que se persistió (mismo filtro
+      // que `persistWithholdingLines`: concepto y monto > 0). Si la
+      // persistencia falla, se emite sin retención y se deja log.error —
+      // misma regla que `invoice-flow.service.ts` (`resolveAndPersist...`).
+      let emittedLines: WithholdingLine[] = [];
+      if (this.withholdingFlow && !orderAlreadyInvoiced) {
+        const persistable = proratedLines.filter(
+          (line) => typeof line.concept_id === 'number' && line.amount > 0,
+        );
+        try {
+          await this.withholdingFlow.persistWithholdingLines({
+            organization_id: order.stores?.organization_id,
+            store_id: order.store_id,
+            invoice_id: null,
+            // PR #858 hallazgo 2 — la factura de esta orden enlaza estas filas
+            // en vez de insertar la sufrida otra vez.
+            order_id: orderId,
+            customer_id: order.customer_id ? Number(order.customer_id) : null,
+            role: 'suffered',
+            counterparty_type: wh.counterparty_type,
+            uvt_value_used: wh.uvt_value_used,
+            lines: persistable,
+          });
+          emittedLines = persistable;
+        } catch (error) {
+          this.logger.error(
+            `[withholding persist failed] order=${orderId}: payment.received se emite sin retención: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          emittedLines = [];
+        }
+      }
+
+      const payloads = buildPaymentReceivedEvents({
+        order: {
+          id: orderId,
+          order_number: order.order_number,
+          store_id: order.store_id,
+          organization_id: order.stores?.organization_id,
+          customer_id: order.customer_id,
+          subtotal_amount: order.subtotal_amount,
+          tip_amount: order.tip_amount,
+        },
+        sale_tax,
+        payments: legPayments.map(({ payment, leg }) => ({
+          id: payment.id,
+          amount: leg.amount,
+          currency: payment.currency,
+          accounting_method: leg.accounting_method,
+          sale_share: (payment as any).sale_share as
+            | PaymentReceivedSaleFields
+            | undefined,
+        })),
+        withholding_lines: emittedLines,
+        currency: order.currency || legPayments[0].payment.currency,
+        user_id: RequestContextService.getUserId() ?? null,
+      });
+
+      // En serie: el listener contable numera el asiento con MAX+1, así que
+      // dos tramos emitidos a la vez chocan en `entry_number` (P2002).
+      for (const payload of payloads) {
+        try {
+          await this.eventEmitter.emitAsync('payment.received', payload);
+        } catch (error) {
+          this.logger.error(
+            `[payment.received listener failed] order=${orderId} payment=${payload.payment_id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+    } catch (error) {
+      this.logger.error(
+        `[emitLegPaymentReceivedEvents failed] order=${orderId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   /**
@@ -6178,7 +8264,12 @@ export class OrderFlowService {
     if (cause instanceof VendixHttpException) {
       causeCode = (cause as any).errorCode ?? causeCode;
       message = cause.message;
-      const causeDetails = (cause as any).details;
+      // VendixHttpException stores public details in HttpException's
+      // response body, not on a `.details` property of the instance.
+      const causeResponse = cause.getResponse();
+      const causeDetails = typeof causeResponse === 'object' && causeResponse !== null
+        ? (causeResponse as { details?: Record<string, unknown> }).details
+        : undefined;
       if (causeDetails && typeof causeDetails === 'object') {
         extraDetails = { ...causeDetails };
       }

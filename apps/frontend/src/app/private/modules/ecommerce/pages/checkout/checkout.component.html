@@ -186,15 +186,24 @@
             />
 
             @if (use_new_address()) {
-              <!-- C.3: mapa 50% enmarcado 9:16 tipo teléfono + formulario 50%.
-                   El teléfono va primero para que quede en el viewport inicial. -->
+              <!-- C.3: formulario (izquierda / arriba en mobile) + mapa de apoyo
+                   enmarcado 9:16 (derecha / abajo en mobile), vía `order` en SCSS. -->
               <div class="delivery-address-grid">
+              <div class="map-column">
               <div class="map-phone-frame">
               <app-address-map-picker
                 [center]="map_center()"
+                [delegateLocate]="true"
                 (located)="onMapLocated($event)"
-                (mapReady)="onMapReady()"
+                (locateRequested)="onLocateRequested()"
               />
+              </div>
+              @if (addressWarning()) {
+                <p class="address-map-warning" role="status">
+                  <app-icon name="alert-triangle" [size]="14" />
+                  {{ addressWarning() }}
+                </p>
+              }
               </div>
               <form [formGroup]="address_form" class="address-form">
                 <app-input
@@ -462,9 +471,16 @@
                 @if (use_new_address()) {
                   <app-address-map-picker
                     [center]="map_center()"
+                    [delegateLocate]="true"
                     (located)="onMapLocated($event)"
-                    (mapReady)="onMapReady()"
+                    (locateRequested)="onLocateRequested()"
                   />
+                  @if (addressWarning()) {
+                    <p class="address-map-warning" role="status">
+                      <app-icon name="alert-triangle" [size]="14" />
+                      {{ addressWarning() }}
+                    </p>
+                  }
                   <form [formGroup]="address_form" class="address-form">
                     <app-input
                       label="Direccion"
@@ -1090,9 +1106,6 @@
                 (bookingStep !== null &&
                   step() === bookingStep &&
                   !allBookingSlotsSelected) ||
-                (step() === 1 &&
-                  !cartHasOnlyServices &&
-                  !canProceedFromAddress()) ||
                 (step() === paymentStep &&
                   !cartHasOnlyServices &&
                   shipping_options().length === 0) ||

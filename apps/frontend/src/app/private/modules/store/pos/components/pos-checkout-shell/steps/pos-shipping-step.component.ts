@@ -22,11 +22,13 @@ import { Router } from '@angular/router';
 import {
   CurrencyInputDirective,
   IconComponent,
+  SelectorComponent,
   StepsLineComponent,
   ToggleComponent,
 } from '../../../../../../../shared/components';
 import type {
   PaymentSubmit,
+  SelectorOption,
   StepsLineItem,
 } from '../../../../../../../shared/components';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
@@ -51,9 +53,29 @@ import { PosCustomerAddress } from '../../../models/customer.model';
 import {
   PosShippingMethod,
   PosShippingAddress,
+  PosShippingOption,
   PosShippingSaleData,
 } from '../../../models/shipping.model';
 import { PaymentRequest } from '../../../models/payment.model';
+import type { PaymentLeg } from '../../../../../../../shared/components/payment-collector/payment-collector.model';
+import type { PosPaymentLeg } from '../../../services/pos-payment.service';
+
+/**
+ * B11 — el collector emite tramos en camelCase (`PaymentLeg`); el backend
+ * espera snake_case exacto (`PaymentLegDto`, `forbidNonWhitelisted`). Espeja
+ * el helper homónimo de `pos-payment-step.component.ts` (mismo contrato, sin
+ * exportarlo desde allá para no tocar un archivo fuera de las 5 asignadas
+ * salvo necesidad).
+ */
+function toPosPaymentLegs(legs: PaymentLeg[]): PosPaymentLeg[] {
+  return legs.map((leg) => ({
+    store_payment_method_id: leg.storePaymentMethodId,
+    amount: leg.amount,
+    ...(leg.amountReceived != null ? { amount_received: leg.amountReceived } : {}),
+    ...(leg.reference ? { payment_reference: leg.reference } : {}),
+    ...(leg.bankAccountId != null ? { bank_account_id: leg.bankAccountId } : {}),
+  }));
+}
 
 type FlashSection = 'shipping-method' | 'address' | 'customer';
 
@@ -113,6 +135,7 @@ function toQuotedShippingTax(option: {
     IconComponent,
     CurrencyPipe,
     CurrencyInputDirective,
+    SelectorComponent,
     StepsLineComponent,
     ToggleComponent,
     AddressFormFieldsComponent,
@@ -246,6 +269,22 @@ export class PosShippingStepComponent {
    * lo preserva para poder restaurar el desglose al volver a automático).
    */
   readonly quotedShippingTax = signal<QuotedShippingTax | null>(null);
+
+  /**
+   * B6 — todas las tarifas devueltas por el backend para el método
+   * seleccionado (antes se descartaban todas menos la primera). Vacío o
+   * un solo elemento ⇒ sin selector visible (comportamiento igual a hoy).
+   */
+  readonly rateOptions = signal<PosShippingOption[]>([]);
+  readonly rateSelectorOptions = computed<SelectorOption[]>(() =>
+    this.rateOptions().map((o) => ({
+      value: o.rate_id ?? o.id,
+      label: [o.rate_name || o.method_name, o.zone_name]
+        .filter(Boolean)
+        .join(' · '),
+      description: this.currencyService.format(o.cost),
+    })),
+  );
 
   // ── Envío sub-wizard (presentación; espeja el patrón de Cobro) ────────────
   /** Sub-paso activo del paso Envío: 0=Método · 1=Dirección (si no pickup) · Costo (terminal). */
@@ -579,7 +618,10 @@ export class PosShippingStepComponent {
     this.quoteGeneration++;
     this.isCalculatingShipping.set(false);
     this.quoteError.set(null);
-    if (!preserveBreakdown) this.quotedShippingTax.set(null);
+    if (!preserveBreakdown) {
+      this.quotedShippingTax.set(null);
+      this.rateOptions.set([]);
+    }
   }
 
   onAddressValidChange(valid: boolean): void {
@@ -668,12 +710,19 @@ export class PosShippingStepComponent {
       next: (options) => {
         if (generation !== this.quoteGeneration) return;
         this.isCalculatingShipping.set(false);
-        const matching = options.find((o) => o.method_id === method.id);
-        if (matching) {
-          this.calculatedShippingCost.set(matching.cost);
-          this.shippingRateId.set(matching.rate_id ?? matching.id);
-          this.quotedShippingTax.set(toQuotedShippingTax(matching));
-          if (!this.manualCostOverride()) this.shippingCost.set(matching.cost);
+        // B6 — el backend devuelve TODAS las tarifas del método (zona/tipo
+        // variados), no solo una. Antes `.find` se quedaba con la primera y
+        // descartaba el resto; ahora se conservan todas para el selector y
+        // se preselecciona la tarifa original (si sigue vigente) o la primera.
+        const matches = options.filter((o) => o.method_id === method.id);
+        this.rateOptions.set(matches);
+        if (matches.length > 0) {
+          const original = this.originalShipping();
+          const preferred =
+            original?.shippingRateId != null
+              ? matches.find((o) => (o.rate_id ?? o.id) === original.shippingRateId)
+              : undefined;
+          this.applyRateSelection(preferred ?? matches[0]);
         } else {
           this.calculatedShippingCost.set(null);
           this.shippingRateId.set(null);
@@ -688,6 +737,23 @@ export class PosShippingStepComponent {
         this.quoteError.set('No se pudo calcular el envío. Reintenta o ingresa un costo válido.');
       },
     });
+  }
+
+  /** B6 — aplica una tarifa (de la cotización) al costo/impuesto/tarifa activos. */
+  private applyRateSelection(option: PosShippingOption): void {
+    this.calculatedShippingCost.set(option.cost);
+    this.shippingRateId.set(option.rate_id ?? option.id);
+    this.quotedShippingTax.set(toQuotedShippingTax(option));
+    if (!this.manualCostOverride()) this.shippingCost.set(option.cost);
+  }
+
+  /** B6 — el cajero cambia de tarifa en el selector (solo visible con 2+ opciones). */
+  onRateSelected(rateId: string | number | null): void {
+    if (rateId == null) return;
+    const option = this.rateOptions().find(
+      (o) => (o.rate_id ?? o.id) === Number(rateId),
+    );
+    if (option) this.applyRateSelection(option);
   }
 
   toggleManualCost(): void {
@@ -806,6 +872,15 @@ export class PosShippingStepComponent {
         // una venta a domicilio queda sin `payments.bank_account_id`.
         bank_account_id: paymentSubmit.bankAccountId,
       };
+      // B11 — cobro multimétodo de contado: el collector ya excluye
+      // cash_on_delivery de los tramos elegibles (`directMethods`), así que
+      // ningún tramo aquí puede ser ON_DELIVERY. Con 2+ tramos se adjunta
+      // `payments[]`; `processShippingSale` decide si lo envía en vez del
+      // escalar (mismo patrón que `processSaleWithPayment`).
+      if (paymentSubmit.legs && paymentSubmit.legs.length >= 2) {
+        (paymentRequest as PaymentRequest & { payments?: PosPaymentLeg[] }).payments =
+          toPosPaymentLegs(paymentSubmit.legs);
+      }
     } else {
       // credito: build the installment-shaped plan (see limitation above).
       const credit = paymentSubmit.credit;

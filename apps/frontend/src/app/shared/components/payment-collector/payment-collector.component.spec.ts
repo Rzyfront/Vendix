@@ -1,4 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
 import { signal } from '@angular/core';
 import { By } from '@angular/platform-browser';
@@ -19,6 +21,13 @@ describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting',
       const num = Number(amount) || 0;
       return `$${num.toLocaleString('es-CO')}`;
     },
+    // Requeridos por CurrencyPipe real (constructor llama loadCurrency()) y
+    // por el propio componente (currencySymbol se lee como campo de clase).
+    // Mismo patrón que buildMultiCurrencyMock() más abajo en este archivo.
+    loadCurrency: () => Promise.resolve(null),
+    currencySymbol: signal('$'),
+    currencyDecimals: signal(0),
+    currencyFormatStyle: signal('dot_comma'),
     currentCurrency: signal({
       code: 'COP',
       symbol: '$',
@@ -37,6 +46,11 @@ describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting',
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        // El template importa StoreUserSelectComponent (context 'order' +
+        // allowAmountOverride) cuyo StoreUserLookupService inyecta HttpClient
+        // (providedIn: 'root'); sin este provider, detectChanges lanza NG0201.
+        provideHttpClient(),
+        provideHttpClientTesting(),
         { provide: CurrencyFormatService, useValue: mockCurrencyService },
         { provide: PaymentMethodsCatalogService, useValue: mockCatalog },
       ],
@@ -44,6 +58,11 @@ describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting',
 
     fixture = TestBed.createComponent(PaymentCollectorComponent);
     component = fixture.componentInstance;
+    // `amount` es un input.required<number>() consumido por effectiveBase()/
+    // effectiveTotal(), que a su vez lee un effect() del constructor en cada
+    // detectChanges(). Sin setInput aquí, cualquier test de este describe
+    // dispara NG0950 aunque no le importe `amount` (vendix-zoneless-signals).
+    fixture.componentRef.setInput('amount', 100000);
   });
 
   describe('formatInstallmentDate', () => {
@@ -448,6 +467,72 @@ describe('PaymentCollectorComponent — modo multi «Varios métodos» (Paso 5)'
     expect(multiPayload).toBeDefined();
     expect('legs' in multiPayload!).toBe(false);
     expect(multiPayload).toEqual(singlePayload);
+  });
+});
+
+describe('PaymentCollectorComponent — B15(1) setLegAmount no deja amountReceived obsoleto', () => {
+  let fixture: ComponentFixture<PaymentCollectorComponent>;
+  let component: PaymentCollectorComponent;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [PaymentCollectorComponent],
+      providers: [
+        { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
+        { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
+      ],
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(PaymentCollectorComponent);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('amount', 100000);
+    fixture.componentRef.setInput('paymentMethods', [
+      multiCashMethod,
+      multiCardMethod,
+      multiTransferMethod,
+    ]);
+    fixture.componentRef.setInput('allowMultiTender', true);
+    fixture.detectChanges();
+    component.setMultiEnabled(true);
+    fixture.detectChanges();
+  });
+
+  it('bajar el monto de un tramo en efectivo sin edición manual arrastra el recibido hacia abajo (sin vuelto fantasma)', () => {
+    component.setLegAmount(0, 50000);
+    fixture.detectChanges();
+    expect(component.legs()[0].amountReceived).toBe(50000);
+    expect(component.legChange(component.legs()[0])).toBe(0);
+
+    // Antes del fix: amountReceived se quedaba en 50000 al bajar el monto,
+    // mostrando un vuelto de 30.000 que nunca se entregó.
+    component.setLegAmount(0, 20000);
+    fixture.detectChanges();
+    expect(component.legs()[0].amountReceived).toBe(20000);
+    expect(component.legChange(component.legs()[0])).toBe(0);
+  });
+
+  it('un recibido editado a mano se conserva mientras siga cubriendo el nuevo monto (más bajo)', () => {
+    component.setLegAmount(0, 50000);
+    component.setLegReceived(0, 80000);
+    fixture.detectChanges();
+    expect(component.legs()[0].amountReceived).toBe(80000);
+
+    component.setLegAmount(0, 30000);
+    fixture.detectChanges();
+    expect(component.legs()[0].amountReceived).toBe(80000);
+    expect(component.legChange(component.legs()[0])).toBe(50000);
+  });
+
+  it('un recibido editado a mano se sube si el nuevo monto lo supera (nunca queda por debajo)', () => {
+    component.setLegAmount(0, 20000);
+    component.setLegReceived(0, 25000);
+    fixture.detectChanges();
+    expect(component.legs()[0].amountReceived).toBe(25000);
+
+    component.setLegAmount(0, 60000);
+    fixture.detectChanges();
+    expect(component.legs()[0].amountReceived).toBe(60000);
+    expect(component.legChange(component.legs()[0])).toBe(0);
   });
 });
 

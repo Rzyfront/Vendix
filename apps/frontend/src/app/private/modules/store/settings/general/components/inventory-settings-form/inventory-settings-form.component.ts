@@ -11,6 +11,7 @@ import {
   BadgeComponent,
   ExpandableCardComponent,
   IconComponent,
+  SettingToggleComponent,
 } from '../../../../../../../shared/components/index';
 
 export type InventoryScope = 'main_location' | 'all_locations';
@@ -22,6 +23,11 @@ export interface InventorySettings {
   out_of_stock_action: OutOfStockAction;
   track_inventory: boolean;
   allow_negative_stock: boolean;
+  /**
+   * Ausente/`null` en el backend se trata como `true` (nunca `?? false`):
+   * ver plan `no-overselling-stock-guard-plan.md` paso 9.
+   */
+  allow_ingredient_overuse: boolean;
   costing_method: 'cpp' | 'fifo';
   pos_stock_scope: InventoryScope;
   low_stock_alerts_scope: InventoryScope;
@@ -32,6 +38,7 @@ const DEFAULTS: InventorySettings = {
   out_of_stock_action: 'hide',
   track_inventory: true,
   allow_negative_stock: false,
+  allow_ingredient_overuse: true,
   costing_method: 'cpp',
   pos_stock_scope: 'main_location',
   low_stock_alerts_scope: 'main_location',
@@ -77,6 +84,7 @@ const ALERT_SCOPE_EFFECTS: Record<InventoryScope, string> = {
     BadgeComponent,
     ExpandableCardComponent,
     IconComponent,
+    SettingToggleComponent,
   ],
   templateUrl: './inventory-settings-form.component.html',
   styleUrls: ['./inventory-settings-form.component.scss'],
@@ -88,13 +96,20 @@ export class InventorySettingsForm {
   form: FormGroup = new FormGroup({
     low_stock_threshold: new FormControl(10),
     out_of_stock_action: new FormControl('hide'),
-    // Estos dos NO se dibujan en la plantilla a propósito: el backend los
-    // persiste pero ningún servicio los lee, así que un interruptor visible
-    // prometería un control que no existe. El texto explicativo del bloque
-    // de existencias ya declara el comportamiento como política fija.
-    // No atarlos a un input sin implementarlos primero en el backend.
+    // `track_inventory` NO se dibuja en la plantilla a propósito: el backend
+    // lo persiste pero ningún servicio lo lee, así que un interruptor
+    // visible prometería un control que no existe. El texto explicativo del
+    // bloque de existencias ya declara el comportamiento como política fija.
+    // No atarlo a un input sin implementarlo primero en el backend.
     track_inventory: new FormControl(true),
+    // `allow_negative_stock` SÍ se lee ahora: `StockValidatorService` lo
+    // consulta para decidir si bloquear la sobreventa (plan
+    // no-overselling-stock-guard-plan.md paso 9). El control se dibuja más
+    // abajo, junto a `allow_ingredient_overuse`.
     allow_negative_stock: new FormControl(false),
+    // Ausente/`null` en el backend equivale a `true` (ver merge con
+    // DEFAULTS más abajo) — nunca se trata como `false`.
+    allow_ingredient_overuse: new FormControl(true),
     costing_method: new FormControl('cpp'),
     pos_stock_scope: new FormControl<InventoryScope>('main_location'),
     low_stock_alerts_scope: new FormControl<InventoryScope>('main_location'),
@@ -198,6 +213,10 @@ export class InventorySettingsForm {
     return this.form.get('allow_negative_stock') as FormControl<boolean>;
   }
 
+  get allowIngredientOveruseControl(): FormControl<boolean> {
+    return this.form.get('allow_ingredient_overuse') as FormControl<boolean>;
+  }
+
   get costingMethodControl(): FormControl<string> {
     return this.form.get('costing_method') as FormControl<string>;
   }
@@ -214,8 +233,17 @@ export class InventorySettingsForm {
     effect(() => {
       const current = this.settings();
       if (current) {
-        this.form.patchValue(current, { emitEvent: false });
-        this.currentValue.set({ ...DEFAULTS, ...current });
+        // Ausente o `null` en el backend equivale a `true` (nunca `false`):
+        // ver plan no-overselling-stock-guard-plan.md paso 9. Se normaliza
+        // ANTES de patchValue para que un `null` explícito no apague el
+        // interruptor por accidente (patchValue sí escribiría un `null`).
+        const normalized: InventorySettings = {
+          ...current,
+          allow_ingredient_overuse:
+            (current as Partial<InventorySettings>).allow_ingredient_overuse ?? true,
+        };
+        this.form.patchValue(normalized, { emitEvent: false });
+        this.currentValue.set({ ...DEFAULTS, ...normalized });
       }
     });
   }

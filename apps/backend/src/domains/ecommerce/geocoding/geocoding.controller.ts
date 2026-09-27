@@ -68,18 +68,22 @@ export class GeocodingController {
   }
 
   /**
-   * `GET /ecommerce/geocoding/forward?q={address}`
+   * `GET /ecommerce/geocoding/forward?q={address}&city={city}&state={state}`
    *
-   * Free-text address → coordinate (Colombia-biased), used when the customer
-   * types the address manually so the map can center on it. Returns
-   * `{ lat: null, lng: null }` when nothing matched (not an error). Provider
-   * failure → 503; too-short/too-long `q` → 400 via the DTO.
+   * Free-text address → coordinate (Colombia-biased cascade: DANE
+   * intersection → structured search → free-text search — see
+   * `GeocodingService.forward`), used when the customer types the address
+   * manually so the map can center on it. `city`/`state` are optional and
+   * backward-compatible: today's frontend sends only `q`, and the service
+   * parses them out of it when absent. Returns `{ lat: null, lng: null }`
+   * when nothing matched (not an error — the service never throws for a
+   * cascade that comes up empty). Too-short/too-long `q` → 400 via the DTO.
    */
   @Get('forward')
   @OptionalAuth()
   async forward(
     @Query() query: ForwardGeocodeDto,
   ): Promise<ForwardGeocodeResult> {
-    return this.geocodingService.forward(query.q);
+    return this.geocodingService.forward(query.q, query.city, query.state);
   }
 }

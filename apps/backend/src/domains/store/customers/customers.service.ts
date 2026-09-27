@@ -1411,8 +1411,24 @@ export class CustomersService {
 
     // QUI-728 — NIT + verification_digit split. If the merchant typed a DV
     // that disagrees with computeNitDv(), refuse BEFORE persisting.
-    let nextDocumentNumber: string | null | undefined = undefined;
-    let nextVerificationDigit: string | null | undefined = undefined;
+    //
+    // Bug: `nextDocumentNumber` used to start at `undefined` and only got
+    // assigned inside the NIT branch below, so for CC/CE/PA/TI/PEP/PPT the
+    // normalized number never reached the `prisma.users.update()` call
+    // (which only writes `document_number` when the value is `!== undefined`)
+    // — the FE kept showing the old number/type. `create()` initializes
+    // `finalDocumentNumber = normalizedDoc.number` unconditionally (~1057);
+    // mirror that here whenever the caller is actually changing the
+    // document, and let the NIT branch overwrite it with the split
+    // number+DV. `verification_digit` only applies to NIT, so when the
+    // document changes to (or stays) a non-NIT type we clear any DV
+    // inherited from a previous NIT classification.
+    let nextDocumentNumber: string | null | undefined = isChangingDocument
+      ? normalizedDoc.number
+      : undefined;
+    let nextVerificationDigit: string | null | undefined = isChangingDocument
+      ? null
+      : undefined;
     if (
       isChangingDocument &&
       normalizedDoc.type === 'NIT' &&

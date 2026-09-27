@@ -25,6 +25,7 @@ import {
   type VexiPosCartSnapshot,
 } from '../../../../core/services/vexi-pos-bridge.service';
 import { VexiUiContextService } from '../../../../core/services/vexi-ui-context.service';
+import { formatStockWarningSummary } from '../../../../core/utils/stock-shortage.util';
 import {
   VexiUiHostRegistry,
   type VexiUiAction,
@@ -1933,6 +1934,14 @@ export class PosComponent {
       })) ?? [],
     });
     this.showOrderConfirmation.set(true);
+
+    // B12 — "Guardar" ya persistió el borrador (a mesa o a mostrador); soltar
+    // la sesión cacheada evita que la venta SIGUIENTE la reuse a ciegas y
+    // choque con TABLE_SESSION_ORDER_NOT_DRAFT si esa orden dejó de estar en
+    // draft. Una ronda legítima sobre la misma mesa la vuelve a traer del
+    // backend al seleccionarla de nuevo (mismo patrón que el cobro, QUI-535).
+    this.paymentTableId.set(null);
+    this.restaurantIntegration.clearTableSession();
   }
 
   onQuote(): void {
@@ -2176,6 +2185,11 @@ export class PosComponent {
                 this.toastService.success(
                   `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
                 );
+                if (fireResult.stock_warnings?.length) {
+                  this.toastService.warning(
+                    formatStockWarningSummary(fireResult.stock_warnings),
+                  );
+                }
                 this.cartService
                   .clearCart()
                   .pipe(takeUntilDestroyed(this.destroyRef))
@@ -2276,6 +2290,11 @@ export class PosComponent {
                 this.toastService.success(
                   `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
                 );
+                if (fireResult.stock_warnings?.length) {
+                  this.toastService.warning(
+                    formatStockWarningSummary(fireResult.stock_warnings),
+                  );
+                }
                 this.cartService
                   .clearCart()
                   .pipe(takeUntilDestroyed(this.destroyRef))
@@ -2880,6 +2899,14 @@ export class PosComponent {
     this.mode.set('create-draft');
     this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(false);
+
+    // B12 — misma razón que en `onCreateOrderConfirmed`: "Nueva venta" no
+    // debe arrastrar la sesión de mesa de la venta anterior. Sin esto, la
+    // mesa quedaba preseleccionada (`[tableId]` lee este mismo signal) y el
+    // checkout siguiente reusaba a ciegas una sesión cuya orden ya no está
+    // en draft, chocando con TABLE_SESSION_ORDER_NOT_DRAFT.
+    this.paymentTableId.set(null);
+    this.restaurantIntegration.clearTableSession();
 
     // Drop the `editOrder` query param too so a browser refresh on the same
     // URL does not re-enter the edit flow.

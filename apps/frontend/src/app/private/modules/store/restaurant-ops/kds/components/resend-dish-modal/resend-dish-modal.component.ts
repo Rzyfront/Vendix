@@ -15,6 +15,7 @@ import {
   ToastService,
 } from '../../../../../../../shared/components/index';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
+import { formatStockWarningSummary } from '../../../../../../../core/utils/stock-shortage.util';
 import { KitchenTicketsService } from '../../services/kitchen-tickets.service';
 
 /**
@@ -160,9 +161,12 @@ export class ResendDishModalComponent {
       .pipe() // sin operadores: el modal vive lo que vive la pantalla del
               // mesero que abrió el modal, y un reenvío nunca dura más que eso.
       .subscribe({
-        next: () => {
+        next: (res) => {
           this.isSubmitting.set(false);
           this.selectedReason.set(null);
+          if (res?.stock_warnings?.length) {
+            this.toastService.warning(formatStockWarningSummary(res.stock_warnings));
+          }
           this.confirmed.emit({ reason });
         },
         error: (err: unknown) => {

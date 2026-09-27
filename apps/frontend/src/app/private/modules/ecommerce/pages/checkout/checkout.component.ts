@@ -1,6 +1,7 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  ElementRef,
   OnInit,
   DestroyRef,
   signal,
@@ -11,7 +12,7 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { firstValueFrom, debounceTime, distinctUntilChanged, filter } from 'rxjs';
+import { firstValueFrom, debounceTime, distinctUntilChanged, filter, merge } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import {
@@ -41,6 +42,7 @@ import { AccountService, Address } from '../../services/account.service';
 import { CustomerAddressPickerComponent } from '../../../../../shared/components/customer-address-picker/customer-address-picker.component';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
+import { focusFirstInvalid } from '../../../../../core/utils/focus-first-invalid';
 import { phoneDigitsValidator } from '../../utils/address-validators';
 import {
   CatalogService,
@@ -79,10 +81,7 @@ import { PaymentInstructionsModalComponent } from '../../components/payment-inst
 import { LocationPermissionModalComponent } from '../../components/location-permission-modal/location-permission-modal.component';
 import { AddressMapPickerComponent } from '../../components/address-map-picker/address-map-picker.component';
 import { GeolocationService } from '../../services/geolocation.service';
-import {
-  GeocodingService,
-  NormalizedAddress,
-} from '../../services/geocoding.service';
+import { GeocodingService } from '../../services/geocoding.service';
 
 @Component({
   selector: 'app-checkout',
@@ -158,19 +157,22 @@ export class CheckoutComponent implements OnInit {
   readonly save_new_address = signal(true);
   readonly is_authenticated = signal(false);
 
-  // ========== GEO-LOCATION (opt-in map address) ==========
-  /** True once the location opt-in modal has been offered (show only once). */
-  readonly location_prompt_shown = signal(false);
+  // ========== GEO-LOCATION (explicit-trigger map pin) ==========
+  // GPS is NEVER requested automatically — only via the map's "Ubicarme"
+  // control (`AddressMapPickerComponent.locateRequested`). The map/GPS path
+  // is a ONE-WAY sink into latitude/longitude; it never rewrites the address
+  // text fields. The written address is the sole source of truth and drives
+  // the map via forward-geocode (see `forwardGeocodeFromForm`).
   /** Controls the location-permission modal visibility. */
   readonly show_location_modal = signal(false);
   /** Current map center / captured coordinate (never rendered as text). */
   readonly map_center = signal<{ lat: number; lng: number } | null>(null);
   /**
-   * True once the address map reported ready (`mapReady`: MapLibre `load` or
-   * its error fallback). Gates the location prompt so the browser permission
-   * is only requested when a live map can consume the coordinate.
+   * Non-blocking notice shown under the map when the typed address could not
+   * be located (forward-geocode returned null/error). Cleared as soon as a
+   * geocode succeeds or the user moves the pin manually.
    */
-  readonly map_ready = signal(false);
+  readonly addressWarning = signal<string | null>(null);
 
   /** Mirror of the selected country code so the template can branch reactively (zoneless). */
   readonly selected_country_code = signal('CO');
@@ -178,23 +180,6 @@ export class CheckoutComponent implements OnInit {
   readonly isColombia = computed(() => this.selected_country_code() === 'CO');
   /** Signal mirror of address_form.validity (FormGroup.valid is not reactive in zoneless). */
   readonly addressFormValid = signal(false);
-
-  /**
-   * Whether the user may leave the address step. Either a saved address is
-   * selected, or the new-address form is fully valid. Service-only carts skip
-   * the address step entirely. This GATES THE CONTINUE BUTTON without adding a
-   * new hard block to any other flow.
-   */
-  readonly canProceedFromAddress = computed(() => {
-    if (this.cartHasOnlyServices) return true;
-    // Paso 1 delivery-first: sin modo elegido no se avanza.
-    if (this.selected_delivery() == null) return false;
-    // Recoger: la opción de retiro se autocotiza al elegir el modo; el click
-    // de Continuar espera la promesa si sigue en vuelo (ver `nextStep`).
-    if (this.selected_delivery() === 'pickup') return true;
-    if (!this.use_new_address()) return this.selected_address_id() != null;
-    return this.addressFormValid();
-  });
 
   /**
    * Identidad de la línea (producto:variante:tarifa) para el `track` del
@@ -432,6 +417,8 @@ export class CheckoutComponent implements OnInit {
   readonly loading_cities = signal(false);
 
   private destroyRef = inject(DestroyRef);
+  /** Host element, used by `focusFirstInvalid` to scroll/focus the first invalid field. */
+  private readonly host = inject(ElementRef<HTMLElement>);
   private catalogService = inject(CatalogService);
   private countryService = inject(CountryService);
   private currencyService = inject(CurrencyFormatService);
@@ -463,38 +450,6 @@ export class CheckoutComponent implements OnInit {
       if (this.order_success_timer) clearTimeout(this.order_success_timer);
     });
     this.initForm();
-
-    // Offer location capture ONCE — the first time the customer is on the
-    // address step of a physical-item cart with home delivery selected, the
-    // new-address form open AND the map ready to consume a coordinate, and
-    // only when the browser supports geolocation. Never fires in pickup mode
-    // or before a delivery mode is chosen. Reads step/cart/use_new/delivery/
-    // map_ready as reactive deps; the guard runs untracked so writing the
-    // flag signals does not re-trigger the effect. The actual decision (use
-    // GPS directly vs. show the opt-in modal vs. stay manual) is delegated to
-    // maybeOfferLocation() based on the current permission state.
-    effect(() => {
-      const isAddressStep = this.step() === 1;
-      const cart = this.cart();
-      const useNew = this.use_new_address();
-      const deliveryMode = this.selected_delivery();
-      const mapReady = this.map_ready();
-      untracked(() => {
-        if (
-          isAddressStep &&
-          cart != null &&
-          !this.cartHasOnlyServices &&
-          useNew &&
-          deliveryMode === 'home' &&
-          mapReady &&
-          !this.location_prompt_shown() &&
-          this.geolocation.isSupported()
-        ) {
-          this.location_prompt_shown.set(true);
-          void this.maybeOfferLocation();
-        }
-      });
-    });
 
     // CP-tienda-checkout-whatsapp (C.2): recotización de fondo del domicilio.
     // Cuando el modo es domicilio y hay una dirección válida, cotiza con
@@ -824,36 +779,85 @@ export class CheckoutComponent implements OnInit {
       )
       .subscribe((line1: string) => this.forwardGeocodeFromForm(line1));
 
+    // Also re-trigger the forward geocode when city or department changes —
+    // a finer administrative division changes where the geocoder should look,
+    // even if the street line1 text itself did not change.
+    const cityChanges = cityControl?.valueChanges;
+    const depChanges = depControl?.valueChanges;
+    if (cityChanges && depChanges) {
+      merge(cityChanges, depChanges)
+        .pipe(
+          debounceTime(800),
+          distinctUntilChanged(),
+          takeUntilDestroyed(this.destroyRef),
+        )
+        .subscribe(() =>
+          this.forwardGeocodeFromForm(
+            this.address_form.get('address_line1')?.value ?? null,
+          ),
+        );
+    }
+
     // Load departments for default country
     this.loadDepartments();
   }
 
   /**
    * Geocodes the free-text address being typed → coordinate, and re-centers the
-   * map on it (dropping the marker). Query = line1 + selected city name +
-   * "Colombia". Moving the map this way does NOT emit `located`, so it never
-   * fights the reverse-geocode that fills the form when the marker is dragged.
-   * The resolved point is stored silently on the hidden lat/lng controls.
+   * map on it (dropping the marker). Query = line1 + city + department, plus
+   * "Colombia" appended only when the country is CO (or not yet chosen).
+   * Moving the map this way does NOT emit `located`, so it never fights the
+   * one-way map→form coordinate sink. The resolved point is stored silently
+   * on the hidden lat/lng controls — text fields are NEVER rewritten from
+   * here. When the address cannot be located, sets a non-blocking
+   * `addressWarning` instead of blocking the flow (geocoding failures never
+   * block per `vendix-address-geocoding`).
    */
   private forwardGeocodeFromForm(line1: string | null): void {
-    const base = (line1 ?? '').trim();
+    const base = (
+      line1 ?? this.address_form.get('address_line1')?.value ?? ''
+    ).trim();
     if (base.length < 5) return;
 
-    const cityId = this.address_form.get('city')?.value;
-    const cityName =
-      this.cities().find((c) => c.id === Number(cityId))?.name ?? '';
-    const query = [base, cityName, 'Colombia'].filter(Boolean).join(', ');
+    const countryCode = (
+      this.address_form.get('country_code')?.value ?? ''
+    ).trim();
+    const cityValue = this.address_form.get('city')?.value;
+    const stateValue = this.address_form.get('state_province')?.value;
 
+    const cityName = this.isColombia()
+      ? (this.cities().find((c) => c.id === Number(cityValue))?.name ?? '')
+      : String(cityValue ?? '').trim();
+    const stateName = this.isColombia()
+      ? (this.departments().find((d) => d.id === Number(stateValue))?.name ??
+        '')
+      : String(stateValue ?? '').trim();
+
+    const parts = [base, cityName, stateName].filter(Boolean);
+    if (!countryCode || countryCode === 'CO') parts.push('Colombia');
+    const query = parts.join(', ');
+
+    // Pass city/state as separate params (when resolved) instead of relying
+    // on the backend splitting them out of `query` by commas, which breaks
+    // if the customer's free-text address itself contains a comma.
     this.geocoding
-      .forward(query)
+      .forward(query, {
+        city: cityName || undefined,
+        state: stateName || undefined,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          if (res?.lat == null || res?.lng == null) return;
+          if (res?.lat == null || res?.lng == null) {
+            this.addressWarning.set(
+              'No pudimos ubicar tu dirección en el mapa. Puedes mover el pin manualmente; si no, se cobrará la tarifa de envío estándar de tu zona.',
+            );
+            return;
+          }
           const coords = { lat: res.lat, lng: res.lng };
           this.map_center.set(coords);
-          // Persist the point silently (never shown as text). Dragging the
-          // marker afterward re-geocodes it precisely.
+          this.addressWarning.set(null);
+          // Persist the point silently (never shown as text).
           this.address_form
             .get('latitude')
             ?.setValue(coords.lat, { emitEvent: false });
@@ -866,6 +870,9 @@ export class CheckoutComponent implements OnInit {
         },
         error: () => {
           // Forward-geocode failed → leave the map as-is; manual form works.
+          this.addressWarning.set(
+            'No pudimos ubicar tu dirección en el mapa. Puedes mover el pin manualmente; si no, se cobrará la tarifa de envío estándar de tu zona.',
+          );
         },
       });
   }
@@ -1010,34 +1017,50 @@ export class CheckoutComponent implements OnInit {
   }
 
   // ========== GEO-LOCATION HANDLERS ==========
+  // Map/GPS is a strictly ONE-WAY sink into latitude/longitude — it NEVER
+  // rewrites the address text fields. The written address is the source of
+  // truth; it drives the map via forward-geocode, never the other way.
 
   /**
-   * Decides how to capture location based on the current permission state:
-   * - `granted` → the customer already allowed it, so use GPS directly (no
-   *   modal) and prefill the form.
-   * - `denied`  → previously blocked; do not show the modal (keep manual form).
-   * - `prompt`/unknown → offer the opt-in modal so the browser prompt fires on
-   *   accept.
+   * The map's "Ubicarme" control was clicked. This is the ONLY place GPS may
+   * be requested — never automatically. Decides based on the current
+   * permission state:
+   * - `granted` → geolocate directly (no modal — already allowed).
+   * - `denied`/`unsupported` → toast, no modal (nagging a blocked customer is
+   *   pointless).
+   * - `prompt`/unknown → show the opt-in modal first so the browser's own
+   *   permission prompt fires only after the customer accepts ours.
    */
-  private async maybeOfferLocation(): Promise<void> {
+  async onLocateRequested(): Promise<void> {
     const state = await this.geolocation.getPermissionState();
     if (state === 'granted') {
-      void this.onLocationAccept();
+      void this.requestGeolocation();
     } else if (state === 'denied' || state === 'unsupported') {
-      // No modal: nagging a blocked customer is pointless — stay on manual form.
-      this.show_location_modal.set(false);
+      this.toast.info(
+        'No pudimos obtener tu ubicación. Puedes ingresar la dirección manualmente.',
+        'Ubicación no disponible',
+      );
     } else {
       this.show_location_modal.set(true);
     }
   }
 
-  /** Customer accepted the prompt: request GPS, enable the map, prefill form. */
+  /** Customer accepted the priming modal: request GPS and drop the pin. */
   async onLocationAccept(): Promise<void> {
     this.show_location_modal.set(false);
+    await this.requestGeolocation();
+  }
+
+  /** Customer declined: close the prompt and keep the manual form flow. */
+  onLocationDecline(): void {
+    this.show_location_modal.set(false);
+  }
+
+  /** Requests the live GPS position and drops it on the map (coords only). */
+  private async requestGeolocation(): Promise<void> {
     try {
       const coords = await this.geolocation.getPrecisePosition();
-      this.map_center.set(coords);
-      this.applyReverseGeocode(coords);
+      this.setMapCoords(coords);
     } catch {
       // Permission denied / unsupported / timeout → stay on the manual form.
       this.toast.info(
@@ -1047,143 +1070,27 @@ export class CheckoutComponent implements OnInit {
     }
   }
 
-  /** Customer declined: close the prompt and keep the manual form flow. */
-  onLocationDecline(): void {
-    this.show_location_modal.set(false);
-  }
-
   /**
-   * Marker moved by the user (drag/click): re-geocode and refresh the exact
-   * coordinate + address fields. We deliberately do NOT push `map_center` here —
-   * the marker is already where the user put it, and re-centering would fight the
-   * drag. `map_center` is reserved for programmatic locates (GPS / typed address).
+   * Marker moved by the user (drag/click) or GPS resolved: the map is only
+   * ever a SINK for the written address — a coordinate arriving here must
+   * NEVER rewrite address_line1/city/department/etc. Only latitude/longitude
+   * are updated, plus `coords_version` so the shipping quote re-evaluates by
+   * distance. Also clears any pending `addressWarning`, since the customer
+   * just placed a valid point manually.
    */
   onMapLocated(coords: { lat: number; lng: number }): void {
-    this.applyReverseGeocode(coords);
+    this.setMapCoords(coords);
   }
 
-  /**
-   * The address map settled (loaded, or failed and fell back to manual):
-   * mark it ready so the deferred location effect may offer the opt-in
-   * prompt in home mode.
-   */
-  onMapReady(): void {
-    this.map_ready.set(true);
-  }
-
-  /** Stores the exact coordinate on the form and prefills the address fields. */
-  private applyReverseGeocode(coords: { lat: number; lng: number }): void {
+  /** Stores the exact coordinate on the form. Never touches text fields. */
+  private setMapCoords(coords: { lat: number; lng: number }): void {
+    this.map_center.set(coords);
     this.address_form.get('latitude')?.setValue(coords.lat);
     this.address_form.get('longitude')?.setValue(coords.lng);
+    this.addressWarning.set(null);
     // H2: mover el pin / aceptar GPS invalida la cotización sellada (las
-    // coords entran a la clave; si el form aún no es válido, la recotización
-    // espera a que el reverse complete los campos de texto).
+    // coords entran a la clave).
     this.bumpCoordsVersion();
-
-    this.geocoding
-      .reverse(coords.lat, coords.lng)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (address) => this.prefillFromGeocode(address),
-        error: () => {
-          // Reverse geocoding failed: keep the exact coordinate; the customer
-          // fills the textual address manually.
-        },
-      });
-  }
-
-  /**
-   * Fills the address form from a normalized geocode result. For Colombia it
-   * maps the department/city NAMES to the api-colombia IDs the selectors use
-   * (department → load cities → city), mirroring the existing ID/name mapping.
-   * For other countries the free-text controls receive the names directly.
-   */
-  private async prefillFromGeocode(address: NormalizedAddress): Promise<void> {
-    const form = this.address_form;
-
-    if (address.address_line1) {
-      // emitEvent:false → this reverse fill must NOT re-trigger the forward
-      // geocode watcher on address_line1 (that would fight the map).
-      form.get('address_line1')?.setValue(address.address_line1, {
-        emitEvent: false,
-      });
-    }
-    if (address.address_line2) {
-      form.get('address_line2')?.setValue(address.address_line2, {
-        emitEvent: false,
-      });
-    }
-    if (address.postal_code) {
-      form.get('postal_code')?.setValue(address.postal_code, {
-        emitEvent: false,
-      });
-    }
-
-    const cc = (address.country_code || '').toUpperCase();
-    const known = this.countries().some((c) => c.code === cc);
-    const targetCountry = known ? cc : 'CO';
-
-    if (targetCountry === 'CO') {
-      // Ensure CO is selected without clobbering an already-CO selection
-      // (setValue would re-trigger the reset + department reload cascade).
-      if (form.get('country_code')?.value !== 'CO') {
-        form.get('country_code')?.setValue('CO');
-      }
-      if (this.departments().length === 0) {
-        await this.loadDepartments();
-      }
-      const department = this.matchByName(
-        this.departments(),
-        address.state_province,
-      );
-      if (department) {
-        form
-          .get('state_province')
-          ?.setValue(department.id, { emitEvent: false });
-        await this.loadCities(department.id);
-        const city = this.matchByName(this.cities(), address.city);
-        if (city) {
-          form.get('city')?.setValue(city.id, { emitEvent: false });
-        }
-      }
-    } else {
-      // Non-CO: switch to free-text mode, then fill the names directly.
-      form.get('country_code')?.setValue(targetCountry);
-      if (address.state_province) {
-        form.get('state_province')?.setValue(address.state_province);
-      }
-      if (address.city) {
-        form.get('city')?.setValue(address.city);
-      }
-    }
-
-    form.markAsDirty();
-    // setValue with emitEvent:false above does not push statusChanges, so
-    // refresh the validity mirror that gates canProceedFromAddress.
-    this.addressFormValid.set(this.address_form.valid);
-  }
-
-  /** Case/accent-insensitive best-effort match of a named option. */
-  private matchByName<T extends { id: number; name: string }>(
-    options: T[],
-    name: string | null,
-  ): T | undefined {
-    if (!name) return undefined;
-    const normalize = (value: string) =>
-      value
-        .normalize('NFD')
-        .replace(/[̀-ͯ]/g, '')
-        .toLowerCase()
-        .trim();
-    const target = normalize(name);
-    if (!target) return undefined;
-    return (
-      options.find((o) => normalize(o.name) === target) ??
-      options.find((o) => {
-        const candidate = normalize(o.name);
-        return candidate.includes(target) || target.includes(candidate);
-      })
-    );
   }
 
   selectPaymentMethod(method_id: number): void {
@@ -2207,14 +2114,17 @@ export class CheckoutComponent implements OnInit {
       }
 
       if (this.use_new_address() && !this.address_form.valid) {
-        this.error_message.set(
-          ERROR_MESSAGES['ECOM_CHECKOUT_ADDR_REQUIRED_001'],
-        );
         this.address_form.markAllAsTouched();
+        const missing = this.missingAddressFieldsMessage();
+        this.error_message.set(
+          missing || ERROR_MESSAGES['ECOM_CHECKOUT_ADDR_REQUIRED_001'],
+        );
+        focusFirstInvalid(this.host, { scroll: true });
         return;
       }
       if (!this.use_new_address() && !this.selected_address_id()) {
         this.error_message.set(ERROR_MESSAGES['ECOM_CHECKOUT_ADDR_SAVED_001']);
+        focusFirstInvalid(this.host, { scroll: true });
         return;
       }
 
@@ -3131,5 +3041,31 @@ export class CheckoutComponent implements OnInit {
     const errorKey = Object.keys(control.errors)[0];
     const code = map[errorKey];
     return code ? (ERROR_MESSAGES[code] ?? '') : '';
+  }
+
+  /** Human-readable labels for the "Completa: X, Y" missing-fields summary. */
+  private static readonly ADDRESS_FIELD_LABELS: Record<string, string> = {
+    address_line1: 'Dirección',
+    address_line2: 'Dirección (línea 2)',
+    state_province: 'Departamento',
+    city: 'Ciudad',
+    country_code: 'País',
+    postal_code: 'Código postal',
+    phone_number: 'Teléfono',
+  };
+
+  /**
+   * Builds a "Completa: X, Y" summary from the currently invalid, enabled
+   * controls of `address_form`, so the customer sees exactly what is missing
+   * in addition to the per-field errors already shown via `getFieldError`.
+   * Returns '' if nothing maps to a known label (falls back to the generic
+   * coded message at the call site).
+   */
+  private missingAddressFieldsMessage(): string {
+    const missing = Object.entries(this.address_form.controls)
+      .filter(([, control]) => control.enabled && control.invalid)
+      .map(([name]) => CheckoutComponent.ADDRESS_FIELD_LABELS[name])
+      .filter((label): label is string => Boolean(label));
+    return missing.length > 0 ? `Completa: ${missing.join(', ')}` : '';
   }
 }

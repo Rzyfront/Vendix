@@ -36,6 +36,7 @@ import { WompiProcessor } from './processors/wompi/wompi.processor';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 import { OrderStockCommitService } from '../inventory/shared/services/order-stock-commit.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
@@ -48,6 +49,8 @@ import { AuditService } from '@common/audit/audit.service';
 import { mockRequestContext } from 'src/testing/prisma-mock';
 import { buildOrder } from 'src/testing/money-fixtures';
 import * as tipUtil from '../../../common/utils/tip.util';
+// Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 /**
  * Tests for PaymentsService focused on the POS sale recalculation flow:
@@ -76,6 +79,8 @@ describe('PaymentsService', () => {
   let settingsService: SettingsService;
   let sessionsService: SessionsService;
   let movementsService: MovementsService;
+  // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+  let orderHistory: { record: jest.Mock };
   // F-157/F-166: handles tipados CONCRETOS del mock de TaxesService,
   // declarados en el ámbito del describe para que los tests los usen
   // DIRECTO por closure — nunca recuperados con `as jest.Mock` (eso
@@ -99,6 +104,21 @@ describe('PaymentsService', () => {
   // con `as jest.Mock` desde `eventEmitter.emit` pasaría incluso si el handle
   // dejara de ser el que el servicio inyecta.
   let emitMock: jest.MockedFunction<EventEmitter2['emit']>;
+  // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+  // step 4): same F-157 pattern — created once per test in `beforeEach`,
+  // used DIRECTLY by closure so a test can override its resolution and
+  // assert calls without retyping through `as jest.Mock`.
+  let assertLinesAvailableMock: jest.MockedFunction<
+    StockValidatorService['assertLinesAvailable']
+  >;
+  // docs/plans/no-overselling-stock-guard-plan.md step 9 — strict default
+  // (allowOversell=false) preserves every pre-existing assertion byte-for-
+  // byte; the oversell-path tests override this per-case.
+  let resolveInventoryPolicyMock: jest.MockedFunction<
+    StockValidatorService['resolveInventoryPolicy']
+  >;
+  let reserveStockMock: jest.MockedFunction<StockLevelManager['reserveStock']>;
+  let allocateForLineMock: jest.MockedFunction<SellableStockAllocator['allocateForLine']>;
 
   const mockUser = {
     id: 1,
@@ -234,6 +254,27 @@ describe('PaymentsService', () => {
 
     emitMock = jest.fn() as jest.MockedFunction<EventEmitter2['emit']>;
 
+    // Default: no shortage (resolves) so the rest of this large suite is
+    // unaffected. Tests exercising the no-overselling guard itself override
+    // this per-case with `.mockRejectedValueOnce(...)`.
+    assertLinesAvailableMock = jest
+      .fn()
+      .mockResolvedValue([]) as jest.MockedFunction<
+      StockValidatorService['assertLinesAvailable']
+    >;
+    resolveInventoryPolicyMock = jest
+      .fn()
+      .mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: true,
+      }) as jest.MockedFunction<StockValidatorService['resolveInventoryPolicy']>;
+    reserveStockMock = jest.fn().mockResolvedValue(undefined) as jest.MockedFunction<
+      StockLevelManager['reserveStock']
+    >;
+    allocateForLineMock = jest.fn() as jest.MockedFunction<
+      SellableStockAllocator['allocateForLine']
+    >;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
@@ -243,7 +284,7 @@ describe('PaymentsService', () => {
         { provide: WebhookHandlerService, useValue: {} },
         {
           provide: StockLevelManager,
-          useValue: { updateStock: jest.fn() },
+          useValue: { updateStock: jest.fn(), reserveStock: reserveStockMock },
         },
         {
           provide: TaxesService,
@@ -312,7 +353,17 @@ describe('PaymentsService', () => {
         // these instead of relying on the empty shape.
         {
           provide: SellableStockAllocator,
-          useValue: { allocateForOrderItem: jest.fn() },
+          useValue: { allocateForOrderItem: jest.fn(), allocateForLine: allocateForLineMock },
+        },
+        // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+        // step 4) — see `assertLinesAvailableMock` declared at describe level.
+        {
+          provide: StockValidatorService,
+          useValue: {
+            assertLinesAvailable: assertLinesAvailableMock,
+            assertIngredientsAvailable: jest.fn().mockResolvedValue(undefined),
+            resolveInventoryPolicy: resolveInventoryPolicyMock,
+          },
         },
         {
           provide: PriceResolverService,
@@ -330,6 +381,16 @@ describe('PaymentsService', () => {
           useValue: {
             applyToOrder: jest.fn(),
             resolveSuffered: jest.fn().mockResolvedValue({
+              lines: [],
+              uvt_value_used: 0,
+              counterparty_type: null,
+            }),
+            // El cobro POS ahora agrupa por bien/servicio y llama a este
+            // método (Step 1, plan pago-multimetodo-pendientes) en vez de
+            // `resolveSuffered` directo. Mismo motivo que arriba: sin este
+            // stub, cualquier caso que llegue al bloque de retenciones muere
+            // con "is not a function" bajo el try/catch.
+            resolveSufferedByOperation: jest.fn().mockResolvedValue({
               lines: [],
               uvt_value_used: 0,
               counterparty_type: null,
@@ -366,6 +427,13 @@ describe('PaymentsService', () => {
             log: jest.fn(),
           },
         },
+        // Plan order-truth-and-invoice-tz (Step 6) — writer único de
+        // order_events. Requerido (no @Optional en PaymentsService): sin
+        // este provider el módulo de test no compila.
+        {
+          provide: OrderHistoryService,
+          useValue: { record: jest.fn().mockResolvedValue(null) },
+        },
       ],
     }).compile();
 
@@ -381,6 +449,7 @@ describe('PaymentsService', () => {
     settingsService = module.get<SettingsService>(SettingsService);
     sessionsService = module.get<SessionsService>(SessionsService);
     movementsService = module.get<MovementsService>(MovementsService);
+    orderHistory = module.get<any>(OrderHistoryService);
   });
 
   it('should be defined', () => {
@@ -3437,6 +3506,59 @@ describe('PaymentsService', () => {
       jest.restoreAllMocks();
     });
 
+    it('un borrador POS con faltante falla antes de reservar o cobrar', async () => {
+      const { order, tx } = arrangePosSale('cash');
+      order.order_items.push({
+        id: 901, product_id: 501, product_variant_id: null,
+        quantity: 1, stock_units_consumed: null, skip_kds: true,
+      } as any);
+      tx.products = { findMany: jest.fn().mockResolvedValue([
+        { id: 501, name: 'MODELO', track_inventory: true, product_type: 'physical' },
+      ]) };
+      assertLinesAvailableMock.mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+          'Sin stock para MODELO', { items: [{ product_name: 'MODELO', requested: 1, available: 0 }] }),
+      );
+
+      await expect(service.processPosPayment(
+        buildPosDto({ is_draft: true, requires_payment: false }), posUser,
+      )).rejects.toMatchObject({ errorCode: 'INV_STOCK_INSUFFICIENT_LINES' });
+      expect(assertLinesAvailableMock).toHaveBeenCalledWith(
+        [expect.objectContaining({ product_id: 501, quantity: 1 })],
+        { orderId: 4242, tx, allowOversell: false },
+      );
+      expect(tx.order_items.findMany).not.toHaveBeenCalled();
+    });
+
+    it('un borrador POS con stock reserva en el mismo tx antes de salir', async () => {
+      const { order, tx } = arrangePosSale('cash');
+      order.order_items.push({
+        id: 902, product_id: 501, product_variant_id: null,
+        quantity: 1, stock_units_consumed: null, skip_kds: true,
+      } as any);
+      tx.products = { findMany: jest.fn().mockResolvedValue([
+        { id: 501, name: 'MODELO', track_inventory: true, product_type: 'physical' },
+      ]) };
+      tx.stock_reservations = { aggregate: jest.fn().mockResolvedValue({ _sum: { quantity: 0 } }) };
+      const afterReserve = new Error('stop-after-reserve');
+      tx.$executeRawUnsafe = jest.fn(async (sql: string) => {
+        if (sql === 'RELEASE SAVEPOINT stock_reserve_sp') throw afterReserve;
+        return 0;
+      });
+      allocateForLineMock.mockResolvedValueOnce({
+        slices: [{ location_id: 77, quantity: 1 }], allocated: 1,
+        available: 1, shortfall: 0,
+      });
+
+      await expect(service.processPosPayment(
+        buildPosDto({ is_draft: true, requires_payment: false }), posUser,
+      )).rejects.toThrow('stop-after-reserve');
+      expect(reserveStockMock).toHaveBeenCalledWith(
+        501, undefined, 77, 1, 'order', 4242, expect.anything(),
+        true, tx, undefined, false, 1, false,
+      );
+    });
+
     it('un cobro Wompi en mostrador deja el stock quieto: el pago está prometido, no cobrado', async () => {
       arrangePosSale('wompi');
 
@@ -4299,6 +4421,29 @@ describe('PaymentsService', () => {
       });
       expect(result.order).toMatchObject({ id: 4242, status: 'finished' });
       expect(result).not.toHaveProperty('_leg_payments');
+
+      // Plan order-truth-and-invoice-tz (Step 6) — un payment_registered por
+      // tramo, dentro de la MISMA tx que crea la fila de pago.
+      expect(orderHistory.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          orderId: 4242,
+          storeId: 1,
+          organizationId: 1,
+          type: 'payment_registered',
+          amount: 20000,
+        }),
+      );
+      expect(orderHistory.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          orderId: 4242,
+          storeId: 1,
+          organizationId: 1,
+          type: 'payment_registered',
+          amount: 80000,
+        }),
+      );
     });
 
     it('emite un payment.received por tramo que suma el total y cuadra subtotal+impuesto', async () => {
@@ -4517,6 +4662,156 @@ describe('PaymentsService', () => {
       );
       expect(tx.payments.create).not.toHaveBeenCalled();
     });
+
+    /**
+     * Paso 3 del plan de pago multimétodo — la retención sufrida se
+     * reconoce UNA vez por orden: antes, cada tramo emitía `wh.lines`
+     * completo y la retención se contabilizaba N veces. Ahora se prorratea
+     * (`splitWithholdingLines`) proporcional al monto del tramo (20.000 /
+     * 80.000 ⇒ 1:4), con el residuo en el ÚLTIMO tramo.
+     */
+    describe('retención sufrida (cliente agente retenedor)', () => {
+      // Base 84.034 (subtotal de la venta): retefuente 2,5 % = 2.100,85;
+      // reteica 0,7 % = 588,24. `resolveSuffered` no se recalcula aquí — se
+      // mockea con el resultado que produciría la cadena de retenciones.
+      const WH_LINES = [
+        {
+          withholding_type: 'retefuente',
+          concept_code: 'RF-COMPRAS',
+          rate: 0.025,
+          base: 84034,
+          amount: 2100.85,
+          role: 'suffered',
+          account_role: 'withholding.suffered.retefuente_receivable',
+        },
+        {
+          withholding_type: 'reteica',
+          concept_code: 'RI-COMERCIO',
+          rate: 0.007,
+          base: 84034,
+          amount: 588.24,
+          role: 'suffered',
+          account_role: 'withholding.suffered.reteica_receivable',
+        },
+      ];
+
+      it('2 tramos: cada evento lleva su porción y Σ de los dos = wh.lines, al centavo', async () => {
+        arrangeMultiLegSale();
+        (service as any).withholdingFlow.resolveSufferedByOperation.mockResolvedValueOnce(
+          { lines: WH_LINES, uvt_value_used: 47065, counterparty_type: 'legal' },
+        );
+
+        await service.processPosPayment(buildMultiDto(), posUser);
+
+        const received = receivedPayloads();
+        expect(received).toHaveLength(2);
+
+        // Tramo 1 (efectivo, 20.000 de 100.000 ⇒ 1/5): floor hacia abajo.
+        expect(received[0].withholding_breakdown).toEqual([
+          expect.objectContaining({
+            concept_code: 'RF-COMPRAS',
+            withholding_type: 'retefuente',
+            amount: 420.17,
+          }),
+          expect.objectContaining({
+            concept_code: 'RI-COMERCIO',
+            withholding_type: 'reteica',
+            amount: 117.64,
+          }),
+        ]);
+        // Tramo 2 (transferencia, 80.000 ⇒ último): remanente exacto.
+        expect(received[1].withholding_breakdown).toEqual([
+          expect.objectContaining({
+            concept_code: 'RF-COMPRAS',
+            amount: 1680.68,
+          }),
+          expect.objectContaining({
+            concept_code: 'RI-COMERCIO',
+            amount: 470.6,
+          }),
+        ]);
+
+        // Σ por concepto entre los dos tramos = la línea original de wh.lines.
+        const cents = (n: number) => Math.round(n * 100);
+        const sumConcept = (concept: string) =>
+          received.reduce(
+            (sum, event) =>
+              sum +
+              cents(
+                (event.withholding_breakdown ?? []).find(
+                  (row: any) => row.concept_code === concept,
+                )?.amount ?? 0,
+              ),
+            0,
+          );
+        expect(sumConcept('RF-COMPRAS')).toBe(cents(2100.85));
+        expect(sumConcept('RI-COMERCIO')).toBe(cents(588.24));
+
+        // Σ total (las dos líneas, los dos tramos) = Σ wh.lines: la
+        // retención se reconoce una sola vez por orden, no N veces.
+        const totalReceived = received.reduce(
+          (sum, event) =>
+            sum +
+            (event.withholding_breakdown ?? []).reduce(
+              (lineSum: number, row: any) => lineSum + cents(row.amount),
+              0,
+            ),
+          0,
+        );
+        expect(totalReceived).toBe(cents(2100.85) + cents(588.24));
+
+        // La retención NO altera el reparto de venta ya garantizado por
+        // `resolvePaymentReceivedSaleFields`: cada evento sigue cumpliendo
+        // amount == (subtotal − descuento) + impuesto + flete + propina.
+        for (const event of received) {
+          expect(
+            cents(event.amount) + cents(event.discount_amount ?? 0),
+          ).toBe(
+            cents(event.subtotal_amount) +
+              cents(event.tax_amount) +
+              cents(event.shipping_amount ?? 0) +
+              cents(event.tip_amount ?? 0),
+          );
+        }
+
+        // Persistencia de `withholding_calculations`: UNA sola vez, con las
+        // líneas completas de la orden (no las porciones por tramo).
+        expect(
+          (service as any).withholdingFlow.persistWithholdingLines,
+        ).toHaveBeenCalledTimes(1);
+        expect(
+          (service as any).withholdingFlow.persistWithholdingLines,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({ lines: WH_LINES }),
+        );
+        // PR #858 hallazgo 2 — la fila lleva la orden para que la factura la
+        // enlace en vez de duplicarla.
+        const persistCtx = (service as any).withholdingFlow.persistWithholdingLines
+          .mock.calls[0][0];
+        expect(persistCtx.invoice_id).toBeNull();
+        expect(typeof persistCtx.order_id).toBe('number');
+      });
+
+      it('regresión escalar: un solo tramo sigue enviando wh.lines intacto (sin prorratear)', async () => {
+        arrangeMultiLegSale();
+        (service as any).withholdingFlow.resolveSufferedByOperation.mockResolvedValueOnce(
+          { lines: WH_LINES, uvt_value_used: 47065, counterparty_type: 'legal' },
+        );
+
+        await service.processPosPayment(
+          buildMultiDto({
+            payments: undefined,
+            store_payment_method_id: CASH_METHOD_ID,
+            amount_received: 120000,
+          }),
+          posUser,
+        );
+
+        const received = receivedPayloads();
+        expect(received).toHaveLength(1);
+        expect(received[0].withholding_breakdown).toEqual(WH_LINES);
+      });
+    });
   });
 });
 
@@ -4553,6 +4848,7 @@ describe('PaymentsService — resolveDeclaredGrossUnitPrice (B.1/F-186)', () => 
         { provide: FiscalInvoiceThresholdService, useValue: {} },
         { provide: OrderStockCommitService, useValue: {} },
         { provide: SellableStockAllocator, useValue: {} },
+        { provide: StockValidatorService, useValue: {} },
         { provide: PriceResolverService, useValue: {} },
         { provide: WithholdingFlowService, useValue: {} },
         { provide: KitchenFireService, useValue: {} },
@@ -4561,6 +4857,9 @@ describe('PaymentsService — resolveDeclaredGrossUnitPrice (B.1/F-186)', () => 
         { provide: InventorySerialNumbersService, useValue: {} },
         { provide: RequestContextService, useValue: {} },
         { provide: AuditService, useValue: {} },
+        // Plan order-truth-and-invoice-tz (Step 6) — requerido en el
+        // constructor de PaymentsService.
+        { provide: OrderHistoryService, useValue: { record: jest.fn() } },
       ],
     }).compile();
     service = module.get<PaymentsService>(PaymentsService);

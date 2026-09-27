@@ -9,6 +9,12 @@ import { StandardPrintDataModel } from '../interfaces/standard-print-data.model'
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
 import {
+  DEFAULT_STORE_TIMEZONE,
+  formatStoreDate,
+  formatStoreTime,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
+import {
   resolveFiscalIssuerForPrint,
   resolveFiscalQualitiesLine,
 } from '../services/fiscal-issuer-identity';
@@ -146,7 +152,11 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     // usan otros callers de este provider — no podíamos meterle un `await`
     // sin volverlo async y arrastrar ese cambio a todos sus usos.
     const signedLogoUrl = await signStoreLogoUrl(this.s3Service, order.stores?.logo_url, this.logger);
-    const model = this.mapOrderToStandardModel(order, signedLogoUrl);
+    // B17 — el ticket mostraba la fecha/hora en la zona del contenedor
+    // (UTC), no en la de la tienda. Se resuelve UNA vez por documento y se
+    // pasa al mapeador, igual que el logo firmado.
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const model = this.mapOrderToStandardModel(order, signedLogoUrl, tz);
     // A.3 (F-047): si la orden ya tiene factura, el desglose y los totales
     // salen del snapshot fiscal. Nunca lanza: ver el método.
     await this.overrideWithInvoiceSnapshot(storeId, orderId, model);
@@ -789,7 +799,11 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     return undefined;
   }
 
-  private mapOrderToStandardModel(order: any, signedLogoUrl?: string): StandardPrintDataModel {
+  private mapOrderToStandardModel(
+    order: any,
+    signedLogoUrl?: string,
+    tz: string = DEFAULT_STORE_TIMEZONE,
+  ): StandardPrintDataModel {
     const store = order.stores || {};
     const org = store.organizations || {};
     const addr = store.addresses?.[0] || {};
@@ -928,8 +942,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         id: order.id,
         number: String(order.order_number),
         date: order.created_at ? new Date(order.created_at).toISOString() : new Date().toISOString(),
-        date_formatted: order.created_at ? new Date(order.created_at).toLocaleDateString('es-CO') : new Date().toLocaleDateString('es-CO'),
-        time: order.created_at ? new Date(order.created_at).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : undefined,
+        // B17 — antes formateaba en la zona del contenedor (`toLocaleDateString`/
+        // `toLocaleTimeString` sin `timeZone`); ahora usa la zona de la tienda.
+        date_formatted: order.created_at ? formatStoreDate(new Date(order.created_at), tz) : formatStoreDate(new Date(), tz),
+        time: order.created_at ? formatStoreTime(new Date(order.created_at), tz) : undefined,
         state: order.state,
         state_label: order.state,
         channel: order.channel,

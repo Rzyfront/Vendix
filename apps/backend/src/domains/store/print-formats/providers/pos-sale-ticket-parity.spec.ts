@@ -45,6 +45,9 @@ describe('pos-sale-ticket — F-007 paridad decimal con el mapper fiscal', () =>
     new PosSaleTicketDataProvider({
       orders: { findFirst: jest.fn().mockResolvedValue(orderRow) },
       invoices: { findFirst: jest.fn().mockResolvedValue(invoice) },
+      // B17 — `fetchDocumentData` resuelve `resolveStoreTimezone` antes de
+      // formatear; sin fila cae al default (`America/Bogota`).
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any);
 
   it('el helper compartido pinea 2 decimales (`$5.000,00`)', () => {
@@ -109,6 +112,7 @@ describe('pos-sale-ticket — C.6 base leída en aggregateTaxes', () => {
     new PosSaleTicketDataProvider({
       orders: { findFirst: jest.fn().mockResolvedValue(order) },
       invoices: { findFirst: jest.fn().mockResolvedValue({ ...order, status: 'draft' }) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any);
 
   it('línea 19 %: la base es el total leído, exacto (no 10000.000000000002)', async () => {
@@ -200,6 +204,7 @@ describe('pos-sale-ticket — envío con factura: subtotal sin envío, envío = 
     new PosSaleTicketDataProvider({
       orders: { findFirst: jest.fn().mockResolvedValue(orderRow) },
       invoices: { findFirst: jest.fn().mockResolvedValue(invoice) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any);
 
   const rowsSum = (t: any) =>
@@ -345,6 +350,7 @@ describe('pos-sale-ticket — B6: fila del impuesto del envío en el ticket no f
     new PosSaleTicketDataProvider({
       orders: { findFirst: jest.fn().mockResolvedValue(orderRow) },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any);
 
   it('orden con envío gravado (INC 8 % incluido): el bloque taxes trae la fila «INC (incl. envío)»', async () => {
@@ -435,6 +441,7 @@ describe('pos-sale-ticket — multimétodo: desglose por pago y tender en efecti
     new PosSaleTicketDataProvider({
       orders: { findFirst: jest.fn().mockResolvedValue(orderRow) },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     } as any);
 
   it('2 pagos: una entrada con monto por pago, en orden de cobro, y tender del tramo en efectivo', async () => {
@@ -498,5 +505,67 @@ describe('pos-sale-ticket — multimétodo: desglose por pago y tender en efecti
     expect(data.document.amount_received_formatted).toBe('$120.000');
     expect(data.document.change_due).toBe(20000);
     expect(data.document.change_due_formatted).toBe('$20.000');
+  });
+});
+
+/**
+ * B17 — el tiquete pintaba `date_formatted`/`time` en la hora del
+ * CONTENEDOR (siempre UTC en producción), no en la de la tienda.
+ * `2026-09-26T02:30:00Z` cae la noche del 25 en Bogotá (UTC-5): un tiquete
+ * cobrado a las 21:30 del 25 imprimía "26/09/2026" — el día calendario
+ * equivocado para el cliente que lo tiene en la mano.
+ */
+describe('pos-sale-ticket — B17 fecha/hora del documento en la zona de la tienda', () => {
+  const orderRow = {
+    id: 55,
+    order_number: 'POS-0055',
+    created_at: new Date('2026-09-26T02:30:00.000Z'),
+    state: 'finished',
+    subtotal_amount: 5000,
+    discount_amount: 0,
+    tax_amount: 0,
+    shipping_cost: 0,
+    grand_total: 5000,
+    order_items: [],
+    users: null,
+    stores: {
+      name: 'Tienda Test',
+      organizations: { tax_id: '900.000.000-1' },
+      addresses: [],
+    },
+    table_sessions: [],
+  };
+
+  it('tienda en America/Bogota: el UTC de madrugada del 26 imprime la noche del 25 (21:30)', async () => {
+    const provider = new PosSaleTicketDataProvider({
+      orders: { findFirst: jest.fn().mockResolvedValue(orderRow) },
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: {},
+          stores: { timezone: 'America/Bogota' },
+        }),
+      },
+    } as any);
+
+    const data = await provider.fetchDocumentData(10, 55);
+
+    expect(data.document.date_formatted).toBe('25/09/2026');
+    // Formato es-CO 12h (el mismo que imprimía antes, ahora en la zona de la tienda).
+    expect(data.document.time).toMatch(/^09:30\s*p\.\s*m\.$/);
+  });
+
+  it('sin fila de settings de tienda: cae al default (America/Bogota), mismo resultado', async () => {
+    const provider = new PosSaleTicketDataProvider({
+      orders: { findFirst: jest.fn().mockResolvedValue(orderRow) },
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as any);
+
+    const data = await provider.fetchDocumentData(10, 55);
+
+    expect(data.document.date_formatted).toBe('25/09/2026');
+    // Formato es-CO 12h (el mismo que imprimía antes, ahora en la zona de la tienda).
+    expect(data.document.time).toMatch(/^09:30\s*p\.\s*m\.$/);
   });
 });

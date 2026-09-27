@@ -1,11 +1,14 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type Redis from 'ioredis';
 import { REDIS_CLIENT } from '@common/redis/redis.module';
+import {
+  crossViaTipoLabel,
+  GeocodeCandidate,
+  ParsedColombianAddress,
+  normalizeColombianAddress,
+  parseFreeTextQuery,
+  selectBestCandidate,
+} from './colombian-address.util';
 
 /**
  * Normalized reverse-geocoding result. This is the EXACT shape returned by
@@ -31,12 +34,16 @@ export interface NormalizedAddress {
 export interface ForwardGeocodeResult {
   lat: number | null;
   lng: number | null;
-}
-
-/** Subset of a Nominatim `/search` result element (jsonv2). */
-interface NominatimSearchResult {
-  lat?: string;
-  lon?: string;
+  /**
+   * How the coordinate was resolved, in decreasing accuracy order:
+   * `exact` (house-numbered Nominatim match) > `intersection` (DANE
+   * cross-street computed via Overpass) > `street` (Nominatim matched the
+   * named street but not a specific house) > `area` (barrio/suburb
+   * centroid, last resort). Optional and purely additive — omitted when the
+   * query could not be resolved at all, or on a code path that predates
+   * this field. Never treat its absence as an error.
+   */
+  precision?: 'exact' | 'intersection' | 'street' | 'area';
 }
 
 /** Subset of the Nominatim `address` object we read (jsonv2 + addressdetails=1). */
@@ -84,11 +91,25 @@ interface OverpassResponse {
 /**
  * GeocodingService
  *
- * Server-side reverse-geocoding proxy so the frontend NEVER calls Nominatim
- * directly. Results are cached in Redis for 30 days keyed by a ~1m-precision
- * cell (`lat/lng.toFixed(5)`); the long cache is what keeps us within
- * Nominatim's 1 req/sec usage policy for real traffic. A short per-cell lock
- * provides best-effort single-flight for concurrent misses on the same cell.
+ * Server-side reverse/forward-geocoding proxy so the frontend NEVER calls
+ * Nominatim directly.
+ *
+ * `reverse()` results are cached in Redis for 30 days keyed by a
+ * ~1m-precision cell (`lat/lng.toFixed(5)`); the long cache is what keeps us
+ * within Nominatim's 1 req/sec usage policy for real traffic. A short
+ * per-cell lock provides best-effort single-flight for concurrent misses on
+ * the same cell.
+ *
+ * `forward()` runs a Colombia-specific cascade (see its own doc) over a
+ * normalized version of the query (see `colombian-address.util.ts`):
+ *   a) DANE intersection via Overpass (when the line parses as
+ *      "<viaTipo> <viaNum> # <cruceNum>-<placa>" and a city is known);
+ *   b) Nominatim structured search (`street=`/`city=`/`state=`);
+ *   c) Nominatim free-text search — the final fallback.
+ * At most 3 external requests are fired per call, and a resolved coordinate
+ * is cached for 7 days while an unresolved one is cached only 6 hours, so a
+ * typo fix or a newly-mapped rural address does not stay "not found" for a
+ * week.
  */
 @Injectable()
 export class GeocodingService {
@@ -112,8 +133,38 @@ export class GeocodingService {
   /** Nominatim forward-geocoding (free-text address → coordinate). */
   private static readonly NOMINATIM_SEARCH_BASE =
     'https://nominatim.openstreetmap.org/search';
-  /** Forward-geocode cache TTL (7 days) — addresses move far less than a cell. */
+  /**
+   * Forward-geocode cache TTL for a RESOLVED coordinate (7 days) — addresses
+   * move far less than a cell. A NULL (unresolved) result is cached far
+   * shorter (see {@link FORWARD_NULL_CACHE_TTL_SECONDS}): retrying a bad/new
+   * address immediately after a typo fix should not have to wait a week.
+   */
   private static readonly FORWARD_CACHE_TTL_SECONDS = 604800;
+  /**
+   * TTL for a forward-geocode MISS (6 hours). Short enough that a customer
+   * who fixes a typo, or a rural/new address that appears in OSM later the
+   * same day, is not stuck behind a week-long null cache; long enough to
+   * still absorb repeated retries of the same bad query within a session.
+   */
+  private static readonly FORWARD_NULL_CACHE_TTL_SECONDS = 21600;
+  /**
+   * Hard cap on cascade ATTEMPTS fired by a single {@link forward} call —
+   * i.e. Nominatim requests (the provider the "~1 req/s" usage policy in
+   * the class doc actually applies to), fired strictly SEQUENTIALLY so the
+   * cap doubles as rate-limiting. The one non-Nominatim attempt
+   * ({@link tryIntersection}'s Overpass lookup) reuses the SAME
+   * mirror-racing pattern already established for `reverse()`'s cross-street
+   * enrichment (4 mirrors queried concurrently, first usable one wins) — a
+   * pre-existing pattern for a different provider with no stated 1 req/s
+   * policy in this codebase, so it counts as exactly one cascade attempt
+   * here regardless of how many mirrors it internally races.
+   */
+  private static readonly MAX_FORWARD_EXTERNAL_REQUESTS = 3;
+  /** Per-step timeouts for the forward cascade. Their sum (7.5s) stays under
+   * the ≤8s total budget even in the worst case (three sequential misses). */
+  private static readonly INTERSECTION_TIMEOUT_MS = 2500;
+  private static readonly STRUCTURED_TIMEOUT_MS = 2500;
+  private static readonly FREETEXT_TIMEOUT_MS = 2500;
   /**
    * Overpass endpoints (mirrors) used to find the perpendicular cross street.
    * Tried IN ORDER until one answers — public instances are frequently blocked
@@ -196,19 +247,51 @@ export class GeocodingService {
   }
 
   /**
-   * Forward-geocode a free-text address to a coordinate, biased to Colombia.
-   * Used when the customer TYPES the address manually so the map can center on
-   * it. Cached in Redis by normalized query. Never throws for a "not found":
-   * returns `{ lat: null, lng: null }` so the caller just leaves the map as-is.
+   * Forward-geocode a free-text Colombian address to a coordinate. Used when
+   * the customer TYPES the address manually so the map can center on it.
    *
-   * @throws ServiceUnavailableException only when the provider is unreachable /
-   *         returns a non-2xx / invalid JSON.
+   * Runs a cascade that stops at the first good result (see class doc for
+   * the full strategy):
+   *   a) DANE intersection — locate the crossing of the primary and
+   *      generating streets via Overpass, when the line parses as DANE
+   *      nomenclature ("Calle 45 # 12-30") AND a city is known.
+   *   b) Nominatim structured search (`street=`, `city=`, `state=`).
+   *   c) Nominatim free-text search (`q=`) as the final fallback.
+   * At most {@link MAX_FORWARD_EXTERNAL_REQUESTS} external requests are
+   * fired, honoring Nominatim's usage policy.
+   *
+   * `city`/`state` are OPTIONAL and backward-compatible: the current
+   * frontend only sends `q` (e.g. "Cra 13 # 62-40, Bogotá, Colombia"), so
+   * when they are omitted this parses them out of `query` itself via
+   * {@link parseFreeTextQuery}.
+   *
+   * Cached in Redis by the NORMALIZED query (+ city/state). Unlike the old
+   * single-shot implementation, this NEVER throws: a total cascade failure
+   * (every attempt errors or comes back empty) degrades to
+   * `{ lat: null, lng: null }`, matching {@link reverse}'s "never block
+   * checkout" philosophy — forward-geocoding only feeds a non-blocking map
+   * preview/warning (see `vendix-address-geocoding` skill), so a 503 here
+   * would only ever be swallowed by the caller anyway.
    */
-  async forward(query: string): Promise<ForwardGeocodeResult> {
+  async forward(
+    query: string,
+    city?: string,
+    state?: string,
+  ): Promise<ForwardGeocodeResult> {
     const q = query.trim().replace(/\s+/g, ' ');
     if (q.length < 3) return { lat: null, lng: null };
 
-    const cacheKey = `geocode:fwd:${q.toLowerCase()}`;
+    const freeText = parseFreeTextQuery(q);
+    const addressLine = freeText.addressLine || q;
+    const resolvedCity = (city ?? freeText.city ?? '').trim() || null;
+    const resolvedState = (state ?? freeText.state ?? '').trim() || null;
+    const parsed = normalizeColombianAddress(addressLine);
+
+    const cacheKey = this.buildForwardCacheKey(
+      parsed.normalized,
+      resolvedCity,
+      resolvedState,
+    );
     const cached = await this.readForwardCache(cacheKey);
     if (cached) {
       this.logger.debug(`forward cache HIT ${cacheKey}`);
@@ -216,61 +299,315 @@ export class GeocodingService {
     }
     this.logger.debug(`forward cache MISS ${cacheKey}`);
 
-    const result = await this.fetchForwardFromNominatim(q);
-    // Cache even a null result briefly-ish (7d) to avoid hammering the provider
-    // with the same unresolved query while the customer keeps editing.
+    const result = await this.forwardCascade(
+      parsed,
+      resolvedCity,
+      resolvedState,
+      q,
+    );
     await this.writeForwardCache(cacheKey, result);
     return result;
   }
 
-  private async fetchForwardFromNominatim(
-    q: string,
-  ): Promise<ForwardGeocodeResult> {
-    const url =
-      `${GeocodingService.NOMINATIM_SEARCH_BASE}?format=jsonv2` +
-      `&q=${encodeURIComponent(q)}&countrycodes=co&limit=1&accept-language=es`;
+  /** Cache key over the NORMALIZED line + city + state (see class doc §Caché). */
+  private buildForwardCacheKey(
+    normalizedLine: string,
+    city: string | null,
+    state: string | null,
+  ): string {
+    const parts = [
+      normalizedLine.toLowerCase(),
+      (city ?? '').toLowerCase(),
+      (state ?? '').toLowerCase(),
+    ];
+    // "v2" bumps the key prefix so the previous 7-day-cached nulls (keyed by
+    // raw lowercased `q`) are simply never read again, instead of having to
+    // be actively purged.
+    return `geocode:fwd:v2:${parts.join('|')}`;
+  }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      GeocodingService.FETCH_TIMEOUT_MS,
+  /**
+   * Runs the forward cascade in priority order, stopping at the first
+   * attempt that resolves a coordinate. An attempt that is not applicable
+   * (e.g. intersection without a known city) is never queued, so the
+   * request budget is spent on attempts that can actually succeed.
+   */
+  private async forwardCascade(
+    parsed: ParsedColombianAddress,
+    city: string | null,
+    state: string | null,
+    rawQuery: string,
+  ): Promise<ForwardGeocodeResult> {
+    type Attempt = () => Promise<ForwardGeocodeResult | null>;
+    const attempts: Attempt[] = [];
+
+    if (parsed.isDaneFormat) {
+      if (city) {
+        attempts.push(() => this.tryIntersection(parsed, city));
+      }
+      attempts.push(() => this.tryStructuredSearch(parsed, city, state, true));
+      // Only spend a slot on the "bare street" structured variant when we
+      // did NOT already spend one on the intersection attempt above — this
+      // keeps every branch at exactly <= MAX_FORWARD_EXTERNAL_REQUESTS while
+      // still always reaching the free-text fallback.
+      if (!city) {
+        attempts.push(() =>
+          this.tryStructuredSearch(parsed, city, state, false),
+        );
+      }
+    }
+    attempts.push(() =>
+      this.tryFreeText(parsed.normalized || rawQuery, city),
     );
 
-    let response: Response;
+    const capped = attempts.slice(
+      0,
+      GeocodingService.MAX_FORWARD_EXTERNAL_REQUESTS,
+    );
+
+    for (const attempt of capped) {
+      let outcome: ForwardGeocodeResult | null;
+      try {
+        outcome = await attempt();
+      } catch (err) {
+        this.logger.warn(`Forward geocode attempt failed, trying next: ${err}`);
+        outcome = null;
+      }
+      if (outcome && outcome.lat != null && outcome.lng != null) {
+        return outcome;
+      }
+    }
+    return { lat: null, lng: null };
+  }
+
+  /**
+   * Step (a): locate the DANE intersection (primary via ∩ generating via) via
+   * Overpass, within the named city's administrative area. Best-effort: any
+   * failure (area not found, ways not found, no geometry close enough)
+   * returns null so the cascade falls through to (b).
+   */
+  private async tryIntersection(
+    parsed: ParsedColombianAddress,
+    city: string,
+  ): Promise<ForwardGeocodeResult | null> {
+    const crossTipo = crossViaTipoLabel(parsed.viaTipo);
+    if (!parsed.viaTipo || !parsed.viaNum || !parsed.cruceNum || !crossTipo) {
+      return null;
+    }
+
+    const primaryVariants = this.buildOsmNameVariants(
+      parsed.viaTipo,
+      parsed.viaNum,
+    );
+    const crossVariants = this.buildOsmNameVariants(crossTipo, parsed.cruceNum);
+
+    const query =
+      `[out:json][timeout:5];` +
+      `area["name"="${this.escapeOverpassString(city)}"]->.a;` +
+      `(way(area.a)["highway"]["name"~"${this.toOverpassRegex(primaryVariants)}",i];` +
+      `way(area.a)["highway"]["name"~"${this.toOverpassRegex(crossVariants)}",i];);` +
+      `out tags geom;`;
+
+    let elements: OverpassElement[];
     try {
-      response = await fetch(url, {
+      elements = await this.raceOverpassMirrors(
+        query,
+        GeocodingService.INTERSECTION_TIMEOUT_MS,
+      );
+    } catch (err) {
+      this.logger.warn(`Intersection Overpass lookup failed for ${city}: ${err}`);
+      return null;
+    }
+    if (elements.length === 0) return null;
+
+    const primaryWays = elements.filter((el) =>
+      this.matchesAnyVariant(el.tags?.name, primaryVariants),
+    );
+    const crossWays = elements.filter((el) =>
+      this.matchesAnyVariant(el.tags?.name, crossVariants),
+    );
+    if (primaryWays.length === 0 || crossWays.length === 0) return null;
+
+    const point = this.nearestPointBetweenWays(primaryWays, crossWays);
+    if (!point) return null;
+
+    return { lat: point.lat, lng: point.lng, precision: 'intersection' };
+  }
+
+  /**
+   * Step (b): Nominatim structured search. `full=true` sends the complete
+   * "<viaTipo> <viaNum> # <cruceNum>-<placa>" street value; `full=false`
+   * sends only "<viaTipo> <viaNum>" (used when no city is known and the
+   * cascade can afford a second structured attempt).
+   */
+  private async tryStructuredSearch(
+    parsed: ParsedColombianAddress,
+    city: string | null,
+    state: string | null,
+    full: boolean,
+  ): Promise<ForwardGeocodeResult | null> {
+    if (!parsed.viaTipo || !parsed.viaNum) return null;
+    const street =
+      full && parsed.cruceNum && parsed.placa
+        ? `${parsed.viaTipo} ${parsed.viaNum} # ${parsed.cruceNum}-${parsed.placa}`
+        : `${parsed.viaTipo} ${parsed.viaNum}`;
+
+    const params = new URLSearchParams({
+      format: 'jsonv2',
+      street,
+      country: 'Colombia',
+      countrycodes: 'co',
+      addressdetails: '1',
+      limit: '5',
+      'accept-language': 'es',
+    });
+    if (city) params.set('city', city);
+    if (state) params.set('state', state);
+
+    const candidates = await this.fetchNominatimSearch(
+      params,
+      GeocodingService.STRUCTURED_TIMEOUT_MS,
+    );
+    const best = selectBestCandidate(candidates, city);
+    if (!best) return null;
+    return {
+      lat: Number(best.candidate.lat),
+      lng: Number(best.candidate.lon),
+      precision: best.precision,
+    };
+  }
+
+  /** Step (c): Nominatim free-text search — the final, most forgiving fallback. */
+  private async tryFreeText(
+    q: string,
+    city: string | null,
+  ): Promise<ForwardGeocodeResult | null> {
+    const params = new URLSearchParams({
+      format: 'jsonv2',
+      q,
+      countrycodes: 'co',
+      addressdetails: '1',
+      limit: '5',
+      'accept-language': 'es',
+    });
+
+    const candidates = await this.fetchNominatimSearch(
+      params,
+      GeocodingService.FREETEXT_TIMEOUT_MS,
+    );
+    const best = selectBestCandidate(candidates, city);
+    if (!best) return null;
+    return {
+      lat: Number(best.candidate.lat),
+      lng: Number(best.candidate.lon),
+      precision: best.precision,
+    };
+  }
+
+  /**
+   * Shared Nominatim `/search` fetch for the structured and free-text steps.
+   * Never throws: a network error, non-2xx, or invalid JSON all resolve to
+   * an empty candidate list so the caller just moves to the next cascade
+   * step instead of aborting the whole request.
+   */
+  private async fetchNominatimSearch(
+    params: URLSearchParams,
+    timeoutMs: number,
+  ): Promise<GeocodeCandidate[]> {
+    const url = `${GeocodingService.NOMINATIM_SEARCH_BASE}?${params.toString()}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
         signal: controller.signal,
         headers: { 'User-Agent': 'Vendix/1.0 (soporte@vendix.online)' },
       });
+      if (!response.ok) {
+        this.logger.warn(`Nominatim search HTTP ${response.status} for ${url}`);
+        return [];
+      }
+      const json = (await response.json()) as GeocodeCandidate[];
+      return Array.isArray(json) ? json : [];
     } catch (err) {
-      this.logger.error(`Nominatim search failed for "${q}": ${err}`);
-      throw new ServiceUnavailableException('Geocoding provider unavailable');
+      this.logger.warn(`Nominatim search failed for ${url}: ${err}`);
+      return [];
     } finally {
       clearTimeout(timeout);
     }
+  }
 
-    if (!response.ok) {
-      this.logger.error(`Nominatim search HTTP ${response.status} for "${q}"`);
-      throw new ServiceUnavailableException('Geocoding provider error');
-    }
+  /**
+   * Builds a small set of literal OSM name variants for a via type + number,
+   * so the Overpass intersection lookup tolerates the naming differences OSM
+   * contributors commonly use (e.g. "Calle 45A" vs "Calle 45 A", or a name
+   * with/without a trailing "Bis").
+   */
+  private buildOsmNameVariants(tipo: string, num: string): string[] {
+    const variants = new Set<string>();
+    const base = num.trim();
+    variants.add(`${tipo} ${base}`);
 
-    let json: NominatimSearchResult[];
-    try {
-      json = (await response.json()) as NominatimSearchResult[];
-    } catch (err) {
-      this.logger.error(`Nominatim search returned invalid JSON: ${err}`);
-      throw new ServiceUnavailableException(
-        'Geocoding provider returned invalid data',
-      );
-    }
+    const noBis = base.replace(/\s*bis\b/i, '').trim();
+    if (noBis && noBis !== base) variants.add(`${tipo} ${noBis}`);
 
-    const first = json?.[0];
-    const lat = first ? Number(first.lat) : NaN;
-    const lng = first ? Number(first.lon) : NaN;
-    if (!first || Number.isNaN(lat) || Number.isNaN(lng)) {
-      return { lat: null, lng: null };
+    const m = base.match(/^(\d+)([A-Za-z])(.*)$/);
+    if (m) variants.add(`${tipo} ${m[1]} ${m[2]}${m[3]}`.trim());
+
+    return Array.from(variants);
+  }
+
+  /** Builds an Overpass regex-value (`~"...",i`) matching any of the variants. */
+  private toOverpassRegex(variants: string[]): string {
+    const escaped = variants.map((v) =>
+      v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    );
+    return `^(${escaped.join('|')})`;
+  }
+
+  /** Escapes a value embedded in an Overpass QL string literal (`"..."`). */
+  private escapeOverpassString(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  /** Accent/case-insensitive check that `name` matches (or extends) any variant. */
+  private matchesAnyVariant(name: string | undefined, variants: string[]): boolean {
+    if (!name) return false;
+    const n = this.norm(name);
+    return variants.some((v) => {
+      const nv = this.norm(v);
+      return n === nv || n.startsWith(nv);
+    });
+  }
+
+  /**
+   * Finds the closest point between any primary-way vertex and any
+   * cross-way's geometry, within a small tolerance — an OSM intersection
+   * usually shares an exact node, but a few meters of slack tolerates ways
+   * that were digitized slightly apart. Returns null when nothing is close
+   * enough to trust as an intersection.
+   */
+  private nearestPointBetweenWays(
+    primaryWays: OverpassElement[],
+    crossWays: OverpassElement[],
+  ): { lat: number; lng: number } | null {
+    const THRESHOLD_M = 40;
+    let best: { lat: number; lng: number; dist: number } | null = null;
+
+    for (const pWay of primaryWays) {
+      for (const vertex of pWay.geometry ?? []) {
+        for (const cWay of crossWays) {
+          const dist = this.minDistanceToWayMeters(
+            vertex.lat,
+            vertex.lon,
+            cWay.geometry ?? [],
+          );
+          if (dist < THRESHOLD_M && (!best || dist < best.dist)) {
+            best = { lat: vertex.lat, lng: vertex.lon, dist };
+          }
+        }
+      }
     }
-    return { lat, lng };
+    return best ? { lat: best.lat, lng: best.lng } : null;
   }
 
   // ----------------------------------------------------------- Nominatim
@@ -590,8 +927,23 @@ export class GeocodingService {
       `way(around:${GeocodingService.CROSS_STREET_RADIUS_M},${lat},${lng})` +
       `[highway][name];out tags geom;`;
 
+    return this.raceOverpassMirrors(query, GeocodingService.OVERPASS_TIMEOUT_MS);
+  }
+
+  /**
+   * Races an arbitrary Overpass QL `query` across all configured mirrors
+   * (see {@link overpassNamedRoads} for why racing beats trying in order),
+   * used both by the reverse-geocode cross-street lookup and by the forward
+   * cascade's intersection lookup ({@link tryIntersection}) — each with its
+   * own `timeoutMs` budget. Returns `[]` when every mirror fails or has
+   * nothing usable; never throws.
+   */
+  private async raceOverpassMirrors(
+    query: string,
+    timeoutMs: number,
+  ): Promise<OverpassElement[]> {
     const attempts = GeocodingService.OVERPASS_MIRRORS.map((url) =>
-      this.fetchOverpassMirror(url, query),
+      this.fetchOverpassMirror(url, query, timeoutMs),
     );
     try {
       // First FULFILLED attempt wins. A mirror that is reachable but empty
@@ -600,7 +952,7 @@ export class GeocodingService {
       // backend targets ES2020 (Promise.any needs the ES2021 lib).
       return await this.firstFulfilled(attempts);
     } catch {
-      // Every mirror failed or returned nothing usable → keep a single axis.
+      // Every mirror failed or returned nothing usable → caller degrades.
       return [];
     }
   }
@@ -636,12 +988,10 @@ export class GeocodingService {
   private async fetchOverpassMirror(
     url: string,
     query: string,
+    timeoutMs: number = GeocodingService.OVERPASS_TIMEOUT_MS,
   ): Promise<OverpassElement[]> {
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      GeocodingService.OVERPASS_TIMEOUT_MS,
-    );
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -805,17 +1155,21 @@ export class GeocodingService {
     }
   }
 
+  /**
+   * A RESOLVED coordinate is cached for 7 days; an unresolved (`lat`/`lng`
+   * null) result only for 6 hours — see the TTL constants' doc for why the
+   * null case is deliberately much shorter.
+   */
   private async writeForwardCache(
     key: string,
     value: ForwardGeocodeResult,
   ): Promise<void> {
+    const ttl =
+      value.lat == null || value.lng == null
+        ? GeocodingService.FORWARD_NULL_CACHE_TTL_SECONDS
+        : GeocodingService.FORWARD_CACHE_TTL_SECONDS;
     try {
-      await this.redis.set(
-        key,
-        JSON.stringify(value),
-        'EX',
-        GeocodingService.FORWARD_CACHE_TTL_SECONDS,
-      );
+      await this.redis.set(key, JSON.stringify(value), 'EX', ttl);
     } catch (err) {
       this.logger.warn(`Redis write failed for ${key}: ${err}`);
     }

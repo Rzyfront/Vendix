@@ -13,6 +13,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
 import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import { TaxesModule } from '../taxes/taxes.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -56,6 +57,7 @@ import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.m
 import { TablesModule } from '../tables/tables.module';
 import { InvoicingModule } from '../invoicing/invoicing.module';
 import { ShippingModule } from '../shipping/shipping.module';
+import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 
 @Module({
   imports: [
@@ -90,6 +92,9 @@ import { ShippingModule } from '../shipping/shipping.module';
     // Copia del impuesto del envío (ShippingTaxService) en la venta POS a
     // domicilio. Sin ciclo: ShippingModule solo importa Prisma/Response/Settings.
     ShippingModule,
+    // Plan order-truth-and-invoice-tz — writer único de `order_events`.
+    // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
+    OrderHistoryModule,
   ],
   controllers: [
     // CP-POLLO-ARABE-727 (verificación E2E) — `BankAccountsController` va ANTES
@@ -115,6 +120,13 @@ import { ShippingModule } from '../shipping/shipping.module';
     WebhookHandlerService,
     WebhookController,
     StockLevelManager,
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+    // step 4) — re-declared locally, same established pattern as
+    // `StockLevelManager` above (see `order-stock-commit.module.ts` docstring).
+    // `OrderStockCommitModule` (imported below) provides its own instance but
+    // only exports `OrderStockCommitService` + `SellableStockAllocator`, not
+    // this one.
+    StockValidatorService,
     InventoryTransactionsService,
     SystemPaymentMethodsService,
     StorePaymentMethodsService,

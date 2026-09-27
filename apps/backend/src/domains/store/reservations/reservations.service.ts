@@ -21,6 +21,7 @@ import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { TablesService } from '../tables/tables.service';
 import { TableSessionsService } from '../tables/table-sessions.service';
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 @Injectable()
 export class ReservationsService {
@@ -35,6 +36,8 @@ export class ReservationsService {
     private readonly priceResolverService: PriceResolverService,
     private readonly tablesService: TablesService,
     private readonly tableSessionsService: TableSessionsService,
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    private readonly orderHistory: OrderHistoryService,
   ) {}
 
   // Estado maquina de transiciones validas
@@ -989,12 +992,26 @@ export class ReservationsService {
     if (dto.reopen_order === true && updated.order_id) {
       const order = await this.prisma.orders.findUnique({
         where: { id: updated.order_id },
-        select: { id: true, state: true, store_id: true, order_number: true },
+        select: {
+          id: true,
+          state: true,
+          store_id: true,
+          order_number: true,
+          stores: { select: { organization_id: true } },
+        },
       });
       if (order && order.state === 'cancelled') {
         await this.prisma.orders.update({
           where: { id: order.id },
           data: { state: 'processing', updated_at: new Date() },
+        });
+        await this.orderHistory.record(this.prisma, {
+          orderId: order.id,
+          storeId: order.store_id,
+          organizationId: order.stores?.organization_id ?? undefined,
+          type: 'state_changed',
+          fromState: 'cancelled',
+          toState: 'processing',
         });
         this.eventEmitter.emit('order.status_changed', {
           store_id: order.store_id,

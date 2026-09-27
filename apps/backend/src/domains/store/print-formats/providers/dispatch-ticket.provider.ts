@@ -11,6 +11,12 @@ import {
 } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  formatStoreDate,
+  formatStoreTime,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
 
 /**
  * CP-DTLP-20260827 — Tiquete de Despacho (dispatch_ticket).
@@ -92,7 +98,9 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
     // Firmado acá (única llamada async del flujo) — `mapOrderToDispatchTicket`
     // es un mapeador puro y síncrono, no puede tener un `await` adentro.
     const signedLogoUrl = await signStoreLogoUrl(this.s3Service, order.stores?.logo_url, this.logger);
-    return this.mapOrderToDispatchTicket(order, signedLogoUrl);
+    // B17 — fecha/hora del documento en la zona de la tienda, no la del contenedor.
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    return this.mapOrderToDispatchTicket(order, signedLogoUrl, tz);
   }
 
   async getSampleData(_storeId?: number): Promise<StandardPrintDataModel> {
@@ -243,7 +251,11 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
   // Mapeo interno
   // ============================================================
 
-  private mapOrderToDispatchTicket(order: any, signedLogoUrl?: string): StandardPrintDataModel {
+  private mapOrderToDispatchTicket(
+    order: any,
+    signedLogoUrl?: string,
+    tz: string = DEFAULT_STORE_TIMEZONE,
+  ): StandardPrintDataModel {
     const store = order.stores || {};
     const org = store.organizations || {};
     const storeAddr = store.addresses?.[0] || {};
@@ -321,13 +333,10 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
           ? new Date(order.created_at).toISOString()
           : new Date().toISOString(),
         date_formatted: order.created_at
-          ? new Date(order.created_at).toLocaleDateString('es-CO')
-          : new Date().toLocaleDateString('es-CO'),
+          ? formatStoreDate(new Date(order.created_at), tz)
+          : formatStoreDate(new Date(), tz),
         time: order.created_at
-          ? new Date(order.created_at).toLocaleTimeString('es-CO', {
-              hour: '2-digit',
-              minute: '2-digit',
-            })
+          ? formatStoreTime(new Date(order.created_at), tz)
           : undefined,
         state: order.state,
         state_label: order.state,

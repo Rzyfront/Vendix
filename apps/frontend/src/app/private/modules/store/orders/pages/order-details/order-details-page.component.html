@@ -100,6 +100,52 @@
     </div>
   }
 
+  <!-- B5 — aviso fijo de reparación del impuesto del envío. `shippingTaxRepairNeeded`
+       se enciende cuando la guarda de facturación rechaza por copia incoherente del
+       impuesto del envío (`createInvoiceFromOrder`, error `INVOICING_CALC_006` +
+       `details.detail = 'shipping_tax:*'`). El toast de 8s sigue existiendo como aviso
+       breve, pero este banner es la vía persistente: no depende de que el operador
+       lo haya visto o cerrado a tiempo. Se apaga al reparar con éxito; si el backend
+       responde 409 (impuesto ya contabilizado, `clear` rechazado), sigue visible. -->
+  @if (shippingTaxRepairNeeded()) {
+    <div
+      role="alert"
+      class="bg-warning-light border border-warning/30 rounded-lg p-4 mb-6 flex items-start gap-3"
+    >
+      <app-icon
+        name="alert-triangle"
+        [size]="18"
+        class="text-warning shrink-0 mt-0.5"
+      ></app-icon>
+      <div class="flex-1">
+        <p class="font-semibold text-text-primary text-sm">
+          El impuesto del envío de esta orden está incompleto y bloquea la
+          factura.
+        </p>
+        <div class="flex flex-wrap gap-2 mt-3">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            [disabled]="isRepairingShippingTax()"
+            (click)="repairShippingTax('complete_rate')"
+          >
+            <app-icon name="calculator" [size]="14"></app-icon>
+            Completar desde la tarifa
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-error text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            [disabled]="isRepairingShippingTax()"
+            (click)="repairShippingTax('clear')"
+          >
+            <app-icon name="ban" [size]="14"></app-icon>
+            Quitar impuesto del envío
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
   <!-- Loading State -->
   @if (isLoading()) {
     <div class="flex justify-center items-center h-64">
@@ -1324,34 +1370,59 @@
                     <p class="text-sm font-bold text-gray-900">
                       {{ step.label }}
                     </p>
-                    @if (step.data) {
-                      <p class="text-xs text-gray-500 mt-1">
-                        Realizado por
-                        <span class="font-semibold text-gray-700"
-                          >{{ step.data.users?.first_name }}
-                          {{ step.data.users?.last_name }}</span
-                        >
-                      </p>
-                      @if (step.data.new_values?.state) {
-                        @if (isRefundStateValue(step.data.new_values.state)) {
+                    @if (isLegacyTimeline()) {
+                      <!-- órdenes anteriores al cambio (order-truth-and-invoice-tz):
+                           timeline audit_logs, sin tocar — mismo markup de siempre. -->
+                      @if (step.data) {
+                        <p class="text-xs text-gray-500 mt-1">
+                          Realizado por
+                          <span class="font-semibold text-gray-700"
+                            >{{ step.data.users?.first_name }}
+                            {{ step.data.users?.last_name }}</span
+                          >
+                        </p>
+                        @if (step.data.new_values?.state) {
+                          @if (isRefundStateValue(step.data.new_values.state)) {
+                            <div
+                              class="mt-2 text-xs bg-orange-50 text-orange-800 px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-orange-200"
+                            >
+                              <span
+                                class="w-1.5 h-1.5 rounded-full bg-orange-500"
+                              ></span>
+                              Reembolso:
+                              {{ refundStateLabel(step.data.new_values.state) }}
+                            </div>
+                          } @else {
+                            <div
+                              class="mt-2 text-xs bg-[var(--color-surface)] text-text-secondary px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-border"
+                            >
+                              <span
+                                class="w-1.5 h-1.5 rounded-full bg-primary-500"
+                              ></span>
+                              Nuevo estado:
+                              {{ formatStatus(step.data.new_values.state) }}
+                            </div>
+                          }
+                        }
+                      }
+                    } @else {
+                      <!-- timeline veraz desde order_events (plan order-truth-and-invoice-tz,
+                           Step 7): actor y badge "Reembolso" salen SOLO de event_type. -->
+                      @if (step.data) {
+                        <p class="text-xs text-gray-500 mt-1">
+                          Realizado por
+                          <span class="font-semibold text-gray-700">{{
+                            getOrderEventActorLabel(step.data)
+                          }}</span>
+                        </p>
+                        @if (isRefundOrderEvent(step.data)) {
                           <div
                             class="mt-2 text-xs bg-orange-50 text-orange-800 px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-orange-200"
                           >
                             <span
                               class="w-1.5 h-1.5 rounded-full bg-orange-500"
                             ></span>
-                            Reembolso:
-                            {{ refundStateLabel(step.data.new_values.state) }}
-                          </div>
-                        } @else {
-                          <div
-                            class="mt-2 text-xs bg-[var(--color-surface)] text-text-secondary px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-border"
-                          >
-                            <span
-                              class="w-1.5 h-1.5 rounded-full bg-primary-500"
-                            ></span>
-                            Nuevo estado:
-                            {{ formatStatus(step.data.new_values.state) }}
+                            Reembolso
                           </div>
                         }
                       }
@@ -2195,7 +2266,8 @@
                               : 'primary'
                       "
                       [fullWidth]="true"
-                      [disabled]="isProcessingAction()"
+                      [disabled]="isProcessingAction() || action.enabled === false"
+                      [ariaLabel]="action.enabled === false ? actionDisabledReason(action) : ''"
                       (clicked)="executeAction(action.id)"
                     >
                       <app-icon

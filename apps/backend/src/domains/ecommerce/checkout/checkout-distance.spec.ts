@@ -488,4 +488,37 @@ describe('CheckoutService - recálculo por distancia al confirmar', () => {
     );
     expect(prisma.orders.create).not.toHaveBeenCalled();
   });
+
+  it('rechazo estricto SIN tolerancia: 15.1 km con el último tramo cerrado en to_km 15 rechaza con ECOM_CHECKOUT_003', async () => {
+    // Antes del revert, matchTierWithTolerance() perdonaba hasta 0.2 km por
+    // encima del to_km del tramo cerrado más alto (15 + 0.2 = 15.2), así que
+    // 15.1 km habría matcheado el tramo [10,15) igual. La decisión de
+    // negocio es rechazo estricto: sin tolerancia, 15.1 > 15 cae fuera de
+    // todos los rangos y debe rechazar — se fija el error_code, no solo la
+    // clase de la excepción, para que un futuro revert accidental de vuelta
+    // a la tolerancia no pase la prueba con un código distinto.
+    distance.resolveDistanceKm.mockResolvedValue(15.1);
+    storePrisma.shipping_rates.findFirst.mockResolvedValue(
+      buildRate({
+        distance_tiers: [
+          { from_km: 0, to_km: 10, price: 8000 },
+          { from_km: 10, to_km: 15, price: 12000 },
+        ],
+      }),
+    );
+
+    let caught: unknown;
+    try {
+      await service.checkout(buildDto());
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(VendixHttpException);
+    expect((caught as VendixHttpException).errorCode).toBe(
+      'ECOM_CHECKOUT_003',
+    );
+    expect((caught as VendixHttpException).getStatus()).toBe(400);
+    expect(prisma.orders.create).not.toHaveBeenCalled();
+  });
 });
