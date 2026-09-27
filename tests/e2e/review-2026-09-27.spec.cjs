@@ -339,6 +339,19 @@ async function main() {
           await page.setViewportSize({ width: 1280, height: 720 });
         }
       });
+      await runScenario('R8: unauthenticated browser cannot read the customer list UI', ['R8'], async () => {
+        const outsider = await browser.newContext({ ignoreHTTPSErrors: true });
+        try {
+          const outsiderPage = await outsider.newPage();
+          await openUiView(outsiderPage, `${adminBase}/admin/customers/all`,
+            outsiderPage.getByText('Prueba Gratis 14 Días').first(),
+            'La portada pública ante acceso anónimo a clientes');
+          assert.equal(await outsiderPage.locator('app-customer-list').count(), 0,
+            'Una sesión sin autenticar recibió el listado de clientes.');
+        } finally {
+          await outsider.close();
+        }
+      });
       await runScenario('R13: orders list shows refund net and partial badge', ['R13'], async () => {
         await openUiView(page, `${adminBase}/admin/orders/sales`,
           page.getByRole('columnheader', { name: 'Neto actual' }), 'El listado de órdenes');
