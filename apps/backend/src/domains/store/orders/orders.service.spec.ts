@@ -2116,7 +2116,12 @@ describe('OrdersService', () => {
         };
         mockPrismaService.orders.findFirst.mockReset()
           .mockResolvedValueOnce(aliasDraft as any)
-          .mockResolvedValue({ ...persistedOrder, ...aliasDraft } as any);
+          .mockResolvedValue({
+            ...persistedOrder,
+            customer_id: null,
+            customer_alias: 'Portería',
+            shipping_address_id: 33,
+          } as any);
         mockPrismaService.store_settings.findFirst.mockResolvedValue({
           settings: { pos: { allow_alias_sales: true } },
         } as any);
