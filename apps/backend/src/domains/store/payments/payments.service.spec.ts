@@ -4784,6 +4784,12 @@ describe('PaymentsService', () => {
         ).toHaveBeenCalledWith(
           expect.objectContaining({ lines: WH_LINES }),
         );
+        // PR #858 hallazgo 2 — la fila lleva la orden para que la factura la
+        // enlace en vez de duplicarla.
+        const persistCtx = (service as any).withholdingFlow.persistWithholdingLines
+          .mock.calls[0][0];
+        expect(persistCtx.invoice_id).toBeNull();
+        expect(typeof persistCtx.order_id).toBe('number');
       });
 
       it('regresión escalar: un solo tramo sigue enviando wh.lines intacto (sin prorratear)', async () => {

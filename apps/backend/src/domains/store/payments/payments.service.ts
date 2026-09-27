@@ -1899,6 +1899,9 @@ export class PaymentsService {
               organization_id: order.stores?.organization_id,
               store_id: createPosPaymentDto.store_id,
               invoice_id: null,
+              // PR #858 hallazgo 2 — la factura de esta orden enlaza estas
+              // filas (les pone `invoice_id`) en vez de duplicar la sufrida.
+              order_id: order.id,
               customer_id: order.customer_id
                 ? Number(order.customer_id)
                 : null,
@@ -1964,6 +1967,9 @@ export class PaymentsService {
               organization_id: order.stores?.organization_id,
               store_id: createPosPaymentDto.store_id,
               invoice_id: null,
+              // PR #858 hallazgo 2 — la factura de esta orden enlaza estas
+              // filas (les pone `invoice_id`) en vez de duplicar la sufrida.
+              order_id: order.id,
               customer_id: order.customer_id
                 ? Number(order.customer_id)
                 : null,
