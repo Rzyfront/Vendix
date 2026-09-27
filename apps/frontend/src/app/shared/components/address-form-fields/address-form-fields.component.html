@@ -76,13 +76,20 @@
     ></app-input>
     }
 
-    @if (showAdvanced() && showMunicipality()) {
+    @if (municipalitySelectVisible()) {
       <!--
         Municipio DANE (Divipola). Es el dato que la facturación electrónica
         exige del adquiriente: sin él el documento declararía 11001 (Bogotá)
         para cualquier cliente del país. Al elegirlo, ciudad y departamento se
         completan solos desde el catálogo y quedan en solo-lectura, así que no
         pueden discrepar del código.
+
+        H7: antes esto vivía detrás de `showAdvanced() && showMunicipality()`.
+        En `compact` (POS) `showAdvanced()` empieza en false, así que el
+        selector nunca aparecía para una dirección nueva. `municipalitySelectVisible`
+        agrega: mismo comportamiento cuando showAdvanced() es true, MÁS
+        visible en compact si el auto-resolve (constructor) no encontró
+        código — para que el cajero pueda elegirlo.
       -->
       <div class="field-block">
         <label class="municipality-label" for="municipality-select">

@@ -388,6 +388,28 @@ export class AddressFormFieldsComponent {
     () => this.showMunicipality() && !!this.municipalityCode(),
   );
 
+  /**
+   * H7 — visibilidad del selector DANE. Antes de este fix vivía SOLO detrás de
+   * `showAdvanced() && showMunicipality()`, y en modo `compact` (POS)
+   * `showAdvanced()` es `false` salvo que la dirección precargada ya trajera
+   * apto/postal/país≠CO. Resultado: una dirección nueva capturada desde el POS
+   * no tenía ningún control para elegir el municipio, y `resolveMunicipalityFromText`
+   * solo se disparaba desde el reverse-fill del mapa (también oculto en
+   * compact) — la dirección se guardaba sin `municipality_code`, que la
+   * factura electrónica usa como `city_code` del adquiriente.
+   *
+   * Fix mínimo: el selector se muestra igual que antes cuando `showAdvanced()`
+   * es true (0 cambios para los 6 consumidores no-compact ni para el POS con
+   * "Más detalles" expandido), Y ADEMÁS en `compact` cuando el auto-resolve
+   * (ver el `merge(...)` del constructor) no encontró código — así el cajero
+   * siempre tiene cómo elegirlo manualmente.
+   */
+  readonly municipalitySelectVisible = computed<boolean>(
+    () =>
+      this.showMunicipality() &&
+      (this.showAdvanced() || (this.compact() && !this.municipalityCode())),
+  );
+
   constructor() {
     // Si el consumidor del form pasó un base DANE distinto (e.g. super-admin
     // reusando este componente en el modal de orgs), reconfiguramos el servicio
@@ -519,6 +541,17 @@ export class AddressFormFieldsComponent {
       .subscribe(() => {
         if (!this.form.dirty) return;
         this.forwardGeocodeFromForm();
+        // H7 — solo en `compact` (POS): el selector DANE queda oculto detrás
+        // de `showAdvanced()` (ver `municipalitySelectVisible`), así que sin
+        // esto una dirección nueva tecleada desde el POS nunca obtenía
+        // `municipality_code` salvo que el cajero abriera "Más detalles" y el
+        // mapa. `resolveMunicipalityFromText` ya es idempotente (no pisa un
+        // código existente) y ya valida país CO — se reutiliza tal cual.
+        // Gateado a `compact()` para no alterar el comportamiento de los
+        // demás consumidores (customer-modal, dispatch-note editor, checkout
+        // suscripción, organization/store edit), donde el selector manual ya
+        // está siempre visible.
+        if (this.compact()) this.resolveMunicipalityFromText();
       });
   }
 
