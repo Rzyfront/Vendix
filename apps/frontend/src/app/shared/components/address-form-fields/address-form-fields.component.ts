@@ -21,7 +21,7 @@ import {
 } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { Observable, merge } from 'rxjs';
-import { debounceTime, map, startWith } from 'rxjs/operators';
+import { debounceTime, finalize, map, startWith } from 'rxjs/operators';
 
 import { AddressMapPickerComponent } from '../../../private/modules/ecommerce/components/address-map-picker/address-map-picker.component';
 import {
@@ -248,6 +248,22 @@ export class AddressFormFieldsComponent {
   /** Counter to discard a stale forward-geocode response that resolves after
    *  a newer request was already fired (fast retyping, fast pin drag). */
   private geocodeGeneration = 0;
+
+  /**
+   * Chip de carga (2026-09-27) — reference count of forward-geocode requests
+   * currently in flight. A COUNTER, not a plain boolean: `forwardGeocodeFromForm`
+   * does not cancel the underlying HTTP call on a new request (no `switchMap`)
+   * — it only discards a STALE response via {@link geocodeGeneration} once it
+   * arrives. Two requests can therefore be in flight at once on a slow
+   * geocode cascade; a plain boolean flipped to `false` in the first one's
+   * `finalize` would go stuck-false while the second (the one that matters)
+   * is still pending. Counting in-flight requests avoids that.
+   */
+  private readonly locatingRequestCount = signal(0);
+  /** True while a forward-geocode for the typed address is in flight. */
+  readonly isLocatingAddress = computed<boolean>(
+    () => this.locatingRequestCount() > 0,
+  );
 
   /**
    * Non-blocking precision badge shown under the address line. A confirmed
@@ -769,9 +785,15 @@ export class AddressFormFieldsComponent {
         : [line1, city, state].filter(Boolean).join(', ');
 
     const generation = ++this.geocodeGeneration;
+    this.locatingRequestCount.update((n) => n + 1);
     this.geocoding
       .forward(query, { city: city || undefined, state: state || undefined })
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        // Runs on next/error AND on early unsubscribe (component destroyed
+        // mid-flight) — the chip never gets stuck showing "Ubicando...".
+        finalize(() => this.locatingRequestCount.update((n) => Math.max(0, n - 1))),
+      )
       .subscribe({
         next: (res) => {
           // A newer request superseded this one, or the operator confirmed a

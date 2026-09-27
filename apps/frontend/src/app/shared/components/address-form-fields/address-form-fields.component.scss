@@ -81,6 +81,47 @@
   line-height: 1.25rem;
 }
 
+/* Chip de carga (2026-09-27) — mientras `forwardGeocodeFromForm` tiene una
+   peticion en vuelo (`isLocatingAddress()`), este chip se muestra arriba de
+   `.map-section`; `.address-warning`/`.precision-badge` se ocultan mientras
+   tanto para que nunca convivan dos chips a la vez. Tono neutral con tokens
+   de tema (sin color fijo), a diferencia de `.address-warning` arriba. */
+.address-locating-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  margin: 0 0 0.75rem;
+  border-radius: 0.625rem;
+  background: var(--color-surface-alt, var(--color-surface));
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.25rem;
+}
+
+.address-locating-chip__spinner {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: address-locating-chip-spin 0.8s linear infinite;
+}
+
+@keyframes address-locating-chip-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .address-locating-chip__spinner {
+    animation: none;
+  }
+}
+
 /* Wraps a single field + its inline error so the message stays attached to the
    control. Only renders when the parent opts into `showErrors`. */
 .field-block {

@@ -1,4 +1,15 @@
 <div class="address-form-fields space-y-4">
+  <!-- Chip de carga (2026-09-27): mientras `forwardGeocodeFromForm` tiene
+       una peticion en vuelo, este chip se muestra arriba de la seccion del
+       mapa. El warning/badge de mas abajo se ocultan mientras tanto (ver
+       `isLocatingAddress`) para que nunca convivan dos chips a la vez. -->
+  @if (isLocatingAddress()) {
+    <div class="address-locating-chip" role="status" aria-live="polite">
+      <span class="address-locating-chip__spinner" aria-hidden="true"></span>
+      <span>Ubicando tu dirección en el mapa…</span>
+    </div>
+  }
+
   <!-- Collapsible map section -->
   @if (showAdvanced()) {
   <div class="map-section">
@@ -26,7 +37,7 @@
   }
 
   <!-- Non-blocking warning (forward-geocode failed, etc.) -->
-  @if (addressWarning()) {
+  @if (addressWarning() && !isLocatingAddress()) {
     <div class="address-warning" role="status">
       <app-icon name="alert-triangle" [size]="16"></app-icon>
       <span>{{ addressWarning() }}</span>
@@ -48,7 +59,7 @@
           <span>Ingresa una dirección válida (mínimo 5 caracteres).</span>
         </p>
       }
-      @if (precisionBadge(); as badge) {
+      @if (!isLocatingAddress() && precisionBadge(); as badge) {
         <p
           class="precision-badge"
           [class.precision-badge--warning]="badge.tone === 'warning'"

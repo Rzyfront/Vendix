@@ -12,7 +12,7 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { firstValueFrom, debounceTime, distinctUntilChanged, filter, merge } from 'rxjs';
+import { firstValueFrom, debounceTime, distinctUntilChanged, filter, finalize, merge } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import {
@@ -194,6 +194,29 @@ export class CheckoutComponent implements OnInit {
   readonly geocodePrecision = signal<GeocodePrecision | null>(null);
   /** Canonical address label the last forward-geocode matched, for display. */
   readonly geocodeLabel = signal<string | null>(null);
+
+  /**
+   * Chip de carga (2026-09-27) — reference count of forward-geocode requests
+   * currently in flight, either from the written address
+   * (`forwardGeocodeFromForm`) or from a saved address without resolved
+   * coords (`ensureSavedAddressCoords`). Exposed as `isLocatingAddress` below.
+   *
+   * A COUNTER, not a plain boolean: neither caller runs its geocode through
+   * `switchMap` (both are only coalesced by an 800ms `debounceTime` upstream,
+   * see `setupLocationData`), so two requests CAN overlap when the backend
+   * cascade is slow (its own budget is up to 15s, see
+   * `vendix-address-geocoding`). A plain boolean flipped to `false` in the
+   * first request's `finalize` would go stuck-false while a SECOND, still
+   * pending request is the one whose result actually matters. Counting
+   * in-flight requests and reading "any pending" avoids that stale-false
+   * flicker without a switchMap rewrite.
+   */
+  private readonly locatingRequestCount = signal(0);
+  /** True while a forward-geocode for the address/map is in flight (see doc above). */
+  readonly isLocatingAddress = computed<boolean>(
+    () => this.locatingRequestCount() > 0,
+  );
+
   /**
    * True once the buyer has explicitly placed the pin themselves (map
    * drag/click or accepted GPS fix). While true, a forward-geocode from
@@ -947,12 +970,18 @@ export class CheckoutComponent implements OnInit {
     // Pass city/state as separate params (when resolved) instead of relying
     // on the backend splitting them out of `query` by commas, which breaks
     // if the customer's free-text address itself contains a comma.
+    this.locatingRequestCount.update((n) => n + 1);
     this.geocoding
       .forward(query, {
         city: cityName || undefined,
         state: stateName || undefined,
       })
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        // Runs on next/error AND on early unsubscribe (component destroyed
+        // mid-flight) — the chip never gets stuck showing "Ubicando...".
+        finalize(() => this.locatingRequestCount.update((n) => Math.max(0, n - 1))),
+      )
       .subscribe({
         next: (res) => {
           if (res?.lat == null || res?.lng == null) {
@@ -1810,6 +1839,7 @@ export class CheckoutComponent implements OnInit {
       .join(', ');
     if (query.trim().length < 5) return;
     this.savedGeocodeInFlight.add(id);
+    this.locatingRequestCount.update((n) => n + 1);
     this.geocoding
       // Paso 8: pass city/state as separate params so the backend does not
       // have to split them out of `query` by commas (see `forward` opts).
@@ -1817,7 +1847,13 @@ export class CheckoutComponent implements OnInit {
         city: saved.city || undefined,
         state: saved.state_province || undefined,
       })
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        // Only covers THIS forward-geocode, not the follow-up `updateAddress`
+        // persist below — the chip's job is "locating", not "saving"; the
+        // precision badge already takes over as soon as `next` sets it.
+        finalize(() => this.locatingRequestCount.update((n) => Math.max(0, n - 1))),
+      )
       .subscribe({
         next: (res) => {
           const lat = res?.lat;

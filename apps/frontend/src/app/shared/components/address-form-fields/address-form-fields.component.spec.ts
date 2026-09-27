@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { signal } from '@angular/core';
-import { of } from 'rxjs';
+import { Subject, of } from 'rxjs';
 
 import { AddressFormFieldsComponent } from './address-form-fields.component';
 import { CountryService } from '../../../core/services/country.service';
@@ -280,5 +280,99 @@ describe('AddressFormFieldsComponent — geocode precisión "area" no es una ubi
     expect(component.coordsSignal()).toEqual({ lat: 4.601, lng: -74.081 });
     expect(component.precision()).toBe('street');
     expect(lastEmitted?.has_location).toBeTrue();
+  });
+});
+
+/**
+ * Chip de carga (2026-09-27, owner request): mientras el forward-geocode del
+ * texto tecleado está en vuelo, debe verse un chip "Ubicando tu dirección en
+ * el mapa…" arriba de la sección del mapa; al resolver (next + complete), el
+ * chip debe ocultarse — `isLocatingAddress()` es un CONTADOR decrementado en
+ * `finalize()`, no un booleano plano, así que este spec usa un `Subject`
+ * controlado a mano (no `of(...)`, que emitiría sincrónicamente y nunca
+ * dejaría observar el estado "pendiente").
+ */
+describe('AddressFormFieldsComponent — chip de carga sobre el mapa', () => {
+  let fixture: ComponentFixture<AddressFormFieldsComponent>;
+  let component: AddressFormFieldsComponent;
+  let forward$: Subject<{ lat: number; lng: number; precision: string; label: string } | null>;
+  let forward: jasmine.Spy;
+
+  const renderAndFlushInitialCycle = async () => {
+    jasmine.clock().install();
+    jasmine.clock().mockDate();
+    fixture.detectChanges();
+    jasmine.clock().tick(600);
+    await fixture.whenStable();
+  };
+
+  const editAddressAndFlushDebounce = async () => {
+    component.form.markAsDirty();
+    component.form.get('address_line1')!.setValue('Carrera 7 # 32-16');
+    component.form.get('city')!.setValue('Bogotá');
+    component.form.get('state_province')!.setValue('Cundinamarca');
+    jasmine.clock().tick(600);
+    await fixture.whenStable();
+  };
+
+  beforeEach(async () => {
+    forward$ = new Subject();
+    forward = jasmine.createSpy('forward').and.returnValue(forward$);
+    TestBed.configureTestingModule({
+      imports: [AddressFormFieldsComponent],
+      providers: [
+        { provide: CountryService, useValue: { getCountries: () => of([{ code: 'CO', name: 'Colombia' }]) } },
+        {
+          provide: DianMunicipalityLookupService,
+          useValue: { resolveByName: () => of(null), resolveByCode: () => of(null), setBaseUrl: () => {} },
+        },
+        { provide: GeocodingService, useValue: { forward, reverse: () => of(null) } },
+        {
+          provide: CurrencyFormatService,
+          useValue: {
+            currencySymbol: signal('$'),
+            currencyFormatStyle: () => 'comma_dot',
+            currencyDecimals: () => 0,
+            loadCurrency: () => {},
+            format: (v: number) => `$${v}`,
+          },
+        },
+      ],
+    });
+    fixture = TestBed.createComponent(AddressFormFieldsComponent);
+    component = fixture.componentInstance;
+  });
+
+  it('el chip esta visible mientras el observable esta pendiente y se oculta al emitir', async () => {
+    try {
+      await renderAndFlushInitialCycle();
+      await editAddressAndFlushDebounce();
+      fixture.detectChanges();
+
+      // Pendiente: `forward$` todavia no emitio nada.
+      expect(component.isLocatingAddress()).toBeTrue();
+      expect(
+        fixture.debugElement.query(By.css('.address-locating-chip')),
+      ).toBeTruthy();
+
+      forward$.next({
+        lat: 4.601,
+        lng: -74.081,
+        precision: 'exact',
+        label: 'Carrera 7, Bogotá',
+      });
+      forward$.complete();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      // Resuelto: `finalize()` bajo el contador vuelve `isLocatingAddress()`
+      // a false y el chip desaparece del DOM.
+      expect(component.isLocatingAddress()).toBeFalse();
+      expect(
+        fixture.debugElement.query(By.css('.address-locating-chip')),
+      ).toBeFalsy();
+    } finally {
+      jasmine.clock().uninstall();
+    }
   });
 });

@@ -642,6 +642,50 @@
     }
 }
 
+// Chip de carga (2026-09-27) — mientras un forward-geocode del punto nuevo
+// (`forwardGeocodeFromForm`) o de una direccion guardada sin coords
+// (`ensureSavedAddressCoords`) esta en vuelo (`isLocatingAddress()`), este
+// chip ocupa el MISMO slot que `.address-map-warning`/`.address-precision-badge`
+// arriba del mapa — nunca conviven dos chips a la vez (ver los `@else if` en
+// el template). Tono neutral (todavia no sabemos si el resultado sera bueno o
+// malo), mismos tokens de tema que el resto de estos avisos.
+.address-locating-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.5rem 0 0;
+    padding: 0.4rem 0.75rem;
+    background: var(--color-surface-alt, rgba(99, 102, 241, 0.08));
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    font-size: var(--fs-sm);
+
+    &__spinner {
+        flex-shrink: 0;
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--color-border);
+        border-top-color: var(--color-primary);
+        border-radius: 50%;
+        animation: address-locating-chip-spin 0.8s linear infinite;
+    }
+}
+
+@keyframes address-locating-chip-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+// Accesibilidad: sin movimiento, pero el texto ("Ubicando tu direccion...")
+// se queda igual — sigue siendo el unico chip visible en el slot.
+@media (prefers-reduced-motion: reduce) {
+    .address-locating-chip__spinner {
+        animation: none;
+    }
+}
+
 // Paso 8 — badge de precision del pin/geocode. Nunca bloquea Continuar; solo
 // informa que tan confiable es el punto que se va a cobrar por distancia.
 .address-precision-badge {
