@@ -150,6 +150,31 @@ describe('DispatchNoteEventsListener — handleDelivered → OrderStockCommitSer
     expect(prismaMock.stock_reservations.count).not.toHaveBeenCalled();
   });
 
+  it('order-linked sobrevendida conserva stock negativo al entregar la remisión', async () => {
+    const stockValidator = {
+      resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowOversell: true }),
+    };
+    listener = new DispatchNoteEventsListener(
+      prismaMock as StorePrismaService,
+      stockLevelManagerMock as StockLevelManager,
+      orderStockCommitMock as OrderStockCommitService,
+      undefined, undefined, undefined, undefined, undefined,
+      stockValidator as any,
+    );
+    prismaMock.dispatch_notes.findFirst.mockResolvedValue(buildOrderLinkedDispatchNote());
+
+    await listener.handleDelivered({
+      dispatch_note_id: 900, dispatch_number: 'REM-1', store_id: 100,
+      order_id: 7777, sales_order_id: null,
+    });
+
+    expect(stockValidator.resolveInventoryPolicy).toHaveBeenCalledWith(100);
+    expect(orderStockCommitMock.commitDispatchDelivery).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ allowNegativeOnShortfall: true }),
+    );
+  });
+
   it('(b) sales-order-linked: delega en commitDispatchDelivery (sin guard standalone)', async () => {
     const note = buildSalesOrderLinkedDispatchNote();
     prismaMock.dispatch_notes.findFirst.mockResolvedValue(note);

@@ -427,7 +427,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     state.shippingContext = undefined;
     state.linkedOrderId = null;
     state.customer = { ...state.customer!, addresses: [
-      { ...originalAddress, id: 33, is_primary: true },
+      { ...originalAddress, id: 33, type: 'shipping', is_primary: true },
     ] };
     mount(state);
     expect(component.address()).toEqual(jasmine.objectContaining({

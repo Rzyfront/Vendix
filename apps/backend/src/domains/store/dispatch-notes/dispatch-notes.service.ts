@@ -931,6 +931,13 @@ export class DispatchNotesService {
       dispatched_quantity: number;
     }>,
   ): Promise<void> {
+    // A POS order may have reserved a negative available balance when the
+    // store explicitly permits overselling. Dispatch must honor that same
+    // server-side policy; otherwise the order can be paid but never shipped.
+    // Structural errors (missing location / wrong variant) remain blocking.
+    const { allowOversell } = await this.stockValidator.resolveInventoryPolicy(
+      store_id,
+    );
     type BlockedItem = {
       product_id: number;
       product_variant_id: number | null;
@@ -1057,6 +1064,14 @@ export class DispatchNotesService {
         onHand - reservedForOrder >= qty
       ) {
         reason = 'reserved_by_others';
+      }
+
+      if (allowOversell && reason !== 'variant_required') {
+        this.logger.warn(
+          `Sobreventa permitida al despachar orden ${order_id}: producto ${item.product_id}, ` +
+            `variante ${item.product_variant_id ?? 'base'}, requerido ${qty}, disponible ${effectiveAvailable}`,
+        );
+        continue;
       }
 
       insufficient.push({

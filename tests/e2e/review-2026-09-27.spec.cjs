@@ -543,19 +543,19 @@ async function main() {
     }
 
     if (results[0]?.status === 'passed' && (group === 'table_cancel' || group === 'all')) {
-      await runScenario('R18: table bill retains pending auto-return and advanced waste/reuse after reload', ['R18'], async () => {
+      await runScenario('R18: table bill retains pending, preparing and ready cancellations after reload', ['R18'], async () => {
         const total = page.locator('.totals-row--grand');
         await openUiView(page, `${adminBase}/admin/restaurant-ops/tables/session/160`,
           total, 'La cuenta de mesa con platos cancelados');
         assert.match(await total.innerText(), /Total\s*\$0/i);
         const cancelled = page.locator('.item-cancelled-badge');
-        assert.equal(await cancelled.count(), 3, 'La mesa perdió alguno de sus tres platos cancelados');
+        assert.equal(await cancelled.count(), 4, 'La mesa perdió alguno de sus cuatro platos cancelados');
         const badges = await cancelled.allInnerTexts();
         assert.equal(badges.filter((label) => label.includes('reuso')).length, 2);
-        assert.equal(badges.filter((label) => label.includes('merma')).length, 1);
+        assert.equal(badges.filter((label) => label.includes('merma')).length, 2);
         const reasons = await page.locator('.item-cancelled-reason').allInnerTexts();
         for (const reason of ['QA R18 mesa pendiente', 'QA R18 mesa avanzada desechar',
-          'QA R18 mesa avanzada reusar']) {
+          'QA R18 mesa avanzada reusar', 'QA R18 mesa lista desechar']) {
           assert(reasons.some((line) => line.includes(reason)), `Falta motivo persistido: ${reason}`);
         }
         assert.equal(await page.getByRole('button', {
@@ -564,7 +564,33 @@ async function main() {
         await openUiView(page, `${adminBase}/admin/restaurant-ops/tables/session/160`,
           total, 'La cuenta de mesa tras recarga');
         assert.match(await total.innerText(), /Total\s*\$0/i);
-        assert.equal(await cancelled.count(), 3);
+        assert.equal(await cancelled.count(), 4);
+      });
+    }
+
+    if (results[0]?.status === 'passed' && (group === 'dispatch_oversell' || group === 'all')) {
+      await runScenario('R17: oversold POS delivery dispatches and leaves exact negative stock', ['R17'], async () => {
+        const heading = page.getByRole('heading', { name: 'Orden #POS-2026-0431' });
+        await openUiView(page, `${adminBase}/admin/orders/1380`, heading,
+          'La orden POS de envío sobrevendido');
+        await page.getByText('REM2609270004', { exact: true }).waitFor();
+        const note = page.getByText('REM2609270004', { exact: true }).locator('xpath=..');
+        assert.match(await note.innerText(), /Entregada/);
+        assert.match(await page.locator('body').innerText(), /Finalizada/);
+        assert.equal(await page.getByRole('button', { name: 'Despachar Orden' }).count(), 0,
+          'Una remisión entregada no debe poder despacharse dos veces');
+
+        const stockTitle = page.getByText('Inventario / Stock', { exact: true }).first();
+        await openUiView(page, `${adminBase}/admin/products/edit/2476?fromPage=1`, stockTitle,
+          'El inventario de QA NoOversell A tras despacho');
+        const stockCard = page.locator('div.p-3.bg-surface').filter({
+          has: page.getByText('En inventario', { exact: true }),
+        }).first();
+        assert.equal((await stockCard.locator('span.text-xl').first().innerText()).trim(), '-1');
+        const availableCard = page.locator('div.p-3.bg-surface').filter({
+          has: page.getByText('Disponible', { exact: true }),
+        }).first();
+        assert.equal((await availableCard.locator('span.text-xl').first().innerText()).trim(), '-1');
       });
     }
 

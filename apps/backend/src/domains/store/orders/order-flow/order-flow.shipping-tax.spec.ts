@@ -35,6 +35,7 @@ describe('OrderFlowService.shipOrder — impuesto del envío', () => {
         update: jest.fn().mockResolvedValue({}),
         findFirst: jest.fn().mockResolvedValue(null),
       },
+      order_items: { findMany: jest.fn().mockResolvedValue([]) },
     };
     snapshotForRate = jest.fn().mockResolvedValue({ ...INC_SNAPSHOT });
     service = Object.create(OrderFlowService.prototype);
