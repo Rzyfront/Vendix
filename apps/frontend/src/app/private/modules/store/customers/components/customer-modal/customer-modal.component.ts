@@ -532,6 +532,17 @@ export class CustomerModalComponent {
   /** Bridge del FormControl `person_type` a signal. */
   readonly person_type = signal<string>('');
   readonly document_type = signal<string>('');
+  /**
+   * `true` durante el `patchValue(customer)` de carga (editar-mode). Los
+   * efectos de sincronización lo consultan para NO re-etiquetar a JURIDICA
+   * una persona natural con NIT ya guardada (autónomo con RUT): la
+   * sugerencia NIT→JURIDICA sólo debe aplicar a interacción en vivo del
+   * usuario, no a datos existentes que se están mostrando. Angular corre los
+   * `effect()` en una tarea de microtask; se resetea con `queueMicrotask`
+   * para que siga en `true` mientras esos efectos procesan el patch y vuelva
+   * a `false` a tiempo para la siguiente interacción real del usuario.
+   */
+  private isPatchingFromCustomer = false;
   /** Bridge del FormControl `fiscal_responsibilities` (array) a signal. */
   readonly fiscalResponsibilitiesValue = signal<string[]>([]);
 
@@ -589,6 +600,12 @@ export class CustomerModalComponent {
       if (this.form.controls['last_name'].invalid) return true;
     }
     if (this.form.controls['phone'].invalid) return true;
+    // Cubre "si hay número de documento, el tipo es obligatorio": el modo
+    // rápido no muestra los campos de documento, pero un número puede llegar
+    // arrastrado desde modo avanzado (botón "Volver al modo rápido").
+    // Un control DISABLED nunca es `.invalid` (su status es DISABLED, no
+    // INVALID), así que esto no bloquea el caso jurídica-NIT bloqueado.
+    if (this.form.controls['document_type'].invalid) return true;
     return false;
   }
 
@@ -599,7 +616,12 @@ export class CustomerModalComponent {
       last_name: ['', [Validators.required, Validators.minLength(2)]],
       legal_name: ['', [Validators.maxLength(255)]],
       phone: ['', [Validators.required, Validators.minLength(7)]],
-      document_type: ['CC'],
+      // Sin default 'CC': un tipo de documento pre-marcado se enviaba aunque
+      // el usuario nunca lo tocara (incidente Óptica Panorama SAS — NIT
+      // facturado como cédula). El tipo se vuelve obligatorio sólo cuando hay
+      // número (ver efecto más abajo), y en modo rápido se omite del payload
+      // si no hay número (ver onSubmit).
+      document_type: [''],
       document_number: [''],
       verification_digit: ['', [Validators.maxLength(1), Validators.pattern(/^\d?$/)]],
       ciiu_code: ['', [Validators.maxLength(10), Validators.pattern(/^\d{2,4}$/)]],
@@ -627,6 +649,13 @@ export class CustomerModalComponent {
       initialValue: (fiscalRespControl.value ?? []) as string[],
     });
 
+    // Bridge document_number valueChanges -> signal (regla: si hay número,
+    // el tipo de documento se vuelve obligatorio — ver efecto más abajo).
+    const documentNumberControl = this.form.controls['document_number'];
+    const documentNumberValue = toSignal(documentNumberControl.valueChanges, {
+      initialValue: documentNumberControl.value as string | null,
+    });
+
     // Bridge form.statusChanges -> signal (re-evalúa computed/methods cuando
     // cualquier control cambia de validez).
     this.form.statusChanges
@@ -643,13 +672,42 @@ export class CustomerModalComponent {
         if (dvCtrl && dvCtrl.value) {
           dvCtrl.setValue('', { emitEvent: false });
         }
+      } else if (!this.isPatchingFromCustomer) {
+        // NIT sugiere persona jurídica (regla dueño: la mayoría de NIT son
+        // jurídicos), pero es una sugerencia, no un candado: si el usuario
+        // la revierte a NATURAL explícitamente después, ese cambio no se
+        // vuelve a pisar (este efecto sólo reacciona a document_type, no a
+        // person_type). Se omite mientras `patchValue(customer)` está en
+        // curso para no re-etiquetar a jurídica una persona natural con NIT
+        // ya guardada correctamente (autónomo/profesional con RUT).
+        const personTypeCtrl = this.form.controls['person_type'];
+        if (personTypeCtrl.value !== 'JURIDICA') {
+          personTypeCtrl.setValue('JURIDICA');
+        }
       }
     });
 
-    // Sincronizar signals derivados.
+    // Sincronizar signals derivados + candado jurídica -> NIT.
     effect(() => {
+      const isJuridica = personTypeValue() === 'JURIDICA';
       this.person_type.set(personTypeValue() ?? '');
       this.applyPersonTypeValidators();
+
+      // Persona jurídica en Colombia sólo tiene NIT (nunca CC): se fija y se
+      // bloquea el selector. Natural sí puede conservar un NIT si el usuario
+      // lo dejó así explícitamente (autónomos con RUT), así que sólo se
+      // libera el candado, nunca se cambia el valor en ese sentido.
+      const docTypeCtrl = this.form.controls['document_type'];
+      if (isJuridica) {
+        if (docTypeCtrl.value !== 'NIT') {
+          docTypeCtrl.setValue('NIT');
+        }
+        if (docTypeCtrl.enabled) {
+          docTypeCtrl.disable({ emitEvent: false });
+        }
+      } else if (docTypeCtrl.disabled) {
+        docTypeCtrl.enable({ emitEvent: false });
+      }
     });
 
     effect(() => {
@@ -677,6 +735,17 @@ export class CustomerModalComponent {
       ctrl.updateValueAndValidity({ emitEvent: false });
     });
 
+    // Regla dueño: si hay número de documento, el tipo es obligatorio. Antes
+    // el tipo llegaba precargado en 'CC' así que esto nunca se notaba; ahora
+    // que no hay default, un número sin tipo debe bloquear el guardado en
+    // vez de viajar al backend con `document_type` vacío/adivinado.
+    effect(() => {
+      const hasNumber = !!(documentNumberValue() ?? '').toString().trim();
+      const docTypeCtrl = this.form.controls['document_type'];
+      docTypeCtrl.setValidators(hasNumber ? [Validators.required] : []);
+      docTypeCtrl.updateValueAndValidity({ emitEvent: false });
+    });
+
     // Group-level validator: solo aplica cuando document_type='NIT'.
     // Los nombres de control se pasan explícitos porque este formulario usa
     // `document_number`/`verification_digit`, no el `nit`/`nit_dv` de los
@@ -693,6 +762,9 @@ export class CustomerModalComponent {
     effect(() => {
       const customer = this.customer();
       if (customer) {
+        // Ver comentario del campo `isPatchingFromCustomer`: suprime la
+        // sugerencia NIT→JURIDICA mientras se cargan datos ya guardados.
+        this.isPatchingFromCustomer = true;
         this.form.patchValue({
           email: customer.email,
           first_name: customer.first_name,
@@ -712,6 +784,9 @@ export class CustomerModalComponent {
           person_type: customer.person_type ?? null,
           is_withholding_agent: customer.is_withholding_agent ?? false,
           fiscal_responsibilities: customer.fiscal_responsibilities ?? [],
+        });
+        queueMicrotask(() => {
+          this.isPatchingFromCustomer = false;
         });
 
         // Cargar la dirección de envío existente (si la hay) para el hijo.
@@ -739,11 +814,10 @@ export class CustomerModalComponent {
         // `reset()` sin argumento pone TODOS los controles en `null`, ignorando
         // el default `[false]` del FormBuilder. `is_withholding_agent` es un
         // Boolean no-nullable en backend, así que un `null` emitido rompe el
-        // alta (500). Reseteamos preservando el booleano en `false` y los
-        // defaults razonables (CC como tipo de documento por default, para
-        // que el campo "Número" quede habilitado desde el arranque).
+        // alta (500). Reseteamos preservando ese booleano; `document_type`
+        // se deja en `null` a propósito — sin default, el usuario debe
+        // elegirlo explícitamente si va a capturar un número de documento.
         this.form.reset({
-          document_type: 'CC',
           is_withholding_agent: false,
           fiscal_responsibilities: [],
         });
@@ -922,6 +996,12 @@ export class CustomerModalComponent {
     const data = this.form.getRawValue() as CreateCustomerRequest;
     if (data.document_type !== 'NIT') {
       data.verification_digit = null;
+    }
+    // Modo rápido no expone los campos de documento en el template; si el
+    // usuario nunca capturó un número (ni lo arrastró desde modo avanzado),
+    // no hay que enviar un `document_type` sin número que lo respalde.
+    if (this.mode() === 'quick' && !data.document_number) {
+      data.document_type = null;
     }
     const customer = this.customer();
 
