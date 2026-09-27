@@ -1261,12 +1261,17 @@
     .checkout-actions__row {
         display: flex;
         flex-direction: row;
+        flex-wrap: wrap;
         align-items: stretch;
         gap: 12px;
 
+        // Base 150px + wrap: cuando la columna del resumen no alcanza para
+        // dos botones lg (1024-1440px), Continuar baja a su propia fila en
+        // vez de desbordar el contenedor.
         > * {
-            flex: 1 1 0;
+            flex: 1 1 150px;
             min-width: 0;
+            max-width: 100%;
         }
     }
 
