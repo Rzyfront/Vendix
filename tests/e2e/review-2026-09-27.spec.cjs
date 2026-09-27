@@ -285,6 +285,23 @@ async function main() {
         assert(!headers.some((header) => header.trim() === 'Estado'),
           `Unexpected Estado column: ${headers.join(', ')}`);
       });
+      await runScenario('R8: customer mobile cards omit Estado without hiding customer details', ['R8'], async () => {
+        await page.setViewportSize({ width: 390, height: 844 });
+        try {
+          const firstCard = page.locator('app-customer-list app-item-list .item-card').first();
+          await openUiView(page, `${adminBase}/admin/customers/all`, firstCard,
+            'Las tarjetas móviles de clientes');
+          await firstCard.waitFor();
+          assert((await firstCard.locator('.card-title').innerText()).trim(),
+            'The mobile customer card lost its customer name.');
+          assert.equal(await page.locator('app-customer-list app-item-list .card-badge-wrap').count(), 0,
+            'Customer status remains visible as a mobile badge.');
+          assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2),
+            'The mobile customer list overflows horizontally.');
+        } finally {
+          await page.setViewportSize({ width: 1280, height: 720 });
+        }
+      });
       await runScenario('R13: orders list shows refund net and partial badge', ['R13'], async () => {
         await openUiView(page, `${adminBase}/admin/orders/sales`,
           page.getByRole('columnheader', { name: 'Neto actual' }), 'El listado de órdenes');
@@ -319,6 +336,48 @@ async function main() {
         const mixedTender = page.getByRole('row').filter({ hasText: 'POS-2026-0382' });
         await mixedTender.waitFor({ timeout: 20_000 });
         assert.match(await mixedTender.innerText(), /POS-2026-0382/);
+      });
+      await runScenario('R10: Datáfono plus completed status finds COD tender, pending excludes it', ['R10'], async () => {
+        await openUiView(page, `${adminBase}/admin/orders/sales`,
+          page.getByRole('columnheader', { name: 'Neto actual' }),
+          'El listado de órdenes para filtros combinados');
+        const filtersButton = page.getByRole('button', { name: 'Filtros' });
+        await filtersButton.click();
+        const method = page.locator('.filter-section').filter({ hasText: 'Forma de pago' }).locator('select');
+        const status = page.locator('.filter-section').filter({ hasText: 'Estado de Pago' }).locator('select');
+        await method.selectOption({ label: 'Datáfono' });
+        await page.waitForFunction(() =>
+          Boolean(new URL(location.href).searchParams.get('payment_method_id')));
+        const datafonoId = new URL(page.url()).searchParams.get('payment_method_id');
+        assert(datafonoId, 'Datáfono did not retain a selected method ID.');
+        if (!(await status.isVisible())) await filtersButton.click();
+        await status.selectOption({ label: 'Completado' });
+        try {
+          await page.waitForFunction((id) => {
+            const params = new URL(location.href).searchParams;
+            return params.get('payment_method_id') === id &&
+              params.get('payment_status') === 'succeeded';
+          }, datafonoId);
+        } catch {
+          throw new Error(`Combined filters did not persist: url=${page.url()}, method=${await method.inputValue()}, status=${await status.inputValue()}`);
+        }
+        const search = page.locator('input[placeholder="Buscar órdenes..."]');
+        await search.fill('POS-2026-0413');
+        const row = page.getByRole('row').filter({ hasText: 'POS-2026-0413' });
+        await row.waitFor({ timeout: 20_000 });
+        assert.match(await row.innerText(), /POS-2026-0413/);
+
+        if (!(await status.isVisible())) await filtersButton.click();
+        await status.selectOption({ label: 'Pendiente' });
+        try {
+          await page.waitForFunction(() =>
+            new URL(location.href).searchParams.get('payment_status') === 'pending');
+        } catch {
+          throw new Error(`Pending filter did not persist: url=${page.url()}, method=${await method.inputValue()}, status=${await status.inputValue()}`);
+        }
+        await page.getByText('Ninguna orden coincide con sus filtros').waitFor({ timeout: 20_000 });
+        assert.equal(await row.count(), 0,
+          'A settled Datáfono tender must not match the pending-status combination.');
       });
     }
 

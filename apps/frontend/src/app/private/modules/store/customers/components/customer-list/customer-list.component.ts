@@ -254,9 +254,6 @@ export class CustomerListComponent {
     subtitleTransform: (item: any) => item?.email || 'Sin correo',
     avatarFallbackIcon: 'user',
     avatarShape: 'circle',
-    badgeKey: 'state',
-    badgeConfig: { type: 'status', size: 'sm' },
-    badgeTransform: (v: any) => (v === 'active' ? 'Activo' : 'Inactivo'),
     detailKeys: [
       {
         key: 'phone',

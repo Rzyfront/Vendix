@@ -243,9 +243,11 @@ export class OrdersListComponent {
       options: [
         { value: '', label: 'Todos los Estados de Pago' },
         { value: 'pending', label: 'Pendiente' },
-        { value: 'processing', label: 'Procesando' },
-        { value: 'completed', label: 'Completado' },
+        { value: 'authorized', label: 'Autorizado' },
+        { value: 'captured', label: 'Capturado' },
+        { value: 'succeeded', label: 'Completado' },
         { value: 'failed', label: 'Fallido' },
+        { value: 'partially_refunded', label: 'Reembolso parcial' },
         { value: 'refunded', label: 'Reembolsado' },
         { value: 'cancelled', label: 'Cancelado' },
       ],
