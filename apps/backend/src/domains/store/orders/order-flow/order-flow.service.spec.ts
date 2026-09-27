@@ -2804,6 +2804,10 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
     inventory_committed: true,
     delivered_at: new Date('2026-09-10T12:00:00.000Z'),
     cancelled_at: null,
+    // H2/H4 — `cancelDeliveredOrderItem` now selects this to resolve the
+    // ticket the item was fired under; default to "no ticket resolvable"
+    // (legacy/untracked row) unless a test overrides it.
+    kitchen_ticket_items: [],
     ...overrides,
   });
 
@@ -3420,6 +3424,9 @@ describe('D.4 — recálculo de propina al cancelar (F-001)', () => {
           quantity: 1,
           delivered_at: new Date('2026-09-10T12:00:00.000Z'),
           cancelled_at: null,
+          // H2/H4 — `cancelDeliveredOrderItem` selects this to resolve the
+          // ticket the item was fired under; empty ⇒ no ticket resolvable.
+          kitchen_ticket_items: [],
         }),
       },
       $transaction: jest.fn((cb: any) => cb(txMock)),

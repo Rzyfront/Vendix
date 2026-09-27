@@ -334,7 +334,17 @@ export class OrderFlowService {
     return undefined;
   }
 
-  /** The fire transaction is the source of truth; never restock the sold dish. */
+  /**
+   * The fire transaction is the source of truth; never restock the sold dish.
+   *
+   * H2 — `ticketId` scopes the `inventory_transactions` lookup to the ONE
+   * kitchen ticket that owns this disposition. A resend/remake reconsumes
+   * the SAME `order_item_id` under a NEW ticket, so an unscoped lookup would
+   * return every fire's consumption, not just this one's. `ticketId` is
+   * `null` only for legacy/edge rows with no resolvable kitchen ticket, in
+   * which case this falls back to the previous (unscoped) behavior — never
+   * worse than before.
+   */
   private async disposeConsumedPreparedLeaves(
     tx: Prisma.TransactionClient,
     orderId: number,
@@ -343,23 +353,37 @@ export class OrderFlowService {
     disposition: 'reuse' | 'waste',
     reason: string,
     afterCommit: Array<() => void>,
+    ticketId: number | null = null,
   ): Promise<ConsumedLeafDisposition[]> {
+    // H2 — idempotency keyed by (order_item_id, ticket_id), NOT
+    // order_item_id alone: a second ticket for the same dish (remake/resend)
+    // must not be swallowed by the first ticket's already-recorded audit row.
     const priorDisposition = await tx.audit_logs.findFirst({
       where: {
         action: 'order_item.prepared_disposition',
         resource_id: orderId,
-        metadata: { path: ['order_item_id'], equals: orderItemId },
+        AND: ticketId != null
+          ? [
+              { metadata: { path: ['order_item_id'], equals: orderItemId } },
+              { metadata: { path: ['ticket_id'], equals: ticketId } },
+            ]
+          : [{ metadata: { path: ['order_item_id'], equals: orderItemId } }],
       },
       select: { id: true },
     });
     if (priorDisposition) return [];
-    const consumed = await tx.inventory_transactions.findMany({
-      where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
-      select: {
-        id: true, product_id: true, product_variant_id: true,
-        quantity_change: true, unit_cost: true, total_cost: true,
-      },
-    });
+    // Defensive: some callers wire a partial/stub `kitchenFireService` (older
+    // test doubles, edge DI paths) that lacks the new method — fall back
+    // instead of throwing, same as the `ticketId == null` case.
+    const consumed = ticketId != null && typeof this.kitchenFireService?.findTicketConsumedLeaves === 'function'
+      ? await this.kitchenFireService.findTicketConsumedLeaves(tx, ticketId, orderItemId)
+      : await tx.inventory_transactions.findMany({
+          where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
+          select: {
+            id: true, product_id: true, product_variant_id: true,
+            quantity_change: true, unit_cost: true, total_cost: true,
+          },
+        });
     const leaves: ConsumedLeafDisposition[] = [];
     for (const ct of consumed) {
       const quantity = Math.abs(ct.quantity_change);
@@ -450,6 +474,12 @@ export class OrderFlowService {
     }
   }
 
+  /**
+   * H4 — `ticketId` is persisted in the metadata so
+   * `KitchenFireService.revertTicket` can recognize (and block reverting) a
+   * cancelled ticket whose order_item already went through this disposition
+   * path. Also feeds H2's (order_item_id, ticket_id) idempotency key.
+   */
   private async auditPreparedDispositionInTx(
     tx: Prisma.TransactionClient,
     orderId: number,
@@ -459,12 +489,18 @@ export class OrderFlowService {
     reason: string,
     disposition: 'reuse' | 'waste',
     leaves: ConsumedLeafDisposition[],
+    ticketId: number | null = null,
   ): Promise<void> {
     const priorDisposition = await tx.audit_logs.findFirst({
       where: {
         action: 'order_item.prepared_disposition',
         resource_id: orderId,
-        metadata: { path: ['order_item_id'], equals: orderItemId },
+        AND: ticketId != null
+          ? [
+              { metadata: { path: ['order_item_id'], equals: orderItemId } },
+              { metadata: { path: ['ticket_id'], equals: ticketId } },
+            ]
+          : [{ metadata: { path: ['order_item_id'], equals: orderItemId } }],
       },
       select: { id: true },
     });
@@ -480,7 +516,7 @@ export class OrderFlowService {
         resource_id: orderId,
         request_id: requestId && requestId.length <= 100 ? requestId : null,
         metadata: {
-          order_id: orderId, order_item_id: orderItemId,
+          order_id: orderId, order_item_id: orderItemId, ticket_id: ticketId,
           reason, destination: disposition, leaves,
           consumed_cost: leaves.reduce((sum, leaf) => sum + leaf.total_cost, 0),
         } as Prisma.InputJsonValue,
@@ -4565,11 +4601,11 @@ export class OrderFlowService {
         preparedDisposition = resolvedType === 'after_fire_reused' ? 'reuse' : 'waste';
         preparedLeaves = await this.disposeConsumedPreparedLeaves(
           tx, orderId, orderItemId, preparedOrganizationId,
-          preparedDisposition, reason.trim(), preparedStockAfterCommit,
+          preparedDisposition, reason.trim(), preparedStockAfterCommit, ticketId,
         );
         await this.auditPreparedDispositionInTx(
           tx, orderId, orderItemId, preparedOrganizationId,
-          order.store_id, reason.trim(), preparedDisposition, preparedLeaves,
+          order.store_id, reason.trim(), preparedDisposition, preparedLeaves, ticketId,
         );
       } else if (resolvedType === 'before_fire' && wasFired) {
         // Esto no debería ocurrir (si `wasFired` es true, resolvedType
@@ -4837,6 +4873,13 @@ export class OrderFlowService {
         cancelled_at: true,
         inventory_consumed_at_fire: true,
         products: { select: { product_type: true } },
+        // H2/H4 — needed to scope the ingredient-refund lookup and stamp
+        // ticket_id on the disposition audit (see `disposeConsumedPreparedLeaves`
+        // / `auditPreparedDispositionInTx`). Mirrors the select in `cancelOrderItem`.
+        kitchen_ticket_items: {
+          orderBy: { id: 'desc' },
+          select: { kitchen_ticket_id: true },
+        },
       },
     });
 
@@ -4845,6 +4888,10 @@ export class OrderFlowService {
         `Order item #${orderItemId} not found on order #${orderId}`,
       );
     }
+
+    // H2/H4 — most recent kitchen ticket this order item was fired under
+    // (kitchen_ticket_items comes desc by id, [0] is the latest).
+    const ticketId = orderItem.kitchen_ticket_items[0]?.kitchen_ticket_id ?? null;
 
     // 3. Idempotencia: la primera reversa es la que ocurrió.
     if (orderItem.cancelled_at) {
@@ -4927,11 +4974,11 @@ export class OrderFlowService {
         preparedLeaves = await this.disposeConsumedPreparedLeaves(
           tx, orderId, orderItemId, preparedOrganizationId,
           destination === 'restock' ? 'reuse' : 'waste', trimmedReason,
-          preparedStockAfterCommit,
+          preparedStockAfterCommit, ticketId,
         );
         await this.auditPreparedDispositionInTx(
           tx, orderId, orderItemId, preparedOrganizationId, order.store_id,
-          trimmedReason, destination === 'restock' ? 'reuse' : 'waste', preparedLeaves,
+          trimmedReason, destination === 'restock' ? 'reuse' : 'waste', preparedLeaves, ticketId,
         );
       } else if (orderItem.product_id != null) {
         // docs/plans/no-overselling-stock-guard-plan.md step 7 — you only
@@ -5978,11 +6025,11 @@ export class OrderFlowService {
             else updatedTicketIds.push(meta.ticketId);
             const leaves = await this.disposeConsumedPreparedLeaves(
               tx, orderId, item.id, Number(freshOrder.stores?.organization_id),
-              'reuse', dto.reason.trim(), preparedStockAfterCommit,
+              'reuse', dto.reason.trim(), preparedStockAfterCommit, meta.ticketId,
             );
             await this.auditPreparedDispositionInTx(
               tx, orderId, item.id, Number(freshOrder.stores?.organization_id),
-              freshOrder.store_id, dto.reason.trim(), 'reuse', leaves,
+              freshOrder.store_id, dto.reason.trim(), 'reuse', leaves, meta.ticketId,
             );
             preparedDispositions.push({ itemId: item.id, disposition: 'reuse', leaves });
             await tx.order_items.update({
@@ -6045,11 +6092,11 @@ export class OrderFlowService {
 
         const leaves = await this.disposeConsumedPreparedLeaves(
           tx, orderId, item.id, Number(freshOrder.stores?.organization_id),
-          disposition, dto.reason.trim(), preparedStockAfterCommit,
+          disposition, dto.reason.trim(), preparedStockAfterCommit, meta.ticketId,
         );
         await this.auditPreparedDispositionInTx(
           tx, orderId, item.id, Number(freshOrder.stores?.organization_id),
-          freshOrder.store_id, dto.reason.trim(), disposition, leaves,
+          freshOrder.store_id, dto.reason.trim(), disposition, leaves, meta.ticketId,
         );
         preparedDispositions.push({ itemId: item.id, disposition, leaves });
 

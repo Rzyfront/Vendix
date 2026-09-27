@@ -1049,6 +1049,9 @@ describe('OrderFlowService.cancelDeliveredOrderItem — item_delivery_reverted',
           quantity: 2,
           delivered_at: new Date('2026-09-10T12:00:00.000Z'),
           cancelled_at: null,
+          // H2/H4 — `cancelDeliveredOrderItem` selects this to resolve the
+          // ticket the item was fired under; empty ⇒ no ticket resolvable.
+          kitchen_ticket_items: [],
         }),
       },
       $transaction: jest.fn((cb: any) => cb(txMock)),

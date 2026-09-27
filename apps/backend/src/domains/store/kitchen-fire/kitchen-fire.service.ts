@@ -3051,8 +3051,11 @@ export class KitchenFireService {
       where: { id: ticketId },
       data: { status: 'delivered', updated_at: new Date() },
     });
+    // H1 — `cancelTicketItemInTx` can leave a single line `cancelled` while
+    // the ticket stays alive (e.g. mid-preparation). That cancelled line must
+    // NEVER flip to `delivered` when the rest of the ticket closes out.
     await this.prisma.kitchen_ticket_items.updateMany({
-      where: { kitchen_ticket_id: ticketId, status: { not: 'delivered' } },
+      where: { kitchen_ticket_id: ticketId, status: { notIn: ['delivered', 'cancelled'] } },
       data: { status: 'delivered', updated_at: new Date() },
     });
 
@@ -3064,8 +3067,10 @@ export class KitchenFireService {
     //
     // Se estampa solo donde esta NULL: la primera entrega es la que ocurrio, y
     // un re-delivery no debe mover la fecha hacia adelante.
+    // H1 — excluye la línea cancelada: su `order_item_id` no debe recibir
+    // `delivered_at` (esa unidad nunca se entregó, se canceló en cocina).
     const deliveredItems = await this.prisma.kitchen_ticket_items.findMany({
-      where: { kitchen_ticket_id: ticketId },
+      where: { kitchen_ticket_id: ticketId, status: { not: 'cancelled' } },
       select: { order_item_id: true },
     });
     if (deliveredItems.length > 0) {
@@ -3156,6 +3161,76 @@ export class KitchenFireService {
   }
 
   /**
+   * H2 (release-855 follow-up) — scope `inventory_transactions` consumption
+   * lookups to ONE ticket's fire event. A resend/remake reconsumes the SAME
+   * `order_item_id` under a NEW ticket (`fireOrderItemsInTx` never mints a
+   * fresh order item on remake), so a naive `findMany({ order_item_id,
+   * quantity_change: { lt: 0 } })` returns EVERY fire's consumption, not
+   * just this ticket's — cancelling/wasting one ticket would then return (or
+   * double-count) a sibling ticket's ingredients too.
+   *
+   * There is no schema link from `inventory_transactions` to
+   * `kitchen_tickets` (none is added here — no migrations, per the anti-
+   * destructive rules). The window is temporal instead: inside
+   * `fireOrderItemsInTx`, every leaf's consumption row is written (real
+   * wall-clock `created_at`) BEFORE the owning ticket's `fired_at` is
+   * stamped, in the SAME transaction — so a ticket's own consumption always
+   * lands at `created_at <= ticket.fired_at`. Because a later re-fire can
+   * only start once the earlier fire's transaction has committed, that same
+   * consumption always lands AFTER the immediately preceding ticket's
+   * `fired_at` for the same `order_item_id` (if any). The half-open window
+   * `(prevFiredAt, thisTicket.fired_at]` therefore isolates exactly one
+   * fire's consumption. Shared by `cancelTicket` here and by
+   * `OrderFlowService.disposeConsumedPreparedLeaves`.
+   */
+  async findTicketConsumedLeaves(
+    tx: Prisma.TransactionClient,
+    ticketId: number,
+    orderItemId: number,
+  ): Promise<Array<{
+    organization_id: number;
+    product_id: number;
+    product_variant_id: number | null;
+    quantity_change: number;
+    unit_cost: Prisma.Decimal | null;
+    total_cost: Prisma.Decimal | null;
+  }>> {
+    const ticket = await tx.kitchen_tickets.findFirst({
+      where: { id: ticketId },
+      select: { fired_at: true },
+    });
+    if (!ticket) return [];
+    const otherTicketItems = await tx.kitchen_ticket_items.findMany({
+      where: { order_item_id: orderItemId, kitchen_ticket_id: { not: ticketId } },
+      select: { kitchen_ticket: { select: { fired_at: true } } },
+    });
+    const priorFiredAtMs = otherTicketItems
+      .map((row) => row.kitchen_ticket?.fired_at?.getTime())
+      .filter((ms): ms is number => ms != null && ms < ticket.fired_at.getTime());
+    const lowerBoundExclusive =
+      priorFiredAtMs.length > 0 ? new Date(Math.max(...priorFiredAtMs)) : null;
+
+    return tx.inventory_transactions.findMany({
+      where: {
+        order_item_id: orderItemId,
+        quantity_change: { lt: 0 },
+        created_at: {
+          lte: ticket.fired_at,
+          ...(lowerBoundExclusive ? { gt: lowerBoundExclusive } : {}),
+        },
+      },
+      select: {
+        organization_id: true,
+        product_id: true,
+        product_variant_id: true,
+        quantity_change: true,
+        unit_cost: true,
+        total_cost: true,
+      },
+    });
+  }
+
+  /**
    * pending | in_preparation | ready → cancelled. Irreversible from the
    * KDS (the order-side flow would have to re-fire to bring it back).
    *
@@ -3230,22 +3305,23 @@ export class KitchenFireService {
         // A prior disposition is the idempotency marker across KDS and order
         // cancellation. The ticket claim serializes repeat clicks; the audit
         // check prevents a later order cancellation from returning twice.
+        // H2 — keyed by (order_item_id, ticket_id), NOT order_item_id alone:
+        // a resend reconsumes the SAME order_item_id under a NEW ticket, and
+        // that second ticket's own disposition must not be swallowed by the
+        // first ticket's already-recorded audit row.
         const existing = await tx.audit_logs.findFirst({
           where: {
             action: 'order_item.prepared_disposition',
             resource_id: ticket.order_id,
-            metadata: { path: ['order_item_id'], equals: orderItemId },
+            AND: [
+              { metadata: { path: ['order_item_id'], equals: orderItemId } },
+              { metadata: { path: ['ticket_id'], equals: ticketId } },
+            ],
           },
           select: { id: true },
         });
         if (existing) continue;
-        const consumed = await tx.inventory_transactions.findMany({
-          where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
-          select: {
-            organization_id: true, product_id: true, product_variant_id: true,
-            quantity_change: true, unit_cost: true, total_cost: true,
-          },
-        });
+        const consumed = await this.findTicketConsumedLeaves(tx, ticketId, orderItemId);
         if (consumed.length === 0) continue;
         let totalCost = 0;
         for (const ct of consumed) {
@@ -3613,13 +3689,39 @@ export class KitchenFireService {
     }
 
     if (ticket.status === 'cancelled' && ticket.order_id != null) {
-      const disposed = await this.prisma.audit_logs.findFirst({
-        where: {
-          action: 'order_item.prepared_disposition',
-          resource_id: ticket.order_id,
-          metadata: { path: ['ticket_id'], equals: ticketId },
-        },
-        select: { id: true },
+      // H4 — `order_item.prepared_disposition` audit rows written from the
+      // order-flow side (`OrderFlowService.auditPreparedDispositionInTx`)
+      // now carry `ticket_id`, so an exact match is the primary signal.
+      // Rows written BEFORE that fix (or by any path that still can't
+      // resolve a ticket id) never had the field: for those, fall back to
+      // matching by `order_item_id` membership in THIS ticket — being
+      // conservative (block the revert) beats risking a resurrected line
+      // whose ingredients were already returned/wasted.
+      const ticketOrderItemIds: number[] = Array.from(
+        new Set<number>(
+          (ticket.items ?? [])
+            .map((item) => Number(item.order_item_id))
+            .filter((id) => Number.isInteger(id) && id > 0),
+        ),
+      );
+      const candidates = ticketOrderItemIds.length > 0
+        ? await this.prisma.audit_logs.findMany({
+            where: {
+              action: 'order_item.prepared_disposition',
+              resource_id: ticket.order_id,
+              OR: ticketOrderItemIds.map(
+                (orderItemId): Prisma.audit_logsWhereInput => ({
+                  metadata: { path: ['order_item_id'], equals: orderItemId },
+                }),
+              ),
+            },
+            select: { metadata: true },
+          })
+        : [];
+      const disposed = candidates.some((row) => {
+        const meta = row.metadata as unknown as { ticket_id?: number | null } | null;
+        const rowTicketId = meta?.ticket_id;
+        return rowTicketId === ticketId || rowTicketId == null;
       });
       if (disposed) {
         throw new VendixHttpException(
@@ -3655,8 +3757,17 @@ export class KitchenFireService {
         where: { id: ticketId },
         data: { status: target as any, updated_at: new Date() },
       });
+      // H1 — reverting a ticket that was cancelled AS A WHOLE (every item
+      // went `cancelled` together) must bring every item back with it. But
+      // reverting a ticket that is alive with ONE line cancelled via
+      // `cancelTicketItemInTx` (ticket.status here is ready/in_preparation/
+      // delivered, not 'cancelled') must NOT resurrect that single cancelled
+      // line — only the ticket's own state moves back a step.
       await tx.kitchen_ticket_items.updateMany({
-        where: { kitchen_ticket_id: ticketId },
+        where: {
+          kitchen_ticket_id: ticketId,
+          ...(ticket.status === 'cancelled' ? {} : { status: { not: 'cancelled' } }),
+        },
         data: { status: target as any, updated_at: new Date() },
       });
       if (ticket.status === 'delivered') {
