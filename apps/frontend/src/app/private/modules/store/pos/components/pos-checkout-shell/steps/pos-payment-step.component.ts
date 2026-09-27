@@ -915,7 +915,7 @@ export class PosPaymentStepComponent implements OnInit {
       ? this.ordersService.flowPayOrder(String(editingId), {
           store_payment_method_id: method.id,
           payment_type: 'direct',
-          amount: this.cartState()!.summary.total,
+          amount: this.cartState()!.summary.total + (submit.tip ?? 0),
           amount_received: submit.amountReceived,
           ...(submit.tip != null && submit.tip > 0
             ? {

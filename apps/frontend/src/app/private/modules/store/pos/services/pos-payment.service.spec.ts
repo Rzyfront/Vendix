@@ -177,6 +177,14 @@ describe('PosPaymentService.processSaleWithPayment — prior table status', () =
     expect(payload.tip_waiter_id).toBe(7);
     expect(payload.amount_received).toBe(1100);
   });
+
+  it('defaults cash received to payable total including the tip', async () => {
+    post.and.returnValue(of({ data: { success: true, order: { id: 1124 } } }));
+    await firstValueFrom(service.processSaleWithPayment(cart, {
+      ...request, tip_amount: 100,
+    }, 'current_user'));
+    expect(post.calls.mostRecent().args[1].amount_received).toBe(1100);
+  });
 });
 
 describe('PosPaymentService.processShippingSale — B7 nota de envío + B11 cobro multimétodo', () => {
@@ -276,6 +284,13 @@ describe('PosPaymentService.processShippingSale — B7 nota de envío + B11 cobr
     expect(payload.tip_amount).toBe(100);
     expect(payload.tip_waiter_id).toBe(7);
     expect(payload.payments[1].amount).toBe(600);
+  });
+
+  it('defaults delivery cash received to shipping plus tip', async () => {
+    await firstValueFrom(service.processShippingSale(cart(), shipping, {
+      paymentMethod: { id: '1', type: 'cash' }, tip_amount: 100,
+    } as any, 'current_user'));
+    expect(post.calls.mostRecent().args[1].amount_received).toBe(1600);
   });
 });
 

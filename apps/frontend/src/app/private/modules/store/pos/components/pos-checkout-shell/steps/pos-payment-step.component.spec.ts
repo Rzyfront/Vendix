@@ -205,7 +205,7 @@ describe('PosPaymentStepComponent — tip contract', () => {
       tip: 100, tipType: 'fixed', tipValue: 100, tipWaiterId: 7,
     } as any);
     expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
-      tip_amount: 100, tip_type: 'fixed', tip_value: 100, tip_waiter_id: 7,
+      amount: 1100, tip_amount: 100, tip_type: 'fixed', tip_value: 100, tip_waiter_id: 7,
     }));
   });
 });

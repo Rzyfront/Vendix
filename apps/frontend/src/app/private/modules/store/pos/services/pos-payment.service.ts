@@ -562,7 +562,8 @@ export class PosPaymentService {
             store_payment_method_id: parseInt(paymentRequest.paymentMethod.id),
             amount_received: Number(
               parseFloat(
-                (paymentRequest.cashReceived || cartState.summary.total).toString(),
+                (paymentRequest.cashReceived ||
+                  cartState.summary.total + (paymentRequest.tip_amount ?? 0)).toString(),
               ).toFixed(2),
             ),
             payment_reference: paymentRequest.reference || '',
@@ -795,7 +796,8 @@ export class PosPaymentService {
         );
         sale_data['amount_received'] = Number(
           parseFloat(
-            (paymentRequest.cashReceived || totalWithShipping).toString(),
+            (paymentRequest.cashReceived ||
+              totalWithShipping + (paymentRequest.tip_amount ?? 0)).toString(),
           ).toFixed(2),
         );
         sale_data['payment_reference'] = paymentRequest.reference || '';

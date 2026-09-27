@@ -50,7 +50,7 @@ import {
  * `null` = el mensaje se muestra solo en el banner (el faltante no vive en un
  * bloque destacable, p. ej. el saldo de la wallet).
  */
-export type PaymentFlashSection = 'method' | 'cash' | 'reference' | 'customer' | 'credit';
+export type PaymentFlashSection = 'method' | 'cash' | 'reference' | 'customer' | 'credit' | 'tip';
 
 /** Resultado de la resolución del primer dato faltante del cobro. */
 interface PaymentValidationError {
@@ -212,18 +212,29 @@ export class PaymentCollectorComponent implements OnInit {
   // a snake_case al backend.
   readonly tipType = signal<'percentage' | 'fixed'>('fixed');
   readonly tipWaiterId = signal<number | null>(null);
+  readonly tipValidationError = computed<string | null>(() => {
+    if (!this.config().allowTip || this.mode() !== 'contado') return null;
+    const raw = Number(this.tip());
+    if (!Number.isFinite(raw) || raw < 0) {
+      return 'Ingresa una propina válida mayor o igual a cero.';
+    }
+    if (this.tipType() === 'percentage' && raw > 100) {
+      return 'El porcentaje de propina debe estar entre 0 y 100.';
+    }
+    return null;
+  });
   /**
    * Monto final que viaja en `PaymentSubmit.tip` (y se espeja en
    * `tipValue` cuando es 'fixed'). Cuando `tipType='percentage'`,
-   * el porcentaje se resuelve contra `effectiveBase()` — la base
-   * gravable real (override ?? restante ?? amount) — y el resultado
+   * el porcentaje se resuelve contra `tipBase()` (productos brutos) cuando
+   * el consumidor lo conoce, o `effectiveBase()` para otros contextos; el resultado
    * redondeado a 2 decimales es el monto que se persiste. El %
    * crudo se descarta después del cálculo (regla del dueño: la
    * propina pactada no puede moverse si cambia el subtotal).
    */
   readonly tipAmount = computed<number>(() => {
     const raw = this.tip() || 0;
-    if (raw <= 0) return 0;
+    if (!Number.isFinite(raw) || raw <= 0 || this.tipValidationError()) return 0;
     if (this.tipType() === 'percentage') {
       return Math.round(((this.tipBase() ?? this.effectiveBase()) * raw) / 100 * 100) / 100;
     }
@@ -628,6 +639,8 @@ export class PaymentCollectorComponent implements OnInit {
       if (this.effectiveBase() <= 0) return false;
       return this.creditTerms() != null;
     }
+
+    if (this.tipValidationError()) return false;
 
     // 5a2 — multi-tender contado: the legs carry the whole validation.
     if (this.multiEnabled()) {
@@ -1337,6 +1350,9 @@ export class PaymentCollectorComponent implements OnInit {
       }
       return this.unnamedGateError();
     }
+
+    const tipError = this.tipValidationError();
+    if (tipError) return { section: 'tip', message: tipError };
 
     // 5a2 — multi-tender contado. Section contract for the legs UI: 'method'
     // highlights the legs block (sum/empty problems), 'cash' a cash-leg
