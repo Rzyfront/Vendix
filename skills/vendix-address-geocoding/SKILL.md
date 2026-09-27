@@ -401,6 +401,27 @@ this.geocoding.forward(query, { city, state }).subscribe(r => {
 });
 ```
 
+### Salida por WhatsApp cuando no se puede ubicar (owner, 2026-09-27)
+
+El bloqueo de Continuar en checkout tiene UNA salida, y solo si la tienda la habilita:
+
+- **Disparador:** el comprador toca "Usar mi ubicación automática" y la geolocalización queda
+  `denied` / no soportada / falla (`onLocateRequested` + catch de `requestGeolocation` en
+  `checkout.component.ts`). Un forward-geocode fallido de la dirección escrita NO dispara el modal —
+  ahí el comprador sigue pudiendo marcar el pin.
+- **Gate:** `canUseWhatsappFallback` (computed, `checkout.component.ts:357`) lee
+  `ecommerce.checkout.whatsapp_checkout === true` + `whatsapp_number` no vacío del domain config.
+  Si es `false` se mantiene el toast de antes ("marca tu ubicación en el mapa").
+- **UX:** `app-whatsapp-fallback-modal`
+  (`private/modules/ecommerce/components/whatsapp-fallback-modal/`) — `isOpen` model, `loading`
+  input, `confirm` (no cierra) / `decline` (cierra y enfoca el mapa). El hero sangra a los bordes
+  con márgenes negativos que DEBEN igualar el padding responsive del body de `app-modal`
+  (`px-3 py-2.5` / `md:px-5 md:py-4`); un margen mayor produce scrollbar horizontal bajo el hero.
+- **Envío:** valida la dirección escrita (o la guardada), pide datos de invitado si falta, manda
+  `pending_shipping_assignment: true` con la dirección SIN coords y abre `wa.me` con el detalle,
+  "Envío: por definir con la tienda" y "Total (sin envío)". Contrato backend y compuertas en
+  `vendix-shipping-distance-pricing` regla 7.
+
 ## Shared — `app-address-form-fields`
 
 `apps/frontend/src/app/shared/components/address-form-fields/address-form-fields.component.ts`:

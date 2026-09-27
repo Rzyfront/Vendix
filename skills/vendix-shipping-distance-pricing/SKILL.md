@@ -109,6 +109,32 @@ monta encima de esas dos.
    - Ver `vendix-address-geocoding` para el contrato completo de `resolveBuyerCoords`/`forward` y
      para las reglas de UX del frontend (bloqueo de Continuar, badge de precisión, GPS con consentimiento).
 
+7. **Sin ubicación del comprador + WhatsApp checkout activo → pedido "envío por asignar" (owner,
+   2026-09-27).** Cuando el comprador pide "Usar mi ubicación automática" y la geolocalización es
+   denegada / no soportada / falla, y la tienda tiene `ecommerce.checkout.whatsapp_checkout = true`
+   con `whatsapp_number` no vacío, el checkout ofrece mandar el pedido por WhatsApp SIN tarifa:
+   - **Contrato (sin migración):** `POST` checkout con `channel: 'whatsapp'` +
+     `pending_shipping_assignment: true`, sin `shipping_method_id`/`shipping_rate_id` y sin
+     `payment_method_id`. La orden queda `delivery_type='other'`, `shipping_method_id = NULL`,
+     `shipping_cost = 0`, `state='pending_payment'`, SIN fila en `payments` y SIN factura
+     automática; `orders.notes` explica que el envío está pendiente de asignar.
+   - **Guard servidor:** `CheckoutService.assertPendingShippingAssignmentAllowed`
+     (`checkout.service.ts:948`, llamado en `runCheckout`) exige canal whatsapp, sin
+     método/tarifa, y tienda con WhatsApp checkout activo + número; si no → 400
+     `ECOM_CHECKOUT_PENDING_SHIPPING_001`. El backend nunca confía en que el frontend haya
+     gateado el botón.
+   - **Compuertas que sostienen el estado:** `'other'` NO está en
+     `SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES`, así que cobrar (`ORD_SHIP_CHARGE_001`), despachar
+     (`ORD_SHIP_REQUIRED_001`) y remisionar (`dispatch-notes.service.ts` `createFromOrder` + pool,
+     `ORD_SHIP_REQUIRED_001`) quedan bloqueados hasta que la tienda asigne método y tarifa desde
+     el detalle de la orden (`assignShipping`). Si la orden ya tiene pagos, cambiar el costo de
+     envío se rechaza con `ORD_SHIP_CHARGED_COST_CHANGE_001`.
+   - **Cron:** `payment-timeout-cleanup.job.ts` excluye `delivery_type='other' AND
+     shipping_method_id IS NULL` del auto-cancel de 2 h — la tienda coordina por chat y puede
+     tardar más.
+   - Este fallback NO relaja la regla 6: sin WhatsApp checkout activo el comprador debe marcar el
+     mapa; no hay tarifa de zona como salida.
+
 ## Architecture
 
 ### Escala de tramos — `shipping_rates.distance_tiers`
