@@ -206,6 +206,20 @@ async function main() {
           await shop.locator('main .price-line .current-price').getByText('$20.000').waitFor();
           assert.equal((await shop.locator('main .price-line .original-price').first().innerText()).trim(), '$22.000',
             'La ficha también debe tachar el regular con la misma regla de IVA incluido.');
+          await shop.getByRole('button', { name: 'Comprar ahora' }).click();
+          const cartLine = shop.locator('app-cart-item-card').filter({ hasText: 'Frutas Orgánicas Mix 1kg' });
+          try {
+            await cartLine.waitFor();
+            assert.equal((await cartLine.locator('.ci-total').innerText()).trim(), '$20.000',
+              'El carrito no debe volver a agregar IVA a la oferta inclusiva.');
+            assert.equal((await shop.locator('.cart-summary .summary-row.total').innerText()).replace(/\s+/g, ' ').trim(),
+              'Total $20.000');
+          } finally {
+            if (await cartLine.isVisible().catch(() => false)) {
+              await cartLine.getByRole('button', { name: 'Eliminar' }).click();
+              await shop.getByText('Tu carrito está vacío').waitFor();
+            }
+          }
         } finally {
           // The save can succeed even if redirect observation times out, so
           // always reopen the editor and inspect persisted state before exit.
