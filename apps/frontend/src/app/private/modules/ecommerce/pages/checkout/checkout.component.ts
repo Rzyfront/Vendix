@@ -542,6 +542,11 @@ export class CheckoutComponent implements OnInit {
         if (!this.use_new_address() && activeSavedId != null) {
           this.ensureSavedAddressCoords(activeSavedId);
         }
+        // Owner directive (change #2): no coords yet → no auto-quote, no
+        // auto-selected/zone-default rate. `hasResolvedCoords` itself reads
+        // `coords_version` so this re-evaluates the instant a pin/GPS/geocode
+        // resolves.
+        if (!this.hasResolvedCoords()) return;
         const key = this.currentAddressKey();
         if (!key || key === this.shipping_quote_key) return;
         // Anti-carrera A→B→A (auditoría D.3): solo la última clave programa;
@@ -823,7 +828,15 @@ export class CheckoutComponent implements OnInit {
       .pipe(
         debounceTime(300),
         distinctUntilChanged(),
-        filter(() => !this.cartHasOnlyServices && this.address_form.valid),
+        // Owner directive (change #2): sin coords resueltas no se cotiza ni
+        // en silencio — mostrar un costo de zona aquí sería exactamente la
+        // tarifa por defecto que ya no debe verse antes de tener un punto.
+        filter(
+          () =>
+            !this.cartHasOnlyServices &&
+            this.address_form.valid &&
+            this.hasResolvedCoords(),
+        ),
         takeUntilDestroyed(this.destroyRef),
       )
       // `notify: false` — esto corre mientras el comprador todavía está
@@ -932,13 +945,7 @@ export class CheckoutComponent implements OnInit {
       .subscribe({
         next: (res) => {
           if (res?.lat == null || res?.lng == null) {
-            this.addressWarning.set(
-              'No pudimos ubicar tu dirección en el mapa. Puedes mover el pin manualmente; si no, se cobrará la tarifa de envío estándar de tu zona.',
-            );
-            // Never quote/save a STALE coordinate from a previous, different
-            // query — clear it and let zone pricing / the backend's own
-            // server-side geocode take over (vendix-shipping-distance-pricing).
-            this.clearGeocodedCoords();
+            this.handleUnresolvedGeocode();
             return;
           }
           const coords = { lat: res.lat, lng: res.lng };
@@ -959,15 +966,12 @@ export class CheckoutComponent implements OnInit {
           // Low-precision hit and no manual confirmation yet: nudge the
           // buyer to check the pin — non-blocking, never stops Continuar.
           if (res.precision === 'street' || res.precision === 'area') {
-            this.hintLowPrecisionPin();
+            this.focusMapHint();
           }
         },
         error: () => {
           // Forward-geocode failed → leave the map as-is; manual form works.
-          this.addressWarning.set(
-            'No pudimos ubicar tu dirección en el mapa. Puedes mover el pin manualmente; si no, se cobrará la tarifa de envío estándar de tu zona.',
-          );
-          this.clearGeocodedCoords();
+          this.handleUnresolvedGeocode();
         },
       });
   }
@@ -976,9 +980,28 @@ export class CheckoutComponent implements OnInit {
    * Forward-geocode returned nothing usable (null result or request error):
    * clear any previously-resolved coordinate so checkout never quotes or
    * saves a point that belongs to a DIFFERENT address the buyer already
+   * moved past, show the explicit "no pudimos ubicar" warning (with the
+   * "Usar mi ubicación automática" CTA rendered alongside it in the
+   * template), and pull the map into view. Owner directive (change #2): home
+   * delivery must NEVER fall back to a silent zone rate here — `coords_version`
+   * bumping also flips `hasResolvedCoords()` to false, which blocks Continuar
+   * and suppresses auto-quoting until the buyer resolves a point (map pin or
+   * GPS).
+   */
+  private handleUnresolvedGeocode(): void {
+    this.clearGeocodedCoords();
+    this.addressWarning.set(
+      'No pudimos ubicar tu dirección automáticamente. Marca tu ubicación en el mapa para calcular la tarifa de envío.',
+    );
+    this.focusMapHint();
+  }
+
+  /**
+   * Clears any previously-resolved coordinate so checkout never quotes or
+   * saves a point that belongs to a DIFFERENT address the buyer already
    * moved past. Bumping `coords_version` re-evaluates the quote — with no
-   * client coords, the backend falls back to zone pricing or its own
-   * server-side geocode (see `vendix-shipping-distance-pricing`).
+   * client coords, `hasResolvedCoords()` turns false and blocks auto-quoting
+   * and Continuar for home delivery (owner directive, change #2).
    */
   private clearGeocodedCoords(): void {
     this.address_form.get('latitude')?.setValue(null, { emitEvent: false });
@@ -989,12 +1012,14 @@ export class CheckoutComponent implements OnInit {
   }
 
   /**
-   * Non-blocking nudge for a low-precision geocode hit (`street`/`area`):
-   * the pin is likely off, so we scroll it into view and pulse it briefly
-   * so the buyer notices they should drag it to the right spot. Never
-   * blocks Continuar/submit — purely visual.
+   * Pulls the map into view and pulses it briefly so the buyer notices there
+   * is something to do there — reused both for a low-precision geocode hit
+   * (`street`/`area`, non-blocking nudge) and for an unresolved geocode
+   * (`handleUnresolvedGeocode`, where Continuar IS blocked until a point is
+   * confirmed). Purely visual: never itself blocks or unblocks anything.
+   * A no-op when no map is mounted (e.g. saved-address view).
    */
-  private hintLowPrecisionPin(): void {
+  private focusMapHint(): void {
     this.mapHighlight.set(true);
     setTimeout(() => {
       this.host.nativeElement
@@ -1002,6 +1027,17 @@ export class CheckoutComponent implements OnInit {
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 0);
     setTimeout(() => this.mapHighlight.set(false), 2000);
+  }
+
+  /**
+   * "Usar mi ubicación automática" CTA next to the unresolved-geocode
+   * warning: re-focuses the map (in case the buyer scrolled away) and opens
+   * the SAME existing GPS consent flow as the map's own "Ubicarme" control
+   * (`onLocateRequested` → `show_location_modal` → `requestGeolocation`).
+   */
+  useAutoLocation(): void {
+    this.focusMapHint();
+    void this.onLocateRequested();
   }
 
   private async loadDepartments(): Promise<void> {
@@ -1578,6 +1614,61 @@ export class CheckoutComponent implements OnInit {
   private bumpCoordsVersion(): void {
     this.coords_version.update((v) => v + 1);
   }
+
+  /**
+   * True once the ACTIVE home-delivery address (new-address form OR the
+   * selected saved address) has a resolved coordinate: forward-geocode,
+   * manual pin, or GPS. Owner directive (change #2): home delivery must
+   * NEVER auto-select a rate or show a zone-default cost while this is
+   * false — it gates auto-quoting and the address/shipping step's Continuar
+   * (see `shippingBlockedReason`).
+   *
+   * Reads `coords_version()` as the reactive trigger and then plain-reads
+   * the form value — `address_form.get(...)?.value` is NOT itself reactive
+   * inside a `computed()` (vendix-zoneless-signals), so recomputation must
+   * be driven by the signal that every coords-writing path already bumps.
+   */
+  readonly hasResolvedCoords = computed<boolean>(() => {
+    this.coords_version();
+    if (this.use_new_address()) {
+      const lat = this.address_form.get('latitude')?.value;
+      const lng = this.address_form.get('longitude')?.value;
+      return lat != null && lng != null;
+    }
+    const id = this.selected_address_id();
+    if (id == null) return false;
+    if (this.savedCoordsOverride()[id]) return true;
+    const saved = this.addresses().find((a) => a.id === id);
+    return saved?.latitude != null && saved?.longitude != null;
+  });
+
+  /**
+   * Reason the address/shipping step's Continuar is blocked, or `null` when
+   * it may proceed. Only gates a physical, HOME-delivery cart — pickup and
+   * service-only carts are never coord-gated (owner directive, change #2).
+   */
+  readonly shippingBlockedReason = computed<string | null>(() => {
+    if (this.cartHasOnlyServices || this.selected_delivery() !== 'home') {
+      return null;
+    }
+    if (!this.hasResolvedCoords()) {
+      return 'Necesitamos tu ubicación exacta para calcular el envío. Marca el punto en el mapa o usa tu ubicación automática.';
+    }
+    const key = this.currentAddressKey();
+    const quoteFresh = !!key && key === this.shipping_quote_key;
+    if (!quoteFresh || this.loading_shipping()) {
+      return 'Calculando la tarifa de envío para tu ubicación…';
+    }
+    if (this.shippableOptions().length === 0) {
+      return 'No hay tarifa de envío para esta ubicación.';
+    }
+    return null;
+  });
+
+  /** True when the address/shipping step may advance (Continuar enabled). */
+  readonly canProceedFromAddressStep = computed<boolean>(
+    () => this.shippingBlockedReason() === null,
+  );
 
   /**
    * H2: si la dirección guardada no trae coords (ni override resuelto),
@@ -2272,6 +2363,18 @@ export class CheckoutComponent implements OnInit {
         return;
       }
 
+      // Owner directive (change #2): mientras NO haya coords (ni geocode ni
+      // pin ni GPS) para domicilio, no se cotiza ni se avanza con una tarifa
+      // por defecto — defensa en profundidad del mismo bloqueo del botón
+      // Continuar (ver `canProceedFromAddressStep`).
+      if (!this.hasResolvedCoords()) {
+        this.error_message.set(
+          'Necesitamos tu ubicación exacta para calcular el envío. Marca el punto en el mapa o usa tu ubicación automática.',
+        );
+        this.focusMapHint();
+        return;
+      }
+
       // If using new address and save_new_address is checked, save it first
       if (
         this.is_authenticated() &&
@@ -2487,6 +2590,16 @@ export class CheckoutComponent implements OnInit {
         // Continue with shipping options
         this.error_message.set('');
         await this.loadShippingOptions();
+        // Owner directive (change #2): con coords ya resueltas (verificado
+        // antes de llamar a este método) pero sin tarifa devuelta, tampoco
+        // se avanza — mismo bloqueo que la ruta de dirección ya guardada.
+        if (this.shippableOptions().length === 0) {
+          this.error_message.set(
+            'No hay envío a domicilio para esta dirección. Prueba con otra dirección o elige "Recoger en tienda".',
+          );
+          this.is_loading.set(false);
+          return;
+        }
         this.advanceStep();
         this.is_loading.set(false);
       },
@@ -2499,6 +2612,12 @@ export class CheckoutComponent implements OnInit {
         );
         this.error_message.set('');
         await this.loadShippingOptions();
+        if (this.shippableOptions().length === 0) {
+          this.error_message.set(
+            'No hay envío a domicilio para esta dirección. Prueba con otra dirección o elige "Recoger en tienda".',
+          );
+          return;
+        }
         this.advanceStep();
       },
     });

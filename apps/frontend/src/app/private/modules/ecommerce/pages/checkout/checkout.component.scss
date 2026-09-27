@@ -583,11 +583,14 @@
 }
 
 // Direccion escrita no localizable en el mapa (forward-geocode null/error):
-// aviso NO bloqueante bajo el mapa. El pin se puede mover a mano; si no, se
-// cotiza por tarifa estandar de zona (ver forwardGeocodeFromForm).
+// aviso bajo el mapa + CTA para usar la ubicacion automatica (GPS). Nunca
+// bloquea la escritura del formulario, pero mientras no haya coords
+// resueltas el boton Continuar SI queda deshabilitado (ver
+// `hasResolvedCoords`/`checkout-block-reason` mas abajo — owner directive).
 .address-map-warning {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
     gap: 0.5rem;
     margin: 0.5rem 0 0;
     padding: 0.5rem 0.75rem;
@@ -597,8 +600,37 @@
     color: var(--color-text-secondary);
     font-size: var(--fs-sm);
 
+    &__text {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0;
+
+        app-icon {
+            color: var(--color-warning, #f59e0b);
+            flex-shrink: 0;
+        }
+    }
+
+    &__action {
+        align-self: flex-start;
+    }
+}
+
+// Owner directive (change #2): razon visible junto al boton Continuar
+// mientras el domicilio no tiene coords + tarifa resuelta. Nunca aparece
+// para recoger en tienda ni carritos solo-servicio.
+.checkout-block-reason {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.5rem 0 0;
+    color: var(--color-warning, #f59e0b);
+    font-size: var(--fs-sm);
+    text-align: center;
+    justify-content: center;
+
     app-icon {
-        color: var(--color-warning, #f59e0b);
         flex-shrink: 0;
     }
 }

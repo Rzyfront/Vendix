@@ -220,10 +220,21 @@
                 </p>
               }
               @if (addressWarning()) {
-                <p class="address-map-warning" role="status">
-                  <app-icon name="alert-triangle" [size]="14" />
-                  {{ addressWarning() }}
-                </p>
+                <div class="address-map-warning" role="status">
+                  <p class="address-map-warning__text">
+                    <app-icon name="alert-triangle" [size]="14" />
+                    {{ addressWarning() }}
+                  </p>
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    class="address-map-warning__action"
+                    (clicked)="useAutoLocation()"
+                  >
+                    <app-icon slot="icon" name="navigation" [size]="14"></app-icon>
+                    Usar mi ubicación automática
+                  </app-button>
+                </div>
               }
               </div>
               <form [formGroup]="address_form" class="address-form">
@@ -518,10 +529,21 @@
                     </p>
                   }
                   @if (addressWarning()) {
-                    <p class="address-map-warning" role="status">
-                      <app-icon name="alert-triangle" [size]="14" />
-                      {{ addressWarning() }}
-                    </p>
+                    <div class="address-map-warning" role="status">
+                      <p class="address-map-warning__text">
+                        <app-icon name="alert-triangle" [size]="14" />
+                        {{ addressWarning() }}
+                      </p>
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        class="address-map-warning__action"
+                        (clicked)="useAutoLocation()"
+                      >
+                        <app-icon slot="icon" name="navigation" [size]="14"></app-icon>
+                        Usar mi ubicación automática
+                      </app-button>
+                    </div>
                   }
                   <form [formGroup]="address_form" class="address-form">
                     <app-input
@@ -1154,7 +1176,10 @@
                 (step() === paymentStep &&
                   !cartHasOnlyServices &&
                   selected_delivery() === 'home' &&
-                  selected_shipping_option_id == null)
+                  selected_shipping_option_id == null) ||
+                (step() === 1 &&
+                  !cartHasOnlyServices &&
+                  !canProceedFromAddressStep())
               "
             >
               Continuar
@@ -1189,6 +1214,17 @@
                     : (cartHasOnlyServices ? "Confirmar Reserva" : "Confirmar Pedido")
               }}
             </app-button>
+          }
+          @if (
+            step() === 1 &&
+            !cartHasOnlyServices &&
+            shippingBlockedReason();
+            as blockReason
+          ) {
+            <p class="checkout-block-reason" role="status">
+              <app-icon name="alert-circle" [size]="14"></app-icon>
+              {{ blockReason }}
+            </p>
           }
         </div>
       </div>
