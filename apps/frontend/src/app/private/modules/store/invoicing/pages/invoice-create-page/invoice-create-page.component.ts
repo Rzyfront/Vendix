@@ -144,7 +144,10 @@ import { getDianSchemeIdForDocumentType } from '../../../../../../shared/constan
 
 import { CustomerModalComponent } from '../../../customers/components/customer-modal/customer-modal.component';
 import { CustomersService } from '../../../customers/services/customers.service';
-import { Customer } from '../../../customers/models/customer.model';
+import {
+  Customer,
+  UpdateCustomerRequest,
+} from '../../../customers/models/customer.model';
 
 import { InvoiceProductOption } from '../../services/invoice-product-lookup.service';
 
@@ -1942,13 +1945,29 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   <span class="text-xs text-text-primary truncate">
                     Vinculado a <strong>{{ linked }}</strong>
                   </span>
-                  <button
-                    type="button"
-                    class="text-xs text-[var(--color-text-secondary)] hover:text-error"
-                    (click)="unlinkCustomer()"
-                  >
-                    Desvincular
-                  </button>
+                  <div class="flex items-center gap-3 shrink-0">
+                    @if (isLinkedToExistingCustomer()) {
+                      <!-- Incidente Óptica Panorama SAS — con ficha ya guardada, la
+                           identidad fiscal de abajo queda de SOLO LECTURA (ver
+                           [readonly]/[disabled] de esta sección): corregirla es
+                           corregir la ficha real, no re-escribirla a mano en esta
+                           factura y dejarla desincronizada sin que quede rastro. -->
+                      <button
+                        type="button"
+                        class="text-xs text-primary hover:underline"
+                        (click)="openCustomerEdit()"
+                      >
+                        Editar ficha del cliente
+                      </button>
+                    }
+                    <button
+                      type="button"
+                      class="text-xs text-[var(--color-text-secondary)] hover:text-error"
+                      (click)="unlinkCustomer()"
+                    >
+                      Desvincular
+                    </button>
+                  </div>
                 </div>
               }
 
@@ -1960,6 +1979,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   [control]="control('customer_name')"
                   [error]="fieldError('customer_name')"
                   [required]="true"
+                  [readonly]="isLinkedToExistingCustomer()"
                   size="sm"
                 ></app-input>
                 <app-input
@@ -1980,6 +2000,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   formControlName="customer_document_type"
                   [options]="documentTypeOptions"
                   [errorText]="fieldError('customer_document_type') ?? ''"
+                  [disabled]="isLinkedToExistingCustomer()"
                   size="sm"
                 ></app-selector>
                 <app-input
@@ -1988,6 +2009,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   [control]="control('customer_tax_id')"
                   [error]="fieldError('customer_tax_id')"
                   [placeholder]="customerTaxIdPlaceholder()"
+                  [readonly]="isLinkedToExistingCustomer()"
                   size="sm"
                 ></app-input>
                 <!--
@@ -2044,6 +2066,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                     formControlName="customer_person_type"
                     [options]="customerPersonTypeOptions"
                     helpText="Natural con NIT (independiente) o Jurídica (empresa)."
+                    [disabled]="isLinkedToExistingCustomer()"
                     size="sm"
                   ></app-selector>
                 }
@@ -2055,6 +2078,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   formControlName="customer_address"
                   [control]="control('customer_address')"
                   [error]="fieldError('customer_address')"
+                  [required]="isNamedAcquirer()"
                   size="sm"
                 ></app-input>
                 <!--
@@ -3228,7 +3252,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
 
     <app-customer-modal
       [isOpen]="customerModalOpen()"
-      [customer]="null"
+      [customer]="customerModalTarget()"
       (isOpenChange)="customerModalOpen.set($event)"
       (save)="onCustomerCreated($event)"
     />
@@ -4881,6 +4905,67 @@ export class InvoiceCreatePageComponent implements OnInit {
   private readonly customerSearch$ = new Subject<string>();
   /** Payload de creación inline; viaja como `inline_customer`. */
   private readonly inlineCustomer = signal<CreateCustomerRequest | null>(null);
+  /**
+   * Incidente Óptica Panorama SAS — el objeto completo detrás de `customer_id`
+   * cuando el adquiriente viene de una ficha YA guardada (vinculado por
+   * búsqueda, no un `inline_customer` pendiente de crear). Se usa para: (1)
+   * abrir `app-customer-modal` en modo EDITAR con sus datos reales en vez de
+   * re-teclearlos, y (2) re-hidratar la cabecera tras guardar ese modal.
+   */
+  readonly linkedCustomer = signal<Customer | null>(null);
+  /**
+   * `[customer]` que recibe `app-customer-modal`: `null` para "Crear" (alta
+   * nueva), la ficha vinculada para "Editar ficha del cliente". El modal en
+   * sí no distingue el origen — sólo lo hace `onCustomerCreated` al leer esta
+   * misma señal para decidir POST vs PATCH.
+   */
+  readonly customerModalTarget = signal<Customer | null>(null);
+  /**
+   * `true` cuando el adquiriente es una ficha real ya persistida
+   * (`customer_id` truthy) — NO un `inline_customer` recién tecleado que
+   * todavía no existe como fila. Sólo en ese caso la identidad fiscal se
+   * bloquea a modo lectura: editarla a mano en la factura desincroniza la
+   * pantalla de la ficha real sin que quede rastro, que es justo el patrón
+   * detrás del incidente (Óptica Panorama SAS se facturó con una identidad
+   * que no coincidía con su ficha real).
+   */
+  readonly isLinkedToExistingCustomer = computed(
+    () => !!this.rawValue()['customer_id'],
+  );
+  /**
+   * Adquiriente CON documento declarado — no "consumidor final" anónimo.
+   * Gobierna si la dirección fiscal es obligatoria (ver
+   * `syncCustomerAddressRequirement` y `collectBlockers`): un consumidor
+   * final sigue sin necesitarla (mismo criterio que la advertencia de
+   * `collectAdvisories` sobre documento ausente).
+   */
+  readonly isNamedAcquirer = computed(
+    () => !!String(this.rawValue()['customer_tax_id'] ?? '').trim(),
+  );
+
+  /**
+   * Incidente Óptica Panorama SAS — un adquiriente NOMBRADO (con documento)
+   * declara domicilio fiscal; sólo "consumidor final" (sin documento) sigue
+   * sin necesitarla — mismo par de condiciones que la advertencia de
+   * `collectAdvisories` sobre documento ausente, espejado del otro lado.
+   * Exportación exenta: un municipio DANE colombiano no aplica a un
+   * comprador en el exterior (mismo criterio que `customerMunicipalityError`).
+   * `updateValueAndValidity()` va CON evento — mismo motivo que
+   * `syncResolutionRequirement`: el botón de Guardar cuelga de `formStatus`,
+   * puente sobre `statusChanges`.
+   */
+  private readonly syncCustomerAddressRequirement = effect(() => {
+    const required = this.isNamedAcquirer() && !this.isExportInvoice();
+    const control = this.invoiceForm.get('customer_address');
+    if (!control) return;
+
+    if (required) {
+      control.setValidators([Validators.required]);
+    } else {
+      control.clearValidators();
+    }
+    control.updateValueAndValidity();
+  });
 
   // ── Aritmética ──────────────────────────────────────────────
 
@@ -8152,6 +8237,14 @@ export class InvoiceCreatePageComponent implements OnInit {
         DOCUMENT_TYPE_NIT_CODE,
       customer_tax_id: customer.document_number ?? '',
       customer_verification_digit: customer.verification_digit ?? '',
+      // Incidente Óptica Panorama SAS — sin este patch la persona quedaba en
+      // el default 'JURIDICA' del form (o en lo que hubiera dejado el
+      // adquiriente anterior) en vez de la de la ficha real. Inofensivo para
+      // el payload (con `customer_id` el backend usa el `person_type` YA
+      // guardado, nunca este control — ver `buildPayload`), pero sin esto la
+      // pantalla mostraba una persona que no era la de la ficha.
+      customer_person_type: (customer.person_type ??
+        'JURIDICA') as 'NATURAL' | 'JURIDICA',
       customer_tax_regime: customer.tax_regime ?? '',
       customer_fiscal_responsibilities: customer.fiscal_responsibilities ?? [],
       customer_email: customer.email ?? '',
@@ -8168,6 +8261,7 @@ export class InvoiceCreatePageComponent implements OnInit {
       customer_city_name: address?.city ?? '',
     });
     this.inlineCustomer.set(null);
+    this.linkedCustomer.set(customer);
     this.linkedCustomerLabel.set(this.customerDisplayName(customer));
     this.customerResults.set([]);
     this.customerQuery.set('');
@@ -8188,24 +8282,94 @@ export class InvoiceCreatePageComponent implements OnInit {
   unlinkCustomer(): void {
     this.invoiceForm.get('customer_id')?.setValue(null);
     this.inlineCustomer.set(null);
+    this.linkedCustomer.set(null);
     this.linkedCustomerLabel.set(null);
   }
 
   openCustomerCreate(): void {
+    this.customerModalTarget.set(null);
+    this.customerModalOpen.set(true);
+  }
+
+  /**
+   * "Editar ficha del cliente" — abre el MISMO `app-customer-modal` (Task 1)
+   * pero en modo EDITAR, con la ficha real (`linkedCustomer()`) precargada.
+   * Existe porque los campos de identidad de esta sección quedan de solo
+   * lectura mientras haya `customer_id` (ver `isLinkedToExistingCustomer`):
+   * la única forma de corregirlos es corregir la ficha, no re-escribirlos a
+   * mano en la factura.
+   */
+  openCustomerEdit(): void {
+    const customer = this.linkedCustomer();
+    if (!customer) return;
+    this.customerModalTarget.set(customer);
     this.customerModalOpen.set(true);
   }
 
   /**
    * El modal de clientes emite el `CreateCustomerRequest` completo (espejo de
-   * `CreateCustomerDto`). Viaja tal cual como `inline_customer`: el backend
-   * materializa la fila `users` DENTRO de la misma transacción de la factura y
-   * usa el `customer_id` resultante. Los campos de cabecera se rellenan además
-   * para que el usuario vea a quién le está facturando.
+   * `CreateCustomerDto`) en AMBOS modos — alta y edición (ver
+   * `customer-modal.component.ts onSubmit()`: en modo editar sólo persiste la
+   * dirección por su cuenta y deja el resto al padre). `customerModalTarget()`
+   * dice cuál de los dos disparó este guardado.
    */
   onCustomerCreated(payload: CreateCustomerRequest): void {
     this.customerModalOpen.set(false);
     if (!payload) return;
 
+    const editingCustomer = this.customerModalTarget();
+    this.customerModalTarget.set(null);
+
+    if (editingCustomer) {
+      // EDITAR FICHA — PATCH real contra el cliente ya vinculado. Sin este
+      // branch, "Editar ficha del cliente" sólo reescribiría los controles de
+      // ESTA factura (como el alta inline) y la ficha real seguiría con los
+      // datos viejos: la próxima factura volvería a mostrar la identidad sin
+      // corregir.
+      //
+      // Mapeo explícito en vez de pasar `payload` tal cual: este archivo
+      // define SU PROPIO `CreateCustomerRequest` (`invoice.interface.ts`,
+      // `tax_regime`/`person_type` como `string` ancho) que no es el mismo
+      // tipo que `UpdateCustomerRequest` (`customers/models/customer.model.ts`,
+      // enums estrechos `TaxRegime`/`PersonType`) — aunque ambos describan el
+      // mismo `CreateCustomerDto` del backend. El backend valida el enum de
+      // todas formas (`@IsEnum`), así que el cast sólo evita que TypeScript
+      // rechace en compilación un valor que en runtime siempre viene de las
+      // MISMAS opciones (`taxRegimeOptions`/`customerPersonTypeOptions`) que
+      // ya usa esta pantalla.
+      const updateData: UpdateCustomerRequest = {
+        email: payload.email ?? undefined,
+        first_name: payload.first_name,
+        last_name: payload.last_name,
+        legal_name: payload.legal_name,
+        document_type: payload.document_type,
+        document_number: payload.document_number,
+        verification_digit: payload.verification_digit,
+        phone: payload.phone,
+        tax_regime: payload.tax_regime as UpdateCustomerRequest['tax_regime'],
+        person_type:
+          payload.person_type as UpdateCustomerRequest['person_type'],
+        fiscal_responsibilities: payload.fiscal_responsibilities,
+        ciiu_code: payload.ciiu_code,
+        is_withholding_agent: payload.is_withholding_agent,
+      };
+
+      this.customersService
+        .updateCustomer(editingCustomer.id, updateData)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (updated) => {
+            this.selectCustomer(updated);
+            this.toastService.success('Ficha del cliente actualizada.');
+          },
+          error: (error: unknown) => {
+            this.toastService.error(describeApiFailure(error).message);
+          },
+        });
+      return;
+    }
+
+    // ALTA INLINE — sin cambios de comportamiento respecto al original.
     const name =
       payload.legal_name ||
       [payload.first_name, payload.last_name].filter(Boolean).join(' ');
@@ -8218,12 +8382,17 @@ export class InvoiceCreatePageComponent implements OnInit {
         DOCUMENT_TYPE_NIT_CODE,
       customer_tax_id: payload.document_number ?? '',
       customer_verification_digit: payload.verification_digit ?? '',
+      customer_person_type: (payload.person_type ??
+        (payload.document_type === 'NIT' ? 'JURIDICA' : 'NATURAL')) as
+        | 'NATURAL'
+        | 'JURIDICA',
       customer_tax_regime: payload.tax_regime ?? '',
       customer_fiscal_responsibilities: payload.fiscal_responsibilities ?? [],
       customer_email: payload.email ?? '',
       customer_phone: payload.phone ?? '',
     });
     this.inlineCustomer.set(payload);
+    this.linkedCustomer.set(null);
     this.linkedCustomerLabel.set(name ? name + ' (se creará al emitir)' : null);
   }
 
@@ -8471,7 +8640,15 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (!this.isExportInvoice()) {
       const addressLine = String(raw['customer_address'] ?? '').trim();
       const cityCode = String(raw['customer_municipality_code'] ?? '').trim();
-      if (addressLine && !cityCode) {
+      // Incidente Óptica Panorama SAS — un adquiriente NOMBRADO (con
+      // documento) sin dirección fiscal es la misma identidad a medias que
+      // llevó a facturar mal: "consumidor final" (sin documento) sigue sin
+      // necesitarla, ver `collectAdvisories`.
+      if (!addressLine && this.isNamedAcquirer()) {
+        blockers.push(
+          'El adquiriente tiene documento declarado y necesita dirección fiscal. Sólo un consumidor final (sin documento) puede omitirla.',
+        );
+      } else if (addressLine && !cityCode) {
         blockers.push(
           'La dirección fiscal necesita su municipio DANE: búscalo por nombre en «Municipio (DANE)» y selecciónalo. Sin ese código la DIAN rechaza el documento.',
         );
