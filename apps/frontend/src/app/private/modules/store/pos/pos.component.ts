@@ -2569,6 +2569,9 @@ export class PosComponent {
       ...(submit.amount != null ? { amount: Number(submit.amount) } : {}),
       ...(submit.reference ? { payment_reference: submit.reference } : {}),
       ...(submit.tip != null ? { tip_amount: Number(submit.tip) } : {}),
+      ...(submit.bankAccountId != null
+        ? { bank_account_id: Number(submit.bankAccountId) }
+        : {}),
       ...(submit.installmentId != null
         ? { installment_id: Number(submit.installmentId) }
         : {}),

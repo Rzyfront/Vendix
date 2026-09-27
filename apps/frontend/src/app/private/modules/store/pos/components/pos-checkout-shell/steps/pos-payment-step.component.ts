@@ -923,6 +923,7 @@ export class PosPaymentStepComponent implements OnInit {
           payment_type: 'direct',
           amount: this.cartState()!.summary.total + (submit.tip ?? 0),
           amount_received: submit.amountReceived,
+          ...(submit.bankAccountId != null ? { bank_account_id: submit.bankAccountId } : {}),
           ...(submit.tip != null && submit.tip > 0
             ? {
                 tip_amount: submit.tip,
