@@ -470,6 +470,14 @@ export class CreditNotesService {
             this.logger,
           )
         : null;
+    // P2(a) — nota TOTAL: mapa id-de-línea-original → índice, para poder
+    // religar cada tributo copiado a SU línea de la nota (ver `line_index`
+    // abajo). `items` para el copiado TOTAL es literalmente
+    // `related_invoice.invoice_items.map(...)` EN EL MISMO ORDEN (arriba), así
+    // que el índice del item original es el mismo índice del item de la nota.
+    const total_copy_original_item_index = new Map<number, number>(
+      related_invoice.invoice_items.map((item, idx) => [item.id, idx]),
+    );
     const incoming_taxes: IncomingNoteTaxRow[] = dto.taxes?.length
       ? dto.taxes
       : derived_partial
@@ -481,6 +489,19 @@ export class CreditNotesService {
             taxable_amount: Number(t.taxable_amount),
             tax_amount: Number(t.tax_amount),
             tax_type: t.tax_type,
+            // P2(a) — la factura padre puede tener ≥2 tributos LIGADOS por
+            // línea (`invoice_taxes.invoice_item_id`: IVA+INC mixto, o
+            // líneas con impuesto inclusivo). Copiar sólo el importe sin este
+            // vínculo desataba cada tributo de su línea — la nota salía con
+            // TODOS los tributos como fila de cabecera
+            // (`invoice_item_id: null`), y el emisor UBL por línea heredaba
+            // el PRIMERO a toda línea del desglose. `undefined` (fila de
+            // cabecera) para la factura padre de un solo tributo — la forma
+            // histórica, sin cambio.
+            line_index:
+              t.invoice_item_id != null
+                ? total_copy_original_item_index.get(t.invoice_item_id)
+                : undefined,
           }));
 
     // QUI-INC — el tipo fiscal se resuelve ACÁ, contra la fila fuente, y ANTES
@@ -492,6 +513,30 @@ export class CreditNotesService {
       type,
       context.store_id ?? null,
     );
+
+    // P1-C — misma razón que el comentario de arriba: esta comprobación vivía
+    // DESPUÉS de `invoices.create` (dentro del `.map()` que arma
+    // `invoice_taxes`), así que una fila sin `taxable_amount`/`tax_amount`
+    // fallaba con el consecutivo YA gastado y la nota (cabecera + líneas) YA
+    // persistida sin sus impuestos — un documento fiscal a medio escribir.
+    // Se mueve ANTES de `generateNextNumber` para que el rechazo no cueste
+    // nada: ni numeración, ni una fila huérfana que limpiar.
+    for (const [index, tax_item] of taxes.entries()) {
+      if (
+        tax_item.taxable_amount === undefined ||
+        tax_item.taxable_amount === null ||
+        tax_item.tax_amount === undefined ||
+        tax_item.tax_amount === null
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_CALC_001,
+          `El impuesto «${tax_item.tax_name}» de la nota llegó sin taxable_amount o sin tax_amount. ` +
+            'Una nota crédito o débito no recalcula: copia los importes del documento que corrige, ' +
+            'así que ambos deben venir ya calculados.',
+          { tax_index: index, tax_name: tax_item.tax_name },
+        );
+      }
+    }
 
     // Calculate amounts — SIEMPRE en `Prisma.Decimal`, nunca en `number`. Un
     // `+=` de floats (la forma anterior) da 3900.0000000000005 sobre 3×1300
@@ -574,7 +619,37 @@ export class CreditNotesService {
           ),
         );
 
-    let note = await this.prisma.invoices.create({
+    // P1-C — ATOMICIDAD: create (cabecera + líneas) → createMany de impuestos
+    // → refetch, en UNA sola transacción de base de datos.
+    //
+    // Antes eran tres llamadas independientes: si `invoice_taxes.createMany`
+    // fallaba (o el proceso caía) DESPUÉS de que `invoices.create` ya
+    // persistiera la nota con sus líneas, el consecutivo recién asignado
+    // (`invoice_number`/`resolution_id`, ya COMMITEADO por
+    // `generateNextNumber` en su propia transacción — ver
+    // `invoice-number-generator.ts`) quedaba atado para siempre a un
+    // documento fiscal sin impuestos: ni borrable en caliente (violaría la
+    // regla anti-destructiva de migraciones — nunca `DELETE` manual sobre una
+    // tabla con datos), ni corregible sin dejar un hueco en la numeración. La
+    // validación de `taxable_amount`/`tax_amount` de más arriba YA corrió
+    // ANTES de `generateNextNumber`, así que lo único que puede fallar aquí
+    // dentro es infraestructura (la propia DB), nunca un dato de entrada
+    // previsible — el rollback de esta transacción nunca desperdicia el
+    // consecutivo por un error de negocio evitable.
+    //
+    // `tx` es el cliente RAW de la transacción: `StorePrismaService
+    // .$transaction` (heredado de `BasePrismaService`) delega directo al
+    // `baseClient` de Prisma, así que el callback NO recibe el wrapper con
+    // scoping — recibe el mismo tipo de cliente que ya usa `withoutScope()`
+    // más abajo para `invoice_taxes`/`credit_note_refund_items`. Es seguro
+    // exactamente por la misma razón que ya vale para esos dos: cada
+    // `data`/`where` de este bloque trae `store_id`/`organization_id`/`id`
+    // explícitos y ya verificados en scope antes de llegar aquí, nunca un
+    // filtro que dependa del scoping automático. Mezclar `tx` con
+    // `this.prisma.withoutScope()` (clientes DISTINTOS) en este bloque
+    // rompería la atomicidad, así que las tres operaciones usan `tx`.
+    let note = await this.prisma.$transaction(async (tx: any) => {
+      let created = await tx.invoices.create({
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id,
@@ -700,97 +775,86 @@ export class CreditNotesService {
         },
       },
       include: INVOICE_INCLUDE,
-    }).catch((error) => this.throwIfDuplicateRefundLink(error, refund_link));
-
-    // F-INC6 — segunda fase: los tributos se crean DESPUÉS de las líneas.
-    // Prisma no permite que un `create` anidado lea el id que otro `create`
-    // anidado HERMANO va a generar en la MISMA llamada, y
-    // `invoice_taxes.invoice_item_id` exige justamente eso cuando la factura
-    // padre mezcla ≥2 tributos (`per_line_schemes`, ver
-    // `derivePartialNoteLinesViaKernel`): el modelo documenta que un
-    // documento con ≥2 tributos exige UNA fila por (línea × tributo) —nunca
-    // agregada— porque el emisor UBL arma el desglose POR LÍNEA leyendo ese
-    // vínculo; sin él hereda a toda línea el primer tributo del documento.
-    // Con un solo tributo (el 100% del histórico) `line_index` viene
-    // `undefined` en cada fila y el resultado es idéntico a antes: una fila
-    // de cabecera con `invoice_item_id` NULL.
-    if (taxes.length > 0) {
-      const created_items = [...note.invoice_items].sort(
-        (a, b) => a.id - b.id,
+      }).catch((error: unknown) =>
+        this.throwIfDuplicateRefundLink(error, refund_link),
       );
-      const tax_rows = taxes.map((tax_item, index) => {
-        // `taxable_amount` y `tax_amount` son opcionales en
-        // `CreateInvoiceTaxDto` porque en las FACTURAS los deriva
-        // `InvoiceCalculatorService` a partir de la línea. Este servicio no
-        // pasa por ese calculador —la nota copia los importes del documento
-        // que corrige o los deriva el kernel—, así que aquí no hay nada de
-        // donde derivarlos y sí hay que exigirlos.
-        //
-        // Sin esta comprobación, `new Prisma.Decimal(undefined)` lanza un
-        // `TypeError` crudo: 500 «Error interno» sobre lo que en realidad
-        // es un campo que faltó en la petición.
-        if (
-          tax_item.taxable_amount === undefined ||
-          tax_item.taxable_amount === null ||
-          tax_item.tax_amount === undefined ||
-          tax_item.tax_amount === null
-        ) {
-          throw new VendixHttpException(
-            ErrorCodes.INVOICING_CALC_001,
-            `El impuesto «${tax_item.tax_name}» de la nota llegó sin taxable_amount o sin tax_amount. ` +
-              'Una nota crédito o débito no recalcula: copia los importes del documento que corrige, ' +
-              'así que ambos deben venir ya calculados.',
-            { tax_index: index, tax_name: tax_item.tax_name },
-          );
+
+      // F-INC6 — segunda fase: los tributos se crean DESPUÉS de las líneas.
+      // Prisma no permite que un `create` anidado lea el id que otro `create`
+      // anidado HERMANO va a generar en la MISMA llamada, y
+      // `invoice_taxes.invoice_item_id` exige justamente eso cuando la
+      // factura padre mezcla ≥2 tributos (`per_line_schemes`, ver
+      // `derivePartialNoteLinesViaKernel`): el modelo documenta que un
+      // documento con ≥2 tributos exige UNA fila por (línea × tributo)
+      // —nunca agregada— porque el emisor UBL arma el desglose POR LÍNEA
+      // leyendo ese vínculo; sin él hereda a toda línea el primer tributo
+      // del documento. Con un solo tributo (el 100% del histórico)
+      // `line_index` viene `undefined` en cada fila y el resultado es
+      // idéntico a antes: una fila de cabecera con `invoice_item_id` NULL.
+      if (taxes.length > 0) {
+        const created_items = [...created.invoice_items].sort(
+          (a: { id: number }, b: { id: number }) => a.id - b.id,
+        );
+        const tax_rows = taxes.map((tax_item) => {
+          // P1-C — `taxable_amount`/`tax_amount` YA se validaron arriba,
+          // ANTES de `generateNextNumber` (ver el comentario en ese punto):
+          // esta rama sólo construye la fila, ya no puede rechazar por dato
+          // faltante. Los `!` son deliberados: el guard que los garantiza
+          // corrió antes de que este bloque —y el consecutivo— existieran.
+          return {
+            invoice_id: created.id,
+            tax_rate_id: tax_item.tax_rate_id,
+            tax_name: tax_item.tax_name,
+            // F-212 — la nota es copista pura: el `tax_rate` que recibe
+            // viaja tal cual a `invoice_taxes` (`Decimal(5,2)`,
+            // PORCENTAJE). Por eso la nota 170 heredó el `0.19` de la
+            // factura 67. Este es un SEGUNDO escritor: no pasa por
+            // `buildInvoiceTaxCreateInput`, así que necesita el mismo
+            // desambiguador que el escritor de facturas.
+            tax_rate: normalizeInvoiceTaxRate(
+              tax_item.tax_rate,
+              tax_item.tax_type,
+            ),
+            taxable_amount: new Prisma.Decimal(tax_item.taxable_amount!),
+            tax_amount: new Prisma.Decimal(tax_item.tax_amount!),
+            // QUI-INC — sin `??` y sin ningún `as`. `resolveNoteTaxTypes`
+            // ya lo resolvió contra la fila fuente (el propio tributo del
+            // documento padre, o la `tax_categories` del `tax_rate_id`),
+            // y si no había de dónde resolverlo la nota no llegó hasta
+            // acá. El `?? 'iva'` que había en este punto no podía
+            // distinguir «tributo genuinamente sin tipar» de «tributo INC
+            // cuyo tipo nadie propagó»: acreditaba con IVA lo que se
+            // facturó como INC, en un documento que va firmado a la DIAN.
+            tax_type: tax_item.tax_type,
+            invoice_item_id:
+              tax_item.line_index != null
+                ? (created_items[tax_item.line_index]?.id ?? null)
+                : null,
+          };
+        });
+        // Mismo `tx` que el `create` de arriba — NO `withoutScope()`: usar el
+        // cliente `baseClient` fuera de esta transacción escribiría en una
+        // conexión/transacción DISTINTA y el `invoices.create` de arriba
+        // podría comitear sin sus impuestos si esta llamada fallara después.
+        // `invoice_taxes` sigue sin registrar en `StorePrismaService`, así
+        // que no hay wrapper de scoping que perder: `created.id` y los ids de
+        // `created_items` ya se validaron en scope, ambos recién creados en
+        // esta misma transacción bajo el tenant de este servicio.
+        await tx.invoice_taxes.createMany({
+          data: tax_rows,
+        });
+        const refetched = await tx.invoices.findFirst({
+          where: { id: created.id },
+          include: INVOICE_INCLUDE,
+        });
+        if (!refetched) {
+          throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
         }
-        return {
-          invoice_id: note.id,
-          tax_rate_id: tax_item.tax_rate_id,
-          tax_name: tax_item.tax_name,
-          // F-212 — la nota es copista pura: el `tax_rate` que recibe
-          // viaja tal cual a `invoice_taxes` (`Decimal(5,2)`,
-          // PORCENTAJE). Por eso la nota 170 heredó el `0.19` de la
-          // factura 67. Este es un SEGUNDO escritor: no pasa por
-          // `buildInvoiceTaxCreateInput`, así que necesita el mismo
-          // desambiguador que el escritor de facturas.
-          tax_rate: normalizeInvoiceTaxRate(
-            tax_item.tax_rate,
-            tax_item.tax_type,
-          ),
-          taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
-          tax_amount: new Prisma.Decimal(tax_item.tax_amount),
-          // QUI-INC — sin `??` y sin ningún `as`. `resolveNoteTaxTypes`
-          // ya lo resolvió contra la fila fuente (el propio tributo del
-          // documento padre, o la `tax_categories` del `tax_rate_id`),
-          // y si no había de dónde resolverlo la nota no llegó hasta
-          // acá. El `?? 'iva'` que había en este punto no podía
-          // distinguir «tributo genuinamente sin tipar» de «tributo INC
-          // cuyo tipo nadie propagó»: acreditaba con IVA lo que se
-          // facturó como INC, en un documento que va firmado a la DIAN.
-          tax_type: tax_item.tax_type,
-          invoice_item_id:
-            tax_item.line_index != null
-              ? (created_items[tax_item.line_index]?.id ?? null)
-              : null,
-        };
-      });
-      // `withoutScope()`: mismo patrón y misma razón que el puente
-      // refund↔NC de más abajo — `invoice_taxes` no está registrado en
-      // `StorePrismaService` y no necesita estarlo: `note.id` y los ids de
-      // `created_items` ya se validaron en scope, ambos recién creados en
-      // esta misma llamada bajo el tenant de este servicio.
-      await this.prisma.withoutScope().invoice_taxes.createMany({
-        data: tax_rows,
-      });
-      const refetched = await this.prisma.invoices.findFirst({
-        where: { id: note.id },
-        include: INVOICE_INCLUDE,
-      });
-      if (!refetched) {
-        throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+        created = refetched;
       }
-      note = refetched;
-    }
+
+      return created;
+    });
 
     // Paso 7 — puente refund↔NC por línea. `withoutScope()` + ids ya
     // verificados: el modelo no está registrado en `StorePrismaService`
