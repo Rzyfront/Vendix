@@ -97,6 +97,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PAY_DUPLICATE_001: 'Ya se registro un pago para esta orden.',
   PAY_FIND_001: 'Pago no encontrado.',
   PAY_VALIDATE_001: 'La validacion de los datos de pago fallo.',
+  PAY_MULTI_TENDER_WALLET_INSUFFICIENT:
+    'El saldo Wallet no cubre los tramos asignados. No se cobró ningún método.',
   PAY_PERM_001: 'No tiene permisos para acceder a este recurso de pago.',
 
   // Authentication

@@ -1,26 +1,67 @@
-<app-payment-modal
-  context="order"
-  [open]="isOpen()"
-  (openChange)="isOpenChange.emit($event)"
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (closed)="closed.emit()"
   [title]="modalTitle()"
   [subtitle]="modalSubtitle()"
   size="lg"
-  [submitLabel]="submitLabel()"
   [dialog]="true"
-  [amount]="chargeAmount()"
-  [remainingBalance]="collectorRemaining()"
-  [paymentMethods]="collectorMethods()"
-  [autoLoad]="false"
-  [installments]="installments()"
-  [preSelectedInstallment]="preSelectedInstallment()"
-  [isProcessing]="isProcessing()"
-  [allowAmountOverride]="isCreditOrder()"
-  [allowTip]="!isCreditOrder()"
-  [allowMultiTender]="!isCreditOrder()"
-  [allowCredit]="false"
-  [allowWompi]="false"
-  [allowWallet]="false"
-  [showKeypad]="true"
-  (submit)="paymentSubmitted.emit($event)"
-  (closed)="closed.emit()"
-/>
+>
+  <app-payment-collector
+    #collector
+    context="order"
+    [amount]="chargeAmount()"
+    [remainingBalance]="collectorRemaining()"
+    [paymentMethods]="collectorMethods()"
+    [autoLoad]="false"
+    [installments]="installments()"
+    [preSelectedInstallment]="preSelectedInstallment()"
+    [isProcessing]="isProcessing()"
+    [allowAmountOverride]="isCreditOrder()"
+    [allowTip]="!isCreditOrder()"
+    [allowMultiTender]="!isCreditOrder()"
+    [allowCredit]="false"
+    [allowWompi]="false"
+    [allowWallet]="false"
+    [showKeypad]="true"
+    (submit)="submitPayment($event)"
+    (closed)="close()"
+  />
+
+  @if (isCreditOrder()) {
+    <p class="credit-cap" role="status">
+      Saldo pendiente máximo: <strong>{{ remainingBalance() | currency }}</strong>
+    </p>
+    @if (creditAmountExceedsBalance(collector.effectiveTotal())) {
+      <p class="credit-cap-error" role="alert">
+        El abono de {{ collector.effectiveTotal() | currency }} supera el saldo
+        pendiente de {{ remainingBalance() | currency }}. Reduce el importe en
+        {{ collector.effectiveTotal() - remainingBalance() | currency }} para continuar.
+      </p>
+    } @else if (remainingBalance() <= 0) {
+      <p class="credit-cap-error" role="alert">
+        Esta venta a crédito ya no tiene saldo pendiente por cobrar.
+      </p>
+    }
+  }
+
+  <div slot="footer" class="payment-footer">
+    <app-button
+      variant="primary"
+      [fullWidth]="true"
+      [loading]="isProcessing()"
+      [disabled]="isProcessing() || !collector.canSubmit() || creditAmountExceedsBalance(collector.effectiveTotal()) || (isCreditOrder() && remainingBalance() <= 0)"
+      (clicked)="collector.triggerSubmit()"
+    >
+      <app-icon slot="icon" name="check-circle" [size]="18" />
+      {{ submitLabel() }}
+    </app-button>
+    <app-button
+      variant="ghost"
+      [fullWidth]="true"
+      [disabled]="isProcessing()"
+      (clicked)="close()"
+      >Cancelar</app-button
+    >
+  </div>
+</app-modal>

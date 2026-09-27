@@ -188,6 +188,18 @@
                             </div>
                           }
                         }
+                        @if (leg.methodType === PaymentMethodType.WALLET) {
+                          <div class="pc-multi-row" role="status">
+                            @if (walletInfo(); as wallet) {
+                              <span>Saldo Wallet disponible: {{ wallet.balance | currency }}</span>
+                              @if (!multiWalletSufficient()) {
+                                <span class="error-text">El saldo Wallet no cubre los tramos asignados.</span>
+                              }
+                            } @else {
+                              <span>Consultando saldo Wallet…</span>
+                            }
+                          </div>
+                        }
                         @if (legNeedsReference(leg)) {
                           <div class="pc-multi-row">
                             <label class="pc-multi-field">
@@ -458,8 +470,8 @@
             }
 
             <!-- Tip -->
-            @if (config().allowTip) {
-              <section class="pc-card">
+            @if (config().allowTip && mode() === 'contado') {
+              <section class="pc-card" [class.pc-flash-target]="flashSection() === 'tip'">
                 <div class="section-header">
                   <div class="section-indicator"></div>
                   <h3 class="section-title">Propina (opcional)</h3>
@@ -506,6 +518,9 @@
                     (keydown.enter)="handleEnter($event); $event.stopPropagation()"
                   />
                 </div>
+                @if (tipValidationError()) {
+                  <p class="pc-warn">{{ tipValidationError() }}</p>
+                }
                 <label class="pc-tip-waiter">
                   <span>Mesero (opcional)</span>
                   <app-store-user-select
@@ -787,7 +802,19 @@
                       </div>
                     }
                   }
-                  @if (legNeedsReference(leg)) {
+                    @if (leg.methodType === PaymentMethodType.WALLET) {
+                      <div class="pc-multi-row" role="status">
+                        @if (walletInfo(); as wallet) {
+                          <span>Saldo Wallet disponible: {{ wallet.balance | currency }}</span>
+                          @if (!multiWalletSufficient()) {
+                            <span class="error-text">El saldo Wallet no cubre los tramos asignados.</span>
+                          }
+                        } @else {
+                          <span>Consultando saldo Wallet…</span>
+                        }
+                      </div>
+                    }
+                    @if (legNeedsReference(leg)) {
                     <div class="pc-multi-row">
                       <label class="pc-multi-field">
                         <span class="pc-multi-label">{{ legReferenceLabel(leg) }}</span>
@@ -1014,8 +1041,8 @@
       }
 
       <!-- Tip -->
-      @if (config().allowTip) {
-        <section class="pc-card">
+      @if (config().allowTip && mode() === 'contado') {
+        <section class="pc-card" [class.pc-flash-target]="flashSection() === 'tip'">
           <div class="section-header">
             <div class="section-indicator"></div>
             <h3 class="section-title">Propina (opcional)</h3>
@@ -1062,6 +1089,9 @@
               (keydown.enter)="handleEnter($event); $event.stopPropagation()"
             />
           </div>
+          @if (tipValidationError()) {
+            <p class="pc-warn">{{ tipValidationError() }}</p>
+          }
           <label class="pc-tip-waiter">
             <span>Mesero (opcional)</span>
             <app-store-user-select

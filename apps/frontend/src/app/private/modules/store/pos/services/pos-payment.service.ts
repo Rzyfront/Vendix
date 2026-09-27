@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, of, throwError, Subject } from 'rxjs';
-import { catchError, map, timeout, delay } from 'rxjs/operators';
+import { catchError, map, switchMap, timeout, delay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 import {
@@ -546,6 +546,14 @@ export class PosPaymentService {
       total_amount: Number(
         parseFloat(cartState.summary.total.toString()).toFixed(2),
       ),
+      ...(paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0
+        ? {
+            tip_amount: paymentRequest.tip_amount,
+            tip_type: paymentRequest.tip_type,
+            tip_value: paymentRequest.tip_value,
+            tip_waiter_id: paymentRequest.tip_waiter_id,
+          }
+        : {}),
       requires_payment: true,
       payment_form: '1', // DIAN: contado
       ...(hasMultiPayments
@@ -554,7 +562,8 @@ export class PosPaymentService {
             store_payment_method_id: parseInt(paymentRequest.paymentMethod.id),
             amount_received: Number(
               parseFloat(
-                (paymentRequest.cashReceived || cartState.summary.total).toString(),
+                (paymentRequest.cashReceived ||
+                  cartState.summary.total + (paymentRequest.tip_amount ?? 0)).toString(),
               ).toFixed(2),
             ),
             payment_reference: paymentRequest.reference || '',
@@ -568,6 +577,9 @@ export class PosPaymentService {
               ? { bank_account_id: paymentRequest.bank_account_id }
               : {}),
           }),
+      ...(hasMultiPayments && paymentRequest.idempotencyKey
+        ? { idempotency_key: paymentRequest.idempotencyKey }
+        : {}),
       wompi_payment_method: (paymentRequest.paymentMethod?.original as any)?.system_payment_method?.type === 'wompi'
         ? paymentRequest.metadata?.wompiPaymentMethod
         : undefined,
@@ -670,6 +682,11 @@ export class PosPaymentService {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
 
+    if (shippingData.manualCostOverride && shippingData.shippingRateId != null &&
+      (shippingData.manualShippingPrice == null || !Number.isFinite(shippingData.manualShippingPrice))) {
+      return throwError(() => new Error('Calcula el costo manual de envío antes de cobrar.'));
+    }
+
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
       return throwError(() => new Error('Usuario no identificado.'));
@@ -719,6 +736,14 @@ export class PosPaymentService {
       ),
       promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: totalWithShipping,
+      ...(paymentRequest?.tip_amount != null && paymentRequest.tip_amount > 0
+        ? {
+            tip_amount: paymentRequest.tip_amount,
+            tip_type: paymentRequest.tip_type,
+            tip_value: paymentRequest.tip_value,
+            tip_waiter_id: paymentRequest.tip_waiter_id,
+          }
+        : {}),
       // Shipping fields
       delivery_type: shippingData.deliveryType,
       shipping_method_id: shippingData.shippingMethodId,
@@ -731,6 +756,12 @@ export class PosPaymentService {
         : {}),
       ...(posShippingRateIdForPayload(shippingData) != null
         ? { shipping_rate_id: posShippingRateIdForPayload(shippingData) }
+        : {}),
+      ...(paymentRequest?.idempotencyKey
+        ? { idempotency_key: paymentRequest.idempotencyKey }
+        : {}),
+      ...(shippingData.manualCostOverride && shippingData.shippingRateId != null
+        ? { manual_shipping_price: shippingData.manualShippingPrice }
         : {}),
       // POS meta
       register_id: register_id,
@@ -779,7 +810,8 @@ export class PosPaymentService {
         );
         sale_data['amount_received'] = Number(
           parseFloat(
-            (paymentRequest.cashReceived || totalWithShipping).toString(),
+            (paymentRequest.cashReceived ||
+              totalWithShipping + (paymentRequest.tip_amount ?? 0)).toString(),
           ).toFixed(2),
         );
         sale_data['payment_reference'] = paymentRequest.reference || '';
@@ -1014,6 +1046,10 @@ export class PosPaymentService {
     shipping?: PosShippingSaleData | null,
   ): Observable<any> {
     // Drafts are NOT transactional — no cash register session required.
+    if (shipping?.manualCostOverride && shipping.shippingRateId != null &&
+      (shipping.manualShippingPrice == null || !Number.isFinite(shipping.manualShippingPrice))) {
+      return throwError(() => new Error('Calcula el costo manual de envío antes de guardar.'));
+    }
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
       return throwError(() => new Error('Usuario no identificado.'));
@@ -1065,6 +1101,9 @@ export class PosPaymentService {
               : {}),
             ...(posShippingRateIdForPayload(shipping) != null
               ? { shipping_rate_id: posShippingRateIdForPayload(shipping) }
+              : {}),
+            ...(shipping.manualCostOverride && shipping.shippingRateId != null
+              ? { manual_shipping_price: shipping.manualShippingPrice }
               : {}),
           }
         : {}),
@@ -1214,13 +1253,46 @@ export class PosPaymentService {
     register_id: string | null,
     tableSessionId?: number | null,
     tableId?: number | null,
+    previousTipOnOrder?: boolean,
   ): Observable<any> {
     const orderId = cartState.linkedOrderId as number;
     const orderNumber = cartState.linkedOrderNumber;
 
+    // A failed digital attempt can leave both a persisted tip and a pending
+    // reservation while the POS cart still shows the untipped product total.
+    // Read the authoritative order before any zero-tip adopted charge: never
+    // start another tender against a pending provider charge, and clear an old
+    // tip through flow/pay rather than the legacy endpoint (which has no tip
+    // contract and could collect an invisible residual balance).
+    if (!(paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0) &&
+        previousTipOnOrder === undefined) {
+      return this.ordersService.getOrderById(String(orderId)).pipe(switchMap((order) => {
+        const pendingDigital = order.payments?.find((payment) =>
+          payment.state === 'pending' &&
+          ['wallet', 'wompi'].includes(
+            payment.store_payment_method?.system_payment_method?.type ?? '',
+          ));
+        if (pendingDigital) {
+          return throwError(() => new Error(
+            `El cobro digital #${pendingDigital.id} sigue pendiente. Confírmalo o cancélalo desde el detalle de la orden antes de cambiar la propina o el medio de pago.`,
+          ));
+        }
+        return this.chargeAdoptedOrder(cartState, paymentRequest, user_id,
+          register_id, tableSessionId, tableId, Number(order.tip_amount ?? 0) > 0);
+      }));
+    }
+
     const multiPayments = (
       paymentRequest as { payments?: PosPaymentLeg[] }
     ).payments;
+    const tipFields = paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0
+      ? {
+          tip_amount: paymentRequest.tip_amount,
+          tip_type: paymentRequest.tip_type,
+          tip_value: paymentRequest.tip_value,
+          tip_waiter_id: paymentRequest.tip_waiter_id,
+        }
+      : { tip_amount: 0, tip_type: 'fixed' as const, tip_value: 0 };
     if (Array.isArray(multiPayments) && multiPayments.length >= 2) {
       return this.ordersService
         .flowPayOrder(String(orderId), {
@@ -1229,6 +1301,7 @@ export class PosPaymentService {
           store_payment_method_id: multiPayments[0].store_payment_method_id,
           payment_type: 'direct',
           payments: multiPayments,
+          ...tipFields,
         } as any)
         .pipe(
           map((response: any) => {
@@ -1255,6 +1328,50 @@ export class PosPaymentService {
             };
           }),
         );
+    }
+
+    if (((paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0) || previousTipOnOrder) &&
+        (paymentRequest.paymentMethod.type === 'wallet' ||
+          paymentRequest.paymentMethod.type === 'wompi')) {
+      return this.processExistingDigitalTip(cartState, paymentRequest, orderId);
+    }
+
+    // `/store/payments` has no tip contract. Direct methods can instead use
+    // flow/pay, which recalculates the order balance with the tip before charge.
+    // Gateway/ON_DELIVERY methods need the existing payment processor metadata,
+    // so never silently discard their tip or send it to an unsupported DTO.
+    if ((paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0) || previousTipOnOrder) {
+      const methodType = paymentRequest.paymentMethod.type;
+      const processingMode = (paymentRequest.paymentMethod.original as any)
+        ?.system_payment_method?.processing_mode;
+      if (processingMode != null && processingMode !== 'DIRECT') {
+        return throwError(() => new Error(
+          'Este método no permite agregar propina al cobrar una orden ya creada. Usa efectivo o tarjeta, o cobra la propina por separado.',
+        ));
+      }
+      const directTipPayment: Parameters<StoreOrdersService['flowPayOrder']>[1] & {
+        bank_account_id?: number;
+      } = {
+        store_payment_method_id: Number(paymentRequest.paymentMethod.id),
+        payment_type: 'direct',
+        amount_received: paymentRequest.cashReceived,
+        payment_reference: paymentRequest.reference,
+        ...(methodType === 'bank_transfer' && paymentRequest.bank_account_id != null
+          ? { bank_account_id: paymentRequest.bank_account_id }
+          : {}),
+        ...tipFields,
+      };
+      return this.ordersService.flowPayOrder(String(orderId), directTipPayment).pipe(map((response: any) => ({
+        success: true,
+        order: {
+          id: orderId,
+          order_number: orderNumber,
+          status: response?.order?.state,
+        },
+        payment: response?.payment,
+        message: response?.message ?? 'Pago aplicado a la orden',
+        change: response?.change ?? response?.payment?.change,
+      })));
     }
 
     const amount = Number(cartState.summary.total.toFixed(2));
@@ -1346,6 +1463,118 @@ export class PosPaymentService {
         };
       }),
       catchError((error) => rethrowApiError(error)),
+    );
+  }
+
+  /**
+   * flow/pay owns the existing order's tip, draft promotion and one pending
+   * payment reservation. The processor endpoint consumes THAT row only; a
+   * second gateway payment must never be created for this charge.
+   */
+  processExistingDigitalTip(
+    cartState: CartState,
+    paymentRequest: PaymentRequest,
+    orderId: number,
+  ): Observable<PosSalePaymentResponse> {
+    const methodType = paymentRequest.paymentMethod.type;
+    if (methodType !== 'wallet' && methodType !== 'wompi') {
+      return throwError(() => new Error('Este medio no usa cobro digital reservado.'));
+    }
+    const walletId = paymentRequest.metadata?.walletId;
+    if (methodType === 'wallet' && (!walletId || walletId <= 0)) {
+      return throwError(() => new Error('Selecciona el monedero del cliente antes de cobrar.'));
+    }
+    const wompiMethod = paymentRequest.metadata?.wompiPaymentMethod;
+    if (methodType === 'wompi' && !wompiMethod) {
+      return throwError(() => new Error('Selecciona cómo pagará el cliente con Wompi.'));
+    }
+
+    const tipFields = paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0
+      ? {
+          tip_amount: paymentRequest.tip_amount,
+          tip_type: paymentRequest.tip_type,
+          tip_value: paymentRequest.tip_value,
+          tip_waiter_id: paymentRequest.tip_waiter_id,
+        }
+      : { tip_amount: 0, tip_type: 'fixed' as const, tip_value: 0 };
+    return this.ordersService.flowPayOrder(String(orderId), {
+      store_payment_method_id: Number(paymentRequest.paymentMethod.id),
+      payment_type: 'online',
+      ...tipFields,
+    }).pipe(
+      // A timeout after reservation is ambiguous: never create a second row.
+      // flow/pay returns the existing payment id in its typed conflict; resume
+      // that same server-owned reservation with the same payment method.
+      catchError((error: any) => {
+        const details = error?.details as Record<string, unknown> | undefined;
+        const existingId = Number(details?.['payment_id']);
+        if (details?.['stage'] === 'digital_payment_pending' &&
+            Number.isSafeInteger(existingId) && existingId > 0) {
+          return this.ordersService.getOrderById(String(orderId)).pipe(switchMap((order) => {
+            const pending = order.payments?.find((payment) =>
+              payment.id === existingId && payment.state === 'pending');
+            const sameTip = Math.round(Number(order.tip_amount ?? 0) * 100) ===
+              Math.round(Number(paymentRequest.tip_amount ?? 0) * 100);
+            if (!pending || !sameTip ||
+                pending.store_payment_method_id !== Number(paymentRequest.paymentMethod.id)) {
+              return throwError(() => new Error(
+                `El cobro digital #${existingId} sigue pendiente con otro medio o importe. Consulta la orden antes de cambiar la propina o volver a cobrar.`,
+              ));
+            }
+            return of({ order: { state: 'pending_payment' },
+              payment: { id: existingId } } as any);
+          }));
+        }
+        return throwError(() => error);
+      }),
+      switchMap((reserved) => {
+        const reservedPayment = reserved?.payment as
+          | (typeof reserved.payment & { id?: number })
+          | undefined;
+        const paymentId = Number(reservedPayment?.id);
+        if (!Number.isSafeInteger(paymentId) || paymentId <= 0) {
+          return throwError(() => new Error(
+            'La orden quedó pendiente, pero no recibimos el identificador del cobro. Actualiza la orden antes de reintentar.',
+          ));
+        }
+        return this.posApi.processReservedPosPayment(paymentId, methodType === 'wallet'
+          ? { wallet_id: walletId }
+          : {
+              wompi_payment_method: wompiMethod,
+              returnUrl: window.location.origin + '/pos/payment-callback',
+        }).pipe(map((response) => {
+          const result = response?.data ?? response;
+          const payment = result?.payment;
+          const state = String(payment?.state ?? 'pending');
+          const pending = state === 'pending' || state === 'authorized';
+          const settled = state === 'succeeded' || state === 'captured';
+          const nextAction = pending && methodType === 'wompi'
+            ? result?.nextAction ?? { type: 'await' as const }
+            : result?.nextAction;
+          return {
+            success: settled || (pending && methodType === 'wompi'),
+            order: {
+              id: orderId,
+              order_number: cartState.linkedOrderNumber,
+              status: reserved?.order?.state,
+            },
+            payment: payment
+              ? { ...payment, paymentMethod: paymentRequest.paymentMethod,
+                  transactionId: payment.transaction_id }
+              : undefined,
+            nextAction,
+            message: pending && methodType === 'wallet'
+              ? 'El cobro del monedero está pendiente de conciliación. No intentes cobrar otra vez esta orden; consulta el detalle del pago.'
+              : result?.message,
+          } satisfies PosSalePaymentResponse;
+        }), catchError((error: unknown) => {
+          const wrapped = new Error(
+            `La orden tiene el cobro digital #${paymentId} reservado, pero no pudimos confirmar su resultado. Puedes reintentar Cobrar: se retomará ese mismo pago, sin crear otro. Si persiste, consulta el detalle de la orden antes de cobrar por otro medio.`,
+          ) as Error & { cause: unknown };
+          wrapped.cause = error;
+          return throwError(() => wrapped);
+        }));
+      }),
     );
   }
 

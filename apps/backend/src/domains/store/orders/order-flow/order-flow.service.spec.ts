@@ -3,7 +3,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { OrderFlowService } from './order-flow.service';
+import { OrderFlowService, isActualCodTender } from './order-flow.service';
 import { OrderFlowController } from './order-flow.controller';
 import { PERMISSIONS_KEY } from '../../../auth/decorators/permissions.decorator';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -17,6 +17,16 @@ import {
   PrismaMock,
 } from 'src/testing/prisma-mock';
 import { buildOrder, buildPayment } from 'src/testing/money-fixtures';
+
+describe('COD settlement tender', () => {
+  it('accepts cash, bank transfer and seeded datáfono; rejects COD itself and Stripe card', () => {
+    expect(isActualCodTender({ type: 'cash', processing_mode: 'DIRECT' })).toBe(true);
+    expect(isActualCodTender({ type: 'bank_transfer', processing_mode: 'ONLINE' })).toBe(true);
+    expect(isActualCodTender({ type: 'voucher', processing_mode: 'ONLINE' })).toBe(true);
+    expect(isActualCodTender({ type: 'cash_on_delivery', processing_mode: 'ON_DELIVERY' })).toBe(false);
+    expect(isActualCodTender({ type: 'card', processing_mode: 'ONLINE' })).toBe(false);
+  });
+});
 
 describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2)', () => {
   const DTO: any = { store_payment_method_id: 1, payment_type: PaymentType.DIRECT };
@@ -37,6 +47,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     const paymentsMock: any = {
       create: jest.fn(async () => { events.push('payment'); return { id: 99, gateway_response: {} }; }),
       update: jest.fn(async () => ({ id: 99, state: 'cancelled' })),
+      updateMany: jest.fn(async () => ({ count: 1 })),
       // B8/B4 — pre-chequeo de delivered/finished: pagos liquidados.
       count: jest.fn(async () => events.filter((e) => e === 'payment').length),
     };
@@ -165,6 +176,212 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     );
     expect(h.getState()).toBe('finished');
     expect(h.stock.releaseReservation).not.toHaveBeenCalled();
+  });
+
+  it('COD creates a real cash payment, keeps the original COD origin and voids only its pending marker', async () => {
+    const marker = {
+      id: 51, state: 'pending', amount: 100,
+      store_payment_method: {
+        system_payment_method: { type: 'cash_on_delivery', processing_mode: 'ON_DELIVERY' },
+      },
+    };
+    const h = harness(false, 'pending_payment', [marker as any]);
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue({
+      id: 1, system_payment_method: { type: 'cash', processing_mode: 'DIRECT', display_name: 'Efectivo' },
+    });
+    const history = { record: jest.fn().mockResolvedValue({ id: 1 }) };
+    (h.service as any).orderHistoryService = history;
+
+    await h.service.payOrder(1, DTO);
+
+    expect(h.prismaMock.payments.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        store_payment_method_id: 1,
+        state: 'succeeded',
+        gateway_response: expect.objectContaining({
+          metadata: expect.objectContaining({
+            payment_origin: 'cash_on_delivery',
+            original_pending_payment_ids: [51],
+          }),
+        }),
+      }),
+    }));
+    expect(h.prismaMock.payments.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [51] }, state: 'pending' },
+      data: expect.objectContaining({ state: 'cancelled' }),
+    });
+    expect(history.record).toHaveBeenCalledWith(h.tx, expect.objectContaining({
+      type: 'payment_registered',
+      payload: expect.objectContaining({
+        payment_origin: 'cash_on_delivery',
+        actual_store_payment_method_id: 1,
+      }),
+    }));
+  });
+
+  it('mesa draft con propina reserva Wompi una vez y expone el id sin duplicar en un segundo flow/pay', async () => {
+    const h = harness();
+    const order = {
+      id: 1,
+      store_id: 4,
+      customer_id: 44,
+      table_session_id: 55,
+      delivery_type: 'dine_in',
+      subtotal_amount: 100,
+      tax_amount: 0,
+      grand_total: 100,
+      tip_amount: 0,
+      currency: 'COP',
+    };
+    const payments: any[] = [];
+    jest.spyOn(h.service as any, 'getOrder').mockImplementation(async () => ({
+      ...order,
+      state: h.getState(),
+      payments,
+    }));
+    h.prismaMock.orders.update = jest.fn(async ({ data }: any) => {
+      Object.assign(order, data);
+      return { ...order };
+    });
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue({
+      id: 1,
+      system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' },
+    });
+    h.prismaMock.payments.create.mockImplementation(async ({ data }: any) => {
+      const payment = {
+        id: 99,
+        ...data,
+        store_payment_method: {
+          system_payment_method: { type: 'wompi' },
+        },
+      };
+      payments.push(payment);
+      h.events.push('payment');
+      return payment;
+    });
+    const dto = {
+      store_payment_method_id: 1,
+      payment_type: PaymentType.ONLINE,
+      payment_reference: 'untrusted-client-reference',
+      tip_type: 'percentage' as const,
+      tip_value: 10,
+    };
+
+    const reserved = await h.service.payOrder(1, dto);
+
+    expect(h.prismaMock.orders.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: expect.objectContaining({ tip_amount: 10, grand_total: 110 }),
+    });
+    expect(h.prismaMock.payments.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        amount: 110,
+        state: 'pending',
+        gateway_reference: null,
+        gateway_response: { payment_type: 'online' },
+      }),
+    });
+    expect(reserved.payment).toEqual({ id: 99, transaction_id: 'TXN-1' });
+    expect(h.getState()).toBe('pending_payment');
+    expect(h.reservations).toHaveLength(1);
+    expect(h.events).toEqual(['reserve', 'payment']);
+
+    const retryError = await h.service.payOrder(1, dto).catch((failure) => failure);
+    expect(retryError).toBeInstanceOf(VendixHttpException);
+    expect(retryError.errorCode).toBe(ErrorCodes.ORD_FLOW_PAYMENT_FAILED_001.code);
+    expect(h.getState()).toBe('pending_payment');
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(h.prismaMock.orders.update).toHaveBeenCalledTimes(1);
+    expect(h.reservations).toHaveLength(1);
+  });
+
+  it.each([
+    ['antes de escribir estado', false],
+    ['después de escribir estado (historial)', true],
+  ])('reserva digital: fallo %s anula sólo el pending nuevo y restaura el draft', async (_label, stateWritten) => {
+    const h = harness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue({
+      id: 1,
+      system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' },
+    });
+    h.tx.payments.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const updateState = (h.service as any).updateOrderState as jest.Mock;
+    updateState.mockImplementationOnce(async () => {
+      if (stateWritten) {
+        await h.prismaMock.orders.updateMany({
+          where: { id: 1, state: 'processing' },
+          data: { state: 'pending_payment' },
+        });
+      }
+      throw new Error('state/history write failed');
+    });
+
+    await expect(h.service.payOrder(1, {
+      store_payment_method_id: 1,
+      payment_type: PaymentType.ONLINE,
+    })).rejects.toThrow('state/history write failed');
+
+    expect(h.tx.payments.updateMany).toHaveBeenCalledWith({
+      where: { id: 99, order_id: 1, state: 'pending' },
+      data: expect.objectContaining({ state: 'cancelled' }),
+    });
+    expect(h.getState()).toBe('draft');
+    expect(h.reservations.filter((row) => row.status === 'active')).toHaveLength(0);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+
+    await h.service.payOrder(1, {
+      store_payment_method_id: 1,
+      payment_type: PaymentType.ONLINE,
+    });
+    expect(h.getState()).toBe('pending_payment');
+    expect(h.reservations.filter((row) => row.status === 'active')).toHaveLength(1);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('si la compensación falla tras escribir pending_payment, el retry no crea otra reserva', async () => {
+    const h = harness(false, 'created');
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue({
+      id: 1,
+      system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' },
+    });
+    let reserved: any;
+    jest.spyOn(h.service as any, 'getOrder').mockImplementation(async () => ({
+      id: 1,
+      state: h.getState(),
+      store_id: 4,
+      customer_id: 44,
+      delivery_type: 'direct_delivery',
+      grand_total: 100,
+      currency: 'COP',
+      payments: reserved ? [reserved] : [],
+    }));
+    h.prismaMock.payments.create.mockImplementation(async ({ data }: any) => {
+      reserved = {
+        id: 99,
+        ...data,
+        store_payment_method: { system_payment_method: { type: 'wompi' } },
+      };
+      return reserved;
+    });
+    h.tx.payments.updateMany = jest.fn().mockRejectedValue(new Error('cannot cancel pending row'));
+    ((h.service as any).updateOrderState as jest.Mock).mockImplementationOnce(async () => {
+      await h.prismaMock.orders.updateMany({
+        where: { id: 1, state: 'processing' },
+        data: { state: 'pending_payment' },
+      });
+      throw new Error('history failed');
+    });
+    const dto = { store_payment_method_id: 1, payment_type: PaymentType.ONLINE };
+
+    await expect(h.service.payOrder(1, dto)).rejects.toThrow('history failed');
+    expect(h.getState()).toBe('pending_payment');
+    expect(reserved.state).toBe('pending');
+
+    const retryError = await h.service.payOrder(1, dto).catch((failure) => failure);
+    expect(retryError).toBeInstanceOf(VendixHttpException);
+    expect(retryError.errorCode).toBe(ErrorCodes.ORD_FLOW_PAYMENT_FAILED_001.code);
+    expect(h.getState()).toBe('pending_payment');
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
   });
 
   it('segundo submit no reserva ni cobra y conserva el 409 tipado', async () => {
@@ -542,6 +759,85 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.reservations).toHaveLength(1);
     expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
   });
+
+  // no-overselling-stock-guard-plan.md, BUG 1 (2026-09-26): la misma clase
+  // de defecto que en `payments.service.ts` — el bucle de `groups` sólo
+  // excluía `inventory_consumed_at_fire` (cocina) y los platos que van a
+  // KDS, nunca una línea ya ENTREGADA (`inventory_committed=true`, stock ya
+  // descontado por `commitOrderLines`, reserva ya consumida) ni una línea
+  // CANCELADA (reserva ya liberada por `cancelOrderItem`). Una mesa con
+  // ambas volvía a demandarlas al promover el draft a `created` (justo
+  // antes de cobrar) y podía 409 con `INV_STOCK_INSUFFICIENT_LINES` aunque
+  // el faltante real fuera cero — no queda nada que reclamar de ninguna de
+  // las dos.
+  it('BUG 1: una línea entregada o cancelada no se re-demanda ni se re-reserva al promover el draft', async () => {
+    const tx: any = {
+      $queryRaw: jest.fn(async () => [{ id: 1, state: 'draft' }]),
+      orders: {
+        findFirst: jest.fn(async () => ({
+          id: 1,
+          store_id: 4,
+          order_items: [
+            {
+              product_id: 701, product_variant_id: null, quantity: 5,
+              inventory_committed: true, cancelled_at: null,
+              products: { id: 701, name: 'MODELO', track_inventory: true, product_type: 'physical' },
+            },
+            {
+              product_id: 702, product_variant_id: null, quantity: 3,
+              inventory_committed: false, cancelled_at: new Date(),
+              products: { id: 702, name: 'OTRO', track_inventory: true, product_type: 'physical' },
+            },
+          ],
+        })),
+        update: jest.fn(async ({ data }: any) => ({ id: 1, state: data.state })),
+      },
+      stock_reservations: { aggregate: jest.fn(async () => ({ _sum: { quantity: 0 } })) },
+    };
+    const prisma: any = { $transaction: jest.fn(async (cb: any) => cb(tx)) };
+    const stockLevelManager: any = {
+      reserveStock: jest.fn(),
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(11),
+    };
+    // Sonda: si el fix no excluyera las dos líneas ya asentadas, `groups`
+    // llegaría con demanda > 0 y este mock rechazaría con el mismo 409 que
+    // produciría un stock realmente en 0.
+    const assertLinesAvailable = jest.fn().mockImplementation((lines: any[]) => {
+      if (lines.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+          'Stock insuficiente',
+          {
+            items: lines.map((l: any) => ({
+              product_name: l.product_name, requested: l.quantity, available: 0,
+            })),
+          },
+        );
+      }
+      return Promise.resolve([]);
+    });
+    const stockValidator: any = {
+      resolveInventoryPolicy: jest.fn().mockResolvedValue({
+        allowOversell: false, allowIngredientOveruse: true,
+      }),
+      assertLinesAvailable,
+    };
+    const audit: any = { logCustom: jest.fn() };
+
+    const service = new OrderFlowService(
+      prisma, {} as any, {} as any, {} as any, {} as any,
+      stockLevelManager, {} as any, {} as any, audit,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      stockValidator,
+    );
+    jest.spyOn(service as any, 'updateOrderState').mockResolvedValue(undefined);
+
+    const promoted = await (service as any).promoteDraftToCreated(1, 4);
+
+    expect(promoted).toBe(true);
+    expect(assertLinesAvailable).not.toHaveBeenCalled();
+    expect(stockLevelManager.reserveStock).not.toHaveBeenCalled();
+  });
 });
 
 describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
@@ -553,6 +849,7 @@ describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
   const harness = (state: string, items: typeof pendingItems) => {
     const prisma: any = {
       kitchen_ticket_items: { findMany: jest.fn().mockResolvedValue(items) },
+      order_items: { findMany: jest.fn().mockResolvedValue([]) },
     };
     const service = new OrderFlowService(
       prisma, {} as any, {} as any, {} as any, {} as any,
@@ -834,9 +1131,12 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
       order_items: ['findMany', 'update'],
       inventory_transactions: ['findMany'],
       kitchen_tickets: ['findFirst'],
+      kitchen_ticket_items: ['findFirst'],
       invoices: ['findMany', 'findFirst'],
       accounts_receivable: ['findMany', 'update'],
       order_installments: ['updateMany'],
+      audit_logs: ['findFirst', 'create'],
+      inventory_cost_layers: ['create'],
     });
     prismaMock.invoices.findMany.mockResolvedValue([]);
     prismaMock.accounts_receivable.findMany.mockResolvedValue([]);
@@ -846,7 +1146,11 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     prismaMock.order_items.findMany.mockResolvedValue([firedItem(status)]);
     prismaMock.order_items.update.mockResolvedValue({});
     prismaMock.inventory_transactions.findMany.mockResolvedValue(consumptions);
+    prismaMock.audit_logs.findFirst.mockResolvedValue(null);
+    prismaMock.audit_logs.create.mockResolvedValue({ id: 1 });
+    prismaMock.inventory_cost_layers.create.mockResolvedValue({ id: 1 });
     prismaMock.kitchen_tickets.findFirst.mockResolvedValue({ status });
+    prismaMock.kitchen_ticket_items.findFirst.mockResolvedValue(null);
 
     const stock = {
       getDefaultLocationForProduct: jest.fn().mockImplementation(
@@ -861,7 +1165,7 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
       releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
     };
     const kds = {
-      cancelTicketInTx: jest.fn().mockResolvedValue(undefined),
+      cancelTicketItemInTx: jest.fn().mockResolvedValue('cancelled'),
       emitTicketCancelledEvent: jest.fn().mockResolvedValue(undefined),
     };
     const emitter = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
@@ -907,7 +1211,7 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledTimes(1);
     expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledWith({
       where: { order_item_id: ITEM_ID, quantity_change: { lt: 0 } },
-      select: { product_id: true, product_variant_id: true, quantity_change: true },
+      select: { id: true, product_id: true, product_variant_id: true, quantity_change: true, unit_cost: true, total_cost: true },
     });
     expect(stock.getDefaultLocationForProduct.mock.calls).toEqual([
       [701, undefined], [702, 91], [703, undefined],
@@ -920,14 +1224,15 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     ];
     expectedReturns.forEach((leaf, index) => {
       const [movement, tx] = stock.updateStock.mock.calls[index];
-      expect(movement).toEqual({
+      expect(movement).toMatchObject({
         ...leaf,
         movement_type: 'return',
-        reason: expect.stringContaining(`orden #${ORDER_ID} ítem #${ITEM_ID}`),
         source_module: 'order_item_cancellation',
         create_movement: true,
         validate_availability: false,
+        allow_negative: true,
       });
+      expect(movement.reason).toContain(`orden #${ORDER_ID} ítem #${ITEM_ID}`);
       expect(movement).not.toHaveProperty('order_item_id');
       expect(tx).toBe(prismaMock);
     });
@@ -940,13 +1245,13 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     });
     expect(prismaMock.order_items.update.mock.calls[0][0].data)
       .not.toHaveProperty('inventory_consumed_at_fire');
-    expect(kds.cancelTicketInTx).not.toHaveBeenCalled();
+    expect(kds.cancelTicketItemInTx).not.toHaveBeenCalled();
     expect(emitter.emit).toHaveBeenCalledWith('order.status_changed', expect.objectContaining({
       order_id: ORDER_ID, new_state: 'cancelled',
     }));
   });
 
-  it('kitchenDisposition waste: registra merma sin consultar consumos ni devolver stock', async () => {
+  it('kitchenDisposition waste: registra el costo consumido para reclasificar sin devolver stock', async () => {
     const { service, prismaMock, stock, kds } = buildKitchenHarness('ready', [
       { product_id: 701, product_variant_id: null, quantity_change: -2.5 },
       { product_id: 702, product_variant_id: 91, quantity_change: -1.25 },
@@ -962,10 +1267,10 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     });
     expect(prismaMock.order_items.update.mock.calls[0][0].data)
       .not.toHaveProperty('inventory_consumed_at_fire');
-    expect(prismaMock.inventory_transactions.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledTimes(1);
     expect(stock.getDefaultLocationForProduct).not.toHaveBeenCalled();
     expect(stock.updateStock).not.toHaveBeenCalled();
-    expect(kds.cancelTicketInTx).not.toHaveBeenCalled();
+    expect(kds.cancelTicketItemInTx).not.toHaveBeenCalled();
   });
 
   it('sin kitchenDisposition y ticket avanzado: error tipado antes del claim, sin efectos', async () => {
@@ -980,7 +1285,7 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     expect(stock.updateStock).not.toHaveBeenCalled();
   });
 
-  it('ticket pending: cancela sin kitchenDisposition y conserva after_fire_waste', async () => {
+  it('ticket pending: cancela sin kitchenDisposition y reintegra automáticamente', async () => {
     const { service, prismaMock, stock, kds, emitter } = buildKitchenHarness('pending');
 
     await expect(service.cancelOrder(ORDER_ID, { reason }))
@@ -989,13 +1294,13 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     expect(prismaMock.kitchen_tickets.findFirst).toHaveBeenCalledWith({
       where: { id: TICKET_ID }, select: { status: true },
     });
-    expect(kds.cancelTicketInTx).toHaveBeenCalledWith(prismaMock, TICKET_ID);
+    expect(kds.cancelTicketItemInTx).toHaveBeenCalledWith(prismaMock, TICKET_ID, ITEM_ID);
     expect(kds.emitTicketCancelledEvent).toHaveBeenCalledWith(TICKET_ID);
     expect(prismaMock.order_items.update).toHaveBeenCalledWith({
       where: { id: ITEM_ID },
-      data: expect.objectContaining({ cancellation_type: 'after_fire_waste' }),
+      data: expect.objectContaining({ cancellation_type: 'after_fire_reused' }),
     });
-    expect(prismaMock.inventory_transactions.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledTimes(1);
     expect(stock.updateStock).not.toHaveBeenCalled();
     expect(emitter.emit).toHaveBeenCalledWith('order.status_changed', expect.anything());
   });
@@ -1008,7 +1313,7 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
 
     expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledWith({
       where: { order_item_id: ITEM_ID, quantity_change: { lt: 0 } },
-      select: { product_id: true, product_variant_id: true, quantity_change: true },
+      select: { id: true, product_id: true, product_variant_id: true, quantity_change: true, unit_cost: true, total_cost: true },
     });
     expect(prismaMock.order_items.update).toHaveBeenCalledWith({
       where: { id: ITEM_ID },
@@ -1601,7 +1906,12 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
         ),
       },
       inventory_transactions: { findMany: jest.fn().mockResolvedValue([]) },
-      payments: { findFirst: jest.fn().mockResolvedValue(null) },
+      audit_logs: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ id: 1 }) },
+      inventory_cost_layers: { create: jest.fn().mockResolvedValue({ id: 1 }) },
+      payments: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       order_items: {
         update: jest.fn().mockResolvedValue({}),
         findMany: jest.fn().mockResolvedValue(
@@ -1628,7 +1938,7 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
       updateStock: jest.fn().mockResolvedValue({}),
     };
     const kitchenFireService = {
-      cancelTicketInTx: jest.fn().mockResolvedValue(undefined),
+      cancelTicketItemInTx: jest.fn().mockResolvedValue('cancelled'),
       emitTicketCancelledEvent: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -1721,7 +2031,7 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
 
     expect((result as any).id).toBe(ORDER_ID);
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
-    expect(kitchenFireService.cancelTicketInTx).not.toHaveBeenCalled();
+    expect(kitchenFireService.cancelTicketItemInTx).not.toHaveBeenCalled();
     expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
   });
 
@@ -1810,8 +2120,52 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     expect(Number(updateData.subtotal_amount)).toBe(70000);
     expect(Number(updateData.tax_amount)).toBe(8000);
     expect(Number(updateData.grand_total)).toBe(78000);
-    expect(kitchenFireService.cancelTicketInTx).not.toHaveBeenCalled();
+    expect(kitchenFireService.cancelTicketItemInTx).not.toHaveBeenCalled();
     expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
+  });
+
+  it('ajusta el marcador COD pendiente al nuevo total tras cancelar un ítem', async () => {
+    const { service, txMock } = buildService({
+      order: {
+        id: ORDER_ID, store_id: 4, state: 'pending_payment',
+        shipping_cost: 5000,
+        payments: [{
+          id: 88, state: 'pending', amount: 71000,
+          store_payment_method: {
+            system_payment_method: { processing_mode: 'ON_DELIVERY' },
+          },
+        }],
+      },
+      activeItems: [{ total_price: 38000, order_item_taxes: [] }],
+    });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'plato cancelado');
+
+    const orderData = txMock.orders.update.mock.calls[0][0].data;
+    expect(Number(orderData.subtotal_amount)).toBe(38000);
+    expect(Number(orderData.grand_total)).toBe(43000);
+    expect(txMock.payments.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [88] }, order_id: ORDER_ID, state: 'pending' },
+      data: { amount: expect.anything(), updated_at: expect.any(Date) },
+    });
+    expect(Number(txMock.payments.updateMany.mock.calls[0][0].data.amount)).toBe(43000);
+  });
+
+  it('no ajusta un pago pendiente de pasarela al cancelar un ítem', async () => {
+    const { service, txMock } = buildService({
+      order: {
+        id: ORDER_ID, store_id: 4, state: 'pending_payment',
+        payments: [{
+          id: 89, state: 'pending', amount: 71000,
+          store_payment_method: {
+            system_payment_method: { processing_mode: 'ONLINE' },
+          },
+        }],
+      },
+    });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'plato cancelado');
+    expect(txMock.payments.updateMany).not.toHaveBeenCalled();
   });
 
   // C.8/F-082 (blocker) — antes el recálculo escribía `grand_total` como
@@ -1855,8 +2209,8 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
 
     await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'se quemó el plato');
 
-    expect(kitchenFireService.cancelTicketInTx).toHaveBeenCalledTimes(1);
-    expect(kitchenFireService.cancelTicketInTx.mock.calls[0][1]).toBe(
+    expect(kitchenFireService.cancelTicketItemInTx).toHaveBeenCalledTimes(1);
+    expect(kitchenFireService.cancelTicketItemInTx.mock.calls[0][1]).toBe(
       TICKET_ID,
     );
     expect(kitchenFireService.emitTicketCancelledEvent).toHaveBeenCalledWith(
@@ -1868,20 +2222,19 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     });
   });
 
-  it('TOCTOU: ticket avanzado en cocina → merma sin tocar el KDS', async () => {
+  it('TOCTOU: ticket avanzado en cocina → rechaza antes de mover stock o KDS', async () => {
     const { service, txMock, kitchenFireService } = buildService({
       item: firedItemPending(),
       freshTicketStatus: 'in_preparation',
     });
 
-    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'el cliente se fue');
-
-    expect(kitchenFireService.cancelTicketInTx).not.toHaveBeenCalled();
-    expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
-    expect(txMock.order_items.update).toHaveBeenCalledWith({
-      where: { id: ITEM_ID },
-      data: expect.objectContaining({ cancellation_type: 'after_fire_waste' }),
+    await expect(service.cancelOrderItem(ORDER_ID, ITEM_ID, 'el cliente se fue')).rejects.toMatchObject({
+      errorCode: 'TABLE_SESSION_ADD_ITEMS_INVALID',
     });
+
+    expect(kitchenFireService.cancelTicketItemInTx).not.toHaveBeenCalled();
+    expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
+    expect(txMock.order_items.update).not.toHaveBeenCalled();
   });
 
   it('cancellation_type explícito se respeta aunque sea inconsistente', async () => {
@@ -2099,6 +2452,23 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
     jest.spyOn(service as any, 'getOrder').mockResolvedValue(orderView);
     return { service, prismaMock, eventEmitter, kitchenFireService, orderView, commitOrderLines };
   };
+
+  it('rechaza entrega de plato physical aún pendiente en cocina sin mover stock ni sello', async () => {
+    const { service, prismaMock, commitOrderLines } = buildService({
+      item: readyItem({
+        item_type: 'physical',
+        products: { product_type: 'prepared' },
+        skip_kds: false,
+        kitchen_ticket_items: [{ id: 900, status: 'pending' }],
+      }),
+    });
+
+    await expect(service.deliverOrderItem(ORDER_ID, ITEM_ID)).rejects.toMatchObject({
+      errorCode: ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE.code,
+    });
+    expect(commitOrderLines).not.toHaveBeenCalled();
+    expect(prismaMock.order_items.updateMany).not.toHaveBeenCalled();
+  });
 
   it('faltante al entregar no estampa delivered_at ni actualiza cocina', async () => {
     const { service, prismaMock, commitOrderLines } = buildService({});
@@ -2347,7 +2717,7 @@ describe('OrderFlowService.cancelOrderItem — guarda delivered (1060 paso 1)', 
       $transaction: jest.fn((cb: any) => cb(txMock)),
     };
     const kitchenFireService = {
-      cancelTicketInTx: jest.fn().mockResolvedValue(undefined),
+      cancelTicketItemInTx: jest.fn().mockResolvedValue('cancelled'),
       emitTicketCancelledEvent: jest.fn().mockResolvedValue(undefined),
     };
     const service = new OrderFlowService(
@@ -2380,7 +2750,7 @@ describe('OrderFlowService.cancelOrderItem — guarda delivered (1060 paso 1)', 
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
     expect(txMock.order_items.update).not.toHaveBeenCalled();
     expect(txMock.orders.update).not.toHaveBeenCalled();
-    expect(kitchenFireService.cancelTicketInTx).not.toHaveBeenCalled();
+    expect(kitchenFireService.cancelTicketItemInTx).not.toHaveBeenCalled();
     expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
   });
 
@@ -2447,7 +2817,10 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
   }) => {
     const txMock: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
-      payments: { findFirst: jest.fn().mockResolvedValue(null) },
+      payments: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       order_items: {
         update: jest.fn().mockResolvedValue({}),
         findMany: jest.fn().mockResolvedValue(
@@ -2586,6 +2959,32 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
       ORDER_ID, ITEM_ID, 'mosca en el plato', 'waste',
     );
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('reprecio COD pendiente al reversar una línea entregada sin cobrar', async () => {
+    const { service, txMock } = buildService({
+      order: {
+        state: 'delivered', shipping_cost: 5000,
+        payments: [{
+          id: 92, state: 'pending', amount: 71000,
+          store_payment_method: {
+            system_payment_method: { processing_mode: 'ON_DELIVERY' },
+          },
+        }],
+      },
+      activeItems: [{ total_price: 38000, order_item_taxes: [] }],
+    });
+
+    await service.cancelDeliveredOrderItem(
+      ORDER_ID, ITEM_ID, 'plato devuelto sin cobro', 'waste',
+    );
+
+    expect(Number(txMock.orders.update.mock.calls[0][0].data.grand_total)).toBe(43000);
+    expect(txMock.payments.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [92] }, order_id: ORDER_ID, state: 'pending' },
+      data: { amount: expect.anything(), updated_at: expect.any(Date) },
+    });
+    expect(Number(txMock.payments.updateMany.mock.calls[0][0].data.amount)).toBe(43000);
   });
 
   it('restock: devuelve stock, cancela suave y audita con destino', async () => {
@@ -2820,7 +3219,7 @@ describe('D.2 — cancelación de una línea prepared ya consumida', () => {
           ? leaves.map((leaf) => ({ ...leaf, unit_cost: null, total_cost: null })) : leaves,
       ) },
       inventory_cost_layers: { create: jest.fn().mockResolvedValue({ id: 1 }) },
-      audit_logs: { create: jest.fn().mockResolvedValue({ id: 99 }) },
+      audit_logs: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ id: 99 }) },
     };
     const prisma: any = {
       order_items: { findFirst: jest.fn().mockResolvedValue(item) },
@@ -2846,7 +3245,7 @@ describe('D.2 — cancelación de una línea prepared ya consumida', () => {
     const service = new OrderFlowService(
       prisma, events as any, {} as any, {} as any, {} as any,
       stock as any, {} as any, {} as any, audit as any,
-      { cancelTicketInTx: jest.fn(), emitTicketCancelledEvent: jest.fn() } as any,
+      { cancelTicketItemInTx: jest.fn(), emitTicketCancelledEvent: jest.fn() } as any,
       undefined, undefined, undefined, accounting as any,
     );
     jest.spyOn(service, 'getOrder').mockResolvedValue({
@@ -2977,19 +3376,15 @@ describe('D.2 — cancelación de una línea prepared ya consumida', () => {
     }) });
   });
 
-  it('D.2 item 6: sin tipo explícito, la línea disparada cae a desechar, nunca a reusar', async () => {
+  it('D.2 item 6: una línea avanzada sin decisión explícita se rechaza antes de mutar', async () => {
     const { tx, stock, accounting, service } = harness(false, 'waste');
-    await service.cancelOrderItem(orderId, itemId, 'motivo válido');
-    expect(tx.order_items.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ cancellation_type: 'after_fire_waste' }),
-    }));
+    await expect(service.cancelOrderItem(orderId, itemId, 'motivo válido')).rejects.toMatchObject({
+      errorCode: 'TABLE_SESSION_ADD_ITEMS_INVALID',
+    });
+    expect(tx.order_items.update).not.toHaveBeenCalled();
     expect(stock.updateStock).not.toHaveBeenCalled();
-    expect(accounting.onPreparedDishDisposition).toHaveBeenCalledWith(expect.objectContaining({
-      disposition: 'waste',
-    }));
-    expect(tx.audit_logs.create).toHaveBeenCalledWith({ data: expect.objectContaining({
-      metadata: expect.objectContaining({ destination: 'waste' }),
-    }) });
+    expect(accounting.onPreparedDishDisposition).not.toHaveBeenCalled();
+    expect(tx.audit_logs.create).not.toHaveBeenCalled();
   });
 });
 
@@ -4062,6 +4457,29 @@ describe('OrderFlowService.getAvailableActions — B4 (release-855) delivered/fi
     expect(actions.find((a) => a.code === 'cancel_payment')).toBeUndefined();
   });
 
+  it('COD home delivery pending payment exposes one dispatch action, never pickup or a second disabled dispatch', async () => {
+    const order = deliveredOrder([], {
+      state: 'pending_payment', delivery_type: 'home_delivery', shipping_method_id: 4,
+      payment_form: '1', order_items: [{ id: 1 }],
+    });
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+    const actions = await service.getAvailableActions(ORDER_ID);
+    expect(actions.filter((action) => action.code === 'dispatch_order')).toHaveLength(1);
+    expect(actions.some((action) => action.code === 'manual_ship' || action.code === 'ready_for_pickup')).toBe(false);
+    expect(actions.find((action) => action.code === 'confirm_payment')?.enabled).toBe(true);
+  });
+
+  it('home delivery processing keeps only its dispatch action, not legacy pickup/shipping duplicates', async () => {
+    const order = deliveredOrder([], {
+      state: 'processing', delivery_type: 'home_delivery', shipping_method_id: 4,
+      order_items: [{ id: 1 }],
+    });
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+    const actions = await service.getAvailableActions(ORDER_ID);
+    expect(actions.filter((action) => action.code === 'dispatch_order')).toHaveLength(1);
+    expect(actions.some((action) => ['manual_ship', 'ready_for_pickup', 'ship_with_tracking'].includes(action.code))).toBe(false);
+  });
+
   it('surfaces `pay` disabled (already paid) and `cancel_payment` enabled for a settled direct payment', async () => {
     const order = deliveredOrder([
       buildPayment({
@@ -4216,6 +4634,44 @@ describe('OrderFlowService.confirmPayment — B8 (release-855) settles the balan
       undefined, undefined, undefined, undefined,
     );
     jest.spyOn(service as any, 'commitCouponUseForOrder').mockResolvedValue(undefined);
+  });
+
+  it('refuses manual confirmation of an unpaid reserved wallet or Wompi charge', async () => {
+    const grandTotal = new Prisma.Decimal('59.50');
+    const order = buildOrder({
+      id: ORDER_ID,
+      state: 'pending_payment',
+      grand_total: grandTotal,
+      payments: [{
+        ...buildPayment({ id: 5004, state: 'pending', amount: grandTotal }),
+        gateway_response: { payment_type: 'online', pos_reserved_payment: true },
+        store_payment_method: { system_payment_method: { type: 'wallet' } },
+      }],
+    });
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+
+    await expect(service.confirmPayment(ORDER_ID)).rejects.toThrow(
+      'pendiente de confirmación',
+    );
+    expect(prismaMock.payments.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('never marks the ON_DELIVERY promise succeeded without selecting the actual tender', async () => {
+    const grandTotal = new Prisma.Decimal('59.50');
+    const order = buildOrder({
+      id: ORDER_ID,
+      state: 'pending_payment',
+      grand_total: grandTotal,
+      payments: [{
+        ...buildPayment({ id: 5005, state: 'pending', amount: grandTotal }),
+        store_payment_method: { system_payment_method: { type: 'cash_on_delivery', processing_mode: 'ON_DELIVERY' } },
+      }],
+    });
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+
+    await expect(service.confirmPayment(ORDER_ID)).rejects.toThrow('método real');
+    expect(prismaMock.payments.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
   });
 
   it('settles total_paid/remaining_balance to grand_total/0 when the pending payment is confirmed', async () => {
@@ -4912,21 +5368,158 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     expect(paymentReceivedCalls[0][1]).toMatchObject({ amount: 100000 });
   });
 
+  it('transferencia escalar conserva la cuenta bancaria validada antes de registrar el pago', async () => {
+    const h = buildHarness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue(LEG_METHODS[1]);
+    h.prismaMock.orders.update = jest.fn().mockResolvedValue({});
+    const orderWithTip = {
+      id: 1,
+      state: 'processing',
+      delivery_type: 'direct_delivery',
+      subtotal_amount: 100000,
+      tax_amount: 0,
+      grand_total: 110000,
+      tip_amount: 10000,
+      currency: 'COP',
+      store_id: 4,
+      customer_id: 44,
+      payments: [],
+    };
+    (h.service as any).getOrder.mockResolvedValueOnce({
+      ...orderWithTip,
+      grand_total: 100000,
+      tip_amount: 0,
+    }).mockResolvedValue(orderWithTip);
+
+    await h.service.payOrder(1, {
+      store_payment_method_id: TRANSFER_ID,
+      payment_type: PaymentType.DIRECT,
+      bank_account_id: 7,
+      tip_amount: 10000,
+    });
+
+    expect(h.prismaMock.orders.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: expect.objectContaining({ tip_amount: 10000, grand_total: 110000 }),
+    });
+    expect(h.paymentGatewayService.resolveAndValidateBankAccount).toHaveBeenCalledWith(
+      7,
+      4,
+      h.prismaMock,
+    );
+    expect(h.prismaMock.payments.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          store_payment_method_id: TRANSFER_ID,
+          bank_account_id: 7,
+          amount: 110000,
+          state: 'succeeded',
+        }),
+      }),
+    );
+  });
+
+  it('transferencia escalar rechaza una cuenta de otra tienda sin crear pago', async () => {
+    const h = buildHarness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue(LEG_METHODS[1]);
+    h.paymentGatewayService.resolveAndValidateBankAccount.mockRejectedValue(
+      new PaymentError(
+        PaymentErrorCodes.VALIDATION_FAILED,
+        'La cuenta bancaria no pertenece a esta tienda',
+      ),
+    );
+
+    const error = await h.service.payOrder(1, {
+      store_payment_method_id: TRANSFER_ID,
+      payment_type: PaymentType.DIRECT,
+      bank_account_id: 7,
+    }).catch((failure) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe(ErrorCodes.PAY_VALIDATE_001.code);
+    expect(error.getStatus()).toBe(400);
+    expect(h.paymentGatewayService.resolveAndValidateBankAccount).toHaveBeenCalledWith(
+      7,
+      4,
+      h.prismaMock,
+    );
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+  });
+
   it("payment_type online (sin payments[]) → NO emite payment.received (queda pending, la pasarela lo confirma después)", async () => {
     const h = buildHarness();
     h.prismaMock.store_payment_methods.findFirst.mockResolvedValue(
       LEG_METHODS[1],
     );
 
-    await h.service.payOrder(1, {
+    const result = await h.service.payOrder(1, {
       store_payment_method_id: TRANSFER_ID,
       payment_type: PaymentType.ONLINE,
     });
 
+    expect(result.payment).toEqual({ transaction_id: 'TXN-1' });
     const paymentReceivedCalls = h.emitter.emitAsync.mock.calls.filter(
       (call: any[]) => call[0] === 'payment.received',
     );
     expect(paymentReceivedCalls).toHaveLength(0);
+  });
+
+  it('wallet online reserva el pago y devuelve su id sin ejecutar el procesador', async () => {
+    const h = buildHarness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue({
+      id: 3,
+      system_payment_method: { type: 'wallet', processing_mode: 'DIRECT' },
+    });
+
+    const result = await h.service.payOrder(1, {
+      store_payment_method_id: 3,
+      payment_type: PaymentType.ONLINE,
+      payment_reference: 'not-a-gateway-reference',
+    });
+
+    expect(result.payment).toEqual({ id: 101, transaction_id: 'TXN-1' });
+    expect(h.prismaMock.payments.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        store_payment_method_id: 3,
+        state: 'pending',
+        gateway_reference: null,
+      }),
+    });
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(h.paymentGatewayService.resolveAndValidateBankAccount).not.toHaveBeenCalled();
+  });
+
+  it('no reserva Wompi sobre un pago online ya pendiente de otro método', async () => {
+    const h = buildHarness({ preClaimState: 'pending_payment' });
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue({
+      id: 3,
+      system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' },
+    });
+    (h.service as any).getOrder.mockResolvedValue({
+      id: 1,
+      state: 'processing',
+      delivery_type: 'direct_delivery',
+      grand_total: 100000,
+      currency: 'COP',
+      store_id: 4,
+      customer_id: 44,
+      payments: [{ id: 80, state: 'pending', store_payment_method: {
+        system_payment_method: { type: 'bank_transfer' },
+      } }],
+    });
+
+    const error = await h.service.payOrder(1, {
+      store_payment_method_id: 3,
+      payment_type: PaymentType.ONLINE,
+    }).catch((failure) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe(ErrorCodes.ORD_FLOW_PAYMENT_FAILED_001.code);
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.prismaMock.orders.updateMany).toHaveBeenCalledWith({
+      where: { id: 1, state: 'processing' },
+      data: expect.objectContaining({ state: 'pending_payment' }),
+    });
   });
 
   it('shipped + 2 tramos → 2 filas y restaura shipped', async () => {
@@ -5251,6 +5844,7 @@ describe('OrderFlowService.shipOrder — allowExemptDeliveryTypes (Task B, solo 
       orders: {
         findFirst: jest.fn(async () => ({ id: 1, store_id: 4, stores: { organization_id: null } })),
       },
+      order_items: { findMany: jest.fn().mockResolvedValue([]) },
     };
     const service = new OrderFlowService(
       prismaMock, { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any, {} as any, {} as any, {} as any, {} as any,
@@ -5361,6 +5955,115 @@ describe('OrderFlowService.fastTrackOrder — pickup/dine_in sin método de env�
     expect(error).toBeInstanceOf(VendixHttpException);
     expect(error.errorCode).toBe('ORD_SHIP_REQUIRED_FOR_FLOW_001');
     expect(payOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrderFlowService.settleFinancialSplitSource — guardia de stock (docs/plans/no-overselling-stock-guard-plan.md paso 9)', () => {
+  const ORDER_ID = 501;
+  const STORE_ID = 4;
+
+  // Cuenta financiera POS de entrega directa, pagada por completo, sin mesa
+  // abierta — la única forma que este método llega a la rama de commit de
+  // stock (línea :2247 en order-flow.service.ts).
+  const baseOrder = (overrides: Record<string, unknown> = {}) => ({
+    id: ORDER_ID,
+    store_id: STORE_ID,
+    state: 'created',
+    active_financial_split_id: 77,
+    grand_total: 100,
+    payments: [{ state: 'succeeded', amount: 100 }],
+    ...overrides,
+  });
+
+  const build = () => {
+    const prismaMock: any = {
+      table_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
+      orders: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findFirst: jest.fn().mockResolvedValue({
+          id: ORDER_ID,
+          channel: 'pos',
+          delivery_type: 'direct_delivery',
+          order_items: [{ products: { requires_serial_numbers: false } }],
+        }),
+      },
+    };
+    const orderStockCommit = { commitOrderDelivery: jest.fn() };
+    const stockValidator = { resolveInventoryPolicy: jest.fn() };
+
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      { emit: jest.fn() } as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any,
+      orderStockCommit as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      stockValidator as any,
+    );
+
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(baseOrder());
+
+    return { service, prismaMock, orderStockCommit, stockValidator };
+  };
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('línea de producto en 0 con allowOversell=false: propaga el errorCode real del commit (INV_STOCK_002) y pide bloqueo', async () => {
+    const { service, orderStockCommit, stockValidator } = build();
+    stockValidator.resolveInventoryPolicy.mockResolvedValue({
+      allowOversell: false,
+      allowIngredientOveruse: true,
+    });
+    // `commitOrderDelivery` con `blockOnInsufficient:true` lanza
+    // `INV_STOCK_002` cuando la disponibilidad total no cubre la línea
+    // (order-stock-commit.service.ts:756-770) — NO `INV_STOCK_INSUFFICIENT_LINES`
+    // (ese código es del guard de `assertLinesAvailable`, otro punto de entrada).
+    orderStockCommit.commitOrderDelivery.mockRejectedValue(
+      new VendixHttpException(
+        ErrorCodes.INV_STOCK_002,
+        'No se puede entregar: stock insuficiente para MODELO (disponible 0, requerido 2)',
+        { product_id: 701, requested: 2, available: 0 },
+      ),
+    );
+
+    const error: any = await service
+      .settleFinancialSplitSource(ORDER_ID)
+      .catch((e) => e);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe(ErrorCodes.INV_STOCK_002.code);
+    expect(stockValidator.resolveInventoryPolicy).toHaveBeenCalledWith(STORE_ID);
+    expect(orderStockCommit.commitOrderDelivery).toHaveBeenCalledWith(
+      ORDER_ID,
+      expect.objectContaining({
+        blockOnInsufficient: true,
+        allowNegativeOnShortfall: false,
+      }),
+    );
+  });
+
+  it('allowOversell=true: no bloquea y el commit recibe la opción de negativo permitido', async () => {
+    const { service, orderStockCommit, stockValidator } = build();
+    stockValidator.resolveInventoryPolicy.mockResolvedValue({
+      allowOversell: true,
+      allowIngredientOveruse: true,
+    });
+    orderStockCommit.commitOrderDelivery.mockResolvedValue({
+      totalCost: 0,
+      committedItemCount: 1,
+    });
+
+    await expect(
+      service.settleFinancialSplitSource(ORDER_ID),
+    ).resolves.toBeUndefined();
+
+    expect(orderStockCommit.commitOrderDelivery).toHaveBeenCalledWith(
+      ORDER_ID,
+      expect.objectContaining({
+        blockOnInsufficient: false,
+        allowNegativeOnShortfall: true,
+      }),
+    );
   });
 });
 

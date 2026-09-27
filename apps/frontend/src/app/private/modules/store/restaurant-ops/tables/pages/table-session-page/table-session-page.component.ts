@@ -210,6 +210,14 @@ export class TableSessionPageComponent implements OnInit {
   readonly cancellationPreparedFired = computed(
     () => this.cancellationTarget()?.inventory_consumed_at_fire === true,
   );
+  readonly cancellationAutoRestorePending = computed(() => {
+    const item = this.cancellationTarget();
+    return !!item && this.cancellationPreparedFired() &&
+      this.kitchenStatusFor(item) === 'pending';
+  });
+  readonly cancellationNeedsDisposition = computed(() =>
+    this.cancellationPreparedFired() && !this.cancellationAutoRestorePending(),
+  );
   /**
    * D.4 — mesa NO pasa preview: el GET de sesión no trae `order_item_taxes`
    * por línea ni `tip_*` de la orden, así que el espejo no puede correr
@@ -818,11 +826,9 @@ export class TableSessionPageComponent implements OnInit {
    * Rules mirror the backend gate:
    *   - not closed, and
    *   - the item was NEVER fired  → deletable outright, or
-   *   - the item was fired but its ticket is still `pending` → deletable
-   *     (backend cancels the KDS ticket + returns the fire-consumed stock).
-   *
-   * Hidden for `in_preparation` / `ready` / `delivered` / `cancelled`
-   * (terminal or in-progress kitchen states the backend rejects with 409).
+   *   - `pending` → backend cancels KDS and returns inputs automatically;
+   *   - `in_preparation` / `ready` → the modal requires reuse or waste.
+   * Delivered and cancelled remain unavailable in this normal-cancel seam.
    */
   canRemoveItem(item: TableSessionOrderItem): boolean {
     if (this.isClosed() || this.hasFinancialSplit()) return false;
@@ -830,7 +836,10 @@ export class TableSessionPageComponent implements OnInit {
     // (`delivered_at`, hecho de servicio) ya no se puede cancelar. Solo
     // presentación: el enforcement real lo pone el backend (paso 1).
     if (this.isDelivered(item)) return false;
-    return !this.isItemFired(item) || this.kitchenStatusFor(item) === 'pending';
+    if (!this.isItemFired(item)) return true;
+    const kitchenStatus = this.kitchenStatusFor(item);
+    return kitchenStatus === 'pending' ||
+      kitchenStatus === 'in_preparation' || kitchenStatus === 'ready';
   }
 
   /**
@@ -1265,8 +1274,9 @@ export class TableSessionPageComponent implements OnInit {
       this.cancellationError.set('El motivo debe tener entre 3 y 500 caracteres.');
       return;
     }
-    const preparedFired = item.inventory_consumed_at_fire === true;
-    const cancellation_type = cancellationTypeForDestination(result.destination, preparedFired);
+    const autoRestorePending = this.cancellationAutoRestorePending();
+    const needsDisposition = this.cancellationNeedsDisposition();
+    const cancellation_type = cancellationTypeForDestination(result.destination, needsDisposition);
     this.removingItemId.set(item.id);
     this.cancellationError.set(null);
     this.tablesService
@@ -1283,7 +1293,11 @@ export class TableSessionPageComponent implements OnInit {
           this.session.set(s);
           this.seedKitchenStateFromOrder(s);
           this.toastService.success(
-            preparedFired ? 'Plato cancelado como merma' : 'Plato cancelado de la cuenta',
+            autoRestorePending || (needsDisposition && result.destination === 'reuse')
+              ? 'Plato cancelado; insumos reintegrados al inventario'
+              : needsDisposition
+                ? 'Plato cancelado como merma'
+                : 'Plato cancelado de la cuenta',
           );
         },
         error: (err: unknown) => {
@@ -1832,8 +1846,9 @@ export class TableSessionPageComponent implements OnInit {
     this.dialogService
       .confirm({
         title: 'Cerrar mesa',
-        message:
-          '¿Cerrar la mesa? La cuenta seguirá activa para ser cobrada después.',
+        message: this.isPaid()
+          ? '¿Cerrar la mesa? La cuenta ya está pagada; los cobros registrados se conservarán.'
+          : '¿Cerrar la mesa? La cuenta seguirá activa para ser cobrada después.',
         confirmText: 'Cerrar mesa',
         cancelText: 'Volver',
         confirmVariant: 'danger',

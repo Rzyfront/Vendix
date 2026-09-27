@@ -6,6 +6,7 @@ import {Component,
   signal,
   computed, effect } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { HttpClient } from '@angular/common/http';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -46,6 +47,13 @@ import { OrderPrintService } from '../../services/order-print.service';
 import { OrdersListSseService } from '../../services/orders-list-sse.service';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
+import { environment } from '../../../../../../../environments/environment';
+
+interface OrderPaymentMethodOption {
+  id: number;
+  display_name: string | null;
+  system_payment_method: { display_name: string };
+}
 
 @Component({
   selector: 'app-orders-list',
@@ -68,6 +76,7 @@ export class OrdersListComponent {
   private currencyService = inject(CurrencyFormatService);
   private printService = inject(OrderPrintService);
   private ordersService = inject(StoreOrdersService);
+  private http = inject(HttpClient);
   private tablesService = inject(TablesService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
@@ -107,6 +116,8 @@ export class OrdersListComponent {
   readonly selectedStatus = signal('');
   readonly selectedChannel = signal('');
   readonly selectedPaymentStatus = signal('');
+  readonly selectedPaymentMethod = signal('');
+  readonly paymentMethods = signal<OrderPaymentMethodOption[]>([]);
   readonly selectedDateRange = signal('');
   readonly dispatchableFilter = signal(false);
   // Carril B - B2: mesa seleccionada (string para empatar con FilterValues;
@@ -160,6 +171,7 @@ export class OrdersListComponent {
     status: undefined,
     channel: undefined,
     payment_status: undefined,
+    payment_method_id: undefined,
     date_range: undefined,
     page: 1,
     limit: 10,
@@ -173,6 +185,7 @@ export class OrdersListComponent {
     status: undefined,
     channel: undefined,
     payment_status: undefined,
+    payment_method_id: undefined,
     date_range: undefined,
     dispatchable: undefined,
     page: 1,
@@ -230,11 +243,25 @@ export class OrdersListComponent {
       options: [
         { value: '', label: 'Todos los Estados de Pago' },
         { value: 'pending', label: 'Pendiente' },
-        { value: 'processing', label: 'Procesando' },
-        { value: 'completed', label: 'Completado' },
+        { value: 'authorized', label: 'Autorizado' },
+        { value: 'captured', label: 'Capturado' },
+        { value: 'succeeded', label: 'Completado' },
         { value: 'failed', label: 'Fallido' },
+        { value: 'partially_refunded', label: 'Reembolso parcial' },
         { value: 'refunded', label: 'Reembolsado' },
         { value: 'cancelled', label: 'Cancelado' },
+      ],
+    },
+    {
+      key: 'payment_method_id',
+      label: 'Forma de pago',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todas las formas de pago' },
+        ...this.paymentMethods().map((method) => ({
+          value: String(method.id),
+          label: method.display_name || method.system_payment_method.display_name,
+        })),
       ],
     },
     {
@@ -353,7 +380,7 @@ export class OrdersListComponent {
         transform: (value: any) => this.formatChannel(value),
       },
       {
-        key: 'state',
+        key: 'list_state',
         label: 'Status',
         sortable: true,
         badge: true,
@@ -370,15 +397,16 @@ export class OrdersListComponent {
             delivered: '#10b981',
             cancelled: '#ef4444',
             refunded: '#f97316',
+            partially_refunded: '#f97316',
             finished: '#8b5cf6',
           },
         },
         transform: (value: any) => this.formatStatus(value),
       },
       {
-        key: 'grand_total',
-        label: 'Total',
-        sortable: true,
+        key: 'net_total',
+        label: 'Neto actual',
+        sortable: false,
         priority: 1,
         transform: (value: any) => this.currencyService.format(value || 0),
       },
@@ -487,7 +515,7 @@ export class OrdersListComponent {
       subtitleKey: 'customer_name',
       avatarFallbackIcon: 'shopping-bag',
       avatarShape: 'circle',
-      badgeKey: 'state',
+      badgeKey: 'list_state',
       badgeConfig: {
         type: 'custom',
         size: 'sm',
@@ -500,12 +528,13 @@ export class OrdersListComponent {
           delivered: '#10b981',
           cancelled: '#ef4444',
           refunded: '#f97316',
+          partially_refunded: '#f97316',
           finished: '#8b5cf6',
         },
       },
       badgeTransform: (value: any) => this.formatStatus(value),
-      footerKey: 'grand_total',
-      footerLabel: 'Total',
+      footerKey: 'net_total',
+      footerLabel: 'Neto actual',
       footerStyle: 'prominent',
       footerTransform: (value: any) =>
         this.currencyService.format(Number(value) || 0),
@@ -543,6 +572,9 @@ export class OrdersListComponent {
           channel: (qp.get('channel') as OrderChannel) || undefined,
           payment_status:
             (qp.get('payment_status') as PaymentStatus) || undefined,
+          payment_method_id: qp.get('payment_method_id')
+            ? Number(qp.get('payment_method_id'))
+            : undefined,
           date_range: qp.get('date_range') || undefined,
           table_id: qp.get('table_id')
             ? Number(qp.get('table_id'))
@@ -572,6 +604,11 @@ export class OrdersListComponent {
         this.selectedStatus.set(this._filters.status ?? '');
         this.selectedChannel.set(this._filters.channel ?? '');
         this.selectedPaymentStatus.set(this._filters.payment_status ?? '');
+        this.selectedPaymentMethod.set(
+          this._filters.payment_method_id != null
+            ? String(this._filters.payment_method_id)
+            : '',
+        );
         this.selectedDateRange.set(this._filters.date_range ?? '');
         this.selectedTable.set(
           this._filters.table_id != null
@@ -608,7 +645,15 @@ export class OrdersListComponent {
       // evento silencioso y este effect nunca lo ve.
       this.orders.update((prev) =>
         prev.map((o) =>
-          o.id === order_id ? { ...o, state: new_state } : o,
+          o.id === order_id
+            ? {
+                ...o,
+                state: new_state,
+                list_state: o.is_partially_refunded && new_state !== 'refunded'
+                  ? 'partially_refunded'
+                  : new_state,
+              }
+            : o,
         ),
       );
       // Limpiar el signal para que el próximo evento vuelva a disparar el effect.
@@ -648,6 +693,17 @@ export class OrdersListComponent {
     this.destroyRef.onDestroy(() => this.ordersListSse.disconnect());
 
     this.loadSeen();
+    this.http
+      .get<{ data: OrderPaymentMethodOption[] }>(
+        `${environment.apiUrl}/store/orders/payment-methods`,
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => this.paymentMethods.set(response.data ?? []),
+        error: (error) => this.toastService.error(
+          extractApiErrorMessage(error) || 'No se pudieron cargar las formas de pago.',
+        ),
+      });
     // Carril B - B2: carga mesas de la tienda. Si falla, el filtro no se
     // pinta (computed filterConfigs arriba depende de tables().length > 0).
     // Fire-and-forget con takeUntilDestroyed. TablesService.getFloorMap()
@@ -691,6 +747,7 @@ export class OrdersListComponent {
       status: f.status ?? null,
       channel: f.channel ?? null,
       payment_status: f.payment_status ?? null,
+      payment_method_id: f.payment_method_id != null ? String(f.payment_method_id) : null,
       date_range: f.date_range ?? null,
       table_id: f.table_id != null ? String(f.table_id) : null,
     };
@@ -750,6 +807,7 @@ export class OrdersListComponent {
       this.selectedStatus() ||
       this.selectedChannel() ||
       this.selectedPaymentStatus() ||
+      this.selectedPaymentMethod() ||
       this.selectedDateRange() ||
       this.dispatchableFilter() ||
       this.selectedTable()
@@ -786,6 +844,7 @@ export class OrdersListComponent {
     this.selectedStatus.set((values['status'] as string) || '');
     this.selectedChannel.set((values['channel'] as string) || '');
     this.selectedPaymentStatus.set((values['payment_status'] as string) || '');
+    this.selectedPaymentMethod.set((values['payment_method_id'] as string) || '');
     this.selectedDateRange.set((values['date_range'] as string) || '');
     // Carril B - B2: '' = sin filtro (viaja undefined al backend para no
     // romper el @IsInt() @Min(1) del DTO). Cualquier otro valor es el id
@@ -801,6 +860,9 @@ export class OrdersListComponent {
     this._filters.payment_status = this.selectedPaymentStatus()
       ? (this.selectedPaymentStatus() as PaymentStatus)
       : undefined;
+    this._filters.payment_method_id = this.selectedPaymentMethod()
+      ? Number(this.selectedPaymentMethod())
+      : undefined;
     this._filters.date_range = this.selectedDateRange() || undefined;
     this._filters.table_id = this.selectedTable()
       ? Number(this.selectedTable())
@@ -815,6 +877,7 @@ export class OrdersListComponent {
       status: this._filters.status,
       channel: this._filters.channel,
       payment_status: this._filters.payment_status,
+      payment_method_id: this._filters.payment_method_id,
       date_range: this._filters.date_range,
       table_id: this._filters.table_id,
     });
@@ -825,6 +888,7 @@ export class OrdersListComponent {
     this.selectedStatus.set('');
     this.selectedChannel.set('');
     this.selectedPaymentStatus.set('');
+    this.selectedPaymentMethod.set('');
     this.selectedDateRange.set('');
     this.dispatchableFilter.set(false);
     this.selectedTable.set('');
@@ -834,6 +898,7 @@ export class OrdersListComponent {
     this._filters.status = undefined;
     this._filters.channel = undefined;
     this._filters.payment_status = undefined;
+    this._filters.payment_method_id = undefined;
     this._filters.date_range = undefined;
     this._filters.dispatchable = undefined;
     this._filters.table_id = undefined;
@@ -846,6 +911,7 @@ export class OrdersListComponent {
       status: null,
       channel: null,
       payment_status: null,
+      payment_method_id: null,
       date_range: null,
       table_id: null,
       dispatchable: null,
@@ -925,6 +991,10 @@ export class OrdersListComponent {
               typeof order.grand_total === 'string'
                 ? parseFloat(order.grand_total)
                 : order.grand_total,
+            net_total: Number(order.net_total ?? order.grand_total) || 0,
+            list_state: order.is_partially_refunded
+              ? 'partially_refunded'
+              : order.state,
             subtotal_amount:
               typeof order.subtotal_amount === 'string'
                 ? parseFloat(order.subtotal_amount)
@@ -985,6 +1055,7 @@ export class OrdersListComponent {
       !f.status &&
       !f.channel &&
       !f.payment_status &&
+      !f.payment_method_id &&
       !f.date_range &&
       f.table_id == null &&
       !f.dispatchable &&
@@ -1073,6 +1144,8 @@ export class OrdersListComponent {
           ? parseInt(order.customer_id)
           : order.customer_id,
       grand_total: toNum(order.grand_total),
+      net_total: toNum(order.net_total ?? order.grand_total),
+      list_state: order.is_partially_refunded ? 'partially_refunded' : order.state,
       subtotal_amount: toNum(order.subtotal_amount),
       tax_amount: toNum(order.tax_amount),
       shipping_cost: toNum(order.shipping_cost),
@@ -1114,7 +1187,7 @@ export class OrdersListComponent {
 
   onSort(event: { column: string; direction: 'asc' | 'desc' | null }): void {
     if (event.direction) {
-      this._filters.sort_by = event.column as any;
+      this._filters.sort_by = event.column === 'list_state' ? 'state' : event.column;
       this._filters.sort_order = event.direction;
       this.loadOrders();
     }
@@ -1219,6 +1292,7 @@ export class OrdersListComponent {
       delivered: 'Entregada',
       cancelled: 'Cancelada',
       refunded: 'Reembolsada',
+      partially_refunded: 'Reembolso parcial',
       finished: 'Finalizada',
     };
     return (

@@ -26,6 +26,7 @@ import {
   ResendOrderItemsDto,
   KitchenTicketQueryDto,
   KdsSnapshotQueryDto,
+  CancelKitchenTicketDto,
 } from './dto';
 
 /**
@@ -358,9 +359,12 @@ export class KitchenFireController {
 
   @Post('tickets/:id/cancel')
   @Permissions('store:kitchen_fire:cancel')
-  async cancelTicket(@Param('id', ParseIntPipe) id: number) {
+  async cancelTicket(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body?: CancelKitchenTicketDto,
+  ) {
     try {
-      const ticket = await this.kitchenFireService.cancelTicket(id);
+      const ticket = await this.kitchenFireService.cancelTicket(id, body?.disposition);
       return this.responseService.success(ticket, 'Ticket cancelado');
     } catch (error) {
       throw error;

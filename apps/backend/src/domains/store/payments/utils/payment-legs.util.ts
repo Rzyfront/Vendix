@@ -7,8 +7,8 @@
  * escalar se normaliza a un tramo con el mismo comportamiento de hoy.
  *
  * Reglas (decisión de negocio del plan de pago multimétodo):
- *   · Sólo métodos directos: nunca pasarela (`wompi`/`wallet`, que se confirman
- *     por webhook después del commit), nunca contra entrega
+ *   · Sólo métodos directos: Wompi nunca; wallet únicamente en la ruta POS
+ *     que debita el ledger en la MISMA transacción (opt-in explícito), nunca contra entrega
  *     (`processing_mode = ON_DELIVERY`, que nace `pending`) ni crédito. Es el
  *     mismo criterio de `resolvePosPaymentRoute` + `isOnDeliveryMethod` en
  *     `payments.service.ts`: lo que ahí se va por pasarela o contra entrega,
@@ -102,7 +102,7 @@ export interface NormalizedPaymentLegs {
 }
 
 /** Métodos que liquidan por pasarela, después del commit (ver `resolvePosPaymentRoute`). */
-const GATEWAY_METHOD_TYPES = ['wompi', 'wallet'];
+const GATEWAY_METHOD_TYPES = ['wompi'];
 
 const toCents = (value: number | null | undefined) =>
   Math.round(Number(value || 0) * 100);
@@ -115,6 +115,7 @@ function isCashMethod(method: PaymentLegMethodInfo): boolean {
 function assertDirectMethod(
   storePaymentMethodId: number,
   method: PaymentLegMethodInfo | undefined,
+  allowWallet: boolean,
 ): asserts method is PaymentLegMethodInfo {
   const detail = { store_payment_method_id: storePaymentMethodId };
   if (!method) {
@@ -126,6 +127,7 @@ function assertDirectMethod(
   }
   if (
     GATEWAY_METHOD_TYPES.includes(method.type) ||
+    (method.type === 'wallet' && (!allowWallet || method.processing_mode !== 'DIRECT')) ||
     method.type === 'credit' ||
     method.processing_mode === 'ON_DELIVERY'
   ) {
@@ -141,6 +143,7 @@ export function normalizePaymentLegs(
   input: NormalizePaymentLegsInput,
   payableAmount: number,
   methodsById: Record<number, PaymentLegMethodInfo>,
+  options: { allowWallet?: boolean } = {},
 ): NormalizedPaymentLegs {
   const rawLegs: PaymentLegInput[] =
     input.payments && input.payments.length > 0
@@ -157,7 +160,7 @@ export function normalizePaymentLegs(
 
   const legs: NormalizedLeg[] = rawLegs.map((raw) => {
     const method = methodsById[raw.store_payment_method_id];
-    assertDirectMethod(raw.store_payment_method_id, method);
+    assertDirectMethod(raw.store_payment_method_id, method, options.allowWallet === true);
     if (toCents(raw.amount) <= 0) {
       throw new VendixHttpException(
         ErrorCodes.PAY_INVALID_AMOUNT_001,

@@ -10,6 +10,7 @@ import {
   signal,
   untracked,
   viewChild,
+  TemplateRef,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -44,6 +45,7 @@ import { CountryService } from '../../../../../../../core/services/country.servi
 
 import { PosPaymentService } from '../../../services/pos-payment.service';
 import { PosShippingService } from '../../../services/pos-shipping.service';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import {
   CustomersService,
   CustomerAddressPayload,
@@ -150,6 +152,9 @@ export class PosShippingStepComponent {
   readonly cartState = input<CartState | null>(null);
   readonly customerAlias = input<string>('');
   readonly editingOrderId = input<number | null>(null);
+  /** The Cliente step renders delivery details from this component's template. */
+  readonly detailsInCliente = input(false);
+  readonly clientDeliveryDetails = viewChild<TemplateRef<unknown>>('clientDeliveryDetails');
   // ── Address capture (owned by shipping step according to method type) ───
   readonly address = signal<AddressPayload | null>(null);
   readonly addressValid = signal<boolean>(false);
@@ -164,6 +169,8 @@ export class PosShippingStepComponent {
   private readonly shippingEdited = signal(false);
   private readonly freeAddressEdited = signal(false);
   private quoteGeneration = 0;
+  private walletMultiAttemptKey: string | null = null;
+  private walletMultiAttemptSignature: string | null = null;
   readonly shippingRateId = signal<number | null>(null);
   readonly quoteError = signal<string | null>(null);
   readonly methodsLoaded = signal(false);
@@ -255,12 +262,18 @@ export class PosShippingStepComponent {
    * históricos (un original inactivo intacto sigue guardable).
    */
   readonly activeShippingMethods = computed<PosShippingMethod[]>(() =>
-    this.shippingMethods().filter((m) => m.is_active !== false),
+    this.shippingMethods().filter((m) =>
+      m.is_active !== false &&
+      (m.type !== 'pickup' || !!this.originalShipping()),
+    ),
   );
   readonly selectedShippingMethod = signal<PosShippingMethod | null>(null);
   readonly shippingCost = signal<number>(0);
   readonly calculatedShippingCost = signal<number | null>(null);
   readonly manualCostOverride = signal<boolean>(false);
+  /** Cashier input: gross for inclusive rates, base for additive rates. */
+  readonly manualShippingPrice = signal<number>(0);
+  readonly manualQuotedShippingTax = signal<QuotedShippingTax | null>(null);
   readonly isCalculatingShipping = signal<boolean>(false);
   /**
    * Paso 15b — bloque fiscal de la última cotización aceptada. Solo lo
@@ -291,6 +304,7 @@ export class PosShippingStepComponent {
   readonly shipSubStep = signal<number>(0);
   /** Sub-pasos dinámicos reflejados en el `app-steps-line` vertical. */
   readonly shipSubSteps = computed<StepsLineItem[]>(() => {
+    if (this.detailsInCliente()) return [{ label: 'Costo' }];
     if (this.requiresAddress()) {
       return [
         { label: 'Método' },
@@ -306,7 +320,7 @@ export class PosShippingStepComponent {
 
   /** True cuando el sub-paso activo es el sub-paso terminal de Costo. */
   readonly isCostSubStep = computed<boolean>(
-    () => this.shipSubStep() === (this.requiresAddress() ? 2 : 1),
+    () => this.detailsInCliente() || this.shipSubStep() === (this.requiresAddress() ? 2 : 1),
   );
 
   // ── Processing ────────────────────────────────────────────────────────────
@@ -357,8 +371,10 @@ export class PosShippingStepComponent {
    * sin impuesto) o sin respaldo fiscal no hay filas.
    */
   readonly shippingTaxBreakdown = computed<QuotedShippingTax | null>(() => {
-    if (this.isPickupMethod() || this.manualCostOverride()) return null;
-    return this.quotedShippingTax();
+    if (this.isPickupMethod()) return null;
+    return this.manualCostOverride()
+      ? this.manualQuotedShippingTax()
+      : this.quotedShippingTax();
   });
 
   /** Etiqueta del modo de la tarifa para el desglose: Incluido/Agregado. */
@@ -366,15 +382,20 @@ export class PosShippingStepComponent {
     this.shippingTaxBreakdown()?.taxIsInclusive === false ? 'Agregado' : 'Incluido',
   );
 
+  readonly manualInputIsBase = computed<boolean>(() =>
+    this.rateOptions().find((o) => (o.rate_id ?? o.id) === this.shippingRateId())
+      ?.tax_is_inclusive === false,
+  );
+
   /**
    * El costo manual pierde la tarifa y su impuesto: avisar al cajero, pero
    * solo cuando la cotización vigente sí traía impuesto (si la tarifa no
    * tiene impuesto no hay nada que perder y el aviso sería ruido).
    */
-  readonly manualCostLosesTax = computed<boolean>(() =>
+  readonly manualTaxUnavailable = computed<boolean>(() =>
     this.manualCostOverride() &&
     !this.isPickupMethod() &&
-    (this.quotedShippingTax()?.tax ?? 0) > 0,
+    !this.shippingRateId(),
   );
 
   /**
@@ -432,7 +453,7 @@ export class PosShippingStepComponent {
             if (method) this.selectedShippingMethod.set(method);
           }
         } else if (!selected) {
-          const first = methods.find((m) => m.is_active !== false);
+          const first = this.activeShippingMethods()[0];
           if (first) this.selectShippingMethod(first, { advance: false, userInitiated: false });
         }
       });
@@ -554,6 +575,15 @@ export class PosShippingStepComponent {
     const addresses = this.cartState()?.customer?.addresses;
     const address = addresses?.find((a) => a.is_primary) ?? addresses?.[0];
     this.setAddress(address ? this.toAddressPayload(address) : null, address?.id ?? null);
+    if (!address) {
+      // Prefill contact once, without making a blank address look valid.
+      this.initialAddress.set({
+        address_line1: null, address_line2: null, city: null,
+        state_province: null, country_code: 'CO', postal_code: null,
+        phone_number: this.cartState()?.customer?.phone ?? null,
+        latitude: null, longitude: null,
+      });
+    }
   }
 
   private setAddress(address: AddressPayload | null, id: number | null): void {
@@ -561,7 +591,8 @@ export class PosShippingStepComponent {
     this.initialAddress.set(address);
     this.addressId.set(id);
     this.addressCustomerId.set(id ? this.cartState()?.customer?.id ?? null : null);
-    this.addressValid.set(!!(address?.address_line1 && address.city));
+    this.addressValid.set(!!(address?.address_line1 && address.city &&
+      address.state_province && address.country_code && address.phone_number));
   }
 
   private toAddressPayload(address: PosCustomerAddress): AddressPayload {
@@ -573,7 +604,10 @@ export class PosShippingStepComponent {
       country_code: address.country_code ?? 'CO',
       postal_code: address.postal_code ?? null,
       phone_number: address.phone_number ?? this.cartState()?.customer?.phone ?? null,
-      latitude: null, longitude: null,
+      latitude: address.latitude != null && Number.isFinite(Number(address.latitude))
+        ? Number(address.latitude) : null,
+      longitude: address.longitude != null && Number.isFinite(Number(address.longitude))
+        ? Number(address.longitude) : null,
     };
   }
 
@@ -591,15 +625,16 @@ export class PosShippingStepComponent {
     this.setAddress(this.toAddressPayload(address), id);
   }
 
-  onAddressChange(payload: AddressPayload): void {
+  onAddressChange(payload: AddressPayload, formDirty = this.addressForm()?.form.dirty ?? true): void {
     // Country/municipality lookup and initial form hydration also emit. Only
     // a dirty form opened deliberately can author an existing order's address.
     if (this.originalShipping() &&
-      (!this.addressEditing() || !this.addressForm()?.form.dirty)) return;
+      (!this.addressEditing() || !formDirty)) return;
+    if (!formDirty) return;
     this.invalidateQuote();
     this.address.set(payload);
     if (!this.manualCostOverride() && !this.isPickupMethod()) this.isCalculatingShipping.set(true);
-    if (this.addressForm()?.form.dirty) {
+    if (formDirty) {
       this.shippingEdited.set(true);
       this.freeAddressEdited.set(this.addressKey(payload) !== this.addressKey(this.initialAddress()));
     }
@@ -620,12 +655,59 @@ export class PosShippingStepComponent {
     this.quoteError.set(null);
     if (!preserveBreakdown) {
       this.quotedShippingTax.set(null);
+      this.manualQuotedShippingTax.set(null);
       this.rateOptions.set([]);
     }
   }
 
   onAddressValidChange(valid: boolean): void {
     this.addressValid.set(valid);
+  }
+
+  /** Gate the delivery details while the cashier is still beside Cliente. */
+  validateDetailsForCliente(): boolean {
+    // Historical orders keep their original destination when nothing was
+    // edited, even if that snapshot cannot be hydrated into today's form.
+    if (this.originalShipping() && !this.hasShippingChanges() && !this.customerChanged()) {
+      return true;
+    }
+    if (!this.selectedShippingMethod()) {
+      this.flashDeliveryDetail('shipping-method', 'Selecciona cómo llegará el pedido');
+      return false;
+    }
+    if (this.requiresAddress() && (!this.addressValid() ||
+      !this.address()?.address_line1 || !this.address()?.city)) {
+      this.showAddressErrors.set(true);
+      this.flashDeliveryDetail('address', 'Completa la dirección de entrega');
+      return false;
+    }
+    return true;
+  }
+
+  /** A new destination must not mutate the customer's selected saved address. */
+  beginNewAddress(): void {
+    this.invalidateQuote();
+    this.addressEditing.set(true);
+    this.shippingEdited.set(true);
+    this.freeAddressEdited.set(true);
+    this.shippingRateId.set(null);
+    this.setAddress(null, null);
+    this.initialAddress.set({
+      address_line1: null, address_line2: null, city: null,
+      state_province: null, country_code: 'CO', postal_code: null,
+      phone_number: this.cartState()?.customer?.phone ?? null,
+      latitude: null, longitude: null,
+    });
+  }
+
+  private flashDeliveryDetail(section: FlashSection, message: string): void {
+    this.flashSection.set(section);
+    this.flashMessage.set(message);
+    if (this.flashTimeout) clearTimeout(this.flashTimeout);
+    this.flashTimeout = setTimeout(() => {
+      this.flashSection.set(null);
+      this.flashMessage.set('');
+    }, 3000);
   }
 
   /**
@@ -635,6 +717,7 @@ export class PosShippingStepComponent {
    *  - Costo (terminal) → devuelve true para que el shell avance a Cobro.
    */
   attemptNextSubStep(): boolean {
+    if (this.detailsInCliente()) return true;
     if (this.originalShipping() && !this.hasShippingChanges() && !this.customerChanged()) return true;
     const current = this.shipSubStep();
     if (current === 0) {
@@ -672,6 +755,7 @@ export class PosShippingStepComponent {
    * Devuelve true si retrocedió internamente, false si ya estaba en 0 (el shell maneja).
    */
   attemptPrevSubStep(): boolean {
+    if (this.detailsInCliente()) return false;
     if (this.shipSubStep() > 0) {
       this.goToShipSubStep(this.shipSubStep() - 1);
       return true;
@@ -706,6 +790,11 @@ export class PosShippingStepComponent {
       country_code: a.country_code || 'CO', city: a.city,
       state_province: a.state_province || undefined,
       address_line1: a.address_line1 || undefined,
+      postal_code: a.postal_code || undefined,
+      ...(a.latitude != null && a.longitude != null &&
+        Number.isFinite(a.latitude) && Number.isFinite(a.longitude)
+        ? { latitude: a.latitude, longitude: a.longitude }
+        : {}),
     }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (options) => {
         if (generation !== this.quoteGeneration) return;
@@ -729,12 +818,13 @@ export class PosShippingStepComponent {
           this.quoteError.set('No hay tarifa para el método y la dirección elegidos. Selecciona otra opción o ingresa un costo válido.');
         }
       },
-      error: () => {
+      error: (error) => {
         if (generation !== this.quoteGeneration) return;
         this.isCalculatingShipping.set(false);
         this.calculatedShippingCost.set(null);
         this.shippingRateId.set(null);
-        this.quoteError.set('No se pudo calcular el envío. Reintenta o ingresa un costo válido.');
+        this.quoteError.set(parseApiError(error).userMessage ||
+          'No se pudo calcular el envío. Verifica la dirección y vuelve a intentarlo.');
       },
     });
   }
@@ -757,20 +847,63 @@ export class PosShippingStepComponent {
   }
 
   toggleManualCost(): void {
-    // Preserva el desglose: al volver a automático se restaura sin esperar
-    // la recotización, y en manual alimenta el aviso de impuesto perdido.
+    // Keep the selected automatic quote so switching back restores its gross.
     this.invalidateQuote(true);
     this.manualCostOverride.update((value) => !value);
     const calc = this.calculatedShippingCost();
-    if (!this.manualCostOverride() && calc !== null) this.shippingCost.set(calc);
+    if (this.manualCostOverride()) {
+      const option = this.rateOptions().find((o) => (o.rate_id ?? o.id) === this.shippingRateId());
+      this.manualShippingPrice.set(option?.tax_is_inclusive === false
+        ? (option.base ?? option.cost) : (option?.cost ?? this.shippingCost()));
+      this.quoteManualCost();
+    } else {
+      this.manualQuotedShippingTax.set(null);
+      if (calc !== null) this.shippingCost.set(calc);
+    }
+    this.shippingEdited.set(true);
   }
 
-  onShippingCostChange(): void {
-    // El costo digitado no cambia los insumos de la cotización: se preserva
-    // el desglose para el aviso de impuesto perdido y la restauración.
-    this.invalidateQuote(true);
+  onShippingCostChange(value = this.shippingCost()): void {
+    this.manualShippingPrice.set(Number(value));
     this.manualCostOverride.set(true);
     this.shippingEdited.set(true);
+    this.quoteManualCost();
+  }
+
+  private quoteManualCost(): void {
+    this.invalidateQuote(true);
+    this.manualQuotedShippingTax.set(null);
+    const generation = this.quoteGeneration;
+    const amount = this.manualShippingPrice();
+    const rateId = this.shippingRateId();
+    const methodId = this.selectedShippingMethod()?.id;
+    if (!Number.isFinite(amount) || amount < 0) {
+      this.quoteError.set('Ingresa un costo de envío válido.');
+      return;
+    }
+    // No applicable rate: retain the historical no-tax manual path, visibly
+    // labelled in the wizard instead of pretending the amount inherits IVA.
+    if (!rateId || !methodId) {
+      this.shippingCost.set(amount);
+      return;
+    }
+    this.isCalculatingShipping.set(true);
+    this.shippingService.quoteManualShipping(methodId, rateId, amount)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (quote) => {
+          if (generation !== this.quoteGeneration || !this.manualCostOverride()) return;
+          this.isCalculatingShipping.set(false);
+          this.shippingCost.set(quote.shipping_cost);
+          this.manualQuotedShippingTax.set(toQuotedShippingTax(quote));
+        },
+        error: (error) => {
+          if (generation !== this.quoteGeneration || !this.manualCostOverride()) return;
+          this.isCalculatingShipping.set(false);
+          this.quoteError.set(parseApiError(error).userMessage ||
+            'No se pudo calcular el impuesto del envío. Inténtalo nuevamente.');
+        },
+      });
   }
 
   navigateToShippingSettings(): void {
@@ -871,6 +1004,16 @@ export class PosShippingStepComponent {
         // también en la venta con envío; sin esto el pago por transferencia de
         // una venta a domicilio queda sin `payments.bank_account_id`.
         bank_account_id: paymentSubmit.bankAccountId,
+        ...(paymentSubmit.tip != null && paymentSubmit.tip > 0
+          ? {
+              tip_amount: paymentSubmit.tip,
+              tip_type: paymentSubmit.tipType ?? 'fixed',
+              tip_value: paymentSubmit.tipValue ?? paymentSubmit.tip,
+              ...(paymentSubmit.tipWaiterId != null
+                ? { tip_waiter_id: paymentSubmit.tipWaiterId }
+                : {}),
+            }
+          : {}),
       };
       // B11 — cobro multimétodo de contado: el collector ya excluye
       // cash_on_delivery de los tramos elegibles (`directMethods`), así que
@@ -880,6 +1023,20 @@ export class PosShippingStepComponent {
       if (paymentSubmit.legs && paymentSubmit.legs.length >= 2) {
         (paymentRequest as PaymentRequest & { payments?: PosPaymentLeg[] }).payments =
           toPosPaymentLegs(paymentSubmit.legs);
+        if (paymentSubmit.legs.some((leg) => leg.methodType === 'wallet')) {
+          const signature = JSON.stringify({
+            customerId: cart.customer?.id ?? null,
+            orderId: this.editingOrderId() ?? cart.linkedOrderId ?? null,
+            items: cart.items.map((item) => [item.product.id, item.quantity, item.totalPrice]),
+            shippingRateId: this.shippingRateId(), shippingCost: this.shippingCost(),
+            legs: (paymentRequest as PaymentRequest & { payments?: PosPaymentLeg[] }).payments,
+          });
+          if (signature !== this.walletMultiAttemptSignature) {
+            this.walletMultiAttemptSignature = signature;
+            this.walletMultiAttemptKey = crypto.randomUUID();
+          }
+          paymentRequest.idempotencyKey = this.walletMultiAttemptKey ?? undefined;
+        }
       }
     } else {
       // credito: build the installment-shaped plan (see limitation above).
@@ -944,9 +1101,7 @@ export class PosShippingStepComponent {
         ? { municipality_code: a.municipality_code.trim() }
         : {}),
       recipient_name: this.customerDisplayName,
-      recipient_phone: this.customerAlias().trim()
-        ? a?.phone_number || ''
-        : this.cartState()?.customer?.phone || '',
+      recipient_phone: a?.phone_number || this.cartState()?.customer?.phone || '',
     };
   }
 
@@ -963,6 +1118,9 @@ export class PosShippingStepComponent {
       shippingMethodId: method.id,
       shippingRateId: this.shippingRateId(),
       shippingCost: this.shippingCost(),
+      ...(this.manualCostOverride() && this.shippingRateId()
+        ? { manualShippingPrice: this.manualShippingPrice() }
+        : {}),
       deliveryType: method.id === this.originalShipping()?.shippingMethodId
         ? this.originalShipping()!.deliveryType ?? this.resolveDeliveryType(method)
         : this.resolveDeliveryType(method),
@@ -1135,6 +1293,9 @@ export class PosShippingStepComponent {
           deliveryNotes: this.notesControl.value || undefined,
           shippingAddressId: addressId,
           shippingRateId: this.shippingRateId(),
+          ...(this.manualCostOverride() && this.shippingRateId()
+            ? { manualShippingPrice: this.manualShippingPrice() }
+            : {}),
           manualCostOverride: this.manualCostOverride(),
         },
         paymentRequest,
@@ -1147,6 +1308,8 @@ export class PosShippingStepComponent {
         next: (response) => {
           this.isProcessing.set(false);
           if (response.success) {
+            this.walletMultiAttemptKey = null;
+            this.walletMultiAttemptSignature = null;
             this.shippingCompleted.emit({
               success: true,
               order: response.order,

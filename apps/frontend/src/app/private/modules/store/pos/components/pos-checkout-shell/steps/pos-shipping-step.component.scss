@@ -12,6 +12,61 @@
   min-width: 0;
 }
 
+/* Delivery inputs live alongside Cliente; keep them compact on narrow POS screens. */
+.client-delivery-details {
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+}
+
+.client-delivery-details .method-section,
+.client-delivery-details .address-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.client-delivery-details .method-card {
+  min-height: 52px;
+  padding: 10px 12px;
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 10px;
+  text-align: left;
+}
+
+.client-delivery-details .method-card-label {
+  font-size: 13px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.client-delivery-details .saved-addresses {
+  grid-template-columns: 1fr;
+}
+
+.address-help,
+.address-preview {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-neutral-600);
+}
+
+.address-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+@media (max-width: 480px) {
+  .client-delivery-details .method-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Stitch paso 5 — screen-reader-only para la live region que anuncia el
    sub-paso actual (el step indicator compartido no expone aria-current). */
 .sr-only {

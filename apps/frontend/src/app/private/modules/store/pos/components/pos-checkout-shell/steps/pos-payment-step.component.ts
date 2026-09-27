@@ -85,7 +85,7 @@ const MULTI_TENDER_ERROR_COPY: Record<string, string> = {
   PAY_MULTI_TENDER_SUM_MISMATCH:
     'La suma de los métodos no coincide con el total a cobrar. Revisa los montos e inténtalo de nuevo.',
   PAY_MULTI_TENDER_METHOD_NOT_ALLOWED:
-    'Uno de los métodos no permite cobro combinado. Usa solo efectivo, tarjeta o transferencia.',
+    'Uno de los métodos no permite cobro combinado. Wallet requiere cliente y saldo; Wompi no se combina.',
   PAY_MULTI_TENDER_MULTIPLE_CASH:
     'Solo se permite un pago en efectivo dentro del cobro combinado.',
   PAY_MULTI_TENDER_CASH_INSUFFICIENT:
@@ -239,6 +239,8 @@ export class PosPaymentStepComponent implements OnInit {
   readonly serialModalLoading = signal(false);
   private serialQueue: CartItem[] = [];
   private pendingSerialSubmit: PaymentSubmit | null = null;
+  private walletMultiAttemptKey: string | null = null;
+  private walletMultiAttemptSignature: string | null = null;
   private readonly serialChoices = new Map<string, { productId: string; variantId: number | null; quantity: number; serialIds: number[]; serialNumbers: string[] }>();
 
   private serialQuantity(item: CartItem): number {
@@ -453,8 +455,19 @@ export class PosPaymentStepComponent implements OnInit {
   readonly effectiveAmount = computed<number>(
     () => this.amountOverride() ?? (this.cartState()?.summary?.total || 0),
   );
+  /** Backend `resolveTip` uses gross products, never discounted total or shipping. */
+  readonly tipBase = computed<number>(() => {
+    const summary = this.cartState()?.summary;
+    return (summary?.subtotal ?? 0) + (summary?.taxAmount ?? 0);
+  });
 
   // ── Footer-facing collector projections (read by the shell) ──────────────
+  readonly tipAmount = computed<number>(() => {
+    const collector = this.collector();
+    return collector?.mode() === 'contado' && collector.config().allowTip
+      ? collector.tipAmount()
+      : 0;
+  });
   readonly mode = computed<PaymentMode | undefined>(() => this.collector()?.mode());
   readonly isWompiSelected = computed<boolean>(
     () => this.collector()?.isWompiSelected() ?? false,
@@ -565,7 +578,7 @@ export class PosPaymentStepComponent implements OnInit {
     if (cur < last) {
       if (cur < c.modoOffset()) {
         c.goToSubStep(c.modoOffset()); // Forma de pago → Método / Plan
-      } else if (!c.selectedMethod()) {
+      } else if (c.multiEnabled() ? !c.isMultiValid() : !c.selectedMethod()) {
         c.flashValidation(); // Método sin elegir → decir qué falta, no ignorar el clic
         return true;
       } else {
@@ -748,6 +761,7 @@ export class PosPaymentStepComponent implements OnInit {
   // ── The single collector submit handler (all POS gates preserved) ────────
   //
   onCollectorSubmit(submit: PaymentSubmit): void {
+    if (this.processing()) return;
     if (!this.cartState()) return;
     if (this.autoExecute() && this.checkoutIntent() === 'pickup' &&
         this.fulfillment() === 'entrega' && this.tableId() == null && this.sessionId() == null &&
@@ -867,6 +881,14 @@ export class PosPaymentStepComponent implements OnInit {
       // viaja con el pago para que el POS persista payments.bank_account_id en
       // processPosPaymentTransaction (CreatePosPaymentDto).
       bank_account_id: submit.bankAccountId,
+      ...(submit.tip != null && submit.tip > 0
+        ? {
+            tip_amount: submit.tip,
+            tip_type: submit.tipType,
+            tip_value: submit.tipValue,
+            tip_waiter_id: submit.tipWaiterId ?? undefined,
+          }
+        : {}),
     };
 
     // Cobro multimétodo de contado: con 2+ tramos el payload lleva
@@ -877,6 +899,20 @@ export class PosPaymentStepComponent implements OnInit {
       submit.legs && submit.legs.length >= 2 ? submit.legs : null;
     if (multiLegs) {
       payment_request.payments = toPosPaymentLegs(multiLegs);
+      if (multiLegs.some((leg) => leg.methodType === PaymentMethodType.WALLET)) {
+        const signature = JSON.stringify({
+          customerId: this.cartState()?.customer?.id ?? null,
+          linkedOrderId: this.editingOrderId() ?? this.cartState()?.linkedOrderId ?? null,
+          items: this.cartState()?.items.map((item) => [item.product.id, item.quantity, item.totalPrice]),
+          legs: payment_request.payments,
+          tip: submit.tip ?? 0,
+        });
+        if (signature !== this.walletMultiAttemptSignature) {
+          this.walletMultiAttemptSignature = signature;
+          this.walletMultiAttemptKey = crypto.randomUUID();
+        }
+        payment_request.idempotencyKey = this.walletMultiAttemptKey;
+      }
     }
 
     if (method.type === 'wallet' && this.walletInfo()) {
@@ -898,18 +934,35 @@ export class PosPaymentStepComponent implements OnInit {
     const selectedCart = this.cartWithConfirmedSerials();
     const immediateSerials = this.needsImmediateSerialCapture(submit) &&
       selectedCart.items.some((item) => item.product.requires_serial_numbers);
-    const obs: Observable<PosSalePaymentResponse> = editingId && !immediateSerials
+    const walletMultiInExistingOrder = editingId != null &&
+      !!multiLegs?.some((leg) => leg.methodType === PaymentMethodType.WALLET);
+    const editingDigitalTip = editingId != null && !immediateSerials &&
+      (submit.tip ?? 0) > 0 &&
+      (method.type === PaymentMethodType.WOMPI ||
+        method.type === PaymentMethodType.WALLET);
+    const obs: Observable<PosSalePaymentResponse> = editingDigitalTip
+      ? this.paymentService.processExistingDigitalTip(selectedCart, payment_request, editingId)
+      : editingId && !immediateSerials && !walletMultiInExistingOrder
       ? this.ordersService.flowPayOrder(String(editingId), {
           store_payment_method_id: method.id,
           payment_type: 'direct',
-          amount: this.cartState()!.summary.total,
+          amount: this.cartState()!.summary.total + (submit.tip ?? 0),
           amount_received: submit.amountReceived,
+          ...(submit.bankAccountId != null ? { bank_account_id: submit.bankAccountId } : {}),
+          ...(submit.tip != null && submit.tip > 0
+            ? {
+                tip_amount: submit.tip,
+                tip_type: submit.tipType,
+                tip_value: submit.tipValue,
+                tip_waiter_id: submit.tipWaiterId ?? undefined,
+              }
+            : { tip_amount: 0, tip_type: 'fixed', tip_value: 0 }),
           // Multimétodo: `PayOrderDto` exige el escalar pero el backend
           // prefiere `payments[]` cuando llega. Se adjunta, no se sustituye.
           ...(multiLegs ? { payments: toPosPaymentLegs(multiLegs) } : {}),
         } as any)
       : this.paymentService.processSaleWithPayment(
-          editingId && immediateSerials
+          editingId && (immediateSerials || walletMultiInExistingOrder)
             ? { ...selectedCart, linkedOrderId: editingId }
             : selectedCart,
           payment_request,
@@ -918,7 +971,7 @@ export class PosPaymentStepComponent implements OnInit {
           this.tableId() ?? null,
           // QUI-653 — 'Para llevar' de la orden hacia `order_items.is_takeaway`.
           this.takeawayOrder(),
-          immediateSerials,
+          immediateSerials || walletMultiInExistingOrder,
           this.deliveryType(),
         );
 
@@ -928,7 +981,7 @@ export class PosPaymentStepComponent implements OnInit {
           // shape (PayOrderResponse) does NOT carry a top-level `success`
           // flag; treat any non-thrown response as success. processSaleWithPayment
           // returns `{success: true/false, ...}` so we honor its flag.
-          const isSuccess = editingId ? !!response?.order : response.success;
+          const isSuccess = response.success ?? (editingId ? !!response?.order : false);
           if (isSuccess) {
             if (
               isWompi &&
@@ -940,6 +993,8 @@ export class PosPaymentStepComponent implements OnInit {
             }
 
             this.processing.set(false);
+            this.walletMultiAttemptKey = null;
+            this.walletMultiAttemptSignature = null;
             if (
               !editingId &&
               response.order?.payment_status === 'succeeded' &&

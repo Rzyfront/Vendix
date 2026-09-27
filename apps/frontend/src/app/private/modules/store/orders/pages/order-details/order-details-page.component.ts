@@ -237,6 +237,30 @@ interface PaymentReceiptPreview {
 type ItemCancellationDestination = 'waste' | 'reuse';
 type ItemCancellationMode = 'cancel' | 'reverse';
 
+/** Contra entrega is a collection promise, never the final tender. */
+export function isCodAwaitingConfirmation(order: Pick<Order, 'payments'> | null | undefined): boolean {
+  return !!order?.payments?.some((payment) =>
+    payment.state === 'pending' &&
+    (payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY' ||
+      payment.store_payment_method?.system_payment_method?.type === 'cash_on_delivery'),
+  );
+}
+
+export function isOrderEligibleForSplitCreation(order: Order | null, hasRefunds = false): boolean {
+  if (!order || order.active_financial_split_id) return false;
+  if (['cancelled', 'refunded'].includes(order.state)) return false;
+  if (order.payment_form === '2' || order.credit_type || order.order_installments?.length) return false;
+  if (!order.order_items?.some((item) => item.cancelled_at == null)) return false;
+  if (order.payments?.some((payment) =>
+    ['pending', 'refunded', 'partially_refunded', 'disputed'].includes(payment.state))) return false;
+  if (order.invoices?.some((invoice) => !['cancelled', 'voided'].includes(invoice.status ?? ''))) return false;
+  if (hasRefunds) return false;
+  const settled = (order.payments ?? [])
+    .filter((payment) => payment.state === 'succeeded' || payment.state === 'captured')
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  return Number(order.grand_total || 0) - settled > 0.01;
+}
+
 /** Mirror the backend's settled-payment gate; UI is advisory, API remains authoritative. */
 export function isOrderItemCancellationPaid(order: Pick<Order, 'payments'> | null): boolean {
   return !!order?.payments?.some((payment) =>
@@ -343,7 +367,7 @@ export function isItemActionEnabled(
  * - `fast_track`: checkbox standalone (`canFastTrack`), nunca un botón.
  */
 export function buildOrderActionButtons(
-  order: Pick<Order, 'state' | 'delivery_type' | 'available_actions'>,
+  order: Pick<Order, 'state' | 'delivery_type' | 'available_actions' | 'payments'>,
 ): OrderActionConfig[] {
   const backendActions: OrderAvailableAction[] | undefined = order.available_actions;
   if (!backendActions || backendActions.length === 0) return [];
@@ -375,7 +399,7 @@ export function buildOrderActionButtons(
       case 'edit_order':
         return { label: 'Modificar Orden', icon: 'edit', variant: 'info', weight: 10 };
       case 'pay':
-        return { label: 'Registrar Pago', icon: 'credit-card', variant: 'primary', weight: 20 };
+        return { label: isCodAwaitingConfirmation(order) ? 'Confirmar Pago' : 'Registrar Pago', icon: 'credit-card', variant: 'primary', weight: 20 };
       case 'credit_payment':
         return { label: 'Registrar Pago', icon: 'credit-card', variant: 'primary', weight: 20 };
       case 'confirm_payment':
@@ -705,12 +729,13 @@ export class OrderDetailsPageComponent {
   });
   /**
    * Release-853 paso 10 — Subtotal BRUTO del Resumen de Pago: Σ de las
-   * líneas en bruto (`final_total_price ?? total_price`). El IVA va
-   * incluido, no suma; el persistido `subtotal_amount` puede traer otra
+   * líneas ACTIVAS en bruto (`final_total_price ?? total_price`). Las
+   * canceladas siguen visibles para auditoría, pero ya no se cobran. El IVA
+   * va incluido, no suma; el persistido `subtotal_amount` puede traer otra
    * base según el canal que creó la orden.
    */
   readonly grossSubtotal = computed(() =>
-    (this.order()?.order_items ?? []).reduce(
+    (this.order()?.order_items ?? []).filter((item) => item.cancelled_at == null).reduce(
       (sum, item) =>
         sum + Number(item.final_total_price ?? item.total_price ?? 0),
       0,
@@ -1055,6 +1080,18 @@ export class OrderDetailsPageComponent {
 
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
+  readonly isCodPending = computed(() => isCodAwaitingConfirmation(this.order()));
+  readonly codActualMethods = computed(() => this.paymentMethods().filter((method) => {
+    const catalog = method.system_payment_method as { type?: string; processing_mode?: string } | null;
+    if (!catalog || catalog.processing_mode === 'ON_DELIVERY') return false;
+    return ['cash', 'bank_transfer', 'voucher'].includes(catalog.type ?? '') ||
+      (catalog.type === 'card' && catalog.processing_mode === 'DIRECT');
+  }));
+  readonly canCreateFinancialSplit = computed(() => {
+    return isOrderEligibleForSplitCreation(this.order(), this.orderRefunds().length > 0) &&
+      (this.hasNamedPermission('store:table_sessions:update') ||
+        this.hasNamedPermission('store:pos:access'));
+  });
 
   // Shipping method assignment
   shippingMethods = signal<StoreShippingMethod[]>([]);
@@ -1461,20 +1498,19 @@ export class OrderDetailsPageComponent {
     () => this.requiresDispatchFlow() || this.isKitchenOrder(),
   );
 
-  /**
-   * Platos ya disparados a cocina que aún no están entregados (ticket ni
-   * `delivered` ni `cancelled`). Solo informa: despachar un domicilio con
-   * cocina pendiente se advierte, nunca se bloquea — el operador puede estar
-   * armando la ruta mientras el último plato sale.
-   */
+  /** Fired dishes still waiting for the kitchen hand-off. */
   readonly undeliveredKitchenItems = computed<OrderItem[]>(() => {
     const order = this.order();
     if (!order?.order_items) return [];
     return order.order_items.filter((it) => {
       const ks = this.kitchenStateFor(it);
-      return !!ks && ks.status !== 'delivered' && ks.status !== 'cancelled';
+      return it.cancelled_at == null && !!ks && ks.status !== 'delivered';
     });
   });
+
+  readonly kitchenBlocksWholeOrder = computed<boolean>(() =>
+    this.pendingKitchenItems().length > 0 || this.undeliveredKitchenItems().length > 0,
+  );
 
   /**
    * Whether this order can produce a remisión (dispatch note). Mirrors the
@@ -1570,19 +1606,19 @@ export class OrderDetailsPageComponent {
       } as OrderActionConfig);
     }
 
-    // Domicilio de restaurante con platos aún en cocina: se avisa, nunca se
-    // bloquea. El despacho sigue siendo la única vía de entrega.
+    // Whole-order dispatch must wait for both unfired and fired dishes. Direct
+    // retail lines can still be delivered individually from their item action.
     if (
-      order.state === 'processing' &&
+      (order.state === 'processing' || order.state === 'pending_payment') &&
       this.requiresDispatchFlow() &&
-      this.undeliveredKitchenItems().length > 0
+      this.kitchenBlocksWholeOrder()
     ) {
       alerts.push({
         id: 'kitchen-info',
         type: 'alert',
         color: 'info',
         icon: 'chef-hat',
-        label: `Hay ${this.undeliveredKitchenItems().length} plato(s) en cocina sin entregar. Puedes despachar igual cuando el domiciliario los reciba.`,
+        label: `Hay ${this.pendingKitchenItems().length + this.undeliveredKitchenItems().length} plato(s) pendientes de cocina. Entrega o cancela esos platos antes de despachar toda la orden; los productos directos se pueden entregar por separado.`,
       } as OrderActionConfig);
     }
 
@@ -2603,6 +2639,10 @@ export class OrderDetailsPageComponent {
    * straight away. This is what collapses the old two-button UX into one flow.
    */
   openDispatchSelector(): void {
+    if (this.kitchenBlocksWholeOrder()) {
+      this.toastService.warning('Entrega o cancela los platos pendientes de cocina antes de despachar toda la orden.');
+      return;
+    }
     // Gate obligatorio: un envío a domicilio sin dirección no se puede
     // despachar. Avisar y ofrecer capturar la dirección antes de continuar.
     if (this.blockedByMissingAddress()) {
@@ -3096,6 +3136,11 @@ export class OrderDetailsPageComponent {
 
   confirmPayment(): void {
     if (!this.orderId) return;
+
+    if (this.isCodPending()) {
+      this.openPayModal();
+      return;
+    }
 
     this.dialogService
       .confirm({
@@ -4963,8 +5008,14 @@ export class OrderDetailsPageComponent {
     return item?.products?.product_type === 'prepared' && item.inventory_consumed_at_fire === true;
   });
 
+  readonly cancellationNeedsDisposition = computed(() => {
+    const item = this.cancellationTarget()?.item;
+    return this.cancellationPreparedFired() &&
+      (item ? this.kitchenStateFor(item)?.status !== 'pending' : false);
+  });
+
   readonly canReuseCancellation = computed(() =>
-    this.cancellationTarget()?.mode === 'reverse' || this.cancellationPreparedFired(),
+    this.cancellationTarget()?.mode === 'reverse' || this.cancellationNeedsDisposition(),
   );
 
   /**
@@ -5135,7 +5186,7 @@ export class OrderDetailsPageComponent {
     let body: ReturnType<typeof cancellationBody>;
     try {
       body = cancellationBody(target.mode, reason, result.destination,
-        this.cancellationPreparedFired());
+        this.cancellationNeedsDisposition());
     } catch (err) {
       this.cancellationError.set((err as Error).message);
       return;

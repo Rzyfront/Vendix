@@ -21,6 +21,7 @@ describe('OrdersController', () => {
 
   const mockOrdersService = {
     findAll: jest.fn(),
+    listPaymentMethods: jest.fn(),
     create: jest.fn(),
     findOne: jest.fn(),
     update: jest.fn(),
@@ -147,6 +148,18 @@ describe('OrdersController', () => {
         400,
       );
     });
+  });
+
+  it('R10 expone catálogo mínimo en ruta estática bajo lectura de órdenes', async () => {
+    const methods = [{ id: 17, display_name: 'Transferencia' }];
+    mockOrdersService.listPaymentMethods.mockResolvedValueOnce(methods);
+    mockResponseService.success.mockReturnValueOnce({ data: methods });
+
+    expect(await controller.listPaymentMethods()).toEqual({ data: methods });
+    expect(mockResponseService.success).toHaveBeenCalledWith(
+      methods, 'Métodos de pago obtenidos exitosamente',
+    );
+    expect(Reflect.getMetadata('path', controller.listPaymentMethods)).toBe('payment-methods');
   });
 
   describe('create', () => {

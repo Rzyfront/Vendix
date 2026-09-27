@@ -377,6 +377,26 @@ export interface DispatchFlowSnapshot {
   state: string;
   delivery_type?: string | null;
   isKitchenOrder?: boolean;
+  /** At least one fired line has not been handed off by KDS. */
+  hasPendingKitchen?: boolean;
+}
+
+/** A prepared line must reach the KDS hand-off before a whole-order dispatch.
+ * A stocked prepared line explicitly sold with skip_kds bypasses the kitchen
+ * only while it has no ticket. Once a ticket exists its latest status is
+ * authoritative, even if skip_kds was subsequently changed. */
+export function hasKitchenLinesAwaitingHandoff(items: ReadonlyArray<{
+  cancelled_at?: Date | null;
+  skip_kds?: boolean | null;
+  products?: { product_type?: string | null } | null;
+  kitchen_ticket_items?: ReadonlyArray<{ status: string }>;
+}>): boolean {
+  return items.some((item) => {
+    if (item.cancelled_at) return false;
+    const latestTicketStatus = item.kitchen_ticket_items?.[0]?.status;
+    if (latestTicketStatus != null) return latestTicketStatus !== 'delivered';
+    return item.products?.product_type === 'prepared' && item.skip_kds !== true;
+  });
 }
 
 function normalizedDeliveryType(order: DispatchFlowSnapshot): string {
@@ -399,6 +419,7 @@ const DISPATCHABLE_ORDER_STATES = new Set(['pending_payment', 'processing']);
  * `processing` (standard post-payment dispatch). */
 export function canDispatchOrder(order: DispatchFlowSnapshot): OrderActionResult {
   if (!DISPATCHABLE_ORDER_STATES.has(order.state)) return { enabled: false };
+  if (order.hasPendingKitchen) return { enabled: false, reason: ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS.code };
   return { enabled: canOfferDispatchFlow(order) && canGenerateRemisionFlow(order) };
 }
 
@@ -407,6 +428,7 @@ export function canDispatchOrder(order: DispatchFlowSnapshot): OrderActionResult
  * order not going home) ships directly instead of through the wizard. */
 export function canManualShip(order: DispatchFlowSnapshot): OrderActionResult {
   if (order.state !== 'pending_payment') return { enabled: false };
+  if (order.hasPendingKitchen) return { enabled: false, reason: ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS.code };
   const delivery = normalizedDeliveryType(order);
   const isShippingDelivery =
     delivery === 'home_delivery' || delivery === 'direct_delivery' || delivery === 'other';
@@ -426,6 +448,7 @@ export function canManualShip(order: DispatchFlowSnapshot): OrderActionResult {
  * header) — same label, two different eligibility rules per state. */
 export function canReadyForPickupBeforePayment(order: DispatchFlowSnapshot): OrderActionResult {
   if (order.state !== 'pending_payment') return { enabled: false };
+  if (order.hasPendingKitchen) return { enabled: false, reason: ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS.code };
   return { enabled: normalizedDeliveryType(order) === 'pickup' };
 }
 
@@ -442,6 +465,7 @@ export function canReadyForPickupBeforePayment(order: DispatchFlowSnapshot): Ord
  * permanently disabled the one time it was ever shown. */
 export function canDirectDeliver(order: DispatchFlowSnapshot): OrderActionResult {
   if (order.state !== 'processing') return { enabled: false };
+  if (order.hasPendingKitchen) return { enabled: false, reason: ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS.code };
   if (normalizedDeliveryType(order) !== 'pickup') return { enabled: false };
   return { enabled: canOfferDispatchFlow(order) && !canGenerateRemisionFlow(order) };
 }
@@ -479,6 +503,8 @@ export function canCollectViaShip(
 export interface OrderItemActionSnapshot {
   order_state: string;
   item_type?: string | null;
+  product_type?: string | null;
+  skip_kds?: boolean | null;
   delivered_at?: Date | string | null;
   /** Latest (most recent) kitchen-ticket-item status for this order item,
    * when it was ever fired — mirrors `deliverOrderItem`'s
@@ -507,7 +533,13 @@ export function canDeliverItem(item: OrderItemActionSnapshot): OrderActionResult
     // not as blocked.
     return { enabled: true };
   }
-  if (item.item_type === 'prepared' && item.latestKitchenStatus !== 'ready') {
+  // `order_items.item_type` is normally `physical` even for a prepared
+  // product. A stock-backed plate explicitly marked skip_kds may bypass the
+  // kitchen only if it has no ticket; an existing ticket always wins.
+  const requiresKitchen = item.item_type === 'prepared' ||
+    (item.product_type === 'prepared' && !item.skip_kds) ||
+    item.latestKitchenStatus != null;
+  if (requiresKitchen && item.latestKitchenStatus !== 'ready') {
     return { enabled: false, reason: ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE.code };
   }
   return { enabled: true };

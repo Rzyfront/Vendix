@@ -536,12 +536,17 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   shipping_cost?: number;
 
+  /** Gross for inclusive rates; taxable base for additive rates. Server derives shipping_cost. */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  manual_shipping_price?: number;
+
   /**
    * Tarifa de envío de la que salió `shipping_cost`. El frontend la envía
-   * SOLO cuando el costo viene de la tarifa (sin override manual). Con ella el
-   * backend valida que la tarifa sea del método y de la tienda y congela la
-   * copia del impuesto del envío en la orden; sin ella (costo digitado a
-   * mano) el envío queda sin impuesto.
+   * Also accompanies manual_shipping_price so the backend can inherit its
+   * fiscal mode and tax category without trusting a client tax calculation.
    */
   @IsOptional()
   @IsInt()
@@ -689,6 +694,12 @@ export class CreatePosPaymentDto {
   @IsOptional()
   @IsNumber()
   wallet_id?: number;
+
+  /** Stable checkout attempt key; required for Wallet in payments[]. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  idempotency_key?: string;
 
   @IsOptional()
   @IsString()

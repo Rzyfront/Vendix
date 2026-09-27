@@ -393,6 +393,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Cash received is less than the cash leg amount',
   },
+  PAY_MULTI_TENDER_WALLET_INSUFFICIENT: {
+    code: 'PAY_MULTI_TENDER_WALLET_INSUFFICIENT',
+    httpStatus: 400,
+    devMessage: 'Wallet balance does not cover the wallet legs in this atomic POS payment',
+  },
 
   // Payment Sources (Card-On-File / Wompi recurrent)
   PAYMENT_SOURCE_NOT_FOUND: {

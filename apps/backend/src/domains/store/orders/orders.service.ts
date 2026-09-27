@@ -15,6 +15,7 @@ import {
   order_channel_enum,
   order_state_enum,
   order_delivery_type_enum,
+  payments_state_enum,
 } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OrderStatsDto } from './dto/order-stats.dto';
@@ -1051,6 +1052,7 @@ export class OrdersService {
       // aplicaba. Por eso filtrar por "Pagado" no recortaba la tabla.
       // Verificado: `orders.payments payments[]` (schema.prisma:1548).
       payment_status,
+      payment_method_id,
       // FIX admin-orders-filters (BUG C) — destructurar `dispatchable`
       // explícitamente para condicionar la rama de `state`. Si se deja
       // implícito (`query.dispatchable`) no podemos hacer la guardia
@@ -1099,8 +1101,22 @@ export class OrdersService {
       // porque una orden puede tener varios pagos en distintos estados
       // (parcialmente pagada, reembolsada parcial, etc.) y queremos
       // matchear si CUALQUIERA cumple.
-      ...(payment_status && {
+      ...(payment_status && !payment_method_id && {
         payments: { some: { state: payment_status } },
+      }),
+      ...(payment_method_id && {
+        AND: [
+          { payments: { some: {
+            store_payment_method_id: payment_method_id,
+            state: { in: [
+              payments_state_enum.succeeded,
+              payments_state_enum.captured,
+              payments_state_enum.partially_refunded,
+              payments_state_enum.refunded,
+            ] },
+          } } },
+          ...(payment_status ? [{ payments: { some: { state: payment_status } } }] : []),
+        ],
       }),
       ...(query.missing_shipping_method && {
         shipping_method_id: null,
@@ -1180,6 +1196,10 @@ export class OrdersService {
               },
             },
           },
+          refunds: {
+            where: { state: 'completed' },
+            select: { amount: true },
+          },
           // Cliente para la columna "Cliente" de los listados (wizard de
           // remisiones, lista de órdenes). findAll ya FILTRA por users en la
           // búsqueda pero no los devolvía → "No data" en la lista. Select
@@ -1224,11 +1244,42 @@ export class OrdersService {
         const cancellation_policy = getOrderCancellationPolicy(order);
         // The minimal payment projection is policy input, not a partial
         // Payment[] response that consumers could mistake for receipt data.
-        const { payments: _policyPayments, ...listOrder } = order;
-        return { ...listOrder, cancellation_policy };
+        const completedRefundTotal = (order.refunds ?? []).reduce(
+          (sum, refund) => sum.plus(refund.amount),
+          new Prisma.Decimal(0),
+        );
+        const netTotal = Prisma.Decimal.max(
+          new Prisma.Decimal(0),
+          new Prisma.Decimal(order.grand_total ?? 0).minus(completedRefundTotal),
+        );
+        // Neither the policy-only payments nor raw refund rows are part of
+        // the list contract. Project only the aggregate read model.
+        const { payments: _policyPayments, refunds: _completedRefunds, ...listOrder } = order;
+        return {
+          ...listOrder,
+          cancellation_policy,
+          net_total: netTotal.toNumber(),
+          completed_refund_amount: completedRefundTotal.toNumber(),
+          is_partially_refunded: completedRefundTotal.gt(0) && netTotal.gt(0),
+        };
       }),
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
+  }
+
+  /** Store-scoped labels for the sales-list payment-method filter. */
+  async listPaymentMethods() {
+    return this.prisma.store_payment_methods.findMany({
+      select: {
+        id: true,
+        display_name: true,
+        state: true,
+        system_payment_method: {
+          select: { display_name: true },
+        },
+      },
+      orderBy: [{ display_order: 'asc' }, { id: 'asc' }],
+    });
   }
 
   async findOne(id: number) {
@@ -1591,6 +1642,8 @@ export class OrdersService {
       available_actions: computeItemActions({
         order_state: order.state,
         item_type: item.item_type,
+        product_type: item.products?.product_type,
+        skip_kds: item.skip_kds,
         delivered_at: item.delivered_at,
         latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
         orderHasSettledPayment,
@@ -1723,27 +1776,31 @@ export class OrdersService {
       }
       actions.push({ code: 'cancel', label_key: 'ORD_ACTION_CANCEL', ...canCancel(snapshot) });
 
-      if (offersDispatchFlow || isPickupDelivery) {
+      // Keep the detail projection in lockstep with OrderFlowService:
+      // only one fulfillment action applies to this delivery type.
+      if (requiresDispatch) {
         actions.push({
           code: 'dispatch_order',
           label_key: 'ORD_ACTION_DISPATCH_ORDER',
           ...canDispatchOrder(snapshot),
         });
-        actions.push({
-          code: 'manual_ship',
-          label_key: 'ORD_ACTION_MANUAL_SHIP',
-          ...canManualShip(snapshot),
-        });
+      } else if (isPickupDelivery) {
         actions.push({
           code: 'ready_for_pickup',
           label_key: 'ORD_ACTION_READY_FOR_PICKUP',
           ...canReadyForPickupBeforePayment(snapshot),
         });
+      } else if (offersDispatchFlow) {
+        actions.push({
+          code: 'manual_ship',
+          label_key: 'ORD_ACTION_MANUAL_SHIP',
+          ...canManualShip(snapshot),
+        });
       }
     }
 
     if (state === 'processing') {
-      if (!hasMethod && !isDirectDelivery) {
+      if (!offersDispatchFlow && !hasMethod && !isDirectDelivery) {
         actions.push({
           code: 'assign_shipping',
           label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
@@ -1761,7 +1818,7 @@ export class OrdersService {
           enabled: false,
           reason: 'ORD_SHIP_REQUIRED_001',
         });
-      } else if (hasMethod) {
+      } else if (!offersDispatchFlow && hasMethod) {
         if (shippingMethodType === 'pickup') {
           actions.push({
             code: 'ready_for_pickup',
@@ -2964,11 +3021,20 @@ export class OrdersService {
     let shippingCost = 0;
     let resolvedShippingRateId: number | null = null;
     let resolvedDeliveryType: order_delivery_type_enum | null = null;
+    let manualShippingCharge: Awaited<ReturnType<ShippingTaxService['chargeForRate']>> | null = null;
 
     // El DTO declara que la orden deja de tener envío: entonces sí, cero.
     const dtoDropsShipment =
       dto.delivery_type === order_delivery_type_enum.pickup ||
       dto.delivery_type === order_delivery_type_enum.dine_in;
+
+    if (dto.manual_shipping_price != null &&
+      (!dto.shipping_method_id || !dto.shipping_rate_id || dtoDropsShipment)) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+        'Selecciona una tarifa de domicilio para aplicar su impuesto al costo manual',
+      );
+    }
 
     if (
       !dto.shipping_method_id &&
@@ -2995,15 +3061,32 @@ export class OrdersService {
           ? order_delivery_type_enum.pickup
           : order_delivery_type_enum.home_delivery;
 
+      // POS alias deliveries own an orphan address persisted on the SAME
+      // draft. The editor intentionally does not send it as a customer
+      // address (there is no customer); reuse only that already-linked row.
+      // Never let a new alias borrow a formal customer's address.
+      const editingExistingAlias =
+        dto.customer_id == null && !!dto.customer_alias?.trim() &&
+        existingOrder.customer_id == null && !!existingOrder.customer_alias;
+      if (editingExistingAlias && dto.shipping_address_id != null &&
+          dto.shipping_address_id !== existingOrder.shipping_address_id) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+          'La dirección del alias no pertenece a esta orden.',
+        );
+      }
+      const shippingAddressId = dto.shipping_address_id ??
+        (editingExistingAlias ? existingOrder.shipping_address_id : null);
+
       if (
         (resolvedDeliveryType === order_delivery_type_enum.home_delivery ||
           dto.delivery_type === 'home_delivery' ||
           dto.delivery_type === 'direct_delivery') &&
-        !dto.shipping_address_id
+        !shippingAddressId
       ) {
         throw new VendixHttpException(
           ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
-          'Delivery requires a shipping_address_id',
+          'La entrega a domicilio requiere una dirección asociada a la orden.',
         );
       }
 
@@ -3028,14 +3111,15 @@ export class OrdersService {
         weight?: number;
         product_type?: string;
       }> = [];
-      if (dto.shipping_address_id) {
+      if (shippingAddressId) {
         // La dirección debe pertenecer al customer_id del editor — sin esto
         // un operador con acceso al store podría leer o grabar la dirección
         // de cualquier cliente que comparta tienda (Round 1, blocker 8).
         const address = await this.prisma.addresses.findFirst({
           where: {
-            id: dto.shipping_address_id,
-            user_id: dto.customer_id,
+            id: shippingAddressId,
+            store_id: storeId,
+            user_id: editingExistingAlias ? null : dto.customer_id,
           },
           select: {
             country_code: true,
@@ -3046,6 +3130,12 @@ export class OrdersService {
             longitude: true,
           },
         });
+        if (!address?.country_code) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+            'La dirección de entrega ya no pertenece a esta orden y tienda. Selecciona otra dirección.',
+          );
+        }
         if (address?.country_code) {
           shippingAddressForCalc = {
             country_code: address.country_code,
@@ -3089,6 +3179,7 @@ export class OrdersService {
             id: dto.shipping_rate_id,
             shipping_method_id: method.id,
             is_active: true,
+            shipping_zone: { is_active: true, OR: [{ store_id: storeId }, { is_system: true, store_id: null }] },
           },
         });
         if (!rate) {
@@ -3132,6 +3223,18 @@ export class OrdersService {
                   )
                 ).gross
               : Number(rate.base_cost);
+        }
+        if (dto.manual_shipping_price != null) {
+          if (quoted == null || !this.shippingTaxService) {
+            throw new VendixHttpException(
+              ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+              'La tarifa ya no cubre esta dirección. Vuelve a calcular el envío.',
+            );
+          }
+          manualShippingCharge = await this.shippingTaxService.chargeForRate(
+            null, rate.id, dto.manual_shipping_price, { store_id: storeId },
+          );
+          shippingCost = manualShippingCharge.gross;
         }
       } else if (shippingAddressForCalc) {
         // Auto-calcular si no hay rate explícito.
@@ -3210,13 +3313,23 @@ export class OrdersService {
     // tolerancia de arriba asegura que el costo es el de la tarifa, así
     // que `rateCost` es el costo del servidor y un método con tarifa
     // siempre re-deriva su snapshot. `undefined` ⇒ se conserva la actual.
-    const shippingTaxUpdate = await this.resolveShippingTaxChange({
-      shippingUnchanged,
-      rateId: dtoDropsShipment ? null : resolvedShippingRateId,
-      rateCost: dtoDropsShipment ? null : shippingCost,
-      shippingCost,
-      storeId,
-    });
+    const manualSnapshot = manualShippingCharge && !shippingUnchanged
+      ? await this.snapshotShippingTax(resolvedShippingRateId, shippingCost, storeId)
+      : null;
+    const shippingTaxUpdate = manualSnapshot
+      ? {
+          ...manualSnapshot,
+          shipping_tax_is_inclusive: manualSnapshot.shipping_tax_amount > 0 && manualShippingCharge?.applies
+            ? manualShippingCharge.reason === 'inclusive'
+            : null,
+        }
+      : await this.resolveShippingTaxChange({
+          shippingUnchanged,
+          rateId: dtoDropsShipment ? null : resolvedShippingRateId,
+          rateCost: dtoDropsShipment ? null : shippingCost,
+          shippingCost,
+          storeId,
+        });
 
     // 9) Promotion quote: recotizamos server-side, NUNCA confiamos en
     //    `promotion_ids` como verdad. El motor decide qué aplica.

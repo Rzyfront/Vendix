@@ -56,6 +56,7 @@ import {
   RouteStopSequenceInput,
 } from '../dispatch-routes/utils/route-stop-calc';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { hasKitchenLinesAwaitingHandoff } from '../orders/order-flow/order-action-policy.util';
 import {
   resolveOrderLineTaxTotal,
   roundMoney2,
@@ -930,6 +931,13 @@ export class DispatchNotesService {
       dispatched_quantity: number;
     }>,
   ): Promise<void> {
+    // A POS order may have reserved a negative available balance when the
+    // store explicitly permits overselling. Dispatch must honor that same
+    // server-side policy; otherwise the order can be paid but never shipped.
+    // Structural errors (missing location / wrong variant) remain blocking.
+    const { allowOversell } = await this.stockValidator.resolveInventoryPolicy(
+      store_id,
+    );
     type BlockedItem = {
       product_id: number;
       product_variant_id: number | null;
@@ -1056,6 +1064,14 @@ export class DispatchNotesService {
         onHand - reservedForOrder >= qty
       ) {
         reason = 'reserved_by_others';
+      }
+
+      if (allowOversell && reason !== 'variant_required') {
+        this.logger.warn(
+          `Sobreventa permitida al despachar orden ${order_id}: producto ${item.product_id}, ` +
+            `variante ${item.product_variant_id ?? 'base'}, requerido ${qty}, disponible ${effectiveAvailable}`,
+        );
+        continue;
       }
 
       insufficient.push({
@@ -1988,7 +2004,14 @@ export class DispatchNotesService {
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },
       include: {
-        order_items: true,
+        order_items: {
+          include: {
+            products: { select: { product_type: true } },
+            kitchen_ticket_items: {
+              select: { status: true }, orderBy: { id: 'desc' }, take: 1,
+            },
+          },
+        },
         users: {
           select: {
             id: true,
@@ -2017,6 +2040,20 @@ export class DispatchNotesService {
 
     if (!order) {
       throw new VendixHttpException(ErrorCodes.DSP_ORDER_FIND_001);
+    }
+
+    // Explicit partial dispatch may contain only ordinary direct-delivery
+    // lines while a dish is still in KDS. The quick-accept/full-order path
+    // must wait for every prepared line's kitchen hand-off. Never let a
+    // retail line in a mixed order turn the implicit ALL into a KDS bypass.
+    const requestedItemIds = Array.isArray(dto.items) && dto.items.length > 0
+      ? new Set(dto.items.map((item) => item.order_item_id))
+      : null;
+    const kitchenCandidates = requestedItemIds
+      ? order.order_items.filter((item) => requestedItemIds.has(item.id))
+      : order.order_items;
+    if (hasKitchenLinesAwaitingHandoff(kitchenCandidates)) {
+      throw new VendixHttpException(ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS);
     }
 
     // A dispatch note (remisión) only makes sense for orders that are being
@@ -2193,10 +2230,20 @@ export class DispatchNotesService {
       });
     }
 
-    // Stock gate: the remisión dispatches what is already reserved for this
-    // order, so reserved-for-this-order units count as available. Only a real
-    // shortfall raises DISPATCH_NOTE_INSUFFICIENT_STOCK.
-    await this.validateDispatchItemsStock(store_id, order_id, dispatch_items);
+    // Stock gate only for lines whose inventory is still pending. An item
+    // delivered individually already consumed its reservation and marked
+    // `inventory_committed`; a prepared dish consumed its ingredients when it
+    // was fired. Revalidating either against TODAY's availability falsely
+    // blocks the remisión after a legitimate handoff (especially when the
+    // store explicitly allowed overselling), even though the delivery commit
+    // below is claim-once and will not consume those lines again.
+    const stockPendingItems = dispatch_items.filter((item) => {
+      const source = order.order_items.find(
+        (line) => line.id === item.sales_order_item_id,
+      );
+      return !source?.inventory_committed && !source?.inventory_consumed_at_fire;
+    });
+    await this.validateDispatchItemsStock(store_id, order_id, stockPendingItems);
 
     const subtotal = dispatch_items.reduce(
       (sum, item) =>

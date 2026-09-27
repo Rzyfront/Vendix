@@ -3581,6 +3581,80 @@ describe('PaymentsService', () => {
       expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
     });
 
+    // BUG 2 (no-overselling-stock-guard-plan.md, 2026-09-26):
+    // `updateInventoryFromOrder` hardcodeaba `blockOnInsufficient: true` sin
+    // mirar el switch de tienda "Permitir sobreventa"
+    // (`store_settings.inventory.allow_negative_stock`). Con el switch en
+    // `true`, una venta POS de mostrador de un producto en 0 disponible
+    // seguía rechazando 409 `INV_STOCK_002` — la MISMA reserva de la línea
+    // (§1.5, más arriba en este archivo) ya toleraba el negativo bajo el
+    // mismo switch, pero el commit de entrega lo ignoraba. El campo
+    // `allow_oversell` del DTO público sigue intencionalmente ignorado: esto
+    // lo gobierna solo el ajuste de tienda, resuelto server-side dentro del
+    // mismo tx (`resolveInventoryPolicyMock`, ya inyectado a nivel de
+    // describe con default `allowOversell:false` para el resto de la suite).
+    it('BUG 2: con allow_negative_stock=true, la entrega directa NO bloquea (INV_STOCK_002 evitado)', async () => {
+      const { order } = arrangePosSale('cash');
+      resolveInventoryPolicyMock.mockResolvedValue({
+        allowOversell: true,
+        allowIngredientOveruse: true,
+      });
+
+      jest
+        .spyOn(service as any, 'processPosPaymentTransaction')
+        .mockResolvedValue({ id: 7, state: 'succeeded' });
+      jest
+        .spyOn(service as any, 'hasPendingKitchenItemsTx')
+        .mockResolvedValue(false);
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_INVENTORY);
+
+      expect(commitOrderDeliveryMock).toHaveBeenCalledTimes(1);
+      expect(commitOrderDeliveryMock).toHaveBeenCalledWith(
+        order.id,
+        expect.objectContaining({
+          blockOnInsufficient: false,
+          allowNegativeOnShortfall: true,
+          onShortfall: expect.any(Function),
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('BUG 2: default (allow_negative_stock=false) sigue bloqueando igual que antes (no-regresión)', async () => {
+      const { order } = arrangePosSale('cash');
+      // resolveInventoryPolicyMock ya resuelve allowOversell:false por
+      // default (beforeEach) — se deja explícito para que el intento no
+      // dependa de la resolución.
+      resolveInventoryPolicyMock.mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: true,
+      });
+
+      jest
+        .spyOn(service as any, 'processPosPaymentTransaction')
+        .mockResolvedValue({ id: 7, state: 'succeeded' });
+      jest
+        .spyOn(service as any, 'hasPendingKitchenItemsTx')
+        .mockResolvedValue(false);
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_INVENTORY);
+
+      expect(commitOrderDeliveryMock).toHaveBeenCalledWith(
+        order.id,
+        expect.objectContaining({
+          blockOnInsufficient: true,
+          allowNegativeOnShortfall: false,
+          onShortfall: undefined,
+        }),
+        expect.anything(),
+      );
+    });
+
     it('el efectivo SÍ consume en el acto: el dinero ya entró (no-regresión)', async () => {
       const { order } = arrangePosSale('cash');
 
@@ -3681,6 +3755,66 @@ describe('PaymentsService', () => {
       }), posUser)).rejects.toThrow();
       expect(order.state).toBe('draft');
       expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+    });
+
+    // no-overselling-stock-guard-plan.md, BUG 1 (2026-09-26): una mesa con
+    // un ítem YA entregado (`inventory_committed=true` — su stock ya se
+    // descontó en `deliverOrderItem`, la reserva que lo cubría ya fue
+    // consumida) volvía a demandarse en el precheck previo a
+    // `assertLinesAvailable`. El precheck solo excluía las líneas que van a
+    // cocina (`isFiredToKitchenLine`); una línea entregada y una cancelada
+    // colaban igual y el pago moría con un 409 falso incluso con stock 0
+    // disponible siendo exactamente lo esperado (ya no queda nada que
+    // reclamar: la unidad ya salió).
+    it('BUG 1: una línea ya entregada (inventory_committed) no se vuelve a demandar antes de cobrar', async () => {
+      const { order, tx } = arrangePosSale('cash');
+      order.order_items.push({
+        id: 950,
+        product_id: 501,
+        product_variant_id: null,
+        quantity: 2,
+        stock_units_consumed: null,
+        skip_kds: false,
+        inventory_committed: true,
+        cancelled_at: null,
+      } as any);
+      tx.products = {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 501, name: 'MODELO', track_inventory: true, product_type: 'physical' },
+        ]),
+      };
+      // Sonda: si el precheck todavía incluyera la línea entregada en la
+      // demanda, `assertLinesAvailable` se llamaría con ella y este mock la
+      // rechaza (mismo 409 que produciría un stock realmente en 0). Con el
+      // fix, la demanda queda vacía y el mock NUNCA se invoca.
+      assertLinesAvailableMock.mockImplementation((lines: any[]) => {
+        if (lines.length > 0) {
+          throw new VendixHttpException(
+            ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+            'Stock insuficiente para MODELO',
+            { items: [{ product_name: 'MODELO', requested: 2, available: 0 }] },
+          );
+        }
+        return Promise.resolve([]);
+      });
+      // Con la única línea del pedido ya asentada (entregada), no queda
+      // nada que reservar ni ningún gasto de inventario que aplicar —
+      // `is_draft`+`requires_payment:false` saltan también el bloque de
+      // eventos/impuestos/retenciones/cupón (`!is_draft`). La transacción
+      // llega limpia hasta el refresh final de `orders` (§ respuesta,
+      // justo antes del `return`); un stub que revienta ahí es la señal
+      // determinista de que nada de lo anterior — en particular la
+      // demanda de stock — disparó un 409.
+      const REACHED_END_OF_TX = 'reached-end-of-tx';
+      tx.orders.findUnique = jest
+        .fn()
+        .mockRejectedValue(new Error(REACHED_END_OF_TX));
+
+      await expect(service.processPosPayment(
+        buildPosDto({ is_draft: true, requires_payment: false }), posUser,
+      )).rejects.toThrow(REACHED_END_OF_TX);
+
+      expect(assertLinesAvailableMock).not.toHaveBeenCalled();
     });
   });
 
@@ -4163,6 +4297,7 @@ describe('PaymentsService', () => {
 
     const CASH_METHOD_ID = 9;
     const TRANSFER_METHOD_ID = 10;
+    const WALLET_METHOD_ID = 11;
 
     const cashMethodRow = {
       id: CASH_METHOD_ID,
@@ -4187,6 +4322,14 @@ describe('PaymentsService', () => {
     const methodsById: Record<number, any> = {
       [CASH_METHOD_ID]: cashMethodRow,
       [TRANSFER_METHOD_ID]: transferMethodRow,
+      [WALLET_METHOD_ID]: {
+        id: WALLET_METHOD_ID,
+        display_name: 'Saldo Wallet',
+        system_payment_method: {
+          type: 'wallet', processing_mode: payment_processing_mode_enum.DIRECT,
+          display_name: 'Saldo Wallet', is_active: true,
+        },
+      },
     };
 
     /**
@@ -4206,6 +4349,7 @@ describe('PaymentsService', () => {
       const order = buildOrder({
         id: 4242,
         store_id: 1,
+        customer_id: 77,
         order_number: 'POS-MULTI-1',
         delivery_type: 'direct_delivery',
         subtotal_amount: new Prisma.Decimal(84034),
@@ -4229,6 +4373,7 @@ describe('PaymentsService', () => {
       let fakeOrderState: string = order.state;
 
       const tx: any = {
+        wallets: { findFirst: jest.fn().mockResolvedValue({ id: 91 }) },
         kitchen_tickets: { findMany: jest.fn().mockResolvedValue([]) },
         // Tienda NO restaurante → el auto-fire (B5) no corre.
         stores: {
@@ -4255,6 +4400,11 @@ describe('PaymentsService', () => {
             };
             void include;
             createdPayments.push(row);
+            return row;
+          }),
+          update: jest.fn(async ({ where, data }: any) => {
+            const row = createdPayments.find((payment) => payment.id === where.id);
+            Object.assign(row, data);
             return row;
           }),
           // `resolvePaymentReceivedSaleFields` lee los OTROS pagos
@@ -4444,6 +4594,89 @@ describe('PaymentsService', () => {
           amount: 80000,
         }),
       );
+    });
+
+    it('Wallet + efectivo debita el ledger dentro de la misma tx y emite ambos pagos liquidados', async () => {
+      const { tx } = arrangeMultiLegSale();
+      (prisma as any).payments = { findFirst: jest.fn().mockResolvedValue(null) };
+      const debitInTransaction = jest.fn().mockResolvedValue({
+        transaction: { id: 305 }, balance_after: 10000,
+      });
+      (service as any).walletBalanceService = { debitInTransaction };
+      const result = await service.processPosPayment(buildMultiDto({
+        idempotency_key: 'wallet-combined-1',
+        payments: [
+          { store_payment_method_id: CASH_METHOD_ID, amount: 20000, amount_received: 20000 },
+          { store_payment_method_id: WALLET_METHOD_ID, amount: 80000 },
+        ],
+      }), posUser);
+
+      expect(tx.payments.create.mock.calls[1][0].data).toMatchObject({
+        state: 'pending', amount: 80000,
+        financial_idempotency_key: 'pos_wallet_multi_1_wallet-combined-1',
+      });
+      expect(debitInTransaction).toHaveBeenCalledWith(tx, 91, 80000,
+        expect.objectContaining({ reference_type: 'payment', expected_store_id: 1,
+          expected_customer_id: 77 }));
+      expect(tx.payments.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ state: 'succeeded', transaction_id: 'wallet_305' }),
+      }));
+      expect(result.payments).toHaveLength(2);
+      expect(result.payments![1]).toMatchObject({ status: 'succeeded', transaction_id: 'wallet_305' });
+      expect(receivedPayloads()).toHaveLength(2);
+    });
+
+    it('saldo Wallet insuficiente aborta antes del fan-out de pagos', async () => {
+      arrangeMultiLegSale();
+      (prisma as any).payments = { findFirst: jest.fn().mockResolvedValue(null) };
+      (service as any).walletBalanceService = {
+        debitInTransaction: jest.fn().mockRejectedValue(new BadRequestException('Insufficient wallet balance')),
+      };
+      await expect(service.processPosPayment(buildMultiDto({
+        idempotency_key: 'wallet-combined-2',
+        payments: [
+          { store_payment_method_id: CASH_METHOD_ID, amount: 20000, amount_received: 20000 },
+          { store_payment_method_id: WALLET_METHOD_ID, amount: 80000 },
+        ],
+      }), posUser)).rejects.toMatchObject({
+        errorCode: ErrorCodes.PAY_MULTI_TENDER_WALLET_INSUFFICIENT.code,
+      });
+      expect(receivedPayloads()).toHaveLength(0);
+    });
+
+    it('reintento con la misma llave devuelve la venta ya pagada sin nuevo débito', async () => {
+      arrangeMultiLegSale();
+      const dto = buildMultiDto({
+        idempotency_key: 'wallet-combined-retry',
+        payments: [
+          { store_payment_method_id: CASH_METHOD_ID, amount: 20000, amount_received: 20000 },
+          { store_payment_method_id: WALLET_METHOD_ID, amount: 80000 },
+        ],
+      });
+      const fingerprint = (service as any).posWalletAttemptFingerprint(dto);
+      const rows = [
+        { id: 7, amount: new Prisma.Decimal(20000), state: 'succeeded',
+          transaction_id: 'cash_7', store_payment_method: cashMethodRow,
+          gateway_response: { change: 0, metadata: { pos_multi_attempt_key: 'wallet-combined-retry' } } },
+        { id: 8, amount: new Prisma.Decimal(80000), state: 'succeeded',
+          transaction_id: 'wallet_305', store_payment_method: methodsById[WALLET_METHOD_ID],
+          gateway_response: { change: 0, metadata: { pos_multi_attempt_key: 'wallet-combined-retry' } } },
+      ];
+      (prisma as any).payments = { findFirst: jest.fn().mockResolvedValue({
+        ...rows[1],
+        gateway_response: { metadata: { pos_attempt_fingerprint: fingerprint,
+          pos_multi_attempt_key: 'wallet-combined-retry' } },
+        orders: { id: 4242, store_id: 1, customer_id: 77, customer_alias: null,
+          order_number: 'POS-MULTI-1', state: 'finished', grand_total: new Prisma.Decimal(100000),
+          payments: rows },
+      }) };
+
+      const result = await service.processPosPayment(dto, posUser);
+      expect(result.success).toBe(true);
+      expect(result.order?.id).toBe(4242);
+      expect(result.payments?.map((payment) => payment.transaction_id))
+        .toEqual(['cash_7', 'wallet_305']);
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
     });
 
     it('emite un payment.received por tramo que suma el total y cuadra subtotal+impuesto', async () => {

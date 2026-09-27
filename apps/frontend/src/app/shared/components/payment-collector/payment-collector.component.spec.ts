@@ -1,9 +1,9 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
 import { signal } from '@angular/core';
 import { By } from '@angular/platform-browser';
+import { provideHttpClient } from '@angular/common/http';
 
 import { PaymentCollectorComponent } from './payment-collector.component';
 import { PaymentModalComponent } from './payment-modal.component';
@@ -16,27 +16,7 @@ describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting',
   let fixture: ComponentFixture<PaymentCollectorComponent>;
   let component: PaymentCollectorComponent;
 
-  const mockCurrencyService = {
-    format: (amount: number | string | null | undefined) => {
-      const num = Number(amount) || 0;
-      return `$${num.toLocaleString('es-CO')}`;
-    },
-    // Requeridos por CurrencyPipe real (constructor llama loadCurrency()) y
-    // por el propio componente (currencySymbol se lee como campo de clase).
-    // Mismo patrón que buildMultiCurrencyMock() más abajo en este archivo.
-    loadCurrency: () => Promise.resolve(null),
-    currencySymbol: signal('$'),
-    currencyDecimals: signal(0),
-    currencyFormatStyle: signal('dot_comma'),
-    currentCurrency: signal({
-      code: 'COP',
-      symbol: '$',
-      decimal_places: 0,
-      position: 'before',
-      format_style: 'dot_comma',
-    }),
-    resolution: signal('resolved'),
-  };
+  const mockCurrencyService = buildMultiCurrencyMock();
 
   const mockCatalog = {
     getEnabledMethods: () => of([]),
@@ -356,6 +336,11 @@ const multiTransferMethod: PaymentMethod = {
   },
 };
 
+const multiWalletMethod: PaymentMethod = {
+  id: '4', type: PaymentMethodType.WALLET,
+  name: 'Saldo Wallet', icon: 'wallet', enabled: true,
+};
+
 describe('PaymentCollectorComponent — modo multi «Varios métodos» (Paso 5)', () => {
   let fixture: ComponentFixture<PaymentCollectorComponent>;
   let component: PaymentCollectorComponent;
@@ -364,6 +349,7 @@ describe('PaymentCollectorComponent — modo multi «Varios métodos» (Paso 5)'
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
@@ -398,6 +384,49 @@ describe('PaymentCollectorComponent — modo multi «Varios métodos» (Paso 5)'
     const balance = fixture.debugElement.query(By.css('.pc-multi-balance'));
     expect(balance).toBeTruthy();
     expect(balance.nativeElement.textContent).toContain('Falta');
+  });
+
+  it('Wallet+efectivo usa saldo disponible del cliente y bloquea saldo insuficiente', () => {
+    fixture.componentRef.setInput('context', 'pos');
+    fixture.componentRef.setInput('customer', { id: 77 });
+    fixture.componentRef.setInput('paymentMethods', [multiCashMethod, multiWalletMethod]);
+    fixture.componentRef.setInput('walletInfo', { balance: 30000 });
+    fixture.detectChanges();
+    const lookedUp: Array<number | string> = [];
+    const sub = component.walletLookup.subscribe(({ id }) => lookedUp.push(id));
+    component.setMultiEnabled(true);
+    component.setLegAmount(0, 70000);
+    component.addLeg();
+    component.setLegMethod(1, multiWalletMethod);
+    component.setLegAmount(1, 30000);
+    fixture.detectChanges();
+
+    expect(lookedUp).toContain(77);
+    expect(component.multiWalletAmount()).toBe(30000);
+    expect(component.isMultiValid()).toBeTrue();
+    expect(component.canSubmit()).toBeTrue();
+    fixture.componentRef.setInput('walletInfo', { balance: 29999 });
+    fixture.detectChanges();
+    expect(component.canConfirmAmount()).toBeFalse();
+    component.flashValidation();
+    expect(component.flashMessage()).toContain('saldo Wallet');
+    sub.unsubscribe();
+  });
+
+  it('Enter no pasa de Método a Monto si una transferencia hace sobrar dinero', () => {
+    fixture.componentRef.setInput('layout', 'stepped');
+    fixture.detectChanges();
+    component.setMultiEnabled(true);
+    component.setLegAmount(0, 50000);
+    component.addLeg();
+    component.setLegAmount(1, 60000);
+    component.goToSubStep(component.modoOffset());
+    fixture.detectChanges();
+
+    expect(component.remaining()).toBe(-10000);
+    component.handleEnter();
+    expect(component.subStep()).toBe(component.modoOffset());
+    expect(component.flashMessage()).toContain('Sobra');
   });
 
   it('efectivo ya usado no reaparece en el selector de tramos', () => {
@@ -478,6 +507,7 @@ describe('PaymentCollectorComponent — B15(1) setLegAmount no deja amountReceiv
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
@@ -543,6 +573,7 @@ describe('PaymentModalComponent — arbitraje NG8002 allowMultiTender (Paso 5c)'
     await TestBed.configureTestingModule({
       imports: [PaymentModalComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
@@ -564,5 +595,79 @@ describe('PaymentModalComponent — arbitraje NG8002 allowMultiTender (Paso 5c)'
     expect(collectorEl).toBeTruthy();
     const collector = collectorEl.componentInstance as PaymentCollectorComponent;
     expect(collector.config().allowMultiTender).toBe(true);
+  });
+});
+
+describe('PaymentCollectorComponent — restaurant tip amount', () => {
+  let fixture: ComponentFixture<PaymentCollectorComponent>;
+  let component: PaymentCollectorComponent;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [PaymentCollectorComponent],
+      providers: [
+        provideHttpClient(),
+        { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
+        { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
+      ],
+    }).compileComponents();
+    fixture = TestBed.createComponent(PaymentCollectorComponent);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('amount', 105000); // products net + shipping
+    fixture.componentRef.setInput('tipBase', 119000); // products gross, before discount
+    fixture.componentRef.setInput('allowTip', true);
+    fixture.detectChanges();
+  });
+
+  afterEach(() => fixture.destroy());
+
+  it('resolves percentage against gross products and charges the resolved money amount', () => {
+    component.tipType.set('percentage');
+    component.tipControl.setValue(10);
+    fixture.detectChanges();
+
+    expect(component.tipAmount()).toBe(11900);
+    expect(component.effectiveTotal()).toBe(116900);
+    expect(component.quickAmounts()[0]).toBe(116900);
+  });
+
+  it('does not add a hidden tip to a credit plan', () => {
+    component.mode.set('credito');
+    component.tipControl.setValue(5000);
+    fixture.detectChanges();
+
+    expect(component.effectiveTotal()).toBe(105000);
+    expect(fixture.debugElement.query(By.css('.pc-tip-mode'))).toBeNull();
+  });
+
+  it('blocks percentages above 100 and invalid fixed amounts with an explicit message', () => {
+    component.selectMethod(multiCashMethod, { advance: false });
+    component.cashReceivedControl.setValue(200000);
+    component.tipType.set('percentage');
+    component.tipControl.setValue(101);
+    expect(component.tipValidationError()).toContain('entre 0 y 100');
+    expect(component.canSubmit()).toBeFalse();
+    expect(component.tipAmount()).toBe(0);
+
+    component.tipType.set('fixed');
+    component.tipControl.setValue(-10);
+    expect(component.tipValidationError()).toContain('mayor o igual a cero');
+    expect(component.canSubmit()).toBeFalse();
+    component.tipControl.setValue(Number.POSITIVE_INFINITY);
+    expect(component.tipValidationError()).toContain('propina válida');
+    expect(component.canSubmit()).toBeFalse();
+  });
+
+  it('makes multi-tender legs balance against total including resolved percentage tip', () => {
+    fixture.componentRef.setInput('allowMultiTender', true);
+    fixture.componentRef.setInput('paymentMethods', [multiCashMethod, multiCardMethod]);
+    fixture.detectChanges();
+    component.setMultiEnabled(true);
+    component.tipType.set('percentage');
+    component.tipControl.setValue(10);
+    expect(component.remaining()).toBe(11900);
+    component.setLegAmount(0, 116900);
+    expect(component.remaining()).toBe(0);
+    expect(component.isMultiValid()).toBeTrue();
   });
 });

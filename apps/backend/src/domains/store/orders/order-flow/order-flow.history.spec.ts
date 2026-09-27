@@ -1338,6 +1338,7 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
       accounts_receivable: ['findMany', 'update'],
       order_installments: ['updateMany'],
       kitchen_tickets: ['findFirst'],
+      kitchen_ticket_items: ['findFirst'],
     });
     mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
     prismaMock.invoices.findMany.mockResolvedValue([]);
@@ -1369,7 +1370,10 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
     ]);
     prismaMock.order_items.findMany.mockResolvedValue([]);
     prismaMock.order_items.update.mockResolvedValue({});
-    prismaMock.kitchen_tickets.findFirst.mockResolvedValue({ status: 'pending' });
+    prismaMock.kitchen_tickets.findFirst.mockImplementation(async ({ where }: any) => ({
+      status: where.id === 55 ? 'pending' : 'ready',
+    }));
+    prismaMock.kitchen_ticket_items.findFirst.mockResolvedValue({ status: 'ready' });
     prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, store_id: 100, state: 'cancelled' });
     prismaMock.payments.update.mockResolvedValue({});
@@ -1377,7 +1381,7 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
     prismaMock.table_sessions.findFirst.mockResolvedValue(null);
 
     const kitchenFireService = {
-      cancelTicketInTx: jest.fn().mockResolvedValue(undefined),
+      cancelTicketItemInTx: jest.fn().mockResolvedValue('cancelled'),
       emitTicketCancelledEvent: jest.fn().mockResolvedValue(undefined),
     };
     const orderHistoryService = { record: jest.fn().mockResolvedValue(null) };
@@ -1407,6 +1411,8 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
         order_items: [],
       }),
     );
+    jest.spyOn(service as any, 'disposeConsumedPreparedLeaves').mockResolvedValue([]);
+    jest.spyOn(service as any, 'auditPreparedDispositionInTx').mockResolvedValue(undefined);
 
     await service.cancelOrder(
       ORDER_ID,
@@ -1422,7 +1428,7 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
         organizationId: 1,
         type: 'item_cancelled',
         orderItemId: PENDING_ITEM,
-        payload: { reason: 'Mesa se fue', cancellation_type: 'after_fire_waste', cascade: true },
+        payload: { reason: 'Mesa se fue', cancellation_type: 'after_fire_reused', cascade: true },
       },
       {
         orderId: ORDER_ID,
@@ -1454,6 +1460,7 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
       accounts_receivable: ['findMany', 'update'],
       order_installments: ['updateMany'],
       inventory_transactions: ['findMany'],
+      kitchen_ticket_items: ['findFirst'],
     });
     mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
     prismaMock.invoices.findMany.mockResolvedValue([]);
@@ -1471,12 +1478,17 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
     prismaMock.order_items.findMany.mockResolvedValue([]);
     prismaMock.order_items.update.mockResolvedValue({});
     prismaMock.inventory_transactions.findMany.mockResolvedValue([]);
+    prismaMock.kitchen_ticket_items.findFirst.mockResolvedValue({ status: 'in_preparation' });
     prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, store_id: 100, state: 'cancelled' });
     prismaMock.payments.findMany.mockResolvedValue([]);
     prismaMock.table_sessions.findFirst.mockResolvedValue(null);
 
     const orderHistoryService = { record: jest.fn().mockResolvedValue(null) };
+    const kitchenFireService = {
+      cancelTicketItemInTx: jest.fn().mockResolvedValue('cancelled'),
+      emitTicketCancelledEvent: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
       { emit: jest.fn() } as any,
@@ -1486,7 +1498,7 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
       { releaseReservationsByReference: jest.fn().mockResolvedValue(undefined) } as any,
       {} as any, {} as any,
       { log: jest.fn().mockResolvedValue(undefined), logCustom: jest.fn().mockResolvedValue(undefined) } as any,
-      undefined, undefined, undefined,
+      kitchenFireService as any, undefined, undefined,
       { recordCancellationPendingRefunds: jest.fn().mockResolvedValue(undefined) } as any,
       undefined, undefined,
       orderHistoryService as any,
@@ -1503,6 +1515,8 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
         order_items: [],
       }),
     );
+    jest.spyOn(service as any, 'disposeConsumedPreparedLeaves').mockResolvedValue([]);
+    jest.spyOn(service as any, 'auditPreparedDispositionInTx').mockResolvedValue(undefined);
 
     await service.cancelOrder(ORDER_ID, { reason: 'Error de comanda', kitchenDisposition: 'reuse' } as any);
 

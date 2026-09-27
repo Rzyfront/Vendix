@@ -156,6 +156,22 @@ export class CreatePaymentDto {
   cancelUrl?: string;
 }
 
+/** Processor inputs only. The reserved payment owns amount, currency, store and customer. */
+export class ProcessReservedPosPaymentDto {
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  wallet_id?: number;
+
+  @IsOptional()
+  @IsObject()
+  wompi_payment_method?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  returnUrl?: string;
+}
+
 export class CreateOrderPaymentDto extends CreatePaymentDto {
   @IsString()
   @MaxLength(255)

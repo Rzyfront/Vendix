@@ -42,6 +42,8 @@ export class ItemCancellationModalComponent {
    * (no hay insumos consumidos que desechar o reutilizar).
    */
   readonly showDestination = input(true);
+  /** Pending fired tickets restore their reserved/consumed inputs automatically. */
+  readonly autoRestorePending = input(false);
   readonly canReuse = input(false);
   readonly inFlight = input(false);
   readonly serverError = input<string | null>(null);

@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
 import { of, throwError } from 'rxjs';
 
 import { PosCartService } from './pos-cart.service';
@@ -11,6 +12,7 @@ import { WithholdingTaxService } from '../../withholding-tax/services/withholdin
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { InvoicingService } from '../../invoicing/services/invoicing.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 
 /**
  * CP-POS-CREAR-EDITAR-COBRAR-001 — G.1 / D.1
@@ -29,6 +31,7 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
  */
 describe('PosCartService — loadFromOrder (editor hydration)', () => {
   let service: PosCartService;
+  let inventorySettings = signal<any>(null);
   // Cast del spy a `any`: jasmine.SpyObj<T> genera intersección con Spy<>
   // para CADA propiedad de T (incluidos signals WritableSignal que no son
   // funciones), y ng build --prod strict template checking rechaza la
@@ -66,6 +69,7 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
   });
 
   beforeEach(() => {
+    inventorySettings = signal<any>({ inventory: { allow_negative_stock: false } });
     productService = jasmine.createSpyObj<PosProductService>(
       'PosProductService',
       ['getProductById'],
@@ -95,10 +99,42 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
         // instancia el facade real y muere con NG0201 antes de llegar a la
         // aserción. Mismo doble que ya usan los demás describes del archivo.
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+        { provide: StoreSettingsFacade, useValue: { settings: inventorySettings } },
       ],
     });
 
     service = TestBed.inject(PosCartService);
+  });
+
+  it('blocks a named shortage with the switch OFF, but allows and warns with ON', () => {
+    const product = { id: '11', name: 'Gaseosa', sku: 'GAS', price: 1000, stock: 0, track_inventory: true } as any;
+    const request = { product, quantity: 1 } as any;
+    expect((service as any).validateAddToCartRequest(request)[0].message).toContain('Gaseosa');
+
+    inventorySettings.set({ inventory: { allow_negative_stock: true } });
+    expect((service as any).validateAddToCartRequest(request)).toEqual([]);
+    const item = { id: 'line-1', itemType: 'product', product, quantity: 1 } as any;
+    service.cartState.set({ ...service.cartState(), items: [item] });
+    expect(service.getOversellWarningForItem(item)).toContain('Sobreventa de Gaseosa');
+  });
+
+  it('treats absent or null policy as strict OFF', () => {
+    const product = { id: '12', name: 'Agua', sku: 'AGU', price: 1000, stock: 0, track_inventory: true } as any;
+    for (const value of [null, undefined]) {
+      inventorySettings.set({ inventory: { allow_negative_stock: value } });
+      expect((service as any).validateAddToCartRequest({ product, quantity: 1 }).length).toBe(1);
+    }
+  });
+
+  it('respects effective variant tracking when evaluating a shortfall', () => {
+    const product = { id: '13', name: 'Camiseta', sku: 'CAM', price: 1000, stock: 0, track_inventory: true } as any;
+    const untrackedVariant = { id: 7, stock: 0, track_inventory_override: false } as any;
+    expect((service as any).validateAddToCartRequest({ product, variant: untrackedVariant, quantity: 1 })).toEqual([]);
+
+    const trackedVariant = { id: 8, stock: 0, track_inventory_override: true } as any;
+    expect((service as any).validateAddToCartRequest({ product, variant: trackedVariant, quantity: 1 }).length).toBe(1);
+    inventorySettings.set({ inventory: { allow_negative_stock: true } });
+    expect((service as any).validateAddToCartRequest({ product, variant: trackedVariant, quantity: 1 })).toEqual([]);
   });
 
   it('usa los productos embebidos y no dispara ningún GET por línea', (done) => {
@@ -114,6 +150,23 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
       // D.1 vino a matar.
       expect(productService.getProductById).not.toHaveBeenCalled();
       expect(state.items[0].product.name).toBe('Producto 1');
+      done();
+    });
+  });
+
+  it('normaliza stock_quantity e imagen del producto embebido al reabrir borrador', (done) => {
+    inventorySettings.set({ inventory: { allow_negative_stock: true } });
+    const order = buildOrder([buildItem(302, {
+      ...embeddedProduct(302),
+      stock_quantity: 11,
+      track_inventory: true,
+      image_url: 'https://images.example.test/coca-cola.jpg',
+    })]);
+    service.loadFromOrder(order).subscribe((state) => {
+      expect(state.items[0].product.stock).toBe(11);
+      expect(state.items[0].product.image_url).toBe('https://images.example.test/coca-cola.jpg');
+      expect(service.getOversellWarningForItem(state.items[0])).toBeNull();
+      expect(productService.getProductById).not.toHaveBeenCalled();
       done();
     });
   });
@@ -190,7 +243,7 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
  */
 describe('PosCartService — removeFromCart (modo adoptado)', () => {
   let service: PosCartService;
-  let posApi: { updateOrderItems: jasmine.Spy; cancelOrder: jasmine.Spy };
+  let posApi: { updateOrderItems: jasmine.Spy; getOrderById: jasmine.Spy; cancelOrder: jasmine.Spy };
 
   const embeddedProduct = (id: number) => ({
     id: String(id),
@@ -225,6 +278,7 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
   beforeEach(() => {
     posApi = {
       updateOrderItems: jasmine.createSpy('updateOrderItems'),
+      getOrderById: jasmine.createSpy('getOrderById'),
       cancelOrder: jasmine.createSpy('cancelOrder').and.returnValue(of({ success: true })),
     };
 
@@ -252,6 +306,7 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
         // instancia el facade real y muere con NG0201 antes de llegar a la
         // aserción. Mismo doble que ya usan los demás describes del archivo.
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+        { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
     });
 
@@ -301,9 +356,27 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
         ],
       }),
     );
+    posApi.getOrderById.and.returnValue(of({
+      id: 500,
+      order_number: 'ORD1',
+      users: { id: 99, first_name: 'Juan', last_name: 'Pérez' },
+      order_promotions: [],
+      coupon_uses: [],
+      order_items: [{
+        product_id: 2,
+        product_name: 'Producto 2',
+        quantity: 1,
+        unit_price: 1000,
+        final_unit_price: 1000,
+        total_price: 1000,
+        tax_amount_item: 0,
+        products: embeddedProduct(2),
+      }],
+    }));
 
     service.removeFromCart('a').subscribe((state) => {
       expect(posApi.updateOrderItems).toHaveBeenCalledTimes(1);
+      expect(posApi.getOrderById).toHaveBeenCalledOnceWith('500');
       const [orderId, payload] =
         posApi.updateOrderItems.calls.mostRecent().args;
       expect(orderId).toBe(500);
@@ -311,6 +384,45 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
       expect(payload[0].product_id).toBe(2);
       expect(state.items.length).toBe(1);
       expect(state.linkedOrderId).toBe(500);
+      done();
+    });
+  });
+
+  it('relee la orden firmada después de agregar un item y conserva imágenes anteriores', (done) => {
+    seedCart(500);
+    const oldImage = 'https://signed.example/old-product.jpg';
+    // PUT /items deliberately has no signed image URLs. GET /:id does.
+    posApi.updateOrderItems.and.returnValue(of({ id: 500, order_items: [] }));
+    posApi.getOrderById.and.returnValue(of({
+      id: 500,
+      order_number: 'ORD1',
+      users: { id: 99, first_name: 'Juan', last_name: 'Pérez' },
+      order_promotions: [],
+      coupon_uses: [],
+      order_items: [
+        {
+          product_id: 1, product_name: 'Producto 1', quantity: 1,
+          unit_price: 1000, final_unit_price: 1000, total_price: 1000,
+          tax_amount_item: 0,
+          products: { ...embeddedProduct(1), image_url: oldImage },
+        },
+        {
+          product_id: 2, product_name: 'Producto 2', quantity: 1,
+          unit_price: 1000, final_unit_price: 1000, total_price: 1000,
+          tax_amount_item: 0, products: embeddedProduct(2),
+        },
+      ],
+    }));
+    spyOn<any>(service, 'processAddToCart').and.returnValue({
+      ...service.cartState(),
+      items: [cartLine('a', 1), cartLine('b', 2)],
+    });
+
+    (service as any).addItemToAdoptedOrder({} as any, 500).subscribe((state: any) => {
+      expect(posApi.getOrderById).toHaveBeenCalledOnceWith('500');
+      expect(state.items[0].product.image_url).toBe(oldImage);
+      expect(state.linkedOrderId).toBe(500);
+      expect(posApi.cancelOrder).not.toHaveBeenCalled();
       done();
     });
   });
@@ -398,6 +510,7 @@ describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
           useValue: { getPosUvtThreshold: () => of({ data: null }) },
         },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+        { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -453,6 +566,7 @@ describe('PosCartService — calculateSummary base neta (C.6)', () => {
           useValue: { getPosUvtThreshold: () => of({ data: null }) },
         },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+        { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -634,6 +748,7 @@ describe('PosCartService — precio con impuesto incluido al repetir producto', 
           useValue: { getPosUvtThreshold: () => of({ data: null }) },
         },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+        { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -787,6 +902,7 @@ describe('PosCartService — tarifa de cliente con impuesto incluido (C.8, terce
           useValue: { getPosUvtThreshold: () => of({ data: null }) },
         },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+        { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -969,6 +1085,7 @@ describe('PosCartService — precio de oferta a nivel producto (B5/B14)', () => 
           useValue: { getPosUvtThreshold: () => of({ data: null }) },
         },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+        { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -1082,6 +1199,7 @@ describe('PosCartService — isPriceOverridden en centavos enteros (F-225)', () 
           useValue: { getPosUvtThreshold: () => of({ data: null }) },
         },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+        { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -1185,6 +1303,7 @@ describe('PosCartService — updateCartItem preserva/borra notas por línea (pas
           useValue: { getPosUvtThreshold: () => of({ data: null }) },
         },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+        { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -1299,6 +1418,7 @@ describe('PosCartService — loadFromOrder repone shippingContext (flete del bor
           useValue: { getPosUvtThreshold: () => of({ data: null }) },
         },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+        { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
       ],
     });
 

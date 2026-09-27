@@ -39,6 +39,13 @@ export class OrderQueryDto {
   @IsEnum(payments_state_enum)
   payment_status?: payments_state_enum;
 
+  /** Matches any settled payment leg using this store payment method. */
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsInt()
+  @Min(1)
+  payment_method_id?: number;
+
   @IsOptional()
   @Transform(({ value }) => parseInt(value))
   @IsInt()

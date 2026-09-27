@@ -77,6 +77,43 @@ describe('PosPaymentService.processShippingSale — adopted order reference', ()
     expect(payload.customer_alias).toBeUndefined();
   });
 
+  it('sends rate, manual input and quoted gross for sale and draft', async () => {
+    const edited: PosShippingSaleData = {
+      ...shipping, shippingRateId: 31, manualCostOverride: true,
+      manualShippingPrice: 10000, shippingCost: 11900,
+    };
+    await firstValueFrom(service.processShippingSale(cart(null), edited, null, 'current_user'));
+    expect(post.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      shipping_rate_id: 31, manual_shipping_price: 10000,
+      shipping_cost: 11900, total_amount: 12900,
+    }));
+
+    await firstValueFrom(service.saveDraft(cart(null), 'current_user', undefined, edited));
+    expect(post.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      shipping_rate_id: 31, manual_shipping_price: 10000,
+      shipping_cost: 11900, total_amount: 12900,
+    }));
+  });
+
+  it('carries one stable Wallet multi-tender attempt key to POS and shipping writes', async () => {
+    const request = {
+      orderId: 'local', amount: 1000, paymentMethod: { id: '1', type: 'cash' },
+      idempotencyKey: 'wallet-attempt-1',
+      payments: [
+        { store_payment_method_id: 1, amount: 500 },
+        { store_payment_method_id: 4, amount: 500 },
+      ],
+    } as any;
+    await firstValueFrom(service.processSaleWithPayment(cart(null), request, 'current_user'));
+    expect(post.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      idempotency_key: 'wallet-attempt-1', payments: request.payments,
+    }));
+    await firstValueFrom(service.processShippingSale(cart(null), shipping, request, 'current_user'));
+    expect(post.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      idempotency_key: 'wallet-attempt-1', payments: request.payments,
+    }));
+  });
+
   it('omits a stale address id for an adopted alias draft while keeping its snapshot', async () => {
     await firstValueFrom(service.saveDraft(
       { ...cart(41), customer: null }, 'current_user', 'Portería torre B',
@@ -162,6 +199,29 @@ describe('PosPaymentService.processSaleWithPayment — prior table status', () =
       expect(result.order?.id).toBe(1124);
     });
   }
+
+  it('persists a fresh restaurant tip separately from product totals', async () => {
+    post.and.returnValue(of({ data: { success: true, order: { id: 1124 } } }));
+    await firstValueFrom(service.processSaleWithPayment(cart, {
+      ...request, tip_amount: 100, tip_type: 'percentage', tip_value: 100,
+      tip_waiter_id: 7, cashReceived: 1100,
+    }, 'current_user'));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.total_amount).toBe(1000);
+    expect(payload.tip_amount).toBe(100);
+    expect(payload.tip_type).toBe('percentage');
+    expect(payload.tip_value).toBe(100);
+    expect(payload.tip_waiter_id).toBe(7);
+    expect(payload.amount_received).toBe(1100);
+  });
+
+  it('defaults cash received to payable total including the tip', async () => {
+    post.and.returnValue(of({ data: { success: true, order: { id: 1124 } } }));
+    await firstValueFrom(service.processSaleWithPayment(cart, {
+      ...request, tip_amount: 100,
+    }, 'current_user'));
+    expect(post.calls.mostRecent().args[1].amount_received).toBe(1100);
+  });
 });
 
 describe('PosPaymentService.processShippingSale — B7 nota de envío + B11 cobro multimétodo', () => {
@@ -244,6 +304,31 @@ describe('PosPaymentService.processShippingSale — B7 nota de envío + B11 cobr
     expect(payload.store_payment_method_id).toBe(1);
     expect(payload.amount_received).toBe(2000);
   });
+
+  it('adds tip fields to a delivery multi-tender sale without adding tip to shipping', async () => {
+    await firstValueFrom(service.processShippingSale(cart(), shipping, {
+      paymentMethod: { id: '1', type: 'cash' },
+      tip_amount: 100, tip_type: 'fixed', tip_value: 100,
+      tip_waiter_id: 7,
+      payments: [
+        { store_payment_method_id: 1, amount: 1000, amount_received: 1000 },
+        { store_payment_method_id: 2, amount: 600 },
+      ],
+    } as any, 'current_user'));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.total_amount).toBe(1500);
+    expect(payload.shipping_cost).toBe(500);
+    expect(payload.tip_amount).toBe(100);
+    expect(payload.tip_waiter_id).toBe(7);
+    expect(payload.payments[1].amount).toBe(600);
+  });
+
+  it('defaults delivery cash received to shipping plus tip', async () => {
+    await firstValueFrom(service.processShippingSale(cart(), shipping, {
+      paymentMethod: { id: '1', type: 'cash' }, tip_amount: 100,
+    } as any, 'current_user'));
+    expect(post.calls.mostRecent().args[1].amount_received).toBe(1600);
+  });
 });
 
 describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada multimétodo enruta a flow/pay', () => {
@@ -251,6 +336,8 @@ describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada mul
   let post: jasmine.Spy;
   let flowPayOrder: jasmine.Spy;
   let processPaymentForExistingOrder: jasmine.Spy;
+  let processReservedPosPayment: jasmine.Spy;
+  let getOrderById: jasmine.Spy;
 
   const cart = {
     items: [],
@@ -266,6 +353,12 @@ describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada mul
     processPaymentForExistingOrder = jasmine
       .createSpy('processPaymentForExistingOrder')
       .and.returnValue(of({ data: { payment: { id: 820 } } }));
+    processReservedPosPayment = jasmine
+      .createSpy('processReservedPosPayment')
+      .and.returnValue(of({ data: { payment: { id: 902, state: 'succeeded' } } }));
+    getOrderById = jasmine.createSpy('getOrderById').and.returnValue(of({
+      tip_amount: 0, payments: [],
+    }));
     flowPayOrder = jasmine.createSpy('flowPayOrder').and.returnValue(of({
       order: { state: 'paid' },
       payment: { id: 900, change: 0 },
@@ -279,8 +372,8 @@ describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada mul
       { getUserId: () => 1, getStoreIdOrThrow: () => 1, getStoreId: () => 1 } as any,
       { isEnabled: false, getRegisterId: () => null } as any,
       {} as any,
-      { processPaymentForExistingOrder } as any,
-      { flowPayOrder } as any,
+      { processPaymentForExistingOrder, processReservedPosPayment } as any,
+      { flowPayOrder, getOrderById } as any,
     );
   });
 
@@ -321,6 +414,152 @@ describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada mul
 
     expect(flowPayOrder).not.toHaveBeenCalled();
     expect(processPaymentForExistingOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes a tipped adopted cash order through flow/pay so the tip is persisted', async () => {
+    await firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '1', type: 'cash' }, cashReceived: 1100,
+      tip_amount: 100, tip_type: 'fixed', tip_value: 100,
+    } as any, 'current_user'));
+    expect(processPaymentForExistingOrder).not.toHaveBeenCalled();
+    expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      store_payment_method_id: 1, amount_received: 1100, tip_amount: 100,
+    }));
+  });
+
+  it('routes tipped adopted bank transfer through flow/pay with its validated bank account', async () => {
+    await firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '3', type: 'bank_transfer' },
+      bank_account_id: 44, tip_amount: 100,
+    } as any, 'current_user'));
+    expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      store_payment_method_id: 3, bank_account_id: 44, tip_amount: 100,
+    }));
+    expect(processPaymentForExistingOrder).not.toHaveBeenCalled();
+  });
+
+  it('clears a persisted adopted-order tip through flow/pay, not the untipped legacy payment API', async () => {
+    getOrderById.and.returnValue(of({ tip_amount: 100, payments: [] }));
+    await firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '1', type: 'cash' }, cashReceived: 1000,
+    } as any, 'current_user'));
+    expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      tip_amount: 0, tip_type: 'fixed', tip_value: 0,
+    }));
+    expect(processPaymentForExistingOrder).not.toHaveBeenCalled();
+  });
+
+  it('does not start a new tender while an adopted digital reservation is unresolved', async () => {
+    getOrderById.and.returnValue(of({ tip_amount: 100, payments: [{
+      id: 907, state: 'pending',
+      store_payment_method: { system_payment_method: { type: 'wompi' } },
+    }] }));
+    await expectAsync(firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '1', type: 'cash' }, cashReceived: 1000,
+    } as any, 'current_user'))).toBeRejectedWithError(/cobro digital #907 sigue pendiente/);
+    expect(flowPayOrder).not.toHaveBeenCalled();
+    expect(processPaymentForExistingOrder).not.toHaveBeenCalled();
+  });
+
+  it('reserva una sola fila y procesa propina de wallet sobre orden adoptada', async () => {
+    flowPayOrder.and.returnValue(of({
+      order: { state: 'pending_payment' }, payment: { id: 902 },
+    }));
+    const result = await firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '4', type: 'wallet' },
+      metadata: { walletId: 88 }, tip_amount: 100,
+    } as any, 'current_user'));
+    expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      payment_type: 'online', tip_amount: 100,
+    }));
+    expect(processReservedPosPayment).toHaveBeenCalledOnceWith(902, { wallet_id: 88 });
+    expect(processPaymentForExistingOrder).not.toHaveBeenCalled();
+    expect(result.success).toBeTrue();
+  });
+
+  it('mantiene Wompi pendiente en espera sin anunciar venta pagada', async () => {
+    flowPayOrder.and.returnValue(of({
+      order: { state: 'pending_payment' }, payment: { id: 903 },
+    }));
+    processReservedPosPayment.and.returnValue(of({
+      data: { payment: { id: 903, state: 'pending', transaction_id: null } },
+    }));
+    const result = await firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '5', type: 'wompi' },
+      metadata: { wompiPaymentMethod: { type: 'NEQUI', phone: '3001234567' } },
+      tip_amount: 100,
+    } as any, 'current_user'));
+    expect(processReservedPosPayment.calls.mostRecent().args[0]).toBe(903);
+    expect(result.nextAction?.type).toBe('await');
+    expect(result.payment?.id).toBe(903);
+  });
+
+  it('no presenta un wallet pendiente de conciliación como pago exitoso', async () => {
+    flowPayOrder.and.returnValue(of({
+      order: { state: 'pending_payment' }, payment: { id: 904 },
+    }));
+    processReservedPosPayment.and.returnValue(of({
+      data: { payment: { id: 904, state: 'pending' } },
+    }));
+    const result = await firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '4', type: 'wallet' },
+      metadata: { walletId: 88 }, tip_amount: 100,
+    } as any, 'current_user'));
+    expect(result.success).toBeFalse();
+    expect(result.message).toContain('pendiente de conciliación');
+  });
+
+  it('retoma la misma reserva digital al reintentar tras un resultado ambiguo', async () => {
+    flowPayOrder.and.returnValue(throwError(() => ({
+      details: { stage: 'digital_payment_pending', payment_id: 905 },
+    })));
+    getOrderById.and.returnValue(of({ tip_amount: 100, payments: [{
+      id: 905, state: 'pending', store_payment_method_id: 4,
+    }] }));
+    processReservedPosPayment.and.returnValue(of({ data: {
+      payment: { id: 905, state: 'succeeded' },
+    } }));
+    const result = await firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '4', type: 'wallet' },
+      metadata: { walletId: 88 }, tip_amount: 100,
+    } as any, 'current_user'));
+    expect(processReservedPosPayment).toHaveBeenCalledOnceWith(905, { wallet_id: 88 });
+    expect(result.payment?.id).toBe(905);
+    expect(processPaymentForExistingOrder).not.toHaveBeenCalled();
+  });
+
+  it('never resumes a pending reservation with a changed tip or method', async () => {
+    flowPayOrder.and.returnValue(throwError(() => ({
+      details: { stage: 'digital_payment_pending', payment_id: 905 },
+    })));
+    getOrderById.and.returnValue(of({ tip_amount: 200, payments: [{
+      id: 905, state: 'pending', store_payment_method_id: 4,
+    }] }));
+    await expectAsync(firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '4', type: 'wallet' },
+      metadata: { walletId: 88 }, tip_amount: 100,
+    } as any, 'current_user'))).toBeRejectedWithError(/otro medio o importe/);
+    expect(processReservedPosPayment).not.toHaveBeenCalled();
+  });
+
+  it('explica la reserva y el reintento seguro si falla el procesamiento posterior', async () => {
+    flowPayOrder.and.returnValue(of({
+      order: { state: 'pending_payment' }, payment: { id: 906 },
+    }));
+    processReservedPosPayment.and.returnValue(throwError(() => new Error('network timeout')));
+    await expectAsync(firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '4', type: 'wallet' },
+      metadata: { walletId: 88 }, tip_amount: 100,
+    } as any, 'current_user'))).toBeRejectedWithError(/cobro digital #906 reservado/);
+  });
+
+  it('envía tip cero al reintentar sin propina para limpiar un intento anterior', async () => {
+    await firstValueFrom(service.processExistingDigitalTip(cart, {
+      paymentMethod: { id: '4', type: 'wallet' }, metadata: { walletId: 88 },
+    } as any, 41));
+    expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      tip_amount: 0, tip_type: 'fixed', tip_value: 0,
+    }));
   });
 });
 

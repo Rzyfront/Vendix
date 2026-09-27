@@ -1,3 +1,86 @@
+<!-- A single shipping-state owner: the shell projects this view beside Cliente. -->
+<ng-template #clientDeliveryDetails>
+  <div class="shipping-step client-delivery-details">
+    @if (flashSection()) {
+      <div class="flash-banner" role="alert">
+        <app-icon name="alert-triangle" [size]="16"></app-icon>
+        <span>{{ flashMessage() }}</span>
+      </div>
+    }
+    <section class="method-section" [class.config-flash-warning]="flashSection() === 'shipping-method'">
+      <div class="section-header">
+        <app-icon name="truck" [size]="20" class="section-icon"></app-icon>
+        <h2 class="section-title">¿Cómo llega el pedido?</h2>
+      </div>
+      @if (activeShippingMethods().length) {
+        <div class="method-grid" aria-label="Método de domicilio">
+          @for (method of activeShippingMethods(); track method.id) {
+            <button type="button" class="method-card"
+              [class.selected]="selectedShippingMethod()?.id === method.id"
+              [attr.aria-pressed]="selectedShippingMethod()?.id === method.id"
+              (click)="selectShippingMethod(method, { advance: false })">
+              <app-icon [name]="getShippingIcon(method.type)" [size]="24"></app-icon>
+              <span class="method-card-label">{{ method.name }}</span>
+            </button>
+          }
+        </div>
+      } @else {
+        <div class="no-methods-alert" role="alert">
+          <app-icon name="alert-triangle" [size]="18"></app-icon>
+          <div class="no-methods-body">
+            <span class="no-methods-title">No hay métodos de domicilio disponibles</span>
+            <button type="button" class="no-methods-link" (click)="navigateToShippingSettings()">Configurar envíos</button>
+          </div>
+        </div>
+      }
+    </section>
+
+    @if (selectedShippingMethod() && requiresAddress()) {
+      <section class="address-section" [class.config-flash-warning]="flashSection() === 'address'">
+        <div class="section-header">
+          <app-icon name="map-pin" [size]="20" class="section-icon"></app-icon>
+          <h2 class="section-title">Dirección de entrega</h2>
+          @if (!addressValid()) { <span class="addr-required-badge">Obligatoria</span> }
+        </div>
+        @if (cartState()?.customer?.addresses?.length) {
+          <div class="method-grid saved-addresses" aria-label="Direcciones guardadas del cliente">
+            @for (saved of cartState()!.customer!.addresses!; track saved.id) {
+              <button type="button" class="method-card"
+                [class.selected]="addressId() === saved.id && !addressEditing()"
+                [attr.aria-pressed]="addressId() === saved.id && !addressEditing()"
+                (click)="selectSavedAddress(saved.id)">
+                <app-icon name="map-pin" [size]="18"></app-icon>
+                <span class="method-card-label">{{ saved.address_line1 }}, {{ saved.city }}</span>
+              </button>
+            }
+          </div>
+        }
+        @if (originalShipping() && !addressEditing()) {
+          <p class="address-preview">{{ addressSummary() }}</p>
+          <button type="button" class="no-methods-link" (click)="addressEditing.set(true)">Editar dirección</button>
+        } @else if (addressId() && !addressEditing()) {
+          <div class="address-preview">
+            <span>{{ addressSummary() }}</span>
+            <button type="button" class="no-methods-link" (click)="beginNewAddress()">Usar otra dirección</button>
+          </div>
+        } @else {
+          <p class="address-help">Usaremos el teléfono del cliente; puedes cambiarlo si recibirá otra persona.</p>
+          <app-address-form-fields #clientAddressForm
+            [initialAddress]="initialAddress()"
+            [compact]="true"
+            [requirePhone]="true"
+            [showErrors]="showAddressErrors()"
+            (addressChange)="onAddressChange($event, clientAddressForm.form.dirty)"
+            (validChange)="onAddressValidChange($event)"
+          ></app-address-form-fields>
+        }
+      </section>
+    } @else if (isPickupMethod()) {
+      <p class="address-help">Recogida en tienda: no necesitas ingresar una dirección.</p>
+    }
+  </div>
+</ng-template>
+
 <div class="shipping-step">
   <!-- Validation flash banner -->
   @if (flashSection()) {
@@ -25,6 +108,16 @@
        duplica. -->
   <div class="ship-grid">
     <div class="ship-main">
+      @if (detailsInCliente() && selectedShippingMethod()) {
+        <div class="ship-collapsed" role="status">
+          <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
+          <span class="sw-label">
+            {{ selectedShippingMethod()?.name }}
+            @if (requiresAddress()) { · {{ addressSummary() }} }
+          </span>
+        </div>
+      }
+      @if (!detailsInCliente()) {
       <!-- SUB-STEP 0 · Método de envío -->
       @if (shipSubStep() === 0) {
         <section
@@ -100,7 +193,7 @@
                 >
               }
             </div>
-            @if (cartState()?.shippingContext && cartState()?.customer?.addresses?.length) {
+            @if (cartState()?.customer?.addresses?.length) {
               <div class="method-grid" aria-label="Direcciones guardadas del cliente">
                 @for (saved of cartState()!.customer!.addresses!; track saved.id) {
                   <button type="button" class="method-card"
@@ -119,6 +212,7 @@
             } @else {
               <app-address-form-fields
                 [initialAddress]="initialAddress()"
+                [compact]="true"
                 [requirePhone]="true"
                 [showErrors]="showAddressErrors()"
                 (addressChange)="onAddressChange($event)"
@@ -133,6 +227,7 @@
             <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
           </button>
         }
+      }
       }
 
       <!-- SUB-STEP TERMINAL · Costo de envío + notas + totales -->
@@ -203,17 +298,24 @@
                   <span class="currency">{{ currencySymbol() }}</span>
                   <input
                     appCurrencyInput
-                    [ngModel]="shippingCost()"
-                    (ngModelChange)="shippingCost.set($event); onShippingCostChange()"
+                    [ngModel]="manualShippingPrice()"
+                    (ngModelChange)="onShippingCostChange($event)"
                     placeholder="0.00"
                   />
                 </div>
+                @if (manualCostOverride() && shippingRateId()) {
+                  <p class="manual-tax-note" role="note">
+                    El importe digitado {{ manualInputIsBase()
+                      ? 'es la base; se añade el impuesto de la tarifa seleccionada si aplica.'
+                      : 'incluye el impuesto de la tarifa seleccionada, si aplica.' }}
+                  </p>
+                }
               </div>
             }
 
-            @if (manualCostLosesTax()) {
+            @if (manualTaxUnavailable()) {
               <p class="manual-tax-note" role="note">
-                El costo manual se registra sin impuesto de envío.
+                No hay una tarifa aplicable; este costo manual se registrará sin impuesto de envío.
               </p>
             }
           </div>
@@ -244,7 +346,7 @@
             </div>
             <div class="totals-divider"></div>
             <div class="totals-row totals-row--grand">
-              <span class="totals-grand-label">Total a pagar</span>
+              <span class="totals-grand-label">Total antes de propina</span>
               <span class="totals-grand-amount">{{ totalWithShipping() | currency }}</span>
             </div>
           </div>
@@ -268,6 +370,7 @@
 
     <!-- Columna del stepper: a la derecha en desktop; oculta en móvil (el header
          horizontal del shell orienta al usuario). -->
+    @if (!detailsInCliente()) {
     <aside class="steps-col">
       <app-steps-line
         [orientation]="'vertical'"
@@ -284,5 +387,6 @@
         {{ shipSubSteps()[shipSubStep()]?.label }}
       </p>
     </aside>
+    }
   </div>
 </div>

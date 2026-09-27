@@ -56,6 +56,33 @@
   border-color: var(--color-primary);
 }
 
+.credit-money-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0 12px;
+  border: 2px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-background);
+  color: var(--color-text-primary);
+}
+
+.credit-money-field:focus-within {
+  border-color: var(--color-primary);
+}
+
+.credit-money-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+}
+
 .credit-methods {
   display: flex;
   flex-wrap: wrap;
