@@ -588,4 +588,35 @@ describe('PaymentCollectorComponent — restaurant tip amount', () => {
     expect(component.effectiveTotal()).toBe(105000);
     expect(fixture.debugElement.query(By.css('.pc-tip-mode'))).toBeNull();
   });
+
+  it('blocks percentages above 100 and invalid fixed amounts with an explicit message', () => {
+    component.selectMethod(multiCashMethod, { advance: false });
+    component.cashReceivedControl.setValue(200000);
+    component.tipType.set('percentage');
+    component.tipControl.setValue(101);
+    expect(component.tipValidationError()).toContain('entre 0 y 100');
+    expect(component.canSubmit()).toBeFalse();
+    expect(component.tipAmount()).toBe(0);
+
+    component.tipType.set('fixed');
+    component.tipControl.setValue(-10);
+    expect(component.tipValidationError()).toContain('mayor o igual a cero');
+    expect(component.canSubmit()).toBeFalse();
+    component.tipControl.setValue(Number.POSITIVE_INFINITY);
+    expect(component.tipValidationError()).toContain('propina válida');
+    expect(component.canSubmit()).toBeFalse();
+  });
+
+  it('makes multi-tender legs balance against total including resolved percentage tip', () => {
+    fixture.componentRef.setInput('allowMultiTender', true);
+    fixture.componentRef.setInput('paymentMethods', [multiCashMethod, multiCardMethod]);
+    fixture.detectChanges();
+    component.setMultiEnabled(true);
+    component.tipType.set('percentage');
+    component.tipControl.setValue(10);
+    expect(component.remaining()).toBe(11900);
+    component.setLegAmount(0, 116900);
+    expect(component.remaining()).toBe(0);
+    expect(component.isMultiValid()).toBeTrue();
+  });
 });
