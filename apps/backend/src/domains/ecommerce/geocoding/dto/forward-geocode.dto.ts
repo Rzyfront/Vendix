@@ -1,4 +1,10 @@
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 /**
  * Query DTO for `GET /ecommerce/geocoding/forward`.
@@ -30,4 +36,15 @@ export class ForwardGeocodeDto {
   @IsString({ message: 'state must be a string' })
   @MaxLength(120, { message: 'state must be at most 120 characters' })
   state?: string;
+
+  /**
+   * DANE municipality code (5 digits, e.g. "11001" for Bogotá). Optional —
+   * when present it pins the municipality bounding box exactly instead of
+   * resolving it from `city`/`state` text, and skips city-name matching
+   * ambiguity (e.g. two municipalities sharing a name in different states).
+   */
+  @IsOptional()
+  @IsString({ message: 'municipality_code must be a string' })
+  @Matches(/^\d{5}$/, { message: 'municipality_code must be exactly 5 digits' })
+  municipality_code?: string;
 }
