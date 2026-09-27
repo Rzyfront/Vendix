@@ -320,6 +320,29 @@ async function main() {
         assert.match(fullText, /Reembolsada/);
         assert.match(fullText, /\$0(?:\D|$)/);
       });
+      await runScenario('R13: mobile order cards retain refund badge and current net', ['R13'], async () => {
+        await page.setViewportSize({ width: 390, height: 844 });
+        try {
+          await openUiView(page, `${adminBase}/admin/orders/sales`,
+            page.locator('input[placeholder="Buscar órdenes..."]'),
+            'El listado móvil de órdenes');
+          const search = page.locator('input[placeholder="Buscar órdenes..."]');
+          await search.fill('POS-2026-0376');
+          const partial = page.locator('app-orders-list app-item-list .item-card')
+            .filter({ hasText: 'POS-2026-0376' });
+          await partial.waitFor({ timeout: 20_000 });
+          assert.match(await partial.locator('.card-badge-wrap').innerText(), /Reembolso parcial/);
+          assert.match(await partial.locator('.card-footer').innerText(), /Neto actual[\s\S]*\$8\.000/i);
+          await search.fill('POS-2026-0388');
+          const full = page.locator('app-orders-list app-item-list .item-card')
+            .filter({ hasText: 'POS-2026-0388' });
+          await full.waitFor({ timeout: 20_000 });
+          assert.match(await full.locator('.card-badge-wrap').innerText(), /Reembolsada/);
+          assert.match(await full.locator('.card-footer').innerText(), /Neto actual[\s\S]*\$0(?:\D|$)/i);
+        } finally {
+          await page.setViewportSize({ width: 1280, height: 720 });
+        }
+      });
 
       await runScenario('R10: orders filter by settled payment method', ['R10'], async () => {
         await openUiView(page, `${adminBase}/admin/orders/sales`,
