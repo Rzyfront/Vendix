@@ -14,23 +14,19 @@ import { buildOrder, buildOrderItem } from '../../../testing/money-fixtures';
  * `createFromOrder` — coherencia de emisión desde POS/orden (Agente D, tareas
  * 3a/3b/3c). Cubre:
  *
- * 1. F-090 (Task 3a): una línea con `tax_amount_item > 0` pero sin filas
- *    `order_item_taxes` (origen kitchen-fire / pasarela de pago / split de
- *    cuenta) NO rechaza — `invoicing.service.tax-matrix.spec.ts` ya prueba,
- *    contra el camino real, que esta población tiene una resolución
- *    deliberada: el escalar `tax_amount_item` se usa vía
- *    `resolveOrderLineTaxTotal` (Σ `order_item_taxes` → escalar ×
- *    `resolveLineUnits`), con `logger.warn` como único rastro. Un intento
- *    previo de convertir esto en un throw fail-closed (`INVOICING_CALC_001`)
- *    fue revertido por romper esa población ya probada (ver el comentario en
- *    `invoicing.service.ts` junto al warn de F-090). Lo que este test
- *    verifica en su lugar es el riesgo que ese intento perseguía: la línea
- *    huérfana SÍ se factura, pero su impuesto nunca llega a `invoice_taxes`
- *    (que sólo agrega filas `order_item_taxes` reales) — así que la cabecera
- *    puede declarar más impuesto del que sus filas respaldan. Se prueba con
- *    el validador REAL (`FiscalDocumentValidator.validate`), no con una
- *    aserción propia: `HEADER_TAX_TOTAL_MISMATCH` SÍ dispara para este
- *    documento. Es un hallazgo, no un fix — reportado, no bloqueado.
+ * 1. F-090 (Task 3a, luego cerrado por Agente E): una línea con
+ *    `tax_amount_item > 0` pero sin filas `order_item_taxes` (origen
+ *    kitchen-fire / pasarela de pago / split de cuenta) NO rechaza — sigue
+ *    facturando su escalar vía `resolveOrderLineTaxTotal` (Σ
+ *    `order_item_taxes` → escalar × `resolveLineUnits`), con `logger.warn`
+ *    como rastro — pero AHORA su impuesto SÍ llega a `invoice_taxes`: se
+ *    resuelve contra un hermano real de la misma orden o contra la
+ *    asignación de impuesto del producto (`orphan-line-tax.util.ts`), nunca
+ *    inventado. El riesgo que un intento previo de throw fail-closed había
+ *    dejado abierto (cabecera con más impuesto del que sus filas
+ *    respaldaban) se prueba CERRADO con el validador REAL
+ *    (`FiscalDocumentValidator.validate`): `HEADER_TAX_TOTAL_MISMATCH` ya NO
+ *    dispara para este documento.
  * 2. Los montos reales de restaurante (3×1300, 10×25000, 1×24500, INC 8 %
  *    inclusivo) cierran dentro de 1 ¢ y la factura resultante pasa el
  *    validador REAL (`FiscalDocumentValidator` vía `judgeDraftLineSnapshot`
@@ -54,7 +50,17 @@ describe('InvoicingService.createFromOrder — coherencia de emisión (F-090, ci
       invoices: ['findFirst', 'create', 'update'],
       invoice_items: ['findMany', 'deleteMany'],
       invoice_taxes: ['createMany', 'deleteMany'],
+      // F-090 remediación (Agente E) — la línea huérfana (población 3)
+      // resuelve su tarifa contra el catálogo del producto vía una
+      // consulta APARTE (`this.prisma.products.findMany`, no anidada en el
+      // `include` de `orders.findFirst` — ver el comentario en
+      // `invoicing.service.ts` sobre el OOM de `backend-typecheck` que
+      // motivó separarla). Vacío por defecto: el test F-090 de este
+      // archivo resuelve por la SIBLING tier (un hermano real de la misma
+      // orden), no por catálogo de producto.
+      products: ['findMany'],
     });
+    prisma.products.findMany.mockResolvedValue([]);
     prisma.invoices.findFirst.mockResolvedValue(null);
     prisma.invoices.create.mockImplementation(
       async ({ data }: { data: Record<string, unknown> }) => ({
@@ -133,7 +139,7 @@ describe('InvoicingService.createFromOrder — coherencia de emisión (F-090, ci
       })),
     ) as Array<{ code: string; severity: string }>;
 
-  it('F-090: línea con tax_amount_item > 0 y order_item_taxes vacío NO rechaza — usa el escalar vía resolveLineUnits, con logger.warn, y el validador REAL confirma el riesgo de HEADER_TAX_TOTAL_MISMATCH que esa población deja abierto', async () => {
+  it('F-090: línea con tax_amount_item > 0 y order_item_taxes vacío NO rechaza — usa el escalar vía resolveLineUnits, con logger.warn, y su impuesto SÍ llega a invoice_taxes (resuelto contra un hermano real) — el validador REAL confirma que HEADER_TAX_TOTAL_MISMATCH ya no dispara', async () => {
     // Línea sana (fire-to-kitchen normal, con desglose completo).
     const sane = buildOrderItem({
       id: 1,
@@ -179,23 +185,30 @@ describe('InvoicingService.createFromOrder — coherencia de emisión (F-090, ci
 
     // La cabecera SÍ suma el impuesto de ambas líneas (288.89 + 4000)...
     expect(data.tax_amount.toString()).toBe('4288.89');
-    // ...pero `invoice_taxes` sólo agrega filas `order_item_taxes` reales —
-    // la huérfana no aporta ninguna — así que sus filas NO respaldan la
-    // cabecera. Esto es el riesgo que Task 3a intentó cerrar con un throw
-    // (revertido por romper la población ya probada): sigue abierto.
-    expect(line_tax_rows).toHaveLength(1);
+    // ...y AHORA (Agente E, F-090 remediación) `invoice_taxes` también lo
+    // hace: la línea huérfana resuelve su tarifa contra el hermano real de
+    // la misma orden (INC 8 %, `tax_rate_id: 68`, la única fila
+    // `order_item_taxes` real del documento) y aporta su propia fila —
+    // enlazada a su `invoice_item_id` porque el INC inclusivo de la línea
+    // sana ya forzaba el camino partido (`persistLineTaxes`/`createMany`).
+    // El riesgo que Task 3a había dejado abierto (cabecera sin respaldo de
+    // filas) queda cerrado: 2 filas, una por línea, que suman exactamente
+    // la cabecera.
+    expect(line_tax_rows).toHaveLength(2);
     expect(
       line_tax_rows.reduce(
         (sum: number, row: any) => sum + Number(row.tax_amount),
         0,
       ),
-    ).toBeCloseTo(288.89, 2);
+    ).toBeCloseTo(4288.89, 2);
 
     // Confirmación con el validador REAL, no con aritmética propia del test:
-    // el mismo documento que `createFromOrder` acaba de construir SÍ dispara
-    // `HEADER_TAX_TOTAL_MISMATCH` (FAU06/tax_amount) contra sus propias filas
-    // de impuesto — la cabecera declara 4.288,89 y `cac:TaxTotal` sólo puede
-    // respaldar 288,89.
+    // el mismo documento que `createFromOrder` acaba de construir YA NO
+    // dispara ninguno de los 4 hallazgos de descuadre aritmético — la
+    // cabecera declara 4.288,89 y `cac:TaxTotal` ahora sí respalda ese
+    // importe. `RESOLUTION_MISSING` sigue siendo blocker aparte (el test
+    // pasa `resolution: null` a propósito, algo ortogonal a este fix), así
+    // que no se afirma `emittable === true`.
     const report = new FiscalDocumentValidator().validate({
       document_type: 'sales_invoice',
       subtotal_amount: data.subtotal_amount,
@@ -221,9 +234,11 @@ describe('InvoicingService.createFromOrder — coherencia de emisión (F-090, ci
     });
 
     const codes = report.findings.map((f) => f.code);
-    expect(codes).toContain('HEADER_TAX_TOTAL_MISMATCH');
-    expect(report.computed.tax_total_amount).toBe('288.89');
-    expect(report.emittable).toBe(false);
+    expect(codes).not.toContain('HEADER_TAX_TOTAL_MISMATCH');
+    expect(codes).not.toContain('HEADER_LINE_EXTENSION_MISMATCH');
+    expect(codes).not.toContain('PAYABLE_AMOUNT_MISMATCH');
+    expect(codes).not.toContain('TAX_SUBTOTAL_MISMATCH');
+    expect(report.computed.tax_total_amount).toBe('4288.89');
   });
 
   it('restaurante real (3×1300, 10×25000, 1×24500, INC 8% inclusivo): cierra sin drift bloqueante y pasa el validador real', async () => {

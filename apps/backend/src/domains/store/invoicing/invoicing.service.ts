@@ -117,6 +117,14 @@ import { normalizeInvoiceTaxRate } from './utils/invoice-tax-rate.util';
 import { resolveOrderLineTaxTotal } from '../taxes/utils/final-price.util';
 import { resolveCategoryTaxType } from '../shipping/utils/shipping-tax.util';
 import { projectOrderInvoiceLines } from './utils/order-invoice-lines.util';
+// F-090 remediación (Agente E, 2026-09-27) — resuelve la tarifa real de una
+// línea huérfana (población 3 de `aggregateOrderTaxes`) contra el catálogo
+// del producto o contra un hermano real de la misma orden; nunca inventa.
+import {
+  buildSiblingTaxCandidates,
+  extractProductTaxCandidates,
+  resolveOrphanLineTax,
+} from './utils/orphan-line-tax.util';
 
 /**
  * Listing rows whose send/transmission state is an error or a pending send get
@@ -2944,11 +2952,14 @@ export class InvoicingService {
     // `weight`), sin sintetizar una fila `order_item_taxes`/`invoice_taxes` —
     // exactamente lo que el docblock de `aggregateOrderTaxes` ya documentaba
     // ("no se sintetiza la fila que falta"). El throw rompía ambos tests.
-    // Revertido: se deja el warn original. El riesgo de `HEADER_TAX_TOTAL_MISMATCH`
-    // que motivó el intento sigue siendo real para la porción de población 3
-    // que NO pasa por el escalador de unidades de precio (ver el propio
-    // fallback más abajo); ese es el gap a resolver, no esta población en
-    // general — reportado como hallazgo, sin bloquear el camino ya probado.
+    // Revertido en su momento: se dejó el warn original. El riesgo de
+    // `HEADER_TAX_TOTAL_MISMATCH` que motivó el intento SÍ se cierra ahora
+    // (Agente E, 2026-09-27, ver el bloque siguiente): el throw fail-closed
+    // vuelve, pero condicionado a que NINGUNA fuente real (producto o
+    // hermano de la misma orden) resuelva la tarifa — la población que
+    // `tax-matrix.spec.ts` ya prueba contra el escalador de unidades de
+    // precio ahora resuelve por asignación de producto (fixture actualizado
+    // en esos dos tests) y nunca llega al throw.
     if (taxScalarWithoutBreakdown.count > 0) {
       this.logger.warn(
         `[invoice:create-from-order]${formatGateCorrelation({
@@ -2960,6 +2971,132 @@ export class InvoicingService {
           `${taxScalarWithoutBreakdown.line_indexes.join(', ')}); quedan ` +
           `fuera de invoice_taxes — no se sintetiza la fila faltante`,
       );
+    }
+    // F-090 remediación (Agente E, 2026-09-27) — el warn de arriba deja de
+    // ser el único rastro. Cada línea de la población 3 se resuelve contra
+    // UNA fuente real —la asignación de impuesto del producto primero, una
+    // fila `order_item_taxes` real de un hermano de la MISMA orden después
+    // (`resolveOrphanLineTax`, `./utils/orphan-line-tax.util.ts`)— y, si
+    // ninguna la explica sin ambigüedad (misma tolerancia de 1 ¢ que
+    // `FiscalDocumentValidator`), el documento se corta con
+    // `INVOICING_CALC_001` ANTES de tocar el consecutivo DIAN. La función
+    // PURA `aggregateOrderTaxes` sigue sin sintetizar nada (su docblock
+    // sigue siendo cierto); esto vive acá, en el llamador con Prisma, que sí
+    // tiene catálogo y hermanos reales para mirar.
+    if (taxScalarWithoutBreakdown.count > 0) {
+      const siblingCandidates = buildSiblingTaxCandidates(projectedOrderItems);
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      // Consulta SEPARADA y acotada (`select`, no `include` anidado dentro
+      // de la mega-consulta de arriba) por los `product_id` de las líneas
+      // huérfanas — nunca las de `orders.findFirst`. Anidar
+      // `product_tax_assignments -> tax_categories -> tax_rates` DENTRO del
+      // `include` gigante de `orders.findFirst` hacía que `backend-typecheck`
+      // reventara por heap (medido: PASA con 6144 MB, FALLA con el techo por
+      // defecto de 3072 MB de `buildcheck.sh` — ver `buildcheck-dev`) porque
+      // el chequeo de tipos de Prisma es combinatorio sobre el árbol
+      // COMPLETO del `include`. Esta consulta aparte, del mismo tamaño que
+      // la de arriba (línea ~6828, `resolveWithholdingAmount`), no paga ese
+      // costo porque su tipo no se anida dentro del otro.
+      const orphanProductIds = Array.from(
+        new Set(
+          taxScalarWithoutBreakdown.line_indexes
+            .map((i) => (projectedOrderItems[i] as any)?.product_id)
+            .filter(
+              (id: unknown): id is number =>
+                typeof id === 'number' && Number.isFinite(id),
+            ),
+        ),
+      );
+      const orphanProducts = orphanProductIds.length
+        ? await this.prisma.products.findMany({
+            where: { id: { in: orphanProductIds } },
+            select: {
+              id: true,
+              product_tax_assignments: {
+                select: {
+                  is_inclusive: true,
+                  tax_categories: {
+                    select: {
+                      tax_type: true,
+                      is_inclusive: true,
+                      tax_rates: { select: { id: true, name: true, rate: true } },
+                    },
+                  },
+                },
+              },
+            },
+          })
+        : [];
+      const orphanProductById = new Map(orphanProducts.map((p) => [p.id, p]));
+      for (const lineIndex of taxScalarWithoutBreakdown.line_indexes) {
+        const sourceItem: any = projectedOrderItems[lineIndex];
+        const taxable_amount = Number(sourceItem?.total_price || 0);
+        const tax_amount = resolveOrderLineTaxTotal(sourceItem);
+        if (tax_amount <= 0) continue; // ya descartado arriba; defensivo
+        const resolution = resolveOrphanLineTax({
+          taxable_amount,
+          tax_amount,
+          product_candidates: extractProductTaxCandidates(
+            orphanProductById.get(Number(sourceItem?.product_id)),
+          ),
+          sibling_candidates: siblingCandidates,
+        });
+        if (!resolution.resolved) {
+          throw new VendixHttpException(
+            ErrorCodes.INVOICING_CALC_001,
+            `La orden #${order.id}, línea ${lineIndex + 1}, cobra ` +
+              `${tax_amount} de impuesto sin fila de desglose y ` +
+              `${
+                resolution.reason === 'ambiguous'
+                  ? 'más de una tarifa real la explica igual de bien'
+                  : 'ninguna tarifa real del producto ni de una línea hermana de la misma orden la explica'
+              } — no se inventa la tarifa. No se creó la factura ni se ` +
+              `usó ningún número. Revisa la asignación de impuesto del ` +
+              `producto (o el desglose de la línea de origen) y factura de nuevo.`,
+            {
+              order_id: order.id,
+              detail: `orphan_line_tax:${lineIndex}:${resolution.reason}`,
+            },
+          );
+        }
+        const resolved = resolution.resolved;
+        const persistedRow: InvoiceTaxRowInput = {
+          tax_rate_id: resolved.tax_rate_id,
+          tax_name: resolved.tax_name,
+          tax_rate: orderTaxFractionToInvoiceRate(
+            resolved.tax_rate,
+            resolved.tax_type,
+          ),
+          taxable_amount: round2(taxable_amount),
+          tax_amount: round2(tax_amount),
+          tax_type: resolved.tax_type,
+          is_inclusive: resolved.is_inclusive,
+        };
+        orderLineTaxes[lineIndex] = [
+          ...(orderLineTaxes[lineIndex] || []),
+          persistedRow,
+        ];
+        const group = invoiceTaxRows.find(
+          (existing) =>
+            existing.tax_name === persistedRow.tax_name &&
+            Number(existing.tax_rate) === Number(persistedRow.tax_rate) &&
+            existing.tax_type === persistedRow.tax_type &&
+            (existing.tax_rate_id ?? null) ===
+              (persistedRow.tax_rate_id ?? null) &&
+            (existing.is_inclusive === true) ===
+              (persistedRow.is_inclusive === true),
+        );
+        if (group) {
+          group.taxable_amount = round2(
+            Number(group.taxable_amount || 0) + taxable_amount,
+          );
+          group.tax_amount = round2(
+            Number(group.tax_amount || 0) + tax_amount,
+          );
+        } else {
+          invoiceTaxRows.push({ ...persistedRow });
+        }
+      }
     }
     // La línea de ENVÍO, cuando existe, se añade al final de `items` y no
     // lleva tributos: se representa como un arreglo vacío para que el
@@ -2997,7 +3134,13 @@ export class InvoicingService {
         orderLineTaxes.push([]);
       }
     }
-    const taxGroups = { size: distinctGroupCount };
+    // `distinctGroupCount` sólo contaba los grupos que salían de
+    // `aggregateOrderTaxes`; el envío y la remediación F-090 de arriba
+    // pueden fundirse en un grupo ya existente o abrir uno nuevo en
+    // `invoiceTaxRows`, así que el tamaño real de después es la única
+    // cuenta que no queda desactualizada (antes de estas dos fusiones,
+    // `distinctGroupCount === invoiceTaxRows.length` siempre se cumplía).
+    const taxGroups = { size: invoiceTaxRows.length };
 
     // `needsOrderLineTaxSplit`: multi-tributo O cualquier línea inclusiva.
     // Con un solo tributo AGREGADO el emisor produce el mismo XML heredándolo;
