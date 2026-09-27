@@ -3560,7 +3560,7 @@ export class CheckoutComponent implements OnInit {
         `*Pedido:* ${order.order_number}\n\n` +
         (itemLines ? `*Productos:*\n${itemLines}\n\n` : '') +
         (pendingLines ? `${pendingLines}\n\n` : '') +
-        `*Total:* ${fmt(Number(order.total))}\n\n` +
+        `${opts?.pendingShipping ? '*Total (sin envío):*' : '*Total:*'} ${fmt(Number(order.total))}\n\n` +
         (opts?.pendingShipping
           ? `*Motivo:* No pudimos ubicarme en el mapa\n\n`
           : '') +

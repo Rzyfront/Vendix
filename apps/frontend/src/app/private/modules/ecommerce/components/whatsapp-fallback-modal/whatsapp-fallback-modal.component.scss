@@ -12,7 +12,14 @@
 .wa-shell {
   display: flex;
   flex-direction: column;
-  margin: -1.25rem -1.25rem 0;
+  /* Bleed the hero to the modal edges. These must mirror app-modal's body
+     padding exactly (px-3 py-2.5 / md:px-5 md:py-4): a larger negative margin
+     overflows the body and renders a horizontal scrollbar under the hero. */
+  margin: -0.625rem -0.75rem;
+
+  @media (min-width: 768px) {
+    margin: -1rem -1.25rem;
+  }
 }
 
 /* ---------- HERO ---------- */
@@ -44,34 +51,35 @@
 
 .wa-hero-icon {
   position: relative;
-  width: 68px;
-  height: 68px;
-  margin: 0 auto 0.75rem;
+  width: 76px;
+  height: 76px;
+  margin: 0 auto 0.875rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.18);
+  background: #fff;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow:
+    0 8px 20px rgba(7, 94, 84, 0.35),
+    0 0 0 4px rgba(255, 255, 255, 0.25);
   z-index: 2;
   animation: wa-icon-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
 .wa-hero-halo {
   position: absolute;
-  inset: -8px;
+  inset: -10px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.3);
   animation: wa-halo 2.4s ease-in-out infinite;
 }
 
 .wa-hero-logo {
   position: relative;
   z-index: 2;
-  width: 36px;
-  height: 36px;
-  color: #fff;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.15));
+  width: 44px;
+  height: 44px;
+  color: #25d366;
 }
 
 .wa-hero-title {
