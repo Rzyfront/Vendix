@@ -637,6 +637,10 @@ export class PosShippingStepComponent {
       const payload = this.toAddressPayload(address);
       this.setAddress(payload, address.id);
       this.ensureSavedAddressCoords(address.id, payload);
+      // H6 — la dirección principal guardada puede tener `state_province` o
+      // `phone_number` nulos (columnas nullable en Prisma): abrir el
+      // formulario precargado en vez de solo un resumen sin vía de completarla.
+      this.addressEditing.set(!this.addressValid());
     } else {
       this.setAddress(null, null);
       // Prefill contact once, without making a blank address look valid.
@@ -743,6 +747,9 @@ export class PosShippingStepComponent {
     const payload = this.toAddressPayload(address);
     this.setAddress(payload, id);
     this.ensureSavedAddressCoords(id, payload);
+    // H6 — una dirección guardada distinta puede resultar igual de incompleta;
+    // reabre el formulario precargado en vez de dejar el resumen sin salida.
+    this.addressEditing.set(!this.addressValid());
   }
 
   onAddressChange(payload: AddressPayload, formDirty = this.addressForm()?.form.dirty ?? true): void {

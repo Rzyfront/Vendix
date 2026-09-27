@@ -67,7 +67,7 @@
             </p>
           }
           <button type="button" class="no-methods-link" (click)="addressEditing.set(true)">Editar dirección</button>
-        } @else if (addressId() && !addressEditing()) {
+        } @else if (addressId() && !addressEditing() && addressValid()) {
           <div class="address-preview">
             <span>{{ addressSummary() }}</span>
             <button type="button" class="no-methods-link" (click)="beginNewAddress()">Usar otra dirección</button>
@@ -82,7 +82,20 @@
             </p>
           }
         } @else {
-          <p class="address-help">Usaremos el teléfono del cliente; puedes cambiarlo si recibirá otra persona.</p>
+          <!-- H6 — dirección guardada (addressId presente) pero incompleta:
+               state_province o phone_number nulos en Prisma. Se precarga el
+               mismo formulario con initialAddress() (la dirección guardada)
+               en vez de forzar "Usar otra dirección" hacia un formulario
+               vacío, avisando qué falta completar. -->
+          @if (addressId() && !addressValid()) {
+            <div class="address-help address-help--warning" role="alert">
+              <app-icon name="alert-triangle" [size]="16"></app-icon>
+              <span>La dirección guardada está incompleta: falta {{ missingAddressFieldsLabel() }}. Complétala para continuar.</span>
+            </div>
+            <button type="button" class="no-methods-link" (click)="beginNewAddress()">Usar otra dirección</button>
+          } @else {
+            <p class="address-help">Usaremos el teléfono del cliente; puedes cambiarlo si recibirá otra persona.</p>
+          }
           <app-address-form-fields #clientAddressForm
             [initialAddress]="initialAddress()"
             [compact]="true"

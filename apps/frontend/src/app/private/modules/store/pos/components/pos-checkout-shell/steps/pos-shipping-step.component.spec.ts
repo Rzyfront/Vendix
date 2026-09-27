@@ -313,6 +313,38 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.buildShippingContext()?.shippingAddressId).toBeUndefined();
   });
 
+  it('H6 — dirección guardada sin state_province muestra el formulario precargado y al completarla addressValid true', () => {
+    // `state_province` es nullable en Prisma; `phone_number` se rellena aparte
+    // desde `customer.phone` en `toAddressPayload` (comportamiento ya
+    // existente), así que solo el departamento queda ausente aquí.
+    const incompleteSaved = { ...originalAddress, id: 55, type: 'shipping', is_primary: true, state_province: null as any };
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [incompleteSaved] };
+    fixture.componentRef.setInput('detailsInCliente', true);
+    mount(state);
+
+    expect(component.addressId()).toBe(55);
+    expect(component.addressValid()).toBeFalse();
+    // Antes de este fix, la plantilla `#clientDeliveryDetails` solo mostraba
+    // resumen + "Usar otra dirección" (formulario vacío) para este caso; el
+    // fix reabre el mismo formulario precargado con la dirección guardada.
+    expect(component.addressEditing()).toBeTrue();
+    expect(component.initialAddress()).toEqual(jasmine.objectContaining({
+      address_line1: originalAddress.address_line1, city: originalAddress.city,
+      state_province: null,
+    }));
+    expect(component.missingAddressFieldsLabel()).toBe('el departamento');
+
+    // El cajero completa solo el campo faltante en el formulario precargado.
+    component.onAddressChange({ ...component.address()!, state_province: 'Valle' }, true);
+    component.onAddressValidChange(true);
+
+    expect(component.addressValid()).toBeTrue();
+    expect(component.addressId()).toBe(55); // sigue siendo UPDATE sobre el mismo id, no uno nuevo
+  });
+
   it('en Cliente muestra solo costo en Envío y exige método y dirección antes de avanzar', () => {
     const state = cart();
     state.shippingContext = undefined;
