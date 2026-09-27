@@ -51,8 +51,14 @@ export interface PaymentReceivedEventPaymentInput {
   id: number;
   amount: unknown;
   currency?: string | null;
-  /** `store_payment_method.system_payment_method.display_name`. */
-  display_name?: string | null;
+  /**
+   * Etiqueta CONTABLE: `store_payment_method.system_payment_method
+   * .display_name`, nunca `store_payment_methods.display_name` (renombrable
+   * por la tienda). Viaja como `payment_method` y `AutoEntryService
+   * .resolveCashBankKey` decide Caja/Bancos con ella — igual que el POS
+   * (`payments.service.ts` ~1880).
+   */
+  accounting_method?: string | null;
   /**
    * Prorrateado SECUENCIALMENTE al crear el tramo (ver
    * `resolvePaymentReceivedSaleFields`/`createLegPayments`). Sin él (pago
@@ -132,7 +138,7 @@ export function buildPaymentReceivedEvents(
       discount_amount: share?.discount_amount ?? sale_tax.discount_amount,
       tip_amount: share?.tip_amount ?? Number(order.tip_amount || 0),
       currency: payment.currency || currency,
-      payment_method: payment.display_name || 'Unknown',
+      payment_method: payment.accounting_method || 'Unknown',
       user_id: user_id ?? undefined,
       customer: order.customer_id ? { id: Number(order.customer_id) } : undefined,
     };

@@ -4449,12 +4449,20 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     {
       id: CASH_ID,
       display_name: 'Efectivo',
-      system_payment_method: { type: 'cash', processing_mode: 'DIRECT' },
+      system_payment_method: {
+        type: 'cash',
+        processing_mode: 'DIRECT',
+        display_name: 'Efectivo',
+      },
     },
     {
       id: TRANSFER_ID,
       display_name: 'Transferencia',
-      system_payment_method: { type: 'bank_transfer', processing_mode: 'DIRECT' },
+      system_payment_method: {
+        type: 'bank_transfer',
+        processing_mode: 'DIRECT',
+        display_name: 'Transferencia',
+      },
     },
   ];
 
@@ -4766,6 +4774,54 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       payment_method: 'Transferencia',
       subtotal_amount: 80000,
     });
+  });
+
+  // PR #858 hallazgo 1 — `resolveCashBankKey` elige Caja/Bancos por la
+  // etiqueta que viaja en `payment_method`. Si la tienda llamó «Caja» a su
+  // efectivo, el payload debe llevar el nombre del SISTEMA; el nombre de la
+  // tienda sólo vive en la respuesta HTTP/ticket.
+  it('tienda renombró su efectivo «Caja» → payment.received lleva el nombre del sistema, la respuesta el de la tienda', async () => {
+    const h = buildHarness();
+    const renamed = [
+      {
+        ...LEG_METHODS[0],
+        display_name: 'Caja',
+        system_payment_method: {
+          ...LEG_METHODS[0].system_payment_method,
+          display_name: 'Efectivo',
+        },
+      },
+      {
+        ...LEG_METHODS[1],
+        display_name: 'Nequi del local',
+        system_payment_method: {
+          ...LEG_METHODS[1].system_payment_method,
+          display_name: 'Transferencia',
+        },
+      },
+    ];
+    h.prismaMock.store_payment_methods.findMany.mockImplementation(
+      async ({ where }: any) => {
+        const ids: number[] = where?.id?.in ?? [];
+        return renamed.filter((row) => ids.includes(row.id));
+      },
+    );
+
+    const result: any = await h.service.payOrder(1, MULTI_DTO);
+
+    // UI/ticket: el nombre que la tienda eligió.
+    expect(result.payments.map((p: any) => p.payment_method)).toEqual([
+      'Caja',
+      'Nequi del local',
+    ]);
+    // Contabilidad: la etiqueta del sistema, nunca la renombrada.
+    const payloads = h.emitter.emitAsync.mock.calls
+      .filter((call: any[]) => call[0] === 'payment.received')
+      .map((call: any[]) => call[1]);
+    expect(payloads.map((p: any) => p.payment_method)).toEqual([
+      'Efectivo',
+      'Transferencia',
+    ]);
   });
 
   it('cocina pendiente (modo estricto) → las 2 filas quedan cancelled y la orden vuelve a created', async () => {
@@ -5305,5 +5361,117 @@ describe('OrderFlowService.fastTrackOrder — pickup/dine_in sin método de env�
     expect(error).toBeInstanceOf(VendixHttpException);
     expect(error.errorCode).toBe('ORD_SHIP_REQUIRED_FOR_FLOW_001');
     expect(payOrder).not.toHaveBeenCalled();
+  });
+});
+
+// PR #858 hallazgo 4 — la base de reteIVA (`ivaAmount`) que `flow/pay` le
+// pasa a `resolveSufferedByOperation` es el IVA de la línea, no Σ de todos
+// sus impuestos: un INC no entra. `tax_type` nulo = IVA (fila legada).
+describe('OrderFlowService.emitLegPaymentReceivedEvents — base de reteIVA', () => {
+  it('ivaAmount suma sólo IVA (y filas sin tipar); INC queda fuera', async () => {
+    const prismaMock: any = {
+      order_items: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            total_price: 100000,
+            quantity: 1,
+            tax_amount_item: 27000,
+            weight: null,
+            price_unit_quantity: null,
+            item_type: 'product',
+            order_item_taxes: [
+              { tax_type: 'iva', tax_amount: 19000, tax_rate: 0.19 },
+              { tax_type: 'inc', tax_amount: 8000, tax_rate: 0.08 },
+            ],
+          },
+          {
+            total_price: 50000,
+            quantity: 1,
+            tax_amount_item: 9500,
+            weight: null,
+            price_unit_quantity: null,
+            item_type: 'product',
+            order_item_taxes: [
+              { tax_type: null, tax_amount: 9500, tax_rate: 0.19 },
+            ],
+          },
+          {
+            total_price: 20000,
+            quantity: 1,
+            tax_amount_item: 1600,
+            weight: null,
+            price_unit_quantity: null,
+            item_type: 'product',
+            order_item_taxes: [
+              { tax_type: 'inc', tax_amount: 1600, tax_rate: 0.08 },
+            ],
+          },
+        ]),
+      },
+    };
+    const withholdingFlow: any = {
+      resolveSufferedByOperation: jest.fn().mockResolvedValue({
+        lines: [],
+        uvt_value_used: 0,
+        counterparty_type: null,
+      }),
+      persistWithholdingLines: jest.fn().mockResolvedValue(undefined),
+    };
+    const emitter = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      emitter as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      undefined, // kitchenFireService
+      undefined, // shippingTaxService
+      undefined, // moduleRef
+      undefined, // refundFlowService
+      undefined, // autoEntryService
+      undefined, // orderSse
+      undefined, // orderHistoryService
+      undefined, // stockValidator
+      undefined, // sellableStockAllocator
+      undefined, // paymentGatewayService
+      undefined, // shippingCalculatorService
+      withholdingFlow,
+    );
+
+    await (service as any).emitLegPaymentReceivedEvents(
+      1,
+      {
+        id: 1,
+        order_number: 'ORD-1',
+        store_id: 4,
+        customer_id: 44,
+        stores: { organization_id: 2 },
+        subtotal_amount: 170000,
+        tip_amount: 0,
+        currency: 'COP',
+      },
+      [
+        {
+          payment: { id: 900, currency: 'COP' },
+          leg: { amount: 208100, accounting_method: 'Efectivo' },
+        },
+      ],
+    );
+
+    expect(withholdingFlow.resolveSufferedByOperation).toHaveBeenCalledTimes(1);
+    const { items } = withholdingFlow.resolveSufferedByOperation.mock.calls[0][0];
+    expect(items.map((item: any) => item.ivaAmount)).toEqual([19000, 9500, 0]);
+    // La base de retefuente/reteICA sigue siendo el subtotal de la línea.
+    expect(items.map((item: any) => item.base)).toEqual([100000, 50000, 20000]);
+    // Y el evento sí salió (el filtro no rompió la emisión).
+    const payloads = emitter.emitAsync.mock.calls.filter(
+      (call: any[]) => call[0] === 'payment.received',
+    );
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0][1].payment_method).toBe('Efectivo');
   });
 });

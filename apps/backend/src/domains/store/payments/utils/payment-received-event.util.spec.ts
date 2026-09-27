@@ -38,7 +38,7 @@ describe('buildPaymentReceivedEvents', () => {
       {
         id: 1001,
         amount: 20000,
-        display_name: 'Efectivo',
+        accounting_method: 'Efectivo',
         sale_share: {
           subtotal_amount: 16806.72,
           tax_amount: 3193.28,
@@ -50,7 +50,7 @@ describe('buildPaymentReceivedEvents', () => {
       {
         id: 1002,
         amount: 80000,
-        display_name: 'Transferencia',
+        accounting_method: 'Transferencia',
         sale_share: {
           subtotal_amount: 67226.89,
           tax_amount: 12773.11,
@@ -111,7 +111,7 @@ describe('buildPaymentReceivedEvents', () => {
     const payloads = buildPaymentReceivedEvents({
       order: ORDER,
       sale_tax: SALE_TAX,
-      payments: [{ id: 2001, amount: 100000, display_name: 'Efectivo' }],
+      payments: [{ id: 2001, amount: 100000, accounting_method: 'Efectivo' }],
       currency: 'COP',
     });
     expect(payloads[0]).toMatchObject({
@@ -127,7 +127,7 @@ describe('buildPaymentReceivedEvents', () => {
     const payloads = buildPaymentReceivedEvents({
       order: ORDER,
       sale_tax: SALE_TAX,
-      payments: [{ id: 3001, amount: 100000, display_name: 'Efectivo' }],
+      payments: [{ id: 3001, amount: 100000, accounting_method: 'Efectivo' }],
       withholding_lines: WH_LINES,
       currency: 'COP',
       user_id: 9,
@@ -155,7 +155,7 @@ describe('buildPaymentReceivedEvents', () => {
     });
   });
 
-  it('sin display_name cae a "Unknown", igual que el POS', () => {
+  it('sin accounting_method cae a "Unknown", igual que el POS', () => {
     const payloads = buildPaymentReceivedEvents({
       order: ORDER,
       sale_tax: SALE_TAX,
@@ -163,6 +163,26 @@ describe('buildPaymentReceivedEvents', () => {
       currency: 'COP',
     });
     expect(payloads[0].payment_method).toBe('Unknown');
+  });
+
+  // PR #858 hallazgo 1 — `payment_method` es la etiqueta CONTABLE (la del
+  // sistema). El nombre que la tienda le puso a su método no entra al payload:
+  // `resolveCashBankKey` decidiría Caja/Bancos con él.
+  it('payment_method es accounting_method aunque el llamador traiga otros campos de nombre', () => {
+    const payloads = buildPaymentReceivedEvents({
+      order: ORDER,
+      sale_tax: SALE_TAX,
+      payments: [
+        {
+          id: 5001,
+          amount: 50000,
+          accounting_method: 'Efectivo',
+          display_name: 'Caja',
+        } as any,
+      ],
+      currency: 'COP',
+    });
+    expect(payloads[0].payment_method).toBe('Efectivo');
   });
 
   it('sin withholding_lines: cada tramo emite un arreglo vacío (no undefined)', () => {
