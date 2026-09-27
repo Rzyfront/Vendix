@@ -63,6 +63,7 @@ describe('OrdersService', () => {
       aggregate: jest.fn(),
       deleteMany: jest.fn(),
     },
+    store_payment_methods: { findMany: jest.fn() },
     order_items: {
       create: jest.fn(),
       createMany: jest.fn(),
@@ -472,6 +473,30 @@ describe('OrdersService', () => {
       expect(lastWhere().payments).toBeUndefined();
     });
 
+    it('R10 filtra por cualquier tramo liquidado del método seleccionado', async () => {
+      await service.findAll({ payment_method_id: 17 } as any);
+
+      expect(lastWhere().AND).toEqual([
+        { payments: { some: {
+          store_payment_method_id: 17,
+          state: { in: ['succeeded', 'captured', 'partially_refunded', 'refunded'] },
+        } } },
+      ]);
+      expect(mockPrismaService.orders.count).toHaveBeenCalledWith({ where: lastWhere() });
+    });
+
+    it('R10 conserva por separado el filtro de estado y el de método en una orden multimétodo', async () => {
+      await service.findAll({ payment_method_id: 17, payment_status: 'pending' } as any);
+
+      expect(lastWhere().AND).toEqual([
+        { payments: { some: {
+          store_payment_method_id: 17,
+          state: { in: ['succeeded', 'captured', 'partially_refunded', 'refunded'] },
+        } } },
+        { payments: { some: { state: 'pending' } } },
+      ]);
+    });
+
     it('B) aplica date_from solo (sin date_to)', async () => {
       await service.findAll({
         date_from: '2026-09-01T00:00:00Z',
@@ -541,6 +566,46 @@ describe('OrdersService', () => {
         notIn: ['direct_delivery', 'dine_in'],
       });
       expect(lastWhere().dispatch_fulfillment).toEqual({ not: 'full' });
+    });
+  });
+
+  describe('findAll — refund net and method catalog', () => {
+    it('R13 descuenta solo refunds completados, sin mutar grand_total', async () => {
+      mockPrismaService.orders.findMany.mockResolvedValueOnce([
+        { id: 1, state: 'finished', grand_total: new Prisma.Decimal(100000),
+          order_items: [], payments: [], refunds: [
+            { amount: new Prisma.Decimal(25000) },
+            { amount: new Prisma.Decimal(5000) },
+          ] },
+        { id: 2, state: 'refunded', grand_total: new Prisma.Decimal(10000),
+          order_items: [], payments: [], refunds: [{ amount: new Prisma.Decimal(10000) }] },
+      ]);
+      mockPrismaService.orders.count.mockResolvedValueOnce(2);
+
+      const result = await service.findAll({} as any);
+
+      expect(result.data.map((o) => ({ original: Number(o.grand_total), net: o.net_total,
+        refunded: o.completed_refund_amount, partial: o.is_partially_refunded })))
+        .toEqual([
+          { original: 100000, net: 70000, refunded: 30000, partial: true },
+          { original: 10000, net: 0, refunded: 10000, partial: false },
+        ]);
+      expect(result.data[0]).not.toHaveProperty('refunds');
+      expect(mockPrismaService.orders.findMany.mock.calls[0][0].include.refunds)
+        .toEqual({ where: { state: 'completed' }, select: { amount: true } });
+    });
+
+    it('R10 cataloga también métodos históricos sin exponer configuración sensible', async () => {
+      const methods = [{ id: 17, state: 'disabled', display_name: 'Transferencia anterior',
+        system_payment_method: { display_name: 'Transferencia' } }];
+      mockPrismaService.store_payment_methods.findMany.mockResolvedValueOnce(methods);
+
+      expect(await service.listPaymentMethods()).toEqual(methods);
+      expect(mockPrismaService.store_payment_methods.findMany).toHaveBeenCalledWith({
+        select: { id: true, display_name: true, state: true,
+          system_payment_method: { select: { display_name: true } } },
+        orderBy: [{ display_order: 'asc' }, { id: 'asc' }],
+      });
     });
   });
 

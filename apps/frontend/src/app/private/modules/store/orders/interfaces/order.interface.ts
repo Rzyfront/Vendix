@@ -111,6 +111,12 @@ export interface Order {
   shipping_tax_amount?: number | string;
   discount_amount: number;
   grand_total: number;
+  /** List-only amount after completed refunds; original grand_total stays immutable. */
+  net_total?: number;
+  completed_refund_amount?: number;
+  is_partially_refunded?: boolean;
+  /** Presentation-only badge derived from state + completed refund coverage. */
+  list_state?: OrderState | 'partially_refunded';
   /**
    * D.4 CP-pos-order-flows-remediation — propina persistida en `orders`
    * (`tip_amount`, `tip_type`, `tip_value`). `orders.service.ts:findOne`
@@ -639,6 +645,8 @@ export interface OrderQuery {
   table_id?: number;
   store_id?: number;
   payment_status?: PaymentStatus;
+  /** Store payment method ID; matches any settled/captured leg. */
+  payment_method_id?: number;
   date_range?: string;
 
   // Filtros de fecha

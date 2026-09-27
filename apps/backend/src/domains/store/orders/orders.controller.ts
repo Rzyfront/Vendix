@@ -139,6 +139,15 @@ export class OrdersController {
     }
   }
 
+  // Static route must precede @Get(':id'). Uses the order-read permission,
+  // not settings-read, so every role allowed to list sales can filter them.
+  @Get('payment-methods')
+  @Permissions('store:orders:read')
+  async listPaymentMethods() {
+    const methods = await this.ordersService.listPaymentMethods();
+    return this.responseService.success(methods, 'Métodos de pago obtenidos exitosamente');
+  }
+
   @Get('preview-eta')
   @Permissions('store:orders:read')
   @ApiOperation({ summary: 'Preview estimated preparation and delivery time' })

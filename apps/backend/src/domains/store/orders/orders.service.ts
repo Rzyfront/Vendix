@@ -15,6 +15,7 @@ import {
   order_channel_enum,
   order_state_enum,
   order_delivery_type_enum,
+  payments_state_enum,
 } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OrderStatsDto } from './dto/order-stats.dto';
@@ -1051,6 +1052,7 @@ export class OrdersService {
       // aplicaba. Por eso filtrar por "Pagado" no recortaba la tabla.
       // Verificado: `orders.payments payments[]` (schema.prisma:1548).
       payment_status,
+      payment_method_id,
       // FIX admin-orders-filters (BUG C) — destructurar `dispatchable`
       // explícitamente para condicionar la rama de `state`. Si se deja
       // implícito (`query.dispatchable`) no podemos hacer la guardia
@@ -1099,8 +1101,22 @@ export class OrdersService {
       // porque una orden puede tener varios pagos en distintos estados
       // (parcialmente pagada, reembolsada parcial, etc.) y queremos
       // matchear si CUALQUIERA cumple.
-      ...(payment_status && {
+      ...(payment_status && !payment_method_id && {
         payments: { some: { state: payment_status } },
+      }),
+      ...(payment_method_id && {
+        AND: [
+          { payments: { some: {
+            store_payment_method_id: payment_method_id,
+            state: { in: [
+              payments_state_enum.succeeded,
+              payments_state_enum.captured,
+              payments_state_enum.partially_refunded,
+              payments_state_enum.refunded,
+            ] },
+          } } },
+          ...(payment_status ? [{ payments: { some: { state: payment_status } } }] : []),
+        ],
       }),
       ...(query.missing_shipping_method && {
         shipping_method_id: null,
@@ -1180,6 +1196,10 @@ export class OrdersService {
               },
             },
           },
+          refunds: {
+            where: { state: 'completed' },
+            select: { amount: true },
+          },
           // Cliente para la columna "Cliente" de los listados (wizard de
           // remisiones, lista de órdenes). findAll ya FILTRA por users en la
           // búsqueda pero no los devolvía → "No data" en la lista. Select
@@ -1224,11 +1244,42 @@ export class OrdersService {
         const cancellation_policy = getOrderCancellationPolicy(order);
         // The minimal payment projection is policy input, not a partial
         // Payment[] response that consumers could mistake for receipt data.
-        const { payments: _policyPayments, ...listOrder } = order;
-        return { ...listOrder, cancellation_policy };
+        const completedRefundTotal = (order.refunds ?? []).reduce(
+          (sum, refund) => sum.plus(refund.amount),
+          new Prisma.Decimal(0),
+        );
+        const netTotal = Prisma.Decimal.max(
+          new Prisma.Decimal(0),
+          new Prisma.Decimal(order.grand_total ?? 0).minus(completedRefundTotal),
+        );
+        // Neither the policy-only payments nor raw refund rows are part of
+        // the list contract. Project only the aggregate read model.
+        const { payments: _policyPayments, refunds: _completedRefunds, ...listOrder } = order;
+        return {
+          ...listOrder,
+          cancellation_policy,
+          net_total: netTotal.toNumber(),
+          completed_refund_amount: completedRefundTotal.toNumber(),
+          is_partially_refunded: completedRefundTotal.gt(0) && netTotal.gt(0),
+        };
       }),
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
+  }
+
+  /** Store-scoped labels for the sales-list payment-method filter. */
+  async listPaymentMethods() {
+    return this.prisma.store_payment_methods.findMany({
+      select: {
+        id: true,
+        display_name: true,
+        state: true,
+        system_payment_method: {
+          select: { display_name: true },
+        },
+      },
+      orderBy: [{ display_order: 'asc' }, { id: 'asc' }],
+    });
   }
 
   async findOne(id: number) {
