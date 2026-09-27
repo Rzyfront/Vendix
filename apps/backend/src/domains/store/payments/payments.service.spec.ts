@@ -385,6 +385,16 @@ describe('PaymentsService', () => {
               uvt_value_used: 0,
               counterparty_type: null,
             }),
+            // El cobro POS ahora agrupa por bien/servicio y llama a este
+            // método (Step 1, plan pago-multimetodo-pendientes) en vez de
+            // `resolveSuffered` directo. Mismo motivo que arriba: sin este
+            // stub, cualquier caso que llegue al bloque de retenciones muere
+            // con "is not a function" bajo el try/catch.
+            resolveSufferedByOperation: jest.fn().mockResolvedValue({
+              lines: [],
+              uvt_value_used: 0,
+              counterparty_type: null,
+            }),
             persistWithholdingLines: jest.fn().mockResolvedValue(undefined),
           },
         },
@@ -4687,7 +4697,7 @@ describe('PaymentsService', () => {
 
       it('2 tramos: cada evento lleva su porción y Σ de los dos = wh.lines, al centavo', async () => {
         arrangeMultiLegSale();
-        (service as any).withholdingFlow.resolveSuffered.mockResolvedValueOnce(
+        (service as any).withholdingFlow.resolveSufferedByOperation.mockResolvedValueOnce(
           { lines: WH_LINES, uvt_value_used: 47065, counterparty_type: 'legal' },
         );
 
@@ -4778,7 +4788,7 @@ describe('PaymentsService', () => {
 
       it('regresión escalar: un solo tramo sigue enviando wh.lines intacto (sin prorratear)', async () => {
         arrangeMultiLegSale();
-        (service as any).withholdingFlow.resolveSuffered.mockResolvedValueOnce(
+        (service as any).withholdingFlow.resolveSufferedByOperation.mockResolvedValueOnce(
           { lines: WH_LINES, uvt_value_used: 47065, counterparty_type: 'legal' },
         );
 

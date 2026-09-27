@@ -164,6 +164,13 @@ describe('InvoiceFlowService support documents', () => {
       resolveSuffered: jest
         .fn()
         .mockResolvedValue({ lines: [], uvt_value_used: 0, counterparty_type: null }),
+      // `resolveWithholdingBatches` agrupa por bien/servicio y llama a este
+      // método en vez de `resolveSuffered` directo (Step 1 del plan
+      // pago-multimetodo-pendientes). Sin este stub la resolución revienta y
+      // el `try/catch` degrada a cero, tapando cualquier regresión ahí.
+      resolveSufferedByOperation: jest
+        .fn()
+        .mockResolvedValue({ lines: [], uvt_value_used: 0, counterparty_type: null }),
       resolveSelf: jest
         .fn()
         .mockResolvedValue({ lines: [], uvt_value_used: 0, counterparty_type: null }),
