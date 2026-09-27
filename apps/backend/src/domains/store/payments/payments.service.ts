@@ -112,6 +112,7 @@ import {
   type PaymentLegMethodInfo,
 } from './utils/payment-legs.util';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
+import { ProcessReservedPosPaymentDto } from './dto/create-payment.dto';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -234,6 +235,48 @@ export class PaymentsService {
         success: true,
         data: result,
         message: 'Payment processed successfully',
+      };
+    } catch (error) {
+      if (error instanceof PaymentError) {
+        const mapped = LEGACY_TO_NEW[error.code];
+        throw new VendixHttpException(mapped, error.message, error.details);
+      }
+      throw error;
+    }
+  }
+
+  async processReservedPosPayment(
+    paymentId: number,
+    dto: ProcessReservedPosPaymentDto,
+    user: any,
+  ) {
+    const storeId = RequestContextService.getContext()?.store_id;
+    if (!storeId) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    await this.validateUserAccess(user, storeId);
+    try {
+      const { result, methodType } = await this.paymentGateway.processReservedPosPayment(
+        paymentId, storeId, dto,
+      );
+      if (methodType === 'wompi') {
+        const transaction = result.gatewayResponse as Record<string, unknown> | undefined;
+        if (transaction?.id && transaction?.reference) {
+          await this.webhookHandler.applyWompiTransaction(transaction);
+        }
+      } else if (result.status === 'succeeded' && result.transactionId) {
+        await this.webhookHandler.settleReservedWalletPayment(paymentId, result.transactionId);
+      } else if (methodType === 'wallet' && result.errorCode === 'WALLET_PRE_DEBIT_REJECTED') {
+        await this.webhookHandler.rejectReservedWalletPayment(
+          paymentId, result.message ?? 'Wallet rejected before debit',
+        );
+      }
+      const payment = await this.prisma.payments.findFirst({
+        where: { id: paymentId, orders: { store_id: storeId } },
+        select: { id: true, state: true, transaction_id: true },
+      });
+      return {
+        payment: payment ?? { id: paymentId, state: result.status, transaction_id: result.transactionId },
+        nextAction: result.nextAction,
+        message: result.message,
       };
     } catch (error) {
       if (error instanceof PaymentError) {

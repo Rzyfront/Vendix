@@ -10,6 +10,7 @@ import {
   signal,
   untracked,
   viewChild,
+  TemplateRef,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -150,6 +151,9 @@ export class PosShippingStepComponent {
   readonly cartState = input<CartState | null>(null);
   readonly customerAlias = input<string>('');
   readonly editingOrderId = input<number | null>(null);
+  /** The Cliente step renders delivery details from this component's template. */
+  readonly detailsInCliente = input(false);
+  readonly clientDeliveryDetails = viewChild<TemplateRef<unknown>>('clientDeliveryDetails');
   // ── Address capture (owned by shipping step according to method type) ───
   readonly address = signal<AddressPayload | null>(null);
   readonly addressValid = signal<boolean>(false);
@@ -255,7 +259,10 @@ export class PosShippingStepComponent {
    * históricos (un original inactivo intacto sigue guardable).
    */
   readonly activeShippingMethods = computed<PosShippingMethod[]>(() =>
-    this.shippingMethods().filter((m) => m.is_active !== false),
+    this.shippingMethods().filter((m) =>
+      m.is_active !== false &&
+      (m.type !== 'pickup' || !!this.originalShipping()),
+    ),
   );
   readonly selectedShippingMethod = signal<PosShippingMethod | null>(null);
   readonly shippingCost = signal<number>(0);
@@ -291,6 +298,7 @@ export class PosShippingStepComponent {
   readonly shipSubStep = signal<number>(0);
   /** Sub-pasos dinámicos reflejados en el `app-steps-line` vertical. */
   readonly shipSubSteps = computed<StepsLineItem[]>(() => {
+    if (this.detailsInCliente()) return [{ label: 'Costo' }];
     if (this.requiresAddress()) {
       return [
         { label: 'Método' },
@@ -306,7 +314,7 @@ export class PosShippingStepComponent {
 
   /** True cuando el sub-paso activo es el sub-paso terminal de Costo. */
   readonly isCostSubStep = computed<boolean>(
-    () => this.shipSubStep() === (this.requiresAddress() ? 2 : 1),
+    () => this.detailsInCliente() || this.shipSubStep() === (this.requiresAddress() ? 2 : 1),
   );
 
   // ── Processing ────────────────────────────────────────────────────────────
@@ -432,7 +440,7 @@ export class PosShippingStepComponent {
             if (method) this.selectedShippingMethod.set(method);
           }
         } else if (!selected) {
-          const first = methods.find((m) => m.is_active !== false);
+          const first = this.activeShippingMethods()[0];
           if (first) this.selectShippingMethod(first, { advance: false, userInitiated: false });
         }
       });
@@ -554,6 +562,15 @@ export class PosShippingStepComponent {
     const addresses = this.cartState()?.customer?.addresses;
     const address = addresses?.find((a) => a.is_primary) ?? addresses?.[0];
     this.setAddress(address ? this.toAddressPayload(address) : null, address?.id ?? null);
+    if (!address) {
+      // Prefill contact once, without making a blank address look valid.
+      this.initialAddress.set({
+        address_line1: null, address_line2: null, city: null,
+        state_province: null, country_code: 'CO', postal_code: null,
+        phone_number: this.cartState()?.customer?.phone ?? null,
+        latitude: null, longitude: null,
+      });
+    }
   }
 
   private setAddress(address: AddressPayload | null, id: number | null): void {
@@ -561,7 +578,8 @@ export class PosShippingStepComponent {
     this.initialAddress.set(address);
     this.addressId.set(id);
     this.addressCustomerId.set(id ? this.cartState()?.customer?.id ?? null : null);
-    this.addressValid.set(!!(address?.address_line1 && address.city));
+    this.addressValid.set(!!(address?.address_line1 && address.city &&
+      address.state_province && address.country_code && address.phone_number));
   }
 
   private toAddressPayload(address: PosCustomerAddress): AddressPayload {
@@ -591,15 +609,16 @@ export class PosShippingStepComponent {
     this.setAddress(this.toAddressPayload(address), id);
   }
 
-  onAddressChange(payload: AddressPayload): void {
+  onAddressChange(payload: AddressPayload, formDirty = this.addressForm()?.form.dirty ?? true): void {
     // Country/municipality lookup and initial form hydration also emit. Only
     // a dirty form opened deliberately can author an existing order's address.
     if (this.originalShipping() &&
-      (!this.addressEditing() || !this.addressForm()?.form.dirty)) return;
+      (!this.addressEditing() || !formDirty)) return;
+    if (!formDirty) return;
     this.invalidateQuote();
     this.address.set(payload);
     if (!this.manualCostOverride() && !this.isPickupMethod()) this.isCalculatingShipping.set(true);
-    if (this.addressForm()?.form.dirty) {
+    if (formDirty) {
       this.shippingEdited.set(true);
       this.freeAddressEdited.set(this.addressKey(payload) !== this.addressKey(this.initialAddress()));
     }
@@ -628,6 +647,52 @@ export class PosShippingStepComponent {
     this.addressValid.set(valid);
   }
 
+  /** Gate the delivery details while the cashier is still beside Cliente. */
+  validateDetailsForCliente(): boolean {
+    // Historical orders keep their original destination when nothing was
+    // edited, even if that snapshot cannot be hydrated into today's form.
+    if (this.originalShipping() && !this.hasShippingChanges() && !this.customerChanged()) {
+      return true;
+    }
+    if (!this.selectedShippingMethod()) {
+      this.flashDeliveryDetail('shipping-method', 'Selecciona cómo llegará el pedido');
+      return false;
+    }
+    if (this.requiresAddress() && (!this.addressValid() ||
+      !this.address()?.address_line1 || !this.address()?.city)) {
+      this.showAddressErrors.set(true);
+      this.flashDeliveryDetail('address', 'Completa la dirección de entrega');
+      return false;
+    }
+    return true;
+  }
+
+  /** A new destination must not mutate the customer's selected saved address. */
+  beginNewAddress(): void {
+    this.invalidateQuote();
+    this.addressEditing.set(true);
+    this.shippingEdited.set(true);
+    this.freeAddressEdited.set(true);
+    this.shippingRateId.set(null);
+    this.setAddress(null, null);
+    this.initialAddress.set({
+      address_line1: null, address_line2: null, city: null,
+      state_province: null, country_code: 'CO', postal_code: null,
+      phone_number: this.cartState()?.customer?.phone ?? null,
+      latitude: null, longitude: null,
+    });
+  }
+
+  private flashDeliveryDetail(section: FlashSection, message: string): void {
+    this.flashSection.set(section);
+    this.flashMessage.set(message);
+    if (this.flashTimeout) clearTimeout(this.flashTimeout);
+    this.flashTimeout = setTimeout(() => {
+      this.flashSection.set(null);
+      this.flashMessage.set('');
+    }, 3000);
+  }
+
   /**
    * Intenta avanzar un sub-paso dentro del paso Envío:
    *  - Método (0) → Dirección (1) si requiresAddress(), o Costo (1) si pickup.
@@ -635,6 +700,7 @@ export class PosShippingStepComponent {
    *  - Costo (terminal) → devuelve true para que el shell avance a Cobro.
    */
   attemptNextSubStep(): boolean {
+    if (this.detailsInCliente()) return true;
     if (this.originalShipping() && !this.hasShippingChanges() && !this.customerChanged()) return true;
     const current = this.shipSubStep();
     if (current === 0) {
@@ -672,6 +738,7 @@ export class PosShippingStepComponent {
    * Devuelve true si retrocedió internamente, false si ya estaba en 0 (el shell maneja).
    */
   attemptPrevSubStep(): boolean {
+    if (this.detailsInCliente()) return false;
     if (this.shipSubStep() > 0) {
       this.goToShipSubStep(this.shipSubStep() - 1);
       return true;
@@ -871,6 +938,16 @@ export class PosShippingStepComponent {
         // también en la venta con envío; sin esto el pago por transferencia de
         // una venta a domicilio queda sin `payments.bank_account_id`.
         bank_account_id: paymentSubmit.bankAccountId,
+        ...(paymentSubmit.tip != null && paymentSubmit.tip > 0
+          ? {
+              tip_amount: paymentSubmit.tip,
+              tip_type: paymentSubmit.tipType ?? 'fixed',
+              tip_value: paymentSubmit.tipValue ?? paymentSubmit.tip,
+              ...(paymentSubmit.tipWaiterId != null
+                ? { tip_waiter_id: paymentSubmit.tipWaiterId }
+                : {}),
+            }
+          : {}),
       };
       // B11 — cobro multimétodo de contado: el collector ya excluye
       // cash_on_delivery de los tramos elegibles (`directMethods`), así que
@@ -944,9 +1021,7 @@ export class PosShippingStepComponent {
         ? { municipality_code: a.municipality_code.trim() }
         : {}),
       recipient_name: this.customerDisplayName,
-      recipient_phone: this.customerAlias().trim()
-        ? a?.phone_number || ''
-        : this.cartState()?.customer?.phone || '',
+      recipient_phone: a?.phone_number || this.cartState()?.customer?.phone || '',
     };
   }
 

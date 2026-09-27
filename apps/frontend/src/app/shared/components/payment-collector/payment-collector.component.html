@@ -458,8 +458,8 @@
             }
 
             <!-- Tip -->
-            @if (config().allowTip) {
-              <section class="pc-card">
+            @if (config().allowTip && mode() === 'contado') {
+              <section class="pc-card" [class.pc-flash-target]="flashSection() === 'tip'">
                 <div class="section-header">
                   <div class="section-indicator"></div>
                   <h3 class="section-title">Propina (opcional)</h3>
@@ -506,6 +506,9 @@
                     (keydown.enter)="handleEnter($event); $event.stopPropagation()"
                   />
                 </div>
+                @if (tipValidationError()) {
+                  <p class="pc-warn">{{ tipValidationError() }}</p>
+                }
                 <label class="pc-tip-waiter">
                   <span>Mesero (opcional)</span>
                   <app-store-user-select
@@ -1014,8 +1017,8 @@
       }
 
       <!-- Tip -->
-      @if (config().allowTip) {
-        <section class="pc-card">
+      @if (config().allowTip && mode() === 'contado') {
+        <section class="pc-card" [class.pc-flash-target]="flashSection() === 'tip'">
           <div class="section-header">
             <div class="section-indicator"></div>
             <h3 class="section-title">Propina (opcional)</h3>
@@ -1062,6 +1065,9 @@
               (keydown.enter)="handleEnter($event); $event.stopPropagation()"
             />
           </div>
+          @if (tipValidationError()) {
+            <p class="pc-warn">{{ tipValidationError() }}</p>
+          }
           <label class="pc-tip-waiter">
             <span>Mesero (opcional)</span>
             <app-store-user-select

@@ -1,7 +1,8 @@
-import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, model, output, runInInjectionContext, signal } from '@angular/core';
+import { Component, Directive, Pipe, PipeTransform, TemplateRef, WritableSignal, input, model, output, runInInjectionContext, signal, viewChild } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ReactiveFormsModule } from '@angular/forms';
+import { NgTemplateOutlet } from '@angular/common';
 import { of } from 'rxjs';
 
 import { PosCheckoutShellComponent } from './pos-checkout-shell.component';
@@ -113,6 +114,7 @@ class PaymentStub {
   readonly canAdvanceSubStep = signal(true);
   readonly canSubmit = signal(true);
   readonly selectedMethodType = signal<string | null>(null);
+  readonly tipAmount = signal(0);
   readonly isWompiSelected = signal(false);
   readonly collectedIsProcessing = signal(false);
   advanceRet = false;
@@ -123,11 +125,13 @@ class PaymentStub {
   triggerSubmit(): void {}
 }
 
-@Component({ selector: 'app-pos-shipping-step', standalone: true, template: `` })
+@Component({ selector: 'app-pos-shipping-step', standalone: true, template: `<ng-template #clientDetails><span class="projected-delivery">Dirección junto al cliente</span></ng-template>` })
 class ShippingStub {
   readonly cartState = input<unknown>(null);
   readonly customerAlias = input<string>('');
   readonly editingOrderId = input<number | null>(null);
+  readonly detailsInCliente = input(false);
+  readonly clientDeliveryDetails = viewChild<TemplateRef<unknown>>('clientDetails');
   readonly shippingCompleted = output<unknown>();
   readonly shippingCost = signal(0);
   readonly shipSubStep = signal(0);
@@ -147,6 +151,7 @@ class ShippingStub {
     return false;
   }
   flashValidation(): void {}
+  validateDetailsForCliente(): boolean { return true; }
   execute(_submit: unknown): void {}
 }
 
@@ -320,6 +325,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
           ShippingStub,
           CustomerSelectorStub,
           AddressStub,
+          NgTemplateOutlet,
           CurrencyStubPipe,
         ],
       },
@@ -588,6 +594,79 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     component.entregaChoice.set('enviar');
     fixture.detectChanges();
     expect(component.stepKeys()).toEqual(['entrega', 'cliente', 'envio', 'cobro']);
+    expect(component.steps()[0].label).toBe('Pedido');
+  });
+
+  it('mantiene Cliente visible al elegirlo para domicilio y valida detalles antes de Envío', () => {
+    component.entregaChoice.set('enviar');
+    component.currentStep.set(1);
+    component.clienteSubStep.set(1);
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+    const ship = fixture.debugElement.query(By.directive(ShippingStub)).componentInstance as ShippingStub;
+    const validate = spyOn(ship, 'validateDetailsForCliente').and.returnValue(false);
+    component.onSelectCustomerAndAdvance({ id: 99, first_name: 'Ana' } as any);
+    expect(component.currentStep()).toBe(1);
+    fixture.componentRef.setInput('cartState', { customer: { id: 99, first_name: 'Ana' }, items: [{ id: 1, product: { name: 'Producto' } }], summary: { total: 10 } });
+    fixture.detectChanges();
+    component.attemptNextStep();
+    expect(validate).toHaveBeenCalled();
+    expect(component.currentStep()).toBe(1);
+    validate.and.returnValue(true);
+    component.attemptNextStep();
+    expect(component.currentStep()).toBe(2);
+  });
+
+  it('tras resolver un cliente de domicilio, el siguiente clic valida dirección sin resolverlo otra vez', () => {
+    component.entregaChoice.set('enviar');
+    component.currentStep.set(1);
+    component.clienteSubStep.set(1);
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+    const selector = fixture.debugElement.query(By.directive(CustomerSelectorStub)).componentInstance as CustomerSelectorStub;
+    bindSlot('customerSelector', selector);
+    const ship = fixture.debugElement.query(By.directive(ShippingStub)).componentInstance as ShippingStub;
+    let identifiers = true;
+    spyOn(selector, 'hasFormIdentifiers').and.callFake(() => identifiers);
+    const resolve = spyOn(selector, 'resolveIfNeeded').and.callFake(() => {
+      identifiers = false; // The real selector resets its form after a successful resolution.
+      selector.customerSelected.emit({ id: 99, first_name: 'Ana' });
+      return of(true);
+    });
+    const validate = spyOn(ship, 'validateDetailsForCliente').and.returnValue(false);
+
+    component.attemptNextStep();
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(component.currentStep()).toBe(1);
+    fixture.componentRef.setInput('cartState', {
+      customer: { id: 99, first_name: 'Ana' }, items: [{ id: 1, product: { name: 'Producto' } }], summary: { total: 10 },
+    });
+    fixture.detectChanges();
+    component.attemptNextStep();
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(validate).toHaveBeenCalledTimes(1);
+    expect(component.currentStep()).toBe(1);
+    validate.and.returnValue(true);
+    component.attemptNextStep();
+    expect(component.currentStep()).toBe(2);
+  });
+
+  it('proyecta los detalles de domicilio del único componente Envío junto al cliente', () => {
+    component.entregaChoice.set('enviar');
+    fixture.componentRef.setInput('cartState', {
+      customer: { id: 99, first_name: 'Ana' }, items: [{ id: 1, product: { name: 'Producto' } }], summary: { total: 10 },
+    });
+    component.currentStep.set(1);
+    component.clienteSubStep.set(1);
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+    const projected = fixture.nativeElement.querySelector('.projected-delivery') as HTMLElement | null;
+    expect(projected?.textContent).toContain('Dirección junto al cliente');
+    expect(projected?.closest('.step-panel')?.classList.contains('step-hidden')).toBeFalse();
+    expect(fixture.debugElement.queryAll(By.directive(ShippingStub)).length).toBe(1);
   });
 
   it('Entrega-llevar avanza; mesa sin mesa abre el picker sin avanzar', () => {
@@ -1076,6 +1155,21 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       shipping_address_id: 1, shipping_rate_id: 2, shipping_cost: 100,
     }));
     expect(component.totalToPay()).toBe(1100);
+  });
+
+  it('muestra la propina una sola vez en el resumen sin alterar la base del cobro', () => {
+    fixture.componentRef.setInput('cartState', {
+      customer: { id: 99, first_name: 'Ana' },
+      items: [{ id: 1, product: { name: 'Producto' } }],
+      summary: { total: 11900, subtotal: 10000, taxAmount: 1900 },
+    });
+    fixture.detectChanges();
+    const pay = fixture.debugElement.query(By.directive(PaymentStub)).componentInstance as PaymentStub;
+    pay.tipAmount.set(1190);
+    fixture.detectChanges();
+    expect(component.totalToPay()).toBe(13090);
+    expect(component.deliveryAmount()).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Propina');
   });
 
   for (const [choice, deliveryType] of [

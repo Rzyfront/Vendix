@@ -213,6 +213,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.preservationWarning()).toBeTruthy();
     expect(component.editorValidationError()).toBeNull();
     expect(component.attemptNextSubStep()).toBeTrue();
+    expect(component.validateDetailsForCliente()).toBeTrue();
     expect(calculate).not.toHaveBeenCalled();
   });
 
@@ -229,6 +230,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.address()).toBeNull();
     expect(component.addressId()).toBeNull();
     expect(component.editorValidationError()).toContain('Cambiaste el cliente');
+    expect(component.validateDetailsForCliente()).toBeFalse();
     component.selectSavedAddress(33); // Former customer ID is not selectable.
     expect(component.addressId()).toBeNull();
     component.selectSavedAddress(1001);
@@ -262,10 +264,60 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     mount(state);
     expect(component.selectedShippingMethod()?.id).toBe(1);
     expect(component.addressId()).toBe(1);
+    expect(component.address()?.phone_number).toBe('3001234567');
     expect(calculate).toHaveBeenCalled();
+    component.goToShipSubStep(1);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Casa principal 1');
     latestQuote().next([quote(1, 7000)]);
     fixture.detectChanges();
     expect(component.shippingCost()).toBe(7000);
+  });
+
+  it('precarga teléfono al crear dirección y permite un teléfono de destinatario distinto', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [] };
+    mount(state);
+    expect(component.initialAddress()?.phone_number).toBe('3001234567');
+    expect(component.addressValid()).toBeFalse();
+    component.address.set({ ...originalAddress, phone_number: '3117654321' });
+    component.addressValid.set(true);
+    expect(component.buildShippingContext()?.shippingAddress.recipient_phone).toBe('3117654321');
+  });
+
+  it('usar otra dirección crea un destino nuevo sin reutilizar el id guardado', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    mount(state);
+    expect(component.addressId()).toBe(1);
+    component.beginNewAddress();
+    expect(component.addressId()).toBeNull();
+    expect(component.initialAddress()?.phone_number).toBe('3001234567');
+    expect(component.addressValid()).toBeFalse();
+    component.onAddressChange({ ...originalAddress, address_line1: 'Calle nueva 10' }, true);
+    component.onAddressValidChange(true);
+    expect(component.buildShippingContext()?.shippingAddressId).toBeUndefined();
+  });
+
+  it('en Cliente muestra solo costo en Envío y exige método y dirección antes de avanzar', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    fixture.componentRef.setInput('detailsInCliente', true);
+    mount(state);
+    expect(component.clientDeliveryDetails()).toBeTruthy();
+    expect(fixture.debugElement.query(By.css('app-address-form-fields'))).toBeFalsy();
+    expect(component.isCostSubStep()).toBeTrue();
+    component.selectedShippingMethod.set(null);
+    expect(component.validateDetailsForCliente()).toBeFalse();
+    component.selectedShippingMethod.set(firstMethod);
+    component.address.set(null);
+    component.addressValid.set(false);
+    expect(component.validateDetailsForCliente()).toBeFalse();
+    expect(component.showAddressErrors()).toBeTrue();
   });
 
   it('QUI-844 — solo los métodos activos se muestran al elegir envío a domicilio', () => {
@@ -356,6 +408,22 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     );
 
     expect(payment.processShippingSale.calls.mostRecent().args[5]).toBe(700);
+  });
+
+  it('propaga la propina calculada y su mesero al cobro de domicilio', () => {
+    const payment = TestBed.inject(PosPaymentService) as any;
+    payment.processShippingSale = jasmine.createSpy('processShippingSale').and.returnValue(
+      of({ success: true, order: { id: 700 } }),
+    );
+    mount();
+    component.execute({
+      mode: 'contado', method: { id: '1', type: 'cash' },
+      tip: 1500, tipType: 'percentage', tipValue: 1500, tipWaiterId: 7,
+    } as any);
+    const request = payment.processShippingSale.calls.mostRecent().args[2];
+    expect(request).toEqual(jasmine.objectContaining({
+      tip_amount: 1500, tip_type: 'percentage', tip_value: 1500, tip_waiter_id: 7,
+    }));
   });
 
   it('does not save a primary address without a valid customer id', () => {

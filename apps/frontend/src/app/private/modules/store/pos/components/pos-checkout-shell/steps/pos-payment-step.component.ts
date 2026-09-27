@@ -453,8 +453,19 @@ export class PosPaymentStepComponent implements OnInit {
   readonly effectiveAmount = computed<number>(
     () => this.amountOverride() ?? (this.cartState()?.summary?.total || 0),
   );
+  /** Backend `resolveTip` uses gross products, never discounted total or shipping. */
+  readonly tipBase = computed<number>(() => {
+    const summary = this.cartState()?.summary;
+    return (summary?.subtotal ?? 0) + (summary?.taxAmount ?? 0);
+  });
 
   // ── Footer-facing collector projections (read by the shell) ──────────────
+  readonly tipAmount = computed<number>(() => {
+    const collector = this.collector();
+    return collector?.mode() === 'contado' && collector.config().allowTip
+      ? collector.tipAmount()
+      : 0;
+  });
   readonly mode = computed<PaymentMode | undefined>(() => this.collector()?.mode());
   readonly isWompiSelected = computed<boolean>(
     () => this.collector()?.isWompiSelected() ?? false,
@@ -867,6 +878,14 @@ export class PosPaymentStepComponent implements OnInit {
       // viaja con el pago para que el POS persista payments.bank_account_id en
       // processPosPaymentTransaction (CreatePosPaymentDto).
       bank_account_id: submit.bankAccountId,
+      ...(submit.tip != null && submit.tip > 0
+        ? {
+            tip_amount: submit.tip,
+            tip_type: submit.tipType,
+            tip_value: submit.tipValue,
+            tip_waiter_id: submit.tipWaiterId ?? undefined,
+          }
+        : {}),
     };
 
     // Cobro multimétodo de contado: con 2+ tramos el payload lleva
@@ -898,12 +917,27 @@ export class PosPaymentStepComponent implements OnInit {
     const selectedCart = this.cartWithConfirmedSerials();
     const immediateSerials = this.needsImmediateSerialCapture(submit) &&
       selectedCart.items.some((item) => item.product.requires_serial_numbers);
-    const obs: Observable<PosSalePaymentResponse> = editingId && !immediateSerials
+    const editingDigitalTip = editingId != null && !immediateSerials &&
+      (submit.tip ?? 0) > 0 &&
+      (method.type === PaymentMethodType.WOMPI ||
+        method.type === PaymentMethodType.WALLET);
+    const obs: Observable<PosSalePaymentResponse> = editingDigitalTip
+      ? this.paymentService.processExistingDigitalTip(selectedCart, payment_request, editingId)
+      : editingId && !immediateSerials
       ? this.ordersService.flowPayOrder(String(editingId), {
           store_payment_method_id: method.id,
           payment_type: 'direct',
-          amount: this.cartState()!.summary.total,
+          amount: this.cartState()!.summary.total + (submit.tip ?? 0),
           amount_received: submit.amountReceived,
+          ...(submit.bankAccountId != null ? { bank_account_id: submit.bankAccountId } : {}),
+          ...(submit.tip != null && submit.tip > 0
+            ? {
+                tip_amount: submit.tip,
+                tip_type: submit.tipType,
+                tip_value: submit.tipValue,
+                tip_waiter_id: submit.tipWaiterId ?? undefined,
+              }
+            : { tip_amount: 0, tip_type: 'fixed', tip_value: 0 }),
           // Multimétodo: `PayOrderDto` exige el escalar pero el backend
           // prefiere `payments[]` cuando llega. Se adjunta, no se sustituye.
           ...(multiLegs ? { payments: toPosPaymentLegs(multiLegs) } : {}),
@@ -928,7 +962,7 @@ export class PosPaymentStepComponent implements OnInit {
           // shape (PayOrderResponse) does NOT carry a top-level `success`
           // flag; treat any non-thrown response as success. processSaleWithPayment
           // returns `{success: true/false, ...}` so we honor its flag.
-          const isSuccess = editingId ? !!response?.order : response.success;
+          const isSuccess = response.success ?? (editingId ? !!response?.order : false);
           if (isSuccess) {
             if (
               isWompi &&

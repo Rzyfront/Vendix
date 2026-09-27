@@ -364,6 +364,7 @@ describe('PaymentCollectorComponent — modo multi «Varios métodos» (Paso 5)'
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
@@ -478,6 +479,7 @@ describe('PaymentCollectorComponent — B15(1) setLegAmount no deja amountReceiv
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
@@ -543,6 +545,7 @@ describe('PaymentModalComponent — arbitraje NG8002 allowMultiTender (Paso 5c)'
     await TestBed.configureTestingModule({
       imports: [PaymentModalComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
@@ -564,5 +567,79 @@ describe('PaymentModalComponent — arbitraje NG8002 allowMultiTender (Paso 5c)'
     expect(collectorEl).toBeTruthy();
     const collector = collectorEl.componentInstance as PaymentCollectorComponent;
     expect(collector.config().allowMultiTender).toBe(true);
+  });
+});
+
+describe('PaymentCollectorComponent — restaurant tip amount', () => {
+  let fixture: ComponentFixture<PaymentCollectorComponent>;
+  let component: PaymentCollectorComponent;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [PaymentCollectorComponent],
+      providers: [
+        provideHttpClient(),
+        { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
+        { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
+      ],
+    }).compileComponents();
+    fixture = TestBed.createComponent(PaymentCollectorComponent);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('amount', 105000); // products net + shipping
+    fixture.componentRef.setInput('tipBase', 119000); // products gross, before discount
+    fixture.componentRef.setInput('allowTip', true);
+    fixture.detectChanges();
+  });
+
+  afterEach(() => fixture.destroy());
+
+  it('resolves percentage against gross products and charges the resolved money amount', () => {
+    component.tipType.set('percentage');
+    component.tipControl.setValue(10);
+    fixture.detectChanges();
+
+    expect(component.tipAmount()).toBe(11900);
+    expect(component.effectiveTotal()).toBe(116900);
+    expect(component.quickAmounts()[0]).toBe(116900);
+  });
+
+  it('does not add a hidden tip to a credit plan', () => {
+    component.mode.set('credito');
+    component.tipControl.setValue(5000);
+    fixture.detectChanges();
+
+    expect(component.effectiveTotal()).toBe(105000);
+    expect(fixture.debugElement.query(By.css('.pc-tip-mode'))).toBeNull();
+  });
+
+  it('blocks percentages above 100 and invalid fixed amounts with an explicit message', () => {
+    component.selectMethod(multiCashMethod, { advance: false });
+    component.cashReceivedControl.setValue(200000);
+    component.tipType.set('percentage');
+    component.tipControl.setValue(101);
+    expect(component.tipValidationError()).toContain('entre 0 y 100');
+    expect(component.canSubmit()).toBeFalse();
+    expect(component.tipAmount()).toBe(0);
+
+    component.tipType.set('fixed');
+    component.tipControl.setValue(-10);
+    expect(component.tipValidationError()).toContain('mayor o igual a cero');
+    expect(component.canSubmit()).toBeFalse();
+    component.tipControl.setValue(Number.POSITIVE_INFINITY);
+    expect(component.tipValidationError()).toContain('propina válida');
+    expect(component.canSubmit()).toBeFalse();
+  });
+
+  it('makes multi-tender legs balance against total including resolved percentage tip', () => {
+    fixture.componentRef.setInput('allowMultiTender', true);
+    fixture.componentRef.setInput('paymentMethods', [multiCashMethod, multiCardMethod]);
+    fixture.detectChanges();
+    component.setMultiEnabled(true);
+    component.tipType.set('percentage');
+    component.tipControl.setValue(10);
+    expect(component.remaining()).toBe(11900);
+    component.setLegAmount(0, 116900);
+    expect(component.remaining()).toBe(0);
+    expect(component.isMultiValid()).toBeTrue();
   });
 });
