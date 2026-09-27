@@ -2787,6 +2787,17 @@ export class InvoicingService {
         tax_amount: new Prisma.Decimal(tax),
         total_amount: new Prisma.Decimal(total_amount),
         is_inclusive: false,
+        // `order_items.price_unit_quantity` (snapshot de `products.price_unit_quantity`
+        // al vender, ver el schema): a cuántas unidades de stock corresponde
+        // `unit_price`. Sin copiarlo, el prevalidador (`fiscal-document.validator.ts`
+        // L620/L744) recompone `LineExtensionAmount` como `unit_price * quantity`
+        // (NULL ⇒ 1) en vez de `unit_price * quantity / price_unit_quantity`, y una
+        // línea vendida por caja/empaque (`price_unit_quantity` > 1) dispara
+        // `HEADER_LINE_EXTENSION_MISMATCH` (FAU02) contra el total realmente cobrado.
+        price_unit_quantity:
+          typeof item.price_unit_quantity === 'number'
+            ? item.price_unit_quantity
+            : null,
         // "Empaque por tarifa" snapshot propagated from the order line so the
         // invoice mirrors the order PDF (tier label + packaging units consumed).
         applied_price_tier_name:
@@ -2920,6 +2931,24 @@ export class InvoicingService {
     // F-090 dice que hoy no se puede. No se sintetiza la fila que falta
     // (ver docblock de `aggregateOrderTaxes`): se reporta el conteo y los
     // índices para que quien investigue pueda ir directo a la línea.
+    //
+    // Task 3a (Agente D, 2026-09-27) — INTENTAMOS convertir esto en un throw
+    // fail-closed (`INVOICING_CALC_001`), asumiendo que una línea escalar sin
+    // desglose es siempre un documento internamente incoherente. Es FALSO:
+    // `invoicing.service.tax-matrix.spec.ts` ("caja x24 SIN desglose: el
+    // escalar cae al fallback y escala por unidades de precio ($8.000)" y
+    // "línea por PESO: el multiplicador es `weight`") prueba, contra el
+    // camino real, que esta MISMA población (F-090) tiene una resolución
+    // deliberada y ya probada: la línea se factura con su escalar
+    // `tax_amount_item` ESCALADO por `quantity / price_unit_quantity` (o por
+    // `weight`), sin sintetizar una fila `order_item_taxes`/`invoice_taxes` —
+    // exactamente lo que el docblock de `aggregateOrderTaxes` ya documentaba
+    // ("no se sintetiza la fila que falta"). El throw rompía ambos tests.
+    // Revertido: se deja el warn original. El riesgo de `HEADER_TAX_TOTAL_MISMATCH`
+    // que motivó el intento sigue siendo real para la porción de población 3
+    // que NO pasa por el escalador de unidades de precio (ver el propio
+    // fallback más abajo); ese es el gap a resolver, no esta población en
+    // general — reportado como hallazgo, sin bloquear el camino ya probado.
     if (taxScalarWithoutBreakdown.count > 0) {
       this.logger.warn(
         `[invoice:create-from-order]${formatGateCorrelation({
