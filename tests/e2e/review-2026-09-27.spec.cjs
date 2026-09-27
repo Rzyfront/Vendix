@@ -549,30 +549,30 @@ async function main() {
           total, 'La cuenta de mesa con platos cancelados');
         assert.match(await total.innerText(), /Total\s*\$0/i);
         const cancelled = page.locator('.item-cancelled-badge');
-        assert.equal(await cancelled.count(), 5, 'La mesa perdió alguno de sus cinco platos cancelados');
+        assert.equal(await cancelled.count(), 6, 'La mesa perdió alguno de sus seis platos cancelados');
         const badges = await cancelled.allInnerTexts();
         assert.equal(badges.filter((label) => label.includes('reuso')).length, 3);
-        assert.equal(badges.filter((label) => label.includes('merma')).length, 2);
+        assert.equal(badges.filter((label) => label.includes('merma')).length, 3);
         const reasons = await page.locator('.item-cancelled-reason').allInnerTexts();
         for (const reason of ['QA R18 mesa pendiente', 'QA R18 mesa avanzada desechar',
           'QA R18 mesa avanzada reusar', 'QA R18 mesa lista desechar',
-          'QA R18 entrega sin cobro reutilizar']) {
+          'QA R18 entrega sin cobro reutilizar', 'QA R18 entrega sin cobro desechar']) {
           assert(reasons.some((line) => line.includes(reason)), `Falta motivo persistido: ${reason}`);
         }
         assert.equal(await page.getByRole('button', {
           name: 'Eliminar Pollo Árabe E2E de la cuenta', exact: true,
         }).count(), 0, 'Un plato cancelado se puede cancelar dos veces');
-        await page.getByText('Entrega reversada', { exact: true }).waitFor();
+        assert.equal(await page.getByText('Entrega reversada', { exact: true }).count(), 2);
         assert.match(await page.locator('body').innerText(), /Entregados\s*0/);
         await openUiView(page, `${adminBase}/admin/restaurant-ops/tables/session/160`,
           total, 'La cuenta de mesa tras recarga');
         assert.match(await total.innerText(), /Total\s*\$0/i);
-        assert.equal(await cancelled.count(), 5);
+        assert.equal(await cancelled.count(), 6);
       });
     }
 
     if (results[0]?.status === 'passed' && (group === 'delivered_reverse' || group === 'all')) {
-      await runScenario('R18: unpaid delivered dish reversed once restores ingredients exactly', ['R18'], async () => {
+      await runScenario('R18: unpaid delivered reuse and waste persist without repeat reversal', ['R18'], async () => {
         const heading = page.getByRole('heading', { name: 'Orden #T-1790520816706-805' });
         await openUiView(page, `${adminBase}/admin/orders/1377`, heading,
           'La orden de mesa con entrega reversada');
@@ -580,8 +580,14 @@ async function main() {
           hasText: 'QA R18 entrega sin cobro reutilizar',
         });
         await item.getByText('Cancelado', { exact: true }).waitFor();
+        const wasted = page.locator('.items-compact > div').filter({
+          hasText: 'QA R18 entrega sin cobro desechar',
+        });
+        await wasted.getByText('Cancelado', { exact: true }).waitFor();
         assert.equal(await item.getByRole('button', { name: 'Reversar' }).count(), 0,
           'La reversa ya aplicada no debe ofrecer un segundo reintegro');
+        assert.equal(await wasted.getByRole('button', { name: 'Reversar' }).count(), 0,
+          'La merma ya registrada no debe ofrecer una segunda reversa');
         const summary = page.locator('app-card').filter({
           has: page.getByRole('heading', { name: 'Resumen de Pago' }),
         });
@@ -596,8 +602,8 @@ async function main() {
           }).first();
           return (await card.locator('span.text-xl').first().innerText()).trim();
         };
-        assert.equal(await stockValue(427), '-900', 'Pollo no recuperó 300 unidades exactas');
-        assert.equal(await stockValue(428), '570', 'Especias no recuperaron 10 unidades exactas');
+        assert.equal(await stockValue(427), '-1200', 'La merma posterior al reuso no conservó el saldo físico');
+        assert.equal(await stockValue(428), '560', 'La merma posterior al reuso no conservó las especias');
       });
     }
 
