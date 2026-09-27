@@ -542,6 +542,32 @@ async function main() {
       });
     }
 
+    if (results[0]?.status === 'passed' && (group === 'table_cancel' || group === 'all')) {
+      await runScenario('R18: table bill retains pending auto-return and advanced waste/reuse after reload', ['R18'], async () => {
+        const total = page.locator('.totals-row--grand');
+        await openUiView(page, `${adminBase}/admin/restaurant-ops/tables/session/160`,
+          total, 'La cuenta de mesa con platos cancelados');
+        assert.match(await total.innerText(), /Total\s*\$0/i);
+        const cancelled = page.locator('.item-cancelled-badge');
+        assert.equal(await cancelled.count(), 3, 'La mesa perdió alguno de sus tres platos cancelados');
+        const badges = await cancelled.allInnerTexts();
+        assert.equal(badges.filter((label) => label.includes('reuso')).length, 2);
+        assert.equal(badges.filter((label) => label.includes('merma')).length, 1);
+        const reasons = await page.locator('.item-cancelled-reason').allInnerTexts();
+        for (const reason of ['QA R18 mesa pendiente', 'QA R18 mesa avanzada desechar',
+          'QA R18 mesa avanzada reusar']) {
+          assert(reasons.some((line) => line.includes(reason)), `Falta motivo persistido: ${reason}`);
+        }
+        assert.equal(await page.getByRole('button', {
+          name: 'Eliminar Pollo Árabe E2E de la cuenta', exact: true,
+        }).count(), 0, 'Un plato cancelado se puede cancelar dos veces');
+        await openUiView(page, `${adminBase}/admin/restaurant-ops/tables/session/160`,
+          total, 'La cuenta de mesa tras recarga');
+        assert.match(await total.innerText(), /Total\s*\$0/i);
+        assert.equal(await cancelled.count(), 3);
+      });
+    }
+
     if (results[0]?.status === 'passed' && (group === 'credit' || group === 'all')) {
       await runScenario('R7: installment down payment is a currency input in POS', ['R7'], async () => {
         await openUiView(page, `${adminBase}/admin/pos`,

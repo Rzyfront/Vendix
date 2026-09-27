@@ -826,11 +826,9 @@ export class TableSessionPageComponent implements OnInit {
    * Rules mirror the backend gate:
    *   - not closed, and
    *   - the item was NEVER fired  → deletable outright, or
-   *   - the item was fired but its ticket is still `pending` → deletable
-   *     (backend cancels the KDS ticket + returns the fire-consumed stock).
-   *
-   * Hidden for `in_preparation` / `ready` / `delivered` / `cancelled`
-   * (terminal or in-progress kitchen states the backend rejects with 409).
+   *   - `pending` → backend cancels KDS and returns inputs automatically;
+   *   - `in_preparation` / `ready` → the modal requires reuse or waste.
+   * Delivered and cancelled remain unavailable in this normal-cancel seam.
    */
   canRemoveItem(item: TableSessionOrderItem): boolean {
     if (this.isClosed() || this.hasFinancialSplit()) return false;
@@ -838,7 +836,10 @@ export class TableSessionPageComponent implements OnInit {
     // (`delivered_at`, hecho de servicio) ya no se puede cancelar. Solo
     // presentación: el enforcement real lo pone el backend (paso 1).
     if (this.isDelivered(item)) return false;
-    return !this.isItemFired(item) || this.kitchenStatusFor(item) === 'pending';
+    if (!this.isItemFired(item)) return true;
+    const kitchenStatus = this.kitchenStatusFor(item);
+    return kitchenStatus === 'pending' ||
+      kitchenStatus === 'in_preparation' || kitchenStatus === 'ready';
   }
 
   /**

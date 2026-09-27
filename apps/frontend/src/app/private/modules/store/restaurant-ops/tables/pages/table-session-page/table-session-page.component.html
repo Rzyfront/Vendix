@@ -612,8 +612,7 @@
                               size="sm"
                               customClasses="!h-11 !w-11 !px-0"
                               [loading]="removingItemId() === item.id"
-                              [attr.title]="'Eliminar de la cuenta'"
-                              [attr.aria-label]="'Eliminar ' + item.product_name"
+                              [ariaLabel]="'Eliminar ' + item.product_name + ' de la cuenta'"
                               (clicked)="onRemoveItem(item)"
                             >
                               <app-icon slot="icon" name="trash-2" [size]="13"></app-icon>
