@@ -4575,30 +4575,21 @@ export class OrderDetailsPageComponent {
   /**
    * Punto de entrada de "Cambiar cliente".
    *
-   * PRE-CHECK (espejo del guard backend `ORD_EDIT_NOT_ALLOWED_001` en
-   * `orders.service.ts`): el titular cambia en created/draft/pending_payment/
-   * processing/pending_delivery. En shipped/delivered/finished/cancelled/
-   * refunded se muestra el dialog informativo y no se abre ningún modal.
-   * Release-853 paso 10: también se bloquea si la orden tiene una
-   * `sales_invoice` vigente (espejo de `ORD_TITULAR_INVOICED_001`); el
-   * borrador sí deja pasar porque el backend le propaga el titular.
-   * En estado editable se abre el buscar-primero; el `app-customer-modal`
-   * en modo crear solo aparece vía "Crear cliente nuevo".
+   * Regla vigente (release-titular-any-state): el titular se puede cambiar
+   * en CUALQUIER estado de la orden (incluidos shipped/delivered/finished/
+   * cancelled/refunded) — ya no hay gate de estado. El único bloqueo es
+   * fiscal: si la orden tiene un documento electrónico TRANSMITIDO a la DIAN
+   * (`sent`/`accepted`) se muestra el dialog informativo (espejo de
+   * `ORD_TITULAR_INVOICED_001`) y no se abre ningún modal. Documentos no
+   * transmitidos (draft/validated/rejected) no bloquean aquí — el backend
+   * decide caso a caso (draft: propaga; validated/rejected: 409 con mensaje
+   * "en proceso"). En estado permitido se abre el buscar-primero; el
+   * `app-customer-modal` en modo crear solo aparece vía "Crear cliente
+   * nuevo".
    */
   async openChangeCustomer(): Promise<void> {
     const order = this.order();
     if (!order) return;
-    const TITULAR_LOCKED_STATES: readonly OrderState[] = [
-      'shipped',
-      'delivered',
-      'finished',
-      'cancelled',
-      'refunded',
-    ];
-    if (TITULAR_LOCKED_STATES.includes(order.state)) {
-      await this.notifyTitularLocked();
-      return;
-    }
     if (this.hasActiveSalesInvoice()) {
       await this.notifyTitularLocked('ORD_TITULAR_INVOICED_001');
       return;
@@ -4608,34 +4599,41 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * Release-854 follow-up — espejo local del gate backend
-   * `ORD_TITULAR_INVOICED_001`: decide con `active_sales_invoice` (calculado
-   * por el backend con el filtro de la guarda) en lugar de `invoices[0]`,
-   * que puede ser una NC aunque exista una `sales_invoice` aceptada. El
-   * borrador sí deja pasar porque el backend le propaga el titular.
-   * `orderInvoice` y la tarjeta de factura no cambian: siguen mostrando
-   * `invoices[0]`.
+   * Espejo local del gate backend `ORD_TITULAR_INVOICED_001`: decide con
+   * `active_sales_invoice` (calculado por el backend con el filtro de la
+   * guarda — incluye `sales_invoice`/`export_invoice`/
+   * `pos_equivalent_document`) en lugar de `invoices[0]`, que puede ser una
+   * NC aunque exista una factura aceptada. Solo bloquea si el documento fue
+   * TRANSMITIDO a la DIAN (`sent`/`accepted`); `draft`/`validated`/
+   * `rejected` no bloquean el pre-check local (el backend decide si
+   * propaga o responde 409 "en proceso"). `orderInvoice` y la tarjeta de
+   * factura no cambian: siguen mostrando `invoices[0]`.
    */
   private hasActiveSalesInvoice(): boolean {
     const active = this.order()?.active_sales_invoice;
     if (!active) return false;
-    return active.status !== 'draft';
+    return active.status === 'sent' || active.status === 'accepted';
   }
 
   /**
    * Dialog informativo (español) del titular bloqueado. Se usa tanto en el
    * pre-check local como al mapear 409/403 del PATCH titular.
    *
-   * Release-853 regresión (paso 10): recibe opcionalmente el `errorCode` que
-   * disparó el bloqueo para diferenciar el copy del caso factura vigente
-   * (`ORD_TITULAR_INVOICED_001`) del genérico de estado/tienda ajena.
+   * Regla vigente (release-titular-any-state): ya no hay gate de estado, así
+   * que se retiró la frase "orden en curso o finalizada" (dejó de aplicar).
+   * Copy por código: factura vigente (`ORD_TITULAR_INVOICED_001`), tienda
+   * ajena (`ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`) y un genérico neutro para
+   * cualquier otro código defensivo (p. ej. `ORD_EDIT_NOT_ALLOWED_001`, que
+   * el backend ya no lanza por titular pero se conserva reconocido por
+   * compatibilidad — ver `isTitularLockedError`).
    */
   private notifyTitularLocked(code?: string | null): Promise<boolean> {
     const message =
       code === 'ORD_TITULAR_INVOICED_001'
         ? 'La orden ya tiene una factura emitida; anúlala o emite una nota crédito para cambiar el titular.'
-        : 'Esta orden ya está en curso o finalizada, por lo que su titular no puede cambiarse. ' +
-          'El titular queda fijado al avanzar la orden y es inmutable por trazabilidad fiscal.';
+        : code === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001'
+          ? 'El cliente seleccionado pertenece a otra tienda; elige un cliente de esta tienda.'
+          : 'No se pudo cambiar el titular de esta orden.';
     return this.dialogService.confirm({
       title: 'No se puede cambiar el titular',
       message,
@@ -4646,12 +4644,16 @@ export class OrderDetailsPageComponent {
 
   /**
    * Devuelve el `errorCode` cuando el error del PATCH titular es uno de los
-   * tres bloqueos de titular: estado (409 `ORD_EDIT_NOT_ALLOWED_001`), tienda
-   * ajena (403 `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`) o factura vigente (409
-   * `ORD_TITULAR_INVOICED_001`); `null` en cualquier otro caso. Release-853
-   * paso 10: decide SOLO por `errorCode` — el fallback por status HTTP metía
-   * en el dialog de bloqueo cualquier 409/403 ajeno al titular (p. ej. un
-   * split financiero activo).
+   * bloqueos de titular reconocidos: tienda ajena (403
+   * `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`) o factura vigente (409
+   * `ORD_TITULAR_INVOICED_001`); `null` en cualquier otro caso.
+   * `ORD_EDIT_NOT_ALLOWED_001` se sigue reconociendo de forma defensiva
+   * (compatibilidad hacia atrás / otros llamadores del PATCH), pero el
+   * backend ya no lo lanza por razón de titular — el gate de estado se
+   * eliminó (regla vigente: el titular cambia en cualquier estado). Decide
+   * SOLO por `errorCode` — el fallback por status HTTP metía en el dialog de
+   * bloqueo cualquier 409/403 ajeno al titular (p. ej. un split financiero
+   * activo).
    *
    * `StoreOrdersService.updateOrderCustomer` lanza `buildApiError(error)`: un
    * `Error` con `errorCode` en camelCase y el `HttpErrorResponse` original en

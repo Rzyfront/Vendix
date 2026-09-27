@@ -3,16 +3,22 @@ import { OrdersService } from './orders.service';
 import { ErrorCodes } from 'src/common/errors';
 
 /**
- * BE-2 pasos 2+6 — contrato de titular de órdenes.
+ * BE-2 pasos 2+6 — contrato de titular de órdenes (regla vigente).
  *
  * - findAll/findOne proyectan users{legal_name, document_type,
  *   document_number, person_type} y el OR de búsqueda matchea legal_name y
  *   phone case-insensitive con scope tenant.
- * - PATCH /store/orders/:id con cambio de titular permite
- *   created/draft/pending_payment/processing/pending_delivery
- *   (409 ORD_EDIT_NOT_ALLOWED_001 en shipped/delivered/finished/
- *   cancelled/refunded) y exige cliente del store
- *   (403 ORD_EDIT_CUSTOMER_STORE_MISMATCH_001).
+ * - PATCH /store/orders/:id con cambio de titular se permite en CUALQUIER
+ *   estado de la orden (incluidos shipped/delivered/finished/cancelled/
+ *   refunded) y exige cliente del store (403
+ *   ORD_EDIT_CUSTOMER_STORE_MISMATCH_001).
+ * - El único bloqueo es por documento electrónico vigente: `sales_invoice`
+ *   / `export_invoice` / `pos_equivalent_document` en `sent`/`accepted`
+ *   (transmitido a la DIAN) ⇒ 409 ORD_TITULAR_INVOICED_001. `validated`/
+ *   `rejected` también bloquean con el MISMO código (mensaje distinto: en
+ *   proceso) porque `InvoicingService.update()` no acepta cambiar
+ *   `customer_id` fuera de `draft`. `draft` propaga; `voided`/`cancelled`
+ *   se ignoran (filtrados en la propia consulta).
  */
 describe('OrdersService — contrato titular (BE-2)', () => {
   const prisma: any = {
@@ -70,28 +76,20 @@ describe('OrdersService — contrato titular (BE-2)', () => {
     users: { id: 12, first_name: 'Miguel', last_name: 'P' },
   };
 
-  describe('PATCH titular — gate de estado', () => {
-    it.each(['shipped', 'delivered', 'finished', 'cancelled', 'refunded'])(
-      'rechaza cambio de titular en estado=%s con 409 ORD_EDIT_NOT_ALLOWED_001',
-      async (state) => {
-        prisma.orders.findFirst.mockResolvedValue({ ...draftOrder, state });
-        await expect(
-          service.update(924, { customer_id: 217 } as any),
-        ).rejects.toMatchObject({
-          errorCode: ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code,
-        });
-        expect(prisma.orders.update).not.toHaveBeenCalled();
-      },
-    );
-
+  describe('PATCH titular — cualquier estado de la orden', () => {
     it.each([
       'created',
       'draft',
       'pending_payment',
       'processing',
       'pending_delivery',
+      'shipped',
+      'delivered',
+      'finished',
+      'cancelled',
+      'refunded',
     ])(
-      'permite cambio de titular en estado=%s cuando el cliente es del store (200)',
+      'permite cambio de titular en estado=%s sin factura vigente (200)',
       async (state) => {
         prisma.orders.findFirst.mockResolvedValue({ ...draftOrder, state });
         prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
@@ -111,17 +109,19 @@ describe('OrdersService — contrato titular (BE-2)', () => {
       },
     );
 
-    it('rechaza cambio de customer_alias en finished con el mismo 409', async () => {
+    it('permite cambio de customer_alias en finished (ya no hay gate de estado)', async () => {
       prisma.orders.findFirst.mockResolvedValue({
         ...draftOrder,
         state: 'finished',
       });
-      await expect(
-        service.update(924, { customer_alias: 'Mesa 5' } as any),
-      ).rejects.toMatchObject({
-        errorCode: ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code,
+      prisma.orders.update.mockResolvedValue({
+        ...draftOrder,
+        state: 'finished',
+        customer_alias: 'Mesa 5',
       });
-      expect(prisma.orders.update).not.toHaveBeenCalled();
+      const result = await service.update(924, { customer_alias: 'Mesa 5' } as any);
+      expect(result.customer_alias).toBe('Mesa 5');
+      expect(prisma.orders.update).toHaveBeenCalled();
     });
 
     it('permite metadata sin titular en finished (el gate solo cubre titular)', async () => {
@@ -166,8 +166,8 @@ describe('OrdersService — contrato titular (BE-2)', () => {
     });
   });
 
-  describe('PATCH titular — gate de factura (release-853 paso 10)', () => {
-    it('factura sent → 409 ORD_TITULAR_INVOICED_001 y la orden no se toca', async () => {
+  describe('PATCH titular — gate de factura electrónica vigente', () => {
+    it('sales_invoice sent → 409 ORD_TITULAR_INVOICED_001 (transmitida) y la orden no se toca', async () => {
       prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
       prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
       prisma.invoices.findFirst.mockResolvedValue({ id: 77, status: 'sent' });
@@ -180,7 +180,10 @@ describe('OrdersService — contrato titular (BE-2)', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             order_id: 924,
-            invoice_type: 'sales_invoice',
+            invoice_type: {
+              in: ['sales_invoice', 'export_invoice', 'pos_equivalent_document'],
+            },
+            status: { notIn: ['voided', 'cancelled'] },
           }),
         }),
       );
@@ -188,20 +191,60 @@ describe('OrdersService — contrato titular (BE-2)', () => {
       expect(prisma.orders.update).not.toHaveBeenCalled();
     });
 
-    it.each(['validated', 'accepted'])(
-      'factura %s → 409 (solo draft propaga)',
+    it('sales_invoice accepted → 409 ORD_TITULAR_INVOICED_001 (fijar errorCode)', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      prisma.invoices.findFirst.mockResolvedValue({ id: 78, status: 'accepted' });
+      const error: any = await service
+        .update(924, { customer_id: 217 } as any)
+        .catch((e: unknown) => e);
+      expect(error.errorCode).toBe(ErrorCodes.ORD_TITULAR_INVOICED_001.code);
+      expect(prisma.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('pos_equivalent_document sent → 409 ORD_TITULAR_INVOICED_001', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      prisma.invoices.findFirst.mockResolvedValue({ id: 81, status: 'sent' });
+      await expect(
+        service.update(924, { customer_id: 217 } as any),
+      ).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_TITULAR_INVOICED_001.code,
+      });
+      expect(prisma.orders.update).not.toHaveBeenCalled();
+    });
+
+    it.each(['validated', 'rejected'])(
+      'factura %s (no transmitida) → 409 mismo código, mensaje "en proceso" (InvoicingService no acepta customer_id fuera de draft)',
       async (status) => {
         prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
         prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
-        prisma.invoices.findFirst.mockResolvedValue({ id: 78, status });
-        await expect(
-          service.update(924, { customer_id: 217 } as any),
-        ).rejects.toMatchObject({
-          errorCode: ErrorCodes.ORD_TITULAR_INVOICED_001.code,
-        });
+        prisma.invoices.findFirst.mockResolvedValue({ id: 82, status });
+        const error: any = await service
+          .update(924, { customer_id: 217 } as any)
+          .catch((e: unknown) => e);
+        expect(error.errorCode).toBe(ErrorCodes.ORD_TITULAR_INVOICED_001.code);
+        expect(String(error.getResponse()?.message || '')).toMatch(
+          /en proceso/i,
+        );
+        expect(invoicing.update).not.toHaveBeenCalled();
         expect(prisma.orders.update).not.toHaveBeenCalled();
       },
     );
+
+    it('factura voided → OK (la propia consulta la excluye, no bloquea ni propaga)', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      // El filtro `status: { notIn: ['voided','cancelled'] }` de
+      // `findActiveTitularInvoice` excluye la factura anulada: la consulta
+      // real nunca la devolvería, así que el mock refleja ese resultado.
+      prisma.invoices.findFirst.mockResolvedValue(null);
+      prisma.orders.update.mockResolvedValue({ ...draftOrder, customer_id: 217 });
+      const result = await service.update(924, { customer_id: 217 } as any);
+      expect(result.customer_id).toBe(217);
+      expect(invoicing.update).not.toHaveBeenCalled();
+      expect(prisma.orders.update).toHaveBeenCalled();
+    });
 
     it('factura draft → aplica a la orden y propaga con InvoicingService.update', async () => {
       prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
@@ -240,17 +283,19 @@ describe('OrdersService — contrato titular (BE-2)', () => {
       expect(prisma.orders.update).toHaveBeenCalled();
     });
 
-    it('cambio solo de alias no consulta la guarda (la única lectura es active_sales_invoice de findOne)', async () => {
+    it('cambio solo de alias no consulta la guarda (findOne siempre resuelve sus dos lecturas de invoices)', async () => {
       prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
       prisma.orders.update.mockResolvedValue({
         ...draftOrder,
         customer_alias: 'Mesa 5',
       });
       await service.update(924, { customer_alias: 'Mesa 5' } as any);
-      // Release-854 paso 2: findOne() siempre resuelve active_sales_invoice
-      // (1 lectura). La guarda de titular no corre para alias, así que no
-      // hay segunda lectura ni propagación.
-      expect(prisma.invoices.findFirst).toHaveBeenCalledTimes(1);
+      // findOne() siempre resuelve `hasIssuedSalesInvoice` (solo
+      // sales_invoice, para available_actions) y `active_sales_invoice`
+      // (los tres tipos, para el pre-chequeo de titular): 2 lecturas. La
+      // guarda de titular no corre para alias, así que no hay una tercera
+      // lectura ni propagación.
+      expect(prisma.invoices.findFirst).toHaveBeenCalledTimes(2);
       expect(invoicing.update).not.toHaveBeenCalled();
       expect(prisma.orders.update).toHaveBeenCalled();
     });
@@ -348,11 +393,28 @@ describe('OrdersService — contrato titular (BE-2)', () => {
         id: 77,
         status: 'accepted',
       });
+      // Dos lecturas separadas de `invoices.findFirst`: una acotada a
+      // `sales_invoice` (alimenta `hasIssuedSalesInvoice`/
+      // `available_actions`, espejo de
+      // `findBlockingSalesInvoiceForPaymentCancel`) y otra ampliada a los
+      // tres tipos de documento electrónico (alimenta `active_sales_invoice`
+      // / la guarda de titular).
       expect(prisma.invoices.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             order_id: 924,
             invoice_type: 'sales_invoice',
+            status: { notIn: ['voided', 'cancelled'] },
+          }),
+        }),
+      );
+      expect(prisma.invoices.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            order_id: 924,
+            invoice_type: {
+              in: ['sales_invoice', 'export_invoice', 'pos_equivalent_document'],
+            },
             status: { notIn: ['voided', 'cancelled'] },
           }),
         }),
