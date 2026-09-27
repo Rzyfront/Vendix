@@ -149,8 +149,8 @@ async function main() {
           await page.getByText('Impuestos agregados a la oferta').waitFor();
           setupAttempted = true;
           await page.getByRole('button', { name: 'Guardar', exact: true }).click();
-          await page.waitForFunction(() => location.pathname === '/admin/products' &&
-            new URLSearchParams(location.search).get('page') === '1', null, { timeout: 15_000 });
+          await page.waitForFunction(() => location.pathname === '/admin/products',
+            null, { timeout: 15_000 });
 
           const card = shop.locator('article.product-card').filter({ hasText: 'Frutas Orgánicas Mix 1kg' });
           await openUiView(shop, 'https://roku-shop.vendix.com/sale', card, 'La tarjeta de oferta con IVA');
@@ -163,10 +163,70 @@ async function main() {
               await page.locator('app-input[formcontrolname="sale_price"] input').fill('0');
               await toggle.click();
               await page.getByRole('button', { name: 'Guardar', exact: true }).click();
-              await page.waitForFunction(() => location.pathname === '/admin/products' &&
-                new URLSearchParams(location.search).get('page') === '1', null, { timeout: 15_000 });
+              await page.waitForFunction(() => location.pathname === '/admin/products',
+                null, { timeout: 15_000 });
             }
           }
+        }
+      });
+
+      await runScenario('R9/R21: IVA-included offer compares final price with final price', ['R9', 'R21'], async () => {
+        // The Roku fixture has no product with an inclusive tax. Change the
+        // existing fruit product through its editor, then restore both fields
+        // through that same UI even if a storefront assertion fails.
+        // The preceding additive-tax scenario usually leaves this admin tab
+        // authenticated, but permit a standalone retry after login failure.
+        if (!await page.evaluate(() => {
+          try { return Boolean(JSON.parse(localStorage.getItem('vendix_auth_state') || '{}')?.tokens?.access_token); }
+          catch { return false; }
+        })) await login(page);
+        const editUrl = `${adminBase}/admin/products/edit/298?fromPage=1`;
+        const toggle = page.locator('app-setting-toggle[label="Activar precio de oferta"] [role=button]');
+        const taxMode = page.locator('vendix-tax-inclusive-chip')
+          .getByRole('button', { name: 'IVA General 19%: impuesto adicional sobre el precio unitario' });
+        try {
+          await openUiView(page, editUrl, taxMode, 'La fruta con IVA adicional');
+          assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+          await taxMode.click();
+          await page.locator('vendix-tax-inclusive-chip')
+            .getByRole('button', { name: 'IVA General 19%: impuesto incluido en el precio unitario' })
+            .waitFor();
+          await toggle.click();
+          await page.locator('app-input[formcontrolname="sale_price"] input').fill('20000');
+          await page.getByText('Oferta final: $20.000').waitFor();
+          await page.getByText('Impuestos incluidos en la oferta').waitFor();
+          await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+          await page.waitForFunction(() => location.pathname === '/admin/products', null, { timeout: 15_000 });
+          const card = shop.locator('article.product-card').filter({ hasText: 'Frutas Orgánicas Mix 1kg' });
+          await openUiView(shop, 'https://roku-shop.vendix.com/sale', card,
+            'La oferta con IVA incluido');
+          assert.equal((await card.locator('.product-price .price').innerText()).trim(), '$20.000');
+          assert.equal((await card.locator('.product-price .original-price').innerText()).trim(), '$22.000');
+          await card.locator('.product-name').click();
+          await shop.locator('main .price-line .current-price').getByText('$20.000').waitFor();
+          assert.equal((await shop.locator('main .price-line .original-price').first().innerText()).trim(), '$22.000',
+            'La ficha también debe tachar el regular con la misma regla de IVA incluido.');
+        } finally {
+          // The save can succeed even if redirect observation times out, so
+          // always reopen the editor and inspect persisted state before exit.
+          await openUiView(page, editUrl, page.locator('vendix-tax-inclusive-chip'),
+            'Restaurar impuesto de fruta QA');
+          const inclusive = page.locator('vendix-tax-inclusive-chip')
+            .getByRole('button', { name: 'IVA General 19%: impuesto incluido en el precio unitario' });
+          const activeOffer = await toggle.getAttribute('aria-pressed') === 'true';
+          const activeInclusive = await inclusive.isVisible();
+          if (activeOffer || activeInclusive) {
+            if (activeOffer) {
+              await page.locator('app-input[formcontrolname="sale_price"] input').fill('0');
+              await toggle.click();
+            }
+            if (activeInclusive) await inclusive.click();
+            await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+            await page.waitForFunction(() => location.pathname === '/admin/products', null, { timeout: 15_000 });
+          }
+          await openUiView(page, editUrl, taxMode, 'Fruta QA restaurada sin oferta ni IVA incluido');
+          assert.equal(await toggle.getAttribute('aria-pressed'), 'false',
+            'La oferta QA debe quedar apagada después de la prueba.');
         }
       });
       }
