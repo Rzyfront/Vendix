@@ -382,20 +382,21 @@ export interface DispatchFlowSnapshot {
 }
 
 /** A prepared line must reach the KDS hand-off before a whole-order dispatch.
- * A stocked prepared line explicitly sold with skip_kds is a normal stock
- * line and must not be blocked. The most recent ticket item is authoritative
- * after a resend. Individual ordinary lines remain deliverable separately. */
+ * A stocked prepared line explicitly sold with skip_kds bypasses the kitchen
+ * only while it has no ticket. Once a ticket exists its latest status is
+ * authoritative, even if skip_kds was subsequently changed. */
 export function hasKitchenLinesAwaitingHandoff(items: ReadonlyArray<{
   cancelled_at?: Date | null;
   skip_kds?: boolean | null;
   products?: { product_type?: string | null } | null;
   kitchen_ticket_items?: ReadonlyArray<{ status: string }>;
 }>): boolean {
-  return items.some((item) =>
-    !item.cancelled_at && item.skip_kds !== true &&
-    item.products?.product_type === 'prepared' &&
-    item.kitchen_ticket_items?.[0]?.status !== 'delivered',
-  );
+  return items.some((item) => {
+    if (item.cancelled_at) return false;
+    const latestTicketStatus = item.kitchen_ticket_items?.[0]?.status;
+    if (latestTicketStatus != null) return latestTicketStatus !== 'delivered';
+    return item.products?.product_type === 'prepared' && item.skip_kds !== true;
+  });
 }
 
 function normalizedDeliveryType(order: DispatchFlowSnapshot): string {

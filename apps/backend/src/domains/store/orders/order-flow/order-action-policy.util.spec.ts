@@ -696,6 +696,12 @@ describe('order-action-policy — kitchen hand-off', () => {
     expect(hasKitchenLinesAwaitingHandoff([prepared('delivered')])).toBe(false);
     expect(hasKitchenLinesAwaitingHandoff([prepared('cancelled')])).toBe(true);
     expect(hasKitchenLinesAwaitingHandoff([prepared(undefined, true)])).toBe(false);
+    expect(hasKitchenLinesAwaitingHandoff([prepared('pending', true)])).toBe(true);
+    expect(hasKitchenLinesAwaitingHandoff([{
+      products: { product_type: 'physical' },
+      skip_kds: true,
+      kitchen_ticket_items: [{ status: 'pending' }],
+    }])).toBe(true);
     expect(hasKitchenLinesAwaitingHandoff([{ ...prepared('pending'), cancelled_at: new Date() }])).toBe(false);
   });
 });
