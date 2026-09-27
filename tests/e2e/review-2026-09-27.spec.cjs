@@ -594,6 +594,24 @@ async function main() {
       });
     }
 
+    if (results[0]?.status === 'passed' && (group === 'delivered_cancel' || group === 'all')) {
+      await runScenario('R18: paid delivered dish routes cancellation to refund instead of reversing stock', ['R18'], async () => {
+        const heading = page.getByRole('heading', { name: 'Orden #POS-2026-0413' });
+        await openUiView(page, `${adminBase}/admin/orders/1361`, heading,
+          'La orden pagada con plato entregado');
+        const dish = page.locator('.items-compact > div').filter({ hasText: 'Pollo Árabe E2E' });
+        await dish.getByText('Entregado', { exact: true }).first().waitFor();
+        assert.equal(await dish.getByRole('button', { name: 'Reversar' }).count(), 0,
+          'Una venta pagada no debe ofrecer reversa directa de inventario');
+        await dish.getByText('Orden cobrada: no se puede cancelar este plato.').waitFor();
+        const refund = dish.getByRole('button', { name: 'Abrir Reembolso' });
+        await refund.click();
+        await page.getByText('Procesar Reembolso', { exact: true }).first().waitFor();
+        // Read-only test: opening the refund form must not create a refund.
+        assert.match(await page.locator('body').innerText(), /Reembolso/);
+      });
+    }
+
     if (results[0]?.status === 'passed' && (group === 'credit' || group === 'all')) {
       await runScenario('R7: installment down payment is a currency input in POS', ['R7'], async () => {
         await openUiView(page, `${adminBase}/admin/pos`,
