@@ -709,6 +709,18 @@ export class OrdersListComponent {
       // (validación runtime en `OrdersListSseService.handleMessage`). Si el
       // backend pushea un estado desconocido, el servicio descarta el
       // evento silencioso y este effect nunca lo ve.
+      // Paso 5: con filtro de estado activo y la orden fuera de él, la fila
+      // se retira (y el total decrementa) en vez de actualizarse — un
+      // re-fetch completo perdería scroll/paginación.
+      const statusFilter = this.asArray(this._filters.status);
+      if (statusFilter.length > 0 && !statusFilter.includes(new_state)) {
+        if (this.orders().some((o) => o.id === order_id)) {
+          this.orders.update((prev) => prev.filter((o) => o.id !== order_id));
+          this.totalItems.update((t) => Math.max(0, t - 1));
+        }
+        this.ordersListSse.lastRelevantEvent.set(null);
+        return;
+      }
       this.orders.update((prev) =>
         prev.map((o) =>
           o.id === order_id
@@ -742,12 +754,9 @@ export class OrdersListComponent {
       // Idempotencia: doble evento por reconexión SSE con la fila ya
       // insertada es no-op.
       if (this.orders().some((o) => o.id === orderId)) return;
-      if (!this.canPrependLiveOrder()) {
-        this.toastService.info(
-          `Nueva orden ${orderNumber} recibida. Quita los filtros o vuelve a la página 1 para verla.`,
-        );
-        return;
-      }
+      // Paso 5: siempre se hidrata por REST; la decisión insertar-vs-toast
+      // se toma SOBRE la fila hidratada dentro de `fetchAndPrependLiveOrder`
+      // (el match necesita `state`/`channel` reales, que el evento no trae).
       this.fetchAndPrependLiveOrder(orderId, orderNumber);
     });
 
@@ -1313,39 +1322,64 @@ export class OrdersListComponent {
   }
 
   /**
-   * CP-orders-sales-sse-realtime: el prepend en vivo solo es honesto en la
-   * página 1 sin filtros restrictivos ni ordenamiento distinto al default.
-   * Con filtros activos o en otra página, insertar mentiría sobre el
-   * resultado (la orden podría no pertenecer a ese filtro) o saltaría la
-   * paginación; en ese caso el effect muestra un toast informativo.
+   * Paso 5: el prepend en vivo solo es honesto cuando la fila hidratada
+   * matchea los filtros VERIFICABLES (status contra `row.state` y channel
+   * contra `row.channel`, ambos conscientes de array), la lista está en
+   * página 1 con el orden default, y NO hay filtros no-verificables activos
+   * (search, payment_status, payment_method, date_range, table,
+   * dispatchable — no se pueden decidir sin re-fetch). En cualquier otro
+   * caso se conserva el toast informativo en vez de insertar.
    */
-  private canPrependLiveOrder(): boolean {
+  private matchesLiveOrderFilters(
+    row: Pick<Order, 'state' | 'channel'>,
+  ): boolean {
     const f = this._filters;
-    return (
-      (f.page ?? 1) === 1 &&
-      !f.search &&
-      !f.status &&
-      !f.channel &&
-      !f.payment_status &&
-      !f.payment_method_id &&
-      !f.date_range &&
-      f.table_id == null &&
-      !f.dispatchable &&
-      (f.sort_by ?? 'created_at') === 'created_at' &&
-      (f.sort_order ?? 'desc') === 'desc'
-    );
+    if ((f.page ?? 1) !== 1) return false;
+    if (
+      (f.sort_by ?? 'created_at') !== 'created_at' ||
+      (f.sort_order ?? 'desc') !== 'desc'
+    ) {
+      return false;
+    }
+    if (
+      f.search ||
+      this.asArray(f.payment_status).length > 0 ||
+      f.payment_method_id != null ||
+      f.date_range ||
+      f.table_id != null ||
+      f.dispatchable
+    ) {
+      return false;
+    }
+    const statusFilter = this.asArray(f.status);
+    if (
+      statusFilter.length > 0 &&
+      !statusFilter.includes(row.state as OrderState)
+    ) {
+      return false;
+    }
+    const channelFilter = this.asArray(f.channel);
+    if (
+      channelFilter.length > 0 &&
+      !channelFilter.includes(row.channel as OrderChannel)
+    ) {
+      return false;
+    }
+    return true;
   }
 
   /** Ventana de ráfaga para colapsar toasts cuando llegan >10 creadas/min. */
   private recentCreatedAt: number[] = [];
 
   /**
-   * Hidrata la orden creada por REST y la inserta arriba sin recargar la
-   * lista. Aplica la misma normalización de `loadOrders` (mesa plana,
+   * Hidrata la orden creada por REST y, solo si matchea los filtros
+   * verificables (`matchesLiveOrderFilters`), la inserta arriba sin recargar
+   * la lista. Aplica la misma normalización de `loadOrders` (mesa plana,
    * números, customer_name) para que la fila viva sea idéntica a una fila
    * cargada por REST. Emite `statsChanged` para que el padre refresque
-   * solo los stats. Un GET 404 (orden borrada entre evento y fetch) se
-   * descarta en silencio sin mutar lista ni totalItems (ERR-03).
+   * solo los stats. Si no matchea, toast informativo (sin mutar). Un GET 404
+   * (orden borrada entre evento y fetch) se descarta en silencio sin mutar
+   * lista ni totalItems (ERR-03).
    */
   private fetchAndPrependLiveOrder(orderId: number, orderNumber: string): void {
     this.ordersService
@@ -1357,6 +1391,12 @@ export class OrdersListComponent {
           // Dedup tardío: la fila pudo llegar por REST mientras el GET volaba.
           if (this.orders().some((o) => o.id === order.id)) return;
           const row = this.normalizeLiveOrderRow(order);
+          if (!this.matchesLiveOrderFilters(row)) {
+            this.toastService.info(
+              `Nueva orden ${orderNumber} recibida. Quita los filtros o vuelve a la página 1 para verla.`,
+            );
+            return;
+          }
           const limit = this._filters.limit || 10;
           this.orders.update((prev) => [row, ...prev].slice(0, limit));
           this.totalItems.update((t) => t + 1);
