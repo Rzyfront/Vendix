@@ -895,12 +895,49 @@ export class InvoiceFlowService {
     const customer_id =
       invoice.customer_id != null ? Number(invoice.customer_id) : null;
 
+    const order_id = invoice.order_id != null ? Number(invoice.order_id) : null;
+
     const persisted: WithholdingLine[] = [];
 
     for (const batch of batches) {
       if (batch.resolution.lines.length === 0) continue;
 
       try {
+        // PR #858 hallazgo 2 — el cobro de la orden (`flow/pay` o POS) ya
+        // persistió la retención SUFRIDA con `invoice_id: null` y su
+        // `order_id`. Insertarla otra vez al aceptar la factura la duplicaba
+        // (el certificado suma todas las filas `suffered` del cliente y el
+        // año). Si existen, se ENLAZAN a esta factura y no se inserta nada.
+        // `practiced`/`self` siguen como antes. Sin orden, o sin filas
+        // previas (filas históricas sin `order_id`), se inserta como siempre.
+        if (batch.role === 'suffered' && order_id != null) {
+          const prior = await this.prisma.withholding_calculations.findMany({
+            where: {
+              organization_id,
+              order_id,
+              role: 'suffered',
+              invoice_id: null,
+            },
+            select: { id: true },
+          });
+          if (prior.length > 0) {
+            await this.prisma.withholding_calculations.updateMany({
+              where: { id: { in: prior.map((row) => row.id) } },
+              data: {
+                invoice_id,
+                ...(accounting_entity_id != null
+                  ? { accounting_entity_id }
+                  : {}),
+              },
+            });
+            // Payload de `invoice.accepted` intacto respecto del histórico:
+            // la sufrida sigue viajando en `withholding_breakdown` (el asiento
+            // no se toca en este cambio; ver `findPriorSaleRecognition`).
+            persisted.push(...batch.resolution.lines);
+            continue;
+          }
+        }
+
         await this.withholdingFlow.persistWithholdingLines({
           organization_id,
           store_id,

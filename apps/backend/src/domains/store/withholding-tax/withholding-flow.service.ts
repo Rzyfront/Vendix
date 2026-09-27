@@ -69,6 +69,13 @@ export interface PersistWithholdingContext {
   store_id?: number | null;
   accounting_entity_id?: number | null;
   invoice_id?: number | null;
+  /**
+   * Orden que originó la retención (PR #858 hallazgo 2). Los cobros
+   * (`flow/pay`, POS) persisten la sufrida con `invoice_id: null` y este
+   * `order_id`; al aceptarse la factura de esa orden, `invoice-flow` ENLAZA
+   * esas filas (les pone `invoice_id`) en vez de insertar otras.
+   */
+  order_id?: number | null;
   supplier_id?: number | null;
   customer_id?: number | null;
   role: WithholdingRoleValue;
@@ -607,6 +614,7 @@ export class WithholdingFlowService {
         store_id: ctx.store_id ?? null,
         accounting_entity_id: ctx.accounting_entity_id ?? null,
         invoice_id: ctx.invoice_id ?? null,
+        order_id: ctx.order_id ?? null,
         supplier_id: ctx.role === 'practiced' ? (ctx.supplier_id ?? null) : null,
         customer_id: ctx.role === 'suffered' ? (ctx.customer_id ?? null) : null,
         concept_id: line.concept_id,
