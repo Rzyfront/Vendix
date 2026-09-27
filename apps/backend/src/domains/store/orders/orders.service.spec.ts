@@ -106,6 +106,7 @@ describe('OrdersService', () => {
     // gates que no ejercitan impuestos no truenen por relación no mockeada.
     product_tax_assignments: { findMany: jest.fn() },
     store_users: { findFirst: jest.fn() },
+    store_settings: { findFirst: jest.fn() },
     shipping_methods: { findFirst: jest.fn() },
     shipping_rates: { findFirst: jest.fn() },
     addresses: { findFirst: jest.fn() },
@@ -2008,6 +2009,9 @@ describe('OrdersService', () => {
         .mockResolvedValueOnce(draftOrder as any)
         .mockResolvedValue(persistedOrder as any);
       mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
+      mockPrismaService.addresses.findFirst.mockResolvedValue({
+        country_code: 'CO', city: 'Bogotá', state_province: 'Bogotá',
+      } as any);
       // P0-1: el editor resuelve la tasa con `resolveLineTaxesForOrder`
       // (`products.findMany` → asignaciones). IVA 19 % AGREGADO sobre la base
       // 100 ⇒ 19, el mismo número que `persistedOrder` declara.
@@ -2096,6 +2100,40 @@ describe('OrdersService', () => {
         expect(
           mockStockLevelManager.releaseReservationsByReference,
         ).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('reutiliza solo la dirección huérfana ya asociada al borrador alias', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        const aliasDraft = {
+          ...draftOrder, customer_id: null, customer_alias: 'Portería',
+          shipping_address_id: 33,
+        };
+        mockPrismaService.orders.findFirst.mockReset()
+          .mockResolvedValueOnce(aliasDraft as any)
+          .mockResolvedValue({ ...persistedOrder, ...aliasDraft } as any);
+        mockPrismaService.store_settings.findFirst.mockResolvedValue({
+          settings: { pos: { allow_alias_sales: true } },
+        } as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1, name: 'Test product', product_type: 'simple', product_variants: [],
+        } as any);
+
+        await service.updateOrderFromEditor(500, {
+          ...fullDto, customer_id: null, customer_alias: 'Portería',
+          shipping_address_id: undefined,
+        });
+
+        expect(mockPrismaService.addresses.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: 33, store_id: 1, user_id: null },
+          }),
+        );
       } finally {
         contextSpy.mockRestore();
       }

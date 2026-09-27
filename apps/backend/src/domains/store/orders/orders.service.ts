@@ -3015,11 +3015,20 @@ export class OrdersService {
     let shippingCost = 0;
     let resolvedShippingRateId: number | null = null;
     let resolvedDeliveryType: order_delivery_type_enum | null = null;
+    let manualShippingCharge: Awaited<ReturnType<ShippingTaxService['chargeForRate']>> | null = null;
 
     // El DTO declara que la orden deja de tener envío: entonces sí, cero.
     const dtoDropsShipment =
       dto.delivery_type === order_delivery_type_enum.pickup ||
       dto.delivery_type === order_delivery_type_enum.dine_in;
+
+    if (dto.manual_shipping_price != null &&
+      (!dto.shipping_method_id || !dto.shipping_rate_id || dtoDropsShipment)) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+        'Selecciona una tarifa de domicilio para aplicar su impuesto al costo manual',
+      );
+    }
 
     if (
       !dto.shipping_method_id &&
@@ -3046,15 +3055,25 @@ export class OrdersService {
           ? order_delivery_type_enum.pickup
           : order_delivery_type_enum.home_delivery;
 
+      // POS alias deliveries own an orphan address persisted on the SAME
+      // draft. The editor intentionally does not send it as a customer
+      // address (there is no customer); reuse only that already-linked row.
+      // Never let a new alias borrow a formal customer's address.
+      const editingExistingAlias =
+        dto.customer_id == null && !!dto.customer_alias?.trim() &&
+        existingOrder.customer_id == null && !!existingOrder.customer_alias;
+      const shippingAddressId = dto.shipping_address_id ??
+        (editingExistingAlias ? existingOrder.shipping_address_id : null);
+
       if (
         (resolvedDeliveryType === order_delivery_type_enum.home_delivery ||
           dto.delivery_type === 'home_delivery' ||
           dto.delivery_type === 'direct_delivery') &&
-        !dto.shipping_address_id
+        !shippingAddressId
       ) {
         throw new VendixHttpException(
           ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
-          'Delivery requires a shipping_address_id',
+          'La entrega a domicilio requiere una dirección asociada a la orden.',
         );
       }
 
@@ -3079,14 +3098,15 @@ export class OrdersService {
         weight?: number;
         product_type?: string;
       }> = [];
-      if (dto.shipping_address_id) {
+      if (shippingAddressId) {
         // La dirección debe pertenecer al customer_id del editor — sin esto
         // un operador con acceso al store podría leer o grabar la dirección
         // de cualquier cliente que comparta tienda (Round 1, blocker 8).
         const address = await this.prisma.addresses.findFirst({
           where: {
-            id: dto.shipping_address_id,
-            user_id: dto.customer_id,
+            id: shippingAddressId,
+            store_id: storeId,
+            user_id: editingExistingAlias ? null : dto.customer_id,
           },
           select: {
             country_code: true,
@@ -3097,6 +3117,12 @@ export class OrdersService {
             longitude: true,
           },
         });
+        if (!address?.country_code) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+            'La dirección de entrega ya no pertenece a esta orden y tienda. Selecciona otra dirección.',
+          );
+        }
         if (address?.country_code) {
           shippingAddressForCalc = {
             country_code: address.country_code,
@@ -3140,6 +3166,7 @@ export class OrdersService {
             id: dto.shipping_rate_id,
             shipping_method_id: method.id,
             is_active: true,
+            shipping_zone: { is_active: true, OR: [{ store_id: storeId }, { is_system: true, store_id: null }] },
           },
         });
         if (!rate) {
@@ -3183,6 +3210,18 @@ export class OrdersService {
                   )
                 ).gross
               : Number(rate.base_cost);
+        }
+        if (dto.manual_shipping_price != null) {
+          if (quoted == null || !this.shippingTaxService) {
+            throw new VendixHttpException(
+              ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+              'La tarifa ya no cubre esta dirección. Vuelve a calcular el envío.',
+            );
+          }
+          manualShippingCharge = await this.shippingTaxService.chargeForRate(
+            null, rate.id, dto.manual_shipping_price, { store_id: storeId },
+          );
+          shippingCost = manualShippingCharge.gross;
         }
       } else if (shippingAddressForCalc) {
         // Auto-calcular si no hay rate explícito.
@@ -3261,13 +3300,23 @@ export class OrdersService {
     // tolerancia de arriba asegura que el costo es el de la tarifa, así
     // que `rateCost` es el costo del servidor y un método con tarifa
     // siempre re-deriva su snapshot. `undefined` ⇒ se conserva la actual.
-    const shippingTaxUpdate = await this.resolveShippingTaxChange({
-      shippingUnchanged,
-      rateId: dtoDropsShipment ? null : resolvedShippingRateId,
-      rateCost: dtoDropsShipment ? null : shippingCost,
-      shippingCost,
-      storeId,
-    });
+    const manualSnapshot = manualShippingCharge && !shippingUnchanged
+      ? await this.snapshotShippingTax(resolvedShippingRateId, shippingCost, storeId)
+      : null;
+    const shippingTaxUpdate = manualSnapshot
+      ? {
+          ...manualSnapshot,
+          shipping_tax_is_inclusive: manualSnapshot.shipping_tax_amount > 0 && manualShippingCharge?.applies
+            ? manualShippingCharge.reason === 'inclusive'
+            : null,
+        }
+      : await this.resolveShippingTaxChange({
+          shippingUnchanged,
+          rateId: dtoDropsShipment ? null : resolvedShippingRateId,
+          rateCost: dtoDropsShipment ? null : shippingCost,
+          shippingCost,
+          storeId,
+        });
 
     // 9) Promotion quote: recotizamos server-side, NUNCA confiamos en
     //    `promotion_ids` como verdad. El motor decide qué aplica.
