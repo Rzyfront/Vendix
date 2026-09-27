@@ -103,9 +103,11 @@ import { PaymentGatewayService } from '../../payments/services/payment-gateway.s
 import { OrderHistoryService } from '../order-history/order-history.service';
 import type { OrderEventSource } from '../order-history/order-history.types';
 import {
+  prorateWithholdingLines,
   resolvePaymentReceivedSaleFields,
   type PaymentReceivedSaleFields,
 } from '../../payments/utils/payment-sale-share.util';
+import type { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
 import { buildOrderSaleTaxPayload } from '../../payments/utils/order-sale-tax-payload.util';
 import { buildPaymentReceivedEvents } from '../../payments/utils/payment-received-event.util';
 import {
@@ -7900,6 +7902,10 @@ export class OrderFlowService {
    * evento, garantiza la regla: carga compensada = sin retención persistida
    * y sin evento.
    *
+   * Orden interno (PR #858 hallazgos 3 y 5): se prorratea la retención a la
+   * porción de este cobro, se PERSISTE y recién entonces se emite, con sólo
+   * las líneas persistidas.
+   *
    * Envuelta en try/catch que sólo loguea — mismo contrato que
    * `emitPosSaleCompletedIfFullyPaid`: un fallo leyendo impuestos o
    * resolviendo retención nunca debe convertir un cobro ya exitoso en un
@@ -7991,6 +7997,56 @@ export class OrderFlowService {
         );
       }
 
+      // PR #858 hallazgo 3 — con abonos previos este cobro cubre sólo
+      // `grand_total − settledAmount`, pero `wh` se resolvió sobre TODOS los
+      // ítems. Se escala a la porción de este cobro (Σ tramos / grand_total)
+      // ANTES de repartir entre tramos; un cobro por el total es identidad.
+      const portion = legPayments.reduce(
+        (sum, { leg }) => sum + Number(leg.amount || 0),
+        0,
+      );
+      const proratedLines = prorateWithholdingLines(
+        wh.lines,
+        portion,
+        Number((order as any).grand_total || 0),
+      );
+
+      // PR #858 hallazgo 5 — persistir ANTES de emitir: un débito en la 1355
+      // sin filas `withholding_calculations` que lo respalden es peor que un
+      // evento sin retención. Sólo se emite lo que se persistió (mismo filtro
+      // que `persistWithholdingLines`: concepto y monto > 0). Si la
+      // persistencia falla, se emite sin retención y se deja log.error —
+      // misma regla que `invoice-flow.service.ts` (`resolveAndPersist...`).
+      let emittedLines: WithholdingLine[] = [];
+      if (this.withholdingFlow) {
+        const persistable = proratedLines.filter(
+          (line) => typeof line.concept_id === 'number' && line.amount > 0,
+        );
+        try {
+          await this.withholdingFlow.persistWithholdingLines({
+            organization_id: order.stores?.organization_id,
+            store_id: order.store_id,
+            invoice_id: null,
+            // PR #858 hallazgo 2 — la factura de esta orden enlaza estas filas
+            // en vez de insertar la sufrida otra vez.
+            order_id: orderId,
+            customer_id: order.customer_id ? Number(order.customer_id) : null,
+            role: 'suffered',
+            counterparty_type: wh.counterparty_type,
+            uvt_value_used: wh.uvt_value_used,
+            lines: persistable,
+          });
+          emittedLines = persistable;
+        } catch (error) {
+          this.logger.error(
+            `[withholding persist failed] order=${orderId}: payment.received se emite sin retención: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          emittedLines = [];
+        }
+      }
+
       const payloads = buildPaymentReceivedEvents({
         order: {
           id: orderId,
@@ -8011,7 +8067,7 @@ export class OrderFlowService {
             | PaymentReceivedSaleFields
             | undefined,
         })),
-        withholding_lines: wh.lines,
+        withholding_lines: emittedLines,
         currency: order.currency || legPayments[0].payment.currency,
         user_id: RequestContextService.getUserId() ?? null,
       });
@@ -8028,19 +8084,6 @@ export class OrderFlowService {
             }`,
           );
         }
-      }
-
-      if (this.withholdingFlow) {
-        await this.withholdingFlow.persistWithholdingLines({
-          organization_id: order.stores?.organization_id,
-          store_id: order.store_id,
-          invoice_id: null,
-          customer_id: order.customer_id ? Number(order.customer_id) : null,
-          role: 'suffered',
-          counterparty_type: wh.counterparty_type,
-          uvt_value_used: wh.uvt_value_used,
-          lines: wh.lines,
-        });
       }
     } catch (error) {
       this.logger.error(

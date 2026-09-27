@@ -201,6 +201,54 @@ export function splitWithholdingLines(
   );
 }
 
+/**
+ * Escala la retención sufrida de la ORDEN a la porción que cubre ESTE cobro
+ * (PR #858 hallazgo 3): con abonos previos, `payOrder` cobra
+ * `grand_total − settledAmount`, pero la retención se resuelve sobre todos
+ * los ítems. Sin escalar, el último cobro reconocía la retención completa.
+ *
+ * `portion` = Σ montos de los tramos de este cobro; `total` = `grand_total`.
+ * Factor = portion / total, en centavos:
+ *   · el total retenido del cobro es `round(Σ líneas × factor)` y se reparte
+ *     entre las líneas por mayor residuo (`allocate`, mismo criterio que
+ *     `computePaymentSaleShare`), así Σ porciones = total escalado al centavo;
+ *   · la `base` de cada línea se escala con el mismo factor (redondeo al
+ *     centavo), porque la fila persistida la suma el certificado;
+ *   · `rate` no cambia.
+ *
+ * Identidad: `portion >= total`, o `total <= 0` (sin dato para prorratear),
+ * devuelve las MISMAS líneas, sin tocar — un cobro por el total produce
+ * exactamente el resultado histórico. Líneas que quedan en 0 se descartan.
+ *
+ * Pura: no toca Prisma.
+ */
+export function prorateWithholdingLines(
+  lines: WithholdingLine[] | undefined,
+  portion: number,
+  total: number,
+): WithholdingLine[] {
+  if (!lines || lines.length === 0) return [];
+  const portionCents = toCents(portion);
+  const totalCents = toCents(total);
+  if (totalCents <= 0 || portionCents >= totalCents) return lines;
+  if (portionCents <= 0) return [];
+
+  const lineCents = lines.map((line) => Math.max(0, toCents(line.amount)));
+  const whTotal = lineCents.reduce((a, b) => a + b, 0);
+  const target = Math.round((whTotal * portionCents) / totalCents);
+  const shares = allocate(target, lineCents);
+
+  return lines
+    .map((line, index) => ({
+      ...line,
+      base: fromCents(
+        Math.round((toCents(line.base) * portionCents) / totalCents),
+      ),
+      amount: fromCents(shares[index]),
+    }))
+    .filter((line) => line.amount > 0);
+}
+
 /** Campos de venta del evento `payment.received` para un pago de la orden. */
 export interface PaymentReceivedSaleFields {
   subtotal_amount: number;

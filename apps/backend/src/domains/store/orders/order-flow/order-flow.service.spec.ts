@@ -5475,3 +5475,138 @@ describe('OrderFlowService.emitLegPaymentReceivedEvents — base de reteIVA', ()
     expect(payloads[0][1].payment_method).toBe('Efectivo');
   });
 });
+
+// PR #858 hallazgos 2, 3 y 5 — `flow/pay` con abono previo: la retención de
+// la orden se prorratea a la porción de este cobro, se PERSISTE (con
+// `order_id`) ANTES de emitir `payment.received`, y el evento lleva sólo lo
+// persistido. Si la persistencia falla, el evento sale sin retención.
+describe('OrderFlowService.emitLegPaymentReceivedEvents — prorrateo y persistir antes de emitir', () => {
+  const line = {
+    withholding_type: 'retefuente',
+    concept_code: 'RF-COMPRAS',
+    concept_id: 5,
+    rate: 0.025,
+    base: 100000,
+    amount: 2500,
+    role: 'suffered',
+    account_role: 'withholding.suffered.retefuente_receivable',
+  };
+  const order = {
+    id: 1,
+    order_number: 'ORD-1',
+    store_id: 4,
+    customer_id: 44,
+    stores: { organization_id: 2 },
+    subtotal_amount: 100000,
+    tip_amount: 0,
+    grand_total: 119000,
+    currency: 'COP',
+  };
+
+  const build = (persistImpl?: () => Promise<unknown>) => {
+    const calls: string[] = [];
+    const prismaMock: any = {
+      order_items: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            total_price: 100000,
+            quantity: 1,
+            tax_amount_item: 19000,
+            weight: null,
+            price_unit_quantity: null,
+            item_type: 'product',
+            order_item_taxes: [{ tax_type: 'iva', tax_amount: 19000, tax_rate: 0.19 }],
+          },
+        ]),
+      },
+    };
+    const withholdingFlow: any = {
+      resolveSufferedByOperation: jest.fn().mockResolvedValue({
+        lines: [line],
+        uvt_value_used: 49799,
+        counterparty_type: 'juridica',
+      }),
+      persistWithholdingLines: jest.fn().mockImplementation(async () => {
+        calls.push('persist');
+        if (persistImpl) return persistImpl();
+        return undefined;
+      }),
+    };
+    const emitter = {
+      emit: jest.fn(),
+      emitAsync: jest.fn().mockImplementation(async () => {
+        calls.push('emit');
+        return [];
+      }),
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      emitter as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      undefined, // kitchenFireService
+      undefined, // shippingTaxService
+      undefined, // moduleRef
+      undefined, // refundFlowService
+      undefined, // autoEntryService
+      undefined, // orderSse
+      undefined, // orderHistoryService
+      undefined, // stockValidator
+      undefined, // sellableStockAllocator
+      undefined, // paymentGatewayService
+      undefined, // shippingCalculatorService
+      withholdingFlow,
+    );
+    return { service, withholdingFlow, emitter, calls };
+  };
+
+  const pay = (service: any, amount: number) =>
+    service.emitLegPaymentReceivedEvents(1, order, [
+      {
+        payment: { id: 900, currency: 'COP' },
+        leg: { amount, accounting_method: 'Efectivo' },
+      },
+    ]);
+
+  it('abono del 40 %: persiste y emite la porción prorrateada, persistiendo primero', async () => {
+    const { service, withholdingFlow, emitter, calls } = build();
+
+    await pay(service, 47600);
+
+    expect(calls).toEqual(['persist', 'emit']);
+    const ctx = withholdingFlow.persistWithholdingLines.mock.calls[0][0];
+    expect(ctx).toMatchObject({ order_id: 1, invoice_id: null, role: 'suffered', customer_id: 44 });
+    expect(ctx.lines).toEqual([{ ...line, base: 40000, amount: 1000 }]);
+    const payload = emitter.emitAsync.mock.calls[0][1];
+    expect(payload.withholding_breakdown).toEqual(ctx.lines);
+  });
+
+  it('cobro por el total: las líneas pasan intactas (factor 1)', async () => {
+    const { service, withholdingFlow, emitter } = build();
+
+    await pay(service, 119000);
+
+    const ctx = withholdingFlow.persistWithholdingLines.mock.calls[0][0];
+    expect(ctx.lines).toEqual([line]);
+    expect(emitter.emitAsync.mock.calls[0][1].withholding_breakdown).toEqual([line]);
+  });
+
+  it('si la persistencia falla, emite sin retención y deja log.error', async () => {
+    const { service, emitter } = build(() => Promise.reject(new Error('db down')));
+    const errorSpy = jest.spyOn((service as any).logger, 'error');
+
+    await pay(service, 119000);
+
+    expect(emitter.emitAsync).toHaveBeenCalledTimes(1);
+    const payload = emitter.emitAsync.mock.calls[0][1];
+    expect(payload.withholding_breakdown ?? []).toEqual([]);
+    expect(
+      errorSpy.mock.calls.some((call) => String(call[0]).includes('withholding persist failed')),
+    ).toBe(true);
+  });
+});
