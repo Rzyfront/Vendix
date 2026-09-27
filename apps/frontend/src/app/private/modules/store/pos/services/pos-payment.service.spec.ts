@@ -382,12 +382,14 @@ describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada mul
     }));
   });
 
-  it('rejects tipped adopted bank transfer before losing the bank account', async () => {
-    await expectAsync(firstValueFrom(service.processSaleWithPayment(cart, {
+  it('routes tipped adopted bank transfer through flow/pay with its validated bank account', async () => {
+    await firstValueFrom(service.processSaleWithPayment(cart, {
       paymentMethod: { id: '3', type: 'bank_transfer' },
       bank_account_id: 44, tip_amount: 100,
-    } as any, 'current_user'))).toBeRejectedWithError(/no permite agregar propina/);
-    expect(flowPayOrder).not.toHaveBeenCalled();
+    } as any, 'current_user'));
+    expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      store_payment_method_id: 3, bank_account_id: 44, tip_amount: 100,
+    }));
     expect(processPaymentForExistingOrder).not.toHaveBeenCalled();
   });
 });

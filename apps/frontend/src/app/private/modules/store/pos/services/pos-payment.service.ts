@@ -1293,19 +1293,24 @@ export class PosPaymentService {
       const processingMode = (paymentRequest.paymentMethod.original as any)
         ?.system_payment_method?.processing_mode;
       if (methodType === 'wompi' || methodType === 'wallet' ||
-          methodType === 'bank_transfer' ||
           (processingMode != null && processingMode !== 'DIRECT')) {
         return throwError(() => new Error(
           'Este método no permite agregar propina al cobrar una orden ya creada. Usa efectivo o tarjeta, o cobra la propina por separado.',
         ));
       }
-      return this.ordersService.flowPayOrder(String(orderId), {
+      const directTipPayment: Parameters<StoreOrdersService['flowPayOrder']>[1] & {
+        bank_account_id?: number;
+      } = {
         store_payment_method_id: Number(paymentRequest.paymentMethod.id),
         payment_type: 'direct',
         amount_received: paymentRequest.cashReceived,
         payment_reference: paymentRequest.reference,
+        ...(methodType === 'bank_transfer' && paymentRequest.bank_account_id != null
+          ? { bank_account_id: paymentRequest.bank_account_id }
+          : {}),
         ...tipFields,
-      }).pipe(map((response: any) => ({
+      };
+      return this.ordersService.flowPayOrder(String(orderId), directTipPayment).pipe(map((response: any) => ({
         success: true,
         order: {
           id: orderId,
