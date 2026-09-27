@@ -108,6 +108,7 @@ import {
   type PaymentReceivedSaleFields,
 } from '../../payments/utils/payment-sale-share.util';
 import type { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
+import { resolvePaymentInvoiceBranch } from '../../accounting/auto-entries/payment-invoice-branch.util';
 import { buildOrderSaleTaxPayload } from '../../payments/utils/order-sale-tax-payload.util';
 import { buildPaymentReceivedEvents } from '../../payments/utils/payment-received-event.util';
 import {
@@ -7961,7 +7962,31 @@ export class OrderFlowService {
         uvt_value_used: 0,
         counterparty_type: null,
       };
-      if (this.withholdingFlow) {
+      // PR #858 — orden ya facturada (factura aceptada a medio pagar y luego
+      // se cobra el resto): `onPaymentReceived` toma la rama «con factura» e
+      // IGNORA la retención, y la factura ya la registró. Retener aquí dejaba
+      // una fila sin asiento que el certificado contaba dos veces. Mismo
+      // criterio que el asiento (`resolvePaymentInvoiceBranch`). Si la
+      // comprobación falla se conserva el comportamiento previo.
+      let orderAlreadyInvoiced = false;
+      try {
+        const branch = await resolvePaymentInvoiceBranch(this.prisma as any, {
+          order_id: orderId,
+          organization_id: order.stores?.organization_id,
+        });
+        orderAlreadyInvoiced = branch.has_invoice;
+      } catch (error) {
+        this.logger.warn(
+          `[emitLegPaymentReceivedEvents] order=${orderId}: no se pudo comprobar si la orden ya está facturada; se sigue sin ese corte: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      if (orderAlreadyInvoiced) {
+        this.logger.log(
+          `[emitLegPaymentReceivedEvents] order=${orderId}: orden ya facturada; payment.received se emite sin retención.`,
+        );
+      } else if (this.withholdingFlow) {
         try {
           const customer_id = order.customer_id
             ? Number(order.customer_id)
@@ -8018,7 +8043,7 @@ export class OrderFlowService {
       // persistencia falla, se emite sin retención y se deja log.error —
       // misma regla que `invoice-flow.service.ts` (`resolveAndPersist...`).
       let emittedLines: WithholdingLine[] = [];
-      if (this.withholdingFlow) {
+      if (this.withholdingFlow && !orderAlreadyInvoiced) {
         const persistable = proratedLines.filter(
           (line) => typeof line.concept_id === 'number' && line.amount > 0,
         );

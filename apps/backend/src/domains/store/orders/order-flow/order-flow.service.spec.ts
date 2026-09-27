@@ -5596,6 +5596,40 @@ describe('OrderFlowService.emitLegPaymentReceivedEvents — prorrateo y persisti
     expect(emitter.emitAsync.mock.calls[0][1].withholding_breakdown).toEqual([line]);
   });
 
+  it('orden ya facturada: no resuelve ni persiste, emite con withholding_breakdown []', async () => {
+    const { service, withholdingFlow, emitter } = build();
+    const prisma = (service as any).prisma;
+    prisma.invoices = { findFirst: jest.fn().mockResolvedValue({ id: 300 }) };
+    prisma.withoutScope = () => ({
+      accounting_entries: { findFirst: jest.fn().mockResolvedValue(null) },
+    });
+
+    await pay(service, 71400);
+
+    // Mismo criterio que la rama «con factura» de `onPaymentReceived`.
+    expect(prisma.invoices.findFirst).toHaveBeenCalledWith({
+      where: { order_id: 1, status: { notIn: ['cancelled', 'voided'] } },
+      select: { id: true },
+    });
+    expect(withholdingFlow.resolveSufferedByOperation).not.toHaveBeenCalled();
+    expect(withholdingFlow.persistWithholdingLines).not.toHaveBeenCalled();
+    expect(emitter.emitAsync).toHaveBeenCalledTimes(1);
+    expect(emitter.emitAsync.mock.calls[0][1].withholding_breakdown).toEqual([]);
+  });
+
+  it('orden sin factura: sigue reteniendo (control del corte)', async () => {
+    const { service, withholdingFlow } = build();
+    const prisma = (service as any).prisma;
+    prisma.invoices = { findFirst: jest.fn().mockResolvedValue(null) };
+    prisma.withoutScope = () => ({
+      accounting_entries: { findFirst: jest.fn().mockResolvedValue(null) },
+    });
+
+    await pay(service, 119000);
+
+    expect(withholdingFlow.persistWithholdingLines).toHaveBeenCalledTimes(1);
+  });
+
   it('si la persistencia falla, emite sin retención y deja log.error', async () => {
     const { service, emitter } = build(() => Promise.reject(new Error('db down')));
     const errorSpy = jest.spyOn((service as any).logger, 'error');
