@@ -192,21 +192,44 @@ export class GeocodingService {
    * worst case (bbox resolution + intersection + structured + free-text).
    */
   private static readonly MAX_FORWARD_EXTERNAL_REQUESTS = 5;
-  private static readonly INTERSECTION_TIMEOUT_MS = 2500;
+  /**
+   * Measured live against the real mirrors (2026-09-27): `fr` answers the
+   * cross-then-around query in 1-4s, `de` is intermittently 406/504, and
+   * `mail.ru` is slow but usable. 2.5s was cutting off `fr` before it could
+   * even finish the cheaper query shape below — 8s gives it (and `de` on a
+   * slow day) room without blowing the overall forward budget.
+   */
+  private static readonly INTERSECTION_TIMEOUT_MS = 8000;
   private static readonly STRUCTURED_TIMEOUT_MS = 2500;
   private static readonly FREETEXT_TIMEOUT_MS = 2500;
   /** Plate walks beyond this are suspicious (likely a mis-detected axis) — keep the corner instead. */
   private static readonly MAX_INTERPOLATION_METERS = 150;
+  /**
+   * `overpass.osm.ch` is Swiss-infrastructure-only and answers every query
+   * with an empty result set instantly — it never contributes a usable
+   * response and was removed rather than raced. Ordered by measured
+   * reliability: `fr` first (fastest, most consistent), `de` next
+   * (intermittent 406/504), `mail.ru` last (works but slow). Order does not
+   * change the racing behaviour (`raceOverpassMirrors` fires all of them
+   * concurrently) — it is purely for readability/maintenance.
+   */
   private static readonly OVERPASS_MIRRORS = [
-    'https://overpass-api.de/api/interpreter',
     'https://overpass.openstreetmap.fr/api/interpreter',
+    'https://overpass-api.de/api/interpreter',
     'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-    'https://overpass.osm.ch/api/interpreter',
   ];
-  private static readonly OVERPASS_TIMEOUT_MS = 4000;
+  private static readonly OVERPASS_TIMEOUT_MS = 8000;
   private static readonly CROSS_STREET_RADIUS_M = 350;
   /** ~25km half-width box used when only a bias point (no city) is known. */
   private static readonly BIAS_BBOX_RADIUS_KM = 25;
+  /**
+   * Hard wall-clock ceiling for one `forward()` call, counted from the
+   * moment the cascade starts (municipality bbox resolution included). A
+   * successful result is cached 7 days, so a slow-but-eventually-correct
+   * cascade is not worth risking a caller-side timeout for — once exceeded,
+   * the cascade stops advancing to the next attempt with whatever it has.
+   */
+  private static readonly FORWARD_OVERALL_BUDGET_MS = 15000;
 
   constructor(
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
@@ -328,7 +351,13 @@ export class GeocodingService {
     if (!hasLocationContext && bias) {
       parts.push(`bias:${bias.lat.toFixed(2)},${bias.lng.toFixed(2)}`);
     }
-    return `geocode:fwd:v3:${parts.join('|')}`;
+    // v4: bumped from v3 when the intersection cascade's Overpass query
+    // shape and street-name matching changed materially (Avenida-prefix
+    // matching, cuadrante-exact matching, cross-then-around scoping,
+    // Bogotá/Soacha corner disambiguation) — a v3-cached 'street'/'area'
+    // result for an address that now resolves to 'intersection'/
+    // 'interpolated' must not shadow the improved result for its 7-day TTL.
+    return `geocode:fwd:v4:${parts.join('|')}`;
   }
 
   // ------------------------------------------------------------- Cascade
@@ -343,6 +372,7 @@ export class GeocodingService {
     const budget = new RequestBudget(
       GeocodingService.MAX_FORWARD_EXTERNAL_REQUESTS,
     );
+    const deadline = Date.now() + GeocodingService.FORWARD_OVERALL_BUDGET_MS;
 
     let bbox: MunicipalityBbox | null = null;
     if (city) {
@@ -370,7 +400,9 @@ export class GeocodingService {
       attempts.push(() => this.tryAreaName(name, city, state, bbox, budget));
     } else {
       if ((parsed.kind === 'dane' || parsed.kind === 'interseccion') && city) {
-        attempts.push(() => this.tryIntersection(parsed, city, bbox, budget));
+        attempts.push(() =>
+          this.tryIntersection(parsed, city, bbox, bias, budget),
+        );
       }
       if (parsed.viaTipo && parsed.viaNum) {
         attempts.push(() =>
@@ -385,6 +417,12 @@ export class GeocodingService {
     let best: ForwardGeocodeResult | null = null;
     for (const attempt of attempts) {
       if (!budget.canSpend()) break;
+      if (Date.now() > deadline) {
+        this.logger.warn(
+          'Forward geocode overall time budget exceeded, stopping cascade early',
+        );
+        break;
+      }
       let outcome: ForwardGeocodeResult | null;
       try {
         outcome = await attempt();
@@ -406,7 +444,10 @@ export class GeocodingService {
       }
     }
 
-    if (!best || best.precision === 'street' || best.precision === 'area') {
+    if (
+      (!best || best.precision === 'street' || best.precision === 'area') &&
+      Date.now() <= deadline
+    ) {
       const googleResult = await this.tryGoogleFallback(
         parsed,
         city,
@@ -713,6 +754,7 @@ export class GeocodingService {
     parsed: ParsedColombianAddress,
     city: string,
     bbox: MunicipalityBbox | null,
+    bias: { lat: number; lng: number } | null,
     budget: RequestBudget,
   ): Promise<ForwardGeocodeResult | null> {
     const crossTipo: ViaTipo | null =
@@ -737,16 +779,31 @@ export class GeocodingService {
       parsed.cruceBis,
       parsed.cruceCuadrante,
     );
-    const cityVariants = this.buildCityNameVariants(city);
+    // Without a resolved municipality bbox there is no safe scope to search
+    // Overpass within (a bare name search risks matching a same-named street
+    // anywhere in Colombia) — let structured/free-text Nominatim search
+    // handle it instead, since those already carry `city`/`state` params.
+    if (!bbox) return null;
 
+    // Cross street first, bounded to the ALREADY-RESOLVED municipality bbox
+    // (a literal bbox filter, not a live `area["boundary"=...]` lookup — an
+    // administrative-boundary Overpass query for a municipality the size of
+    // Bogotá was measured live to take 15-20s and time out even at an 8s
+    // budget, while the same query with a literal bbox filter answers in
+    // ~5s). The primary street is then searched only `around` that cross
+    // street (40m) instead of across the whole city, which is both far
+    // cheaper for Overpass to evaluate than two city-wide `out geom` sets
+    // and a second, independent guard against matching a same-named street
+    // on the far side of town. Because the bbox is a rectangle (not a
+    // polygon), it can still admit a corner from a bordering municipality
+    // (the measured Bogotá/Soacha "Calle 32 × Carrera 7" collision) —
+    // {@link selectBestCorner} is what actually disambiguates that case.
     const query =
-      `[out:json][timeout:6];` +
-      `area[boundary=administrative][admin_level~"^(6|7|8)$"]["name"~"${this.toOverpassRegex(
-        cityVariants,
-      )}",i]->.a;` +
-      `(way(area.a)["highway"]["name"~"${this.toOverpassRegex(primaryVariants)}",i];` +
-      `way(area.a)["highway"]["name"~"${this.toOverpassRegex(crossVariants)}",i];);` +
-      `out tags geom;`;
+      `[out:json][timeout:8];` +
+      `way["highway"]["name"~"${this.toStreetOverpassRegex(crossVariants)}",i]` +
+      `(${bbox.south},${bbox.west},${bbox.north},${bbox.east})->.b;` +
+      `way["highway"]["name"~"${this.toStreetOverpassRegex(primaryVariants)}",i](around.b:40)->.a;` +
+      `(.a;.b;);out tags geom;`;
 
     budget.spend();
     let elements: OverpassElement[];
@@ -771,9 +828,8 @@ export class GeocodingService {
     );
     if (primaryWays.length === 0 || crossWays.length === 0) return null;
 
-    const corner = this.nearestPointBetweenWays(primaryWays, crossWays);
+    const corner = this.selectBestCorner(primaryWays, crossWays, bbox, bias);
     if (!corner) return null;
-    if (bbox && !this.isWithinBbox(corner.lat, corner.lng, bbox)) return null;
 
     if (parsed.placa) {
       const placaMeters = Number(parsed.placa.replace(/[^\d]/g, ''));
@@ -1128,28 +1184,65 @@ export class GeocodingService {
     return `^(${escaped.join('|')})`;
   }
 
+  /**
+   * Same escaping as {@link toOverpassRegex}, but anchored on BOTH ends and
+   * with an optional "Avenida " prefix — OSM commonly tags a major artery as
+   * "Avenida Carrera 7"/"Avenida Calle 100" even though the DANE nomenclature
+   * and every real address just say "Carrera 7"/"Calle 100". The END anchor
+   * is what stops "Carrera 7" from also matching "Carrera 7 Este" or "Calle
+   * 38 Sur" — a genuinely different street — unless the parsed address
+   * itself carries that cuadrante (in which case it is already part of the
+   * variant string being anchored). Used ONLY for street `name` matching
+   * (intersection lookup); city/administrative-area names keep the plain,
+   * unanchored {@link toOverpassRegex}.
+   */
+  private toStreetOverpassRegex(variants: string[]): string {
+    const escaped = variants.map((v) =>
+      v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    );
+    return `^(Avenida )?(${escaped.join('|')})$`;
+  }
+
   private escapeOverpassString(value: string): string {
     return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
+  /**
+   * Matches ignoring a leading "Avenida " on EITHER side (so "Carrera 7"
+   * matches an OSM way tagged "Avenida Carrera 7") and otherwise requires
+   * an EXACT match — no `startsWith` — so a way named "Carrera 7 Este"
+   * never matches the variant "Carrera 7".
+   */
   private matchesAnyVariant(
     name: string | undefined,
     variants: string[],
   ): boolean {
     if (!name) return false;
-    const n = this.norm(name);
-    return variants.some((v) => {
-      const nv = this.norm(v);
-      return n === nv || n.startsWith(nv);
-    });
+    const n = this.norm(name).replace(/^avenida\s+/, '');
+    return variants.some((v) => this.norm(v).replace(/^avenida\s+/, '') === n);
   }
 
-  private nearestPointBetweenWays(
+  /**
+   * Picks the best corner between the primary/cross way sets when Overpass
+   * returns more than one crossing point — e.g. a same-named street pair
+   * that exists in both the target municipality and a bordering one (the
+   * measured Bogotá/Soacha "Calle 32 × Carrera 7" collision: Bogotá's
+   * rectangular bbox geometrically covers part of Soacha, so a bbox-only
+   * filter cannot tell them apart). Filters to corners inside `bbox` first
+   * (defensive — the area-scoped query above should already exclude a
+   * neighbouring municipality, but a loose administrative-name match could
+   * still let one through); when several remain, prefers the one closest to
+   * `bias`, else the one closest to the bbox centre, else the globally
+   * nearest vertex pair.
+   */
+  private selectBestCorner(
     primaryWays: OverpassElement[],
     crossWays: OverpassElement[],
+    bbox: MunicipalityBbox | null,
+    bias: { lat: number; lng: number } | null,
   ): { lat: number; lng: number } | null {
     const THRESHOLD_M = 40;
-    let best: { lat: number; lng: number; dist: number } | null = null;
+    const corners: { lat: number; lng: number; dist: number }[] = [];
 
     for (const pWay of primaryWays) {
       for (const vertex of pWay.geometry ?? []) {
@@ -1159,13 +1252,51 @@ export class GeocodingService {
             vertex.lon,
             cWay.geometry ?? [],
           );
-          if (dist < THRESHOLD_M && (!best || dist < best.dist)) {
-            best = { lat: vertex.lat, lng: vertex.lon, dist };
+          if (dist < THRESHOLD_M) {
+            corners.push({ lat: vertex.lat, lng: vertex.lon, dist });
           }
         }
       }
     }
-    return best ? { lat: best.lat, lng: best.lng } : null;
+    if (corners.length === 0) return null;
+
+    const inBbox = bbox
+      ? corners.filter((c) => this.isWithinBbox(c.lat, c.lng, bbox))
+      : corners;
+    const candidates = inBbox.length ? inBbox : corners;
+    if (candidates.length === 1) return candidates[0];
+
+    const target =
+      bias ??
+      (bbox
+        ? {
+            lat: (bbox.south + bbox.north) / 2,
+            lng: (bbox.west + bbox.east) / 2,
+          }
+        : null);
+    if (target) {
+      return candidates.reduce((best, c) =>
+        this.approxMeters(c.lat, c.lng, target.lat, target.lng) <
+        this.approxMeters(best.lat, best.lng, target.lat, target.lng)
+          ? c
+          : best,
+      );
+    }
+    return candidates.reduce((best, c) => (c.dist < best.dist ? c : best));
+  }
+
+  /** Flat-earth point-to-point distance in metres (fine at city scale). */
+  private approxMeters(
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number,
+  ): number {
+    const mPerDegLat = 111320;
+    const mPerDegLng = 111320 * Math.cos((lat1 * Math.PI) / 180);
+    const dy = (lat2 - lat1) * mPerDegLat;
+    const dx = (lng2 - lng1) * mPerDegLng;
+    return Math.hypot(dx, dy);
   }
 
   // ----------------------------------------------------------- Nominatim
