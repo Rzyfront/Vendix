@@ -2744,6 +2744,14 @@
       "sessions": 0,
       "memories": 3,
       "prompts": 0
+    },
+    {
+      "id": "4ea2bc14",
+      "created_by": "rzy",
+      "created_at": "2026-09-27T13:38:05Z",
+      "sessions": 0,
+      "memories": 8,
+      "prompts": 0
     }
   ]
 }

@@ -83,7 +83,8 @@ async function login(page) {
 
 async function openUiView(page, url, visibleLocator, description) {
   let lastNavigationError = '';
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let lastView = '';
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       await page.goto(url, { waitUntil: 'commit', timeout: 20_000 });
     } catch (error) {
@@ -92,18 +93,19 @@ async function openUiView(page, url, visibleLocator, description) {
       continue;
     }
     try {
-      await visibleLocator.waitFor({ timeout: 12_000 });
+      await visibleLocator.waitFor({ timeout: 10_000 });
       return;
     } catch {
       // Local domain bootstrap can commit a blank Angular shell after a
       // cross-vhost navigation while nginx/backend watches reconnect.
       // Retry through the browser; do not treat an empty bootstrap as a
       // product-price assertion or bypass the UI with a direct API request.
+      lastView = (await page.locator('body').innerText({ timeout: 2_000 })
+        .catch(() => '(sin body)')).slice(0, 300);
       await page.goto('about:blank', { waitUntil: 'commit', timeout: 5_000 }).catch(() => {});
     }
   }
-  const view = await page.locator('body').innerText({ timeout: 2_000 }).catch(() => '(sin body)');
-  throw new Error(`${description} no apareció después de tres navegaciones UI; URL=${page.url()}; navegación=${lastNavigationError}; vista=${view.slice(0, 300)}`);
+  throw new Error(`${description} no apareció después de cinco navegaciones UI; URL=${url}; navegación=${lastNavigationError}; última vista=${lastView}`);
 }
 
 async function main() {
@@ -320,8 +322,8 @@ async function main() {
       });
     }
 
-    if (results[0]?.status === 'passed' && (group === 'details' || group === 'all')) {
-      await runScenario('R5: settled Wallet + cash remain distinct after reload', ['R5'], async () => {
+    if (results[0]?.status === 'passed' && (group === 'details' || group === 'datafono' || group === 'all')) {
+      if (group !== 'datafono') await runScenario('R5: settled Wallet + cash remain distinct after reload', ['R5'], async () => {
         await openUiView(page, `${adminBase}/admin/orders/1323`,
           page.getByRole('heading', { name: 'Orden #POS-2026-0382' }),
           'El detalle Wallet mixto');
@@ -333,12 +335,12 @@ async function main() {
         for (const expected of ['$1.000', '$37.000', 'efectivo', 'wallet', 'exitoso']) {
           assert(text.includes(expected), `Falta ${expected} en el historial mixto Wallet`);
         }
-        await page.reload({ waitUntil: 'commit' });
-        await heading.waitFor();
+        await openUiView(page, `${adminBase}/admin/orders/1323`, heading,
+          'El detalle Wallet mixto tras recarga');
         assert.equal(await cards.count(), 2, 'La recarga cambió los dos pagos Wallet/efectivo');
       });
 
-      await runScenario('R20: completed COD retains origin and one real tender after reload', ['R20'], async () => {
+      if (group !== 'datafono') await runScenario('R20: completed COD retains origin and one real tender after reload', ['R20'], async () => {
         await openUiView(page, `${adminBase}/admin/orders/1336`,
           page.getByRole('heading', { name: 'Orden #POS-2026-0393' }),
           'El detalle contra entrega finalizado');
@@ -351,12 +353,52 @@ async function main() {
         assert.match(paymentText, /\$19\.000[\s\S]*exitoso[\s\S]*efectivo/);
         assert.equal(await page.getByRole('button', { name: 'Confirmar Pago' }).count(), 0);
         assert.equal(await page.getByRole('button', { name: 'Despachar Orden' }).count(), 0);
-        await page.reload({ waitUntil: 'commit' });
-        await heading.waitFor();
+        await openUiView(page, `${adminBase}/admin/orders/1336`, heading,
+          'El detalle contra entrega finalizado tras recarga');
         assert.equal(await cards.count(), 2, 'La recarga duplicó o perdió pagos de contra entrega');
       });
 
-      await runScenario('R11: excessive credit abono is explained and cannot write', ['R11'], async () => {
+      if (group !== 'details') await runScenario('R20: delivered COD settles with Datáfono and keeps its origin after reload', ['R20'], async () => {
+        await openUiView(page, `${adminBase}/admin/orders/1361`,
+          page.getByRole('heading', { name: 'Orden #POS-2026-0413' }),
+          'El detalle contra entrega cobrado con Datáfono');
+        const heading = page.getByRole('heading', { name: /Historial de Pagos/i });
+        const cards = heading.locator('xpath=..').locator(':scope > div');
+        await cards.first().waitFor();
+        assert.equal(await cards.count(), 2, 'Debe quedar el marcador COD y un solo pago real');
+        let paymentText = (await heading.locator('xpath=..').innerText()).toLowerCase();
+        assert.match(paymentText, /cancelado[\s\S]*pago contra entrega/);
+        assert.match(paymentText, /\$71\.000[\s\S]*exitoso[\s\S]*datáfono/);
+        assert.equal(await page.getByRole('button', { name: 'Confirmar Pago' }).count(), 0);
+        assert.equal(await page.locator('app-button:visible').filter({ hasText: 'Despachar Orden' }).count(), 0);
+        await openUiView(page, `${adminBase}/admin/orders/1361`, heading,
+          'El detalle contra entrega Datáfono tras recarga');
+        assert.equal(await cards.count(), 2, 'La recarga duplicó el cobro Datáfono');
+        paymentText = (await heading.locator('xpath=..').innerText()).toLowerCase();
+        assert.match(paymentText, /cancelado[\s\S]*pago contra entrega[\s\S]*exitoso[\s\S]*datáfono/);
+      });
+
+      if (group !== 'details') await runScenario('R20: Datáfono config persists typed boolean and numeric values', ['R20'], async () => {
+        const row = page.locator('app-responsive-data-view').first().locator('tr')
+          .filter({ hasText: 'Datáfono' });
+        await openUiView(page, `${adminBase}/admin/settings/payments`, row,
+          'Los métodos de pago de la tienda');
+        assert.match(await row.innerText(), /Activo/);
+        await row.locator('button[aria-label="Editar"]').click();
+        const modal = page.locator('app-modal').nth(1);
+        await modal.getByText('Editar Datáfono').waitFor();
+        const toggles = modal.locator('app-toggle button');
+        assert.equal(await toggles.count(), 2);
+        assert.equal(await toggles.nth(0).getAttribute('aria-pressed'), 'true');
+        assert.equal(await toggles.nth(1).getAttribute('aria-pressed'), 'false');
+        const numbers = modal.locator('input[type="number"]');
+        assert.equal(await numbers.count(), 2);
+        assert.deepEqual(await numbers.evaluateAll((inputs) => inputs.map((input) => input.value)),
+          ['100000', '1000']);
+        await modal.getByText('Cancelar', { exact: true }).click();
+      });
+
+      if (group !== 'datafono') await runScenario('R11: excessive credit abono is explained and cannot write', ['R11'], async () => {
         await openUiView(page, `${adminBase}/admin/orders/1329`,
           page.getByRole('heading', { name: 'Orden #POS-2026-0387' }),
           'El detalle de crédito');
@@ -368,8 +410,9 @@ async function main() {
         assert.match(await warning.innerText(), /\$40\.000[\s\S]*\$38\.000[\s\S]*\$2\.000/);
         assert(await modal.getByRole('button', { name: 'Registrar Abono' }).isDisabled());
         await modal.getByRole('button', { name: 'Cancelar' }).click();
-        await page.reload({ waitUntil: 'commit' });
-        await page.getByRole('heading', { name: 'Orden #POS-2026-0387' }).waitFor();
+        await openUiView(page, `${adminBase}/admin/orders/1329`,
+          page.getByRole('heading', { name: 'Orden #POS-2026-0387' }),
+          'El detalle de crédito tras recarga');
         await page.getByRole('button', { name: 'Registrar Pago' }).first().click();
         await modal.getByText('Saldo pendiente máximo:').waitFor();
         assert.match(await modal.locator('.credit-cap').innerText(), /\$38\.000/);
