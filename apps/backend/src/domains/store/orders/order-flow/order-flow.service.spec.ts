@@ -4912,6 +4912,84 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     expect(paymentReceivedCalls[0][1]).toMatchObject({ amount: 100000 });
   });
 
+  it('transferencia escalar conserva la cuenta bancaria validada antes de registrar el pago', async () => {
+    const h = buildHarness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue(LEG_METHODS[1]);
+    h.prismaMock.orders.update = jest.fn().mockResolvedValue({});
+    const orderWithTip = {
+      id: 1,
+      state: 'processing',
+      delivery_type: 'direct_delivery',
+      subtotal_amount: 100000,
+      tax_amount: 0,
+      grand_total: 110000,
+      tip_amount: 10000,
+      currency: 'COP',
+      store_id: 4,
+      customer_id: 44,
+      payments: [],
+    };
+    (h.service as any).getOrder.mockResolvedValueOnce({
+      ...orderWithTip,
+      grand_total: 100000,
+      tip_amount: 0,
+    }).mockResolvedValue(orderWithTip);
+
+    await h.service.payOrder(1, {
+      store_payment_method_id: TRANSFER_ID,
+      payment_type: PaymentType.DIRECT,
+      bank_account_id: 7,
+      tip_amount: 10000,
+    });
+
+    expect(h.prismaMock.orders.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: expect.objectContaining({ tip_amount: 10000, grand_total: 110000 }),
+    });
+    expect(h.paymentGatewayService.resolveAndValidateBankAccount).toHaveBeenCalledWith(
+      7,
+      4,
+      h.prismaMock,
+    );
+    expect(h.prismaMock.payments.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          store_payment_method_id: TRANSFER_ID,
+          bank_account_id: 7,
+          amount: 110000,
+          state: 'succeeded',
+        }),
+      }),
+    );
+  });
+
+  it('transferencia escalar rechaza una cuenta de otra tienda sin crear pago', async () => {
+    const h = buildHarness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue(LEG_METHODS[1]);
+    h.paymentGatewayService.resolveAndValidateBankAccount.mockRejectedValue(
+      new PaymentError(
+        PaymentErrorCodes.VALIDATION_FAILED,
+        'La cuenta bancaria no pertenece a esta tienda',
+      ),
+    );
+
+    const error = await h.service.payOrder(1, {
+      store_payment_method_id: TRANSFER_ID,
+      payment_type: PaymentType.DIRECT,
+      bank_account_id: 7,
+    }).catch((failure) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe(ErrorCodes.PAY_VALIDATE_001.code);
+    expect(error.getStatus()).toBe(400);
+    expect(h.paymentGatewayService.resolveAndValidateBankAccount).toHaveBeenCalledWith(
+      7,
+      4,
+      h.prismaMock,
+    );
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+  });
+
   it("payment_type online (sin payments[]) → NO emite payment.received (queda pending, la pasarela lo confirma después)", async () => {
     const h = buildHarness();
     h.prismaMock.store_payment_methods.findFirst.mockResolvedValue(
