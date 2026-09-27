@@ -2800,6 +2800,14 @@
       "sessions": 0,
       "memories": 6,
       "prompts": 0
+    },
+    {
+      "id": "75e7ed1b",
+      "created_by": "rzy",
+      "created_at": "2026-09-27T14:47:38Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }
