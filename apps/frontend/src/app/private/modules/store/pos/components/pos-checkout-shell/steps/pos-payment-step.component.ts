@@ -917,7 +917,13 @@ export class PosPaymentStepComponent implements OnInit {
     const selectedCart = this.cartWithConfirmedSerials();
     const immediateSerials = this.needsImmediateSerialCapture(submit) &&
       selectedCart.items.some((item) => item.product.requires_serial_numbers);
-    const obs: Observable<PosSalePaymentResponse> = editingId && !immediateSerials
+    const editingDigitalTip = editingId != null && !immediateSerials &&
+      (submit.tip ?? 0) > 0 &&
+      (method.type === PaymentMethodType.WOMPI ||
+        method.type === PaymentMethodType.WALLET);
+    const obs: Observable<PosSalePaymentResponse> = editingDigitalTip
+      ? this.paymentService.processExistingDigitalTip(selectedCart, payment_request, editingId)
+      : editingId && !immediateSerials
       ? this.ordersService.flowPayOrder(String(editingId), {
           store_payment_method_id: method.id,
           payment_type: 'direct',
@@ -956,7 +962,7 @@ export class PosPaymentStepComponent implements OnInit {
           // shape (PayOrderResponse) does NOT carry a top-level `success`
           // flag; treat any non-thrown response as success. processSaleWithPayment
           // returns `{success: true/false, ...}` so we honor its flag.
-          const isSuccess = editingId ? !!response?.order : response.success;
+          const isSuccess = response.success ?? (editingId ? !!response?.order : false);
           if (isSuccess) {
             if (
               isWompi &&

@@ -131,6 +131,21 @@ export class PosApiService {
     return this.http.post(`${this.apiUrl}/store/payments`, paymentData);
   }
 
+  /** Complete the single payment row reserved by flow/pay for a tipped order. */
+  processReservedPosPayment(
+    paymentId: number,
+    details: {
+      wallet_id?: number;
+      wompi_payment_method?: unknown;
+      returnUrl?: string;
+    },
+  ): Observable<any> {
+    return this.http.post(
+      `${this.apiUrl}/store/payments/pos/process-reserved/${paymentId}`,
+      details,
+    );
+  }
+
   getPaymentMethods(): Observable<any> {
     return this.http.get(`${this.apiUrl}/store/payments/methods`);
   }

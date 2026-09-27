@@ -299,6 +299,7 @@ describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada mul
   let post: jasmine.Spy;
   let flowPayOrder: jasmine.Spy;
   let processPaymentForExistingOrder: jasmine.Spy;
+  let processReservedPosPayment: jasmine.Spy;
 
   const cart = {
     items: [],
@@ -314,6 +315,9 @@ describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada mul
     processPaymentForExistingOrder = jasmine
       .createSpy('processPaymentForExistingOrder')
       .and.returnValue(of({ data: { payment: { id: 820 } } }));
+    processReservedPosPayment = jasmine
+      .createSpy('processReservedPosPayment')
+      .and.returnValue(of({ data: { payment: { id: 902, state: 'succeeded' } } }));
     flowPayOrder = jasmine.createSpy('flowPayOrder').and.returnValue(of({
       order: { state: 'paid' },
       payment: { id: 900, change: 0 },
@@ -327,7 +331,7 @@ describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada mul
       { getUserId: () => 1, getStoreIdOrThrow: () => 1, getStoreId: () => 1 } as any,
       { isEnabled: false, getRegisterId: () => null } as any,
       {} as any,
-      { processPaymentForExistingOrder } as any,
+      { processPaymentForExistingOrder, processReservedPosPayment } as any,
       { flowPayOrder } as any,
     );
   });
@@ -391,6 +395,54 @@ describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada mul
       store_payment_method_id: 3, bank_account_id: 44, tip_amount: 100,
     }));
     expect(processPaymentForExistingOrder).not.toHaveBeenCalled();
+  });
+
+  it('reserva una sola fila y procesa propina de wallet sobre orden adoptada', async () => {
+    flowPayOrder.and.returnValue(of({
+      order: { state: 'pending_payment' }, payment: { id: 902 },
+    }));
+    const result = await firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '4', type: 'wallet' },
+      metadata: { walletId: 88 }, tip_amount: 100,
+    } as any, 'current_user'));
+    expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      payment_type: 'online', tip_amount: 100,
+    }));
+    expect(processReservedPosPayment).toHaveBeenCalledOnceWith(902, { wallet_id: 88 });
+    expect(processPaymentForExistingOrder).not.toHaveBeenCalled();
+    expect(result.success).toBeTrue();
+  });
+
+  it('mantiene Wompi pendiente en espera sin anunciar venta pagada', async () => {
+    flowPayOrder.and.returnValue(of({
+      order: { state: 'pending_payment' }, payment: { id: 903 },
+    }));
+    processReservedPosPayment.and.returnValue(of({
+      data: { payment: { id: 903, state: 'pending', transaction_id: null } },
+    }));
+    const result = await firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '5', type: 'wompi' },
+      metadata: { wompiPaymentMethod: { type: 'NEQUI', phone: '3001234567' } },
+      tip_amount: 100,
+    } as any, 'current_user'));
+    expect(processReservedPosPayment.calls.mostRecent().args[0]).toBe(903);
+    expect(result.nextAction?.type).toBe('await');
+    expect(result.payment?.id).toBe(903);
+  });
+
+  it('no presenta un wallet pendiente de conciliación como pago exitoso', async () => {
+    flowPayOrder.and.returnValue(of({
+      order: { state: 'pending_payment' }, payment: { id: 904 },
+    }));
+    processReservedPosPayment.and.returnValue(of({
+      data: { payment: { id: 904, state: 'pending' } },
+    }));
+    const result = await firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '4', type: 'wallet' },
+      metadata: { walletId: 88 }, tip_amount: 100,
+    } as any, 'current_user'));
+    expect(result.success).toBeFalse();
+    expect(result.message).toContain('pendiente de conciliación');
   });
 });
 
