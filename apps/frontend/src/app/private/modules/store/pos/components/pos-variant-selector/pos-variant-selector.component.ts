@@ -2,6 +2,7 @@ import { Component, input, output, inject } from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { Product, PosProductVariant } from '../../services/pos-product.service';
+import { PosCartService } from '../../services/pos-cart.service';
 import { PriceResolverService } from '../../../../../../shared/services/pricing';
 import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing-variants-banner/pos-product-missing-variants-banner.component';
 
@@ -137,7 +138,9 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
                     }
                   }
                   @if (doesVariantTrackInventory(variant)) {
-                    @if (isVariantAvailable(variant)) {
+                    @if (isVariantOversellCandidate(variant)) {
+                      <span class="text-xs text-warning font-medium mt-0.5">Sobreventa · {{ variant.stock }} disp.</span>
+                    } @else if (isVariantAvailable(variant)) {
                       <span
                         class="text-xs mt-0.5"
                         [class]="
@@ -174,6 +177,7 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
 })
 export class PosVariantSelectorComponent {
   private priceResolver = inject(PriceResolverService);
+  private cartService = inject(PosCartService);
 
   readonly product = input.required<Product>();
   readonly variants = input.required<PosProductVariant[]>();
@@ -206,10 +210,16 @@ export class PosVariantSelectorComponent {
   /** Check if a variant is available considering track_inventory */
   isVariantAvailable(variant: PosProductVariant): boolean {
     if (!this.doesVariantTrackInventory(variant)) return true;
+    if (this.cartService.allowNegativeStock()) return true;
     if (typeof variant.is_available === 'boolean') {
       return variant.is_available;
     }
     return variant.stock > 0;
+  }
+
+  isVariantOversellCandidate(variant: PosProductVariant): boolean {
+    return this.cartService.allowNegativeStock() &&
+      this.doesVariantTrackInventory(variant) && Number(variant.stock ?? 0) <= 0;
   }
 
   doesVariantTrackInventory(variant: PosProductVariant): boolean {

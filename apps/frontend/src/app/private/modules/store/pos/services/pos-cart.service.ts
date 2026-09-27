@@ -11,6 +11,7 @@ import {
 } from 'rxjs/operators';
 import { toObservable, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import {
   CartItem,
   CartSummary,
@@ -95,6 +96,12 @@ export class PosCartService {
   private saleUnitService = inject(PosSaleUnitService);
   private priceTierCache = inject(PriceTierCacheService);
   private authFacade = inject(AuthFacade);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
+
+  /** Only an explicit store opt-in permits negative sellable stock. */
+  readonly allowNegativeStock = computed(
+    () => this.storeSettingsFacade.settings()?.inventory?.allow_negative_stock === true,
+  );
 
   /**
    * Techo de 5 UVT para el documento equivalente POS (Art. 616-1 ET / Res.
@@ -2668,6 +2675,7 @@ export class PosCartService {
       ? item.product.product_variants?.find((v) => v.id === item.variant_id)
       : undefined;
     if (
+      !this.allowNegativeStock() &&
       !item.is_weight_product &&
       this.doesLineTrackInventory(item.product, variant)
     ) {
@@ -2683,7 +2691,7 @@ export class PosCartService {
             ? ` (${item.units_per_package} unidades por empaque)`
             : '';
         throw new Error(
-          `Stock insuficiente. Máximo permitido: ${maxQuantity}${unitsHint}`,
+          `Stock insuficiente de ${item.product.name}. Máximo permitido: ${maxQuantity}${unitsHint}`,
         );
       }
     }
@@ -3053,7 +3061,10 @@ export class PosCartService {
     }
 
     // Only validate stock when the line effectively tracks inventory
-    if (this.doesLineTrackInventory(request.product, request.variant)) {
+    if (
+      !this.allowNegativeStock() &&
+      this.doesLineTrackInventory(request.product, request.variant)
+    ) {
       const availableStock = this.getAvailableStock(
         request.product,
         request.variant,
@@ -3077,14 +3088,14 @@ export class PosCartService {
         : 1;
       const totalRequiredStock = totalRequestedQuantity * requiredPerUnit;
 
-      if (request.product && totalRequiredStock > availableStock) {
+      if (totalRequiredStock > availableStock) {
         const packageHint =
           requiredPerUnit > 1 ? ` (${requiredPerUnit} unidades por empaque)` : '';
         errors.push({
           field: 'quantity',
           message: currentCartQuantity > 0
-            ? `Stock insuficiente. Ya tienes ${currentCartQuantity} en el carrito${packageHint}. Disponible: ${availableStock} unidades`
-            : `Stock insuficiente. Disponible: ${availableStock} unidades`,
+            ? `Stock insuficiente de ${request.product.name}. Ya tienes ${currentCartQuantity} en el carrito${packageHint}. Disponible: ${availableStock} unidades`
+            : `Stock insuficiente de ${request.product.name}. Disponible: ${availableStock} unidades`,
         });
       }
     }
@@ -3112,6 +3123,31 @@ export class PosCartService {
     return Number(product.stock ?? 0);
   }
 
+  /** Cashier-facing warning; never substitutes the backend's authoritative stock check. */
+  getOversellWarningForItem(item: CartItem): string | null {
+    if (!this.allowNegativeStock() || item.itemType === 'custom') return null;
+    const variant = item.variant_id
+      ? item.product.product_variants?.find((candidate) =>
+          Number(candidate.id) === Number(item.variant_id),
+        )
+      : undefined;
+    if (!this.doesLineTrackInventory(item.product, variant)) return null;
+    const available = this.getAvailableStock(item.product, variant);
+    const requested = this.cartState().items
+      .filter((candidate) =>
+        candidate.product.id === item.product.id &&
+        Number(candidate.variant_id ?? 0) === Number(item.variant_id ?? 0),
+      )
+      .reduce((sum, candidate) =>
+        sum + candidate.quantity * this.getRequiredStockPerUnit(
+          candidate.product,
+          !!candidate.is_package_unit,
+          candidate.units_per_package ?? null,
+        ), 0);
+    if (requested <= available) return null;
+    return `Sobreventa de ${item.product.name}: ${requested} unidades solicitadas, ${available} disponibles. Actualiza el inventario.`;
+  }
+
   /**
    * Stock units consumed per cart line unit. Packaging is now TIER-OWNED:
    * when the applied tier resolves a pack size > 1, each cart `quantity`
@@ -3136,6 +3172,7 @@ export class PosCartService {
     unitsPerPackage?: number | null,
   ): number {
     if (!this.doesLineTrackInventory(product, variant)) return 999;
+    if (this.allowNegativeStock()) return Number.POSITIVE_INFINITY;
     const availableStock = this.getAvailableStock(product, variant);
     const requiredStockPerUnit = this.getRequiredStockPerUnit(
       product,

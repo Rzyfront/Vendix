@@ -40,6 +40,7 @@ import { PosCartService } from '../services/pos-cart.service';
 import {
   PosProductService,
   PosProductVariant,
+  Product,
   PosProductsLoadError,
   SearchFilters,
   SearchRankMeta,
@@ -481,6 +482,8 @@ function isMultiTokenQuery(query: string): boolean {
                       >
                         Agotado
                       </span>
+                    } @else if (isProductOversellCandidate(product)) {
+                      <span class="text-[9px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded-full shrink-0">Sobreventa</span>
                     } @else if (isProductLowStock(product)) {
                       <span
                         class="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded-full shrink-0"
@@ -657,7 +660,9 @@ function isMultiTokenQuery(query: string): boolean {
                   @if (
                     product.track_inventory !== false && !product.has_variants
                   ) {
-                    @if (product.is_available === false) {
+                    @if (isProductOversellCandidate(product)) {
+                      <app-badge variant="warning" size="xs" badgeStyle="solid" class="absolute top-2 right-2 z-[1]">SOBREVENTA</app-badge>
+                    } @else if (product.is_available === false) {
                       <app-badge
                         variant="error"
                         size="xs"
@@ -1197,6 +1202,7 @@ export class PosProductSelectionComponent {
   readonly defaultWeightUnit = signal<'kg' | 'g' | 'lb'>('kg');
   readonly allowManualWeightEntry = signal(true);
   readonly lowStockThreshold = signal(10);
+  readonly allowNegativeStock = computed(() => this.cartService.allowNegativeStock());
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -1818,6 +1824,9 @@ export class PosProductSelectionComponent {
     if (this.isProductCardUnavailable(product)) {
       return `${name}, ${price}, Agotado`;
     }
+    if (this.allowNegativeStock() && product.track_inventory !== false && Number(product?.stock ?? 0) <= 0 && !product.has_variants) {
+      return `${name}, ${price}, Sin existencias; se permite sobreventa`;
+    }
     const stock = Number(product?.stock ?? 0);
     // Stitch PSVERSION0001 paso 3 — el badge "En Carrito (N)" también se
     // anuncia en texto para lector de pantalla.
@@ -2032,6 +2041,8 @@ export class PosProductSelectionComponent {
     if (product.effective_track_inventory === false) return false;
     if (product.track_inventory === false) return false;
 
+    if (this.allowNegativeStock()) return false;
+
     if (product.has_variants) {
       const variants = product.product_variants ?? [];
       if (!variants.length) return false;
@@ -2042,6 +2053,24 @@ export class PosProductSelectionComponent {
       return !product.is_available;
     }
     return product.stock === 0;
+  }
+
+  isProductOversellCandidate(product: any): boolean {
+    return this.allowNegativeStock() &&
+      !product.has_variants &&
+      product.effective_track_inventory !== false &&
+      product.track_inventory !== false &&
+      Number(product.stock ?? 0) <= 0;
+  }
+
+  private warnIfOversold(product: Product, variant?: PosProductVariant): void {
+    const item = this.cartService.cartState().items.find((candidate) =>
+      String(candidate.product.id) === String(product.id) &&
+      Number(candidate.variant_id ?? 0) === Number(variant?.id ?? 0),
+    );
+    if (!item) return;
+    const warning = this.cartService.getOversellWarningForItem(item);
+    if (warning) this.toastService.warning(warning);
   }
 
   /**
@@ -2143,6 +2172,7 @@ export class PosProductSelectionComponent {
             this.toastService.success(
               `${product.name} (${variantLabel}) ${weight} ${unit} agregado al carrito`,
             );
+            this.warnIfOversold(product, variant);
             this.productAddedToCart.emit({ product, quantity: 1 });
           },
           error: (error) => {
@@ -2172,6 +2202,7 @@ export class PosProductSelectionComponent {
           this.toastService.success(
             `${product.name} (${variantLabel}) agregado al carrito`,
           );
+          this.warnIfOversold(product, variant);
           this.productAddedToCart.emit({ product, quantity: 1 });
         },
         error: (error) => {
@@ -2443,15 +2474,15 @@ export class PosProductSelectionComponent {
   }
 
   private async addToCartNormal(product: any): Promise<void> {
-    if (product.track_inventory !== false) {
+    if (product.effective_track_inventory !== false && product.track_inventory !== false) {
       if (product.stock > 0 && this.isProductLowStock(product)) {
         this.toastService.warning(
           `Producto con existencias bajo (${product.stock} unidades restantes)`,
         );
       }
 
-      if (product.stock === 0) {
-        this.toastService.warning('Producto sin stock disponible');
+      if (Number(product.stock ?? 0) <= 0 && !this.allowNegativeStock()) {
+        this.toastService.warning(`Stock insuficiente de ${product.name}. Disponible: ${product.stock ?? 0} unidades`);
         return;
       }
     }
@@ -2476,6 +2507,7 @@ export class PosProductSelectionComponent {
             this.toastService.success(
               `${product.name} agregado al carrito en la presentación pistoleada`,
             );
+            this.warnIfOversold(product);
             this.productAddedToCart.emit({ product, quantity: 1 });
           },
           error: (error) => {
@@ -2574,6 +2606,7 @@ export class PosProductSelectionComponent {
           this.toastService.success(
             `${product.name} agregado al carrito${tag}`,
           );
+          this.warnIfOversold(product);
           this.productAddedToCart.emit({ product, quantity: 1 });
         },
         error: (error) => {
@@ -2690,6 +2723,7 @@ export class PosProductSelectionComponent {
           this.toastService.success(
             `${product.name} (${captured.amount} ${captured.unitCode}) agregado al carrito`,
           );
+          this.warnIfOversold(product);
           this.productAddedToCart.emit({
             product,
             quantity: captured.quantity,
@@ -2727,6 +2761,7 @@ export class PosProductSelectionComponent {
           this.toastService.success(
             `${product.name} (${weight} ${unit}) agregado al carrito - ${this.formatPrice(totalPrice)}`,
           );
+          this.warnIfOversold(product);
           this.productAddedToCart.emit({ product, quantity: 1 });
         },
         error: (error) => {
