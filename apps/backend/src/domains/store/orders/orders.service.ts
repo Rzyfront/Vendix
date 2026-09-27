@@ -3098,6 +3098,7 @@ export class OrdersService {
       // (`vendix-shipping-distance-pricing`).
       let shippingAddressForCalc: {
         country_code: string;
+        address_line1?: string;
         state_province?: string;
         city?: string;
         postal_code?: string;
@@ -3123,6 +3124,7 @@ export class OrdersService {
           },
           select: {
             country_code: true,
+            address_line1: true,
             state_province: true,
             city: true,
             postal_code: true,
@@ -3139,6 +3141,7 @@ export class OrdersService {
         if (address?.country_code) {
           shippingAddressForCalc = {
             country_code: address.country_code,
+            address_line1: address.address_line1 || undefined,
             state_province: address.state_province || undefined,
             city: address.city || undefined,
             postal_code: address.postal_code || undefined,
@@ -4920,6 +4923,7 @@ export class OrdersService {
         items,
         {
           country_code: address.country_code,
+          address_line1: address.address_line1 || undefined,
           state_province: address.state_province || undefined,
           city: address.city || undefined,
           postal_code: address.postal_code || undefined,

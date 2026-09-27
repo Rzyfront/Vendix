@@ -4885,6 +4885,7 @@ export class PaymentsService {
 
     let address: {
       country_code?: string | null;
+      address_line1?: string | null;
       state_province?: string | null;
       city?: string | null;
       postal_code?: string | null;
@@ -4896,6 +4897,7 @@ export class PaymentsService {
         where: { id: dto.shipping_address_id },
         select: {
           country_code: true,
+          address_line1: true,
           state_province: true,
           city: true,
           postal_code: true,
@@ -4953,6 +4955,7 @@ export class PaymentsService {
         items,
         {
           country_code: address.country_code,
+          address_line1: address.address_line1 || undefined,
           state_province: address.state_province || undefined,
           city: address.city || undefined,
           postal_code: address.postal_code || undefined,
