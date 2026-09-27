@@ -3,6 +3,7 @@ import { FinancialSplitErrors } from 'src/common/errors/financial-split-error-co
 import { ErrorCodes } from 'src/common/errors/error-codes';
 import {
   FULFILLED_PAYMENT_CANCELABLE_STATES,
+  PAYMENT_CANCELABLE_STATES,
   SETTLED_PAYMENT_STATES,
   getOrderCancellationPolicy,
   hasNonDirectSettledPayment,
@@ -155,8 +156,12 @@ export function canPay(order: OrderActionSnapshot): OrderActionResult {
  *    only reversal: requires a settled payment, every settled leg must be a
  *    DIRECT method (never a processor/gateway one — that needs a real
  *    reversal), and no sales invoice already issued to DIAN.
- *  - `pending_payment`/`processing` — delegates to
- *    `getOrderCancellationPolicy` (original behavior, unchanged).
+ *  - `pending_payment`/`processing` — owner rule: cancelling the PAYMENT is
+ *    NOT blocked by committed/consumed stock (that blocker is exclusive to
+ *    cancelling the ORDER). Only a non-direct settled leg
+ *    (`ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001`) or an issued sales invoice
+ *    (`ORD_PAYMENT_CANCEL_INVOICED_001`) blocks it — the exact checks
+ *    `OrderFlowService.cancelPayment` runs for these states.
  *  - Any active financial split locks this action regardless of state
  *    (economic mutations must cancel the allocation first).
  */
@@ -177,11 +182,14 @@ export function canCancelPayment(order: OrderActionSnapshot): OrderActionResult 
     }
     return { enabled: true };
   }
-  if (order.state === 'pending_payment' || order.state === 'processing') {
-    const policy = getOrderCancellationPolicy(order);
-    return policy.can_cancel_payment
-      ? { enabled: true }
-      : { enabled: false, ...(policy.reason_code ? { reason: policy.reason_code } : {}) };
+  if (PAYMENT_CANCELABLE_STATES.has(order.state)) {
+    if (hasNonDirectSettledPayment(order.payments)) {
+      return { enabled: false, reason: ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001.code };
+    }
+    if (order.hasIssuedSalesInvoice) {
+      return { enabled: false, reason: ErrorCodes.ORD_PAYMENT_CANCEL_INVOICED_001.code };
+    }
+    return { enabled: true };
   }
   return { enabled: false };
 }

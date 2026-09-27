@@ -672,6 +672,129 @@ describe('OrderFlowService.cancelPayment — payment_cancelled + state_changed',
   });
 });
 
+describe('OrderFlowService.cancelPayment — D: el stock comprometido no bloquea cancelar el PAGO (regla del dueño)', () => {
+  const ORDER_ID = 9101;
+  let prismaMock: PrismaMock;
+
+  const cashPayment = () =>
+    buildPayment({
+      id: 5101,
+      state: 'succeeded',
+      amount: new Prisma.Decimal('59.50'),
+      store_payment_method: {
+        system_payment_method: { type: 'cash', processing_mode: 'DIRECT' },
+      },
+    });
+
+  // Línea ya entregada con `deliverOrderItem` (stock descontado) antes de cobrar.
+  const committedItem = {
+    id: 77,
+    product_id: 100,
+    quantity: 1,
+    inventory_committed: true,
+    inventory_consumed_at_fire: false,
+    delivered_at: new Date('2026-09-25T10:00:00Z'),
+  };
+
+  const buildHarness = (orderState: string) => {
+    prismaMock = createPrismaMock({
+      orders: ['update', 'findFirst'],
+      payments: ['update'],
+      invoices: ['findFirst'],
+      order_items: ['updateMany', 'update'],
+    });
+    prismaMock.invoices.findFirst.mockResolvedValue(null);
+    prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID });
+    prismaMock.orders.findFirst.mockResolvedValue({ id: ORDER_ID, payments: [] });
+    prismaMock.$queryRaw = jest
+      .fn()
+      .mockResolvedValueOnce([{ id: ORDER_ID, state: orderState }])
+      .mockResolvedValue([]);
+
+    const orderStockCommit = {
+      commitOrderDelivery: jest.fn(),
+      commitOrderLines: jest.fn(),
+    };
+    const orderHistoryService = { record: jest.fn().mockResolvedValue(null) };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      { emit: jest.fn() } as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      { log: jest.fn().mockResolvedValue(undefined), logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      orderHistoryService as any,
+    );
+    (service as any).orderStockCommit = orderStockCommit;
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      buildOrder({
+        id: ORDER_ID,
+        state: orderState,
+        grand_total: new Prisma.Decimal('59.50'),
+        total_paid: new Prisma.Decimal('59.50'),
+        stores: { organization_id: 1 },
+        order_items: [committedItem],
+        payments: [cashPayment()],
+      }),
+    );
+    return { service, orderHistoryService, orderStockCommit };
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
+  });
+
+  it('processing con stock comprometido: anula el pago, vuelve a created con saldo completo y NO toca inventario', async () => {
+    const { service, orderHistoryService, orderStockCommit } = buildHarness('processing');
+
+    await service.cancelPayment(ORDER_ID, { reason: 'medio equivocado' } as any, 'admin');
+
+    expect(prismaMock.payments.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 5101 }, data: expect.objectContaining({ state: 'cancelled' }) }),
+    );
+    expect(prismaMock.orders.update).toHaveBeenCalledWith({
+      where: { id: ORDER_ID },
+      data: expect.objectContaining({
+        state: 'created',
+        completed_at: null,
+        total_paid: 0,
+        remaining_balance: new Prisma.Decimal('59.50'),
+      }),
+    });
+    // Estado cambia de verdad → el state_changed es real, no fabricado.
+    expect(orderHistoryService.record).toHaveBeenCalledWith(
+      prismaMock,
+      expect.objectContaining({ type: 'state_changed', fromState: 'processing', toState: 'created' }),
+    );
+    // La línea entregada conserva su flag: nada de inventario se mueve al anular.
+    expect(prismaMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.order_items.update).not.toHaveBeenCalled();
+    expect(orderStockCommit.commitOrderDelivery).not.toHaveBeenCalled();
+    expect(orderStockCommit.commitOrderLines).not.toHaveBeenCalled();
+  });
+
+  it('processing con factura de venta emitida: rechaza ORD_PAYMENT_CANCEL_INVOICED_001 sin anular nada', async () => {
+    const { service } = buildHarness('processing');
+    prismaMock.invoices.findFirst.mockResolvedValue({ id: 3, status: 'accepted' });
+
+    await expect(
+      service.cancelPayment(ORDER_ID, { reason: 'QA' } as any, 'admin'),
+    ).rejects.toMatchObject({ errorCode: 'ORD_PAYMENT_CANCEL_INVOICED_001' });
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(prismaMock.orders.update).not.toHaveBeenCalled();
+  });
+
+  it('finished sigue rechazando ORD_PAYMENT_CANCEL_FINISHED_001 (sólo reembolso)', async () => {
+    const { service } = buildHarness('finished');
+
+    await expect(
+      service.cancelPayment(ORDER_ID, { reason: 'QA' } as any, 'admin'),
+    ).rejects.toMatchObject({ errorCode: 'ORD_PAYMENT_CANCEL_FINISHED_001' });
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(prismaMock.orders.update).not.toHaveBeenCalled();
+  });
+});
+
 describe('OrderFlowService.cancelOrder — state_changed →cancelled', () => {
   const ORDER_ID = 9001;
 

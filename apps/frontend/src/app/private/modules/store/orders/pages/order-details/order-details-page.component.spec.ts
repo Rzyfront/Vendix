@@ -4,6 +4,7 @@ import {
   lifecycleLookupState, kitchenStateForItem, isItemActionEnabled, isOrderCreateLog,
   isRefundAuditRow, isConfirmedStateTransition, buildOrderActionButtons,
   orderStateLabel, orderEventLabel, orderEventActorLabel, isRefundOrderEvent,
+  cancelPaymentCopy,
 } from './order-details-page.component';
 import { Order, OrderItem, OrderEvent } from '../../interfaces/order.interface';
 import {
@@ -386,6 +387,14 @@ describe('order-truth-and-invoice-tz plan (Paso 7) — orderStateLabel / orderEv
     expect(orderEventLabel(baseEvent({ event_type: 'invoice_issued' }), formatAmount)).toBe('Factura emitida');
   });
 
+  it('orderEventLabel arma kitchen_fired con el número de platos y distingue el reenvío', () => {
+    expect(orderEventLabel(baseEvent({ event_type: 'kitchen_fired', payload: { ticket_ids: [9], order_item_ids: [1, 2] } }), formatAmount))
+      .toBe('Enviado a cocina — 2 platos');
+    expect(orderEventLabel(baseEvent({ event_type: 'kitchen_fired', payload: { order_item_ids: [1], resend: true } }), formatAmount))
+      .toBe('Reenviado a cocina — 1 plato');
+    expect(orderEventLabel(baseEvent({ event_type: 'kitchen_fired' }), formatAmount)).toBe('Enviado a cocina');
+  });
+
   it('orderEventLabel cubre el resto del mapa determinístico por event_type', () => {
     const cases: Array<[OrderEvent['event_type'], string]> = [
       ['payment_cancelled', 'Pago anulado'],
@@ -423,5 +432,25 @@ describe('order-truth-and-invoice-tz plan (Paso 7) — orderStateLabel / orderEv
     // la heurística legacy `isRefundAuditRow`, acá sólo manda el event_type.
     expect(isRefundOrderEvent(baseEvent({ event_type: 'state_changed', to_state: 'processing' as any }))).toBeFalse();
     expect(isRefundOrderEvent(baseEvent({ event_type: 'payment_cancelled' }))).toBeFalse();
+  });
+});
+
+describe('cancelPaymentCopy — el texto de «Cancelar pago» dice lo que hace el backend', () => {
+  it('shipped/delivered conservan el estado: nunca prometen volver a «Creada»', () => {
+    for (const state of ['shipped', 'delivered']) {
+      const copy = cancelPaymentCopy(state);
+      expect(copy.confirm).toContain('conserva su estado');
+      expect(copy.confirm).not.toContain('Creada');
+      expect(copy.success).not.toContain('Creada');
+    }
+  });
+
+  it('pending_payment/processing vuelven a «Creada» y avisan que no se re-descuenta stock', () => {
+    for (const state of ['pending_payment', 'processing']) {
+      const copy = cancelPaymentCopy(state);
+      expect(copy.confirm).toContain('"Creada"');
+      expect(copy.confirm).toContain('no se vuelven a descontar');
+      expect(copy.success).toContain('"Creada"');
+    }
   });
 });

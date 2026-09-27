@@ -1,6 +1,7 @@
 import {
   getCancellationBlocker,
   getOrderCancellationPolicy,
+  hasNonDirectSettledPayment,
   OrderCancellationSnapshot,
   SETTLED_PAYMENT_STATES,
 } from './order-cancellation-policy.util';
@@ -84,12 +85,14 @@ describe('Order cancellation policy', () => {
     (state) => expect(getCancellationBlocker(snapshot({ state }))).toBe(STOCK_BLOCKER),
   );
 
-  it('blocks legacy unpaid pending stock without claiming it was physically returned', () => {
+  it('blocks cancelling a legacy unpaid order with committed stock, but not its (unsettled) payment', () => {
+    // Regla del dueño: el stock comprometido bloquea cancelar la ORDEN, nunca
+    // cancelar el PAGO. Un wompi `pending` no está liquidado → no pide reversa.
     expect(getOrderCancellationPolicy(snapshot({
       state: 'pending_payment',
       order_items: [{ inventory_committed: true }],
       payments: [payment('pending', 'ONLINE', 'wompi')],
-    }))).toEqual({ can_cancel: false, can_cancel_payment: false, reason_code: STOCK_BLOCKER });
+    }))).toEqual({ can_cancel: false, can_cancel_payment: true, reason_code: STOCK_BLOCKER });
   });
 
   it('gives inventory precedence over a confirmed digital payment', () => {
@@ -196,6 +199,45 @@ describe('Order cancellation policy', () => {
     expect(JSON.stringify(order)).toBe(before);
   });
 
+  describe('bank_transfer — cobro confirmado a mano, se anula localmente como el efectivo', () => {
+    it.each(['succeeded', 'captured', 'partially_refunded', 'refunded'])(
+      'no exige reversa de pasarela para una transferencia %s sembrada ONLINE',
+      (state) => {
+        expect(hasNonDirectSettledPayment([payment(state, 'ONLINE', 'bank_transfer')])).toBe(false);
+        expect(getCancellationBlocker(snapshot({
+          payments: [payment(state, 'ONLINE', 'bank_transfer')],
+        }))).toBeNull();
+      },
+    );
+
+    it('processing con transferencia ONLINE: cancelable y con anulación de pago', () => {
+      expect(getOrderCancellationPolicy(snapshot({
+        payments: [payment('succeeded', 'ONLINE', 'bank_transfer')],
+      }))).toEqual({ can_cancel: true, can_cancel_payment: true, reason_code: null });
+    });
+
+    it.each(['shipped', 'delivered'])(
+      'habilita can_cancel_payment en %s con una transferencia ONLINE liquidada',
+      (state) => expect(getOrderCancellationPolicy(snapshot({
+        state,
+        payments: [payment('succeeded', 'ONLINE', 'bank_transfer')],
+      })).can_cancel_payment).toBe(true),
+    );
+
+    it('una transferencia no tapa un segundo cobro Wompi/wallet en la misma orden', () => {
+      for (const type of ['wompi', 'wallet']) {
+        expect(getCancellationBlocker(snapshot({ payments: [
+          payment('succeeded', 'ONLINE', 'bank_transfer'),
+          payment('succeeded', 'ONLINE', type),
+        ] }))).toBe(PAYMENT_BLOCKER);
+      }
+    });
+
+    it('otro método ONLINE (card por pasarela) sigue bloqueado', () => {
+      expect(hasNonDirectSettledPayment([payment('succeeded', 'ONLINE', 'card')])).toBe(true);
+    });
+  });
+
   describe('B4/B1b (release-855 + order-truth-and-invoice-tz) — fulfilled-state payment-only cancellation', () => {
     it.each(['shipped', 'delivered'])(
       'allows can_cancel_payment on %s with a settled direct payment, stock blocker aside',
@@ -240,5 +282,40 @@ describe('Order cancellation policy', () => {
         payments: [payment('succeeded', 'DIRECT', 'cash')],
       })).can_cancel_payment).toBe(false);
     });
+  });
+});
+
+describe('D — cancelar el PAGO no lo bloquea el stock comprometido (regla del dueño)', () => {
+  const stockEvidence = [
+    { inventory_committed: true, inventory_consumed_at_fire: false },
+    { inventory_committed: false, inventory_consumed_at_fire: false, delivered_at: '2026-09-20T00:00:00Z' },
+  ];
+
+  it.each(['processing', 'pending_payment'])(
+    '%s con stock comprometido + pago directo: can_cancel_payment=true, can_cancel sigue bloqueado',
+    (state) => {
+      for (const item of stockEvidence) {
+        expect(getOrderCancellationPolicy(snapshot({
+          state,
+          order_items: [item],
+          payments: [payment('succeeded', 'DIRECT', 'cash')],
+        }))).toEqual({ can_cancel: false, can_cancel_payment: true, reason_code: STOCK_BLOCKER });
+      }
+    },
+  );
+
+  it('processing con stock comprometido + pasarela liquidada: el pago sigue exigiendo reversa', () => {
+    expect(getOrderCancellationPolicy(snapshot({
+      state: 'processing',
+      order_items: [{ inventory_committed: true }],
+      payments: [payment('succeeded', 'ONLINE', 'wompi')],
+    }))).toEqual({ can_cancel: false, can_cancel_payment: false, reason_code: STOCK_BLOCKER });
+  });
+
+  it('finished nunca habilita cancelar el pago, aunque sea efectivo', () => {
+    expect(getOrderCancellationPolicy(snapshot({
+      state: 'finished',
+      payments: [payment('succeeded', 'DIRECT', 'cash')],
+    })).can_cancel_payment).toBe(false);
   });
 });

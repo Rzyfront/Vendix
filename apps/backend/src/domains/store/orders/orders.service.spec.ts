@@ -556,7 +556,9 @@ describe('OrdersService', () => {
       const result = await service.findAll({} as any);
 
       expect(result.data.map((order) => order.cancellation_policy)).toEqual([
-        { can_cancel: false, can_cancel_payment: false, reason_code: 'ORD_CANCEL_STOCK_COMMITTED_001' },
+        // Regla del dueño: el stock comprometido bloquea cancelar la ORDEN,
+        // no cancelar el PAGO.
+        { can_cancel: false, can_cancel_payment: true, reason_code: 'ORD_CANCEL_STOCK_COMMITTED_001' },
         { can_cancel: true, can_cancel_payment: false, reason_code: null },
         { can_cancel: false, can_cancel_payment: false, reason_code: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001' },
       ]);
