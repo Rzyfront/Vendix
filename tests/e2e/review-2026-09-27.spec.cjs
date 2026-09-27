@@ -376,6 +376,34 @@ async function main() {
         await modal.getByRole('button', { name: 'Cancelar' }).click();
       });
     }
+
+    if (results[0]?.status === 'passed' && (group === 'credit' || group === 'all')) {
+      await runScenario('R7: installment down payment is a currency input in POS', ['R7'], async () => {
+        await openUiView(page, `${adminBase}/admin/pos`,
+          page.getByText('Carrito Actual', { exact: true }), 'El POS para crédito');
+        await page.getByRole('list', { name: 'Resultados de productos' })
+          .getByRole('listitem').filter({ hasText: 'Coca-Cola 400ml' }).first().click();
+        await page.getByRole('button', { name: 'Cobrar $38.000' }).first().click();
+        const shell = page.locator('app-pos-checkout-shell');
+        await shell.getByRole('radio', { name: /Para llevar/ }).click();
+        await shell.getByRole('radio', { name: /Con Cliente/ }).click();
+        const search = shell.locator('app-pos-customer-selector app-inputsearch input');
+        await search.fill('Camila Torres');
+        await shell.locator('app-pos-customer-selector button.customer-result')
+          .filter({ hasText: 'Camila Torres' }).first().click();
+        await shell.getByText('Paso 3 de 3: Cobro').waitFor();
+        await shell.getByRole('button', { name: /Crédito/ }).first().click();
+        await shell.getByRole('button', { name: 'Cuotas', exact: true }).click();
+        const initial = shell.locator('#credit-initial-payment');
+        await initial.waitFor();
+        const moneyField = initial.locator('xpath=..');
+        assert.equal((await moneyField.locator('span').first().innerText()).trim(), '$');
+        await initial.fill('1000');
+        assert((await initial.inputValue()).replace(/\D/g, '').includes('1000'));
+        await shell.locator('button.btn-cancel').click();
+        assert(!(await page.getByText('¡Venta Completada!').isVisible()));
+      });
+    }
   } finally {
     // An ID is green only when EVERY registered scenario for it is green.
     // Otherwise a passing price assertion could mask a failed photo/cart test
