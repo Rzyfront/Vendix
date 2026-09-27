@@ -2135,6 +2135,24 @@ export class OrdersService {
       customer_id: number | null;
     } | null = null;
     if (titularCustomerChanged) {
+      // Cartera abierta de la orden: la CxC guarda su propio customer_id y
+      // quedaría a nombre del titular anterior.
+      const openReceivable = await this.prisma.accounts_receivable.findFirst({
+        where: {
+          source_type: { in: ['credit_sale', 'order'] },
+          source_id: id,
+          balance: { gt: 0 },
+          status: { notIn: ['paid', 'cancelled', 'written_off'] },
+        },
+        select: { id: true },
+      });
+      if (openReceivable) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_TITULAR_OPEN_RECEIVABLE_001,
+          undefined,
+          { accounts_receivable_id: openReceivable.id },
+        );
+      }
       const titularInvoice = await this.findActiveTitularInvoice(id);
       if (titularInvoice && titularInvoice.status !== 'draft') {
         const isTransmitted =

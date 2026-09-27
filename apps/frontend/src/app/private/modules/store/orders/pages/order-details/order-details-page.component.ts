@@ -4631,9 +4631,11 @@ export class OrderDetailsPageComponent {
     const message =
       code === 'ORD_TITULAR_INVOICED_001'
         ? 'La orden ya tiene una factura emitida; anúlala o emite una nota crédito para cambiar el titular.'
-        : code === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001'
-          ? 'El cliente seleccionado pertenece a otra tienda; elige un cliente de esta tienda.'
-          : 'No se pudo cambiar el titular de esta orden.';
+        : code === 'ORD_TITULAR_OPEN_RECEIVABLE_001'
+          ? 'La orden tiene saldo pendiente en cartera a nombre del cliente actual; salda o anula la cuenta por cobrar para cambiar el titular.'
+          : code === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001'
+            ? 'El cliente seleccionado pertenece a otra tienda; elige un cliente de esta tienda.'
+            : 'No se pudo cambiar el titular de esta orden.';
     return this.dialogService.confirm({
       title: 'No se puede cambiar el titular',
       message,
@@ -4670,7 +4672,8 @@ export class OrderDetailsPageComponent {
       parseApiError((error as { cause?: unknown } | null)?.cause ?? error).errorCode;
     return code === 'ORD_EDIT_NOT_ALLOWED_001' ||
       code === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001' ||
-      code === 'ORD_TITULAR_INVOICED_001'
+      code === 'ORD_TITULAR_INVOICED_001' ||
+      code === 'ORD_TITULAR_OPEN_RECEIVABLE_001'
       ? code
       : null;
   }

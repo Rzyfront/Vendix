@@ -31,6 +31,7 @@ describe('OrdersService — contrato titular (BE-2)', () => {
     store_users: { findFirst: jest.fn() },
     // Release-853 paso 10 — gate titular vs factura.
     invoices: { findFirst: jest.fn() },
+    accounts_receivable: { findFirst: jest.fn() },
   };
   const orderFlow = { forceOrderState: jest.fn(), cancelOrder: jest.fn() };
   const invoicing = { update: jest.fn() };
@@ -57,6 +58,7 @@ describe('OrdersService — contrato titular (BE-2)', () => {
     jest.clearAllMocks();
     // Default: orden sin factura (los casos con factura lo sobrescriben).
     prisma.invoices.findFirst.mockResolvedValue(null);
+    prisma.accounts_receivable.findFirst.mockResolvedValue(null);
   });
 
   const draftOrder = {
@@ -163,6 +165,36 @@ describe('OrdersService — contrato titular (BE-2)', () => {
           data: expect.objectContaining({ customer_id: 217 }),
         }),
       );
+    });
+  });
+
+  describe('PATCH titular — gate de cartera abierta', () => {
+    it('CxC abierta de la orden → 409 ORD_TITULAR_OPEN_RECEIVABLE_001 y la orden no se toca', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder, state: 'finished' });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      prisma.accounts_receivable.findFirst.mockResolvedValue({ id: 55 });
+      await expect(
+        service.update(924, { customer_id: 217 } as any),
+      ).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_TITULAR_OPEN_RECEIVABLE_001.code,
+      });
+      expect(prisma.accounts_receivable.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            source_type: { in: ['credit_sale', 'order'] },
+            source_id: 924,
+            balance: { gt: 0 },
+          }),
+        }),
+      );
+      expect(prisma.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('cambiar sólo customer_alias no consulta la cartera', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder, state: 'finished' });
+      prisma.orders.update.mockResolvedValue({ ...draftOrder, customer_alias: 'Mesa 5' });
+      await service.update(924, { customer_alias: 'Mesa 5' } as any);
+      expect(prisma.accounts_receivable.findFirst).not.toHaveBeenCalled();
     });
   });
 

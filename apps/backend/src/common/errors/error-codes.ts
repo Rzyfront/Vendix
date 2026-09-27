@@ -1443,6 +1443,14 @@ export const ErrorCodes = {
     devMessage:
       'This order already has an issued sales invoice and its holder cannot be changed',
   },
+  // El titular no cambia mientras la orden tenga saldo abierto en cartera:
+  // `accounts_receivable.customer_id` quedaría con el cliente anterior.
+  ORD_TITULAR_OPEN_RECEIVABLE_001: {
+    code: 'ORD_TITULAR_OPEN_RECEIVABLE_001',
+    httpStatus: 409,
+    devMessage:
+      'This order has an open accounts receivable balance and its holder cannot be changed',
+  },
   // CP-POS-CREAR-EDITAR-COBRAR-001 — dirección/método/rate de envío inválidos,
   // método inactivo, rate no pertenece al método, o costo negativo.
   ORD_EDIT_INVALID_SHIPPING_001: {
