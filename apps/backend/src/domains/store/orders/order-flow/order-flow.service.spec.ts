@@ -167,6 +167,82 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.stock.releaseReservation).not.toHaveBeenCalled();
   });
 
+  it('mesa draft con propina reserva Wompi una vez y expone el id sin duplicar en un segundo flow/pay', async () => {
+    const h = harness();
+    const order = {
+      id: 1,
+      store_id: 4,
+      customer_id: 44,
+      table_session_id: 55,
+      delivery_type: 'dine_in',
+      subtotal_amount: 100,
+      tax_amount: 0,
+      grand_total: 100,
+      tip_amount: 0,
+      currency: 'COP',
+    };
+    const payments: any[] = [];
+    jest.spyOn(h.service as any, 'getOrder').mockImplementation(async () => ({
+      ...order,
+      state: h.getState(),
+      payments,
+    }));
+    h.prismaMock.orders.update = jest.fn(async ({ data }: any) => {
+      Object.assign(order, data);
+      return { ...order };
+    });
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue({
+      id: 1,
+      system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' },
+    });
+    h.prismaMock.payments.create.mockImplementation(async ({ data }: any) => {
+      const payment = {
+        id: 99,
+        ...data,
+        store_payment_method: {
+          system_payment_method: { type: 'wompi' },
+        },
+      };
+      payments.push(payment);
+      h.events.push('payment');
+      return payment;
+    });
+    const dto = {
+      store_payment_method_id: 1,
+      payment_type: PaymentType.ONLINE,
+      payment_reference: 'untrusted-client-reference',
+      tip_type: 'percentage' as const,
+      tip_value: 10,
+    };
+
+    const reserved = await h.service.payOrder(1, dto);
+
+    expect(h.prismaMock.orders.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: expect.objectContaining({ tip_amount: 10, grand_total: 110 }),
+    });
+    expect(h.prismaMock.payments.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        amount: 110,
+        state: 'pending',
+        gateway_reference: null,
+        gateway_response: { payment_type: 'online' },
+      }),
+    });
+    expect(reserved.payment).toEqual({ id: 99, transaction_id: 'TXN-1' });
+    expect(h.getState()).toBe('pending_payment');
+    expect(h.reservations).toHaveLength(1);
+    expect(h.events).toEqual(['reserve', 'payment']);
+
+    const retryError = await h.service.payOrder(1, dto).catch((failure) => failure);
+    expect(retryError).toBeInstanceOf(VendixHttpException);
+    expect(retryError.errorCode).toBe(ErrorCodes.ORD_FLOW_PAYMENT_FAILED_001.code);
+    expect(h.getState()).toBe('pending_payment');
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(h.prismaMock.orders.update).toHaveBeenCalledTimes(1);
+    expect(h.reservations).toHaveLength(1);
+  });
+
   it('segundo submit no reserva ni cobra y conserva el 409 tipado', async () => {
     const h = harness();
     await h.service.payOrder(1, DTO);
@@ -4996,15 +5072,41 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       LEG_METHODS[1],
     );
 
-    await h.service.payOrder(1, {
+    const result = await h.service.payOrder(1, {
       store_payment_method_id: TRANSFER_ID,
       payment_type: PaymentType.ONLINE,
     });
 
+    expect(result.payment).toEqual({ transaction_id: 'TXN-1' });
     const paymentReceivedCalls = h.emitter.emitAsync.mock.calls.filter(
       (call: any[]) => call[0] === 'payment.received',
     );
     expect(paymentReceivedCalls).toHaveLength(0);
+  });
+
+  it('wallet online reserva el pago y devuelve su id sin ejecutar el procesador', async () => {
+    const h = buildHarness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue({
+      id: 3,
+      system_payment_method: { type: 'wallet', processing_mode: 'DIRECT' },
+    });
+
+    const result = await h.service.payOrder(1, {
+      store_payment_method_id: 3,
+      payment_type: PaymentType.ONLINE,
+      payment_reference: 'not-a-gateway-reference',
+    });
+
+    expect(result.payment).toEqual({ id: 101, transaction_id: 'TXN-1' });
+    expect(h.prismaMock.payments.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        store_payment_method_id: 3,
+        state: 'pending',
+        gateway_reference: null,
+      }),
+    });
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(h.paymentGatewayService.resolveAndValidateBankAccount).not.toHaveBeenCalled();
   });
 
   it('shipped + 2 tramos → 2 filas y restaura shipped', async () => {

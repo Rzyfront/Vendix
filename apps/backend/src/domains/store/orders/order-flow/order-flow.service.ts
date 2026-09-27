@@ -1366,6 +1366,26 @@ export class OrderFlowService {
       throw new VendixHttpException(ErrorCodes.ORD_PAY_ALREADY_PAID_001);
     }
 
+    // A reserved wallet/Wompi payment must be resumed through its payment id,
+    // not by creating another pending row (or paying directly while the
+    // provider may still confirm the first one). The claim serializes this
+    // check with competing flow/pay calls; the outer catch restores the
+    // pre-claim state when rejecting it.
+    const activeDigitalReservation = preClaimState === 'pending_payment'
+      ? (order.payments ?? []).find((payment) =>
+          payment.state === 'pending' &&
+          ['wallet', 'wompi'].includes(
+            payment.store_payment_method?.system_payment_method?.type ?? '',
+          ),
+        )
+      : undefined;
+    if (activeDigitalReservation) {
+      throw this.wrapPaymentFailure('digital_payment_pending', {
+        order_id: orderId,
+        payment_id: activeDigitalReservation.id,
+      });
+    }
+
     // CP-POS-MODAL-SCOPE-001 / Phase C.4 — defense in depth: edit→pay without
     // customer is only allowed when the POS escape hatch is on
     // (`pos.allow_anonymous_sales=true`). Otherwise the cashier must
@@ -2212,9 +2232,12 @@ export class OrderFlowService {
       };
     } else {
       // Online payment - goes to pending_payment
+      const isReservedDigitalPayment = ['wallet', 'wompi'].includes(
+        paymentMethod.system_payment_method?.type ?? '',
+      );
       const transactionId = await this.generateTransactionId();
 
-      await this.prisma.payments.create({
+      const pendingPayment = await this.prisma.payments.create({
         data: {
           order_id: orderId,
           store_payment_method_id: dto.store_payment_method_id,
@@ -2222,7 +2245,11 @@ export class OrderFlowService {
           currency: order.currency,
           state: 'pending',
           transaction_id: transactionId,
-          gateway_reference: dto.payment_reference ?? null,
+          // The gateway owns the eventual reference. A client-provided value
+          // must not masquerade as a confirmed provider transaction.
+          gateway_reference: isReservedDigitalPayment
+            ? null
+            : dto.payment_reference ?? null,
           gateway_response: {
             payment_type: 'online',
           },
@@ -2230,7 +2257,16 @@ export class OrderFlowService {
       });
       paymentPersisted = true;
 
-      this.validateTransition(order.state as OrderState, 'pending_payment');
+      // `order.state` is the transient processing claim, not the business
+      // state the cashier paid from. A draft was promoted to created above;
+      // created -> pending_payment is legal, processing -> pending_payment is
+      // not. Validate that real edge while retaining the claim until write.
+      this.validateTransition(
+        preClaimState === 'draft'
+          ? 'created'
+          : ((preClaimState ?? order.state) as OrderState),
+        'pending_payment',
+      );
       const updatedOrder = await this.updateOrderState(
         orderId,
         'pending_payment',
@@ -2243,7 +2279,9 @@ export class OrderFlowService {
       );
       return {
         order: updatedOrder,
-        payment: { transaction_id: transactionId },
+        payment: isReservedDigitalPayment
+          ? { id: pendingPayment.id, transaction_id: transactionId }
+          : { transaction_id: transactionId },
       };
     }
     } catch (error) {
