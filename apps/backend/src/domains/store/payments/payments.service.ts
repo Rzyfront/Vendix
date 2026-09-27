@@ -4686,8 +4686,13 @@ export class PaymentsService {
    * shipping-rate-tax). El frontend manda `shipping_rate_id` si la tarifa
    * cotizó el costo o si gobierna el impuesto de `manual_shipping_price`.
    * - Sin `shipping_rate_id` ⇒ copia vacía y `rate_id` null.
-   * - Con precio manual explícito ⇒ el servidor deriva bruto y copia fiscal
-   *   desde la tarifa seleccionada, sin exigir que iguale su precio automático.
+   * - Con precio manual explícito y la tarifa SÍ recotiza la dirección ⇒ el
+   *   servidor deriva bruto y copia fiscal desde la tarifa seleccionada, sin
+   *   exigir que iguale su precio automático.
+   * - Con precio manual explícito y la tarifa NO recotiza (sin
+   *   `country_code`, dirección no resoluble, o fuera de cobertura) ⇒ NO
+   *   rechaza (H5): cae al contrato de costo manual sin impuesto, igual que
+   *   el comportamiento previo a PR #860, conservando el `rate_id`.
    * - Con él: la tarifa debe existir, pertenecer al `shipping_method_id` del
    *   DTO y a una zona de la tienda (o del sistema). Si no ⇒ 400
    *   `ORD_SHIP_RATE_MISMATCH_001` (validación de entrada, no del impuesto).
@@ -4749,19 +4754,31 @@ export class PaymentsService {
     }
 
     if (dto.manual_shipping_price != null) {
-      if (!this.shippingTaxService || typeof this.shippingTaxService.chargeForRate !== 'function') {
-        throw new VendixHttpException(
-          ErrorCodes.PAY_VALIDATE_001,
-          'No se pudo calcular el impuesto del costo manual de envío',
-        );
-      }
       const applicableCost = await this.recalculatePosRateCost(
         tx, dto, store_id, rate.id, order_items,
       );
       if (applicableCost == null) {
+        // La tarifa ya no recotiza esta dirección (sin `country_code`,
+        // dirección no resoluble, o fuera de cobertura). Regresión H5:
+        // esto rechazaba con ORD_SHIP_RATE_MISMATCH_001 y bloqueaba una
+        // venta que en el comportamiento previo a PR #860 sí pasaba.
+        // Decisión del dueño: no rechazar — cae al mismo contrato de
+        // "costo manual" que el bloque general de abajo (sin tarifa que lo
+        // respalde ⇒ sin impuesto), conservando el `rate_id` para no perder
+        // la referencia de la tarifa elegida en el ticket. El chequeo de
+        // "shipping_cost del cliente cuadra al centavo con charge.gross"
+        // solo aplica cuando la tarifa SÍ recotiza (rama de abajo).
+        return {
+          snapshot: { ...EMPTY_SHIPPING_TAX },
+          rate_id: rate.id,
+          is_inclusive: null,
+          gross_cost: shipping_cost,
+        };
+      }
+      if (!this.shippingTaxService || typeof this.shippingTaxService.chargeForRate !== 'function') {
         throw new VendixHttpException(
-          ErrorCodes.ORD_SHIP_RATE_MISMATCH_001,
-          'La tarifa ya no cubre esta dirección. Vuelve al paso de envío y recotiza.',
+          ErrorCodes.PAY_VALIDATE_001,
+          'No se pudo calcular el impuesto del costo manual de envío',
         );
       }
       const charge = await this.shippingTaxService.chargeForRate(

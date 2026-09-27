@@ -159,6 +159,101 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
     expect(client.orders.update).not.toHaveBeenCalled();
   });
 
+  describe('H5 — precio manual cuando la tarifa ya no recotiza la dirección', () => {
+    it('sin country_code: no rechaza, costo manual sin impuesto, conserva la tarifa', async () => {
+      const client = tx();
+      const quoteRateGross = jest.fn();
+      service.shippingCalculatorService = { quoteRateGross };
+      const chargeForRate = jest.fn();
+      service.shippingTaxService.chargeForRate = chargeForRate;
+
+      await service.createOrUpdateOrderFromPos(client, dto({
+        shipping_rate_id: 9, manual_shipping_price: 10000, shipping_cost: 11900,
+        // Sin `country_code` ⇒ `recalculatePosRateCost` devuelve null antes
+        // de siquiera llamar al calculador (regresión H5).
+        shipping_address_snapshot: { city: 'Bogotá' },
+      }), user);
+
+      expect(quoteRateGross).not.toHaveBeenCalled();
+      expect(chargeForRate).not.toHaveBeenCalled();
+      expect(snapshotForRate).not.toHaveBeenCalled();
+      const data = client.orders.update.mock.calls[0][0].data;
+      expect(data).toEqual(expect.objectContaining({
+        ...EMPTY_SHIPPING_TAX,
+        shipping_rate_id: 9,
+        shipping_cost: 11900,
+        grand_total: 21900,
+      }));
+    });
+
+    it('tarifa fuera de cobertura (quoteRateGross null): no rechaza, costo manual sin impuesto', async () => {
+      const client: any = tx();
+      client.addresses = {
+        findFirst: jest.fn().mockResolvedValue({ country_code: 'CO', city: 'Bogotá' }),
+      };
+      client.products = { findMany: jest.fn().mockResolvedValue([]) };
+      const quoteRateGross = jest.fn().mockResolvedValue(null);
+      service.shippingCalculatorService = { quoteRateGross };
+      const chargeForRate = jest.fn();
+      service.shippingTaxService.chargeForRate = chargeForRate;
+
+      await service.createOrUpdateOrderFromPos(client, dto({
+        shipping_rate_id: 9, manual_shipping_price: 10000, shipping_cost: 11900,
+        shipping_address_id: 3,
+      }), user);
+
+      expect(quoteRateGross).toHaveBeenCalled();
+      expect(chargeForRate).not.toHaveBeenCalled();
+      expect(snapshotForRate).not.toHaveBeenCalled();
+      const data = client.orders.update.mock.calls[0][0].data;
+      expect(data).toEqual(expect.objectContaining({
+        ...EMPTY_SHIPPING_TAX,
+        shipping_rate_id: 9,
+        shipping_cost: 11900,
+        grand_total: 21900,
+      }));
+    });
+
+    it('con manual + tarifa que SÍ recotiza: el comportamiento nuevo sigue intacto', async () => {
+      const client = tx();
+      service.shippingCalculatorService = { quoteRateGross: jest.fn().mockResolvedValue(15000) };
+      const chargeForRate = jest.fn().mockResolvedValue({
+        applies: true, reason: 'exclusive', gross: 11900, base: 10000, tax: 1900,
+      });
+      service.shippingTaxService.chargeForRate = chargeForRate;
+      snapshotForRate.mockResolvedValue({
+        shipping_tax_rate_id: 78, shipping_tax_name: 'IVA 19%',
+        shipping_tax_type: 'iva', shipping_tax_rate: 0.19, shipping_tax_amount: 1900,
+      });
+
+      await service.createOrUpdateOrderFromPos(client, dto({
+        shipping_rate_id: 9, manual_shipping_price: 10000, shipping_cost: 11900,
+        shipping_address_snapshot: { country_code: 'CO', city: 'Bogotá' },
+      }), user);
+
+      expect(chargeForRate).toHaveBeenCalledWith(client, 9, 10000, { store_id: 1 });
+      expect(snapshotForRate).toHaveBeenCalledWith(client, 9, 11900, { store_id: 1 });
+      const data = client.orders.update.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        shipping_rate_id: 9, shipping_cost: 11900, shipping_tax_amount: 1900,
+        shipping_tax_is_inclusive: false, grand_total: 21900,
+      });
+    });
+
+    it('sin manual y tarifa que no pertenece al método/tienda: sigue lanzando ORD_SHIP_RATE_MISMATCH_001', async () => {
+      const client = tx(null);
+      let caught: any;
+      try {
+        await service.createOrUpdateOrderFromPos(client, dto({ shipping_rate_id: 99 }), user);
+      } catch (error) { caught = error; }
+
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001.code);
+      expect(caught.getStatus()).toBe(400);
+      expect(client.orders.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('tarifas calculadas: costo recalculado en el servidor (unificado con quoteRateGross)', () => {
     const calcTx = (type: string) => {
       const client: any = tx({ id: 9, shipping_method_id: 5, type, base_cost: 5000 });
