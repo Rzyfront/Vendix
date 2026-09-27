@@ -364,6 +364,7 @@ describe('PaymentCollectorComponent — modo multi «Varios métodos» (Paso 5)'
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
@@ -478,6 +479,7 @@ describe('PaymentCollectorComponent — B15(1) setLegAmount no deja amountReceiv
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
@@ -543,6 +545,7 @@ describe('PaymentModalComponent — arbitraje NG8002 allowMultiTender (Paso 5c)'
     await TestBed.configureTestingModule({
       imports: [PaymentModalComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
@@ -575,6 +578,7 @@ describe('PaymentCollectorComponent — restaurant tip amount', () => {
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
