@@ -149,3 +149,63 @@ describe('PosPaymentStepComponent — E.1 serial capture before immediate charge
     });
   }
 });
+
+describe('PosPaymentStepComponent — tip contract', () => {
+  const originalRegister = localStorage.getItem('pos_register_id');
+  afterAll(() => {
+    if (originalRegister == null) localStorage.removeItem('pos_register_id');
+    else localStorage.setItem('pos_register_id', originalRegister);
+  });
+
+  const makeStep = (editingOrderId: number | null = null) => {
+    const charge = jasmine.createSpy('charge').and.returnValue(of({
+      success: true, order: { id: 42 }, payment: { id: 77 },
+    }));
+    const flowPayOrder = jasmine.createSpy('flowPayOrder').and.returnValue(of({
+      order: { id: 42, state: 'paid' }, payment: { id: 77 },
+    }));
+    const step = Object.assign(Object.create(PosPaymentStepComponent.prototype), {
+      cartState: () => ({ items: [], customer: null, summary: { total: 1000 } }),
+      cartWithConfirmedSerials: () => ({ items: [], customer: null, summary: { total: 1000 } }),
+      authFacade: { isRestaurant: () => true },
+      autoExecute: () => true, checkoutIntent: () => 'pickup',
+      collectSerialsBeforeCharge: () => false,
+      needsImmediateSerialCapture: () => false,
+      isAlias: () => false, isAnonymous: () => true,
+      isWithinBusinessHours: () => true,
+      cashRegisterEnabled: () => false, autoCreateDefaultRegister: () => true,
+      editingOrderId: () => editingOrderId,
+      paymentService: { processSaleWithPayment: charge },
+      ordersService: { flowPayOrder },
+      processing: signal(false), submittedWompiSubMethod: signal(null),
+      toastService: { info: jasmine.createSpy('info'), show: jasmine.createSpy('show') },
+      sessionId: () => null, tableId: () => null, takeawayOrder: () => false,
+      deliveryType: () => null, fulfillment: () => 'entrega',
+      paymentCompleted: { emit: jasmine.createSpy('emit') },
+      destroyRef: { onDestroy: () => {} },
+    });
+    return { step, charge, flowPayOrder };
+  };
+
+  it('carries resolved tip and waiter to a fresh POS payment', () => {
+    const { step, charge } = makeStep();
+    step.onCollectorSubmit({
+      mode: 'contado', method: { id: '1', type: 'cash' }, amountReceived: 1100,
+      tip: 100, tipType: 'fixed', tipValue: 100, tipWaiterId: 7,
+    } as any);
+    expect(charge.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      tip_amount: 100, tip_type: 'fixed', tip_value: 100, tip_waiter_id: 7,
+    }));
+  });
+
+  it('carries tip to flow/pay for an edited draft', () => {
+    const { step, flowPayOrder } = makeStep(42);
+    step.onCollectorSubmit({
+      mode: 'contado', method: { id: '1', type: 'cash' },
+      tip: 100, tipType: 'fixed', tipValue: 100, tipWaiterId: 7,
+    } as any);
+    expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      tip_amount: 100, tip_type: 'fixed', tip_value: 100, tip_waiter_id: 7,
+    }));
+  });
+});

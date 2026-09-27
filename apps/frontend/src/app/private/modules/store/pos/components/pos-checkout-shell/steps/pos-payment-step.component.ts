@@ -453,6 +453,11 @@ export class PosPaymentStepComponent implements OnInit {
   readonly effectiveAmount = computed<number>(
     () => this.amountOverride() ?? (this.cartState()?.summary?.total || 0),
   );
+  /** Backend `resolveTip` uses gross products, never discounted total or shipping. */
+  readonly tipBase = computed<number>(() => {
+    const summary = this.cartState()?.summary;
+    return (summary?.subtotal ?? 0) + (summary?.taxAmount ?? 0);
+  });
 
   // ── Footer-facing collector projections (read by the shell) ──────────────
   readonly mode = computed<PaymentMode | undefined>(() => this.collector()?.mode());
@@ -867,6 +872,14 @@ export class PosPaymentStepComponent implements OnInit {
       // viaja con el pago para que el POS persista payments.bank_account_id en
       // processPosPaymentTransaction (CreatePosPaymentDto).
       bank_account_id: submit.bankAccountId,
+      ...(submit.tip != null && submit.tip > 0
+        ? {
+            tip_amount: submit.tip,
+            tip_type: submit.tipType,
+            tip_value: submit.tipValue,
+            tip_waiter_id: submit.tipWaiterId ?? undefined,
+          }
+        : {}),
     };
 
     // Cobro multimétodo de contado: con 2+ tramos el payload lleva
@@ -904,6 +917,14 @@ export class PosPaymentStepComponent implements OnInit {
           payment_type: 'direct',
           amount: this.cartState()!.summary.total,
           amount_received: submit.amountReceived,
+          ...(submit.tip != null && submit.tip > 0
+            ? {
+                tip_amount: submit.tip,
+                tip_type: submit.tipType,
+                tip_value: submit.tipValue,
+                tip_waiter_id: submit.tipWaiterId ?? undefined,
+              }
+            : {}),
           // Multimétodo: `PayOrderDto` exige el escalar pero el backend
           // prefiere `payments[]` cuando llega. Se adjunta, no se sustituye.
           ...(multiLegs ? { payments: toPosPaymentLegs(multiLegs) } : {}),

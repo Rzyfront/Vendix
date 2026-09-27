@@ -458,7 +458,7 @@
             }
 
             <!-- Tip -->
-            @if (config().allowTip) {
+            @if (config().allowTip && mode() === 'contado') {
               <section class="pc-card">
                 <div class="section-header">
                   <div class="section-indicator"></div>
@@ -1014,7 +1014,7 @@
       }
 
       <!-- Tip -->
-      @if (config().allowTip) {
+      @if (config().allowTip && mode() === 'contado') {
         <section class="pc-card">
           <div class="section-header">
             <div class="section-indicator"></div>

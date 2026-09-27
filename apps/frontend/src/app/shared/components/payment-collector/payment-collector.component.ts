@@ -149,6 +149,8 @@ export class PaymentCollectorComponent implements OnInit {
   readonly context = input<PaymentContext>('generic');
   readonly currencyDecimals = input<number>();
   readonly walletInfo = input<{ balance: number } | null>(null);
+  /** Gross product amount for percentage tips; excludes discounts and shipping. */
+  readonly tipBase = input<number | null>(null);
   /**
    * Seed for the initial mode on reset. Honored only when the resolved config
    * has `allowCredit` (a 'credito' seed on a credit-less config falls back to
@@ -223,7 +225,7 @@ export class PaymentCollectorComponent implements OnInit {
     const raw = this.tip() || 0;
     if (raw <= 0) return 0;
     if (this.tipType() === 'percentage') {
-      return Math.round((this.effectiveBase() * raw) / 100 * 100) / 100;
+      return Math.round(((this.tipBase() ?? this.effectiveBase()) * raw) / 100 * 100) / 100;
     }
     return Math.round(raw * 100) / 100;
   });
@@ -451,7 +453,7 @@ export class PaymentCollectorComponent implements OnInit {
   );
 
   readonly effectiveTotal = computed<number>(
-    () => this.effectiveBase() + (this.config().allowTip ? this.tip() || 0 : 0),
+    () => this.effectiveBase() + (this.config().allowTip && this.mode() === 'contado' ? this.tipAmount() : 0),
   );
 
   readonly isCashSelected = computed(() => this.selectedMethod()?.type === PaymentMethodType.CASH);
