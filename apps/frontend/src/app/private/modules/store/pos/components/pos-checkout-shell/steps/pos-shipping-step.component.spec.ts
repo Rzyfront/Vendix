@@ -1,5 +1,5 @@
 import { NO_ERRORS_SCHEMA, Pipe, PipeTransform, signal } from '@angular/core';
-import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -740,7 +740,10 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.shippingCost()).toBe(7000);
   });
 
-  it('after geocode emits coords, /shipping/calculate payload includes latitude/longitude', fakeAsync(() => {
+  // Zoneless: sin zone.js/testing, `fakeAsync` no existe en este arnés (ver
+  // pos-order-confirmation.component.spec.ts). Se usa `jasmine.clock()` para
+  // controlar el debounce de 500ms del forward-geocode del formulario real.
+  it('after geocode emits coords, /shipping/calculate payload includes latitude/longitude', async () => {
     const geocoding = TestBed.inject(GeocodingService) as unknown as { forward: jasmine.Spy };
     geocoding.forward = jasmine.createSpy('forward').and.returnValue(
       of({ lat: 4.6097, lng: -74.0817, precision: 'exact' }),
@@ -749,28 +752,60 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     state.shippingContext = undefined;
     state.linkedOrderId = null;
     state.customer = { ...state.customer!, addresses: [] };
-    mount(state);
-    component.goToShipSubStep(1);
-    fixture.detectChanges();
+    // `debounceTime`'s internal "did we really wait long enough" check reads
+    // `Date.now()` (via RxJS's `asyncScheduler`/`dateTimestampProvider`), which
+    // `jasmine.clock().install()` alone does NOT mock — only the timer
+    // functions (setTimeout/setInterval). Without `mockDate()`, `tick()` fires
+    // the fake interval, but the operator sees real wall-clock time barely
+    // advanced, decides it hasn't actually waited 500ms, and reschedules
+    // instead of emitting — the callback never runs and the spy is never
+    // called. `mockDate()` freezes/advances `Date` in lockstep with `tick()`
+    // so the operator's own time check agrees with the fake clock.
+    //
+    // Installed BEFORE the render that constructs `AddressFormFieldsComponent`
+    // (not just around the real edits below): its constructor's
+    // `initialAddress` prefill effect ALSO fires `municipality_code` through
+    // the same debounced `merge(...)` on first render (emitEvent:true, to
+    // bridge country/municipality into their signals — see that effect's own
+    // comment). `debounceTime` keeps a single shared "pending task" slot per
+    // subscription; if that first, harmless emission schedules its wait on the
+    // REAL scheduler (clock installed later), it silently claims that slot and
+    // every later value (ours) just updates the pending value/time without
+    // scheduling a NEW fake timer — so a `tick()` from an installed-afterward
+    // clock flushes nothing, ever. Ticking once right after that first render
+    // flushes the harmless cycle (address_line1 is still empty, so
+    // `forwardGeocodeFromForm` no-ops on its own length guard) and frees the
+    // slot for the real edits' own debounce below.
+    jasmine.clock().install();
+    jasmine.clock().mockDate();
+    try {
+      mount(state);
+      component.goToShipSubStep(1);
+      fixture.detectChanges();
+      jasmine.clock().tick(600);
 
-    const form = fixture.debugElement.query(By.directive(AddressFormFieldsComponent))
-      .componentInstance as AddressFormFieldsComponent;
-    form.form.markAsDirty();
-    form.form.get('address_line1')!.setValue('Carrera 7 # 32-16');
-    form.form.get('city')!.setValue('Bogotá');
-    form.form.get('state_province')!.setValue('Bogotá D.C.');
-    tick(600); // flush the shared component's 500ms forward-geocode debounce
+      const form = fixture.debugElement.query(By.directive(AddressFormFieldsComponent))
+        .componentInstance as AddressFormFieldsComponent;
+      form.form.markAsDirty();
+      form.form.get('address_line1')!.setValue('Carrera 7 # 32-16');
+      form.form.get('city')!.setValue('Bogotá');
+      form.form.get('state_province')!.setValue('Bogotá D.C.');
+      jasmine.clock().tick(600); // flush the shared component's 500ms forward-geocode debounce
+      await fixture.whenStable();
+    } finally {
+      jasmine.clock().uninstall();
+    }
     fixture.detectChanges();
 
     expect(geocoding.forward).toHaveBeenCalled();
     expect(component.address()).toEqual(jasmine.objectContaining({
       latitude: 4.6097, longitude: -74.0817,
     }));
-    expect(component.addressGeocodePrecision()).toBe('exact' as any);
+    expect(component.addressGeocodePrecision()).toBe('exact');
     expect(calculate.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
       latitude: 4.6097, longitude: -74.0817,
     }));
-  }));
+  });
 
   it('B6 — cambiar de tarifa en el selector actualiza el costo de envío', () => {
     mount();
