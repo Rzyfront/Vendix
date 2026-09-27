@@ -992,6 +992,16 @@ export class OrderFlowService {
 
           if (item.inventory_consumed_at_fire === true) continue;
 
+          // BUG 1 (no-overselling-stock-guard-plan.md, 2026-09-26): una línea
+          // ya ENTREGADA (`inventory_committed=true`, su stock ya se descontó
+          // en `commitOrderLines` y la reserva que la cubría ya fue consumida)
+          // o CANCELADA (`cancelled_at`, su reserva ya fue liberada) no tiene
+          // nada pendiente que reclamar. Re-demandarla aquí duplicaba stock
+          // que ya salió o que nunca se iba a vender.
+          if (item.inventory_committed === true || item.cancelled_at != null) {
+            continue;
+          }
+
           const isKitchenDish =
             isRestaurant && product.product_type === 'prepared' && !item.skip_kds;
           if (isKitchenDish) continue;

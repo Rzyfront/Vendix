@@ -535,6 +535,85 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.reservations).toHaveLength(1);
     expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
   });
+
+  // no-overselling-stock-guard-plan.md, BUG 1 (2026-09-26): la misma clase
+  // de defecto que en `payments.service.ts` — el bucle de `groups` sólo
+  // excluía `inventory_consumed_at_fire` (cocina) y los platos que van a
+  // KDS, nunca una línea ya ENTREGADA (`inventory_committed=true`, stock ya
+  // descontado por `commitOrderLines`, reserva ya consumida) ni una línea
+  // CANCELADA (reserva ya liberada por `cancelOrderItem`). Una mesa con
+  // ambas volvía a demandarlas al promover el draft a `created` (justo
+  // antes de cobrar) y podía 409 con `INV_STOCK_INSUFFICIENT_LINES` aunque
+  // el faltante real fuera cero — no queda nada que reclamar de ninguna de
+  // las dos.
+  it('BUG 1: una línea entregada o cancelada no se re-demanda ni se re-reserva al promover el draft', async () => {
+    const tx: any = {
+      $queryRaw: jest.fn(async () => [{ id: 1, state: 'draft' }]),
+      orders: {
+        findFirst: jest.fn(async () => ({
+          id: 1,
+          store_id: 4,
+          order_items: [
+            {
+              product_id: 701, product_variant_id: null, quantity: 5,
+              inventory_committed: true, cancelled_at: null,
+              products: { id: 701, name: 'MODELO', track_inventory: true, product_type: 'physical' },
+            },
+            {
+              product_id: 702, product_variant_id: null, quantity: 3,
+              inventory_committed: false, cancelled_at: new Date(),
+              products: { id: 702, name: 'OTRO', track_inventory: true, product_type: 'physical' },
+            },
+          ],
+        })),
+        update: jest.fn(async ({ data }: any) => ({ id: 1, state: data.state })),
+      },
+      stock_reservations: { aggregate: jest.fn(async () => ({ _sum: { quantity: 0 } })) },
+    };
+    const prisma: any = { $transaction: jest.fn(async (cb: any) => cb(tx)) };
+    const stockLevelManager: any = {
+      reserveStock: jest.fn(),
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(11),
+    };
+    // Sonda: si el fix no excluyera las dos líneas ya asentadas, `groups`
+    // llegaría con demanda > 0 y este mock rechazaría con el mismo 409 que
+    // produciría un stock realmente en 0.
+    const assertLinesAvailable = jest.fn().mockImplementation((lines: any[]) => {
+      if (lines.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+          'Stock insuficiente',
+          {
+            items: lines.map((l: any) => ({
+              product_name: l.product_name, requested: l.quantity, available: 0,
+            })),
+          },
+        );
+      }
+      return Promise.resolve([]);
+    });
+    const stockValidator: any = {
+      resolveInventoryPolicy: jest.fn().mockResolvedValue({
+        allowOversell: false, allowIngredientOveruse: true,
+      }),
+      assertLinesAvailable,
+    };
+    const audit: any = { logCustom: jest.fn() };
+
+    const service = new OrderFlowService(
+      prisma, {} as any, {} as any, {} as any, {} as any,
+      stockLevelManager, {} as any, {} as any, audit,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      stockValidator,
+    );
+    jest.spyOn(service as any, 'updateOrderState').mockResolvedValue(undefined);
+
+    const promoted = await (service as any).promoteDraftToCreated(1, 4);
+
+    expect(promoted).toBe(true);
+    expect(assertLinesAvailable).not.toHaveBeenCalled();
+    expect(stockLevelManager.reserveStock).not.toHaveBeenCalled();
+  });
 });
 
 describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
