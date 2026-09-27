@@ -61,7 +61,7 @@
         } @else if (addressId() && !addressEditing()) {
           <div class="address-preview">
             <span>{{ addressSummary() }}</span>
-            <button type="button" class="no-methods-link" (click)="addressEditing.set(true)">Usar otra dirección</button>
+            <button type="button" class="no-methods-link" (click)="beginNewAddress()">Usar otra dirección</button>
           </div>
         } @else {
           <p class="address-help">Usaremos el teléfono del cliente; puedes cambiarlo si recibirá otra persona.</p>

@@ -649,6 +649,11 @@ export class PosShippingStepComponent {
 
   /** Gate the delivery details while the cashier is still beside Cliente. */
   validateDetailsForCliente(): boolean {
+    // Historical orders keep their original destination when nothing was
+    // edited, even if that snapshot cannot be hydrated into today's form.
+    if (this.originalShipping() && !this.hasShippingChanges() && !this.customerChanged()) {
+      return true;
+    }
     if (!this.selectedShippingMethod()) {
       this.flashDeliveryDetail('shipping-method', 'Selecciona cómo llegará el pedido');
       return false;
@@ -660,6 +665,22 @@ export class PosShippingStepComponent {
       return false;
     }
     return true;
+  }
+
+  /** A new destination must not mutate the customer's selected saved address. */
+  beginNewAddress(): void {
+    this.invalidateQuote();
+    this.addressEditing.set(true);
+    this.shippingEdited.set(true);
+    this.freeAddressEdited.set(true);
+    this.shippingRateId.set(null);
+    this.setAddress(null, null);
+    this.initialAddress.set({
+      address_line1: null, address_line2: null, city: null,
+      state_province: null, country_code: 'CO', postal_code: null,
+      phone_number: this.cartState()?.customer?.phone ?? null,
+      latitude: null, longitude: null,
+    });
   }
 
   private flashDeliveryDetail(section: FlashSection, message: string): void {

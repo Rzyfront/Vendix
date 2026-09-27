@@ -213,6 +213,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.preservationWarning()).toBeTruthy();
     expect(component.editorValidationError()).toBeNull();
     expect(component.attemptNextSubStep()).toBeTrue();
+    expect(component.validateDetailsForCliente()).toBeTrue();
     expect(calculate).not.toHaveBeenCalled();
   });
 
@@ -229,6 +230,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.address()).toBeNull();
     expect(component.addressId()).toBeNull();
     expect(component.editorValidationError()).toContain('Cambiaste el cliente');
+    expect(component.validateDetailsForCliente()).toBeFalse();
     component.selectSavedAddress(33); // Former customer ID is not selectable.
     expect(component.addressId()).toBeNull();
     component.selectSavedAddress(1001);
@@ -283,6 +285,21 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     component.address.set({ ...originalAddress, phone_number: '3117654321' });
     component.addressValid.set(true);
     expect(component.buildShippingContext()?.shippingAddress.recipient_phone).toBe('3117654321');
+  });
+
+  it('usar otra dirección crea un destino nuevo sin reutilizar el id guardado', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    mount(state);
+    expect(component.addressId()).toBe(1);
+    component.beginNewAddress();
+    expect(component.addressId()).toBeNull();
+    expect(component.initialAddress()?.phone_number).toBe('3001234567');
+    expect(component.addressValid()).toBeFalse();
+    component.onAddressChange({ ...originalAddress, address_line1: 'Calle nueva 10' }, true);
+    component.onAddressValidChange(true);
+    expect(component.buildShippingContext()?.shippingAddressId).toBeUndefined();
   });
 
   it('en Cliente muestra solo costo en Envío y exige método y dirección antes de avanzar', () => {
