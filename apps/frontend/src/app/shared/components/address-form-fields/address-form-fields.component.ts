@@ -18,11 +18,12 @@ import {
   Validators,
 } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { Observable } from 'rxjs';
-import { debounceTime, distinctUntilChanged, map, startWith } from 'rxjs/operators';
+import { Observable, merge } from 'rxjs';
+import { debounceTime, map, startWith } from 'rxjs/operators';
 
 import { AddressMapPickerComponent } from '../../../private/modules/ecommerce/components/address-map-picker/address-map-picker.component';
 import {
+  GeocodePrecision,
   GeocodingService,
   NormalizedAddress,
 } from '../../../private/modules/ecommerce/services/geocoding.service';
@@ -78,6 +79,19 @@ export interface AddressPayload {
    *    construyen un `AddressPayload` literal (despacho, rutas, checkout, POS).
    */
   municipality_code?: string | null;
+  /**
+   * True once the operator (or GPS via `onLocated`) placed/dragged the map
+   * pin for THIS coordinate — a manual point the operator explicitly set,
+   * as opposed to a forward-geocode guess. Optional and purely additive:
+   * existing consumers that don't read it are unaffected.
+   */
+  pin_confirmed?: boolean;
+  /**
+   * Precision tier of the last forward-geocode result (see
+   * `GeocodePrecision`), or `null` when the point came from a confirmed pin
+   * or hasn't been resolved yet. Optional and purely additive.
+   */
+  geocode_precision?: GeocodePrecision | null;
 }
 
 /**
@@ -179,6 +193,59 @@ export class AddressFormFieldsComponent {
   readonly coordsSignal = signal<LatLng | null>(null);
   /** True while reverse-geocoding a map locate. */
   readonly reverseLoading = signal(false);
+  /** Precision tier of the last forward-geocode result; null when unresolved
+   *  or superseded by a confirmed pin (see {@link pinConfirmed}). */
+  readonly precision = signal<GeocodePrecision | null>(null);
+  /** Canonical label the geocoder resolved the query to, for display only. */
+  readonly geocodeLabel = signal<string | null>(null);
+  /**
+   * True once the operator (drag/click on the map, or GPS via `onLocated`)
+   * placed an exact point. While true, forward-geocode results from typing
+   * must NOT overwrite the coordinate — the manual pin wins. Editing
+   * `address_line1` again means a different address is being entered, so
+   * it resets back to false (see the constructor subscription below).
+   */
+  readonly pinConfirmed = signal(false);
+  /** Counter to discard a stale forward-geocode response that resolves after
+   *  a newer request was already fired (fast retyping, fast pin drag). */
+  private geocodeGeneration = 0;
+
+  /**
+   * Non-blocking precision badge shown under the address line. A confirmed
+   * pin always wins over whatever precision tier a prior geocode returned —
+   * the operator's placement is more trustworthy than a text-match guess.
+   */
+  readonly precisionBadge = computed<{
+    text: string;
+    tone: 'success' | 'warning';
+    icon: string;
+  } | null>(() => {
+    if (this.pinConfirmed()) {
+      return { text: 'Punto confirmado en el mapa', tone: 'success', icon: 'map-pin' };
+    }
+    switch (this.precision()) {
+      case 'exact':
+        return { text: 'Ubicación exacta', tone: 'success', icon: 'check-circle' };
+      case 'interpolated':
+        return { text: 'Ubicación aproximada a la placa', tone: 'success', icon: 'map-pin' };
+      case 'intersection':
+        return { text: 'Ubicada en la esquina', tone: 'success', icon: 'map-pin' };
+      case 'street':
+        return {
+          text: 'Solo encontramos la calle — confirma el punto en el mapa',
+          tone: 'warning',
+          icon: 'alert-triangle',
+        };
+      case 'area':
+        return {
+          text: 'Solo encontramos el barrio o sector — confirma el punto en el mapa',
+          tone: 'warning',
+          icon: 'alert-triangle',
+        };
+      default:
+        return null;
+    }
+  });
 
   private readonly fb = inject(FormBuilder);
   private readonly geocoding = inject(GeocodingService);
@@ -377,15 +444,15 @@ export class AddressFormFieldsComponent {
       }
     });
 
-    // Keep coordsSignal in sync with the hidden lat/lng controls so the map
-    // follows whatever point the form currently has.
-    effect(() => {
-      const lat = this.form.get('latitude')?.value as number | null;
-      const lng = this.form.get('longitude')?.value as number | null;
-      if (lat != null && lng != null) {
-        this.coordsSignal.set({ lat, lng });
-      }
-    });
+    // `coordsSignal` (map center) is now written directly, as a signal, at
+    // every place a coordinate is resolved: the initial-address prefill
+    // above, `onLocated`, `forwardGeocodeFromForm`'s success path, and
+    // `clearCoords`. There used to be an `effect()` here reading
+    // `form.get('latitude')?.value` — a PLAIN property, not a signal — so it
+    // never re-ran after its first (no-op) execution and the map silently
+    // never re-centered on a resolved coordinate. See
+    // vendix-zoneless-signals: reading a FormControl value inside `effect()`
+    // does not register a reactive dependency.
 
     // Opt-in: make phone_number required when `requirePhone()` is true so it
     // affects form.valid / validChange. Default false leaves the constructor
@@ -409,7 +476,7 @@ export class AddressFormFieldsComponent {
     this.form.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
-        this.addressChange.emit(this.form.value as AddressPayload);
+        this.emitAddressChange();
       });
     this.form.statusChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -417,16 +484,56 @@ export class AddressFormFieldsComponent {
         this.validChange.emit(this.form.valid);
       });
 
-    // Forward-geocode typed address_line1 (debounced 500ms). Sets lat/lng
-    // silently; failure sets a non-blocking warning.
+    // A manual pin (map drag/click/GPS) is the source of truth for its
+    // coordinate. Typing a NEW address_line1 means the operator is entering
+    // a different address, so the previous pin confirmation no longer
+    // applies to it. `prefillFromGeocode`/the initial-address prefill both
+    // write address_line1 with `emitEvent:false`, so they never reach here.
     this.form
       .get('address_line1')!
-      .valueChanges.pipe(
-        debounceTime(500),
-        distinctUntilChanged(),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe((line1: string | null) => this.forwardGeocodeFromForm(line1));
+      .valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.pinConfirmed()) this.pinConfirmed.set(false);
+      });
+
+    // Re-geocode (debounced 500ms) on address_line1, city, state_province OR
+    // municipality_code changes — the #1 bug this component had: only
+    // address_line1 re-triggered a forward-geocode, so picking a different
+    // city/department on an address that already resolved coordinates left
+    // them silently stale.
+    //
+    // Gated on `form.dirty` so the silent `initialAddress` prefill (which
+    // sets `country_code`/`municipality_code` with `emitEvent:true` but never
+    // calls `markAsDirty`) does NOT fire a needless re-geocode on every
+    // modal open. `form.dirty` turns true on real typing, and is explicitly
+    // set by `onMunicipalitySelected` and `prefillFromGeocode` — exactly the
+    // user-driven changes that must re-trigger this (see vendix-known-errors:
+    // "setValue no marca dirty").
+    merge(
+      this.form.get('address_line1')!.valueChanges,
+      this.form.get('city')!.valueChanges,
+      this.form.get('state_province')!.valueChanges,
+      this.form.get('municipality_code')!.valueChanges,
+    )
+      .pipe(debounceTime(500), takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (!this.form.dirty) return;
+        this.forwardGeocodeFromForm();
+      });
+  }
+
+  /**
+   * Emits the current form value PLUS the two signal-only fields
+   * (`pin_confirmed`, `geocode_precision`) that are not FormControls. Every
+   * `addressChange` emission goes through this helper so parents always see
+   * both, and existing consumers that ignore them are unaffected.
+   */
+  private emitAddressChange(): void {
+    this.addressChange.emit({
+      ...(this.form.value as AddressPayload),
+      pin_confirmed: this.pinConfirmed(),
+      geocode_precision: this.precision(),
+    });
   }
 
   /** Toggles the collapsible map section. */
@@ -447,7 +554,7 @@ export class AddressFormFieldsComponent {
    */
   onMunicipalitySelected(municipality: DianMunicipalityOption | null): void {
     if (!municipality) {
-      this.addressChange.emit(this.form.value as AddressPayload);
+      this.emitAddressChange();
       return;
     }
     this.form
@@ -457,7 +564,7 @@ export class AddressFormFieldsComponent {
       .get('state_province')
       ?.setValue(municipality.department_name, { emitEvent: false });
     this.form.markAsDirty();
-    this.addressChange.emit(this.form.value as AddressPayload);
+    this.emitAddressChange();
   }
 
   /**
@@ -487,6 +594,12 @@ export class AddressFormFieldsComponent {
    * (this reusable component uses free-text city/state_province).
    */
   onLocated(coords: LatLng): void {
+    // The map pin is now the source of truth for this coordinate: it must
+    // win over any in-flight or future forward-geocode guess.
+    this.pinConfirmed.set(true);
+    this.precision.set(null);
+    this.geocodeLabel.set(null);
+    this.addressWarning.set(null);
     this.form.get('latitude')?.setValue(coords.lat);
     this.form.get('longitude')?.setValue(coords.lng);
     this.coordsSignal.set(coords);
@@ -504,23 +617,35 @@ export class AddressFormFieldsComponent {
       });
   }
 
+  /**
+   * Reverse-geocode landed after a map locate. Only fills fields that are
+   * CURRENTLY EMPTY — the typed address is the truth; a pin dropped on an
+   * already-filled form must never clobber `address_line1` (or any other
+   * textual field) with the provider's guess. `country_code` is the one
+   * exception (see its own comment below): it is a controlled selector, not
+   * free text the operator typed.
+   */
   private prefillFromGeocode(address: NormalizedAddress): void {
+    const isEmpty = (value: unknown) =>
+      value == null || String(value).trim().length === 0;
+
     // emitEvent:false → reverse fill must NOT re-trigger the forward-geocode
-    // watcher on address_line1 (that would fight the map).
-    if (address.address_line1) {
+    // watcher on address_line1/city/state_province (that would fight the map
+    // pin this method exists to honor).
+    if (address.address_line1 && isEmpty(this.form.get('address_line1')?.value)) {
       this.form
         .get('address_line1')
         ?.setValue(address.address_line1, { emitEvent: false });
     }
-    if (address.address_line2) {
+    if (address.address_line2 && isEmpty(this.form.get('address_line2')?.value)) {
       this.form
         .get('address_line2')
         ?.setValue(address.address_line2, { emitEvent: false });
     }
-    if (address.city) {
+    if (address.city && isEmpty(this.form.get('city')?.value)) {
       this.form.get('city')?.setValue(address.city, { emitEvent: false });
     }
-    if (address.state_province) {
+    if (address.state_province && isEmpty(this.form.get('state_province')?.value)) {
       this.form
         .get('state_province')
         ?.setValue(address.state_province, { emitEvent: false });
@@ -536,15 +661,16 @@ export class AddressFormFieldsComponent {
         .get('country_code')
         ?.setValue(address.country_code.toUpperCase(), { emitEvent: true });
     }
-    if (address.postal_code) {
+    if (address.postal_code && isEmpty(this.form.get('postal_code')?.value)) {
       this.form
         .get('postal_code')
         ?.setValue(address.postal_code, { emitEvent: false });
     }
     this.form.markAsDirty();
     this.reverseLoading.set(false);
-    // Re-emit so the parent sees the reverse-filled values.
-    this.addressChange.emit(this.form.value as AddressPayload);
+    // Re-emit so the parent sees the reverse-filled values (plus the
+    // pinConfirmed/precision signals set by `onLocated`).
+    this.emitAddressChange();
     // El geocodificador devuelve nombres y NUNCA el código DANE
     // (`geocoding.service.ts:440` pone `municipality_code: null` a propósito),
     // así que se traduce aquí. Sin este paso, ubicar la dirección en el mapa
@@ -587,49 +713,100 @@ export class AddressFormFieldsComponent {
         this.form
           .get('state_province')
           ?.setValue(municipality.department_name, { emitEvent: false });
-        this.addressChange.emit(this.form.value as AddressPayload);
+        this.emitAddressChange();
       });
   }
 
   /**
-   * Forward-geocodes the typed address → coordinate, and re-centers the map
-   * on it. Query = line1 + city + "Colombia". The resolved point is stored
-   * silently on the hidden lat/lng controls. Failure sets `addressWarning`
-   * (NON-blocking — `validChange` is based only on syntactic validators).
+   * Forward-geocodes the composed address (line1 + city + state) and
+   * re-centers the map on the result. Debounced trigger lives in the
+   * constructor's `merge(...)` subscription and fires on address_line1,
+   * city, state_province OR municipality_code changes.
+   *
+   * A confirmed pin (`pinConfirmed()`) already IS the exact point the
+   * operator wants: this method returns immediately without calling the
+   * provider, so a forward-geocode can never overwrite it.
+   *
+   * Null result or an HTTP error CLEARS lat/lng (via {@link clearCoords}) —
+   * the #2 historical bug here was keeping the OLD coordinate on failure,
+   * which let a quote go out for a stale/unrelated point. `addressWarning`
+   * is NON-blocking — `validChange` is based only on syntactic validators.
    */
-  private forwardGeocodeFromForm(line1: string | null): void {
-    const base = (line1 ?? '').trim();
-    if (base.length < 5) {
+  private forwardGeocodeFromForm(): void {
+    if (this.pinConfirmed()) return;
+
+    const line1 = ((this.form.get('address_line1')?.value as string | null) ?? '').trim();
+    if (line1.length < 5) {
       this.addressWarning.set(null);
+      this.precision.set(null);
+      this.geocodeLabel.set(null);
       return;
     }
-    const city = (this.form.get('city')?.value as string | null)?.trim() ?? '';
-    const query = [base, city, 'Colombia'].filter(Boolean).join(', ');
+    const city = ((this.form.get('city')?.value as string | null) ?? '').trim();
+    const state = ((this.form.get('state_province')?.value as string | null) ?? '').trim();
+    const country = ((this.form.get('country_code')?.value as string | null) ?? '')
+      .trim()
+      .toUpperCase();
+    // "Colombia" is only a helpful hint for CO (or an unset) country — biasing
+    // a foreign address toward Colombia would send the query to the wrong
+    // place entirely.
+    const query =
+      !country || country === COLOMBIA_COUNTRY_CODE
+        ? [line1, city, 'Colombia'].filter(Boolean).join(', ')
+        : [line1, city, state].filter(Boolean).join(', ');
 
+    const generation = ++this.geocodeGeneration;
     this.geocoding
-      .forward(query)
+      .forward(query, { city: city || undefined, state: state || undefined })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
+          // A newer request superseded this one, or the operator confirmed a
+          // pin while this call was in flight — either way, discard.
+          if (generation !== this.geocodeGeneration || this.pinConfirmed()) return;
           if (res?.lat == null || res?.lng == null) {
+            this.clearCoords();
             this.addressWarning.set(
               'No pudimos geocodificar la dirección. Verifícala o ubícala en el mapa.',
             );
             return;
           }
           this.addressWarning.set(null);
-          this.form
-            .get('latitude')
-            ?.setValue(res.lat, { emitEvent: false });
-          this.form
-            .get('longitude')
-            ?.setValue(res.lng, { emitEvent: false });
+          this.form.get('latitude')?.setValue(res.lat, { emitEvent: false });
+          this.form.get('longitude')?.setValue(res.lng, { emitEvent: false });
           this.coordsSignal.set({ lat: res.lat, lng: res.lng });
+          this.precision.set(res.precision ?? null);
+          this.geocodeLabel.set(res.label ?? null);
+          this.emitAddressChange();
+          // Low-precision hit: open the map — even in compact mode — so the
+          // operator can confirm or drag the pin. Non-blocking: nothing here
+          // gates `validChange`/submit.
+          if (res.precision === 'street' || res.precision === 'area') {
+            this.showMap.set(true);
+            this.advancedOverride.set(true);
+          }
         },
         error: () => {
-          // Forward-geocode failed → leave the map as-is; manual form works.
-          this.addressWarning.set(null);
+          if (generation !== this.geocodeGeneration || this.pinConfirmed()) return;
+          this.clearCoords();
+          this.addressWarning.set(
+            'No pudimos geocodificar la dirección. Verifícala o ubícala en el mapa.',
+          );
         },
       });
+  }
+
+  /**
+   * Clears the resolved coordinate (and its precision) and re-emits so the
+   * parent never quotes shipping against a stale/previous point. Called on a
+   * null forward-geocode result and on an HTTP error.
+   */
+  private clearCoords(): void {
+    this.form.get('latitude')?.setValue(null, { emitEvent: false });
+    this.form.get('longitude')?.setValue(null, { emitEvent: false });
+    this.coordsSignal.set(null);
+    this.precision.set(null);
+    this.geocodeLabel.set(null);
+    this.emitAddressChange();
   }
 }

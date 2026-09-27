@@ -52,6 +52,19 @@
           <span>Ingresa una dirección válida (mínimo 5 caracteres).</span>
         </p>
       }
+      @if (precisionBadge(); as badge) {
+        <p
+          class="precision-badge"
+          [class.precision-badge--warning]="badge.tone === 'warning'"
+          role="status"
+        >
+          <app-icon [name]="badge.icon" [size]="14"></app-icon>
+          <span>{{ badge.text }}</span>
+          @if (!pinConfirmed() && geocodeLabel()) {
+            <span class="precision-badge-label">{{ geocodeLabel() }}</span>
+          }
+        </p>
+      }
     </div>
 
     @if (showAdvanced()) {
