@@ -22,6 +22,7 @@ import {
   FilterConfig,
   FilterValues,
   DropdownAction,
+  HeaderPinConfig,
   ButtonComponent,
   IconComponent,
   PaginationComponent,
@@ -223,6 +224,11 @@ export class OrdersListComponent {
     sort_by: 'created_at',
     sort_order: 'desc',
   };
+
+  // Pin de header del dropdown de filtros. Referencia ESTABLE (no un literal
+  // en el template): un objeto fresco por ciclo ensucia el input signal en
+  // cada pasada y encadena ticks infinitos en Zoneless.
+  readonly salesHeaderPin: HeaderPinConfig = { key: SALES_FILTERS_PIN_KEY, label: 'Fijar' };
 
   // Filter configuration for the options dropdown
   // Carril B - B2: filterConfigs es computed (no campo plano) porque la

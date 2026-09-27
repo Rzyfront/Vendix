@@ -11,7 +11,7 @@ import { EmptyStateComponent } from '../../../../shared/components/empty-state/e
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { OptionsDropdownComponent } from '../../../../shared/components/options-dropdown/options-dropdown.component';
-import { FilterConfig, FilterValues } from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { FilterConfig, FilterValues, HeaderPinConfig } from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 
 import { toLocalDateString, getDefaultEndDate, formatChartPeriod } from '../../../../shared/utils/date.util';
 import { AnalyticsService, ProfitLossSummary } from '../analytics/services/analytics.service';
@@ -159,7 +159,7 @@ interface FixedPeriodState {
             <app-options-dropdown
               [filters]="dateFilters()"
               [filterValues]="dateFilterValues()"
-              [headerPin]="{ key: 'fix_period', label: 'Fijar' }"
+              [headerPin]="periodPin"
               title="Período"
               triggerLabel="Período"
               [debounceMs]="300"
@@ -331,6 +331,11 @@ export class DashboardComponent {
 
   // Quick links config
   readonly quickLinks = QUICK_LINKS;
+
+  // Pin de header del dropdown de período. Referencia ESTABLE (no un literal
+  // en el template): un objeto fresco por ciclo ensucia el input signal en
+  // cada pasada y encadena ticks infinitos en Zoneless.
+  readonly periodPin: HeaderPinConfig = { key: FIXED_PERIOD_FILTER_KEY, label: 'Fijar' };
 
   // Preset options for the date filter
   private readonly presetOptions = [

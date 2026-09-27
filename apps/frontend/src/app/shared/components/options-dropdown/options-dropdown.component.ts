@@ -31,6 +31,18 @@ import {
   HeaderPinConfig,
 } from './options-dropdown.interfaces';
 
+/**
+ * Array vacío ESTABLE para multi-selects sin valor.
+ *
+ * `getMultiFilterValues()` se evalúa en CADA ciclo de detección de cambios y
+ * su resultado alimenta `[ngModel]` → `writeValue` → `signal.set`, que en
+ * Zoneless agenda un nuevo ciclo. Devolver un literal `[]` fresco por ciclo
+ * encadena ciclos infinitos y congela la app al abrir el dropdown.
+ * El multi-selector nunca muta el array in-place (toggle/remove crean uno
+ * nuevo), así que compartir esta referencia es seguro.
+ */
+const EMPTY_MULTI_VALUES: string[] = [];
+
 @Component({
   selector: 'app-options-dropdown',
   standalone: true,
@@ -395,7 +407,7 @@ export class OptionsDropdownComponent {
     if (Array.isArray(value)) {
       return value;
     }
-    return [];
+    return EMPTY_MULTI_VALUES;
   }
 
   /**
