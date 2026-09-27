@@ -777,6 +777,7 @@ export class PaymentGatewayService {
       amount: Prisma.Decimal | number | string;
       state: refunds_state_enum;
       refund_transaction_id: string | null;
+      reason?: string | null;
     },
   ) {
     const order = await this.prisma.orders.findUnique({
@@ -789,6 +790,29 @@ export class PaymentGatewayService {
     });
 
     if (!order) return;
+
+    // `refund_created` SIEMPRE que el carril de pasarela crea la fila de
+    // `refunds`, en cualquier estado inicial (incluido `processing` cuando la
+    // pasarela responde `pending`). Shape espejo de
+    // `RefundFlowService.recordCancellationPendingRefunds`: el reembolso vuelve
+    // por el riel original del pago (`refund_method: 'original_payment'`).
+    if (refund) {
+      await this.orderHistory?.record(this.prisma, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: (order as any).stores?.organization_id ?? undefined,
+        type: 'refund_created',
+        paymentId: refund.payment_id ?? null,
+        amount: refund.amount?.toString() ?? null,
+        payload: {
+          reason: refund.reason ?? null,
+          refund_id: refund.id,
+          refund_method: 'original_payment',
+          initial_state: refund.state,
+          payout_channel: 'gateway',
+        },
+      });
+    }
 
     // Plan order-truth-and-invoice-tz — refund_resolved (shape espejo de
     // `RefundFlowService.resolveRefund`). Solo cuando la pasarela dejó el
@@ -821,13 +845,17 @@ export class PaymentGatewayService {
       .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
       .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
 
+    // `refunds` no tiene columna `status`: el estado vive en `state`
+    // (`refunds_state_enum`) y el éxito terminal es `completed`. Filtrar por
+    // `r.status === 'succeeded'` dejaba `totalRefunded` siempre en 0 y la orden
+    // nunca pasaba a `refunded` por el carril de pasarela.
     const totalRefunded = order.refunds
-      .filter((r: any) => r.status === 'succeeded')
-      .reduce((sum: number, r: any) => sum + Number(r.amount), 0);
+      .filter((r) => r.state === refunds_state_enum.completed)
+      .reduce((sum: number, r) => sum + Number(r.amount), 0);
 
     const netAmount = totalPaid - totalRefunded;
 
-    if (netAmount <= 0 && totalRefunded > 0) {
+    if (netAmount <= 0 && totalRefunded > 0 && order.state !== 'refunded') {
       const previousState = order.state;
       await this.prisma.orders.update({
         where: { id: orderId },
