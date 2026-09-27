@@ -81,10 +81,10 @@ async function login(page) {
   await dismissWeeklyStories(page);
 }
 
-async function openUiView(page, url, visibleLocator, description) {
+async function openUiView(page, url, visibleLocator, description, attempts = 5) {
   let lastNavigationError = '';
   let lastView = '';
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
       await page.goto(url, { waitUntil: 'commit', timeout: 20_000 });
     } catch (error) {
@@ -105,7 +105,7 @@ async function openUiView(page, url, visibleLocator, description) {
       await page.goto('about:blank', { waitUntil: 'commit', timeout: 5_000 }).catch(() => {});
     }
   }
-  throw new Error(`${description} no apareció después de cinco navegaciones UI; URL=${url}; navegación=${lastNavigationError}; última vista=${lastView}`);
+  throw new Error(`${description} no apareció después de ${attempts} navegaciones UI; URL=${url}; navegación=${lastNavigationError}; última vista=${lastView}`);
 }
 
 async function main() {
@@ -220,11 +220,25 @@ async function main() {
               await shop.getByText('Tu carrito está vacío').waitFor();
             }
           }
+          const relatedFruit = shop.locator('app-product-carousel .carousel-item')
+            .filter({ hasText: 'Frutas Orgánicas Mix 1kg' });
+          await openUiView(shop,
+            'https://roku-shop.vendix.com/products/aceite-de-oliva-extra-virgen-500ml-1781330431513',
+            relatedFruit, 'La fruta ofrecida como producto sugerido');
+          await relatedFruit.click();
+          const quickView = shop.locator('app-product-quick-view-modal');
+          await quickView.locator('.product-price .current-price').getByText('$20.000').waitFor();
+          assert.equal((await quickView.locator('.product-price .original-price').innerText()).trim(),
+            '$22.000', 'La vista rápida también debe comparar importes con IVA incluido.');
+        } catch (error) {
+          // A cleanup failure must not hide which storefront assertion failed.
+          console.error('R9/R21 inclusive storefront error before restore:', error);
+          throw error;
         } finally {
           // The save can succeed even if redirect observation times out, so
           // always reopen the editor and inspect persisted state before exit.
           await openUiView(page, editUrl, page.locator('vendix-tax-inclusive-chip'),
-            'Restaurar impuesto de fruta QA');
+            'Restaurar impuesto de fruta QA', 12);
           const inclusive = page.locator('vendix-tax-inclusive-chip')
             .getByRole('button', { name: 'IVA General 19%: impuesto incluido en el precio unitario' });
           const activeOffer = await toggle.getAttribute('aria-pressed') === 'true';
@@ -238,7 +252,8 @@ async function main() {
             await page.getByRole('button', { name: 'Guardar', exact: true }).click();
             await page.waitForFunction(() => location.pathname === '/admin/products', null, { timeout: 15_000 });
           }
-          await openUiView(page, editUrl, taxMode, 'Fruta QA restaurada sin oferta ni IVA incluido');
+          await openUiView(page, editUrl, taxMode,
+            'Fruta QA restaurada sin oferta ni IVA incluido', 12);
           assert.equal(await toggle.getAttribute('aria-pressed'), 'false',
             'La oferta QA debe quedar apagada después de la prueba.');
         }
