@@ -190,6 +190,10 @@
                    enmarcado 9:16 (derecha / abajo en mobile), vía `order` en SCSS. -->
               <div class="delivery-address-grid">
               <div class="map-column">
+              <div
+                class="address-map-anchor"
+                [class.address-map-anchor--highlight]="mapHighlight()"
+              >
               <div class="map-phone-frame">
               <app-address-map-picker
                 [center]="map_center()"
@@ -198,6 +202,23 @@
                 (locateRequested)="onLocateRequested()"
               />
               </div>
+              </div>
+              @if (precisionBadge(); as badge) {
+                <p
+                  class="address-precision-badge address-precision-badge--{{ badge.tone }}"
+                  role="status"
+                >
+                  <app-icon [name]="badge.icon" [size]="14" />
+                  <span>
+                    {{ badge.text }}
+                    @if (geocodeLabel()) {
+                      <span class="address-precision-badge__label">{{
+                        geocodeLabel()
+                      }}</span>
+                    }
+                  </span>
+                </p>
+              }
               @if (addressWarning()) {
                 <p class="address-map-warning" role="status">
                   <app-icon name="alert-triangle" [size]="14" />
@@ -469,12 +490,33 @@
                 />
 
                 @if (use_new_address()) {
-                  <app-address-map-picker
-                    [center]="map_center()"
-                    [delegateLocate]="true"
-                    (located)="onMapLocated($event)"
-                    (locateRequested)="onLocateRequested()"
-                  />
+                  <div
+                    class="address-map-anchor"
+                    [class.address-map-anchor--highlight]="mapHighlight()"
+                  >
+                    <app-address-map-picker
+                      [center]="map_center()"
+                      [delegateLocate]="true"
+                      (located)="onMapLocated($event)"
+                      (locateRequested)="onLocateRequested()"
+                    />
+                  </div>
+                  @if (precisionBadge(); as badge) {
+                    <p
+                      class="address-precision-badge address-precision-badge--{{ badge.tone }}"
+                      role="status"
+                    >
+                      <app-icon [name]="badge.icon" [size]="14" />
+                      <span>
+                        {{ badge.text }}
+                        @if (geocodeLabel()) {
+                          <span class="address-precision-badge__label">{{
+                            geocodeLabel()
+                          }}</span>
+                        }
+                      </span>
+                    </p>
+                  }
                   @if (addressWarning()) {
                     <p class="address-map-warning" role="status">
                       <app-icon name="alert-triangle" [size]="14" />

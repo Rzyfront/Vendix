@@ -66,6 +66,7 @@ import {
 } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { IconName } from '../../../../../shared/components/icon/icons.registry';
 import {
   SelectorComponent,
   SelectorOption,
@@ -81,7 +82,7 @@ import { PaymentInstructionsModalComponent } from '../../components/payment-inst
 import { LocationPermissionModalComponent } from '../../components/location-permission-modal/location-permission-modal.component';
 import { AddressMapPickerComponent } from '../../components/address-map-picker/address-map-picker.component';
 import { GeolocationService } from '../../services/geolocation.service';
-import { GeocodingService } from '../../services/geocoding.service';
+import { GeocodingService, GeocodePrecision } from '../../services/geocoding.service';
 
 @Component({
   selector: 'app-checkout',
@@ -173,6 +174,70 @@ export class CheckoutComponent implements OnInit {
    * geocode succeeds or the user moves the pin manually.
    */
   readonly addressWarning = signal<string | null>(null);
+
+  /**
+   * Paso 8 (precision UX) — how precise the LAST resolved coordinate is,
+   * per the backend's `ForwardGeocodeResult.precision`. `null` while nothing
+   * has resolved yet. Purely informational: it never blocks Continuar/submit.
+   */
+  readonly geocodePrecision = signal<GeocodePrecision | null>(null);
+  /** Canonical address label the last forward-geocode matched, for display. */
+  readonly geocodeLabel = signal<string | null>(null);
+  /**
+   * True once the buyer has explicitly placed the pin themselves (map
+   * drag/click or accepted GPS fix). While true, a forward-geocode from
+   * typing city/department must NOT overwrite the buyer's coordinate —
+   * only editing `address_line1` again resets this, since that means the
+   * buyer is describing a different location.
+   */
+  readonly pinConfirmed = signal(false);
+  /** Briefly true to nudge the map (scroll + highlight) on low-precision hits. */
+  readonly mapHighlight = signal(false);
+
+  /**
+   * Precision badge shown near the address field/map. `pinConfirmed` always
+   * wins — a buyer-placed pin is more trustworthy than any geocoder guess.
+   * Returns `null` when there is nothing to show yet.
+   */
+  readonly precisionBadge = computed<{
+    text: string;
+    icon: IconName;
+    tone: 'success' | 'info' | 'warning';
+  } | null>(() => {
+    if (this.pinConfirmed()) {
+      return {
+        text: 'Punto confirmado en el mapa',
+        icon: 'check-circle-2',
+        tone: 'success',
+      };
+    }
+    switch (this.geocodePrecision()) {
+      case 'exact':
+        return { text: 'Ubicación exacta', icon: 'check-circle-2', tone: 'success' };
+      case 'interpolated':
+        return {
+          text: 'Ubicación aproximada a la placa',
+          icon: 'map-pin',
+          tone: 'info',
+        };
+      case 'intersection':
+        return { text: 'Ubicada en la esquina', icon: 'map-pin', tone: 'info' };
+      case 'street':
+        return {
+          text: 'Solo encontramos la calle — confirma el punto en el mapa',
+          icon: 'alert-triangle',
+          tone: 'warning',
+        };
+      case 'area':
+        return {
+          text: 'Solo encontramos el barrio o sector — confirma el punto en el mapa',
+          icon: 'alert-triangle',
+          tone: 'warning',
+        };
+      default:
+        return null;
+    }
+  });
 
   /** Mirror of the selected country code so the template can branch reactively (zoneless). */
   readonly selected_country_code = signal('CO');
@@ -766,6 +831,16 @@ export class CheckoutComponent implements OnInit {
       // aviso explícito se da al intentar avanzar, no mientras tipea.
       .subscribe(() => this.loadShippingOptions(false));
 
+    // Editing the street line invalidates a previously buyer-confirmed pin —
+    // the buyer is describing a (possibly different) location, so the next
+    // forward-geocode below must be allowed to move the pin again. This runs
+    // UNDEBOUNCED (every keystroke) so `pinConfirmed` flips to false well
+    // before the 800ms debounce below fires the actual geocode.
+    this.address_form
+      .get('address_line1')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.pinConfirmed.set(false));
+
     // Forward-geocode what the customer TYPES so the map re-centers on it. The
     // reverse-geocode fill uses `emitEvent: false`, so only genuine typing
     // reaches here — a map/GPS result never re-triggers this. 800ms debounce
@@ -812,8 +887,16 @@ export class CheckoutComponent implements OnInit {
    * here. When the address cannot be located, sets a non-blocking
    * `addressWarning` instead of blocking the flow (geocoding failures never
    * block per `vendix-address-geocoding`).
+   *
+   * Paso 8: bails out entirely when `pinConfirmed()` is true — the buyer
+   * already placed (or GPS-confirmed) an exact pin, and a coarser text
+   * geocode (e.g. triggered by a city/department change) must never yank it
+   * back. Editing `address_line1` is the only thing that resets the flag
+   * (see the raw subscription in `setupLocationData`).
    */
   private forwardGeocodeFromForm(line1: string | null): void {
+    if (this.pinConfirmed()) return;
+
     const base = (
       line1 ?? this.address_form.get('address_line1')?.value ?? ''
     ).trim();
@@ -852,11 +935,17 @@ export class CheckoutComponent implements OnInit {
             this.addressWarning.set(
               'No pudimos ubicar tu dirección en el mapa. Puedes mover el pin manualmente; si no, se cobrará la tarifa de envío estándar de tu zona.',
             );
+            // Never quote/save a STALE coordinate from a previous, different
+            // query — clear it and let zone pricing / the backend's own
+            // server-side geocode take over (vendix-shipping-distance-pricing).
+            this.clearGeocodedCoords();
             return;
           }
           const coords = { lat: res.lat, lng: res.lng };
           this.map_center.set(coords);
           this.addressWarning.set(null);
+          this.geocodePrecision.set(res.precision ?? null);
+          this.geocodeLabel.set(res.label ?? null);
           // Persist the point silently (never shown as text).
           this.address_form
             .get('latitude')
@@ -867,14 +956,52 @@ export class CheckoutComponent implements OnInit {
           // H2: el forward-geocode tardío invalida la cotización sellada sin
           // coords (el setValue silencioso no dispara el effect por sí solo).
           this.bumpCoordsVersion();
+          // Low-precision hit and no manual confirmation yet: nudge the
+          // buyer to check the pin — non-blocking, never stops Continuar.
+          if (res.precision === 'street' || res.precision === 'area') {
+            this.hintLowPrecisionPin();
+          }
         },
         error: () => {
           // Forward-geocode failed → leave the map as-is; manual form works.
           this.addressWarning.set(
             'No pudimos ubicar tu dirección en el mapa. Puedes mover el pin manualmente; si no, se cobrará la tarifa de envío estándar de tu zona.',
           );
+          this.clearGeocodedCoords();
         },
       });
+  }
+
+  /**
+   * Forward-geocode returned nothing usable (null result or request error):
+   * clear any previously-resolved coordinate so checkout never quotes or
+   * saves a point that belongs to a DIFFERENT address the buyer already
+   * moved past. Bumping `coords_version` re-evaluates the quote — with no
+   * client coords, the backend falls back to zone pricing or its own
+   * server-side geocode (see `vendix-shipping-distance-pricing`).
+   */
+  private clearGeocodedCoords(): void {
+    this.address_form.get('latitude')?.setValue(null, { emitEvent: false });
+    this.address_form.get('longitude')?.setValue(null, { emitEvent: false });
+    this.geocodePrecision.set(null);
+    this.geocodeLabel.set(null);
+    this.bumpCoordsVersion();
+  }
+
+  /**
+   * Non-blocking nudge for a low-precision geocode hit (`street`/`area`):
+   * the pin is likely off, so we scroll it into view and pulse it briefly
+   * so the buyer notices they should drag it to the right spot. Never
+   * blocks Continuar/submit — purely visual.
+   */
+  private hintLowPrecisionPin(): void {
+    this.mapHighlight.set(true);
+    setTimeout(() => {
+      this.host.nativeElement
+        .querySelector('.address-map-anchor')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 0);
+    setTimeout(() => this.mapHighlight.set(false), 2000);
   }
 
   private async loadDepartments(): Promise<void> {
@@ -1082,12 +1209,20 @@ export class CheckoutComponent implements OnInit {
     this.setMapCoords(coords);
   }
 
-  /** Stores the exact coordinate on the form. Never touches text fields. */
+  /**
+   * Stores the exact coordinate on the form. Never touches text fields.
+   * Paso 8: marks `pinConfirmed` — from here on, a text-driven forward-geocode
+   * must NOT overwrite this buyer-placed point (see `forwardGeocodeFromForm`).
+   * The stale geocoder label is cleared since it no longer describes this
+   * exact point; the "Punto confirmado" badge takes over (see `precisionBadge`).
+   */
   private setMapCoords(coords: { lat: number; lng: number }): void {
     this.map_center.set(coords);
     this.address_form.get('latitude')?.setValue(coords.lat);
     this.address_form.get('longitude')?.setValue(coords.lng);
     this.addressWarning.set(null);
+    this.pinConfirmed.set(true);
+    this.geocodeLabel.set(null);
     // H2: mover el pin / aceptar GPS invalida la cotización sellada (las
     // coords entran a la clave).
     this.bumpCoordsVersion();
@@ -1473,7 +1608,12 @@ export class CheckoutComponent implements OnInit {
     if (query.trim().length < 5) return;
     this.savedGeocodeInFlight.add(id);
     this.geocoding
-      .forward(query)
+      // Paso 8: pass city/state as separate params so the backend does not
+      // have to split them out of `query` by commas (see `forward` opts).
+      .forward(query, {
+        city: saved.city || undefined,
+        state: saved.state_province || undefined,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
@@ -1483,6 +1623,10 @@ export class CheckoutComponent implements OnInit {
             this.savedGeocodeInFlight.delete(id);
             return;
           }
+          // Store precision for display (badge only renders for the
+          // "new address" form/map, which is where this signal is read).
+          this.geocodePrecision.set(res.precision ?? null);
+          this.geocodeLabel.set(res.label ?? null);
           this.account_service
             .updateAddress(id, {
               address_line1: saved.address_line1,
