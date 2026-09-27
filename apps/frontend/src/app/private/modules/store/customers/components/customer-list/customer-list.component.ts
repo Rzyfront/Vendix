@@ -236,26 +236,6 @@ export class CustomerListComponent {
       transform: (val: any) => (val ? new Date(val).toLocaleDateString() : 'Nunca'),
     },
     {
-      key: 'state',
-      label: 'Estado',
-      priority: 2,
-      badge: true,
-      badgeConfig: { type: 'status', size: 'sm' },
-      // QUI-808 — el badge mostraba el enum crudo ("pending_verification"
-      // en snake_case) porque el template de la tabla solo aplica
-      // `column.transform` al texto del badge, no `badgeTransform`.
-      // Mapeo centralizado: si en el futuro se agregan más estados,
-      // se traducen acá sin tocar el table component.
-      transform: (val: any) => {
-        const labels: Record<string, string> = {
-          active: 'Activo',
-          inactive: 'Inactivo',
-          pending_verification: 'Verificación pendiente',
-        };
-        return labels[val] ?? val;
-      },
-    },
-    {
       key: 'created_at',
       label: 'Registrado',
       sortable: true,
