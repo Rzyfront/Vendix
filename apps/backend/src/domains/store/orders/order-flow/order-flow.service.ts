@@ -1557,6 +1557,20 @@ export class OrderFlowService {
       });
     }
 
+    if (
+      preClaimState === 'pending_payment' &&
+      dto.payment_type === PaymentType.ONLINE &&
+      ['wallet', 'wompi'].includes(paymentMethod.system_payment_method?.type ?? '')
+    ) {
+      const existingPending = (order.payments ?? []).find((payment) => payment.state === 'pending');
+      if (existingPending) {
+        throw this.wrapPaymentFailure('payment_pending', {
+          order_id: orderId,
+          payment_id: existingPending.id,
+        });
+      }
+    }
+
     // Cobro multimétodo de contado — guarda upfront: `payments[]` sólo se
     // acepta con `payment_type: 'direct'`. Va AQUÍ (y no en cada rama) porque
     // la rama shipped ignora `payment_type`: sin esta guarda, un
@@ -2235,6 +2249,15 @@ export class OrderFlowService {
       const isReservedDigitalPayment = ['wallet', 'wompi'].includes(
         paymentMethod.system_payment_method?.type ?? '',
       );
+      // `order.state` is the transient processing claim, not the business
+      // state the cashier paid from. Validate the real edge BEFORE creating
+      // a pending row, so a rejected transition cannot strand a reservation.
+      this.validateTransition(
+        preClaimState === 'draft'
+          ? 'created'
+          : ((preClaimState ?? order.state) as OrderState),
+        'pending_payment',
+      );
       const transactionId = await this.generateTransactionId();
 
       const pendingPayment = await this.prisma.payments.create({
@@ -2257,22 +2280,36 @@ export class OrderFlowService {
       });
       paymentPersisted = true;
 
-      // `order.state` is the transient processing claim, not the business
-      // state the cashier paid from. A draft was promoted to created above;
-      // created -> pending_payment is legal, processing -> pending_payment is
-      // not. Validate that real edge while retaining the claim until write.
-      this.validateTransition(
-        preClaimState === 'draft'
-          ? 'created'
-          : ((preClaimState ?? order.state) as OrderState),
-        'pending_payment',
-      );
-      const updatedOrder = await this.updateOrderState(
-        orderId,
-        'pending_payment',
-        {},
-        { historyFromState: preClaimState },
-      );
+      let updatedOrder;
+      try {
+        updatedOrder = await this.updateOrderState(
+          orderId,
+          'pending_payment',
+          {},
+          { historyFromState: preClaimState },
+        );
+      } catch (error) {
+        // No processor has run yet. Cancel the one reserved digital row and
+        // reopen the claimed order atomically, including any draft stock
+        // reservation. If compensation fails, keep the claim/pending row
+        // fail-closed instead of allowing a second active reservation.
+        if (isReservedDigitalPayment) {
+          try {
+            await this.compensateUnprocessedDigitalReservation(
+              orderId,
+              order.store_id,
+              pendingPayment.id,
+              preClaimState,
+              draftReservations,
+            );
+          } catch (compensationError) {
+            this.logger.error(
+              `[flow/pay digital reservation compensation failed] order=${orderId} payment=${pendingPayment.id}: ${(compensationError as Error).message}`,
+            );
+          }
+        }
+        throw error;
+      }
 
       this.logger.log(
         `Order #${orderId} moved to pending_payment for online payment`,
@@ -7886,6 +7923,53 @@ export class OrderFlowService {
         `[payOrder pre-claim state restore failed] order=${orderId}: ${(restoreErr as Error).message}`,
       );
     }
+  }
+
+  /** Undo only a digital reservation that was never handed to its processor. */
+  private async compensateUnprocessedDigitalReservation(
+    orderId: number,
+    storeId: number,
+    paymentId: number,
+    preClaimState: OrderState | null,
+    draftReservations: DraftReservationKey[],
+  ): Promise<void> {
+    if (!preClaimState) {
+      throw new Error(`Missing pre-claim state for digital reservation ${paymentId}`);
+    }
+    await this.prisma.$transaction(async (tx) => {
+      const locked = await lockOrderLifecycle(tx, orderId, storeId);
+      if (locked.state !== 'processing' && locked.state !== 'pending_payment') {
+        throw new Error(`Digital reservation order changed state: order=${orderId} state=${locked.state}`);
+      }
+      const cancelled = await tx.payments.updateMany({
+        where: { id: paymentId, order_id: orderId, state: 'pending' },
+        data: { state: 'cancelled', updated_at: new Date() },
+      });
+      if (cancelled.count !== 1) {
+        throw new Error(`Digital reservation already changed: payment=${paymentId}`);
+      }
+      if (preClaimState === 'draft') {
+        for (const reservation of draftReservations) {
+          await this.stockLevelManager.releaseReservationQuantity(
+            'order',
+            orderId,
+            reservation.productId,
+            reservation.variantId,
+            reservation.quantity,
+            'cancelled',
+            tx,
+            { newestFirst: true },
+          );
+        }
+      }
+      const restored = await tx.orders.updateMany({
+        where: { id: orderId, store_id: storeId, state: locked.state as OrderState },
+        data: { state: preClaimState, updated_at: new Date() },
+      });
+      if (restored.count !== 1) {
+        throw new Error(`Digital reservation claim changed: order=${orderId}`);
+      }
+    });
   }
 
   /** Release only the quantity reserved by this draft claim, then reopen it

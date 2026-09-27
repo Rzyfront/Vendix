@@ -243,6 +243,95 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.reservations).toHaveLength(1);
   });
 
+  it.each([
+    ['antes de escribir estado', false],
+    ['después de escribir estado (historial)', true],
+  ])('reserva digital: fallo %s anula sólo el pending nuevo y restaura el draft', async (_label, stateWritten) => {
+    const h = harness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue({
+      id: 1,
+      system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' },
+    });
+    h.tx.payments.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const updateState = (h.service as any).updateOrderState as jest.Mock;
+    updateState.mockImplementationOnce(async () => {
+      if (stateWritten) {
+        await h.prismaMock.orders.updateMany({
+          where: { id: 1, state: 'processing' },
+          data: { state: 'pending_payment' },
+        });
+      }
+      throw new Error('state/history write failed');
+    });
+
+    await expect(h.service.payOrder(1, {
+      store_payment_method_id: 1,
+      payment_type: PaymentType.ONLINE,
+    })).rejects.toThrow('state/history write failed');
+
+    expect(h.tx.payments.updateMany).toHaveBeenCalledWith({
+      where: { id: 99, order_id: 1, state: 'pending' },
+      data: expect.objectContaining({ state: 'cancelled' }),
+    });
+    expect(h.getState()).toBe('draft');
+    expect(h.reservations.filter((row) => row.status === 'active')).toHaveLength(0);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+
+    await h.service.payOrder(1, {
+      store_payment_method_id: 1,
+      payment_type: PaymentType.ONLINE,
+    });
+    expect(h.getState()).toBe('pending_payment');
+    expect(h.reservations.filter((row) => row.status === 'active')).toHaveLength(1);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('si la compensación falla tras escribir pending_payment, el retry no crea otra reserva', async () => {
+    const h = harness(false, 'created');
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue({
+      id: 1,
+      system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' },
+    });
+    let reserved: any;
+    jest.spyOn(h.service as any, 'getOrder').mockImplementation(async () => ({
+      id: 1,
+      state: h.getState(),
+      store_id: 4,
+      customer_id: 44,
+      delivery_type: 'direct_delivery',
+      grand_total: 100,
+      currency: 'COP',
+      payments: reserved ? [reserved] : [],
+    }));
+    h.prismaMock.payments.create.mockImplementation(async ({ data }: any) => {
+      reserved = {
+        id: 99,
+        ...data,
+        store_payment_method: { system_payment_method: { type: 'wompi' } },
+      };
+      return reserved;
+    });
+    h.tx.payments.updateMany = jest.fn().mockRejectedValue(new Error('cannot cancel pending row'));
+    ((h.service as any).updateOrderState as jest.Mock).mockImplementationOnce(async () => {
+      await h.prismaMock.orders.updateMany({
+        where: { id: 1, state: 'processing' },
+        data: { state: 'pending_payment' },
+      });
+      throw new Error('history failed');
+    });
+    const dto = { store_payment_method_id: 1, payment_type: PaymentType.ONLINE };
+
+    await expect(h.service.payOrder(1, dto)).rejects.toThrow('history failed');
+    expect(h.getState()).toBe('pending_payment');
+    expect(reserved.state).toBe('pending');
+
+    const retryError = await h.service.payOrder(1, dto).catch((failure) => failure);
+    expect(retryError).toBeInstanceOf(VendixHttpException);
+    expect(retryError.errorCode).toBe(ErrorCodes.ORD_FLOW_PAYMENT_FAILED_001.code);
+    expect(h.getState()).toBe('pending_payment');
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+  });
+
   it('segundo submit no reserva ni cobra y conserva el 409 tipado', async () => {
     const h = harness();
     await h.service.payOrder(1, DTO);
@@ -5107,6 +5196,39 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     });
     expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
     expect(h.paymentGatewayService.resolveAndValidateBankAccount).not.toHaveBeenCalled();
+  });
+
+  it('no reserva Wompi sobre un pago online ya pendiente de otro método', async () => {
+    const h = buildHarness({ preClaimState: 'pending_payment' });
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue({
+      id: 3,
+      system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' },
+    });
+    (h.service as any).getOrder.mockResolvedValue({
+      id: 1,
+      state: 'processing',
+      delivery_type: 'direct_delivery',
+      grand_total: 100000,
+      currency: 'COP',
+      store_id: 4,
+      customer_id: 44,
+      payments: [{ id: 80, state: 'pending', store_payment_method: {
+        system_payment_method: { type: 'bank_transfer' },
+      } }],
+    });
+
+    const error = await h.service.payOrder(1, {
+      store_payment_method_id: 3,
+      payment_type: PaymentType.ONLINE,
+    }).catch((failure) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe(ErrorCodes.ORD_FLOW_PAYMENT_FAILED_001.code);
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.prismaMock.orders.updateMany).toHaveBeenCalledWith({
+      where: { id: 1, state: 'processing' },
+      data: expect.objectContaining({ state: 'pending_payment' }),
+    });
   });
 
   it('shipped + 2 tramos → 2 filas y restaura shipped', async () => {
