@@ -27,7 +27,9 @@ Se corrigieron los 21 hallazgos comunicados para `develop`. La verificación fun
 
 ## Automatización reutilizable
 
-`tests/e2e/review-2026-09-27.spec.cjs` contiene comprobaciones UI de regresión para R8, R9, R10, R13, R14 y R21. El grupo público `--group storefront` pasó cinco recorridos R14 sin login: ficha desktop, vista rápida desde carrusel, ficha móvil, foto base heredada y variante con su precio en carrito invitado. `tests/e2e/review-payments-2026-09-27.spec.cjs` pasó cinco escenarios UI para R1–R3 y R15, incluyendo cobro doble intencional sin duplicar la orden. Se observaron las órdenes QA POS-2026-0401, 0402 y 0403 en detalle y tras recarga. Los demás casos de la tabla se ejecutaron con navegador Playwright interactivo y se documentaron con IDs de órdenes/tickets. **No interpretar estos diez IDs con alguna automatización como cobertura automática de los 21**: `--all` debe fallar si no hay escenario automatizado para cada requisito.
+`tests/e2e/review-2026-09-27.spec.cjs` comprueba R5, R8–R11, R13, R14, R20 y R21 por UI en grupos independientes: `--group storefront` pasó cinco recorridos R14 sin login (ficha desktop, vista rápida, móvil, foto base y carrito); `--group lists` pasó clientes, reembolsos parcial/total y filtro Efectivo que incluye una venta mixta; `--group details` pasó historial Wallet+efectivo, abono excesivo sin escritura y contra entrega finalizada; `--group pricing` pasó la oferta gravada comparada con precio regular gravado y restauró la oferta temporal. `tests/e2e/review-payments-2026-09-27.spec.cjs` pasó cinco escenarios R1–R3 y R15, incluyendo cobro doble intencional sin duplicar la orden (POS-2026-0401, 0402 y 0403). `tests/e2e/review-shipping-2026-09-27.spec.cjs` pasó tres escenarios R4/R19 con IVA aditivo/incluido, persistencia tras recarga y ciudad fuera de cobertura (POS-2026-0404 y 0405). Los casos restantes se recorrieron de forma interactiva y están identificados en la tabla principal. **Tener alguna automatización para 15 IDs no equivale a cobertura total de los 21**: `--all` debe fallar mientras falten escenarios/requisitos.
+
+`tests/e2e/review-kitchen-2026-09-27.spec.cjs` es un runner **preparado pero no ejecutado**: requiere cuatro órdenes/tickets frescos, un turno KDS propio y stock sin actividad concurrente. Verifica precondiciones antes de mutar, pero no constituye evidencia PASS para R6/R18 hasta que se creen sus fixtures por UI y se ejecute. Tampoco cubre aún cocina lista→despacho ni cancelación por ítem/orden.
 
 ## Auditoría frente a la meta de verificación total
 
@@ -36,10 +38,10 @@ La tabla anterior acredita recorridos concretos, **no** una garantía del 100 %
 | Hallazgos | Feliz | Error de uso | Integridad / abuso | Brecha principal |
 |---|---|---|---|---|
 | R1–R3, R15 | Parcial | Parcial | Parcial | Ya pasaron cambio en efectivo, referencias faltantes, tramo cero, Enter por defecto y doble envío; faltan foco en buscadores/campos y otras combinaciones de pago. |
-| R4, R19 | Parcial | Pendiente | Pendiente | Cambio entre varias tarifas y equivalencia alias/cliente formal con la misma dirección; recarga de detalle fiscal. |
-| R5 | Parcial | Parcial | Pendiente | Débito Wallet antes/después y reintento concurrente sin cargo duplicado, observados desde UI. |
+| R4, R19 | Parcial | Parcial | Parcial | Ya pasaron dos modos de IVA, persistencia tras recarga y no cobertura; falta equivalencia alias/cliente formal con la misma dirección y cambio entre varias tarifas. |
+| R5 | Parcial | Parcial | Parcial | Ya pasó historial Wallet+efectivo tras recarga; faltan saldo antes/después y reintento concurrente sin cargo duplicado desde UI. |
 | R6 | Parcial | Parcial | Pendiente | Completar ticket KDS y entonces despachar; reintentar despacho/entrega, incluido `skip_kds` con ticket existente. |
-| R7, R11 | Parcial | Parcial | Pendiente | Abono válido tras el rechazo, saldo y movimientos estables tras recarga; moneda configurada distinta. |
+| R7, R11 | Parcial | Parcial | Parcial | Ya pasó abono 40k rechazado contra saldo38k, botón deshabilitado y saldo intacto tras recarga; faltan abono válido posterior y moneda distinta. |
 | R8 | Parcial | Pendiente | Pendiente | Tabla y tarjeta responsive sin regresión de datos/filtros. |
 | R9, R21 | Parcial | Pendiente | Pendiente | IVA incluido además de aditivo y comparación en todas las superficies de venta. |
 | R10 | Parcial | Pendiente | Pendiente | Método real en venta multimétodo, filtros combinados y ausencia de falso positivo. |
@@ -49,7 +51,7 @@ La tabla anterior acredita recorridos concretos, **no** una garantía del 100 %
 | R16 | Parcial | Parcial | Pendiente | Doble Guardar, dos pestañas y cancelar mientras se edita, conservando ID/stock/imágenes. |
 | R17 | Parcial | Parcial | Pendiente | Variante agotada, incremento de cantidad y viewport móvil con ON/OFF. |
 | R18 | Parcial | Pendiente | Pendiente | Cancelación por ítem/orden, cierre del modal y segundo intento sin reintegro duplicado. |
-| R20 | Parcial | Pendiente | Pendiente | Datáfono habilitado, segunda confirmación/cross-tab y un único cobro tras recarga. |
+| R20 | Parcial | Pendiente | Parcial | Ya pasó historial COD finalizado con marcador cancelado y un cobro real tras recarga; faltan datáfono y segunda confirmación/cross-tab. |
 
 Un fallo intermitente de los tests de catálogo coincidió con respuestas `504 Gateway Time-out` del entorno local; no se convierte en PASS por reintento ni se atribuye automáticamente a la lógica de precios. La suite debe volver a ejecutarse estable antes de cerrar la meta.
 

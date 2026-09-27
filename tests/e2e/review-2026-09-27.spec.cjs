@@ -42,23 +42,8 @@ async function dismissWeeklyStories(page) {
 async function login(page) {
   assert(process.env.QA_EMAIL && process.env.QA_PASSWORD,
     'Set QA_EMAIL and QA_PASSWORD in the process environment.');
-  await page.goto(`${adminBase}/auth/login`, { waitUntil: 'commit' });
-  // When the backend watcher is restarting, the Angular domain bootstrap may
-  // show its own retry screen. Recover through that UI, not an API probe.
-  for (let attempt = 0; attempt < 18; attempt++) {
-    if (await page.locator('input[type="email"]').isVisible()) break;
-    if (await page.getByText('No pudimos conectar').isVisible()) {
-      await page.getByRole('button', { name: 'Reintentar' }).click();
-    }
-    await page.waitForTimeout(1_500);
-  }
-  if (!(await page.locator('input[type="email"]').isVisible())) {
-    await page.reload({ waitUntil: 'commit' });
-    await page.locator('input[type="email"]').waitFor({ timeout: 15_000 }).catch(() => {});
-  }
-  if (!(await page.locator('input[type="email"]').isVisible())) {
-    throw new Error(`El formulario de acceso no apareció; UI: ${(await page.locator('body').innerText()).slice(-350)}`);
-  }
+  await openUiView(page, `${adminBase}/auth/login`,
+    page.locator('input[type="email"]'), 'El formulario de acceso');
   // Angular's SSR markup can expose the form before its submit listener is
   // attached. Give the dev app one hydration turn; networkidle is unsuitable
   // because the admin shell keeps long-lived notification connections open.
@@ -83,32 +68,16 @@ async function login(page) {
       try {
         const state = JSON.parse(localStorage.getItem('vendix_auth_state') || '{}');
         return Boolean(state?.tokens?.access_token && state?.user?.id);
-      } catch {
-        return false;
-      }
+      } catch { return false; }
     }, null, { timeout: 20_000 });
-    // On the landing vhost the environment-change redirect currently strands
-    // a successfully authenticated user on /auth/. Open the real admin URL
-    // through the browser to verify the feature UI; report that separate
-    // redirect defect rather than misclassifying it as bad credentials.
-    await page.waitForTimeout(750);
-    if (!/\/admin\//.test(page.url())) {
-      await page.goto(`${adminBase}/admin/pos`, { waitUntil: 'commit' });
-    }
   } catch (error) {
     const visible = (await page.locator('body').innerText()).slice(-500);
     throw new Error(`${String(error?.message ?? error).slice(0, 180)}; UI: ${visible}`);
   }
-  try {
-    await page.getByText('Punto de Venta', { exact: true }).first().waitFor({ timeout: 12_000 });
-  } catch {
-    await page.goto(`${adminBase}/admin/pos`, { waitUntil: 'commit' });
-    try {
-      await page.getByText('Punto de Venta', { exact: true }).first().waitFor({ timeout: 12_000 });
-    } catch {
-      throw new Error(`El POS no apareció tras login; URL=${page.url()}; UI=${(await page.locator('body').innerText()).slice(0,450)}`);
-    }
-  }
+  // The environment-change redirect can strand a successful login on /auth/.
+  // Navigate via the browser to the real admin surface and require its cart.
+  await openUiView(page, `${adminBase}/admin/pos`,
+    page.getByText('Carrito Actual', { exact: true }), 'El POS tras login');
   await dismissWeeklyStories(page);
 }
 
@@ -119,6 +88,7 @@ async function openUiView(page, url, visibleLocator, description) {
       await page.goto(url, { waitUntil: 'commit', timeout: 20_000 });
     } catch (error) {
       lastNavigationError = String(error?.message ?? error).slice(0, 180);
+      await page.goto('about:blank', { waitUntil: 'commit', timeout: 5_000 }).catch(() => {});
       continue;
     }
     try {
@@ -129,6 +99,7 @@ async function openUiView(page, url, visibleLocator, description) {
       // cross-vhost navigation while nginx/backend watches reconnect.
       // Retry through the browser; do not treat an empty bootstrap as a
       // product-price assertion or bypass the UI with a direct API request.
+      await page.goto('about:blank', { waitUntil: 'commit', timeout: 5_000 }).catch(() => {});
     }
   }
   const view = await page.locator('body').innerText({ timeout: 2_000 }).catch(() => '(sin body)');
@@ -141,15 +112,17 @@ async function main() {
   const page = await context.newPage();
   // Keep each vhost on its own tab: the admin shell holds long-lived SSE
   // connections and its cross-origin teardown can strand storefront navigation.
-  const shop = await context.newPage();
+  let shop = await context.newPage();
   page.setDefaultTimeout(15_000);
   shop.setDefaultTimeout(15_000);
   const consoleErrors = [];
-  for (const tab of [page, shop]) {
+  const watchConsole = (tab) => {
     tab.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text());
     });
-  }
+  };
+  watchConsole(page);
+  watchConsole(shop);
 
   try {
     if (group === 'pricing' || group === 'storefront' || group === 'all') {
@@ -160,17 +133,9 @@ async function main() {
         await login(page);
         const openTaxedProduct = async () => {
           const toggle = page.locator('app-setting-toggle[label="Activar precio de oferta"] [role=button]');
-          for (let attempt = 0; attempt < 3; attempt++) {
-            await page.goto(`${adminBase}/admin/products/edit/298?fromPage=1`, { waitUntil: 'commit' });
-            try {
-              await toggle.waitFor({ timeout: 12_000 });
-              return toggle;
-            } catch {
-              // The local vhost sometimes commits a blank bootstrap while
-              // nginx/backend watches reconnect. Retry the actual UI page.
-            }
-          }
-          throw new Error('El formulario de fruta con IVA no se hidrató en la UI.');
+          await openUiView(page, `${adminBase}/admin/products/edit/298?fromPage=1`,
+            toggle, 'El formulario de fruta con IVA');
+          return toggle;
         };
         let setupAttempted = false;
         try {
@@ -182,7 +147,8 @@ async function main() {
           await page.getByText('Impuestos agregados a la oferta').waitFor();
           setupAttempted = true;
           await page.getByRole('button', { name: 'Guardar', exact: true }).click();
-          await page.waitForURL(/\/admin\/products\?page=1/, { timeout: 15_000 });
+          await page.waitForFunction(() => location.pathname === '/admin/products' &&
+            new URLSearchParams(location.search).get('page') === '1', null, { timeout: 15_000 });
 
           const card = shop.locator('article.product-card').filter({ hasText: 'Frutas Orgánicas Mix 1kg' });
           await openUiView(shop, 'https://roku-shop.vendix.com/sale', card, 'La tarjeta de oferta con IVA');
@@ -195,13 +161,25 @@ async function main() {
               await page.locator('app-input[formcontrolname="sale_price"] input').fill('0');
               await toggle.click();
               await page.getByRole('button', { name: 'Guardar', exact: true }).click();
-              await page.waitForURL(/\/admin\/products\?page=1/, { timeout: 15_000 });
+              await page.waitForFunction(() => location.pathname === '/admin/products' &&
+                new URLSearchParams(location.search).get('page') === '1', null, { timeout: 15_000 });
             }
           }
         }
       });
       }
 
+      if (group === 'all') {
+        // R9 leaves this tab on /sale while the admin tab restores the offer.
+        // A fresh storefront tab avoids reusing a stalled Vite navigation for
+        // R14 and preserves independent console/error capture.
+        await shop.close().catch(() => {});
+        shop = await context.newPage();
+        shop.setDefaultTimeout(15_000);
+        watchConsole(shop);
+      }
+
+      if (group !== 'pricing') {
       await runScenario('R14: storefront variant switch changes the actual selling price', ['R14'], async () => {
         await openUiView(shop,
           'https://roku-shop.vendix.com/products/tv-samsung-55-4k',
@@ -283,6 +261,7 @@ async function main() {
         await shop.locator('.summary-row.total').getByText('$3.299.000').waitFor();
         assert.match(await shop.locator('app-cart-item-card').first().innerText(), /65"/);
       });
+      }
     }
 
     if (group !== 'pricing' && group !== 'storefront' && group !== 'all') {
@@ -338,6 +317,63 @@ async function main() {
         const mixedTender = page.getByRole('row').filter({ hasText: 'POS-2026-0382' });
         await mixedTender.waitFor({ timeout: 20_000 });
         assert.match(await mixedTender.innerText(), /POS-2026-0382/);
+      });
+    }
+
+    if (results[0]?.status === 'passed' && (group === 'details' || group === 'all')) {
+      await runScenario('R5: settled Wallet + cash remain distinct after reload', ['R5'], async () => {
+        await openUiView(page, `${adminBase}/admin/orders/1323`,
+          page.getByRole('heading', { name: 'Orden #POS-2026-0382' }),
+          'El detalle Wallet mixto');
+        const heading = page.getByRole('heading', { name: /Historial de Pagos/i });
+        const cards = heading.locator('xpath=..').locator(':scope > div');
+        await cards.first().waitFor();
+        assert.equal(await cards.count(), 2);
+        const text = (await heading.locator('xpath=..').innerText()).toLowerCase();
+        for (const expected of ['$1.000', '$37.000', 'efectivo', 'wallet', 'exitoso']) {
+          assert(text.includes(expected), `Falta ${expected} en el historial mixto Wallet`);
+        }
+        await page.reload({ waitUntil: 'commit' });
+        await heading.waitFor();
+        assert.equal(await cards.count(), 2, 'La recarga cambió los dos pagos Wallet/efectivo');
+      });
+
+      await runScenario('R20: completed COD retains origin and one real tender after reload', ['R20'], async () => {
+        await openUiView(page, `${adminBase}/admin/orders/1336`,
+          page.getByRole('heading', { name: 'Orden #POS-2026-0393' }),
+          'El detalle contra entrega finalizado');
+        const heading = page.getByRole('heading', { name: /Historial de Pagos/i });
+        const cards = heading.locator('xpath=..').locator(':scope > div');
+        await cards.first().waitFor();
+        assert.equal(await cards.count(), 2);
+        const paymentText = (await heading.locator('xpath=..').innerText()).toLowerCase();
+        assert.match(paymentText, /cancelado[\s\S]*pago contra entrega/);
+        assert.match(paymentText, /\$19\.000[\s\S]*exitoso[\s\S]*efectivo/);
+        assert.equal(await page.getByRole('button', { name: 'Confirmar Pago' }).count(), 0);
+        assert.equal(await page.getByRole('button', { name: 'Despachar Orden' }).count(), 0);
+        await page.reload({ waitUntil: 'commit' });
+        await heading.waitFor();
+        assert.equal(await cards.count(), 2, 'La recarga duplicó o perdió pagos de contra entrega');
+      });
+
+      await runScenario('R11: excessive credit abono is explained and cannot write', ['R11'], async () => {
+        await openUiView(page, `${adminBase}/admin/orders/1329`,
+          page.getByRole('heading', { name: 'Orden #POS-2026-0387' }),
+          'El detalle de crédito');
+        await page.getByRole('button', { name: 'Registrar Pago' }).first().click();
+        const modal = page.locator('app-order-payment-modal');
+        await modal.locator('input[placeholder="Usar monto sugerido"]').fill('40000');
+        const warning = modal.locator('.credit-cap-error[role="alert"]');
+        await warning.waitFor();
+        assert.match(await warning.innerText(), /\$40\.000[\s\S]*\$38\.000[\s\S]*\$2\.000/);
+        assert(await modal.getByRole('button', { name: 'Registrar Abono' }).isDisabled());
+        await modal.getByRole('button', { name: 'Cancelar' }).click();
+        await page.reload({ waitUntil: 'commit' });
+        await page.getByRole('heading', { name: 'Orden #POS-2026-0387' }).waitFor();
+        await page.getByRole('button', { name: 'Registrar Pago' }).first().click();
+        await modal.getByText('Saldo pendiente máximo:').waitFor();
+        assert.match(await modal.locator('.credit-cap').innerText(), /\$38\.000/);
+        await modal.getByRole('button', { name: 'Cancelar' }).click();
       });
     }
   } finally {
