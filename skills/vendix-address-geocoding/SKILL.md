@@ -276,22 +276,30 @@ la vía (`tryRoadPoint`, camina metros desde el Km) y si no, el nombre de vereda
 finca como área (`precision: 'area'`); kind `manzana` busca directamente el nombre de la
 urbanización/barrio/conjunto.
 
-### Plausibilidad de la esquina — regla de negocio (parcialmente implementada)
+### Plausibilidad de la esquina — compuerta dura (2026-09-27)
 
-**Regla:** una esquina de intersección solo debería aceptarse si cae razonablemente cerca de un
-ancla independiente (el `bias` del origen del método de envío, o el centro del bbox del municipio)
-— nunca una esquina cualquiera con nombre de calle coincidente en cualquier punto del municipio.
+**Regla:** una esquina de Overpass solo se acepta si es corroborable. `selectBestCorner` devuelve
+también `candidateCount`:
 
-**Estado real en código:** `selectBestCorner` (l.1238-1286) usa `bias`/centro-de-bbox como
-**desempate de preferencia** entre varias esquinas candidatas, NO como un **rechazo duro** por
-distancia — si Overpass devuelve una sola esquina candidata, se acepta tal cual sin comparar contra
-ningún ancla, sin importar qué tan lejos esté. El filtro de bbox (`isWithinBbox`) es la única
-compuerta dura hoy, y un bbox rectangular de un municipio grande puede admitir una esquina de un
-municipio vecino (el caso Bogotá/Soacha documentado en el código). Si se detecta una esquina
-absurdamente lejana del `bias`/centro pasando el filtro de bbox, **no asumir que hay una compuerta
-de plausibilidad que la habría bloqueado** — hoy no la hay; es una brecha conocida (candidata a
-issue: rechazar/degradar a `street` cuando la única esquina candidata excede una distancia máxima
-razonable de su ancla, en vez de aceptarla sin más).
+- **Varias candidatas** dentro del bbox → el desempate por cercanía a `bias`/centro-de-bbox ya se
+  autocorrobora (una esquina urbana real produce muchos fragmentos de vía agrupados); se acepta.
+- **Una sola candidata** → se contrasta contra un ancla independiente
+  (`resolveIntersectionAnchor`): primero Nominatim estructurado de la MISMA dirección con placa
+  (`"<cruce>-<placa> <vía>"`, nunca el nombre de calle pelado — "Carrera 13" sola mide km y
+  rechazaba esquinas buenas), si no el centroide de la vía principal. Si la esquina queda a más de
+  `INTERSECTION_ANCHOR_MAX_METERS = 2000` m del ancla, o no hay ancla, se **descarta** (warn
+  `Intersection corner rejected`) y la cascade cae a la precisión honesta de Nominatim
+  (`street`/`area`).
+
+Caso que la motivó: "Calle 14 # 26-13, Bogotá" daba un único par "Calle 14"/"Carrera 26" en un
+corregimiento rural a ~15 km (el bbox administrativo de Bogotá D.C. incluye zona rural), reportado
+como `interpolated`. Tras la compuerta resuelve en zona urbana con `street`. NO aplicar la
+compuerta a resultados multi-candidato: Nominatim es un ancla poco fiable para calles largas de
+Bogotá (a 5,6 km de una esquina correcta en vivo) y producía rechazos falsos.
+
+**Limitación conocida:** el sentido de la interpolación de placa sigue el orden de vértices de la
+vía OSM, que no garantiza el sentido creciente de la numeración (Cra 13 # 62-40 queda a ~99 m).
+Sin nodos `addr:housenumber` en OSM no hay señal barata para calibrarlo.
 
 ## Fallback Google — `google-geocoding.provider.ts`
 
@@ -336,7 +344,7 @@ cascade OSM resuelve a `null`/`street`/`area` (ver paso 5 arriba).
   contexto de auth real de la petición; cualquier fallo (header inválido, tienda inexistente, sin
   método con coords) se ignora en silencio y el endpoint sigue siendo público.
 - Caché Redis reverse: **30 días** (`geocode:rev:*`).
-- Caché Redis forward: **versionada** `geocode:fwd:vN:` (hoy **v4**, `buildForwardCacheKey`,
+- Caché Redis forward: **versionada** `geocode:fwd:vN:` (hoy **v5** — v4→v5 al añadir la compuerta de plausibilidad, `buildForwardCacheKey`,
   `geocoding.service.ts:335-361`) sobre la línea normalizada + `city` + `state` +
   `municipality_code` — **7 días éxito / 6 horas null** (`FORWARD_NULL_CACHE_TTL_SECONDS`, l.183;
   bajado de la ventana anterior para que una dirección nueva/rural se reintente antes). `bias` SOLO
@@ -501,10 +509,9 @@ Edit-mode sí persiste el modal directamente (el customer ya existe).
 - **Caché Nominatim/forward — 7 días éxito, 6 horas null**: reintentar geocoding inmediatamente no
   mejora el resultado; una dirección nueva/rural se reintenta sola pasadas esas 6h. El cacheo de
   null evita saturar la política pública de Nominatim (~1 req/s).
-- **La compuerta de plausibilidad de esquina NO es un rechazo duro hoy** — `selectBestCorner` solo
-  desempata entre VARIAS candidatas por cercanía a `bias`/bbox-centro; una única esquina candidata
-  se acepta sin comparar contra ningún ancla, sin importar la distancia (ver sección Cascade). No
-  asumir que existe una validación de "demasiado lejos del bias" — es una brecha conocida.
+- **Una esquina única de Overpass nunca es confianza por sí sola** — si se toca `tryIntersection`,
+  preservar la compuerta `candidateCount <= 1` → ancla ≤ 2 km; quitarla reintroduce resultados
+  `interpolated` a kilómetros del punto real, que cobran un tramo equivocado sin aviso.
 - **`bias` en la llave de caché SOLO sin `city`/`municipality_code`** — si un caller nuevo siempre
   manda `city`, cambiar solo el `bias` (p.ej. otro método de envío) no invalida la caché: ambos
   leen la misma llave a propósito (ver regla 2 de `vendix-shipping-distance-pricing`). Confundir
