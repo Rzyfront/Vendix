@@ -1793,7 +1793,9 @@ export class CheckoutComponent implements OnInit {
       return null;
     }
     if (!this.hasResolvedCoords()) {
-      return 'Necesitamos tu ubicación exacta para calcular el envío. Marca el punto en el mapa o usa tu ubicación automática.';
+      // Owner directive (2026-09-27): copia acortada para caber en el aviso
+      // compacto de una sola linea (`.checkout-block-reason`, max 40px).
+      return 'Marca tu ubicación en el mapa para calcular el envío.';
     }
     const key = this.currentAddressKey();
     const quoteFresh = !!key && key === this.shipping_quote_key();

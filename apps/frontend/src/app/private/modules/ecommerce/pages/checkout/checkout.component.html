@@ -196,6 +196,9 @@
                    tiene un forward-geocode en vuelo, este chip ocupa el MISMO
                    slot que el badge/warning de abajo — nunca conviven dos a
                    la vez (ver `isLocatingAddress`). -->
+              <div class="map-column">
+              <div class="map-indicator">
+              <div class="map-indicator__inner">
               @if (isLocatingAddress()) {
                 <div class="address-locating-chip" role="status" aria-live="polite">
                   <span class="address-locating-chip__spinner" aria-hidden="true"></span>
@@ -226,12 +229,15 @@
                   </app-button>
                 </div>
               }
+              </div>
+              </div>
               <div
                 class="address-map-anchor"
                 [class.address-map-anchor--highlight]="mapHighlight()"
               >
                 <div class="map-phone-frame">
                   <app-address-map-picker
+                    hintPosition="top"
                     [center]="map_center()"
                     [delegateLocate]="true"
                     (located)="onMapLocated($event)"
@@ -239,16 +245,24 @@
                   />
                 </div>
               </div>
+              </div>
             }
 
             @if (use_new_address()) {
               <!-- C.3: formulario (izquierda / arriba en mobile) + mapa de apoyo
-                   enmarcado 9:16 (derecha / abajo en mobile), vía `order` en SCSS. -->
+                   cuadrado 1:1 (derecha / abajo en mobile), vía `order` en SCSS. -->
               <div class="delivery-address-grid">
               <div class="map-column">
               <!-- Chip de carga (2026-09-27): mismo slot que el
                    warning/badge de abajo — nunca conviven dos a la vez
                    (ver `isLocatingAddress`). -->
+              <div
+                class="map-indicator"
+                [class.map-indicator--collapsed]="
+                  !isLocatingAddress() && !addressWarning() && !precisionBadge()
+                "
+              >
+              <div class="map-indicator__inner">
               @if (isLocatingAddress()) {
                 <div class="address-locating-chip" role="status" aria-live="polite">
                   <span class="address-locating-chip__spinner" aria-hidden="true"></span>
@@ -287,12 +301,15 @@
                   </span>
                 </p>
               }
+              </div>
+              </div>
               <div
                 class="address-map-anchor"
                 [class.address-map-anchor--highlight]="mapHighlight()"
               >
               <div class="map-phone-frame">
               <app-address-map-picker
+                hintPosition="top"
                 [center]="map_center()"
                 [delegateLocate]="true"
                 (located)="onMapLocated($event)"
@@ -428,10 +445,6 @@
                 </p>
               </div>
             } @else if (shippableOptions().length > 0) {
-              <p class="delivery-subhead">
-                Opciones de envío disponibles — elige la tuya en el paso Pago
-                junto al total.
-              </p>
               @if (isPickupOnlyCoverage()) {
                 <div class="shipping-coverage-fallback">
                   <app-icon
@@ -572,6 +585,9 @@
                        Chip de carga (2026-09-27): mismo slot que el
                        badge/warning — nunca conviven dos a la vez (ver
                        `isLocatingAddress`). -->
+                  <div class="map-column">
+                  <div class="map-indicator">
+                  <div class="map-indicator__inner">
                   @if (isLocatingAddress()) {
                     <div class="address-locating-chip" role="status" aria-live="polite">
                       <span class="address-locating-chip__spinner" aria-hidden="true"></span>
@@ -602,22 +618,34 @@
                       </app-button>
                     </div>
                   }
+                  </div>
+                  </div>
                   <div
                     class="address-map-anchor"
                     [class.address-map-anchor--highlight]="mapHighlight()"
                   >
                     <app-address-map-picker
+                      hintPosition="top"
                       [center]="map_center()"
                       [delegateLocate]="true"
                       (located)="onMapLocated($event)"
                       (locateRequested)="onLocateRequested()"
                     />
                   </div>
+                  </div>
                 }
 
                 @if (use_new_address()) {
+                  <div class="map-column">
                   <!-- Chip de carga (2026-09-27): mismo slot que el
                        warning/badge de abajo (ver `isLocatingAddress`). -->
+                  <div
+                    class="map-indicator"
+                    [class.map-indicator--collapsed]="
+                      !isLocatingAddress() && !addressWarning() && !precisionBadge()
+                    "
+                  >
+                  <div class="map-indicator__inner">
                   @if (isLocatingAddress()) {
                     <div class="address-locating-chip" role="status" aria-live="polite">
                       <span class="address-locating-chip__spinner" aria-hidden="true"></span>
@@ -656,16 +684,20 @@
                       </span>
                     </p>
                   }
+                  </div>
+                  </div>
                   <div
                     class="address-map-anchor"
                     [class.address-map-anchor--highlight]="mapHighlight()"
                   >
                     <app-address-map-picker
+                      hintPosition="top"
                       [center]="map_center()"
                       [delegateLocate]="true"
                       (located)="onMapLocated($event)"
                       (locateRequested)="onLocateRequested()"
                     />
+                  </div>
                   </div>
                   <form [formGroup]="address_form" class="address-form">
                     <app-input
@@ -1256,24 +1288,27 @@
           }
         </div>
 
-        @if (
-          step() === 1 &&
-          !cartHasOnlyServices &&
-          shippingBlockedReason();
-          as blockReason
-        ) {
-          <!-- Visual (2026-09-27): aviso informativo ENCIMA de la botonera
-               Volver/Continuar, coherente con el estilo de
-               `.address-map-warning`. -->
-          <p class="checkout-block-reason" role="status">
-            <app-icon name="alert-circle" [size]="14"></app-icon>
-            {{ blockReason }}
-          </p>
-        }
-
         <!-- Botonera de acciones: vive debajo de la card de resumen para que
-             Continuar / Confirmar queden siempre visibles junto al total. -->
+             Continuar / Confirmar queden siempre visibles junto al total.
+             Es el MISMO nodo en desktop y mobile (CSS la reposiciona a la
+             barra fija inferior en <=1023px), asi que el aviso de abajo
+             tambien aparece en ambos sin logica duplicada. -->
         <div class="checkout-actions checkout-actions--summary">
+          @if (
+            step() === 1 &&
+            !cartHasOnlyServices &&
+            shippingBlockedReason();
+            as blockReason
+          ) {
+            <!-- Visual (2026-09-27): aviso compacto ENCIMA de los botones,
+                 coherente con el estilo de `.address-map-warning`. -->
+            <p class="checkout-block-reason" role="status">
+              <app-icon name="alert-circle" [size]="13"></app-icon>
+              {{ blockReason }}
+            </p>
+          }
+
+          <div class="checkout-actions__row">
           @if (step() > 1) {
             <div class="checkout-actions__left">
               <app-button
@@ -1355,6 +1390,7 @@
               }}
             </app-button>
           }
+          </div>
         </div>
       </div>
     </div>
