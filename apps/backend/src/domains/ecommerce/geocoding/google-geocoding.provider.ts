@@ -203,8 +203,10 @@ export class GoogleGeocodingProvider {
       }
       return count <= this.monthlyCap;
     } catch (err) {
-      this.logger.warn(`Google quota check failed, allowing call: ${err}`);
-      return true;
+      // A paid request without an enforced counter can exceed the merchant's
+      // monthly cap. Keep the free OSM result instead of spending unmetered.
+      this.logger.warn(JSON.stringify({ reason: 'google_quota_unavailable' }));
+      return false;
     }
   }
 
