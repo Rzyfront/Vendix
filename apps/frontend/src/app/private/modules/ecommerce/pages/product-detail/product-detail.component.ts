@@ -1708,6 +1708,7 @@ export class ProductDetailComponent implements OnInit {
    * propios y el CTA bloqueado por la red de seguridad de `purchaseDisabled`.
    */
   readonly selectedSaleUnit = computed<SaleUnitOption | null>(() => {
+    if (this.product()?.variants?.length) return null;
     const tierId = this.selectedTierId();
     return (
       this.saleUnits().find((unit) => unit.price_tier_id === tierId) ?? null
@@ -2345,6 +2346,10 @@ export class ProductDetailComponent implements OnInit {
    * queda bloqueado por stock— o en ninguna opción si no la ofrece.
    */
   private seedSaleUnit(product: ProductDetail): void {
+    if (product.variants?.length) {
+      this.selectedTierId.set(null);
+      return;
+    }
     const units = product.available_sale_units ?? [];
     if (units.length === 0) {
       this.selectedTierId.set(null);

@@ -733,6 +733,7 @@ export class ProductQuickViewModalComponent {
    * Mismo contrato que el detalle de producto.
    */
   readonly selectedSaleUnit = computed<SaleUnitOption | null>(() => {
+    if (this.product()?.variants?.length) return null;
     const tierId = this.selectedTierId();
     return (
       this.saleUnits().find((unit) => unit.price_tier_id === tierId) ?? null

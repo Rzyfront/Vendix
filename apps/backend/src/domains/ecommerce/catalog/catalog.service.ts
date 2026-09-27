@@ -1331,11 +1331,13 @@ export class CatalogService {
     // Fase 2b — el ABANICO de presentaciones. `[]` con el flag apagado o sin
     // presentaciones publicadas, y en ese caso la card queda idéntica a la
     // histórica: `sale_unit_count: 0` y `price_from: null` son aditivos.
-    const saleUnitOptions = this.buildAvailableSaleUnits(
-      product,
-      availableStockUnits,
-      effectiveTracking,
-    );
+    const saleUnitOptions = variantCount > 0
+      ? []
+      : this.buildAvailableSaleUnits(
+          product,
+          availableStockUnits,
+          effectiveTracking,
+        );
 
     return {
       id: product.id,
@@ -1476,11 +1478,13 @@ export class CatalogService {
     // Fase 2b — el abanico completo, que es lo que pinta el selector del
     // detalle. Se mide contra el MISMO stock que `available_stock`, así que un
     // chip "Agotado" y el badge del producto no pueden contradecirse.
-    const saleUnitOptions = this.buildAvailableSaleUnits(
-      product,
-      productAvailableStockUnits,
-      effectiveTracking,
-    );
+    const saleUnitOptions = hasVariants
+      ? []
+      : this.buildAvailableSaleUnits(
+          product,
+          productAvailableStockUnits,
+          effectiveTracking,
+        );
 
     return {
       id: product.id,
