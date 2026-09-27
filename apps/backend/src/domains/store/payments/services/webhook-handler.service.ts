@@ -314,6 +314,12 @@ export class WebhookHandlerService {
         } : posReservedPayment ? {
           ...(gatewayResponse && typeof gatewayResponse === 'object' ? gatewayResponse : { gateway_event: gatewayResponse }),
           pos_reserved_payment: true,
+          // The wallet id belongs to the server-owned reservation marker, not
+          // to the provider response. Keep it for an idempotent retry after a
+          // successful debit (settleReservedWalletPayment rechecks the ledger).
+          ...(reservedWallet && typeof (prior as Record<string, unknown>).wallet_id === 'number'
+            ? { wallet_id: (prior as Record<string, unknown>).wallet_id }
+            : {}),
         } : payment.financial_account_id ? {
           ...(gatewayResponse && typeof gatewayResponse === 'object' ? gatewayResponse : { gateway_event: gatewayResponse }),
           financial_request: (prior as any)?.financial_request,

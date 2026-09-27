@@ -4383,6 +4383,26 @@ describe('OrderFlowService.confirmPayment — B8 (release-855) settles the balan
     jest.spyOn(service as any, 'commitCouponUseForOrder').mockResolvedValue(undefined);
   });
 
+  it('refuses manual confirmation of an unpaid reserved wallet or Wompi charge', async () => {
+    const grandTotal = new Prisma.Decimal('59.50');
+    const order = buildOrder({
+      id: ORDER_ID,
+      state: 'pending_payment',
+      grand_total: grandTotal,
+      payments: [{
+        ...buildPayment({ id: 5004, state: 'pending', amount: grandTotal }),
+        gateway_response: { payment_type: 'online', pos_reserved_payment: true },
+        store_payment_method: { system_payment_method: { type: 'wallet' } },
+      }],
+    });
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+
+    await expect(service.confirmPayment(ORDER_ID)).rejects.toThrow(
+      'pendiente de confirmación',
+    );
+    expect(prismaMock.payments.updateMany).not.toHaveBeenCalled();
+  });
+
   it('settles total_paid/remaining_balance to grand_total/0 when the pending payment is confirmed', async () => {
     const grandTotal = new Prisma.Decimal('59.50');
     const order = buildOrder({

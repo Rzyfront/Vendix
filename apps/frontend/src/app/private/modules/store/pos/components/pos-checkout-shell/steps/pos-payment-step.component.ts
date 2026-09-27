@@ -937,7 +937,7 @@ export class PosPaymentStepComponent implements OnInit {
                 tip_value: submit.tipValue,
                 tip_waiter_id: submit.tipWaiterId ?? undefined,
               }
-            : {}),
+            : { tip_amount: 0, tip_type: 'fixed', tip_value: 0 }),
           // Multimétodo: `PayOrderDto` exige el escalar pero el backend
           // prefiere `payments[]` cuando llega. Se adjunta, no se sustituye.
           ...(multiLegs ? { payments: toPosPaymentLegs(multiLegs) } : {}),

@@ -2442,6 +2442,19 @@ export class OrderFlowService {
         };
       }
       const pendingPayment = order.payments.find((p) => p.state === 'pending');
+      // A reserved wallet/Wompi charge is not proof of money received.
+      // Only its ledger settlement or provider webhook may change the payment
+      // to succeeded; the generic staff confirmation must never bypass them.
+      if (order.payments.some((payment) =>
+        payment.state === 'pending' &&
+        (payment.gateway_response as Record<string, unknown> | null)?.payment_type === 'online' &&
+        ['wallet', 'wompi'].includes(
+          payment.store_payment_method?.system_payment_method?.type ?? '',
+        ))) {
+        throw new BadRequestException(
+          'Este cobro digital está pendiente de confirmación del monedero o la pasarela.',
+        );
+      }
       if (pendingPayment) {
         await tx.payments.updateMany({
           where: { id: pendingPayment.id, state: 'pending' },

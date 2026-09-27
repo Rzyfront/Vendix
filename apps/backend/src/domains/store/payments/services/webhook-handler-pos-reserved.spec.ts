@@ -58,6 +58,23 @@ describe('WebhookHandlerService reserved POS Wompi settlement', () => {
     expect(confirm).toHaveBeenCalled();
   });
 
+  it('keeps the reserved wallet identity after settlement so a paid retry stays idempotent', async () => {
+    const { handler, payment, accounting, tx } = make();
+    payment.gateway_reference = 'pos_wallet_3_12_77';
+    payment.gateway_response = { pos_reserved_payment: true, wallet_id: 9 };
+    await (handler as any).updatePaymentStatus(payment.gateway_reference, 'succeeded',
+      { wallet_transaction_id: 40 },
+      { matchedPayment: { id: 77, order_id: 12 } });
+    expect(payment.gateway_response).toEqual(expect.objectContaining({
+      pos_reserved_payment: true, wallet_id: 9, wallet_transaction_id: 40,
+    }));
+    await (handler as any).updatePaymentStatus(payment.gateway_reference, 'succeeded',
+      { wallet_transaction_id: 40 },
+      { matchedPayment: { id: 77, order_id: 12 } });
+    expect(tx.payments.updateMany).toHaveBeenCalledTimes(1);
+    expect(accounting).toHaveBeenCalledTimes(1);
+  });
+
   it('flags approval after a declined adopted attempt for reconciliation, never a second sale receipt', async () => {
     const { handler, order, payment, accounting, confirm } = make();
     order.state = 'created';
