@@ -1084,7 +1084,11 @@ export class OrdersService {
           { customer_alias: { contains: search, mode: 'insensitive' } },
         ],
       }),
-      ...(status && !dispatchable && { state: status }),
+      // Paso 3 (multi-select ventas) — array usa `in` (equivalente a
+      // igualdad para un elemento); single conserva la igualdad exacta.
+      ...(status && !dispatchable && {
+        state: Array.isArray(status) ? { in: status } : status,
+      }),
       ...(customer_id && { customer_id }),
       // Carril B — B2: filtra órdenes que tengan al menos una table_session
       // apuntando a la mesa solicitada (incluye sesiones ya cerradas; la orden
@@ -1092,7 +1096,9 @@ export class OrdersService {
       ...(table_id && {
         table_sessions: { some: { table_id } },
       }),
-      ...(channel && { channel }),
+      ...(channel && {
+        channel: Array.isArray(channel) ? { in: channel } : channel,
+      }),
       // FIX admin-orders-filters (BUG A) — aplica el filtro de "Estado de
       // pago" del dropdown. Viaja como `payments_state_enum` en el DTO.
       // La columna destino NO está denormalizada en `orders` (sólo existe
@@ -1102,7 +1108,13 @@ export class OrdersService {
       // (parcialmente pagada, reembolsada parcial, etc.) y queremos
       // matchear si CUALQUIERA cumple.
       ...(payment_status && !payment_method_id && {
-        payments: { some: { state: payment_status } },
+        payments: {
+          some: {
+            state: Array.isArray(payment_status)
+              ? { in: payment_status }
+              : payment_status,
+          },
+        },
       }),
       ...(payment_method_id && {
         AND: [
@@ -1115,7 +1127,19 @@ export class OrdersService {
               payments_state_enum.refunded,
             ] },
           } } },
-          ...(payment_status ? [{ payments: { some: { state: payment_status } } }] : []),
+          ...(payment_status
+            ? [
+                {
+                  payments: {
+                    some: {
+                      state: Array.isArray(payment_status)
+                        ? { in: payment_status }
+                        : payment_status,
+                    },
+                  },
+                },
+              ]
+            : []),
         ],
       }),
       ...(query.missing_shipping_method && {
