@@ -19,7 +19,10 @@ export type OrderEventType =
   | 'item_cancelled'
   | 'item_delivery_reverted'
   | 'shipping_assigned'
-  | 'invoice_issued';
+  | 'invoice_issued'
+  /** Platos enviados a cocina (fire o resend). Payload: `ticket_ids`,
+   * `order_item_ids`, `kds_ids`, y `resend: true` (+ `reason`) en reenvíos. */
+  | 'kitchen_fired';
 
 /**
  * Origen del cambio. Determina `actor_source` cuando el llamador no puede

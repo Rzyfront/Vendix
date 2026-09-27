@@ -120,6 +120,43 @@ describe('KitchenFireService — remake consumption after D2 reuse', () => {
     expect(events.emit).not.toHaveBeenCalled();
   });
 
+  it('el remake con consumo delega el historial al fire canónico con resend: true', async () => {
+    const { service, fire } = harness();
+    await service.resendOrderItems({ order_id: 100, order_item_ids: [7], reason: 'remake_dish' });
+    expect(fire).toHaveBeenCalledWith(
+      expect.anything(),
+      1,
+      expect.objectContaining({ historyExtras: { resend: true, reason: 'remake_dish' } }),
+    );
+  });
+
+  it('el reenvío sin consumo (lost_command) registra kitchen_fired con resend: true en el tx del ticket', async () => {
+    const { service, prisma, tx, fire } = harness([orderItem(7, 'after_fire_reused')]);
+    prisma.orders.findUnique.mockResolvedValue({ state: 'processing' });
+    prisma.kitchen_ticket_items = { findMany: jest.fn().mockResolvedValue([]) };
+    const record = jest.fn().mockResolvedValue({ id: 1 });
+    (service as any).orderHistoryService = { record };
+
+    await service.resendOrderItems({ order_id: 100, order_item_ids: [7], reason: 'lost_command' });
+
+    expect(fire).not.toHaveBeenCalled();
+    expect(tx.kitchen_tickets.create).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledWith(tx, {
+      orderId: 100,
+      storeId: 1,
+      organizationId: 2,
+      type: 'kitchen_fired',
+      payload: {
+        ticket_ids: [55],
+        order_item_ids: [7],
+        kds_ids: [5],
+        resend: true,
+        reason: 'lost_command',
+      },
+    });
+  });
+
   it('rejects a replay after a post-cancel remake ticket without a second stock exit', async () => {
     const { service, tx, fire, events } = harness();
     tx.kitchen_ticket_items.findFirst.mockResolvedValueOnce({ id: 901 });
@@ -647,6 +684,51 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
   // Matriz: producto variantizado, producto simple, línea partida por exclusión
   // (splitLinesForExclusions) y línea recipe-less (el segundo `push()`).
   // --------------------------------------------------------------------------
+
+  // Historial de orden — `kitchen_fired` en `order_events`, mismo tx del ticket.
+  it('registra kitchen_fired en order_events dentro del mismo tx que crea el ticket', async () => {
+    const record = jest.fn().mockResolvedValue({ id: 1 });
+    (service as any).orderHistoryService = { record };
+    setupFireableContext([makeVariantOrderItem(10, 50)]);
+    const ticketCreate = setupFireTransaction(10);
+
+    await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+
+    expect(record).toHaveBeenCalledTimes(1);
+    const [txArg, evt] = record.mock.calls[0];
+    // El tx del evento es el MISMO que creó el ticket (atomicidad).
+    expect(txArg.kitchen_tickets.create).toBe(ticketCreate);
+    expect(evt).toEqual({
+      orderId: 100,
+      storeId: 1,
+      organizationId: 1,
+      type: 'kitchen_fired',
+      payload: { ticket_ids: [555], order_item_ids: [10], kds_ids: [1] },
+    });
+  });
+
+  it('un fire sin OrderHistoryService cableado sigue funcionando (inyección opcional)', async () => {
+    (service as any).orderHistoryService = undefined;
+    setupFireableContext([makeVariantOrderItem(10, 50)]);
+    setupFireTransaction(10);
+
+    await expect(
+      service.fireOrderItems({ order_id: 100, order_item_ids: [10] }),
+    ).resolves.toMatchObject({ kitchen_ticket_id: 555 });
+  });
+
+  it('si registrar el evento falla, el fire hace rollback (no se traga el error)', async () => {
+    (service as any).orderHistoryService = {
+      record: jest.fn().mockRejectedValue(new Error('order_events down')),
+    };
+    setupFireableContext([makeVariantOrderItem(10, 50)]);
+    setupFireTransaction(10);
+
+    await expect(
+      service.fireOrderItems({ order_id: 100, order_item_ids: [10] }),
+    ).rejects.toThrow('order_events down');
+    expect(eventEmitter.emit).not.toHaveBeenCalledWith('kitchen.fired', expect.anything());
+  });
 
   it('persists product_variant_id and variant_label for a prepared item with a variant', async () => {
     setupFireableContext([
@@ -1217,6 +1299,33 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       await service.cancelTicket(555);
 
       expect(prismaMock.recipes.findMany).not.toHaveBeenCalled();
+    });
+
+    it('markReady desde pending NO aplica el guard de receta: es la única salida del plato sin receta hacia la entrega', async () => {
+      // `markDelivered` rechaza `pending` y `deliverOrderItem` exige `ready`
+      // para un `prepared`: si `ready` también bloqueara, el plato quedaría
+      // atascado (solo cancelable).
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('pending', [makeTicketItem(11, 50)]),
+      );
+      prismaMock.recipes.findMany.mockResolvedValue([]);
+      setupStartTx();
+
+      const result = await service.markReady(555);
+
+      expect(result).toMatchObject({ id: 555 });
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+      expect(prismaMock.recipes.findMany).not.toHaveBeenCalled();
+    });
+
+    it('el plato sin receta en pending sigue sin poder entregarse directo (KITCHEN_TICKET_NOT_READY)', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('pending', [makeTicketItem(11, 50)]),
+      );
+
+      await expect(service.markDelivered(555)).rejects.toMatchObject({
+        errorCode: 'KITCHEN_TICKET_NOT_READY',
+      });
     });
   });
 

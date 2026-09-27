@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -16,6 +16,7 @@ import { FireOrderItemsDto, KitchenTicketQueryDto, ResendOrderItemsDto } from '.
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { KdsSessionsService } from '../kds/sessions/kds-sessions.service';
 import { roundMoney2 } from '../taxes/utils/final-price.util';
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 /** Historical delivered_* values are read-only aliases of the canonical decisions. */
 const POST_CANCEL_REMAKE_TYPES = new Set([
@@ -216,6 +217,13 @@ export interface PreExplodedFireContext {
    * can surface them on its return without re-running the query.
    */
   preCheckedStockWarnings?: InsufficientStockItem[];
+  /**
+   * Historial de orden — extras del evento `kitchen_fired` que
+   * `fireOrderItemsInTx` registra en `order_events`. Solo el resend (camino
+   * waste/remake) lo fija, con `resend: true`; el fire normal y los auto-fire
+   * lo omiten.
+   */
+  historyExtras?: { resend: true; reason?: string };
 }
 
 /**
@@ -289,7 +297,42 @@ export class KitchenFireService {
     private readonly eventEmitter: EventEmitter2,
     private readonly sseService: NotificationsSseService,
     private readonly kdsSessionsService: KdsSessionsService,
+    // Historial de orden (`order_events`): opcional como en los demás
+    // escritores (OrderFlowService) — sin él el fire funciona igual y los
+    // specs que construyen el servicio a mano no necesitan cablearlo.
+    @Optional() private readonly orderHistoryService?: OrderHistoryService,
   ) {}
+
+  /**
+   * Registra `kitchen_fired` en `order_events` DENTRO del `tx` que creó los
+   * tickets: si el fire hace rollback, el evento nunca existió. No-op sin
+   * tickets o sin `OrderHistoryService` cableado.
+   */
+  private async recordKitchenFiredEvent(
+    tx: Prisma.TransactionClient,
+    evt: {
+      orderId: number;
+      storeId: number;
+      ticketIds: number[];
+      orderItemIds: number[];
+      kdsIds: number[];
+      extras?: Record<string, Prisma.InputJsonValue>;
+    },
+  ): Promise<void> {
+    if (!this.orderHistoryService || evt.ticketIds.length === 0) return;
+    await this.orderHistoryService.record(tx, {
+      orderId: evt.orderId,
+      storeId: evt.storeId,
+      organizationId: RequestContextService.getContext()?.organization_id ?? null,
+      type: 'kitchen_fired',
+      payload: {
+        ticket_ids: evt.ticketIds,
+        order_item_ids: evt.orderItemIds,
+        kds_ids: evt.kdsIds,
+        ...(evt.extras ?? {}),
+      },
+    });
+  }
 
   /** Fecha de negocio 'YYYY-MM-DD' en tz de la tienda, desplazada por la hora de corte (default 3 AM → un ticket a la 1 AM cuenta para el día anterior). Configurable vía store_settings.settings.operations.ticket_closing_hour (con fallback legado a restaurant_ops.business_day_cutoff_hour). */
   private async getBusinessDate(store_id: number): Promise<string> {
@@ -1222,6 +1265,18 @@ export class KitchenFireService {
       }
     }
 
+    // Historial de orden: un `kitchen_fired` por fire (cubre las N estaciones),
+    // en el MISMO tx que creó los tickets. Cubre el fire manual y los
+    // auto-fire (POS, cierre de mesa, split) que delegan aquí.
+    await this.recordKitchenFiredEvent(tx, {
+      orderId: order.id,
+      storeId: store_id,
+      ticketIds,
+      orderItemIds: firedOrderItemIds,
+      kdsIds: [...snapshotsByKds.keys()].sort((a, b) => a - b),
+      extras: preComputed.historyExtras,
+    });
+
     return {
       // `ticketId` es el ticket PRIMARIO del fire (la estacion de menor id).
       // Se conserva porque el evento `kitchen.fired` y el payload SSE siguen
@@ -1662,7 +1717,10 @@ export class KitchenFireService {
           }
           fallbackReuseIds.push(...ctx.skippedItemIds);
         }
-        return this.fireOrderItemsInTx(tx, store_id, ctx);
+        return this.fireOrderItemsInTx(tx, store_id, {
+          ...ctx,
+          historyExtras: { resend: true, reason: dto.reason },
+        });
       });
       if (wasteResult) {
         wasteTicketIds = wasteResult.ticketIds;
@@ -1792,6 +1850,25 @@ export class KitchenFireService {
           });
           ids.push(ticket.id);
         }
+
+        // Historial de orden: reimpresión sin consumo = `kitchen_fired` con
+        // `resend: true`, en el mismo tx que creó los tickets nuevos.
+        await this.recordKitchenFiredEvent(tx, {
+          orderId: order.id,
+          storeId: store_id,
+          ticketIds: ids,
+          orderItemIds: plainItems
+            .filter((it) => it.product_id)
+            .map((it) => it.id),
+          kdsIds: [...snapshotsByKds.keys()].sort((a, b) => a - b),
+          extras: {
+            resend: true,
+            ...(dto.reason ? { reason: dto.reason } : {}),
+            ...(oldTicketIdsToCancel.length > 0
+              ? { cancelled_ticket_ids: oldTicketIdsToCancel }
+              : {}),
+          },
+        });
         return ids;
       },
     );
@@ -2529,6 +2606,79 @@ export class KitchenFireService {
     return { ticket, store_id };
   }
 
+  /**
+   * Ids de `kitchen_ticket_items` del ticket cuyo par (producto, variante)
+   * NO tiene receta activa en la tabla FRESCA `recipes` (misma regla
+   * exacta→base→null que `fireOrderItems` / `prepareFireContext`). Única
+   * fuente del guard `KITCHEN_TICKET_NO_RECIPE`; lo usa `startPreparation`.
+   */
+  private async findRecipeLessTicketItemIds(ticket: {
+    items?: Array<{
+      id: number;
+      product_id: number | null;
+      product_variant_id?: number | null;
+    }> | null;
+  }): Promise<number[]> {
+    const recipeLessItemIds: number[] = [];
+    // Recetas-por-variante (paso 5): el guard es por par (producto, variante),
+    // no por producto — `.some(is_active)` dejaba pasar una línea cuya variante
+    // no tiene receta mientras OTRA variante sí la tuviera (y no distingue la
+    // base heredada de la exacta). Un único `findMany` sobre la tabla fresca
+    // (sin N+1 por línea) y resolución en memoria con la misma regla del fire.
+    const ticketProductIds = [
+      ...new Set(
+        (ticket.items ?? [])
+          .map((i) => i.product_id)
+          .filter((v): v is number => v != null),
+      ),
+    ];
+    type FreshRecipeRow = {
+      id: number;
+      product_id: number;
+      product_variant_id: number | null;
+      is_active: boolean;
+    };
+    const freshRecipes =
+      ticketProductIds.length > 0
+        ? ((await this.prisma.recipes.findMany({
+            where: { product_id: { in: ticketProductIds }, is_active: true },
+            select: {
+              id: true,
+              product_id: true,
+              product_variant_id: true,
+              is_active: true,
+            },
+          })) as FreshRecipeRow[])
+        : [];
+    const exactRecipeByPair = new Map<string, FreshRecipeRow>();
+    const baseRecipeByProduct = new Map<number, FreshRecipeRow>();
+    for (const r of freshRecipes) {
+      if (r.is_active !== true) continue;
+      if (r.product_variant_id != null) {
+        exactRecipeByPair.set(
+          this.recipeKey(r.product_id, r.product_variant_id),
+          r,
+        );
+      } else {
+        baseRecipeByProduct.set(r.product_id, r);
+      }
+    }
+    for (const item of ticket.items ?? []) {
+      if (!item.product_id) continue;
+      const hasActiveRecipe =
+        this.resolveRecipeForVariant(
+          exactRecipeByPair,
+          baseRecipeByProduct,
+          item.product_id,
+          item.product_variant_id ?? null,
+        ) != null;
+      if (!hasActiveRecipe) {
+        recipeLessItemIds.push(item.id);
+      }
+    }
+    return recipeLessItemIds;
+  }
+
   // ---------------------------------------------------------------- mutations
   /**
    * pending → in_preparation. Cascades item status, used by the KDS
@@ -2609,63 +2759,7 @@ export class KitchenFireService {
     // (or missing) is released by retrying `start` as soon as the recipe is
     // reactivated/created — no re-fire needed and no refresh endpoint: the
     // board just retries `POST /tickets/:id/start`, which re-reads here.
-    const recipeLessItemIds: number[] = [];
-    // Recetas-por-variante (paso 5): el guard es por par (producto, variante),
-    // no por producto — `.some(is_active)` dejaba pasar una línea cuya variante
-    // no tiene receta mientras OTRA variante sí la tuviera (y no distingue la
-    // base heredada de la exacta). Un único `findMany` sobre la tabla fresca
-    // (sin N+1 por línea) y resolución en memoria con la misma regla del fire.
-    const ticketProductIds = [
-      ...new Set(
-        (ticket.items ?? [])
-          .map((i) => i.product_id)
-          .filter((v): v is number => v != null),
-      ),
-    ];
-    type FreshRecipeRow = {
-      id: number;
-      product_id: number;
-      product_variant_id: number | null;
-      is_active: boolean;
-    };
-    const freshRecipes =
-      ticketProductIds.length > 0
-        ? ((await this.prisma.recipes.findMany({
-            where: { product_id: { in: ticketProductIds }, is_active: true },
-            select: {
-              id: true,
-              product_id: true,
-              product_variant_id: true,
-              is_active: true,
-            },
-          })) as FreshRecipeRow[])
-        : [];
-    const exactRecipeByPair = new Map<string, FreshRecipeRow>();
-    const baseRecipeByProduct = new Map<number, FreshRecipeRow>();
-    for (const r of freshRecipes) {
-      if (r.is_active !== true) continue;
-      if (r.product_variant_id != null) {
-        exactRecipeByPair.set(
-          this.recipeKey(r.product_id, r.product_variant_id),
-          r,
-        );
-      } else {
-        baseRecipeByProduct.set(r.product_id, r);
-      }
-    }
-    for (const item of ticket.items ?? []) {
-      if (!item.product_id) continue;
-      const hasActiveRecipe =
-        this.resolveRecipeForVariant(
-          exactRecipeByPair,
-          baseRecipeByProduct,
-          item.product_id,
-          item.product_variant_id ?? null,
-        ) != null;
-      if (!hasActiveRecipe) {
-        recipeLessItemIds.push(item.id);
-      }
-    }
+    const recipeLessItemIds = await this.findRecipeLessTicketItemIds(ticket);
     if (recipeLessItemIds.length > 0) {
       throw new VendixHttpException(
         ErrorCodes.KITCHEN_TICKET_NO_RECIPE,
@@ -2761,6 +2855,13 @@ export class KitchenFireService {
     if (ticket.status === 'ready') {
       return ticket;
     }
+
+    // Guard de receta (`findRecipeLessTicketItemIds`) deliberadamente NO
+    // aplicado aquí: `markDelivered` rechaza `pending` (KITCHEN_TICKET_NOT_READY)
+    // y `OrderFlowService.deliverOrderItem` exige `ready` para un `prepared`,
+    // así que `pending → ready` es hoy la ÚNICA salida de un plato sin receta
+    // hacia la entrega. Cerrarla dejaría el plato atascado (solo cancelable)
+    // hasta que exista una entrega directa desde `pending` para esos tickets.
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const t = await tx.kitchen_tickets.update({
