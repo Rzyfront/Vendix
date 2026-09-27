@@ -3120,9 +3120,10 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
     // callback contra el mismo `prismaMock` para que `tx.payments` sea el
     // mock que estos tests ya assertan sobre `prismaMock.payments`.
     prismaMock.$transaction = jest.fn(async (callback: any) => callback(prismaMock));
+    const emitter = { emit: jest.fn() };
     const service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
-      {} as any,
+      emitter as any,
       {} as any,
       {} as any,
       {} as any,
@@ -3152,11 +3153,11 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
     jest
       .spyOn(service as any, 'computeAndPersistEta')
       .mockResolvedValue(undefined);
-    return { service, prismaMock };
+    return { service, prismaMock, emitter };
   };
 
   it('finish → INV_STOCK_002: anula el pago Y restaura created', async () => {
-    const { service, prismaMock } = buildService();
+    const { service, prismaMock, emitter } = buildService();
     jest
       .spyOn(service as any, 'updateOrderState')
       .mockRejectedValue(new VendixHttpException(ErrorCodes.INV_STOCK_002));
@@ -3184,6 +3185,12 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
       where: { id: 1, state: 'processing' },
       data: expect.objectContaining({ state: 'created' }),
     });
+    // PLAN-pago-multimetodo-pendientes paso 2 — una carga compensada NUNCA
+    // emite `payment.received`: `emitLegPaymentReceivedEvents` sólo se llama
+    // desde el camino de éxito de cada rama, nunca desde `cancelLegPayments`.
+    expect(
+      emitter.emit.mock.calls.filter((c: any[]) => c[0] === 'payment.received'),
+    ).toHaveLength(0);
   });
 
   it('finish OK: NO restaura (el claim es el único updateMany)', async () => {
@@ -4153,13 +4160,42 @@ describe('OrderFlowService.confirmPayment — B8 (release-855) settles the balan
     mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
 
     prismaMock = createPrismaMock({
-      orders: ['update', 'updateMany', 'findFirst'],
-      payments: ['update', 'updateMany'],
+      orders: ['update', 'updateMany', 'findFirst', 'findUnique'],
+      payments: ['update', 'updateMany', 'findMany'],
+      store_payment_methods: ['findFirst'],
+      // Paso 2 — `emitLegPaymentReceivedEvents` lee las líneas de la orden
+      // para armar `sale_tax`/la retención antes de emitir. Vacío es válido:
+      // degrada a los totales de la orden (mismo criterio que en el harness
+      // de "Paso 3"). Sin este mock, `this.prisma.order_items` es
+      // `undefined` y el `TypeError` lo traga el try/catch exterior,
+      // dejando 0 emits en vez de 1.
+      order_items: ['findMany'],
     });
     prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'pending_payment' }]);
     prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, state: 'processing' });
     prismaMock.orders.findFirst.mockResolvedValue({ id: ORDER_ID, state: 'processing', payments: [] });
+    prismaMock.order_items.findMany.mockResolvedValue([]);
+    // Paso 2 — `resolvePaymentReceivedSaleFields` (dentro de la emisión de
+    // `payment.received` de `confirmPayment`) lee la orden y los pagos
+    // previos vía `this.prisma`, no vía `tx`.
+    prismaMock.orders.findUnique.mockResolvedValue({
+      subtotal_amount: 50,
+      discount_amount: 0,
+      tax_amount: 9.5,
+      shipping_cost: 0,
+      shipping_tax_amount: 0,
+      tip_amount: 0,
+      grand_total: 59.5,
+      shipping_tax_type: null,
+      shipping_tax_rate: null,
+      order_items: [],
+    });
+    prismaMock.payments.findMany.mockResolvedValue([]);
+    prismaMock.store_payment_methods.findFirst.mockResolvedValue({
+      display_name: 'Efectivo',
+      system_payment_method: { display_name: 'Efectivo' },
+    });
     prismaMock.payments.update.mockResolvedValue({});
     prismaMock.payments.updateMany.mockResolvedValue({ count: 1 });
 
@@ -4198,6 +4234,83 @@ describe('OrderFlowService.confirmPayment — B8 (release-855) settles the balan
     expect(balanceWrite).toBeDefined();
     expect(Number(balanceWrite![0].data.remaining_balance)).toBe(0);
     expect(Number(balanceWrite![0].data.total_paid)).toBe(59.50);
+  });
+
+  it('PLAN-pago-multimetodo-pendientes paso 2 — emite payment.received UNA vez para el pago confirmado', async () => {
+    const grandTotal = new Prisma.Decimal('59.50');
+    const order = buildOrder({
+      id: ORDER_ID,
+      state: 'pending_payment',
+      grand_total: grandTotal,
+      total_paid: new Prisma.Decimal('0'),
+      remaining_balance: grandTotal,
+      payments: [
+        buildPayment({ id: 5001, state: 'pending', amount: grandTotal }),
+      ],
+    });
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+
+    await service.confirmPayment(ORDER_ID);
+
+    const paymentReceivedCalls = emitter.emit.mock.calls.filter(
+      (call: any[]) => call[0] === 'payment.received',
+    );
+    expect(paymentReceivedCalls).toHaveLength(1);
+    // `confirmPayment` toma `Number(confirmedPayment.amount)` (no el Decimal
+    // crudo) al armar el leg — mismo criterio que `payOrder`'s `NormalizedLeg`.
+    expect(paymentReceivedCalls[0][1]).toMatchObject({
+      payment_id: 5001,
+      amount: 59.5,
+      payment_method: 'Efectivo',
+    });
+  });
+
+  it('PLAN-pago-multimetodo-pendientes paso 2 — llamada del webhook (source: "webhook") NO emite payment.received (ya lo emitió emitPaymentReceivedAccounting)', async () => {
+    const grandTotal = new Prisma.Decimal('59.50');
+    const order = buildOrder({
+      id: ORDER_ID,
+      state: 'pending_payment',
+      grand_total: grandTotal,
+      total_paid: new Prisma.Decimal('0'),
+      remaining_balance: grandTotal,
+      payments: [
+        buildPayment({ id: 5002, state: 'pending', amount: grandTotal }),
+      ],
+    });
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+
+    await service.confirmPayment(ORDER_ID, { source: 'webhook' });
+
+    const paymentReceivedCalls = emitter.emit.mock.calls.filter(
+      (call: any[]) => call[0] === 'payment.received',
+    );
+    expect(paymentReceivedCalls).toHaveLength(0);
+  });
+
+  it('re-confirmación idempotente (applied=true, sin pago pending que confirmar) no emite payment.received', async () => {
+    const grandTotal = new Prisma.Decimal('59.50');
+    // `state: 'pending_payment'` mantiene la rama `applied` (no dispara el
+    // early-return `applied:false`), pero SIN un pago `pending` que
+    // confirmar — el mismo shape que ve una segunda llamada replay tras un
+    // primer confirm exitoso.
+    const order = buildOrder({
+      id: ORDER_ID,
+      state: 'pending_payment',
+      grand_total: grandTotal,
+      total_paid: grandTotal,
+      remaining_balance: new Prisma.Decimal('0'),
+      payments: [
+        buildPayment({ id: 5003, state: 'succeeded', amount: grandTotal }),
+      ],
+    });
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+
+    await service.confirmPayment(ORDER_ID);
+
+    const paymentReceivedCalls = emitter.emit.mock.calls.filter(
+      (call: any[]) => call[0] === 'payment.received',
+    );
+    expect(paymentReceivedCalls).toHaveLength(0);
   });
 });
 
@@ -4363,6 +4476,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     let paySeq = 100;
     let txnSeq = 0;
     const stateUpdates: Array<{ state: string; metadata: unknown }> = [];
+    const createdPayments: any[] = [];
     const prismaMock: any = {
       store_payment_methods: {
         findFirst: jest.fn().mockResolvedValue(LEG_METHODS[0]),
@@ -4374,13 +4488,32 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
         }),
       },
       payments: {
-        create: jest.fn().mockImplementation(async ({ data }: any) => ({
-          id: ++paySeq,
-          ...data,
-        })),
+        create: jest.fn().mockImplementation(async ({ data }: any) => {
+          const row = { id: ++paySeq, ...data };
+          createdPayments.push(row);
+          return row;
+        }),
         update: jest.fn().mockResolvedValue({}),
+        // `resolvePaymentReceivedSaleFields`: pagos previos del mismo cobro
+        // (sólo los tramos ya creados), para el reparto secuencial.
+        findMany: jest.fn().mockImplementation(async ({ where }: any) =>
+          createdPayments
+            .filter((row) => row.id !== where?.id?.not)
+            .map((row) => ({ amount: row.amount })),
+        ),
       },
       orders: {
+        // `resolvePaymentReceivedSaleFields` lee los totales de la orden.
+        findUnique: jest.fn().mockResolvedValue({
+          subtotal_amount: 100000,
+          discount_amount: 0,
+          tax_amount: 0,
+          shipping_cost: 0,
+          shipping_tax_amount: 0,
+          tip_amount: 0,
+          grand_total: 100000,
+          order_items: [],
+        }),
         findFirst: jest.fn().mockImplementation(async (args: any) => {
           if (args?.select?.state) return { state: opts?.preClaimState ?? 'created' };
           // Sonda del shipping-gate / cupón / orden actualizada: sin cupón,
@@ -4404,6 +4537,11 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       },
       coupon_uses: { findFirst: jest.fn().mockResolvedValue(null) },
       coupons: { findFirst: jest.fn().mockResolvedValue(null) },
+      // PLAN-pago-multimetodo-pendientes paso 2 — `emitLegPaymentReceivedEvents`
+      // lee las líneas de la orden (con impuestos) para armar `sale_tax`/la
+      // retención. Vacío es válido: `buildOrderSaleTaxPayload` degrada a
+      // ceros y el payload cae a los totales de la orden (`getOrder` mock).
+      order_items: { findMany: jest.fn().mockResolvedValue([]) },
     };
     // `createLegPayments`/`cancelLegPayments` corren dentro de
     // `this.prisma.$transaction(async (tx) => …)`; el mock resuelve el
@@ -4429,9 +4567,10 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
         })),
     };
 
+    const emitter = { emit: jest.fn() };
     const service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
-      {} as any,
+      emitter as any,
       {} as any,
       {} as any,
       {} as any,
@@ -4496,6 +4635,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       project,
       updateOrderState,
       paymentGatewayService,
+      emitter,
     };
   };
 
@@ -4600,6 +4740,25 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     expect(
       h.paymentGatewayService.resolveAndValidateBankAccount,
     ).toHaveBeenCalledWith(7, 4, h.prismaMock);
+
+    // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received` por
+    // tramo, cada uno con su monto y su método (no un solo evento agregado).
+    const paymentReceivedCalls = h.emitter.emit.mock.calls.filter(
+      (call: any[]) => call[0] === 'payment.received',
+    );
+    expect(paymentReceivedCalls).toHaveLength(2);
+    expect(paymentReceivedCalls[0][1]).toMatchObject({
+      amount: 20000,
+      payment_method: 'Efectivo',
+      // Porción propia del tramo, no el subtotal de la orden (100.000):
+      // con los totales completos cada tramo reconocería el ingreso entero.
+      subtotal_amount: 20000,
+    });
+    expect(paymentReceivedCalls[1][1]).toMatchObject({
+      amount: 80000,
+      payment_method: 'Transferencia',
+      subtotal_amount: 80000,
+    });
   });
 
   it('cocina pendiente (modo estricto) → las 2 filas quedan cancelled y la orden vuelve a created', async () => {
@@ -4681,6 +4840,30 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 100000, 'bank_transfer', 101);
     expect(result.payment).toEqual({ transaction_id: 'TXN-1', change: 0 });
     expect(result).not.toHaveProperty('payments');
+
+    // PLAN-pago-multimetodo-pendientes paso 2 — pago escalar: 1 solo emit.
+    const paymentReceivedCalls = h.emitter.emit.mock.calls.filter(
+      (call: any[]) => call[0] === 'payment.received',
+    );
+    expect(paymentReceivedCalls).toHaveLength(1);
+    expect(paymentReceivedCalls[0][1]).toMatchObject({ amount: 100000 });
+  });
+
+  it("payment_type online (sin payments[]) → NO emite payment.received (queda pending, la pasarela lo confirma después)", async () => {
+    const h = buildHarness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValue(
+      LEG_METHODS[1],
+    );
+
+    await h.service.payOrder(1, {
+      store_payment_method_id: TRANSFER_ID,
+      payment_type: PaymentType.ONLINE,
+    });
+
+    const paymentReceivedCalls = h.emitter.emit.mock.calls.filter(
+      (call: any[]) => call[0] === 'payment.received',
+    );
+    expect(paymentReceivedCalls).toHaveLength(0);
   });
 
   it('shipped + 2 tramos → 2 filas y restaura shipped', async () => {

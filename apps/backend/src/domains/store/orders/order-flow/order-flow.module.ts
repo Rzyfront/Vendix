@@ -29,6 +29,7 @@ import { ShippingModule } from '../../shipping/shipping.module'; // ShippingTaxS
 import { KitchenFireModule } from '../../kitchen-fire/kitchen-fire.module'; // Seam cancelOrderItem: cancel KDS pending in-tx + SSE post-commit (sin ciclo: KitchenFireModule no importa este módulo)
 import { AccountingModule } from '../../accounting/accounting.module';
 import { OrderHistoryModule } from '../order-history/order-history.module'; // Plan order-truth-and-invoice-tz — único escritor de order_events (sin ciclo: OrderHistoryModule solo importa PrismaModule)
+import { WithholdingTaxModule } from '../../withholding-tax/withholding-tax.module'; // PLAN-pago-multimetodo-pendientes paso 2 — `payment.received` resuelve retención sufrida (sin ciclo: WithholdingTaxModule solo importa Prisma/Response)
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { OrderHistoryModule } from '../order-history/order-history.module'; // P
     ShippingModule,
     WalletModule,
     OrderHistoryModule,
+    WithholdingTaxModule,
     // QUI-777: OrderSseService vive en OrdersModule y OrdersModule ya importa
     // OrderFlowModule (línea 54) — ciclo. `forwardRef` rompe el ciclo en DI.
     forwardRef(() => OrdersModule),
