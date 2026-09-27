@@ -42,6 +42,10 @@ import {
   AddressPayload,
 } from '../../../../../../../shared/components/address-form-fields/address-form-fields.component';
 import { CountryService } from '../../../../../../../core/services/country.service';
+import {
+  GeocodingService,
+  type GeocodePrecision,
+} from '../../../../../ecommerce/services/geocoding.service';
 
 import { PosPaymentService } from '../../../services/pos-payment.service';
 import { PosShippingService } from '../../../services/pos-shipping.service';
@@ -161,6 +165,44 @@ export class PosShippingStepComponent {
   readonly showAddressErrors = signal<boolean>(false);
   readonly addressId = signal<number | null>(null);
   private readonly addressCustomerId = signal<number | null>(null);
+  /**
+   * Geocode precision + pin-confirmation state for the address currently in
+   * view, mirroring `app-address-form-fields`' own signals (its emitted
+   * `geocode_precision`/`pin_confirmed` for a freshly-typed address, or the
+   * result of {@link ensureSavedAddressCoords} for a saved address that had
+   * no coordinates yet). Non-blocking — only feeds `addressPrecisionBadge`.
+   */
+  readonly addressGeocodePrecision = signal<GeocodePrecision | null>(null);
+  readonly addressPinConfirmed = signal<boolean>(false);
+  readonly addressPrecisionBadge = computed<
+    { text: string; tone: 'success' | 'warning'; icon: string } | null
+  >(() => {
+    if (this.addressPinConfirmed()) {
+      return { text: 'Punto confirmado en el mapa', tone: 'success', icon: 'check-circle' };
+    }
+    switch (this.addressGeocodePrecision()) {
+      case 'exact':
+        return { text: 'Ubicación exacta', tone: 'success', icon: 'check-circle' };
+      case 'interpolated':
+        return { text: 'Ubicación aproximada a la placa', tone: 'success', icon: 'map-pin' };
+      case 'intersection':
+        return { text: 'Ubicada en la esquina', tone: 'success', icon: 'map-pin' };
+      case 'street':
+        return {
+          text: 'Solo encontramos la calle — confirma el punto en el mapa',
+          tone: 'warning',
+          icon: 'alert-triangle',
+        };
+      case 'area':
+        return {
+          text: 'Solo encontramos el barrio o sector — confirma el punto en el mapa',
+          tone: 'warning',
+          icon: 'alert-triangle',
+        };
+      default:
+        return null;
+    }
+  });
 
   /** Stable form seed; emitted form values must never feed their own input. */
   readonly initialAddress = signal<AddressPayload | null>(null);
@@ -241,6 +283,20 @@ export class PosShippingStepComponent {
     return [a.address_line1, a.city].filter(Boolean).join(', ') || 'Sin dirección';
   });
 
+  /**
+   * H6 — nombra los campos nullable de `addresses` (Prisma: `state_province`,
+   * `phone_number`) que faltan en la dirección guardada actual, para el aviso
+   * que precede el formulario precargado en `#clientDeliveryDetails`.
+   */
+  readonly missingAddressFieldsLabel = computed<string>(() => {
+    const a = this.address();
+    if (!a) return '';
+    const missing: string[] = [];
+    if (!a.state_province) missing.push('el departamento');
+    if (!a.phone_number) missing.push('el teléfono');
+    return missing.join(' y ');
+  });
+
   // ── Outputs ───────────────────────────────────────────────────────────────
   readonly shippingCompleted = output<any>();
 
@@ -251,6 +307,9 @@ export class PosShippingStepComponent {
   private readonly toastService = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly countryService = inject(CountryService);
+  private readonly geocodingService = inject(GeocodingService);
+  /** Addresses currently being backfilled by {@link ensureSavedAddressCoords}. */
+  private readonly savedAddressGeocodeInFlight = new Set<number>();
 
   readonly currencySymbol = this.currencyService.currencySymbol;
 
@@ -574,8 +633,12 @@ export class PosShippingStepComponent {
   private loadDefaultAddress(): void {
     const addresses = this.cartState()?.customer?.addresses;
     const address = addresses?.find((a) => a.is_primary) ?? addresses?.[0];
-    this.setAddress(address ? this.toAddressPayload(address) : null, address?.id ?? null);
-    if (!address) {
+    if (address) {
+      const payload = this.toAddressPayload(address);
+      this.setAddress(payload, address.id);
+      this.ensureSavedAddressCoords(address.id, payload);
+    } else {
+      this.setAddress(null, null);
       // Prefill contact once, without making a blank address look valid.
       this.initialAddress.set({
         address_line1: null, address_line2: null, city: null,
@@ -593,6 +656,61 @@ export class PosShippingStepComponent {
     this.addressCustomerId.set(id ? this.cartState()?.customer?.id ?? null : null);
     this.addressValid.set(!!(address?.address_line1 && address.city &&
       address.state_province && address.country_code && address.phone_number));
+    this.addressGeocodePrecision.set(address?.geocode_precision ?? null);
+    this.addressPinConfirmed.set(!!address?.pin_confirmed);
+  }
+
+  /**
+   * Backfills coordinates for a saved address that has none, so a
+   * distance-priced shipping method quotes against a real point instead of
+   * silently bailing (`calculateShippingCost` requires `a?.city` and only
+   * sends lat/lng when finite — an address book entry saved before this
+   * feature existed has neither). Mirrors the ecommerce checkout's own
+   * `ensureSavedAddressCoords`: forward-geocodes through the backend proxy
+   * (never Nominatim/Google directly) using the address's own city/state,
+   * then best-effort persists the result back to the address book so the
+   * next load skips this call entirely. Failures are silent — the address
+   * simply stays without coords, exactly as it already could before this
+   * feature existed; this never blocks the quote or the sale.
+   */
+  private ensureSavedAddressCoords(id: number, address: AddressPayload): void {
+    if (address.latitude != null && address.longitude != null &&
+      Number.isFinite(address.latitude) && Number.isFinite(address.longitude)) return;
+    if (!address.address_line1 || !address.city) return;
+    if (this.savedAddressGeocodeInFlight.has(id)) return;
+    this.savedAddressGeocodeInFlight.add(id);
+    const country = (address.country_code ?? '').trim().toUpperCase();
+    const query = !country || country === 'CO'
+      ? [address.address_line1, address.city, 'Colombia'].filter(Boolean).join(', ')
+      : [address.address_line1, address.city, address.state_province].filter(Boolean).join(', ');
+    this.geocodingService.forward(query, {
+      city: address.city || undefined,
+      state: address.state_province || undefined,
+    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (res) => {
+        this.savedAddressGeocodeInFlight.delete(id);
+        if (res?.lat == null || res?.lng == null) return;
+        // The cashier may have switched to a different address while the
+        // request was in flight — never apply a stale geocode result.
+        if (this.addressId() !== id) return;
+        const updated: AddressPayload = { ...address, latitude: res.lat, longitude: res.lng };
+        this.address.set(updated);
+        this.initialAddress.set(updated);
+        this.addressGeocodePrecision.set(res.precision ?? null);
+        this.invalidateQuote();
+        if (!this.manualCostOverride() && !this.isPickupMethod()) this.isCalculatingShipping.set(true);
+        // Best-effort: a failed PATCH just means the next load re-geocodes.
+        this.customersService.updateCustomerAddress(id, {
+          latitude: String(res.lat),
+          longitude: String(res.lng),
+        }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+          error: (err) => console.error('updateCustomerAddress (coords backfill) failed', err),
+        });
+      },
+      error: () => {
+        this.savedAddressGeocodeInFlight.delete(id);
+      },
+    });
   }
 
   private toAddressPayload(address: PosCustomerAddress): AddressPayload {
@@ -622,7 +740,9 @@ export class PosShippingStepComponent {
     this.shippingEdited.set(true);
     this.freeAddressEdited.set(false);
     this.addressEditing.set(false);
-    this.setAddress(this.toAddressPayload(address), id);
+    const payload = this.toAddressPayload(address);
+    this.setAddress(payload, id);
+    this.ensureSavedAddressCoords(id, payload);
   }
 
   onAddressChange(payload: AddressPayload, formDirty = this.addressForm()?.form.dirty ?? true): void {
@@ -633,6 +753,8 @@ export class PosShippingStepComponent {
     if (!formDirty) return;
     this.invalidateQuote();
     this.address.set(payload);
+    this.addressGeocodePrecision.set(payload.geocode_precision ?? null);
+    this.addressPinConfirmed.set(!!payload.pin_confirmed);
     if (!this.manualCostOverride() && !this.isPickupMethod()) this.isCalculatingShipping.set(true);
     if (formDirty) {
       this.shippingEdited.set(true);
@@ -640,13 +762,23 @@ export class PosShippingStepComponent {
     }
   }
 
+  /**
+   * Includes lat/lng so a coords-only change (pin moved, or a re-geocode
+   * that resolved a new point without touching any text field) counts as an
+   * edit against an existing order's original address — otherwise
+   * `hasShippingChanges()` would stay false and the shipping-cost recompute
+   * effect (gated by `!original || edited`) would never re-quote a
+   * distance-priced method after the coordinates changed.
+   */
   private addressKey(address: AddressPayload | null): string {
     const norm = (value: unknown) => String(value ?? '').trim().toLocaleLowerCase();
+    const coord = (value: number | null | undefined) =>
+      value != null && Number.isFinite(value) ? value.toFixed(6) : '';
     return JSON.stringify([
       address?.address_line1, address?.address_line2, address?.city,
       address?.state_province, address?.country_code ?? 'CO', address?.postal_code,
       address?.phone_number,
-    ].map(norm));
+    ].map(norm).concat([coord(address?.latitude), coord(address?.longitude)]));
   }
 
   private invalidateQuote(preserveBreakdown = false): void {

@@ -57,12 +57,30 @@
         }
         @if (originalShipping() && !addressEditing()) {
           <p class="address-preview">{{ addressSummary() }}</p>
+          @if (addressPrecisionBadge(); as badge) {
+            <p class="flex items-center gap-1.5 mt-1.5 text-xs font-medium"
+              [class.text-green-600]="badge.tone === 'success'"
+              [class.text-amber-700]="badge.tone === 'warning'"
+              role="status">
+              <app-icon [name]="badge.icon" [size]="14"></app-icon>
+              <span>{{ badge.text }}</span>
+            </p>
+          }
           <button type="button" class="no-methods-link" (click)="addressEditing.set(true)">Editar dirección</button>
         } @else if (addressId() && !addressEditing()) {
           <div class="address-preview">
             <span>{{ addressSummary() }}</span>
             <button type="button" class="no-methods-link" (click)="beginNewAddress()">Usar otra dirección</button>
           </div>
+          @if (addressPrecisionBadge(); as badge) {
+            <p class="flex items-center gap-1.5 mt-1.5 text-xs font-medium"
+              [class.text-green-600]="badge.tone === 'success'"
+              [class.text-amber-700]="badge.tone === 'warning'"
+              role="status">
+              <app-icon [name]="badge.icon" [size]="14"></app-icon>
+              <span>{{ badge.text }}</span>
+            </p>
+          }
         } @else {
           <p class="address-help">Usaremos el teléfono del cliente; puedes cambiarlo si recibirá otra persona.</p>
           <app-address-form-fields #clientAddressForm
@@ -206,6 +224,15 @@
             }
             @if (originalShipping() && !addressEditing()) {
               <p>{{ addressSummary() }}</p>
+              @if (addressPrecisionBadge(); as badge) {
+                <p class="flex items-center gap-1.5 mt-1.5 text-xs font-medium"
+                  [class.text-green-600]="badge.tone === 'success'"
+                  [class.text-amber-700]="badge.tone === 'warning'"
+                  role="status">
+                  <app-icon [name]="badge.icon" [size]="14"></app-icon>
+                  <span>{{ badge.text }}</span>
+                </p>
+              }
               <button type="button" class="no-methods-link" (click)="addressEditing.set(true)">
                 Editar dirección
               </button>

@@ -1,5 +1,5 @@
 import { NO_ERRORS_SCHEMA, Pipe, PipeTransform, signal } from '@angular/core';
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -707,6 +707,38 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.shippingRateId()).toBe(201);
     expect(component.shippingCost()).toBe(7000);
   });
+
+  it('after geocode emits coords, /shipping/calculate payload includes latitude/longitude', fakeAsync(() => {
+    const geocoding = TestBed.inject(GeocodingService) as unknown as { forward: jasmine.Spy };
+    geocoding.forward = jasmine.createSpy('forward').and.returnValue(
+      of({ lat: 4.6097, lng: -74.0817, precision: 'exact' }),
+    );
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [] };
+    mount(state);
+    component.goToShipSubStep(1);
+    fixture.detectChanges();
+
+    const form = fixture.debugElement.query(By.directive(AddressFormFieldsComponent))
+      .componentInstance as AddressFormFieldsComponent;
+    form.form.markAsDirty();
+    form.form.get('address_line1')!.setValue('Carrera 7 # 32-16');
+    form.form.get('city')!.setValue('Bogotá');
+    form.form.get('state_province')!.setValue('Bogotá D.C.');
+    tick(600); // flush the shared component's 500ms forward-geocode debounce
+    fixture.detectChanges();
+
+    expect(geocoding.forward).toHaveBeenCalled();
+    expect(component.address()).toEqual(jasmine.objectContaining({
+      latitude: 4.6097, longitude: -74.0817,
+    }));
+    expect(component.addressGeocodePrecision()).toBe('exact' as any);
+    expect(calculate.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      latitude: 4.6097, longitude: -74.0817,
+    }));
+  }));
 
   it('B6 — cambiar de tarifa en el selector actualiza el costo de envío', () => {
     mount();
