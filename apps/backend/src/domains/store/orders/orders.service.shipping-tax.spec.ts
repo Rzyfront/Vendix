@@ -563,3 +563,68 @@ describe('OrdersService.assignShipping — propina, intacta y split (paso 5 B2)'
     expect(prisma.orders.update).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * checkout-whatsapp-location-fallback (Paso 2) — `assignShipping` bloquea el
+ * cambio de costo de envío cuando la orden ya tiene pagos aplicados
+ * (`total_paid > 0`): el pago ya se aplicó sobre el `grand_total` anterior,
+ * así que cambiar el costo aquí lo desincroniza sin tocar el pago. Solo se
+ * usa `order.total_paid` (sin consultar `payments`) — mismo signal que
+ * `remove()` usa como "evidencia financiera existe" (orders.service.ts).
+ */
+describe('OrdersService.assignShipping — bloqueo de cambio de costo con pagos aplicados (paso 2)', () => {
+  let service: any;
+  let prisma: any;
+
+  beforeEach(() => {
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      store_id: 1, organization_id: 1, user_id: 9,
+    } as any);
+    prisma = {
+      orders: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 10, store_id: 1, state: 'created',
+          subtotal_amount: 10000, tax_amount: 800, discount_amount: 0,
+          shipping_cost: 5000, shipping_method_id: 4, shipping_rate_id: null,
+          total_paid: 5000,
+        }),
+        update: jest.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: 10, ...data })),
+      },
+      shipping_methods: {
+        findFirst: jest.fn().mockResolvedValue({ id: 4, store_id: 1, type: 'delivery', is_active: true }),
+      },
+      shipping_rates: { findFirst: jest.fn() },
+    };
+    service = Object.create(OrdersService.prototype);
+    service.prisma = prisma;
+    service.eventEmitter = { emit: jest.fn() };
+    service.shippingTaxService = { snapshotForRate: jest.fn() };
+    service.logger = { warn: jest.fn() };
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('rechaza ORD_SHIP_CHARGED_COST_CHANGE_001 cuando hay pagos aplicados y el costo cambia', async () => {
+    await expect(
+      service.assignShipping(10, { shipping_method_id: 4, shipping_cost: 9000 }),
+    ).rejects.toMatchObject({ errorCode: 'ORD_SHIP_CHARGED_COST_CHANGE_001' });
+    expect(prisma.orders.update).not.toHaveBeenCalled();
+  });
+
+  it('permite reasignar cuando el costo NO cambia aunque haya pagos aplicados', async () => {
+    await service.assignShipping(10, { shipping_method_id: 4, shipping_cost: 5000 });
+    expect(prisma.orders.update).toHaveBeenCalled();
+  });
+
+  it('sin pagos aplicados (total_paid=0), cambiar el costo sigue permitido (comportamiento previo intacto)', async () => {
+    prisma.orders.findFirst.mockResolvedValue({
+      id: 10, store_id: 1, state: 'created',
+      subtotal_amount: 10000, tax_amount: 800, discount_amount: 0,
+      shipping_cost: 5000, shipping_method_id: 4, shipping_rate_id: null,
+      total_paid: 0,
+    });
+    await service.assignShipping(10, { shipping_method_id: 4, shipping_cost: 9000 });
+    const data = prisma.orders.update.mock.calls[0][0].data;
+    expect(data.shipping_cost).toBe(9000);
+  });
+});

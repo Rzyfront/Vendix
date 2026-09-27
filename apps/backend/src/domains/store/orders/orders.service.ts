@@ -4804,14 +4804,27 @@ export class OrdersService {
       }
     }
 
+    // Paso 2 (checkout-whatsapp-location-fallback) — una orden con pagos ya
+    // aplicados no puede cambiar su costo de envío aquí: el pago ya se
+    // aplicó sobre el grand_total anterior, y cambiar el costo ahora
+    // desincroniza total_paid/remaining_balance sin tocar el pago.
+    // Reasignar método/tarifa SIN que cambie el costo sigue permitido.
+    const hasAppliedPayments = Number(order.total_paid ?? 0) > 0;
+    const shippingCostChanged = differsByAtLeastCents(
+      shippingCost,
+      Number(order.shipping_cost ?? 0),
+      1,
+    );
+    if (hasAppliedPayments && shippingCostChanged) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_SHIP_CHARGED_COST_CHANGE_001,
+      );
+    }
+
     // Paso 5 (B1+B2) — regla única: sin cambio ⇒ copia intacta; tarifa
     // con su costo ⇒ snapshot; costo manual ⇒ copia vacía.
     const shippingUnchanged =
-      !differsByAtLeastCents(
-        shippingCost,
-        Number(order.shipping_cost ?? 0),
-        1,
-      ) &&
+      !shippingCostChanged &&
       method.id === (order.shipping_method_id ?? null) &&
       (resolvedRateId ?? null) === (order.shipping_rate_id ?? null);
     const shippingTax = await this.resolveShippingTaxChange({

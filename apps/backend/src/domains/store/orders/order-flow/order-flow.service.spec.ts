@@ -5898,6 +5898,26 @@ describe('OrderFlowService.shipOrder — allowExemptDeliveryTypes (Task B, solo 
     expect(error).toBeInstanceOf(VendixHttpException);
     expect(error.errorCode).toBe('ORD_SHIP_REQUIRED_001');
   });
+
+  // checkout-whatsapp-location-fallback (Paso 2): 'other' es el delivery_type
+  // de las órdenes con pending_shipping_assignment (envío por asignar). No
+  // está en SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES a propósito — sin método
+  // asignado, sigue sin poder despacharse, con o sin allowExemptDeliveryTypes.
+  it("'other' sin método sigue rechazando ORD_SHIP_REQUIRED_001 (delivery_type del flujo pending_shipping_assignment)", async () => {
+    const { service } = buildService(baseOrder('other'));
+    const error: any = await service.shipOrder(1, {} as any).catch((e) => e);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_SHIP_REQUIRED_001');
+  });
+
+  it("con allowExemptDeliveryTypes: 'other' sin método SIGUE rechazando — fuera del exempt set", async () => {
+    const { service } = buildService(baseOrder('other'));
+    const error: any = await service
+      .shipOrder(1, {} as any, false, { allowExemptDeliveryTypes: true })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_SHIP_REQUIRED_001');
+  });
 });
 
 describe('OrderFlowService.fastTrackOrder — pickup/dine_in sin método de envío (Task B)', () => {
