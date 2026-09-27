@@ -211,6 +211,8 @@ export class PosShippingStepComponent {
   private readonly shippingEdited = signal(false);
   private readonly freeAddressEdited = signal(false);
   private quoteGeneration = 0;
+  /** Manual tax quotes depend on amount/rate, not on address requotes. */
+  private manualQuoteGeneration = 0;
   private walletMultiAttemptKey: string | null = null;
   private walletMultiAttemptSignature: string | null = null;
   readonly shippingRateId = signal<number | null>(null);
@@ -1051,7 +1053,7 @@ export class PosShippingStepComponent {
   private quoteManualCost(): void {
     this.invalidateQuote(true);
     this.manualQuotedShippingTax.set(null);
-    const generation = this.quoteGeneration;
+    const generation = ++this.manualQuoteGeneration;
     const amount = this.manualShippingPrice();
     const rateId = this.shippingRateId();
     const methodId = this.selectedShippingMethod()?.id;
@@ -1070,13 +1072,13 @@ export class PosShippingStepComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (quote) => {
-          if (generation !== this.quoteGeneration || !this.manualCostOverride()) return;
+          if (generation !== this.manualQuoteGeneration || !this.manualCostOverride()) return;
           this.isCalculatingShipping.set(false);
           this.shippingCost.set(quote.shipping_cost);
           this.manualQuotedShippingTax.set(toQuotedShippingTax(quote));
         },
         error: (error) => {
-          if (generation !== this.quoteGeneration || !this.manualCostOverride()) return;
+          if (generation !== this.manualQuoteGeneration || !this.manualCostOverride()) return;
           this.isCalculatingShipping.set(false);
           this.quoteError.set(parseApiError(error).userMessage ||
             'No se pudo calcular el impuesto del envío. Inténtalo nuevamente.');

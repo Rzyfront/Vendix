@@ -10,6 +10,7 @@ import { PosPaymentService } from '../../../services/pos-payment.service';
 import { CustomersService } from '../../../../customers/services/customers.service';
 import { CartState } from '../../../models/cart.model';
 import {
+  PosManualShippingQuote,
   PosShippingMethod,
   PosShippingOption,
   posShippingRateIdForPayload,
@@ -441,6 +442,39 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(context.manualShippingPrice).toBe(5000);
     expect(posShippingRateIdForPayload(context)).toBe(93);
     expect(manualQuote).toHaveBeenCalledWith(7, 93, 5000);
+  });
+
+  it('keeps a pending manual tax quote when a late address update invalidates the automatic quote', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = null;
+    mount(state);
+    component.selectedShippingMethod.set(firstMethod);
+    component.shippingRateId.set(93);
+    component.manualCostOverride.set(true);
+    const pendingQuote = new Subject<PosManualShippingQuote>();
+    manualQuote.and.returnValue(pendingQuote.asObservable());
+
+    component.onShippingCostChange(18000);
+    component.onAddressChange({ ...originalAddress, city: 'Riohacha' }, true);
+    pendingQuote.next({
+      shipping_rate_id: 93,
+      manual_shipping_price: 18000,
+      shipping_cost: 18000,
+      base: 15126.05,
+      shipping_tax_amount: 2873.95,
+      tax_is_inclusive: true,
+    });
+    fixture.detectChanges();
+
+    expect(manualQuote).toHaveBeenCalledWith(1, 93, 18000);
+    expect(component.shippingCost()).toBe(18000);
+    expect(component.manualQuotedShippingTax()).toEqual({
+      base: 15126.05,
+      tax: 2873.95,
+      taxIsInclusive: true,
+    });
   });
 
   it('quotes alias delivery with the same full destination fields used by a customer address', () => {
