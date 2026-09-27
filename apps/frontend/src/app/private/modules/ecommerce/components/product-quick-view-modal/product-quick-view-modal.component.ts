@@ -120,9 +120,9 @@ import {
                   / {{ unit.name }}
                 </span>
               }
-              @if (hasActiveDiscount() || (prod.is_on_sale && !selectedVariant()?.price_override)) {
+              @if (hasActiveDiscount() || directSaleComparePrice() !== null) {
                 <span class="original-price text-sm text-text-muted line-through opacity-70">
-                  {{ (hasActiveDiscount() ? displayPrice() : prod.base_price) | currency }}
+                  {{ (hasActiveDiscount() ? displayPrice() : directSaleComparePrice()) | currency }}
                 </span>
               }
               @if (hasActiveDiscount() && activePromoDiscount()?.type === 'percentage') {
@@ -763,6 +763,15 @@ export class ProductQuickViewModalComponent {
     const v = this.selectedVariant();
     if (v) return v.final_price;
     return this.product()?.final_price || 0;
+  });
+
+  readonly directSaleComparePrice = computed<number | null>(() => {
+    const product = this.product();
+    const variant = this.selectedVariant();
+    if (!product || !(variant?.is_on_sale || product.is_on_sale)) return null;
+    const regular = variant?.regular_final_price ?? product.regular_final_price;
+    const current = this.displayPrice();
+    return regular != null && regular > current ? regular : null;
   });
 
   /**

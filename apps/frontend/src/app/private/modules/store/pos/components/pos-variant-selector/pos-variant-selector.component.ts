@@ -125,14 +125,14 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
                             : 'text-text-primary'
                         "
                       >
-                        {{ resolution.unitPrice | currency }}
+                        {{ getVariantFinalPrice(variant) | currency }}
                       </span>
                     </div>
-                    @if (resolution.isOnSale && resolution.compareAtPrice) {
+                    @if (getVariantCompareAtPrice(variant); as compareAt) {
                       <span
                         class="text-[10px] text-text-muted line-through mt-0.5"
                       >
-                        {{ resolution.compareAtPrice | currency }}
+                        {{ compareAt | currency }}
                       </span>
                     }
                   }
@@ -245,6 +245,23 @@ export class PosVariantSelectorComponent {
     const productLike = this.toProductLike(this.product());
     const variantLike = this.toVariantLike(variant);
     return this.priceResolver.resolve(productLike, variantLike);
+  }
+
+  getVariantFinalPrice(variant: PosProductVariant): number {
+    return Number(variant.final_price ?? this.getVariantPriceResolution(variant).unitPrice);
+  }
+
+  getVariantCompareAtPrice(variant: PosProductVariant): number | null {
+    const resolution = this.getVariantPriceResolution(variant);
+    if (!resolution.isOnSale) return null;
+    // A server final price includes tax; never strike a locally resolved net
+    // price beside it. Older responses without final_price stay net-to-net.
+    const before = variant.final_price != null
+      ? Number(variant.regular_final_price)
+      : Number(resolution.compareAtPrice);
+    return Number.isFinite(before) && before > this.getVariantFinalPrice(variant)
+      ? before
+      : null;
   }
 
   getVariantLabel(variant: PosProductVariant): string {

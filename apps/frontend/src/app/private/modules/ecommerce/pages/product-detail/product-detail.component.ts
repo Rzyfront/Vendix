@@ -239,11 +239,11 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
                       priceUnit.label
                     }}</span>
                   }
-                  @if (hasActiveDiscount() || selectedPriceResolution()?.isOnSale) {
+                  @if (hasActiveDiscount() || directSaleComparePrice() !== null) {
                     <span
                       class="original-price text-base text-text-muted line-through opacity-70 ml-1"
                     >
-                      {{ (hasActiveDiscount() ? currentUnitPrice() : (selectedPriceResolution()?.compareAtPrice ?? currentUnitPrice())) | currency }}
+                      {{ (hasActiveDiscount() ? currentUnitPrice() : directSaleComparePrice()) | currency }}
                     </span>
                   }
                   @if (hasActiveDiscount() && activePromoDiscount()?.type === 'percentage') {
@@ -1857,6 +1857,15 @@ export class ProductDetailComponent implements OnInit {
     );
   });
 
+  readonly directSaleComparePrice = computed<number | null>(() => {
+    if (!this.selectedPriceResolution()?.isOnSale) return null;
+    const product = this.product();
+    const variant = this.selectedVariant();
+    const regular = variant?.regular_final_price ?? product?.regular_final_price;
+    const current = this.currentUnitPrice();
+    return regular != null && regular > current ? regular : null;
+  });
+
   /** Minimum price across all variants */
   minVariantPrice = computed((): number => {
     const p = this.product();
@@ -2280,6 +2289,7 @@ export class ProductDetailComponent implements OnInit {
                 this.isVariantAvailable(variant),
               ) ?? product.variants[0];
             this.selectedVariantId.set(firstVariant.id);
+            this.resetActiveImageForVariant(firstVariant);
             // Initialize attribute-based selection from first variant's attributes
             if (
               firstVariant.attributes &&
@@ -2524,14 +2534,20 @@ export class ProductDetailComponent implements OnInit {
     this.activeImageUrl.set(url);
   }
 
+  private resetActiveImageForVariant(variant: ProductVariantDetail | null): void {
+    const product = this.product();
+    const mainImage = product?.images?.find((image) => image.is_main)?.image_url
+      ?? product?.images?.[0]?.image_url
+      ?? product?.image_url
+      ?? null;
+    this.activeImageUrl.set(variant?.image_url ?? mainImage);
+  }
+
   selectVariant(variant: ProductVariantDetail): void {
     if (!this.isVariantAvailable(variant)) return;
 
     this.selectedVariantId.set(variant.id);
-    // Update main image if variant has its own image
-    if (variant.image_url) {
-      this.activeImageUrl.set(variant.image_url);
-    }
+    this.resetActiveImageForVariant(variant);
     // Reset quantity if it exceeds variant stock (skip for on-demand products)
     const stock = variant.available_stock ?? variant.stock_quantity ?? 0;
     if (!this.isOnDemand() && this.quantity() > stock) {
@@ -2556,15 +2572,14 @@ export class ProductDetailComponent implements OnInit {
     const matched = this.matchedVariant();
     if (matched) {
       this.selectedVariantId.set(matched.id);
-      if (matched.image_url) {
-        this.activeImageUrl.set(matched.image_url);
-      }
+      this.resetActiveImageForVariant(matched);
       const matchedStock = matched.available_stock ?? matched.stock_quantity ?? 0;
       if (!this.isOnDemand() && this.quantity() > matchedStock) {
         this.quantity.set(Math.max(1, matchedStock));
       }
     } else {
       this.selectedVariantId.set(null);
+      this.resetActiveImageForVariant(null);
     }
   }
 

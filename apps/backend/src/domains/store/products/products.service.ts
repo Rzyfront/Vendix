@@ -2949,6 +2949,10 @@ export class ProductsService {
                 // resuelto con las tasas heredadas del producto. Sin tocar
                 // los valores persistidos.
                 final_price: calculateVariantFinalPrice(variant, product),
+                regular_final_price: calculateVariantFinalPrice(
+                  { ...variant, is_on_sale: false, sale_price: null },
+                  { ...product, is_on_sale: false, sale_price: null },
+                ),
                 stock: variantStock,
                 stock_quantity: variantStock,
                 // Campos explícitos source-of-truth para el frontend POS.
@@ -3169,6 +3173,10 @@ export class ProductsService {
                 // resuelto con las tasas heredadas del producto. Sin tocar
                 // los valores persistidos.
                 final_price: calculateVariantFinalPrice(variant, product),
+                regular_final_price: calculateVariantFinalPrice(
+                  { ...variant, is_on_sale: false, sale_price: null },
+                  { ...product, is_on_sale: false, sale_price: null },
+                ),
                 stock_quantity: variantStock,
                 available_stock: effectiveTracking ? variantStock : null,
                 is_available: !effectiveTracking || variantStock > 0,
