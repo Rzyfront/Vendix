@@ -169,13 +169,13 @@
     }
   </form>
   @if (compact() && !showAdvanced()) {
-    <button type="button" class="map-toggle advanced-toggle" (click)="advancedOpen.set(true)"
+    <button type="button" class="map-toggle advanced-toggle" (click)="advancedOverride.set(true)"
       aria-label="Mostrar más detalles de dirección">
       <app-icon name="plus" [size]="16"></app-icon>
       <span>Más detalles de dirección</span>
     </button>
-  } @else if (compact() && advancedOpen()) {
-    <button type="button" class="map-toggle advanced-toggle" (click)="advancedOpen.set(false)"
+  } @else if (compact() && showAdvanced()) {
+    <button type="button" class="map-toggle advanced-toggle" (click)="advancedOverride.set(false)"
       aria-label="Ocultar detalles adicionales de dirección">
       <app-icon name="minus" [size]="16"></app-icon>
       <span>Menos detalles</span>

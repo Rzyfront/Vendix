@@ -34,6 +34,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { AuditService, AuditResource } from '../../../common/audit/audit.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
+import { ProcessReservedPosPaymentDto } from './dto/create-payment.dto';
 
 /**
  * CP-POS-CREAR-EDITAR-COBRAR-001 — F.1 · defense in depth.
@@ -202,6 +203,18 @@ export class PaymentsController {
       req.user,
     );
     return this.responseService.success(result, 'Wompi payment status synced');
+  }
+
+  @Post('pos/process-reserved/:paymentId')
+  @Permissions('store:pos:access')
+  @ApiOperation({ summary: 'Process an already reserved POS digital payment' })
+  async processReservedPosPayment(
+    @Param('paymentId', ParseIntPipe) paymentId: number,
+    @Body() dto: ProcessReservedPosPaymentDto,
+    @Request() req,
+  ) {
+    const result = await this.paymentsService.processReservedPosPayment(paymentId, dto, req.user);
+    return this.responseService.success(result, 'Reserved POS payment processed');
   }
 
   @Get()

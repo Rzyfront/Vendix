@@ -112,6 +112,7 @@ import {
   type PaymentLegMethodInfo,
 } from './utils/payment-legs.util';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
+import { ProcessReservedPosPaymentDto } from './dto/create-payment.dto';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -234,6 +235,48 @@ export class PaymentsService {
         success: true,
         data: result,
         message: 'Payment processed successfully',
+      };
+    } catch (error) {
+      if (error instanceof PaymentError) {
+        const mapped = LEGACY_TO_NEW[error.code];
+        throw new VendixHttpException(mapped, error.message, error.details);
+      }
+      throw error;
+    }
+  }
+
+  async processReservedPosPayment(
+    paymentId: number,
+    dto: ProcessReservedPosPaymentDto,
+    user: any,
+  ) {
+    const storeId = RequestContextService.getContext()?.store_id;
+    if (!storeId) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    await this.validateUserAccess(user, storeId);
+    try {
+      const { result, methodType } = await this.paymentGateway.processReservedPosPayment(
+        paymentId, storeId, dto,
+      );
+      if (methodType === 'wompi') {
+        const transaction = result.gatewayResponse as Record<string, unknown> | undefined;
+        if (transaction?.id && transaction?.reference) {
+          await this.webhookHandler.applyWompiTransaction(transaction);
+        }
+      } else if (result.status === 'succeeded' && result.transactionId) {
+        await this.webhookHandler.settleReservedWalletPayment(paymentId, result.transactionId);
+      } else if (methodType === 'wallet' && result.errorCode === 'WALLET_PRE_DEBIT_REJECTED') {
+        await this.webhookHandler.rejectReservedWalletPayment(
+          paymentId, result.message ?? 'Wallet rejected before debit',
+        );
+      }
+      const payment = await this.prisma.payments.findFirst({
+        where: { id: paymentId, orders: { store_id: storeId } },
+        select: { id: true, state: true, transaction_id: true },
+      });
+      return {
+        payment: payment ?? { id: paymentId, state: result.status, transaction_id: result.transactionId },
+        nextAction: result.nextAction,
+        message: result.message,
       };
     } catch (error) {
       if (error instanceof PaymentError) {
@@ -1730,6 +1773,13 @@ export class PaymentsService {
               tax_amount_item: true,
               weight: true,
               price_unit_quantity: true,
+              // Retención sufrida POR TIPO DE OPERACIÓN (bienes vs
+              // servicios, decisión del dueño 2026-09-26): el catálogo, no
+              // un valor por defecto, ya decidió esto al crear la orden
+              // (`orders.service.ts`: `item.product_id ? product.product_type
+              // : item.item_type || 'custom'`). `prepared`/`custom`/null
+              // cuentan como bienes en `resolveSufferedByOperation`.
+              item_type: true,
               // `is_inclusive` NO se lee acá, a propósito: `total_price` sale
               // de `unitBasePrice`, que es el NETO en las dos ramas
               // (`finalUnitPrice / (1 + total_rate)` en la rama custom,
@@ -1772,6 +1822,12 @@ export class PaymentsService {
           // tenant.is_withholding_agent=false or no customer_id → lines:[]; we
           // degrade to an empty resolution on any failure so the sale never
           // breaks because of withholding.
+          //
+          // Retención POR TIPO DE OPERACIÓN (decisión del dueño 2026-09-26):
+          // bienes y servicios se agrupan aparte, cada uno con su propia base
+          // e IVA, en vez de resolver una única tarifa para toda la orden
+          // (que antes siempre premiaba `RTE_HONOR_PN` — ver
+          // `WithholdingResolverService.evaluate` gate `suffered` (c)).
           let wh: WithholdingResolution = {
             lines: [],
             uvt_value_used: 0,
@@ -1781,19 +1837,30 @@ export class PaymentsService {
             const customer_id = order.customer_id
               ? Number(order.customer_id)
               : null;
-            wh = await this.withholdingFlow.resolveSuffered({
+            const withholdingItems = orderItemsWithTaxes.map((item) => ({
+              product_type: item.item_type,
+              base: Number(item.total_price || 0),
+              // Mismo agregado que antes viajaba como `order.tax_amount`
+              // (todos los tipos de la línea, no sólo IVA), ahora repartido
+              // por línea para que cada grupo aporte SU parte al `ivaAmount`
+              // que usa reteIVA.
+              ivaAmount: (item.order_item_taxes || []).reduce(
+                (sum, tax) => sum + Number(tax.tax_amount || 0),
+                0,
+              ),
+            }));
+            wh = await this.withholdingFlow.resolveSufferedByOperation({
               organization_id: order.stores?.organization_id,
               store_id: createPosPaymentDto.store_id,
               customer_id,
-              base: Number(order.subtotal_amount || 0),
-              ivaAmount: Number(order.tax_amount || 0),
+              items: withholdingItems,
               // Sin `client` las 6 lecturas de la cadena salen por una segunda
               // conexión del pool mientras esta transacción sostiene locks.
               client: tx,
             });
           } catch (error) {
             this.logger.warn(
-              `resolveSuffered failed for order ${order.id}; degrading to no withholding: ${
+              `resolveSufferedByOperation failed for order ${order.id}; degrading to no withholding: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             );
@@ -1900,6 +1967,9 @@ export class PaymentsService {
               organization_id: order.stores?.organization_id,
               store_id: createPosPaymentDto.store_id,
               invoice_id: null,
+              // PR #858 hallazgo 2 — la factura de esta orden enlaza estas
+              // filas (les pone `invoice_id`) en vez de duplicar la sufrida.
+              order_id: order.id,
               customer_id: order.customer_id
                 ? Number(order.customer_id)
                 : null,
@@ -1965,6 +2035,9 @@ export class PaymentsService {
               organization_id: order.stores?.organization_id,
               store_id: createPosPaymentDto.store_id,
               invoice_id: null,
+              // PR #858 hallazgo 2 — la factura de esta orden enlaza estas
+              // filas (les pone `invoice_id`) en vez de duplicar la sufrida.
+              order_id: order.id,
               customer_id: order.customer_id
                 ? Number(order.customer_id)
                 : null,

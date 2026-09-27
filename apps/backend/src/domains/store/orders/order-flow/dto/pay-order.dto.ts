@@ -44,6 +44,12 @@ export class PayOrderDto {
   @IsString()
   payment_reference?: string;
 
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  bank_account_id?: number;
+
   /**
    * Cobro multimétodo de contado: 2..5 tramos cuya suma debe ser igual al
    * total a cobrar (`amountToCharge`). Sólo se acepta con

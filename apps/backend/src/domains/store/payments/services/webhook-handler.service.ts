@@ -27,6 +27,7 @@ import {
 } from '../../invoicing/pos/presential-pos-sale';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
 import { buildOrderSaleTaxPayload } from '../utils/order-sale-tax-payload.util';
+import { resolvePaymentReceivedSaleFields } from '../utils/payment-sale-share.util';
 
 interface WebhookPaymentTransition {
   paymentId: number | null;
@@ -34,6 +35,7 @@ interface WebhookPaymentTransition {
   transitioned: boolean;
   shouldConfirmOrder: boolean;
   reconciliationRequired: boolean;
+  posReservedPayment?: boolean;
 }
 
 // States considered terminal for compare-and-swap and idempotency checks.
@@ -273,10 +275,19 @@ export class WebhookHandlerService {
         });
         if (!payment) return noChange;
         const base = { ...noChange, paymentId: payment.id, orderId: payment.order_id };
+        const prior = payment.gateway_response;
+        const reservedWompi = payment.gateway_reference ===
+          `vendix_${order.store_id}_${order.id}_${payment.id}`;
+        const reservedWallet = payment.gateway_reference ===
+          `pos_wallet_${order.store_id}_${order.id}_${payment.id}`;
+        const posReservedPayment =
+          (prior as Record<string, unknown> | null)?.pos_reserved_payment === true &&
+          (reservedWompi || reservedWallet);
         const lateApproval = approved && (payment.state === 'cancelled' ||
-          ['cancelled', 'refunded'].includes(locked.state));
+          ['cancelled', 'refunded'].includes(locked.state) ||
+          (posReservedPayment && payment.state === 'failed'));
         if ((PAYMENT_TERMINAL_STATES as readonly string[]).includes(payment.state) &&
-            !(approved && payment.state === 'cancelled')) {
+            !lateApproval) {
           // Resume a failed post-commit stock step on replay, without emitting
           // a second monetary receipt. Never reopen a terminal order.
           const needsReconciliation = (payment.gateway_response as Record<string, unknown> | null)?.reconciliation_required === true;
@@ -285,7 +296,14 @@ export class WebhookHandlerService {
           return { ...base, shouldConfirmOrder: resume &&
             await this.isOrderFullyPaid(tx, payment.order_id) };
         }
-        const prior = payment.gateway_response;
+        if (posReservedPayment && reservedWallet && ['failed', 'cancelled'].includes(status)) {
+          const debit = await tx.wallet_transactions.findFirst({
+            where: { reference_type: 'payment', reference_id: payment.id,
+              type: 'debit', state: 'completed' },
+            select: { id: true },
+          });
+          if (debit) return base;
+        }
         const response = lateApproval ? {
           ...(prior && typeof prior === 'object' && !Array.isArray(prior) ? prior : {}),
           gateway_event: gatewayResponse,
@@ -293,6 +311,15 @@ export class WebhookHandlerService {
           reconciliation_reason: 'approved_after_local_cancellation',
           previous_payment_state: payment.state,
           order_state: locked.state,
+        } : posReservedPayment ? {
+          ...(gatewayResponse && typeof gatewayResponse === 'object' ? gatewayResponse : { gateway_event: gatewayResponse }),
+          pos_reserved_payment: true,
+          // The wallet id belongs to the server-owned reservation marker, not
+          // to the provider response. Keep it for an idempotent retry after a
+          // successful debit (settleReservedWalletPayment rechecks the ledger).
+          ...(reservedWallet && typeof (prior as Record<string, unknown>).wallet_id === 'number'
+            ? { wallet_id: (prior as Record<string, unknown>).wallet_id }
+            : {}),
         } : payment.financial_account_id ? {
           ...(gatewayResponse && typeof gatewayResponse === 'object' ? gatewayResponse : { gateway_event: gatewayResponse }),
           financial_request: (prior as any)?.financial_request,
@@ -304,7 +331,16 @@ export class WebhookHandlerService {
             ...(approved ? { paid_at: new Date() } : {}), ...(options?.extraUpdate ?? {}) },
         });
         if (cas.count === 0) return base;
+        if (posReservedPayment && ['failed', 'cancelled'].includes(status)) {
+          // An adopted table/order was promoted before this attempt. A declined
+          // digital charge must not cancel it or release its stock/KDS work.
+          await tx.orders.updateMany({
+            where: { id: order.id, store_id: order.store_id, state: 'pending_payment' },
+            data: { state: 'created', updated_at: new Date() },
+          });
+        }
         return { ...base, transitioned: true, reconciliationRequired: lateApproval,
+          posReservedPayment,
           shouldConfirmOrder: approved && !lateApproval &&
             ['pending_payment', 'processing'].includes(locked.state) &&
             await this.isOrderFullyPaid(tx, payment.order_id) };
@@ -317,10 +353,53 @@ export class WebhookHandlerService {
     }
     if (result.orderId && result.shouldConfirmOrder) {
       await this.confirmOrderPaid(result.orderId);
-    } else if (result.transitioned && result.orderId && ['failed', 'cancelled'].includes(status)) {
+    } else if (result.transitioned && result.orderId && !result.posReservedPayment && ['failed', 'cancelled'].includes(status)) {
       await this.cancelOrderIfOpen(result.orderId, status, gatewayResponse);
     }
     return result;
+  }
+
+  /** Internal settlement of an idempotent wallet ledger debit tied to one reserved payment. */
+  async settleReservedWalletPayment(paymentId: number, transactionId: string): Promise<void> {
+    const client = this.prisma.withoutScope();
+    const payment = await client.payments.findUnique({
+      where: { id: paymentId },
+      include: { orders: true, store_payment_method: { include: { system_payment_method: true } } },
+    });
+    const marker = payment?.gateway_response as Record<string, unknown> | null;
+    const walletTx = await client.wallet_transactions.findFirst({
+      where: { reference_type: 'payment', reference_id: paymentId, type: 'debit', state: 'completed' },
+      include: { wallet: true },
+    });
+    if (!payment || !walletTx || payment.store_payment_method?.system_payment_method?.type !== 'wallet' ||
+        marker?.pos_reserved_payment !== true || marker?.wallet_id !== walletTx.wallet_id ||
+        payment.gateway_reference !== `pos_wallet_${payment.orders.store_id}_${payment.order_id}_${payment.id}` ||
+        walletTx.wallet.store_id !== payment.orders.store_id ||
+        walletTx.wallet.customer_id !== payment.orders.customer_id ||
+        !walletTx.amount.equals(payment.amount) || transactionId !== `wallet_${walletTx.id}`) {
+      throw new Error('Wallet ledger does not match this reserved POS payment');
+    }
+    await this.updatePaymentStatus(payment.gateway_reference, 'succeeded', {
+      wallet_transaction_id: walletTx.id,
+      balance_after: walletTx.balance_after.toString(),
+    }, { matchedPayment: payment, extraUpdate: { transaction_id: transactionId } });
+  }
+
+  /** A pre-debit validation rejection may reopen a reservation only if no wallet ledger exists. */
+  async rejectReservedWalletPayment(paymentId: number, reason: string): Promise<void> {
+    const client = this.prisma.withoutScope();
+    const payment = await client.payments.findUnique({
+      where: { id: paymentId },
+      include: { orders: true, store_payment_method: { include: { system_payment_method: true } } },
+    });
+    if (!payment || payment.store_payment_method?.system_payment_method?.type !== 'wallet' ||
+        (payment.gateway_response as Record<string, unknown> | null)?.pos_reserved_payment !== true ||
+        payment.gateway_reference !== `pos_wallet_${payment.orders.store_id}_${payment.order_id}_${payment.id}`) {
+      throw new Error('Not a reserved POS wallet payment');
+    }
+    await this.updatePaymentStatus(payment.gateway_reference, 'failed',
+      { rejection_reason: reason, pos_reserved_payment: true },
+      { matchedPayment: payment });
   }
 
   private async isOrderFullyPaid(tx: Prisma.TransactionClient, orderId: number): Promise<boolean> {
@@ -407,6 +486,7 @@ export class WebhookHandlerService {
    */
   private async emitPaymentReceivedAccounting(paymentId: number): Promise<void> {
     let financial = false;
+    let reservedPos = false;
     try {
       const client = this.prisma.withoutScope();
       const payment = await client.payments.findUnique({
@@ -483,6 +563,27 @@ export class WebhookHandlerService {
         order,
         order_items: orderItemsWithTaxes,
       });
+      reservedPos =
+        (payment.gateway_response as Record<string, unknown> | null)?.pos_reserved_payment === true;
+      const saleShare = reservedPos
+        ? await resolvePaymentReceivedSaleFields(client, {
+            order_id: order.id,
+            payment_id: payment.id,
+            amount: Number(payment.amount),
+          })
+        : null;
+      if (saleShare) {
+        const shareCents = Math.round((
+          saleShare.subtotal_amount - saleShare.discount_amount +
+          saleShare.tax_amount + (saleShare.shipping_amount ?? 0) + saleShare.tip_amount
+        ) * 100);
+        if (shareCents !== Math.round(Number(payment.amount) * 100) ||
+            (saleShare.tax_amount > 0 && sale_tax.tax_breakdown.length > 0 &&
+              !saleShare.tax_breakdown?.length &&
+              Number(payment.amount) < Number(order.grand_total))) {
+          throw new Error(`Reserved POS payment ${payment.id} has an unreconciled sale share`);
+        }
+      }
 
       const systemPaymentMethod =
         payment.store_payment_method?.system_payment_method;
@@ -500,18 +601,18 @@ export class WebhookHandlerService {
         order_id: order.id,
         order_number: order.order_number,
         amount: Number(payment.amount),
-        subtotal_amount: Number(order.subtotal_amount || 0),
-        tax_amount: sale_tax.tax_amount,
-        shipping_amount: sale_tax.shipping_amount,
-        tax_breakdown: sale_tax.tax_breakdown,
+        subtotal_amount: saleShare?.subtotal_amount ?? Number(order.subtotal_amount || 0),
+        tax_amount: saleShare?.tax_amount ?? sale_tax.tax_amount,
+        shipping_amount: saleShare?.shipping_amount ?? sale_tax.shipping_amount,
+        tax_breakdown: saleShare?.tax_breakdown ?? sale_tax.tax_breakdown,
         // Webhooks do not compute suffered withholding on the fly (the POS
         // path resolves it via `WithholdingFlow.resolveSuffered` inside its
         // transaction). Leave the breakdown empty; the listener + auto-entry
         // handle `undefined` / `[]` as "no withholding lines".
         withholding_breakdown: [],
         // Parte de BASE del descuento de orden (impuesto neto proyectado).
-        discount_amount: sale_tax.discount_amount,
-        tip_amount: Number(order.tip_amount || 0),
+        discount_amount: saleShare?.discount_amount ?? sale_tax.discount_amount,
+        tip_amount: saleShare?.tip_amount ?? Number(order.tip_amount || 0),
         currency: payment.currency || order.currency || 'COP',
         payment_method: paymentMethodLabel,
         // Webhooks have no end-user context (no JWT user, no POS cashier).
@@ -527,6 +628,20 @@ export class WebhookHandlerService {
       );
     } catch (error) {
       if (financial) throw error;
+      if (reservedPos) {
+        // Money may already be captured. Do not emit a false ledger entry;
+        // leave a durable reconciliation flag for finance/support instead.
+        try {
+          await this.prisma.withoutScope().$executeRaw`
+            UPDATE payments
+            SET gateway_response = COALESCE(gateway_response, '{}'::jsonb) ||
+              '{"reconciliation_required":true,"reconciliation_reason":"pos_reserved_sale_share"}'::jsonb
+            WHERE id = ${paymentId}
+          `;
+        } catch (markError) {
+          this.logger.error(`Could not mark payment ${paymentId} for accounting reconciliation: ${String(markError)}`);
+        }
+      }
       this.logger.error(
         `Failed to emit payment.received for webhook payment ${paymentId}: ${
           error instanceof Error ? error.message : String(error)

@@ -215,6 +215,14 @@ describe('PosPaymentStepComponent — tip contract', () => {
     }));
   });
 
+  it('clears a previously reserved tip when the edited order is retried without one', () => {
+    const { step, flowPayOrder } = makeStep(42);
+    step.onCollectorSubmit({ mode: 'contado', method: { id: '1', type: 'cash' } } as any);
+    expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      tip_amount: 0, tip_type: 'fixed', tip_value: 0,
+    }));
+  });
+
   it('routes a tipped edited Wompi order through the reserved digital processor', () => {
     const { step, flowPayOrder, digital } = makeStep(42);
     step.onCollectorSubmit({

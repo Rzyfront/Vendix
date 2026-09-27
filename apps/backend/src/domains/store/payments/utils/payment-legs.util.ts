@@ -40,6 +40,14 @@ export interface PaymentLegMethodInfo {
    * `'Unknown'` si falta.
    */
   display_name?: string;
+  /**
+   * Etiqueta CONTABLE del método: `system_payment_methods.display_name`,
+   * nunca el nombre que la tienda le puso. `AutoEntryService
+   * .resolveCashBankKey` elige Caja o Bancos por esta etiqueta; un efectivo
+   * renombrado «Caja» o «Contado» no debe caer en Bancos. Opcional: el
+   * normalizador cae a `'Unknown'` si falta, igual que el POS.
+   */
+  accounting_method?: string;
 }
 
 /** Un tramo tal como llega en el DTO (`payments[]`). */
@@ -79,6 +87,12 @@ export interface NormalizedLeg {
    * `methodsById`, sin consultas nuevas.
    */
   display_name: string;
+  /**
+   * Etiqueta contable del método (`system_payment_methods.display_name`) —
+   * la que viaja como `payment_method` en `payment.received`. Separada de
+   * `display_name` (UI/ticket) a propósito.
+   */
+  accounting_method: string;
 }
 
 export interface NormalizedPaymentLegs {
@@ -159,6 +173,7 @@ export function normalizePaymentLegs(
       bank_account_id: raw.bank_account_id,
       is_cash: isCashMethod(method),
       display_name: method.display_name || 'Unknown',
+      accounting_method: method.accounting_method || 'Unknown',
     };
   });
 

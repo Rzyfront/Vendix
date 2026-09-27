@@ -164,6 +164,13 @@ describe('InvoiceFlowService support documents', () => {
       resolveSuffered: jest
         .fn()
         .mockResolvedValue({ lines: [], uvt_value_used: 0, counterparty_type: null }),
+      // `resolveWithholdingBatches` agrupa por bien/servicio y llama a este
+      // método en vez de `resolveSuffered` directo (Step 1 del plan
+      // pago-multimetodo-pendientes). Sin este stub la resolución revienta y
+      // el `try/catch` degrada a cero, tapando cualquier regresión ahí.
+      resolveSufferedByOperation: jest
+        .fn()
+        .mockResolvedValue({ lines: [], uvt_value_used: 0, counterparty_type: null }),
       resolveSelf: jest
         .fn()
         .mockResolvedValue({ lines: [], uvt_value_used: 0, counterparty_type: null }),
@@ -660,5 +667,124 @@ describe('InvoiceFlowService support documents', () => {
 
       expect(numberGenerator.generateNextNumber).not.toHaveBeenCalled();
     });
+  });
+});
+
+// PR #858 hallazgo 2 — el cobro de la orden ya persistió la retención
+// SUFRIDA con `invoice_id: null` + `order_id`. Al aceptarse la factura de esa
+// orden se ENLAZAN esas filas (updateMany con `invoice_id`) y no se inserta
+// otra `suffered`; `self` sigue insertándose. Sin filas previas, o sin orden,
+// se inserta como siempre.
+describe('InvoiceFlowService.persistWithholdingBatches — enlace de la sufrida del cobro', () => {
+  const sufferedLine = {
+    withholding_type: 'retefuente',
+    concept_code: 'RF-COMPRAS',
+    concept_id: 5,
+    rate: 0.025,
+    base: 100000,
+    amount: 2500,
+    role: 'suffered',
+    account_role: 'withholding.suffered.retefuente_receivable',
+  } as any;
+  const selfLine = {
+    ...sufferedLine,
+    concept_code: 'AUTO',
+    concept_id: 6,
+    role: 'self',
+    amount: 400,
+    account_role: 'withholding.self.retefuente_payable',
+  } as any;
+  const batches = [
+    {
+      role: 'suffered',
+      resolution: { lines: [sufferedLine], uvt_value_used: 49799, counterparty_type: 'juridica' },
+    },
+    {
+      role: 'self',
+      resolution: { lines: [selfLine], uvt_value_used: 49799, counterparty_type: null },
+    },
+  ];
+  const invoice = {
+    id: 300,
+    organization_id: 1,
+    store_id: 2,
+    accounting_entity_id: 77,
+    customer_id: 44,
+    supplier_id: null,
+    order_id: 900,
+  };
+
+  const build = (priorRows: Array<{ id: number }>) => {
+    const prisma = {
+      withholding_calculations: {
+        findMany: jest.fn().mockResolvedValue(priorRows),
+        updateMany: jest.fn().mockResolvedValue({ count: priorRows.length }),
+      },
+    };
+    const withholdingFlow = {
+      persistWithholdingLines: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new InvoiceFlowService(
+      prisma as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      withholdingFlow as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    return { service, prisma, withholdingFlow };
+  };
+
+  it('con filas sufridas previas de la orden: las enlaza y no inserta suffered', async () => {
+    const { service, prisma, withholdingFlow } = build([{ id: 11 }, { id: 12 }]);
+
+    const breakdown = await (service as any).persistWithholdingBatches(invoice, batches);
+
+    expect(prisma.withholding_calculations.findMany).toHaveBeenCalledWith({
+      where: { organization_id: 1, order_id: 900, role: 'suffered', invoice_id: null },
+      select: { id: true },
+    });
+    expect(prisma.withholding_calculations.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [11, 12] } },
+      data: { invoice_id: 300, accounting_entity_id: 77 },
+    });
+    const persistedRoles = withholdingFlow.persistWithholdingLines.mock.calls.map(
+      (call: any[]) => call[0].role,
+    );
+    expect(persistedRoles).toEqual(['self']);
+    // El payload de `invoice.accepted` no cambia respecto del histórico.
+    expect(breakdown).toEqual([sufferedLine, selfLine]);
+  });
+
+  it('sin filas previas: inserta la suffered como siempre', async () => {
+    const { service, prisma, withholdingFlow } = build([]);
+
+    await (service as any).persistWithholdingBatches(invoice, batches);
+
+    expect(prisma.withholding_calculations.updateMany).not.toHaveBeenCalled();
+    const persistedRoles = withholdingFlow.persistWithholdingLines.mock.calls.map(
+      (call: any[]) => call[0].role,
+    );
+    expect(persistedRoles).toEqual(['suffered', 'self']);
+    expect(withholdingFlow.persistWithholdingLines.mock.calls[0][0]).toMatchObject({
+      invoice_id: 300,
+      customer_id: 44,
+      lines: [sufferedLine],
+    });
+  });
+
+  it('factura sin orden: ni busca filas previas, inserta como siempre', async () => {
+    const { service, prisma, withholdingFlow } = build([{ id: 11 }]);
+
+    await (service as any).persistWithholdingBatches({ ...invoice, order_id: null }, batches);
+
+    expect(prisma.withholding_calculations.findMany).not.toHaveBeenCalled();
+    expect(prisma.withholding_calculations.updateMany).not.toHaveBeenCalled();
+    expect(withholdingFlow.persistWithholdingLines).toHaveBeenCalledTimes(2);
   });
 });

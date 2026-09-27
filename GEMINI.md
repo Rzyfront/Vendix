@@ -381,6 +381,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Reserving or releasing stock | `vendix-inventory-stock` |
 | Resolving a knowledge gap by creating or updating a skill | `skill-creator` |
 | Resolving and caching Vendix team/project/labels UUIDs in .linear/config.json | `linear-connect` |
+| Resolving suffered withholding by operation type (goods vs services) | `vendix-tax-typing` |
 | Returning a failed ticket to Todo with the Devuelto label and raised priority | `verify-ticket-prod` |
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
 | Reusing a fiscal predicate that also governs write enforcement | `vendix-fiscal-scope` |

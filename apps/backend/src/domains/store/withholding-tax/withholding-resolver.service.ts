@@ -243,6 +243,20 @@ export class WithholdingResolverService {
         ) {
           continue;
         }
+
+        // (c) `supplier_type_filter` clasifica al PROVEEDOR de una compra
+        // (CASO 1). En `suffered` el retenido es el TENANT — no hay
+        // proveedor que clasificar, y el cliente (la contraparte que
+        // retiene) ya pasó la puerta (a). Un concepto con filtro !== 'any'
+        // (p.ej. RTE_HONOR_PN, 'persona_natural') no aplica a esta venta y,
+        // sobre todo, NO debe sumar especificidad: sin esta puerta,
+        // `specificity: concept.supplier_type_filter !== 'any' ? 1 : 0`
+        // premiaba a RTE_HONOR_PN sobre RTE_COMPRAS/RTE_SERV_GEN sin que su
+        // filtro comparara contra nada real. Ver knowledge gap en
+        // `vendix-tax-typing`: si algún día se modela un perfil fiscal del
+        // tenant como contraparte, esta puerta se reemplaza por una
+        // comparación real en vez de un descarte total.
+        if (concept.supplier_type_filter !== 'any') continue;
       } else {
         // CASO 3 — self (autorretención). Ver la nota del doc-comment.
         // (a) sólo se autorretiene quien tiene la calidad de autorretenedor.

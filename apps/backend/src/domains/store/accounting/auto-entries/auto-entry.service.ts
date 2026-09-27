@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { resolvePaymentInvoiceBranch } from './payment-invoice-branch.util';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { AccountMappingService } from '../account-mappings/account-mapping.service';
@@ -3297,39 +3298,13 @@ export class AutoEntryService {
         }
       : undefined;
 
-    // Check if this payment's order has an associated invoice
-    let has_invoice = false;
-    let has_real_invoice = false;
-    let has_credit_sale = false;
-    if (data.order_id) {
-      const invoice = await this.prisma.invoices.findFirst({
-        where: {
-          order_id: data.order_id,
-          status: { notIn: ['cancelled', 'voided'] },
-        },
-        select: { id: true },
+    // Check if this payment's order has an associated invoice. Criterio
+    // compartido con `OrderFlowService` (no retener en un cobro que cae aquí).
+    const { has_invoice, has_real_invoice, has_credit_sale } =
+      await resolvePaymentInvoiceBranch(this.prisma, {
+        order_id: data.order_id,
+        organization_id: data.organization_id,
       });
-      has_invoice = !!invoice;
-      has_real_invoice = !!invoice;
-      // Venta a crédito: `credit_sale.created` ya reconoció el ingreso +
-      // impuestos contra 1305 (con propina incluida en la 1305 y acreditada a su
-      // pasivo). El cobro posterior sólo cruza cartera (DR caja / CR 1305); por
-      // la rama «sin factura» reconocería la venta otra vez, y con factura no
-      // debe volver a separar la propina.
-      const credit_sale = await this.prisma
-        .withoutScope()
-        .accounting_entries.findFirst({
-          where: {
-            organization_id: data.organization_id,
-            source_type: 'credit_sale.created',
-            source_id: data.order_id,
-            status: 'posted',
-          },
-          select: { id: true },
-        });
-      has_credit_sale = !!credit_sale;
-      has_invoice = has_invoice || has_credit_sale;
-    }
 
     const payment_desc = data.payment_method
       ? `Pago ${data.payment_method}`

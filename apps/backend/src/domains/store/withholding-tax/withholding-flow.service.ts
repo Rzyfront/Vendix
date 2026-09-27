@@ -69,6 +69,13 @@ export interface PersistWithholdingContext {
   store_id?: number | null;
   accounting_entity_id?: number | null;
   invoice_id?: number | null;
+  /**
+   * Orden que originó la retención (PR #858 hallazgo 2). Los cobros
+   * (`flow/pay`, POS) persisten la sufrida con `invoice_id: null` y este
+   * `order_id`; al aceptarse la factura de esa orden, `invoice-flow` ENLAZA
+   * esas filas (les pone `invoice_id`) en vez de insertar otras.
+   */
+  order_id?: number | null;
   supplier_id?: number | null;
   customer_id?: number | null;
   role: WithholdingRoleValue;
@@ -83,6 +90,26 @@ export interface PersistWithholdingContext {
    * posterior deja retenciones sin venta.
    */
   client?: WithholdingDbClient;
+}
+
+/**
+ * Una línea/renglón de la venta, tal como cada llamador la tiene a mano: apenas
+ * lo necesario para decidir el grupo (bien vs servicio) y aportar su base/IVA
+ * al grupo. NO es `EvaluableConcept` — es el dato de la VENTA, no del catálogo
+ * de conceptos. Consumido por `resolveSufferedByOperation`.
+ */
+export interface SufferedOperationItem {
+  /**
+   * `physical` | `service` | `prepared` | `custom` | `null` | cualquier otro
+   * valor sin clasificar. Sólo `'service'` va al grupo `service`; todo lo
+   * demás (bienes, `prepared`, sin producto/tipo determinable) va a
+   * `purchase` — decisión del dueño (2026-09-26).
+   */
+  product_type?: string | null;
+  /** Base neta (subtotal) atribuible a esta línea. */
+  base: number;
+  /** IVA atribuible a esta línea (reteIVA del grupo se calcula sobre esto). */
+  ivaAmount?: number;
 }
 
 /**
@@ -419,6 +446,93 @@ export class WithholdingFlowService {
   }
 
   /**
+   * CASO 2 — suffered, POR TIPO DE OPERACIÓN. Agrupa las líneas de la venta en
+   * `purchase` (bienes: `physical`, `prepared`, sin producto o sin tipo
+   * determinable) y `service` (`service`), y resuelve `resolveSuffered` UNA
+   * VEZ POR GRUPO — cada uno con su propia base, su propio IVA y su propio
+   * umbral UVT — para que una venta mixta produzca una línea de retefuente por
+   * bien y otra por servicio en vez de una sola tarifa promediada o elegida al
+   * azar. Decisión del dueño (2026-09-26): «por separado».
+   *
+   * Existe porque ningún llamador pasaba `appliesTo` a `resolveSuffered`:
+   * `WithholdingResolverService.evaluate()` recibía todos los conceptos sin
+   * filtrar por `applies_to`, y la especificidad (ahora corregida en el
+   * resolver) premiaba conceptos con `supplier_type_filter !== 'any'`
+   * (p.ej. `RTE_HONOR_PN`) que nada tenían que ver con lo vendido.
+   *
+   * Un grupo vacío o con base `<= 0` NUNCA llama a `resolveSuffered` — ni
+   * siquiera con `base: 0`, que degradaría a un umbral UVT trivialmente
+   * superado en threshold 0 (p.ej. `RTE_HONOR`). Cero-regresión: sin líneas o
+   * sin base, `lines: []`.
+   */
+  async resolveSufferedByOperation(params: {
+    organization_id: number;
+    store_id?: number | null;
+    customer_id?: number | null;
+    items: SufferedOperationItem[];
+    year?: number;
+    /** Cliente de la transacción en curso; ver {@link WithholdingDbClient}. */
+    client?: WithholdingDbClient;
+  }): Promise<WithholdingResolution> {
+    const groups = new Map<
+      'purchase' | 'service',
+      { base: number; ivaAmount: number }
+    >();
+
+    for (const item of params.items) {
+      const base = Number(item.base || 0);
+      if (base <= 0) continue;
+
+      // Regla del dueño: `prepared` y las líneas sin tipo determinable
+      // (custom / sin producto / null) cuentan como bienes. Sólo `service`
+      // va al grupo de servicios.
+      const bucket: 'purchase' | 'service' =
+        item.product_type === 'service' ? 'service' : 'purchase';
+
+      const acc = groups.get(bucket) ?? { base: 0, ivaAmount: 0 };
+      acc.base += base;
+      acc.ivaAmount += Number(item.ivaAmount || 0);
+      groups.set(bucket, acc);
+    }
+
+    if (groups.size === 0) {
+      return { lines: [], uvt_value_used: 0, counterparty_type: null };
+    }
+
+    // Secuencial a propósito: `client` suele ser un `tx` interactivo de
+    // Prisma, que no admite consultas concurrentes sobre la misma conexión.
+    const resolutions: WithholdingResolution[] = [];
+    for (const [appliesTo, group] of groups.entries()) {
+      resolutions.push(
+        await this.resolveSuffered({
+          organization_id: params.organization_id,
+          store_id: params.store_id,
+          customer_id: params.customer_id,
+          base: group.base,
+          ivaAmount: group.ivaAmount,
+          appliesTo,
+          year: params.year,
+          client: params.client,
+        }),
+      );
+    }
+
+    const lines = resolutions.flatMap((resolution) => resolution.lines);
+    // Los dos grupos comparten tenant y cliente, así que el UVT usado y el
+    // tipo de contraparte son el mismo dato repetido — no hay nada que
+    // sumar; se toma el primero que haya resuelto (ambos degradan igual a
+    // 0/null cuando no hay cliente/agente retenedor).
+    const uvt_value_used =
+      resolutions.find((resolution) => resolution.uvt_value_used > 0)
+        ?.uvt_value_used ?? 0;
+    const counterparty_type =
+      resolutions.find((resolution) => resolution.counterparty_type != null)
+        ?.counterparty_type ?? null;
+
+    return { lines, uvt_value_used, counterparty_type };
+  }
+
+  /**
    * CASO 3 — self (AUTORRETENCIÓN). La tienda vende y se retiene a sí misma.
    * Resuelve las líneas aplicables (pasivos propios, 2365/2368).
    *
@@ -500,6 +614,7 @@ export class WithholdingFlowService {
         store_id: ctx.store_id ?? null,
         accounting_entity_id: ctx.accounting_entity_id ?? null,
         invoice_id: ctx.invoice_id ?? null,
+        order_id: ctx.order_id ?? null,
         supplier_id: ctx.role === 'practiced' ? (ctx.supplier_id ?? null) : null,
         customer_id: ctx.role === 'suffered' ? (ctx.customer_id ?? null) : null,
         concept_id: line.concept_id,

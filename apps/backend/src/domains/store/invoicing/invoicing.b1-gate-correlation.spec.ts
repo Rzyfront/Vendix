@@ -88,6 +88,11 @@ describe('InvoicingService · correlación del gate y reparo (B.1)', () => {
           uvt_value_used: 0,
           counterparty_type: null,
         }),
+        resolveSufferedByOperation: jest.fn().mockResolvedValue({
+          lines: [],
+          uvt_value_used: 0,
+          counterparty_type: null,
+        }),
         resolveSelf: jest.fn().mockResolvedValue({
           lines: [],
           uvt_value_used: 0,

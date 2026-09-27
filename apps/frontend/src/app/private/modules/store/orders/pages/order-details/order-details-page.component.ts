@@ -2418,9 +2418,12 @@ export class OrderDetailsPageComponent {
    * surface. Stored locally because these codes do not exist in the shared
    * `ERROR_MESSAGES` catalog (same reason as `ERROR_COPY` below), and
    * `parseApiError` falls back to a generic copy otherwise. Keys are matched
-   * on the surface `errorCode` AND on `details.cause_code`: in-branch
-   * rejections arrive wrapped as `ORD_FLOW_PAYMENT_FAILED_001` with the
-   * typed cause inside, while the online+legs guard arrives unwrapped.
+   * on the surface `errorCode` AND on `details.cause_code`: payload
+   * validation rejections (sum mismatch, method not allowed, multiple cash,
+   * invalid amount, the online+legs guard) arrive unwrapped as a 400 with
+   * their own `PAY_*` code, while flow-stage failures (order not payable,
+   * kitchen pending, finish blocked, …) still arrive wrapped as a 409
+   * `ORD_FLOW_PAYMENT_FAILED_001` with the typed cause in `details.cause_code`.
    */
   private readonly MULTI_TENDER_COPY: Record<string, string> = {
     PAY_MULTI_TENDER_SUM_MISMATCH:
