@@ -100,6 +100,24 @@ export class PosCustomerSelectorComponent {
    * en vez de mandar al cajero por el flujo completo "Con Cliente".
    */
   readonly minimalInvoiceMode = input<boolean>(false);
+  /**
+   * Incidente Óptica Panorama SAS — cuando la venta va a facturación
+   * electrónica (DIAN), un `document_conflict` del resolve (el documento
+   * tecleado no coincide con el que ya tiene guardado la ficha matcheada
+   * por email/nombre — ver `customers.service.ts findOrCreateByEmailOrDocument`,
+   * líneas ~590-611, backend fuera de este scope, solo lectura) NO puede
+   * pasar en silencio: bloquea el avance en vez de facturar con la
+   * identidad equivocada. Fuera de facturación electrónica el conflicto
+   * sigue siendo no bloqueante (comportamiento previo).
+   *
+   * Default `false` a propósito: el host debe pasar explícitamente esta
+   * bandera (p.ej. `settingsFacade.checkout()?.require_customer_data` en
+   * `pos-checkout-shell`, que ya es el flag documentado como "gobierna
+   * electronic invoicing" — ver comentario en ese archivo, fuera de mi
+   * scope) para activar el bloqueo; sin wiring del host, el gate queda
+   * inactivo y el comportamiento no cambia.
+   */
+  readonly requiresElectronicInvoicing = input<boolean>(false);
 
   // ── Outputs ─────────────────────────────────────────────────────────
   readonly customerSelected = output<PosCustomer>();
@@ -124,6 +142,13 @@ export class PosCustomerSelectorComponent {
   private readonly query = signal('');
   /** Última consulta efectiva (reservada para futuros prefill heurísticos). */
   readonly lastQuery = signal('');
+  /**
+   * `true` mientras el último `resolveCustomer()` respondió `document_conflict`
+   * bajo facturación electrónica y el avance quedó bloqueado — ver
+   * `requiresElectronicInvoicing`. Se limpia al editar el formulario o al
+   * salir del paso de creación.
+   */
+  readonly documentConflict = signal(false);
 
   // ── Top-suggestions (clientes más frecuentes) ───────────────────────
   /** Top-3 clientes por volumen de órdenes (carga on-init si showTopSuggestions). */
@@ -281,6 +306,15 @@ export class PosCustomerSelectorComponent {
         if (wantTop && !minimalInvoice) this.loadTopCustomers();
       });
     });
+
+    // Editar cualquier campo tras un bloqueo por document_conflict limpia el
+    // aviso — el cajero ya está corrigiendo la ficha, no tiene sentido dejar
+    // el mensaje viejo colgado hasta el próximo "Siguiente".
+    this.form.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.documentConflict()) this.documentConflict.set(false);
+      });
   }
 
   /** Carga perezosa e idempotente del top-3 comprimido (solo cuando showTopSuggestions). */
@@ -470,11 +504,36 @@ export class PosCustomerSelectorComponent {
 
     return this.customerService.resolveCustomer(request).pipe(
       map(
-        ({
-          customer,
-          was_created,
-          was_updated,
-        }): boolean => {
+        (result): boolean => {
+          // BLOQUEADOR (ver nota de scope): `PosCustomerService.resolveCustomer()`
+          // (apps/frontend/.../pos/services/pos-customer.service.ts, líneas
+          // ~107-121, fuera de mi scope — no es sibling de este componente y
+          // lo consumen pos.component.ts / dispatch-notes/party-step.component.ts
+          // además de este selector y pos-customer-modal) mapea la respuesta
+          // del backend a `{customer, was_created, was_updated, matched_by}` y
+          // DESCARTA `document_conflict`, que el backend SÍ devuelve
+          // (`customers.service.ts findOrCreateByEmailOrDocument`, líneas
+          // ~698-704, confirmado leyendo el archivo — backend fuera de scope,
+          // solo lectura). Hasta que ese servicio compartido agregue
+          // `document_conflict: !!payload.document_conflict` a su `map()` (y
+          // al tipo de retorno), este campo llega siempre `undefined` en
+          // runtime y el bloqueo de abajo nunca se activa — el cast solo
+          // documenta el contrato objetivo, no lo repara.
+          const document_conflict =
+            (result as { document_conflict?: boolean }).document_conflict ===
+            true;
+          const { customer, was_created, was_updated } = result;
+
+          if (document_conflict && this.requiresElectronicInvoicing()) {
+            this.documentConflict.set(true);
+            this.resolving.set(false);
+            this.toastService.error(
+              'El documento ingresado no coincide con la ficha del cliente; edita la ficha antes de facturar',
+            );
+            return false;
+          }
+          this.documentConflict.set(false);
+
           this.customerSelected.emit(customer);
           this.view.set('overview');
           this.form.reset();
