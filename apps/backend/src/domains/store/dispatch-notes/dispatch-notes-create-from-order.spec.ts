@@ -130,6 +130,32 @@ describe('DispatchNotesService — createFromOrder prorratea el impuesto de lín
     expect(txCreate).toHaveBeenCalledTimes(1);
   });
 
+  it('does not recheck stock already committed on a delivered direct line or consumed at kitchen fire', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue(orderWith([
+      orderItem({
+        inventory_committed: true,
+        products: { product_type: 'physical' },
+        kitchen_ticket_items: [],
+      }),
+      orderItem({
+        id: 12,
+        product_id: 353,
+        inventory_consumed_at_fire: true,
+        products: { product_type: 'prepared' },
+        kitchen_ticket_items: [{ status: 'delivered' }],
+      }),
+    ]));
+    prismaMock.dispatch_notes = { findMany: jest.fn().mockResolvedValue([]) };
+
+    await service.createFromOrder(ORDER_ID, { items: [] } as any);
+
+    expect((service as any).validateDispatchItemsStock).toHaveBeenCalledWith(
+      STORE_ID, ORDER_ID, [],
+    );
+    expect(txCreate).toHaveBeenCalledTimes(1);
+    expect(txCreate.mock.calls[0][0].data.dispatch_note_items.create).toHaveLength(2);
+  });
+
   it('despacho completo qty 5 base 50.000 IVA 19 % persiste tax 47.500 y total 297.500', async () => {
     const { persisted } = await runCreate([orderItem()], 5);
 

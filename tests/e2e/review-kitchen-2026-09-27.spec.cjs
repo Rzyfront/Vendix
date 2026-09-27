@@ -208,8 +208,8 @@ async function run(name, reviewId, scheme, fn) {
 async function main() {
   const fixtures = parseFixtures(); // Fail before opening a browser or mutating anything.
   const group = process.env.QA_KITCHEN_GROUP || 'all';
-  assert(['all', 'r6', 'r18', 'pending', 'reuse', 'waste'].includes(group),
-    'QA_KITCHEN_GROUP must be all, r6, r18, pending, reuse or waste.');
+  assert(['all', 'r6', 'r6_handoff', 'r6_dispatch', 'r18', 'pending', 'reuse', 'waste'].includes(group),
+    'QA_KITCHEN_GROUP must be all, r6, r6_handoff, r6_dispatch, r18, pending, reuse or waste.');
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const admin = await context.newPage();
@@ -269,6 +269,65 @@ async function main() {
       await openKds(kds);
       await requireTicket(kds, 'pending', fixture);
       return `${fixture.orderNumber}: direct delivered; dish/KDS remained pending; dispatch disabled after reload`;
+    });
+
+    if (group === 'r6_handoff') await run('Prepared dish handoff unblocks whole-order dispatch', 'R6', 'happy/integrity', async () => {
+      const fixture = fixtures.r6;
+      await openKds(kds);
+      await requireOwnKdsShift(kds);
+      let card = await requireTicket(kds, 'pending', fixture);
+      await card.getByRole('button', { name: 'Iniciar', exact: true }).click();
+      await kds.getByRole('dialog', { name: 'Verificar ticket para cocinar' })
+        .getByRole('button', { name: 'Cocinar sin cambios' }).click();
+      card = await requireTicket(kds, 'in_preparation', fixture);
+      await card.getByRole('button', { name: 'Listo', exact: true }).click();
+      card = await requireTicket(kds, 'ready', fixture);
+      await card.getByRole('button', { name: 'Entregar', exact: true }).click();
+      await requireTicket(kds, 'delivered', fixture);
+
+      await openView(admin, `${BASE}/admin/orders/${fixture.orderId}`,
+        admin.getByRole('heading', { name: `Orden #${fixture.orderNumber}` }), 'R6 ready order detail');
+      const dish = admin.locator('.items-compact > div').filter({ hasText: fixture.dishName });
+      await dish.waitFor();
+      assert(!(await dish.innerText()).includes('Cocina: Pendiente'),
+        'The delivered kitchen ticket still looks pending in the order detail.');
+      const dispatch = admin.locator('app-button:visible')
+        .filter({ hasText: 'Despachar Orden' }).locator('button');
+      assert.equal(await dispatch.count(), 1, 'One dispatch action should remain after handoff.');
+      assert(await dispatch.isEnabled(), 'Dispatch must unlock after KDS delivered the dish.');
+      return `${fixture.orderNumber}: KDS pending→preparing→ready→delivered; dispatch enabled in order detail`;
+    });
+
+    if (group === 'r6_dispatch') await run('Dispatch after kitchen handoff preserves COD payment pending', 'R6', 'happy/sad', async () => {
+      const fixture = fixtures.r6;
+      await openKds(kds);
+      await requireTicket(kds, 'delivered', fixture);
+      await openView(admin, `${BASE}/admin/orders/${fixture.orderId}`,
+        admin.getByRole('heading', { name: `Orden #${fixture.orderNumber}` }), 'R6 dispatch order');
+      const dispatch = admin.locator('app-button:visible')
+        .filter({ hasText: 'Despachar Orden' }).locator('button');
+      assert.equal(await dispatch.count(), 1, 'Only one dispatch CTA should remain after kitchen handoff.');
+      assert(await dispatch.isEnabled(), 'Dispatch must be enabled after KDS delivered the dish.');
+      await dispatch.click();
+      const courier = admin.locator('app-courier-name-modal');
+      await courier.getByText('¿Quién lleva el despacho?').waitFor();
+      await courier.getByRole('button', { name: 'Cancelar' }).click();
+      assert(await dispatch.isEnabled(), 'Abandoning courier selection must not dispatch the order.');
+      await dispatch.click();
+      await courier.locator('app-input[formcontrolname="courier_name"] input')
+        .fill('QA Review R6 Repartidor');
+      await courier.getByRole('button', { name: 'Confirmar entrega' }).click();
+      await admin.locator('app-sticky-header').getByText('Entregada', { exact: true })
+        .waitFor({ timeout: 25_000 });
+      await openView(admin, `${BASE}/admin/orders/${fixture.orderId}`,
+        admin.getByRole('heading', { name: `Orden #${fixture.orderNumber}` }), 'R6 dispatched reload');
+      const body = await admin.locator('body').innerText();
+      assert(body.includes('PENDIENTE') && body.includes('Pago Contra Entrega'),
+        'Kitchen handoff/dispatch must not silently collect the COD payment.');
+      assert.equal(await admin.locator('app-button:visible')
+        .filter({ hasText: 'Despachar Orden' }).count(), 0,
+      'Delivered order must not offer a second dispatch.');
+      return `${fixture.orderNumber}: courier cancel was safe; delivery completed after KDS, COD still pending after reload`;
     });
 
     if (['all', 'r18', 'pending'].includes(group)) await run('Pending KDS cancellation automatically restores each ingredient once', 'R18', 'happy/integrity', async () => {
@@ -352,5 +411,5 @@ main().catch((error) => {
   process.exitCode = 1;
 }).finally(() => {
   process.stdout.write(`Coverage: ${results.length} executed; ${results.filter((r) => r.status === 'passed').length} passed; ` +
-    'R6 KDS completion/dispatch and R18 item/order cancellation remain outside this fixture-gated file.\n');
+    'R6 skipKds-with-existing-ticket and R18 item/order cancellation remain outside this fixture-gated file.\n');
 });

@@ -2215,10 +2215,20 @@ export class DispatchNotesService {
       });
     }
 
-    // Stock gate: the remisión dispatches what is already reserved for this
-    // order, so reserved-for-this-order units count as available. Only a real
-    // shortfall raises DISPATCH_NOTE_INSUFFICIENT_STOCK.
-    await this.validateDispatchItemsStock(store_id, order_id, dispatch_items);
+    // Stock gate only for lines whose inventory is still pending. An item
+    // delivered individually already consumed its reservation and marked
+    // `inventory_committed`; a prepared dish consumed its ingredients when it
+    // was fired. Revalidating either against TODAY's availability falsely
+    // blocks the remisión after a legitimate handoff (especially when the
+    // store explicitly allowed overselling), even though the delivery commit
+    // below is claim-once and will not consume those lines again.
+    const stockPendingItems = dispatch_items.filter((item) => {
+      const source = order.order_items.find(
+        (line) => line.id === item.sales_order_item_id,
+      );
+      return !source?.inventory_committed && !source?.inventory_consumed_at_fire;
+    });
+    await this.validateDispatchItemsStock(store_id, order_id, stockPendingItems);
 
     const subtotal = dispatch_items.reduce(
       (sum, item) =>
