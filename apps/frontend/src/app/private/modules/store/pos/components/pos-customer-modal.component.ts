@@ -29,6 +29,7 @@ import {
   ToggleComponent,
   ToastService,
   DialogService,
+  AlertBannerComponent,
   type AddressPayload } from '../../../../../shared/components';
 import {
   DOCUMENT_TYPES,
@@ -61,6 +62,7 @@ import { CreateCustomerRequest } from '../../customers/models/customer.model';
     IconComponent,
     InputsearchComponent,
     ToggleComponent,
+    AlertBannerComponent,
     CustomerModalComponent
 ],
   template: `
@@ -413,6 +415,27 @@ import { CreateCustomerRequest } from '../../customers/models/customer.model';
                   Dígito de verificación: <strong>{{ computedVerificationDigit() ?? '—' }}</strong> (calculado automáticamente)
                 </p>
               }
+              @if (legalPersonDocumentTypeWarning()) {
+                <!--
+                  P2 — el candado JURIDICA→NIT normalmente fuerza y bloquea
+                  el tipo de documento, pero esta ficha ya existía como
+                  JURIDICA con un tipo distinto de NIT (dato guardado antes
+                  de esa regla, o corregido a mano). Se respeta lo guardado en
+                  vez de reescribirlo en silencio: el campo queda editable y
+                  el backend rechazará el guardado si la combinación sigue
+                  siendo incoherente.
+                -->
+                <app-alert-banner
+                  variant="warning"
+                  icon="alert-triangle"
+                  tone="token"
+                  heading="Persona jurídica debe usar NIT"
+                >
+                  Esta ficha es persona jurídica pero su tipo de documento no
+                  es NIT. Corrige el tipo de documento antes de guardar; de lo
+                  contrario el guardado será rechazado.
+                </app-alert-banner>
+              }
               <!-- Información fiscal -->
               <div class="pt-2 border-t border-[var(--color-border)]">
                 <h3 class="text-sm font-semibold text-[var(--color-text-primary)] mb-3">
@@ -637,6 +660,16 @@ export class PosCustomerModalComponent {
   /** Tipo de persona (reactivo), para togglear nombre/apellido vs razón social. */
   readonly personTypeValue = signal<string>('');
 
+  /**
+   * `true` cuando la ficha cargada es JURIDICA con un `document_type`
+   * distinto de NIT (dato guardado antes del candado, o corregido a mano).
+   * El candado JURIDICA→NIT normalmente fuerza el valor a NIT y bloquea el
+   * campo; en ese caso NO lo hace (ver el efecto que lo escribe, en el
+   * constructor) para no reescribir en silencio una ficha real. La plantilla
+   * usa esta señal para mostrar la advertencia visible.
+   */
+  readonly legalPersonDocumentTypeWarning = signal(false);
+
   /** Número de documento (reactivo), para derivar el DV automáticamente. */
   readonly documentNumberValue = signal<string>('');
 
@@ -801,12 +834,35 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
     effect(() => {
       const isJuridica = this.personTypeValue() === 'JURIDICA';
       const docTypeCtrl = this.customerForm.controls['documentType'];
+      const loadedCustomer = this.customer();
+      // P2 — una ficha JURIDICA vieja pudo quedar guardada con CC (dato de
+      // antes de este candado, o corregido a mano). Si el estado actual
+      // coincide EXACTO con lo que la ficha ya traía guardado, no es una
+      // elección en vivo — es el `patchValue` de `populateFormForEdit` — y
+      // forzar NIT aquí la reescribiría en silencio. Se respeta el dato, se
+      // avisa (`legalPersonDocumentTypeWarning`), y el campo queda editable
+      // para que el usuario lo corrija (el backend rechaza la combinación
+      // incoherente si se toca).
+      const isLoadedInconsistentJuridica =
+        isJuridica &&
+        docTypeCtrl.value !== 'NIT' &&
+        loadedCustomer?.person_type === 'JURIDICA' &&
+        loadedCustomer?.document_type === docTypeCtrl.value;
+
+      this.legalPersonDocumentTypeWarning.set(isLoadedInconsistentJuridica);
+
       if (isJuridica) {
-        if (docTypeCtrl.value !== 'NIT') {
-          docTypeCtrl.setValue('NIT');
-        }
-        if (docTypeCtrl.enabled) {
-          docTypeCtrl.disable({ emitEvent: false });
+        if (isLoadedInconsistentJuridica) {
+          if (docTypeCtrl.disabled) {
+            docTypeCtrl.enable({ emitEvent: false });
+          }
+        } else {
+          if (docTypeCtrl.value !== 'NIT') {
+            docTypeCtrl.setValue('NIT');
+          }
+          if (docTypeCtrl.enabled) {
+            docTypeCtrl.disable({ emitEvent: false });
+          }
         }
       } else if (docTypeCtrl.disabled) {
         docTypeCtrl.enable({ emitEvent: false });

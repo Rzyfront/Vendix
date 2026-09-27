@@ -1995,12 +1995,20 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
               </div>
 
               <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
+                <!--
+                  P2 — el candado de identidad para un adquiriente vinculado
+                  NO se aplica con [disabled]: FormControlName declara su
+                  propio Input disabled que sólo emite el
+                  disabledAttrWarning de Angular Forms al convivir con
+                  formControlName en el mismo elemento. El estado real lo
+                  fija syncLinkedCustomerIdentityLock con
+                  control.disable()/enable().
+                -->
                 <app-selector
                   label="Tipo de identificación"
                   formControlName="customer_document_type"
                   [options]="documentTypeOptions"
                   [errorText]="fieldError('customer_document_type') ?? ''"
-                  [disabled]="isLinkedToExistingCustomer()"
                   size="sm"
                 ></app-selector>
                 <app-input
@@ -2061,12 +2069,13 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                   cuanto el documento deja de ser NIT).
                 -->
                 @if (isNitCustomer()) {
+                  <!-- P2 — mismo motivo que customer_document_type arriba:
+                       el candado es syncLinkedCustomerIdentityLock, no [disabled]. -->
                   <app-selector
                     label="Tipo de persona"
                     formControlName="customer_person_type"
                     [options]="customerPersonTypeOptions"
                     helpText="Natural con NIT (independiente) o Jurídica (empresa)."
-                    [disabled]="isLinkedToExistingCustomer()"
                     size="sm"
                   ></app-selector>
                 }
@@ -4932,6 +4941,32 @@ export class InvoiceCreatePageComponent implements OnInit {
   readonly isLinkedToExistingCustomer = computed(
     () => !!this.rawValue()['customer_id'],
   );
+  /**
+   * P2 — candado de identidad de un adquiriente vinculado.
+   *
+   * `customer_document_type` y `customer_person_type` se bloquean con
+   * `control.disable()/enable()`, NUNCA con `[disabled]` en el template: ese
+   * binding convive con `formControlName` en el mismo `app-selector`, y
+   * `FormControlName` declara su propio `@Input('disabled')` sólo para
+   * emitir el `disabledAttrWarning` de Angular Forms — dos vías queriendo
+   * gobernar el mismo estado. `getRawValue()` (fuente de `rawValue()` y de
+   * `buildPayload()`) sigue devolviendo el valor de un control deshabilitado,
+   * así que el payload no pierde `customer_document_type` — el DV
+   * (`computedCustomerDv`), el correo, el teléfono y la dirección fiscal no
+   * se tocan aquí y siguen editables.
+   */
+  private readonly syncLinkedCustomerIdentityLock = effect(() => {
+    const locked = this.isLinkedToExistingCustomer();
+    for (const name of ['customer_document_type', 'customer_person_type']) {
+      const control = this.invoiceForm.get(name);
+      if (!control) continue;
+      if (locked && control.enabled) {
+        control.disable({ emitEvent: false });
+      } else if (!locked && control.disabled) {
+        control.enable({ emitEvent: false });
+      }
+    }
+  });
   /**
    * Adquiriente CON documento declarado — no "consumidor final" anónimo.
    * Gobierna si la dirección fiscal es obligatoria (ver

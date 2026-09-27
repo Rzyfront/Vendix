@@ -19,6 +19,7 @@ import {
   ToggleComponent,
   AddressFormFieldsComponent,
   IconComponent,
+  AlertBannerComponent,
   type AddressPayload,
 } from '../../../../../../shared/components';
 import {
@@ -111,6 +112,7 @@ interface AddressDtoPayload {
     ToggleComponent,
     AddressFormFieldsComponent,
     IconComponent,
+    AlertBannerComponent,
   ],
   template: `
     <app-modal
@@ -334,6 +336,28 @@ interface AddressDtoPayload {
                   ></app-input>
                 }
               </div>
+
+              @if (legalPersonDocumentTypeWarning()) {
+                <!--
+                  P2 — el candado JURIDICA→NIT normalmente fuerza y bloquea
+                  este campo, pero esta ficha ya existía como JURIDICA con un
+                  tipo de documento distinto de NIT (dato guardado antes de
+                  esa regla, o corregido a mano). Se respeta lo guardado en
+                  vez de reescribirlo en silencio: el campo queda editable y
+                  el backend rechazará el guardado si la combinación sigue
+                  siendo incoherente.
+                -->
+                <app-alert-banner
+                  variant="warning"
+                  icon="alert-triangle"
+                  tone="token"
+                  heading="Persona jurídica debe usar NIT"
+                >
+                  Esta ficha es persona jurídica pero su tipo de documento no
+                  es NIT. Corrige el tipo de documento antes de guardar; de lo
+                  contrario el guardado será rechazado.
+                </app-alert-banner>
+              }
             </div>
 
             <!-- ============================================================ -->
@@ -533,16 +557,14 @@ export class CustomerModalComponent {
   readonly person_type = signal<string>('');
   readonly document_type = signal<string>('');
   /**
-   * `true` durante el `patchValue(customer)` de carga (editar-mode). Los
-   * efectos de sincronización lo consultan para NO re-etiquetar a JURIDICA
-   * una persona natural con NIT ya guardada (autónomo con RUT): la
-   * sugerencia NIT→JURIDICA sólo debe aplicar a interacción en vivo del
-   * usuario, no a datos existentes que se están mostrando. Angular corre los
-   * `effect()` en una tarea de microtask; se resetea con `queueMicrotask`
-   * para que siga en `true` mientras esos efectos procesan el patch y vuelva
-   * a `false` a tiempo para la siguiente interacción real del usuario.
+   * `true` cuando la ficha cargada es JURIDICA con un `document_type`
+   * distinto de NIT (dato guardado antes del candado, o corregido a mano).
+   * El candado JURIDICA→NIT normalmente fuerza el valor a NIT y bloquea el
+   * campo; en este caso NO lo hace — ver el efecto que lo escribe, más
+   * abajo — para no reescribir en silencio una ficha real. La plantilla usa
+   * esta señal para mostrar la advertencia visible.
    */
-  private isPatchingFromCustomer = false;
+  readonly legalPersonDocumentTypeWarning = signal(false);
   /** Bridge del FormControl `fiscal_responsibilities` (array) a signal. */
   readonly fiscalResponsibilitiesValue = signal<string[]>([]);
 
@@ -672,17 +694,30 @@ export class CustomerModalComponent {
         if (dvCtrl && dvCtrl.value) {
           dvCtrl.setValue('', { emitEvent: false });
         }
-      } else if (!this.isPatchingFromCustomer) {
+      } else {
         // NIT sugiere persona jurídica (regla dueño: la mayoría de NIT son
         // jurídicos), pero es una sugerencia, no un candado: si el usuario
         // la revierte a NATURAL explícitamente después, ese cambio no se
         // vuelve a pisar (este efecto sólo reacciona a document_type, no a
-        // person_type). Se omite mientras `patchValue(customer)` está en
-        // curso para no re-etiquetar a jurídica una persona natural con NIT
-        // ya guardada correctamente (autónomo/profesional con RUT).
-        const personTypeCtrl = this.form.controls['person_type'];
-        if (personTypeCtrl.value !== 'JURIDICA') {
-          personTypeCtrl.setValue('JURIDICA');
+        // person_type).
+        //
+        // Se omite cuando este NIT es EXACTAMENTE el que trae la ficha
+        // cargada (`customer()?.document_type`): eso es el `patchValue` de
+        // datos ya guardados, no una elección en vivo del usuario, y no debe
+        // re-etiquetar a jurídica a un NATURAL con NIT (autónomo/profesional
+        // con RUT) que la ficha real ya tenía correctamente clasificado.
+        //
+        // Comparación DETERMINISTA contra el valor cargado — reemplaza el
+        // flag `isPatchingFromCustomer` + `queueMicrotask` que dependía de
+        // qué efecto Angular agendara primero para correr (P2: la ventana de
+        // carrera podía cerrarse antes o después de que este efecto leyera
+        // el flag).
+        const isLoadedValue = this.customer()?.document_type === code;
+        if (!isLoadedValue) {
+          const personTypeCtrl = this.form.controls['person_type'];
+          if (personTypeCtrl.value !== 'JURIDICA') {
+            personTypeCtrl.setValue('JURIDICA');
+          }
         }
       }
     });
@@ -698,12 +733,34 @@ export class CustomerModalComponent {
       // lo dejó así explícitamente (autónomos con RUT), así que sólo se
       // libera el candado, nunca se cambia el valor en ese sentido.
       const docTypeCtrl = this.form.controls['document_type'];
+      const loadedCustomer = this.customer();
+      // P2 — Óptica Panorama SAS al revés: una ficha JURIDICA vieja pudo
+      // quedar guardada con CC (dato de antes de este candado, o corregido a
+      // mano). Si el estado actual coincide EXACTO con lo que la ficha ya
+      // traía guardado, no es una elección en vivo — es el patch de carga —
+      // y forzar NIT aquí la reescribiría en silencio. Se respeta el dato,
+      // se avisa, y el campo queda editable para que el usuario lo corrija
+      // (el backend rechaza la combinación incoherente si se toca).
+      const isLoadedInconsistentJuridica =
+        isJuridica &&
+        docTypeCtrl.value !== 'NIT' &&
+        loadedCustomer?.person_type === 'JURIDICA' &&
+        loadedCustomer?.document_type === docTypeCtrl.value;
+
+      this.legalPersonDocumentTypeWarning.set(isLoadedInconsistentJuridica);
+
       if (isJuridica) {
-        if (docTypeCtrl.value !== 'NIT') {
-          docTypeCtrl.setValue('NIT');
-        }
-        if (docTypeCtrl.enabled) {
-          docTypeCtrl.disable({ emitEvent: false });
+        if (isLoadedInconsistentJuridica) {
+          if (docTypeCtrl.disabled) {
+            docTypeCtrl.enable({ emitEvent: false });
+          }
+        } else {
+          if (docTypeCtrl.value !== 'NIT') {
+            docTypeCtrl.setValue('NIT');
+          }
+          if (docTypeCtrl.enabled) {
+            docTypeCtrl.disable({ emitEvent: false });
+          }
         }
       } else if (docTypeCtrl.disabled) {
         docTypeCtrl.enable({ emitEvent: false });
@@ -762,9 +819,11 @@ export class CustomerModalComponent {
     effect(() => {
       const customer = this.customer();
       if (customer) {
-        // Ver comentario del campo `isPatchingFromCustomer`: suprime la
-        // sugerencia NIT→JURIDICA mientras se cargan datos ya guardados.
-        this.isPatchingFromCustomer = true;
+        // La sugerencia NIT→JURIDICA y el candado JURIDICA→NIT se suprimen
+        // para ESTE patch comparando de forma determinista contra
+        // `this.customer()` dentro de cada efecto (ver el comentario en el
+        // efecto de `documentTypeValue` y en el de `personTypeValue`) — no
+        // hace falta un flag ni un `queueMicrotask` aquí.
         this.form.patchValue({
           email: customer.email,
           first_name: customer.first_name,
@@ -784,9 +843,6 @@ export class CustomerModalComponent {
           person_type: customer.person_type ?? null,
           is_withholding_agent: customer.is_withholding_agent ?? false,
           fiscal_responsibilities: customer.fiscal_responsibilities ?? [],
-        });
-        queueMicrotask(() => {
-          this.isPatchingFromCustomer = false;
         });
 
         // Cargar la dirección de envío existente (si la hay) para el hijo.
