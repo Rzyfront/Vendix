@@ -1841,6 +1841,15 @@ export class PosComponent {
       this.toastService.warning(EMPTY_CART_MESSAGE);
       return;
     }
+    // Guardar while editing is an update of the same order, not a second
+    // create-draft flow. In particular, do not show the initial customer /
+    // delivery wizard or call saveDraft (which cancels/recreates the draft).
+    if (this.isEditMode()) {
+      if (this.loading()) return;
+      this.showCartModal.set(false);
+      this.updateExistingOrder();
+      return;
+    }
     // Close the mobile cart modal so the checkout shell is the only
     // full-screen dialog open at a time.
     this.showCartModal.set(false);
@@ -1861,6 +1870,10 @@ export class PosComponent {
    */
   onOpenCreateModal(): void {
     if (!this.cartState() || this.isEmpty) return;
+    if (this.isEditMode()) {
+      this.onSaveDraft();
+      return;
+    }
     // Close the mobile cart modal so the checkout shell is the only
     // full-screen dialog open at a time.
     this.showCartModal.set(false);
@@ -2388,9 +2401,8 @@ export class PosComponent {
     // CP-POS-MODAL-SCOPE-001 / Phase A.4 — edit mode now opens the shell
     // with `mode='edit'` (full wizard: Cliente + Cobro). The shell emits
     // `editorUpdated` after PUT /editor so the cashier can immediately
-    // Cobrar from the same modal without leaving the POS. The legacy
-    // `updateExistingOrder()` direct path (which produced "error al
-    // validar") is removed in favour of the shell handler.
+    // Cobrar from the same modal without leaving the POS. Guardar uses
+    // the direct editor path without reopening this wizard.
     if (this.isEditMode()) {
       this.mode.set('edit');
       this.initialEntrega.set(this.entregaChoiceForEditingOrder());
@@ -4092,10 +4104,10 @@ export class PosComponent {
           // the server's authoritative snapshot.
           this.editingOrder.set(updatedOrder);
           this.readyToPayOrder.set(updatedOrder);
-          // Stay in POS: DO NOT navigate. DO NOT clear the cart. DO NOT close
-          // any modal — the cashier must see "Cobrar" now.
+          // Stay in POS and keep the original draft identity. The cashier may
+          // keep editing or choose Cobrar separately.
           this.toastService.success(
-            `Orden #${updatedOrder.order_number} actualizada — lista para cobrar`,
+            `Orden #${updatedOrder.order_number} guardada`,
           );
           this.fetchPaymentMethodsCatalog();
         },
@@ -4120,23 +4132,13 @@ export class PosComponent {
    * made Prisma 7 reject the request. The backend never received a clean
    * payload and the cashier never saw Cobrar.
    *
-   * Customer fallback: when the cart has no customer attached (the cashier
-   * didn't pick one during edit) we fall back to the order's existing
-   * `customer_id`. Sending `null` would let Prisma 7 drop the FK and break
-   * the next `flow/pay`. If both are missing we surface
-   * `POS_CUSTOMER_REQUIRED_001` locally — saves a round-trip and matches
-   * the backend's authoritative rejection.
+   * Customer fallback: a persisted customer or alias remains attached when
+   * Guardar is used without the checkout wizard. Anonymous drafts remain
+   * anonymous; the backend POS policy is authoritative.
    *
-   * Shipping fields: forwarded from `state.shippingContext`. Hasta F-FLETE
-   * esta nota mentía — decía "populated by `loadFromOrder`" cuando NADIE lo
-   * escribía y este bloque nunca podía emitir una sola clave de envío. Hoy el
-   * escritor existe (`PosCartService.buildShippingContextFromOrder`).
-   *
-   * OJO: este método es el carril LEGADO. Su único llamador,
-   * `updateExistingOrder()`, es privado y no lo invoca nadie — el carril vivo
-   * es `PosCheckoutShellComponent.buildEditorShippingPayload`, que consume el
-   * MISMO `state.shippingContext`. Si cambias la política de flete, cámbiala
-   * allí también o los dos carriles divergen.
+   * Shipping is intentionally omitted. Guardar has no shipping editor and
+   * resending its snapshot would trigger a new quote. Cobrar still uses the
+   * shell's buildEditorShippingPayload for explicit shipping edits.
    *
    * Undefined keys are omitted, not nulled — the editor endpoint treats
    * absent keys as "no change" and any explicit `null` could clear a value
@@ -4153,16 +4155,12 @@ export class PosComponent {
       ? Number(this.editingOrder()!.customer_id)
       : null;
     const customerId = cartCustomerId ?? orderCustomerId;
-    if (customerId == null || !Number.isFinite(customerId) || customerId < 1) {
-      // Defensive mirror of `POS_CUSTOMER_REQUIRED_001`. Backend would reject
-      // with that code; we throw the same shape so the cashier sees a real
-      // reason instead of a silent 422.
-      const err = new Error(
-        'Selecciona o crea un cliente antes de guardar la orden. (POS_CUSTOMER_REQUIRED_001)',
-      ) as Error & { errorCode: string };
-      err.errorCode = 'POS_CUSTOMER_REQUIRED_001';
-      throw err;
-    }
+    // A persisted anonymous/alias draft is already authorized by the POS
+    // policy. Requiring a customer here would make the no-wizard save path
+    // impossible for those orders; the editor endpoint is authoritative.
+    const customerAlias = customerId == null
+      ? this.editingOrder()?.customer_alias?.trim() || undefined
+      : undefined;
     const appliedCoupon = state.appliedCoupon;
     const promotionIds = (state.appliedDiscounts ?? [])
       .map((d: any) => Number(d.promotion_id))
@@ -4193,6 +4191,7 @@ export class PosComponent {
         this.cartBookingsFromChild?.()?.get?.(item?.id) ?? null;
 
       return {
+        item_type: isCustomItem ? 'custom' : (item?.itemType ?? 'product'),
         product_id: productIdNumeric,
         product_variant_id: variantIdNumeric,
         product_name: productName,
@@ -4253,31 +4252,9 @@ export class PosComponent {
       };
     });
 
-    const shipping = state.shippingContext;
-    const shippingKeys: Record<string, unknown> = {};
-    if (shipping) {
-      if (shipping.deliveryType != null) {
-        shippingKeys['delivery_type'] = shipping.deliveryType;
-      }
-      if (shipping.shippingAddressId != null) {
-        shippingKeys['shipping_address_id'] = shipping.shippingAddressId;
-      }
-      if (shipping.billingAddressId != null) {
-        shippingKeys['billing_address_id'] = shipping.billingAddressId;
-      }
-      if (shipping.shippingMethodId != null) {
-        shippingKeys['shipping_method_id'] = shipping.shippingMethodId;
-      }
-      if (shipping.shippingRateId != null) {
-        shippingKeys['shipping_rate_id'] = shipping.shippingRateId;
-      }
-      if (shipping.shippingCost != null) {
-        shippingKeys['shipping_cost'] = shipping.shippingCost;
-      }
-    }
-
     return {
       customer_id: customerId,
+      customer_alias: customerAlias,
       coupon_code: appliedCoupon?.code ?? null,
       promotion_ids: promotionIds,
       items,
@@ -4289,7 +4266,9 @@ export class PosComponent {
       // for the cart path.
       ...(state.notes ? { notes: state.notes } : {}),
       ...(state.internalNotes ? { internal_notes: state.internalNotes } : {}),
-      ...shippingKeys,
+      // The cart only holds the persisted shipping snapshot here; there is no
+      // shipping editor in this direct Guardar path. Omit all shipping keys so
+      // PUT /editor preserves the existing quote instead of re-quoting it.
     };
   }
 

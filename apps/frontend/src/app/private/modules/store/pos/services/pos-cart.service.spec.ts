@@ -190,7 +190,7 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
  */
 describe('PosCartService — removeFromCart (modo adoptado)', () => {
   let service: PosCartService;
-  let posApi: { updateOrderItems: jasmine.Spy; cancelOrder: jasmine.Spy };
+  let posApi: { updateOrderItems: jasmine.Spy; getOrderById: jasmine.Spy; cancelOrder: jasmine.Spy };
 
   const embeddedProduct = (id: number) => ({
     id: String(id),
@@ -225,6 +225,7 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
   beforeEach(() => {
     posApi = {
       updateOrderItems: jasmine.createSpy('updateOrderItems'),
+      getOrderById: jasmine.createSpy('getOrderById'),
       cancelOrder: jasmine.createSpy('cancelOrder').and.returnValue(of({ success: true })),
     };
 
@@ -301,9 +302,27 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
         ],
       }),
     );
+    posApi.getOrderById.and.returnValue(of({
+      id: 500,
+      order_number: 'ORD1',
+      users: { id: 99, first_name: 'Juan', last_name: 'Pérez' },
+      order_promotions: [],
+      coupon_uses: [],
+      order_items: [{
+        product_id: 2,
+        product_name: 'Producto 2',
+        quantity: 1,
+        unit_price: 1000,
+        final_unit_price: 1000,
+        total_price: 1000,
+        tax_amount_item: 0,
+        products: embeddedProduct(2),
+      }],
+    }));
 
     service.removeFromCart('a').subscribe((state) => {
       expect(posApi.updateOrderItems).toHaveBeenCalledTimes(1);
+      expect(posApi.getOrderById).toHaveBeenCalledOnceWith('500');
       const [orderId, payload] =
         posApi.updateOrderItems.calls.mostRecent().args;
       expect(orderId).toBe(500);
@@ -311,6 +330,45 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
       expect(payload[0].product_id).toBe(2);
       expect(state.items.length).toBe(1);
       expect(state.linkedOrderId).toBe(500);
+      done();
+    });
+  });
+
+  it('relee la orden firmada después de agregar un item y conserva imágenes anteriores', (done) => {
+    seedCart(500);
+    const oldImage = 'https://signed.example/old-product.jpg';
+    // PUT /items deliberately has no signed image URLs. GET /:id does.
+    posApi.updateOrderItems.and.returnValue(of({ id: 500, order_items: [] }));
+    posApi.getOrderById.and.returnValue(of({
+      id: 500,
+      order_number: 'ORD1',
+      users: { id: 99, first_name: 'Juan', last_name: 'Pérez' },
+      order_promotions: [],
+      coupon_uses: [],
+      order_items: [
+        {
+          product_id: 1, product_name: 'Producto 1', quantity: 1,
+          unit_price: 1000, final_unit_price: 1000, total_price: 1000,
+          tax_amount_item: 0,
+          products: { ...embeddedProduct(1), image_url: oldImage },
+        },
+        {
+          product_id: 2, product_name: 'Producto 2', quantity: 1,
+          unit_price: 1000, final_unit_price: 1000, total_price: 1000,
+          tax_amount_item: 0, products: embeddedProduct(2),
+        },
+      ],
+    }));
+    spyOn<any>(service, 'processAddToCart').and.returnValue({
+      ...service.cartState(),
+      items: [cartLine('a', 1), cartLine('b', 2)],
+    });
+
+    (service as any).addItemToAdoptedOrder({} as any, 500).subscribe((state: any) => {
+      expect(posApi.getOrderById).toHaveBeenCalledOnceWith('500');
+      expect(state.items[0].product.image_url).toBe(oldImage);
+      expect(state.linkedOrderId).toBe(500);
+      expect(posApi.cancelOrder).not.toHaveBeenCalled();
       done();
     });
   });

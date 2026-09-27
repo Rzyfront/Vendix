@@ -1249,13 +1249,18 @@ export class PosCartService {
             () => new Error('Respuesta vacía al actualizar la orden adoptada'),
           );
         }
-        return this.loadFromOrder(order).pipe(
-          map((state) => ({
-            ...state,
-            linkedOrderId: order.id ?? orderId,
-            linkedOrderNumber: order.order_number ?? null,
-            updatedAt: new Date(),
-          })),
+        // PUT /items returns its transactional snapshot without signed S3
+        // URLs. Hydrating from that response strips every existing product
+        // image from the cart after adding a line. GET /:id signs the images
+        // and is the same authoritative read used when opening the editor.
+        return this.posApi.getOrderById(String(orderId)).pipe(
+          switchMap((freshResponse: any) => {
+            const freshOrder = freshResponse?.data ?? freshResponse;
+            if (!freshOrder) {
+              return throwError(() => new Error('No se pudo recargar la orden editada'));
+            }
+            return this.loadFromOrder(freshOrder);
+          }),
         );
       }),
       tap((newState) => {
@@ -1357,13 +1362,14 @@ export class PosCartService {
             () => new Error('Respuesta vacía al actualizar la orden adoptada'),
           );
         }
-        return this.loadFromOrder(order).pipe(
-          map((state) => ({
-            ...state,
-            linkedOrderId: order.id ?? orderId,
-            linkedOrderNumber: order.order_number ?? null,
-            updatedAt: new Date(),
-          })),
+        return this.posApi.getOrderById(String(orderId)).pipe(
+          switchMap((freshResponse: any) => {
+            const freshOrder = freshResponse?.data ?? freshResponse;
+            if (!freshOrder) {
+              return throwError(() => new Error('No se pudo recargar la orden editada'));
+            }
+            return this.loadFromOrder(freshOrder);
+          }),
         );
       }),
       tap((newState) => {
