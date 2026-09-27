@@ -460,6 +460,12 @@ export class PosPaymentStepComponent implements OnInit {
   });
 
   // ── Footer-facing collector projections (read by the shell) ──────────────
+  readonly tipAmount = computed<number>(() => {
+    const collector = this.collector();
+    return collector?.mode() === 'contado' && collector.config().allowTip
+      ? collector.tipAmount()
+      : 0;
+  });
   readonly mode = computed<PaymentMode | undefined>(() => this.collector()?.mode());
   readonly isWompiSelected = computed<boolean>(
     () => this.collector()?.isWompiSelected() ?? false,

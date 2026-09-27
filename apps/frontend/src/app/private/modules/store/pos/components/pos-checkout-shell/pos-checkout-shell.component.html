@@ -476,6 +476,12 @@
                 <span class="summary-value">{{ shippingCost() | currency }}</span>
               </div>
             }
+            @if ((paymentStep()?.tipAmount() ?? 0) > 0) {
+              <div class="summary-row">
+                <span>Propina</span>
+                <span class="summary-value">{{ paymentStep()!.tipAmount() | currency }}</span>
+              </div>
+            }
           </div>
 
           <!-- F-134 (C.9, major) -->

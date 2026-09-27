@@ -114,6 +114,7 @@ class PaymentStub {
   readonly canAdvanceSubStep = signal(true);
   readonly canSubmit = signal(true);
   readonly selectedMethodType = signal<string | null>(null);
+  readonly tipAmount = signal(0);
   readonly isWompiSelected = signal(false);
   readonly collectedIsProcessing = signal(false);
   advanceRet = false;
@@ -1153,6 +1154,21 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       shipping_address_id: 1, shipping_rate_id: 2, shipping_cost: 100,
     }));
     expect(component.totalToPay()).toBe(1100);
+  });
+
+  it('muestra la propina una sola vez en el resumen sin alterar la base del cobro', () => {
+    fixture.componentRef.setInput('cartState', {
+      customer: { id: 99, first_name: 'Ana' },
+      items: [{ id: 1 }],
+      summary: { total: 11900, subtotal: 10000, taxAmount: 1900 },
+    });
+    fixture.detectChanges();
+    const pay = fixture.debugElement.query(By.directive(PaymentStub)).componentInstance as PaymentStub;
+    pay.tipAmount.set(1190);
+    fixture.detectChanges();
+    expect(component.totalToPay()).toBe(13090);
+    expect(component.deliveryAmount()).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Propina');
   });
 
   for (const [choice, deliveryType] of [

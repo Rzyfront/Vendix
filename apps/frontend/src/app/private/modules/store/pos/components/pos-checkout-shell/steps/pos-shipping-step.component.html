@@ -67,6 +67,7 @@
           <p class="address-help">Usaremos el teléfono del cliente; puedes cambiarlo si recibirá otra persona.</p>
           <app-address-form-fields #clientAddressForm
             [initialAddress]="initialAddress()"
+            [compact]="true"
             [requirePhone]="true"
             [showErrors]="showAddressErrors()"
             (addressChange)="onAddressChange($event, clientAddressForm.form.dirty)"
@@ -211,6 +212,7 @@
             } @else {
               <app-address-form-fields
                 [initialAddress]="initialAddress()"
+                [compact]="true"
                 [requirePhone]="true"
                 [showErrors]="showAddressErrors()"
                 (addressChange)="onAddressChange($event)"
