@@ -18,6 +18,7 @@ describe('normalizePaymentLegs', () => {
   const TRANSFER = 21;
   const CARD = 22;
   const WOMPI = 31;
+  const WALLET = 32;
   const COD = 41;
 
   const methodsById: Record<number, PaymentLegMethodInfo> = {
@@ -26,6 +27,7 @@ describe('normalizePaymentLegs', () => {
     [TRANSFER]: { type: 'bank_transfer', processing_mode: 'ONLINE' },
     [CARD]: { type: 'card', processing_mode: 'DIRECT' },
     [WOMPI]: { type: 'wompi', processing_mode: 'ONLINE' },
+    [WALLET]: { type: 'wallet', processing_mode: 'DIRECT' },
     [COD]: { type: 'cash_on_delivery', processing_mode: 'ON_DELIVERY' },
   };
 
@@ -132,6 +134,26 @@ describe('normalizePaymentLegs', () => {
           100000,
           methodsById,
         ),
+      ErrorCodes.PAY_MULTI_TENDER_METHOD_NOT_ALLOWED.code,
+    );
+  });
+
+  it('Wallet requires the POS atomic-ledger opt-in; Wompi remains forbidden', () => {
+    const input = { payments: [
+      { store_payment_method_id: WALLET, amount: 40000 },
+      { store_payment_method_id: CARD, amount: 60000 },
+    ] };
+    expectRejection(
+      () => normalizePaymentLegs(input, 100000, methodsById),
+      ErrorCodes.PAY_MULTI_TENDER_METHOD_NOT_ALLOWED.code,
+    );
+    expect(normalizePaymentLegs(input, 100000, methodsById, { allowWallet: true })
+      .legs.map((leg) => leg.store_payment_method_id)).toEqual([WALLET, CARD]);
+    expectRejection(
+      () => normalizePaymentLegs({ payments: [
+        { store_payment_method_id: WALLET, amount: 40000 },
+        { store_payment_method_id: WOMPI, amount: 60000 },
+      ] }, 100000, methodsById, { allowWallet: true }),
       ErrorCodes.PAY_MULTI_TENDER_METHOD_NOT_ALLOWED.code,
     );
   });

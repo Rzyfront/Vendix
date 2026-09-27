@@ -26,6 +26,8 @@ export interface PaymentRequest {
    * cae en la pantalla "Pagos sin asignar" de E.2.
    */
   bank_account_id?: number;
+  /** Stable attempt key for an atomic Wallet + direct multi-tender charge. */
+  idempotencyKey?: string;
   /** Optional restaurant tip, resolved to money before submitting. */
   tip_amount?: number;
   tip_type?: 'percentage' | 'fixed';

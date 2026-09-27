@@ -75,8 +75,10 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
     expect(client.shipping_rates.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         id: 9,
+        is_active: true,
         shipping_method_id: 5,
-        shipping_zone: { OR: [{ store_id: 1 }, { is_system: true, store_id: null }] },
+        shipping_method: { store_id: 1, is_active: true },
+        shipping_zone: { is_active: true, OR: [{ store_id: 1 }, { is_system: true, store_id: null }] },
       }),
     }));
     expect(snapshotForRate).toHaveBeenCalledWith(client, 9, 15000, { store_id: 1 });
@@ -118,6 +120,43 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
       shipping_cost: 12000,
       grand_total: 22000,
     }));
+  });
+
+  it('precio manual con tarifa IVA agregado: deriva bruto, conserva tarifa y copia fiscal', async () => {
+    const client = tx();
+    service.shippingCalculatorService = { quoteRateGross: jest.fn().mockResolvedValue(15000) };
+    const chargeForRate = jest.fn().mockResolvedValue({
+      applies: true, reason: 'exclusive', gross: 11900, base: 10000, tax: 1900,
+    });
+    service.shippingTaxService.chargeForRate = chargeForRate;
+    snapshotForRate.mockResolvedValue({
+      shipping_tax_rate_id: 78, shipping_tax_name: 'IVA 19%',
+      shipping_tax_type: 'iva', shipping_tax_rate: 0.19, shipping_tax_amount: 1900,
+    });
+    await service.createOrUpdateOrderFromPos(client, dto({
+      shipping_rate_id: 9, manual_shipping_price: 10000, shipping_cost: 11900,
+      shipping_address_snapshot: { country_code: 'CO', city: 'Bogotá' },
+    }), user);
+
+    expect(chargeForRate).toHaveBeenCalledWith(client, 9, 10000, { store_id: 1 });
+    expect(snapshotForRate).toHaveBeenCalledWith(client, 9, 11900, { store_id: 1 });
+    expect(client.orders.update.mock.calls[0][0].data).toMatchObject({
+      shipping_rate_id: 9, shipping_cost: 11900, shipping_tax_amount: 1900,
+      shipping_tax_is_inclusive: false, grand_total: 21900,
+    });
+  });
+
+  it('precio manual rechaza un bruto cliente distinto del calculado antes de mutar', async () => {
+    const client = tx();
+    service.shippingCalculatorService = { quoteRateGross: jest.fn().mockResolvedValue(15000) };
+    service.shippingTaxService.chargeForRate = jest.fn().mockResolvedValue({
+      applies: true, reason: 'exclusive', gross: 11900, base: 10000, tax: 1900,
+    });
+    await expect(service.createOrUpdateOrderFromPos(client, dto({
+      shipping_rate_id: 9, manual_shipping_price: 10000, shipping_cost: 10000,
+      shipping_address_snapshot: { country_code: 'CO', city: 'Bogotá' },
+    }), user)).rejects.toBeInstanceOf(VendixHttpException);
+    expect(client.orders.update).not.toHaveBeenCalled();
   });
 
   describe('tarifas calculadas: costo recalculado en el servidor (unificado con quoteRateGross)', () => {

@@ -188,6 +188,18 @@
                             </div>
                           }
                         }
+                        @if (leg.methodType === PaymentMethodType.WALLET) {
+                          <div class="pc-multi-row" role="status">
+                            @if (walletInfo(); as wallet) {
+                              <span>Saldo Wallet disponible: {{ wallet.balance | currency }}</span>
+                              @if (!multiWalletSufficient()) {
+                                <span class="error-text">El saldo Wallet no cubre los tramos asignados.</span>
+                              }
+                            } @else {
+                              <span>Consultando saldo Wallet…</span>
+                            }
+                          </div>
+                        }
                         @if (legNeedsReference(leg)) {
                           <div class="pc-multi-row">
                             <label class="pc-multi-field">
@@ -790,7 +802,19 @@
                       </div>
                     }
                   }
-                  @if (legNeedsReference(leg)) {
+                    @if (leg.methodType === PaymentMethodType.WALLET) {
+                      <div class="pc-multi-row" role="status">
+                        @if (walletInfo(); as wallet) {
+                          <span>Saldo Wallet disponible: {{ wallet.balance | currency }}</span>
+                          @if (!multiWalletSufficient()) {
+                            <span class="error-text">El saldo Wallet no cubre los tramos asignados.</span>
+                          }
+                        } @else {
+                          <span>Consultando saldo Wallet…</span>
+                        }
+                      </div>
+                    }
+                    @if (legNeedsReference(leg)) {
                     <div class="pc-multi-row">
                       <label class="pc-multi-field">
                         <span class="pc-multi-label">{{ legReferenceLabel(leg) }}</span>

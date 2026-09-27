@@ -45,6 +45,7 @@ import { CountryService } from '../../../../../../../core/services/country.servi
 
 import { PosPaymentService } from '../../../services/pos-payment.service';
 import { PosShippingService } from '../../../services/pos-shipping.service';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import {
   CustomersService,
   CustomerAddressPayload,
@@ -168,6 +169,8 @@ export class PosShippingStepComponent {
   private readonly shippingEdited = signal(false);
   private readonly freeAddressEdited = signal(false);
   private quoteGeneration = 0;
+  private walletMultiAttemptKey: string | null = null;
+  private walletMultiAttemptSignature: string | null = null;
   readonly shippingRateId = signal<number | null>(null);
   readonly quoteError = signal<string | null>(null);
   readonly methodsLoaded = signal(false);
@@ -268,6 +271,9 @@ export class PosShippingStepComponent {
   readonly shippingCost = signal<number>(0);
   readonly calculatedShippingCost = signal<number | null>(null);
   readonly manualCostOverride = signal<boolean>(false);
+  /** Cashier input: gross for inclusive rates, base for additive rates. */
+  readonly manualShippingPrice = signal<number>(0);
+  readonly manualQuotedShippingTax = signal<QuotedShippingTax | null>(null);
   readonly isCalculatingShipping = signal<boolean>(false);
   /**
    * Paso 15b — bloque fiscal de la última cotización aceptada. Solo lo
@@ -365,8 +371,10 @@ export class PosShippingStepComponent {
    * sin impuesto) o sin respaldo fiscal no hay filas.
    */
   readonly shippingTaxBreakdown = computed<QuotedShippingTax | null>(() => {
-    if (this.isPickupMethod() || this.manualCostOverride()) return null;
-    return this.quotedShippingTax();
+    if (this.isPickupMethod()) return null;
+    return this.manualCostOverride()
+      ? this.manualQuotedShippingTax()
+      : this.quotedShippingTax();
   });
 
   /** Etiqueta del modo de la tarifa para el desglose: Incluido/Agregado. */
@@ -374,15 +382,20 @@ export class PosShippingStepComponent {
     this.shippingTaxBreakdown()?.taxIsInclusive === false ? 'Agregado' : 'Incluido',
   );
 
+  readonly manualInputIsBase = computed<boolean>(() =>
+    this.rateOptions().find((o) => (o.rate_id ?? o.id) === this.shippingRateId())
+      ?.tax_is_inclusive === false,
+  );
+
   /**
    * El costo manual pierde la tarifa y su impuesto: avisar al cajero, pero
    * solo cuando la cotización vigente sí traía impuesto (si la tarifa no
    * tiene impuesto no hay nada que perder y el aviso sería ruido).
    */
-  readonly manualCostLosesTax = computed<boolean>(() =>
+  readonly manualTaxUnavailable = computed<boolean>(() =>
     this.manualCostOverride() &&
     !this.isPickupMethod() &&
-    (this.quotedShippingTax()?.tax ?? 0) > 0,
+    !this.shippingRateId(),
   );
 
   /**
@@ -591,7 +604,10 @@ export class PosShippingStepComponent {
       country_code: address.country_code ?? 'CO',
       postal_code: address.postal_code ?? null,
       phone_number: address.phone_number ?? this.cartState()?.customer?.phone ?? null,
-      latitude: null, longitude: null,
+      latitude: address.latitude != null && Number.isFinite(Number(address.latitude))
+        ? Number(address.latitude) : null,
+      longitude: address.longitude != null && Number.isFinite(Number(address.longitude))
+        ? Number(address.longitude) : null,
     };
   }
 
@@ -639,6 +655,7 @@ export class PosShippingStepComponent {
     this.quoteError.set(null);
     if (!preserveBreakdown) {
       this.quotedShippingTax.set(null);
+      this.manualQuotedShippingTax.set(null);
       this.rateOptions.set([]);
     }
   }
@@ -773,6 +790,11 @@ export class PosShippingStepComponent {
       country_code: a.country_code || 'CO', city: a.city,
       state_province: a.state_province || undefined,
       address_line1: a.address_line1 || undefined,
+      postal_code: a.postal_code || undefined,
+      ...(a.latitude != null && a.longitude != null &&
+        Number.isFinite(a.latitude) && Number.isFinite(a.longitude)
+        ? { latitude: a.latitude, longitude: a.longitude }
+        : {}),
     }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (options) => {
         if (generation !== this.quoteGeneration) return;
@@ -796,12 +818,13 @@ export class PosShippingStepComponent {
           this.quoteError.set('No hay tarifa para el método y la dirección elegidos. Selecciona otra opción o ingresa un costo válido.');
         }
       },
-      error: () => {
+      error: (error) => {
         if (generation !== this.quoteGeneration) return;
         this.isCalculatingShipping.set(false);
         this.calculatedShippingCost.set(null);
         this.shippingRateId.set(null);
-        this.quoteError.set('No se pudo calcular el envío. Reintenta o ingresa un costo válido.');
+        this.quoteError.set(parseApiError(error).userMessage ||
+          'No se pudo calcular el envío. Verifica la dirección y vuelve a intentarlo.');
       },
     });
   }
@@ -824,20 +847,63 @@ export class PosShippingStepComponent {
   }
 
   toggleManualCost(): void {
-    // Preserva el desglose: al volver a automático se restaura sin esperar
-    // la recotización, y en manual alimenta el aviso de impuesto perdido.
+    // Keep the selected automatic quote so switching back restores its gross.
     this.invalidateQuote(true);
     this.manualCostOverride.update((value) => !value);
     const calc = this.calculatedShippingCost();
-    if (!this.manualCostOverride() && calc !== null) this.shippingCost.set(calc);
+    if (this.manualCostOverride()) {
+      const option = this.rateOptions().find((o) => (o.rate_id ?? o.id) === this.shippingRateId());
+      this.manualShippingPrice.set(option?.tax_is_inclusive === false
+        ? (option.base ?? option.cost) : (option?.cost ?? this.shippingCost()));
+      this.quoteManualCost();
+    } else {
+      this.manualQuotedShippingTax.set(null);
+      if (calc !== null) this.shippingCost.set(calc);
+    }
+    this.shippingEdited.set(true);
   }
 
-  onShippingCostChange(): void {
-    // El costo digitado no cambia los insumos de la cotización: se preserva
-    // el desglose para el aviso de impuesto perdido y la restauración.
-    this.invalidateQuote(true);
+  onShippingCostChange(value = this.shippingCost()): void {
+    this.manualShippingPrice.set(Number(value));
     this.manualCostOverride.set(true);
     this.shippingEdited.set(true);
+    this.quoteManualCost();
+  }
+
+  private quoteManualCost(): void {
+    this.invalidateQuote(true);
+    this.manualQuotedShippingTax.set(null);
+    const generation = this.quoteGeneration;
+    const amount = this.manualShippingPrice();
+    const rateId = this.shippingRateId();
+    const methodId = this.selectedShippingMethod()?.id;
+    if (!Number.isFinite(amount) || amount < 0) {
+      this.quoteError.set('Ingresa un costo de envío válido.');
+      return;
+    }
+    // No applicable rate: retain the historical no-tax manual path, visibly
+    // labelled in the wizard instead of pretending the amount inherits IVA.
+    if (!rateId || !methodId) {
+      this.shippingCost.set(amount);
+      return;
+    }
+    this.isCalculatingShipping.set(true);
+    this.shippingService.quoteManualShipping(methodId, rateId, amount)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (quote) => {
+          if (generation !== this.quoteGeneration || !this.manualCostOverride()) return;
+          this.isCalculatingShipping.set(false);
+          this.shippingCost.set(quote.shipping_cost);
+          this.manualQuotedShippingTax.set(toQuotedShippingTax(quote));
+        },
+        error: (error) => {
+          if (generation !== this.quoteGeneration || !this.manualCostOverride()) return;
+          this.isCalculatingShipping.set(false);
+          this.quoteError.set(parseApiError(error).userMessage ||
+            'No se pudo calcular el impuesto del envío. Inténtalo nuevamente.');
+        },
+      });
   }
 
   navigateToShippingSettings(): void {
@@ -957,6 +1023,20 @@ export class PosShippingStepComponent {
       if (paymentSubmit.legs && paymentSubmit.legs.length >= 2) {
         (paymentRequest as PaymentRequest & { payments?: PosPaymentLeg[] }).payments =
           toPosPaymentLegs(paymentSubmit.legs);
+        if (paymentSubmit.legs.some((leg) => leg.methodType === 'wallet')) {
+          const signature = JSON.stringify({
+            customerId: cart.customer?.id ?? null,
+            orderId: this.editingOrderId() ?? cart.linkedOrderId ?? null,
+            items: cart.items.map((item) => [item.product.id, item.quantity, item.totalPrice]),
+            shippingRateId: this.shippingRateId(), shippingCost: this.shippingCost(),
+            legs: (paymentRequest as PaymentRequest & { payments?: PosPaymentLeg[] }).payments,
+          });
+          if (signature !== this.walletMultiAttemptSignature) {
+            this.walletMultiAttemptSignature = signature;
+            this.walletMultiAttemptKey = crypto.randomUUID();
+          }
+          paymentRequest.idempotencyKey = this.walletMultiAttemptKey ?? undefined;
+        }
       }
     } else {
       // credito: build the installment-shaped plan (see limitation above).
@@ -1038,6 +1118,9 @@ export class PosShippingStepComponent {
       shippingMethodId: method.id,
       shippingRateId: this.shippingRateId(),
       shippingCost: this.shippingCost(),
+      ...(this.manualCostOverride() && this.shippingRateId()
+        ? { manualShippingPrice: this.manualShippingPrice() }
+        : {}),
       deliveryType: method.id === this.originalShipping()?.shippingMethodId
         ? this.originalShipping()!.deliveryType ?? this.resolveDeliveryType(method)
         : this.resolveDeliveryType(method),
@@ -1210,6 +1293,9 @@ export class PosShippingStepComponent {
           deliveryNotes: this.notesControl.value || undefined,
           shippingAddressId: addressId,
           shippingRateId: this.shippingRateId(),
+          ...(this.manualCostOverride() && this.shippingRateId()
+            ? { manualShippingPrice: this.manualShippingPrice() }
+            : {}),
           manualCostOverride: this.manualCostOverride(),
         },
         paymentRequest,
@@ -1222,6 +1308,8 @@ export class PosShippingStepComponent {
         next: (response) => {
           this.isProcessing.set(false);
           if (response.success) {
+            this.walletMultiAttemptKey = null;
+            this.walletMultiAttemptSignature = null;
             this.shippingCompleted.emit({
               success: true,
               order: response.order,

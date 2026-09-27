@@ -3,6 +3,15 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { Prisma } from '@prisma/client';
 import { lockOrderLifecycle } from '../../orders/order-flow/order-lifecycle-lock.util';
 
+type WalletDebitParams = {
+  reference_type: string;
+  reference_id?: number;
+  description?: string;
+  created_by?: number;
+  expected_store_id?: number;
+  expected_customer_id?: number;
+};
+
 @Injectable()
 export class WalletBalanceService {
   constructor(private readonly prisma: StorePrismaService) {}
@@ -73,16 +82,20 @@ export class WalletBalanceService {
   async debit(
     walletId: number,
     amount: number,
-    params: {
-      reference_type: string;
-      reference_id?: number;
-      description?: string;
-      created_by?: number;
-      expected_store_id?: number;
-      expected_customer_id?: number;
-    },
+    params: WalletDebitParams,
   ) {
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction((tx) =>
+      this.debitInTransaction(tx, walletId, amount, params),
+    );
+  }
+
+  /** Same wallet lock + ledger writer, joined to the POS multi-tender tx. */
+  async debitInTransaction(
+    tx: Prisma.TransactionClient,
+    walletId: number,
+    amount: number,
+    params: WalletDebitParams,
+  ) {
       if (params.reference_type === 'payment' && params.reference_id != null) {
         const candidate = await tx.payments.findUnique({
           where: { id: params.reference_id }, select: { order_id: true },
@@ -163,7 +176,6 @@ export class WalletBalanceService {
       });
 
       return { transaction, balance_after };
-    });
   }
 
   /**

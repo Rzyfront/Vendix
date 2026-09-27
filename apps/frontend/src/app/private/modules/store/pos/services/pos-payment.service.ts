@@ -577,6 +577,9 @@ export class PosPaymentService {
               ? { bank_account_id: paymentRequest.bank_account_id }
               : {}),
           }),
+      ...(hasMultiPayments && paymentRequest.idempotencyKey
+        ? { idempotency_key: paymentRequest.idempotencyKey }
+        : {}),
       wompi_payment_method: (paymentRequest.paymentMethod?.original as any)?.system_payment_method?.type === 'wompi'
         ? paymentRequest.metadata?.wompiPaymentMethod
         : undefined,
@@ -679,6 +682,11 @@ export class PosPaymentService {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
 
+    if (shippingData.manualCostOverride && shippingData.shippingRateId != null &&
+      (shippingData.manualShippingPrice == null || !Number.isFinite(shippingData.manualShippingPrice))) {
+      return throwError(() => new Error('Calcula el costo manual de envío antes de cobrar.'));
+    }
+
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
       return throwError(() => new Error('Usuario no identificado.'));
@@ -748,6 +756,12 @@ export class PosPaymentService {
         : {}),
       ...(posShippingRateIdForPayload(shippingData) != null
         ? { shipping_rate_id: posShippingRateIdForPayload(shippingData) }
+        : {}),
+      ...(paymentRequest?.idempotencyKey
+        ? { idempotency_key: paymentRequest.idempotencyKey }
+        : {}),
+      ...(shippingData.manualCostOverride && shippingData.shippingRateId != null
+        ? { manual_shipping_price: shippingData.manualShippingPrice }
         : {}),
       // POS meta
       register_id: register_id,
@@ -1032,6 +1046,10 @@ export class PosPaymentService {
     shipping?: PosShippingSaleData | null,
   ): Observable<any> {
     // Drafts are NOT transactional — no cash register session required.
+    if (shipping?.manualCostOverride && shipping.shippingRateId != null &&
+      (shipping.manualShippingPrice == null || !Number.isFinite(shipping.manualShippingPrice))) {
+      return throwError(() => new Error('Calcula el costo manual de envío antes de guardar.'));
+    }
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
       return throwError(() => new Error('Usuario no identificado.'));
@@ -1083,6 +1101,9 @@ export class PosPaymentService {
               : {}),
             ...(posShippingRateIdForPayload(shipping) != null
               ? { shipping_rate_id: posShippingRateIdForPayload(shipping) }
+              : {}),
+            ...(shipping.manualCostOverride && shipping.shippingRateId != null
+              ? { manual_shipping_price: shipping.manualShippingPrice }
               : {}),
           }
         : {}),

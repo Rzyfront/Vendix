@@ -72,7 +72,7 @@ describe('PosPaymentStepComponent — B.5 cleaning warning', () => {
         isAlias: () => false,
         isAnonymous: () => true,
         isWithinBusinessHours: () => true,
-        processing: { set: jasmine.createSpy('processing') },
+        processing: signal(false),
         submittedWompiSubMethod: { set: jasmine.createSpy('submethod') },
         editingOrderId: () => null,
         paymentService: { processSaleWithPayment: charge },
@@ -247,6 +247,26 @@ describe('PosPaymentStepComponent — tip contract', () => {
     expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
       amount: 1100, tip_amount: 100, tip_type: 'fixed', tip_value: 100, tip_waiter_id: 7,
     }));
+  });
+
+  it('routes Wallet+cash on an edited draft through the atomic POS writer, not flow/pay', () => {
+    const { step, charge, flowPayOrder } = makeStep(42);
+    step.cartState = () => ({ items: [], customer: { id: 77 },
+      summary: { total: 1000 }, linkedOrderId: 42 });
+    step.cartWithConfirmedSerials = step.cartState;
+    step.isAnonymous = () => false;
+    step.onCollectorSubmit({
+      mode: 'contado', method: { id: '1', type: 'cash' },
+      legs: [
+        { storePaymentMethodId: 1, methodType: 'cash', amount: 500, amountReceived: 500 },
+        { storePaymentMethodId: 4, methodType: 'wallet', amount: 500 },
+      ],
+    } as any);
+    expect(flowPayOrder).not.toHaveBeenCalled();
+    expect(charge).toHaveBeenCalledTimes(1);
+    expect(charge.calls.mostRecent().args[0].linkedOrderId).toBe(42);
+    expect(charge.calls.mostRecent().args[6]).toBe(true);
+    expect(charge.calls.mostRecent().args[1].idempotencyKey).toBeTruthy();
   });
 
   it('clears a previously reserved tip when the edited order is retried without one', () => {

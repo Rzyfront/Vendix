@@ -1476,6 +1476,9 @@ export class PosCheckoutShellComponent {
             shipping_method_id: context.shippingMethodId,
             shipping_rate_id: context.shippingRateId ?? undefined,
             shipping_cost: context.shippingCost,
+            ...(context.manualCostOverride && context.shippingRateId != null
+              ? { manual_shipping_price: context.manualShippingPrice }
+              : {}),
           },
           warning: null,
         };

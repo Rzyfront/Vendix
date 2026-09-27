@@ -298,17 +298,24 @@
                   <span class="currency">{{ currencySymbol() }}</span>
                   <input
                     appCurrencyInput
-                    [ngModel]="shippingCost()"
-                    (ngModelChange)="shippingCost.set($event); onShippingCostChange()"
+                    [ngModel]="manualShippingPrice()"
+                    (ngModelChange)="onShippingCostChange($event)"
                     placeholder="0.00"
                   />
                 </div>
+                @if (manualCostOverride() && shippingRateId()) {
+                  <p class="manual-tax-note" role="note">
+                    El importe digitado {{ manualInputIsBase()
+                      ? 'es la base; se añade el impuesto de la tarifa seleccionada si aplica.'
+                      : 'incluye el impuesto de la tarifa seleccionada, si aplica.' }}
+                  </p>
+                }
               </div>
             }
 
-            @if (manualCostLosesTax()) {
+            @if (manualTaxUnavailable()) {
               <p class="manual-tax-note" role="note">
-                El costo manual se registra sin impuesto de envío.
+                No hay una tarifa aplicable; este costo manual se registrará sin impuesto de envío.
               </p>
             }
           </div>

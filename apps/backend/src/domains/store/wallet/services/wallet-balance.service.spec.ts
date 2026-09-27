@@ -2,6 +2,38 @@ import { WalletBalanceService } from './wallet-balance.service';
 import { Prisma } from '@prisma/client';
 
 describe('WalletBalanceService.debit payment retry', () => {
+  it('debitInTransaction writes the ledger on the caller transaction, without opening a second one', async () => {
+    const tx: any = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 12, state: 'pending_payment' }]),
+      payments: {
+        findUnique: jest.fn().mockResolvedValue({ order_id: 12 }),
+        findFirst: jest.fn().mockResolvedValue({ state: 'pending', amount: new Prisma.Decimal(500),
+          orders: { store_id: 3, customer_id: 5 } }),
+      },
+      wallets: {
+        findUnique: jest.fn().mockResolvedValue({ id: 9, store_id: 3, customer_id: 5,
+          is_active: true, balance: 1000, held_balance: 0 }),
+        update: jest.fn(),
+      },
+      wallet_transactions: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 40 }),
+      },
+    };
+    const ownTransaction = jest.fn();
+    const service = new WalletBalanceService({ $transaction: ownTransaction } as any);
+    const result = await service.debitInTransaction(tx, 9, 500, {
+      reference_type: 'payment', reference_id: 77,
+      expected_store_id: 3, expected_customer_id: 5,
+    });
+    expect(result.transaction.id).toBe(40);
+    expect(tx.wallets.update).toHaveBeenCalledTimes(1);
+    expect(tx.wallet_transactions.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ reference_type: 'payment', reference_id: 77,
+        amount: 500, balance_after: 500 }),
+    }));
+    expect(ownTransaction).not.toHaveBeenCalled();
+  });
   it('locks the wallet and reuses one ledger debit for a reserved payment', async () => {
     const wallet = { id: 9, store_id: 3, customer_id: 5, is_active: true,
       balance: 20000, held_balance: 0 };

@@ -113,6 +113,7 @@ import {
 } from './utils/payment-legs.util';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 import { ProcessReservedPosPaymentDto } from './dto/create-payment.dto';
+import { WalletBalanceService } from '../wallet/services/wallet-balance.service';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -205,6 +206,7 @@ export class PaymentsService {
     @Optional() private readonly shippingCalculatorService?: ShippingCalculatorService,
     // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
     @Optional() private readonly orderHistory?: OrderHistoryService,
+    @Optional() private readonly walletBalanceService?: WalletBalanceService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -794,6 +796,96 @@ export class PaymentsService {
   /**
    * Process POS payment - unified entry point for all POS sales
    */
+  private posWalletAttemptFingerprint(dto: CreatePosPaymentDto): string {
+    return crypto.createHash('sha256').update(JSON.stringify({
+      customer_id: dto.customer_id ?? null,
+      customer_alias: dto.customer_alias ?? null,
+      order_id: dto.order_id ?? null,
+      is_draft: dto.is_draft ?? false,
+      requires_payment: dto.requires_payment ?? true,
+      payment_form: dto.payment_form ?? null,
+      items: dto.items,
+      payments: dto.payments,
+      subtotal: dto.subtotal,
+      total_amount: dto.total_amount,
+      currency: dto.currency,
+      delivery_type: dto.delivery_type,
+      shipping_method_id: dto.shipping_method_id,
+      shipping_rate_id: dto.shipping_rate_id,
+      shipping_cost: dto.shipping_cost,
+      manual_shipping_price: dto.manual_shipping_price,
+      shipping_address_snapshot: dto.shipping_address_snapshot,
+      tip_amount: dto.tip_amount,
+      coupon_code: dto.coupon_code,
+      promotion_ids: dto.promotion_ids,
+    })).digest('hex');
+  }
+
+  /** Replays a committed Wallet+direct attempt, never charging its ledger twice. */
+  private async findPosWalletAttemptReplay(
+    storeId: number,
+    dto: CreatePosPaymentDto,
+  ): Promise<PosPaymentResponseDto | null> {
+    if (!dto.idempotency_key || !dto.payments?.length) return null;
+    const key = `pos_wallet_multi_${storeId}_${dto.idempotency_key}`;
+    const claimed = await this.prisma.payments.findFirst({
+      where: { financial_idempotency_key: key, orders: { store_id: storeId } },
+      include: {
+        orders: {
+          include: {
+            payments: { include: {
+              store_payment_method: { include: { system_payment_method: true } },
+            } },
+          },
+        },
+      },
+    });
+    if (!claimed) return null;
+    const marker = claimed.gateway_response as Record<string, any> | null;
+    if (claimed.orders.customer_id !== dto.customer_id ||
+      marker?.metadata?.pos_attempt_fingerprint !== this.posWalletAttemptFingerprint(dto)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Esta referencia de cobro ya se usó para una venta distinta.',
+      );
+    }
+    const rows = [...claimed.orders.payments]
+      .filter((row) =>
+        (row.gateway_response as Record<string, any> | null)?.metadata?.pos_multi_attempt_key ===
+        dto.idempotency_key,
+      )
+      .sort((a, b) => a.id - b.id);
+    if (!rows.length || rows.some((row) => row.state !== 'succeeded')) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'El cobro anterior todavía no terminó. Consulta la orden antes de reintentar.',
+      );
+    }
+    const payments = rows.map((row) => ({
+      id: row.id,
+      amount: Number(row.amount),
+      payment_method: row.store_payment_method?.display_name ||
+        row.store_payment_method?.system_payment_method?.display_name || 'Unknown',
+      status: row.state,
+      transaction_id: row.transaction_id ?? undefined,
+      change: (row.gateway_response as Record<string, any> | null)?.change ?? 0,
+    }));
+    return {
+      success: true,
+      message: 'Cobro ya registrado; no se realizó un segundo débito Wallet.',
+      order: {
+        id: claimed.orders.id,
+        order_number: claimed.orders.order_number,
+        customer_alias: claimed.orders.customer_alias,
+        status: claimed.orders.state,
+        payment_status: claimed.state,
+        total_amount: Number(claimed.orders.grand_total),
+      },
+      payment: payments[0],
+      payments,
+    };
+  }
+
   async processPosPayment(
     createPosPaymentDto: CreatePosPaymentDto,
     user: any,
@@ -821,6 +913,16 @@ export class PaymentsService {
 
       await this.validateUserAccess(user, createPosPaymentDto.store_id);
 
+      // The replay fingerprint includes currency; resolve the same server
+      // default before checking a prior attempt and before the transaction.
+      if (!createPosPaymentDto.currency) {
+        createPosPaymentDto.currency =
+          await this.settingsService.getStoreCurrency();
+      }
+
+      const replay = await this.findPosWalletAttemptReplay(ctxStoreId, createPosPaymentDto);
+      if (replay) return replay;
+
       // E.5: a delivery intent must never fall through to the POS default
       // `direct_delivery`. Reject before the payment transaction so no order,
       // stock movement or charge can be born without a dispatch method.
@@ -837,12 +939,6 @@ export class PaymentsService {
           ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001,
           'Selecciona un método de envío antes de guardar o cobrar esta venta.',
         );
-      }
-
-      // Resolve store currency once if not provided in DTO
-      if (!createPosPaymentDto.currency) {
-        createPosPaymentDto.currency =
-          await this.settingsService.getStoreCurrency();
       }
 
       // Enforce require_session_for_sales setting
@@ -2244,7 +2340,7 @@ export class PaymentsService {
               p.store_payment_method?.display_name ||
               p.store_payment_method?.system_payment_method?.display_name ||
               'Unknown',
-            status: p.status,
+            status: p.state ?? p.status,
             transaction_id: p.transaction_id,
             change: p.gateway_response?.change ?? p.change ?? 0,
             nextAction: p.nextAction,
@@ -2260,7 +2356,7 @@ export class PaymentsService {
                   payment.store_payment_method?.system_payment_method
                     ?.display_name ||
                   'Unknown',
-                status: payment.status,
+                status: payment.state ?? payment.status,
                 transaction_id: payment.transaction_id,
                 change: payment.change,
                 nextAction: payment?.nextAction,
@@ -2285,7 +2381,24 @@ export class PaymentsService {
         // (`order-flow.service.ts` usa 20 s). Si un cobro necesita más que
         // esto para pasar, el problema es la transacción — subir el número la
         // deja sosteniendo locks más tiempo y empeora la contención.
-      }, { timeout: 20_000, maxWait: 5_000 });
+      }, { timeout: 20_000, maxWait: 5_000 }).catch(async (error) => {
+        // A concurrent identical request can lose the UNIQUE claim after the
+        // winner commits. Its entire order/payment/stock transaction rolls
+        // back; replay the committed result instead of asking for a new debit.
+        if (createPosPaymentDto.idempotency_key &&
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002' &&
+          String(error.meta?.target ?? '').includes('financial_idempotency_key')) {
+          const committed = await this.findPosWalletAttemptReplay(ctxStoreId, createPosPaymentDto);
+          if (committed) return { ...committed, _idempotentReplay: true } as any;
+        }
+        throw error;
+      });
+
+      if ((result as any)._idempotentReplay === true) {
+        delete (result as any)._idempotentReplay;
+        return result as PosPaymentResponseDto;
+      }
 
       // Plan KDS fire-flows (B5 / B9): AFTER the payment $transaction
       // commits, emit the kitchen.fired event + push the KDS SSE
@@ -3976,7 +4089,16 @@ export class PaymentsService {
         (sum, leg) => sum + Number(leg.amount || 0),
         0,
       );
-      normalizePaymentLegs(dto, payableAmount ?? legsTotal, methodsById);
+      const normalized = normalizePaymentLegs(
+        dto, payableAmount ?? legsTotal, methodsById, { allowWallet: true },
+      );
+      if (normalized.legs.some((leg) => methodsById[leg.store_payment_method_id]?.type === 'wallet') &&
+        (!dto.customer_id || !this.walletBalanceService || !dto.idempotency_key)) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_MULTI_TENDER_METHOD_NOT_ALLOWED,
+          'Wallet requiere un cliente identificado y una referencia única del cobro.',
+        );
+      }
       return { isDigitalPayment: false, isOnDelivery: false };
     }
     if (dto.store_payment_method_id == null) {
@@ -4561,9 +4683,11 @@ export class PaymentsService {
 
   /**
    * Impuesto opcional por tarifa de envío en la venta POS (contrato
-   * shipping-rate-tax). El frontend manda `shipping_rate_id` SOLO si el costo
-   * salió de la tarifa (sin override manual).
+   * shipping-rate-tax). El frontend manda `shipping_rate_id` si la tarifa
+   * cotizó el costo o si gobierna el impuesto de `manual_shipping_price`.
    * - Sin `shipping_rate_id` ⇒ copia vacía y `rate_id` null.
+   * - Con precio manual explícito ⇒ el servidor deriva bruto y copia fiscal
+   *   desde la tarifa seleccionada, sin exigir que iguale su precio automático.
    * - Con él: la tarifa debe existir, pertenecer al `shipping_method_id` del
    *   DTO y a una zona de la tienda (o del sistema). Si no ⇒ 400
    *   `ORD_SHIP_RATE_MISMATCH_001` (validación de entrada, no del impuesto).
@@ -4580,23 +4704,34 @@ export class PaymentsService {
     snapshot: ShippingTaxSnapshot;
     rate_id: number | null;
     is_inclusive: boolean | null;
+    gross_cost: number;
   }> {
     const rate_id = dto.shipping_rate_id ?? null;
     if (!rate_id) {
+      if (dto.manual_shipping_price != null) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_SHIP_RATE_MISMATCH_001,
+          'Selecciona una tarifa de envío para aplicar su impuesto al costo manual',
+        );
+      }
       return {
         snapshot: { ...EMPTY_SHIPPING_TAX },
         rate_id: null,
         is_inclusive: null,
+        gross_cost: shipping_cost,
       };
     }
 
     const rate = await tx.shipping_rates.findFirst({
       where: {
         id: rate_id,
+        is_active: true,
         ...(dto.shipping_method_id
           ? { shipping_method_id: dto.shipping_method_id }
           : {}),
+        shipping_method: { store_id, is_active: true },
         shipping_zone: {
+          is_active: true,
           OR: [{ store_id }, { is_system: true, store_id: null }],
         },
       },
@@ -4611,6 +4746,45 @@ export class PaymentsService {
           shipping_method_id: dto.shipping_method_id ?? null,
         },
       );
+    }
+
+    if (dto.manual_shipping_price != null) {
+      if (!this.shippingTaxService || typeof this.shippingTaxService.chargeForRate !== 'function') {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          'No se pudo calcular el impuesto del costo manual de envío',
+        );
+      }
+      const applicableCost = await this.recalculatePosRateCost(
+        tx, dto, store_id, rate.id, order_items,
+      );
+      if (applicableCost == null) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_SHIP_RATE_MISMATCH_001,
+          'La tarifa ya no cubre esta dirección. Vuelve al paso de envío y recotiza.',
+        );
+      }
+      const charge = await this.shippingTaxService.chargeForRate(
+        tx, rate.id, dto.manual_shipping_price, { store_id },
+      );
+      if (differsByAtLeastCents(shipping_cost, charge.gross, 1)) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          'El total del envío cambió. Revisa el costo antes de cobrar.',
+          { expected_shipping_cost: charge.gross, client_shipping_cost: shipping_cost },
+        );
+      }
+      const snapshot = await this.shippingTaxService.snapshotForRate(
+        tx, rate.id, charge.gross, { store_id },
+      );
+      return {
+        snapshot,
+        rate_id: rate.id,
+        is_inclusive: snapshot.shipping_tax_amount > 0 && charge.applies
+          ? charge.reason === 'inclusive'
+          : null,
+        gross_cost: charge.gross,
+      };
     }
 
     // Costo manual: si el costo cobrado no es el de la tarifa, el envío NO
@@ -4688,7 +4862,7 @@ export class PaymentsService {
           ? mode_charge.reason === 'inclusive'
           : null;
     }
-    return { snapshot, rate_id: rate.id, is_inclusive };
+    return { snapshot, rate_id: rate.id, is_inclusive, gross_cost: shipping_cost };
   }
 
   /**
@@ -5107,18 +5281,18 @@ export class PaymentsService {
         const totalDiscount = this.roundMoney(
           promotionQuote.total_discount + couponInfo.discount_amount,
         );
-        const shippingCost = this.roundMoney(dto.shipping_cost || 0);
-        // Impuesto opcional por tarifa de envío: copia congelada SOLO si el
-        // costo viene de una tarifa (`shipping_rate_id`) validada contra el
-        // método y la tienda. Sin tarifa (costo digitado a mano) ⇒ copia
-        // vacía. No cambia `grandTotal`: el impuesto va incluido en el costo.
+        const requestedShippingCost = this.roundMoney(dto.shipping_cost || 0);
+        // Impuesto por tarifa de envío: la tarifa validada gobierna también
+        // el precio manual explícito (inclusive=bruto, additive=base). El
+        // bruto resultante entra una sola vez en grandTotal.
         const shippingTax = await this.resolvePosShippingTax(
           tx,
           dto,
           dtoStoreId,
-          shippingCost,
+          requestedShippingCost,
           orderItems,
         );
+        const shippingCost = shippingTax.gross_cost;
 
         // E.6 — retail shares the table/flow resolver and its gross product
         // base; the tip remains outside taxable subtotal and product tax.
@@ -5405,7 +5579,10 @@ export class PaymentsService {
   ): Promise<Record<number, PaymentLegMethodInfo>> {
     if (legMethodIds.length === 0) return {};
     const rows = await tx.store_payment_methods.findMany({
-      where: { id: { in: legMethodIds }, store_id: storeId },
+      where: {
+        id: { in: legMethodIds }, store_id: storeId, state: 'enabled',
+        system_payment_method: { is_active: true },
+      },
       include: { system_payment_method: true },
     });
     const methodsById: Record<number, PaymentLegMethodInfo> = {};
@@ -5453,10 +5630,16 @@ export class PaymentsService {
       dto,
       payableAmount,
       methodsById,
+      { allowWallet: true },
     );
 
     const created: any[] = [];
+    const isWalletMulti = legs.some((leg) =>
+      methodsById[leg.store_payment_method_id]?.type === 'wallet',
+    );
+    let walletKeyClaimed = false;
     for (const leg of legs) {
+      const isWallet = methodsById[leg.store_payment_method_id]?.type === 'wallet';
       // QUI-728 por tramo: la cuenta destino se resuelve y valida dentro de
       // la misma transacción antes de persistir `bank_account_id`.
       let resolvedBankAccountId: number | null = null;
@@ -5483,8 +5666,11 @@ export class PaymentsService {
           // es exacta; redondear por tramo podría descuadrar el saldo final.
           amount: leg.amount,
           currency: dto.currency,
-          state: 'succeeded',
-          transaction_id: await this.generateTransactionId(),
+          state: isWallet ? 'pending' : 'succeeded',
+          transaction_id: isWallet ? null : await this.generateTransactionId(),
+          ...(isWallet && !walletKeyClaimed && dto.idempotency_key
+            ? { financial_idempotency_key: `pos_wallet_multi_${dtoStoreId}_${dto.idempotency_key}` }
+            : {}),
           gateway_response: {
             reference: leg.payment_reference,
             // El vuelto del acto vive sólo en el tramo en efectivo.
@@ -5494,6 +5680,7 @@ export class PaymentsService {
               seller_user_id: dto.seller_user_id,
               amount_received: legReceived,
               is_pos_payment: true,
+              ...(isWalletMulti ? { pos_multi_attempt_key: dto.idempotency_key } : {}),
             },
           },
         },
@@ -5506,6 +5693,77 @@ export class PaymentsService {
         },
       });
 
+      let settledPayment = payment;
+      if (isWallet) {
+        walletKeyClaimed = true;
+        if (!order.customer_id || !this.walletBalanceService) {
+          throw new VendixHttpException(
+            ErrorCodes.PAY_MULTI_TENDER_METHOD_NOT_ALLOWED,
+            'Wallet requiere un cliente identificado.',
+          );
+        }
+        const wallet = await tx.wallets.findFirst({
+          where: {
+            store_id: dtoStoreId, customer_id: order.customer_id,
+            currency: dto.currency, is_active: true,
+          },
+          select: { id: true },
+        });
+        if (!wallet) {
+          throw new VendixHttpException(
+            ErrorCodes.PAY_MULTI_TENDER_METHOD_NOT_ALLOWED,
+            'El cliente no tiene una Wallet activa en esta tienda y moneda.',
+          );
+        }
+        try {
+          const debit = await this.walletBalanceService.debitInTransaction(
+            tx, wallet.id, leg.amount, {
+              reference_type: 'payment', reference_id: payment.id,
+              description: `Pago POS de orden #${order.id}`,
+              created_by: order.customer_id,
+              expected_store_id: dtoStoreId,
+              expected_customer_id: order.customer_id,
+            },
+          );
+          settledPayment = await tx.payments.update({
+            where: { id: payment.id },
+            data: {
+              state: 'succeeded',
+              transaction_id: `wallet_${debit.transaction.id}`,
+              gateway_response: {
+                payment_type: 'direct_wallet',
+                wallet_transaction_id: debit.transaction.id,
+                balance_after: debit.balance_after,
+                change: 0,
+                metadata: {
+                  register_id: dto.register_id,
+                  seller_user_id: dto.seller_user_id,
+                  is_pos_payment: true,
+                  pos_multi_attempt_key: dto.idempotency_key,
+                  pos_attempt_fingerprint: this.posWalletAttemptFingerprint(dto),
+                },
+              },
+            },
+            include: {
+              store_payment_method: { include: { system_payment_method: true } },
+            },
+          });
+        } catch (error) {
+          if (error instanceof BadRequestException) {
+            const insufficient = error.message.includes('Insufficient wallet balance');
+            throw new VendixHttpException(
+              insufficient
+                ? ErrorCodes.PAY_MULTI_TENDER_WALLET_INSUFFICIENT
+                : ErrorCodes.PAY_MULTI_TENDER_METHOD_NOT_ALLOWED,
+              insufficient
+                ? 'El saldo Wallet no cubre los tramos asignados. No se cobró ningún método.'
+                : 'No se pudo usar esta Wallet para el cobro combinado. No se cobró ningún método.',
+            );
+          }
+          throw error;
+        }
+      }
+
       // Aditivo y seguro para N llamadas: re-lee el total fresco en `tx`.
       await this.applyOrderBalanceOnPayment(tx, order.id, leg.amount);
 
@@ -5514,19 +5772,19 @@ export class PaymentsService {
         storeId: dtoStoreId,
         organizationId: order.stores?.organization_id ?? undefined,
         type: 'payment_registered',
-        paymentId: payment.id,
+        paymentId: settledPayment.id,
         amount: leg.amount,
       });
 
       // Secuencial por construcción: en este punto sólo existen en `tx` los
       // tramos anteriores, así que son los únicos `prior_amounts` y el último
       // tramo toma el remanente exacto.
-      payment.sale_share = await resolvePaymentReceivedSaleFields(tx, {
+      settledPayment.sale_share = await resolvePaymentReceivedSaleFields(tx, {
         order_id: order.id,
-        payment_id: payment.id,
+        payment_id: settledPayment.id,
         amount: Number(leg.amount),
       });
-      created.push(payment);
+      created.push(settledPayment);
     }
 
     const first = created[0];

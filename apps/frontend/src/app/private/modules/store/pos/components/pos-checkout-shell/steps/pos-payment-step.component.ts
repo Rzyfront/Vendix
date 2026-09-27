@@ -85,7 +85,7 @@ const MULTI_TENDER_ERROR_COPY: Record<string, string> = {
   PAY_MULTI_TENDER_SUM_MISMATCH:
     'La suma de los métodos no coincide con el total a cobrar. Revisa los montos e inténtalo de nuevo.',
   PAY_MULTI_TENDER_METHOD_NOT_ALLOWED:
-    'Uno de los métodos no permite cobro combinado. Usa solo efectivo, tarjeta o transferencia.',
+    'Uno de los métodos no permite cobro combinado. Wallet requiere cliente y saldo; Wompi no se combina.',
   PAY_MULTI_TENDER_MULTIPLE_CASH:
     'Solo se permite un pago en efectivo dentro del cobro combinado.',
   PAY_MULTI_TENDER_CASH_INSUFFICIENT:
@@ -239,6 +239,8 @@ export class PosPaymentStepComponent implements OnInit {
   readonly serialModalLoading = signal(false);
   private serialQueue: CartItem[] = [];
   private pendingSerialSubmit: PaymentSubmit | null = null;
+  private walletMultiAttemptKey: string | null = null;
+  private walletMultiAttemptSignature: string | null = null;
   private readonly serialChoices = new Map<string, { productId: string; variantId: number | null; quantity: number; serialIds: number[]; serialNumbers: string[] }>();
 
   private serialQuantity(item: CartItem): number {
@@ -759,6 +761,7 @@ export class PosPaymentStepComponent implements OnInit {
   // ── The single collector submit handler (all POS gates preserved) ────────
   //
   onCollectorSubmit(submit: PaymentSubmit): void {
+    if (this.processing()) return;
     if (!this.cartState()) return;
     if (this.autoExecute() && this.checkoutIntent() === 'pickup' &&
         this.fulfillment() === 'entrega' && this.tableId() == null && this.sessionId() == null &&
@@ -896,6 +899,20 @@ export class PosPaymentStepComponent implements OnInit {
       submit.legs && submit.legs.length >= 2 ? submit.legs : null;
     if (multiLegs) {
       payment_request.payments = toPosPaymentLegs(multiLegs);
+      if (multiLegs.some((leg) => leg.methodType === PaymentMethodType.WALLET)) {
+        const signature = JSON.stringify({
+          customerId: this.cartState()?.customer?.id ?? null,
+          linkedOrderId: this.editingOrderId() ?? this.cartState()?.linkedOrderId ?? null,
+          items: this.cartState()?.items.map((item) => [item.product.id, item.quantity, item.totalPrice]),
+          legs: payment_request.payments,
+          tip: submit.tip ?? 0,
+        });
+        if (signature !== this.walletMultiAttemptSignature) {
+          this.walletMultiAttemptSignature = signature;
+          this.walletMultiAttemptKey = crypto.randomUUID();
+        }
+        payment_request.idempotencyKey = this.walletMultiAttemptKey;
+      }
     }
 
     if (method.type === 'wallet' && this.walletInfo()) {
@@ -917,13 +934,15 @@ export class PosPaymentStepComponent implements OnInit {
     const selectedCart = this.cartWithConfirmedSerials();
     const immediateSerials = this.needsImmediateSerialCapture(submit) &&
       selectedCart.items.some((item) => item.product.requires_serial_numbers);
+    const walletMultiInExistingOrder = editingId != null &&
+      !!multiLegs?.some((leg) => leg.methodType === PaymentMethodType.WALLET);
     const editingDigitalTip = editingId != null && !immediateSerials &&
       (submit.tip ?? 0) > 0 &&
       (method.type === PaymentMethodType.WOMPI ||
         method.type === PaymentMethodType.WALLET);
     const obs: Observable<PosSalePaymentResponse> = editingDigitalTip
       ? this.paymentService.processExistingDigitalTip(selectedCart, payment_request, editingId)
-      : editingId && !immediateSerials
+      : editingId && !immediateSerials && !walletMultiInExistingOrder
       ? this.ordersService.flowPayOrder(String(editingId), {
           store_payment_method_id: method.id,
           payment_type: 'direct',
@@ -943,7 +962,7 @@ export class PosPaymentStepComponent implements OnInit {
           ...(multiLegs ? { payments: toPosPaymentLegs(multiLegs) } : {}),
         } as any)
       : this.paymentService.processSaleWithPayment(
-          editingId && immediateSerials
+          editingId && (immediateSerials || walletMultiInExistingOrder)
             ? { ...selectedCart, linkedOrderId: editingId }
             : selectedCart,
           payment_request,
@@ -952,7 +971,7 @@ export class PosPaymentStepComponent implements OnInit {
           this.tableId() ?? null,
           // QUI-653 — 'Para llevar' de la orden hacia `order_items.is_takeaway`.
           this.takeawayOrder(),
-          immediateSerials,
+          immediateSerials || walletMultiInExistingOrder,
           this.deliveryType(),
         );
 
@@ -974,6 +993,8 @@ export class PosPaymentStepComponent implements OnInit {
             }
 
             this.processing.set(false);
+            this.walletMultiAttemptKey = null;
+            this.walletMultiAttemptSignature = null;
             if (
               !editingId &&
               response.order?.payment_status === 'succeeded' &&

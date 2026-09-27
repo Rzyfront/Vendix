@@ -336,6 +336,11 @@ const multiTransferMethod: PaymentMethod = {
   },
 };
 
+const multiWalletMethod: PaymentMethod = {
+  id: '4', type: PaymentMethodType.WALLET,
+  name: 'Saldo Wallet', icon: 'wallet', enabled: true,
+};
+
 describe('PaymentCollectorComponent — modo multi «Varios métodos» (Paso 5)', () => {
   let fixture: ComponentFixture<PaymentCollectorComponent>;
   let component: PaymentCollectorComponent;
@@ -379,6 +384,33 @@ describe('PaymentCollectorComponent — modo multi «Varios métodos» (Paso 5)'
     const balance = fixture.debugElement.query(By.css('.pc-multi-balance'));
     expect(balance).toBeTruthy();
     expect(balance.nativeElement.textContent).toContain('Falta');
+  });
+
+  it('Wallet+efectivo usa saldo disponible del cliente y bloquea saldo insuficiente', () => {
+    fixture.componentRef.setInput('context', 'pos');
+    fixture.componentRef.setInput('customer', { id: 77 });
+    fixture.componentRef.setInput('paymentMethods', [multiCashMethod, multiWalletMethod]);
+    fixture.componentRef.setInput('walletInfo', { balance: 30000 });
+    fixture.detectChanges();
+    const lookedUp: Array<number | string> = [];
+    const sub = component.walletLookup.subscribe(({ id }) => lookedUp.push(id));
+    component.setMultiEnabled(true);
+    component.setLegAmount(0, 70000);
+    component.addLeg();
+    component.setLegMethod(1, multiWalletMethod);
+    component.setLegAmount(1, 30000);
+    fixture.detectChanges();
+
+    expect(lookedUp).toContain(77);
+    expect(component.multiWalletAmount()).toBe(30000);
+    expect(component.isMultiValid()).toBeTrue();
+    expect(component.canSubmit()).toBeTrue();
+    fixture.componentRef.setInput('walletInfo', { balance: 29999 });
+    fixture.detectChanges();
+    expect(component.canConfirmAmount()).toBeFalse();
+    component.flashValidation();
+    expect(component.flashMessage()).toContain('saldo Wallet');
+    sub.unsubscribe();
   });
 
   it('Enter no pasa de Método a Monto si una transferencia hace sobrar dinero', () => {

@@ -1157,6 +1157,20 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     expect(component.totalToPay()).toBe(1100);
   });
 
+  it('editor envía el precio manual separado del bruto y conserva la tarifa fiscal', () => {
+    const { update, ship } = prepareShippingEdit();
+    ship.hasShippingChanges.set(true);
+    ship.shippingContext.set({
+      deliveryType: 'home_delivery', shippingMethodId: 1,
+      shippingAddressId: 1, shippingRateId: 2, shippingCost: 11900,
+      manualCostOverride: true, manualShippingPrice: 10000,
+    });
+    component.onPrimaryConfirm();
+    expect(update.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      shipping_rate_id: 2, shipping_cost: 11900, manual_shipping_price: 10000,
+    }));
+  });
+
   it('muestra la propina una sola vez en el resumen sin alterar la base del cobro', () => {
     fixture.componentRef.setInput('cartState', {
       customer: { id: 99, first_name: 'Ana' },

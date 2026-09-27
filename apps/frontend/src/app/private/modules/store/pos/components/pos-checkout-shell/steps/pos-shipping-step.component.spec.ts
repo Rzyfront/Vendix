@@ -34,6 +34,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
   let methods: Subject<PosShippingMethod[]>;
   let quotes: Subject<PosShippingOption[]>[];
   let calculate: jasmine.Spy;
+  let manualQuote: jasmine.Spy;
   let customers: jasmine.SpyObj<CustomersService>;
   const originalMethod: PosShippingMethod = { id: 7, name: 'Transportadora', type: 'carrier', is_active: true };
   const firstMethod: PosShippingMethod = { id: 1, name: 'Mensajero', type: 'own_fleet', is_active: true };
@@ -73,13 +74,23 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
       quotes.push(response);
       return response.asObservable();
     });
+    manualQuote = jasmine.createSpy('quoteManualShipping').and.callFake(
+      (_methodId: number, rateId: number, price: number) => of({
+        shipping_rate_id: rateId,
+        manual_shipping_price: price,
+        shipping_cost: price,
+        base: price,
+        shipping_tax_amount: 0,
+        tax_is_inclusive: null,
+      }),
+    );
     customers = jasmine.createSpyObj<CustomersService>('CustomersService', ['createCustomerAddress', 'updateCustomerAddress']);
     TestBed.configureTestingModule({
       imports: [PosShippingStepComponent],
       providers: [
         { provide: Router, useValue: { navigate: () => {} } },
         { provide: PosPaymentService, useValue: {} },
-        { provide: PosShippingService, useValue: { getShippingMethods: () => methods, calculateShipping: calculate } },
+        { provide: PosShippingService, useValue: { getShippingMethods: () => methods, calculateShipping: calculate, quoteManualShipping: manualQuote } },
         { provide: CustomersService, useValue: customers },
         { provide: ToastService, useValue: { show: () => {} } },
         { provide: CurrencyFormatService, useValue: { currencySymbol: signal('$'), loadCurrency: () => {}, format: (v: number) => `$${v}` } },
@@ -379,7 +390,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(posShippingRateIdForPayload(context)).toBe(93);
   });
 
-  it('manual cost override: the payload drops shipping_rate_id (no tax snapshot)', () => {
+  it('manual cost override keeps its rate and typed price for server tax calculation', () => {
     mount();
     component.selectSavedAddress(1);
     fixture.detectChanges();
@@ -389,9 +400,42 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     component.onShippingCostChange();
     const context = component.buildShippingContext()!;
     expect(context.manualCostOverride).toBeTrue();
-    // El editor sigue leyendo la tarifa cruda; la venta/borrador no la manda.
     expect(context.shippingRateId).toBe(93);
-    expect(posShippingRateIdForPayload(context)).toBeUndefined();
+    expect(context.manualShippingPrice).toBe(5000);
+    expect(posShippingRateIdForPayload(context)).toBe(93);
+    expect(manualQuote).toHaveBeenCalledWith(7, 93, 5000);
+  });
+
+  it('quotes alias delivery with the same full destination fields used by a customer address', () => {
+    const state = cart();
+    state.customer = null;
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    fixture.componentRef.setInput('customerAlias', 'Portería torre B');
+    mount(state);
+    component.onAddressChange(originalAddress, true);
+    fixture.detectChanges();
+
+    expect(calculate.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      country_code: 'CO', city: 'Cali', state_province: 'Valle',
+      postal_code: '760001', latitude: 3.45, longitude: -76.5,
+    }));
+  });
+
+  it('keeps saved customer coordinates for distance-based quotation', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [
+      { ...originalAddress, id: 33, is_primary: true },
+    ] };
+    mount(state);
+    expect(component.address()).toEqual(jasmine.objectContaining({
+      latitude: 3.45, longitude: -76.5,
+    }));
+    expect(calculate.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      postal_code: '760001', latitude: 3.45, longitude: -76.5,
+    }));
   });
 
   it('passes the reopened order id to the shipping charge', () => {
@@ -577,7 +621,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(text).toContain('1111.11');
   });
 
-  it('paso 15b — modo agregado etiqueta Agregado; el costo manual oculta el desglose con aviso y volver restaura', () => {
+  it('modo agregado: costo manual usa base digitada, cobra bruto y conserva desglose', () => {
     const state = cart();
     state.shippingContext = undefined;
     state.linkedOrderId = null;
@@ -590,13 +634,18 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.shippingTaxBreakdown()).toEqual({ base: 10000, tax: 1900, taxIsInclusive: false });
     expect(component.shippingTaxModeLabel()).toBe('Agregado');
     expect(fixture.nativeElement.textContent).toContain('Impuesto (Agregado)');
+    manualQuote.and.callFake((_methodId: number, rateId: number, price: number) => of({
+      shipping_rate_id: rateId, manual_shipping_price: price,
+      shipping_cost: price * 1.19, base: price,
+      shipping_tax_amount: price * 0.19, tax_is_inclusive: false,
+    }));
     component.toggleManualCost();
-    component.shippingCost.set(5000);
-    component.onShippingCostChange();
+    component.onShippingCostChange(5000);
     fixture.detectChanges();
-    expect(component.shippingTaxBreakdown()).toBeNull();
-    expect(component.manualCostLosesTax()).toBeTrue();
-    expect(fixture.nativeElement.textContent).toContain('se registra sin impuesto');
+    expect(component.shippingCost()).toBe(5950);
+    expect(component.shippingTaxBreakdown()).toEqual({ base: 5000, tax: 950, taxIsInclusive: false });
+    expect(component.manualTaxUnavailable()).toBeFalse();
+    expect(fixture.nativeElement.textContent).toContain('es la base; se añade el impuesto');
     // Volver a automático restaura el desglose sin esperar la recotización.
     component.toggleManualCost();
     expect(component.shippingTaxBreakdown()).toEqual({ base: 10000, tax: 1900, taxIsInclusive: false });
@@ -616,7 +665,7 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     component.goToShipSubStep(2);
     fixture.detectChanges();
     expect(component.shippingTaxBreakdown()).toBeNull();
-    expect(component.manualCostLosesTax()).toBeFalse();
+    expect(component.manualTaxUnavailable()).toBeFalse();
     const text = fixture.nativeElement.textContent as string;
     expect(text).not.toContain('Base envío');
     expect(text).not.toContain('Impuesto (');
@@ -679,7 +728,7 @@ describe('posShippingRateIdForPayload', () => {
   it('sends the rate only when there is one and the cost is not manual', () => {
     expect(posShippingRateIdForPayload({ shippingRateId: 5, manualCostOverride: false })).toBe(5);
     expect(posShippingRateIdForPayload({ shippingRateId: 5 })).toBe(5);
-    expect(posShippingRateIdForPayload({ shippingRateId: 5, manualCostOverride: true })).toBeUndefined();
+    expect(posShippingRateIdForPayload({ shippingRateId: 5, manualCostOverride: true })).toBe(5);
     expect(posShippingRateIdForPayload({ shippingRateId: null })).toBeUndefined();
     expect(posShippingRateIdForPayload(null)).toBeUndefined();
   });

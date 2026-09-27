@@ -384,6 +384,13 @@ export class UpdateOrderEditorDto {
   @Min(0)
   shipping_cost?: number;
 
+  /** Gross if rate includes tax, base if rate adds tax. Requires shipping_rate_id. */
+  @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  manual_shipping_price?: number;
+
   /**
    * Promociones manuales que el operador quiere forzar (las auto-apply las
    * resuelve el motor). Vacío = sólo auto-apply; con ids = el motor suma el

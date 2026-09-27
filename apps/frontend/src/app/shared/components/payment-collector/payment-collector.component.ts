@@ -571,12 +571,25 @@ export class PaymentCollectorComponent implements OnInit {
     () => (this.toCents(this.effectiveTotal()) - this.toCents(this.legsTotal())) / 100,
   );
 
+  readonly multiWalletAmount = computed<number>(() =>
+    this.legs().filter((leg) => leg.methodType === PaymentMethodType.WALLET)
+      .reduce((sum, leg) => sum + leg.amount, 0),
+  );
+  readonly hasWalletLeg = computed<boolean>(() =>
+    this.multiEnabled() && this.legs().some((leg) => leg.methodType === PaymentMethodType.WALLET),
+  );
+  readonly multiWalletSufficient = computed<boolean>(() =>
+    !this.hasWalletLeg() || (!!this.customer() && !!this.walletInfo() &&
+      this.toCents(this.walletInfo()!.balance) >= this.toCents(this.multiWalletAmount())),
+  );
+
   /** Multi gate body: non-empty, ≤ cap, Σ == total, every leg valid on its own. */
   readonly isMultiValid = computed<boolean>(() => {
     const legs = this.legs();
     if (legs.length === 0 || legs.length > this.maxMultiLegs) return false;
     if (this.remaining() !== 0) return false;
     if (legs.filter((l) => l.methodType === PaymentMethodType.CASH).length > 1) return false;
+    if (!this.multiWalletSufficient()) return false;
     return legs.every((leg) => this.isLegValid(leg));
   });
 
@@ -598,6 +611,8 @@ export class PaymentCollectorComponent implements OnInit {
         case PaymentMethodType.VOUCHER:
         case PaymentMethodType.PAYPAL:
           return true;
+        case PaymentMethodType.WALLET:
+          return this.context() === 'pos' && this.config().allowWallet;
         default:
           return false;
       }
@@ -732,6 +747,15 @@ export class PaymentCollectorComponent implements OnInit {
       const methodCount = this.directMethods().length;
       untracked(() => {
         if (this.legsForm.length === 0 && methodCount > 0) this.seedFirstLeg();
+      });
+    });
+
+    // A Wallet leg must load the selected customer's AVAILABLE balance.
+    effect(() => {
+      const customerId = this.customer()?.id;
+      const needsWallet = this.hasWalletLeg();
+      untracked(() => {
+        if (needsWallet && customerId != null) this.walletLookup.emit({ id: customerId });
       });
     });
 
@@ -977,6 +1001,8 @@ export class PaymentCollectorComponent implements OnInit {
         case PaymentMethodType.VOUCHER:
         case PaymentMethodType.PAYPAL:
           return true;
+        case PaymentMethodType.WALLET:
+          return this.context() === 'pos' && this.config().allowWallet;
         default:
           return false;
       }
@@ -1377,6 +1403,15 @@ export class PaymentCollectorComponent implements OnInit {
       }
       if (legs.filter((l) => l.methodType === PaymentMethodType.CASH).length > 1) {
         return { section: 'method', message: 'El efectivo solo puede usarse en un tramo' };
+      }
+      if (this.hasWalletLeg() && !this.customer()) {
+        return { section: 'customer', message: 'Selecciona un cliente para usar Wallet', requestCustomer: true };
+      }
+      if (this.hasWalletLeg() && !this.walletInfo()) {
+        return { section: 'method', message: 'Consultando saldo Wallet del cliente' };
+      }
+      if (!this.multiWalletSufficient()) {
+        return { section: 'method', message: 'El saldo Wallet no cubre los tramos asignados a Wallet' };
       }
       const shortCash = legs.find(
         (l) => l.methodType === PaymentMethodType.CASH && (l.amountReceived ?? 0) < l.amount,

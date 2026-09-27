@@ -77,6 +77,43 @@ describe('PosPaymentService.processShippingSale — adopted order reference', ()
     expect(payload.customer_alias).toBeUndefined();
   });
 
+  it('sends rate, manual input and quoted gross for sale and draft', async () => {
+    const edited: PosShippingSaleData = {
+      ...shipping, shippingRateId: 31, manualCostOverride: true,
+      manualShippingPrice: 10000, shippingCost: 11900,
+    };
+    await firstValueFrom(service.processShippingSale(cart(null), edited, null, 'current_user'));
+    expect(post.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      shipping_rate_id: 31, manual_shipping_price: 10000,
+      shipping_cost: 11900, total_amount: 12900,
+    }));
+
+    await firstValueFrom(service.saveDraft(cart(null), 'current_user', undefined, edited));
+    expect(post.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      shipping_rate_id: 31, manual_shipping_price: 10000,
+      shipping_cost: 11900, total_amount: 12900,
+    }));
+  });
+
+  it('carries one stable Wallet multi-tender attempt key to POS and shipping writes', async () => {
+    const request = {
+      orderId: 'local', amount: 1000, paymentMethod: { id: '1', type: 'cash' },
+      idempotencyKey: 'wallet-attempt-1',
+      payments: [
+        { store_payment_method_id: 1, amount: 500 },
+        { store_payment_method_id: 4, amount: 500 },
+      ],
+    } as any;
+    await firstValueFrom(service.processSaleWithPayment(cart(null), request, 'current_user'));
+    expect(post.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      idempotency_key: 'wallet-attempt-1', payments: request.payments,
+    }));
+    await firstValueFrom(service.processShippingSale(cart(null), shipping, request, 'current_user'));
+    expect(post.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      idempotency_key: 'wallet-attempt-1', payments: request.payments,
+    }));
+  });
+
   it('omits a stale address id for an adopted alias draft while keeping its snapshot', async () => {
     await firstValueFrom(service.saveDraft(
       { ...cart(41), customer: null }, 'current_user', 'Portería torre B',
