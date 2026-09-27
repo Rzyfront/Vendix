@@ -296,6 +296,14 @@ async function main() {
             'The mobile customer card lost its customer name.');
           assert.equal(await page.locator('app-customer-list app-item-list .card-badge-wrap').count(), 0,
             'Customer status remains visible as a mobile badge.');
+          const options = page.locator('app-customer-list app-options-dropdown');
+          assert.equal(await options.getByRole('button', { name: 'Filtros' }).count(), 0,
+            'Estado sigue ofreciéndose como filtro móvil aunque no está conectado al listado.');
+          const actions = options.getByRole('button', { name: 'Acciones' });
+          assert.equal(await actions.count(), 1, 'El disparador de acciones perdió su nombre accesible.');
+          await actions.click();
+          await options.getByRole('button', { name: 'Nuevo Cliente' }).waitFor();
+          await actions.click();
           assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2),
             'The mobile customer list overflows horizontally.');
         } finally {

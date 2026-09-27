@@ -17,9 +17,7 @@ import {
   TableAction,
   ItemListCardConfig,
   OptionsDropdownComponent,
-  FilterConfig,
   DropdownAction,
-  FilterValues,
   PaginationComponent,
 } from '../../../../../../shared/components';
 import { Customer } from '../../models/customer.model';
@@ -67,12 +65,8 @@ import { getDocumentTypeLabel } from '../../../../../../shared/constants/documen
 
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-              [filters]="filterConfigs"
-              [filterValues]="filterValues"
               [actions]="dropdownActions"
               [isLoading]="loading()"
-              (filterChange)="onFilterChange($event)"
-              (clearAllFilters)="onClearFilters()"
               (actionClick)="onActionClick($event)"
             ></app-options-dropdown>
           </div>
@@ -147,7 +141,6 @@ export class CustomerListComponent {
   readonly limit = input(10);
 
   readonly search = output<string>();
-  readonly filter = output<FilterValues>();
   readonly create = output<void>();
   readonly edit = output<Customer>();
   readonly delete = output<Customer>();
@@ -163,23 +156,6 @@ export class CustomerListComponent {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
   }
-
-  // Filter configuration for the options dropdown
-  filterConfigs: FilterConfig[] = [
-    {
-      key: 'is_active',
-      label: 'Estado',
-      type: 'select',
-      options: [
-        { value: '', label: 'Todos' },
-        { value: 'true', label: 'Activos' },
-        { value: 'false', label: 'Inactivos' },
-      ],
-    },
-  ];
-
-  // Current filter values
-  filterValues: FilterValues = {};
 
   // Dropdown actions
   dropdownActions: DropdownAction[] = [
@@ -320,16 +296,6 @@ export class CustomerListComponent {
 
   onPageChangeAction(page: number) {
     this.pageChange.emit(page);
-  }
-
-  onFilterChange(values: FilterValues): void {
-    this.filterValues = values;
-    this.filter.emit(values);
-  }
-
-  onClearFilters(): void {
-    this.filterValues = {};
-    this.filter.emit({});
   }
 
   onActionClick(action: string): void {
