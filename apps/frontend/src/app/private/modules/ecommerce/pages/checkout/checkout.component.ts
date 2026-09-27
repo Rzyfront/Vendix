@@ -30,6 +30,7 @@ import {
   CheckoutService,
   PaymentMethod,
   CheckoutRequest,
+  CheckoutShippingAddress,
   GuestCheckoutCustomer,
   BookingSelection,
   WompiWidgetConfig,
@@ -80,6 +81,7 @@ import {
 } from '../../components/guest-checkout-data-modal/guest-checkout-data-modal.component';
 import { PaymentInstructionsModalComponent } from '../../components/payment-instructions-modal/payment-instructions-modal.component';
 import { LocationPermissionModalComponent } from '../../components/location-permission-modal/location-permission-modal.component';
+import { WhatsappFallbackModalComponent } from '../../components/whatsapp-fallback-modal/whatsapp-fallback-modal.component';
 import { AddressMapPickerComponent } from '../../components/address-map-picker/address-map-picker.component';
 import { GeolocationService } from '../../services/geolocation.service';
 import { GeocodingService, GeocodePrecision } from '../../services/geocoding.service';
@@ -105,6 +107,7 @@ import { GeocodingService, GeocodePrecision } from '../../services/geocoding.ser
     CustomerAddressPickerComponent,
     CartPromotionsComponent,
     LocationPermissionModalComponent,
+    WhatsappFallbackModalComponent,
     AddressMapPickerComponent,
   ],
   templateUrl: './checkout.component.html',
@@ -333,6 +336,30 @@ export class CheckoutComponent implements OnInit {
    */
   readonly is_whatsapp_channel = signal(false);
 
+  // ========== WHATSAPP LOCATION FALLBACK ==========
+  // Distinct from `is_whatsapp_channel` above (that one is the explicit
+  // "Finalizar por WhatsApp" entry point). This fallback instead offers
+  // WhatsApp as a rescue path from INSIDE the normal home-delivery flow,
+  // only when the buyer could not be located on the map at all.
+  /** Controls the WhatsApp-fallback modal visibility. */
+  readonly show_whatsapp_fallback_modal = signal(false);
+  /** True while the fallback order is being submitted (modal loading state). */
+  readonly whatsapp_fallback_submitting = signal(false);
+
+  /**
+   * True when the store both enabled WhatsApp checkout and configured a
+   * number — same reading `cart.component.ts:81` (`whatsappEnabled()`) uses.
+   * `getCurrentDomainConfig()` looks like a plain method but internally reads
+   * `tenant_facade.domainConfig`, a `toSignal()`-backed signal, so wrapping
+   * it in `computed()` here is fully zoneless-reactive (vendix-zoneless-signals):
+   * no plain field is read by this computed.
+   */
+  readonly canUseWhatsappFallback = computed<boolean>(() => {
+    const checkout = this.tenant_facade.getCurrentDomainConfig()?.customConfig
+      ?.ecommerce?.checkout;
+    return !!checkout?.whatsapp_checkout && !!checkout?.whatsapp_number?.trim();
+  });
+
   // Wompi Widget
   readonly isWompiPayment = signal(false);
   readonly wompiWidgetLoading = signal(false);
@@ -534,6 +561,12 @@ export class CheckoutComponent implements OnInit {
   readonly guestDataModal = viewChild(GuestCheckoutDataModalComponent);
   private guest_data_decision_made = false;
   private guest_checkout_data: GuestCheckoutData | null = null;
+  /**
+   * `true` when the guest-data modal was opened FROM the WhatsApp-fallback
+   * confirm (guest without prior data), so `onGuestDataCompleted` routes to
+   * `submitWhatsappFallbackOrder()` instead of the normal `placeOrder()`.
+   */
+  private whatsapp_fallback_pending_guest_data = false;
 
   constructor(
     private cart_service: CartService,
@@ -1242,8 +1275,9 @@ export class CheckoutComponent implements OnInit {
    * be requested — never automatically. Decides based on the current
    * permission state:
    * - `granted` → geolocate directly (no modal — already allowed).
-   * - `denied`/`unsupported` → toast, no modal (nagging a blocked customer is
-   *   pointless).
+   * - `denied`/`unsupported` → if the store offers the WhatsApp fallback,
+   *   open that modal instead of nagging with a toast; otherwise the usual
+   *   toast (nagging a blocked customer is pointless without a fallback).
    * - `prompt`/unknown → show the opt-in modal first so the browser's own
    *   permission prompt fires only after the customer accepts ours.
    */
@@ -1252,10 +1286,14 @@ export class CheckoutComponent implements OnInit {
     if (state === 'granted') {
       void this.requestGeolocation();
     } else if (state === 'denied' || state === 'unsupported') {
-      this.toast.info(
-        'No pudimos obtener tu ubicación. Puedes ingresar la dirección manualmente.',
-        'Ubicación no disponible',
-      );
+      if (this.canUseWhatsappFallback()) {
+        this.show_whatsapp_fallback_modal.set(true);
+      } else {
+        this.toast.info(
+          'No pudimos obtener tu ubicación. Puedes ingresar la dirección manualmente.',
+          'Ubicación no disponible',
+        );
+      }
     } else {
       this.show_location_modal.set(true);
     }
@@ -1278,11 +1316,17 @@ export class CheckoutComponent implements OnInit {
       const coords = await this.geolocation.getPrecisePosition();
       this.onMapLocated(coords);
     } catch {
-      // Permission denied / unsupported / timeout → stay on the manual form.
-      this.toast.info(
-        'No pudimos obtener tu ubicación. Puedes ingresar la dirección manualmente.',
-        'Ubicación no disponible',
-      );
+      // Permission denied / unsupported / timeout → offer the WhatsApp
+      // fallback when the store supports it; otherwise stay on the manual
+      // form with the usual toast.
+      if (this.canUseWhatsappFallback()) {
+        this.show_whatsapp_fallback_modal.set(true);
+      } else {
+        this.toast.info(
+          'No pudimos obtener tu ubicación. Puedes ingresar la dirección manualmente.',
+          'Ubicación no disponible',
+        );
+      }
     }
   }
 
@@ -2848,6 +2892,52 @@ export class CheckoutComponent implements OnInit {
     }, 1000);
   }
 
+  /**
+   * Resolves the shipping-address portion of a `CheckoutRequest` from the
+   * current step-1 state (new-address form vs a selected saved address).
+   * Extracted from `placeOrder()` so `submitWhatsappFallbackOrder()` can
+   * reuse the exact same resolution instead of duplicating it.
+   *
+   * Returns `{}` when the cart has no physical items (nothing to resolve).
+   * `unresolvedCityError: true` means the typed address' city/department
+   * catalog IDs could not be mapped to names yet — the caller must abort
+   * with `ORD_SHIP_CITY_UNRESOLVED_001`, exactly as `placeOrder()` always
+   * has (never send a raw catalog ID as the city name).
+   */
+  private resolveShippingAddressForRequest(): {
+    shipping_address?: CheckoutShippingAddress;
+    shipping_address_id?: number;
+    unresolvedCityError?: boolean;
+  } {
+    if (this.cartHasOnlyServices) return {};
+    if (this.use_new_address()) {
+      const { value: addressValue, unresolved } = this.resolveGeoNames(
+        this.address_form.getRawValue(),
+      );
+      if (unresolved.length > 0) {
+        return { unresolvedCityError: true };
+      }
+      return { shipping_address: addressValue };
+    }
+    if (this.selected_address_id()) {
+      return { shipping_address_id: this.selected_address_id() ?? undefined };
+    }
+    return {};
+  }
+
+  /**
+   * A.4 CP-facturacion-fixes: one key per purchase attempt. Retries of the
+   * SAME attempt reuse it (the backend returns the first response); a new
+   * attempt (after a visible error) generates another. Extracted from
+   * `placeOrder()` so `submitWhatsappFallbackOrder()` shares the exact same
+   * generation logic.
+   */
+  private newIdempotencyKey(): string {
+    return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
   placeOrder(): void {
     if (!this.selected_payment_method_id()) {
       this.error_message.set('Por favor selecciona un método de pago');
@@ -2986,33 +3076,22 @@ export class CheckoutComponent implements OnInit {
         : {}),
     };
 
-    if (!this.cartHasOnlyServices && this.use_new_address()) {
-      // Convert IDs to names for backend compatibility
-      const { value: addressValue, unresolved } = this.resolveGeoNames(
-        this.address_form.getRawValue(),
-      );
-
+    const shippingAddress = this.resolveShippingAddressForRequest();
+    if (shippingAddress.unresolvedCityError) {
       // Mandar el ID del catálogo como nombre de ciudad deja la orden con una
       // dirección de envío inservible para despacho. Abortamos.
-      if (unresolved.length > 0) {
-        this.is_submitting.set(false);
-        this.error_message.set(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
-        this.toast.error(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
-        return;
-      }
-
-      request.shipping_address = addressValue;
-    } else if (!this.cartHasOnlyServices && this.selected_address_id()) {
-      request.shipping_address_id = this.selected_address_id() ?? undefined;
+      this.is_submitting.set(false);
+      this.error_message.set(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
+      this.toast.error(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
+      return;
+    }
+    if (shippingAddress.shipping_address) {
+      request.shipping_address = shippingAddress.shipping_address;
+    } else if (shippingAddress.shipping_address_id != null) {
+      request.shipping_address_id = shippingAddress.shipping_address_id;
     }
 
-    // A.4 CP-facturacion-fixes: una key por intento de compra. Los reintentos del
-    // MISMO intento la reutilizan (el backend devuelve la primera respuesta);
-    // un intento nuevo (tras error visible) genera otra.
-    const idempotencyKey =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const idempotencyKey = this.newIdempotencyKey();
 
     // Wompi payment flow: create order first, then open widget.
     // En canal WhatsApp NO se abre wa.me antes del pago: el mensaje de
@@ -3114,10 +3193,191 @@ export class CheckoutComponent implements OnInit {
   onGuestDataCompleted(data: GuestCheckoutData | null): void {
     // `null` = el invitado canceló el modal: se aborta, sin reintentar solo.
     // Al pulsar "Finalizar" de nuevo el modal vuelve a abrirse.
-    if (!data) return;
+    if (!data) {
+      this.whatsapp_fallback_pending_guest_data = false;
+      return;
+    }
     this.guest_checkout_data = data;
     this.guest_data_decision_made = true;
+    if (this.whatsapp_fallback_pending_guest_data) {
+      this.whatsapp_fallback_pending_guest_data = false;
+      this.submitWhatsappFallbackOrder();
+      return;
+    }
     this.placeOrder();
+  }
+
+  // ========== WHATSAPP LOCATION FALLBACK HANDLERS ==========
+
+  /**
+   * Buyer confirmed sending the order to the store's WhatsApp instead of
+   * fighting the map. Validates the SAME address form the normal home-
+   * delivery step requires (plus guest contact data), but deliberately
+   * skips `hasResolvedCoords()`/`shippingBlockedReason()` — those exist to
+   * gate auto-quoting a shipping rate, and this flow has none: that is the
+   * entire point of the fallback.
+   */
+  onWhatsappFallbackConfirm(): void {
+    const addressValid = this.use_new_address()
+      ? this.address_form.valid
+      : !!this.selected_address_id();
+    if (!addressValid) {
+      this.show_whatsapp_fallback_modal.set(false);
+      if (this.use_new_address()) {
+        this.address_form.markAllAsTouched();
+      }
+      this.toast.warning(
+        'Completa tu dirección y datos de contacto para enviar el pedido.',
+        'Datos incompletos',
+      );
+      return;
+    }
+
+    if (!this.is_authenticated() && !this.guest_data_decision_made) {
+      this.whatsapp_fallback_pending_guest_data = true;
+      this.show_whatsapp_fallback_modal.set(false);
+      this.guestDataModal()?.open();
+      return;
+    }
+
+    this.submitWhatsappFallbackOrder();
+  }
+
+  /** Buyer declined the fallback: close the modal and re-focus the map. */
+  onWhatsappFallbackDecline(): void {
+    this.show_whatsapp_fallback_modal.set(false);
+    this.focusMapHint();
+  }
+
+  /**
+   * Builds and submits the pending-shipping WhatsApp order: `channel:
+   * 'whatsapp'` + `pending_shipping_assignment: true`, with no
+   * `payment_method_id` / `shipping_method_id` / `shipping_rate_id` — the
+   * backend forces `delivery_type='other'` and the store assigns shipping
+   * afterward via `PATCH /store/orders/:id/shipping`. Reuses the same
+   * shipping-address resolution and idempotency-key helpers `placeOrder()`
+   * uses, so the two flows never drift apart.
+   */
+  private submitWhatsappFallbackOrder(): void {
+    const shippingAddress = this.resolveShippingAddressForRequest();
+    if (shippingAddress.unresolvedCityError) {
+      this.toast.error(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
+      return;
+    }
+
+    this.whatsapp_fallback_submitting.set(true);
+
+    const request: CheckoutRequest = {
+      channel: 'whatsapp',
+      pending_shipping_assignment: true,
+      notes: this.notes() || undefined,
+      items: this.cart()?.items?.map((item: CartItem) => ({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id || undefined,
+        quantity: item.quantity,
+        price_tier_id: item.price_tier?.id ?? undefined,
+      })),
+      guest_customer: this.toGuestCustomer(this.guest_checkout_data),
+      coupon_code: this.coupon_code().trim() || undefined,
+      ...(shippingAddress.shipping_address
+        ? { shipping_address: shippingAddress.shipping_address }
+        : {}),
+      ...(shippingAddress.shipping_address_id != null
+        ? { shipping_address_id: shippingAddress.shipping_address_id }
+        : {}),
+    };
+
+    const idempotencyKey = this.newIdempotencyKey();
+    const contact = this.resolveFallbackContact(shippingAddress.shipping_address);
+
+    this.checkout_service.checkout(request, null, idempotencyKey).subscribe({
+      next: (response) => {
+        this.whatsapp_fallback_submitting.set(false);
+        if (!response.success) return;
+        this.show_whatsapp_fallback_modal.set(false);
+        this.orderPlaced = true;
+        this.openWhatsAppFromResponse(response.data, {
+          pendingShipping: true,
+          contactName: contact.name,
+          contactPhone: contact.phone,
+          address: contact.address,
+          notes: this.notes() || undefined,
+        });
+        if (!this.is_authenticated() && response.data.public_order_token) {
+          this.cart_service.clearAllCart();
+          this.navigateAfterSuccessOverlay(
+            ['/pedido', response.data.public_order_token],
+            { success: true },
+          );
+        } else {
+          this.navigateAfterSuccessOverlay(
+            ['/account/orders', response.data.order_id],
+            { success: true },
+          );
+        }
+      },
+      error: (err) => {
+        this.whatsapp_fallback_submitting.set(false);
+        const msg = extractApiErrorMessage(err);
+        this.toast.error(msg, 'Error al procesar el pedido');
+        if (!this.is_authenticated()) {
+          this.guest_data_decision_made = false;
+        }
+      },
+    });
+  }
+
+  /**
+   * Contact name/phone/address for the extended fallback WhatsApp message —
+   * sourced from the same data the request itself carries: the ALREADY
+   * geo-name-resolved `shipping_address` this same submit built (new-address
+   * case — avoids a second `resolveGeoNames` pass), the selected saved
+   * address (saved-address case), and guest data for the name. Never from
+   * GPS/map coordinates (those are never written into the address text
+   * fields).
+   */
+  private resolveFallbackContact(
+    resolvedNewAddress?: CheckoutShippingAddress,
+  ): {
+    name?: string;
+    phone?: string;
+    address?: { line1: string; line2?: string; city: string; state: string };
+  } {
+    const guest = this.guest_checkout_data;
+    const name =
+      this.is_authenticated() || !guest
+        ? undefined
+        : `${guest.first_name ?? ''} ${guest.last_name ?? ''}`.trim() ||
+          undefined;
+
+    if (this.use_new_address()) {
+      if (!resolvedNewAddress) return { name };
+      return {
+        name,
+        phone: resolvedNewAddress.phone_number || undefined,
+        address: {
+          line1: resolvedNewAddress.address_line1,
+          line2: resolvedNewAddress.address_line2 || undefined,
+          city: resolvedNewAddress.city || '',
+          state: resolvedNewAddress.state_province || '',
+        },
+      };
+    }
+
+    const saved = this.addresses().find(
+      (a) => a.id === this.selected_address_id(),
+    );
+    if (!saved) return { name };
+    return {
+      name,
+      phone: saved.phone_number || undefined,
+      address: {
+        line1: saved.address_line1,
+        line2: saved.address_line2 || undefined,
+        city: saved.city || '',
+        state: saved.state_province || '',
+      },
+    };
   }
 
   /**
@@ -3190,16 +3450,35 @@ export class CheckoutComponent implements OnInit {
    * bloquea el popup, se informa para que el comprador lo abra manualmente
    * (la orden YA existe: nunca se pierde la venta por un popup bloqueado).
    */
-  private openWhatsAppFromResponse(order: {
-    order_number: string;
-    total: number;
-    items?: Array<{
-      name: string;
-      variant_sku: string | null;
-      quantity: number;
-      total_price: number;
-    }>;
-  }): void {
+  private openWhatsAppFromResponse(
+    order: {
+      order_number: string;
+      total: number;
+      subtotal?: number;
+      tax_amount?: number;
+      discount_amount?: number;
+      items?: Array<{
+        name: string;
+        variant_sku: string | null;
+        quantity: number;
+        total_price: number;
+      }>;
+    },
+    /**
+     * checkout-whatsapp-location-fallback: extends the message with the
+     * pending-shipping context when the order was created via
+     * `submitWhatsappFallbackOrder()`. Omitted (or `pendingShipping: false`)
+     * on the normal `?channel=whatsapp` flow — the message body is then
+     * byte-identical to before this parameter existed.
+     */
+    opts?: {
+      pendingShipping: boolean;
+      contactName?: string;
+      contactPhone?: string;
+      address?: { line1: string; line2?: string; city: string; state: string };
+      notes?: string;
+    },
+  ): void {
     const config = this.tenant_facade.getCurrentDomainConfig();
     const phone = (
       config?.customConfig?.ecommerce?.checkout?.whatsapp_number || ''
@@ -3243,11 +3522,48 @@ export class CheckoutComponent implements OnInit {
       : customerName
         ? `Hola, soy *${customerName}*! Acabo de comprar en *${storeName}* 🛒`
         : `Hola! Acabo de comprar en *${storeName}* 🛒`;
+    // checkout-whatsapp-location-fallback: extra block with contact/address/
+    // notes/pending-shipping totals, only when the order was created via the
+    // location fallback. Empty string when `opts` is omitted, so the message
+    // below is byte-identical to the pre-existing normal WhatsApp flow.
+    const pendingLines = opts?.pendingShipping
+      ? [
+          opts.contactName ? `*Cliente:* ${opts.contactName}` : '',
+          opts.contactPhone ? `*Teléfono:* ${opts.contactPhone}` : '',
+          opts.address
+            ? `*Dirección:* ${[
+                opts.address.line1,
+                opts.address.line2,
+                opts.address.city,
+                opts.address.state,
+              ]
+                .filter(Boolean)
+                .join(', ')}`
+            : '',
+          opts.notes ? `*Notas:* ${opts.notes}` : '',
+          `*Envío:* por definir con la tienda`,
+          order.subtotal != null
+            ? `*Subtotal:* ${fmt(Number(order.subtotal))}`
+            : '',
+          order.tax_amount != null
+            ? `*Impuestos:* ${fmt(Number(order.tax_amount))}`
+            : '',
+          order.discount_amount
+            ? `*Descuento:* -${fmt(Number(order.discount_amount))}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : '';
     const message = encodeURIComponent(
       `${header}\n\n` +
         `*Pedido:* ${order.order_number}\n\n` +
         (itemLines ? `*Productos:*\n${itemLines}\n\n` : '') +
+        (pendingLines ? `${pendingLines}\n\n` : '') +
         `*Total:* ${fmt(Number(order.total))}\n\n` +
+        (opts?.pendingShipping
+          ? `*Motivo:* No pudimos ubicarme en el mapa\n\n`
+          : '') +
         `Quedo atento para coordinar el pago y la entrega!`,
     );
     const popup = window.open(`https://wa.me/${phone}?text=${message}`, '_blank');

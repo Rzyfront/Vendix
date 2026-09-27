@@ -1441,6 +1441,13 @@
     (decline)="onLocationDecline()"
   />
 
+  <app-whatsapp-fallback-modal
+    [(isOpen)]="show_whatsapp_fallback_modal"
+    [loading]="whatsapp_fallback_submitting()"
+    (confirm)="onWhatsappFallbackConfirm()"
+    (decline)="onWhatsappFallbackDecline()"
+  />
+
   @if (wompiWidgetLoading()) {
     <div class="wompi-loading-overlay">
       <div class="spinner"></div>
