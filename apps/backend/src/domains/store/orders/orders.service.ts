@@ -3062,6 +3062,13 @@ export class OrdersService {
       const editingExistingAlias =
         dto.customer_id == null && !!dto.customer_alias?.trim() &&
         existingOrder.customer_id == null && !!existingOrder.customer_alias;
+      if (editingExistingAlias && dto.shipping_address_id != null &&
+          dto.shipping_address_id !== existingOrder.shipping_address_id) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+          'La dirección del alias no pertenece a esta orden.',
+        );
+      }
       const shippingAddressId = dto.shipping_address_id ??
         (editingExistingAlias ? existingOrder.shipping_address_id : null);
 

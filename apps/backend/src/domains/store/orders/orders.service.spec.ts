@@ -2139,6 +2139,30 @@ describe('OrdersService', () => {
       }
     });
 
+    it('rechaza tomar la dirección huérfana de otro alias de la misma tienda', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        mockPrismaService.orders.findFirst.mockReset().mockResolvedValueOnce({
+          ...draftOrder, customer_id: null, customer_alias: 'Portería',
+          shipping_address_id: 33,
+        } as any);
+        mockPrismaService.store_settings.findFirst.mockResolvedValue({
+          settings: { pos: { allow_alias_sales: true } },
+        } as any);
+        await expect(service.updateOrderFromEditor(500, {
+          ...fullDto, customer_id: null, customer_alias: 'Portería',
+          shipping_address_id: 34,
+        })).rejects.toMatchObject({
+          errorCode: ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+        });
+        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
     // ----------------------------------------------------------------
     // Impuesto opcional por tarifa de envío — copia en el editor.
     // ----------------------------------------------------------------
