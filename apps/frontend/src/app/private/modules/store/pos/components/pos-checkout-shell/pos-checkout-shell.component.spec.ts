@@ -1,4 +1,4 @@
-import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, model, output, runInInjectionContext, signal } from '@angular/core';
+import { Component, Directive, Pipe, PipeTransform, TemplateRef, WritableSignal, input, model, output, runInInjectionContext, signal, viewChild } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ReactiveFormsModule } from '@angular/forms';
@@ -124,13 +124,13 @@ class PaymentStub {
   triggerSubmit(): void {}
 }
 
-@Component({ selector: 'app-pos-shipping-step', standalone: true, template: `` })
+@Component({ selector: 'app-pos-shipping-step', standalone: true, template: `<ng-template #clientDetails><span class="projected-delivery">Dirección junto al cliente</span></ng-template>` })
 class ShippingStub {
   readonly cartState = input<unknown>(null);
   readonly customerAlias = input<string>('');
   readonly editingOrderId = input<number | null>(null);
   readonly detailsInCliente = input(false);
-  readonly clientDeliveryDetails = signal<any>(null);
+  readonly clientDeliveryDetails = viewChild<TemplateRef<unknown>>('clientDetails');
   readonly shippingCompleted = output<unknown>();
   readonly shippingCost = signal(0);
   readonly shipSubStep = signal(0);
@@ -615,6 +615,22 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     validate.and.returnValue(true);
     component.attemptNextStep();
     expect(component.currentStep()).toBe(2);
+  });
+
+  it('proyecta los detalles de domicilio del único componente Envío junto al cliente', () => {
+    component.entregaChoice.set('enviar');
+    fixture.componentRef.setInput('cartState', {
+      customer: { id: 99, first_name: 'Ana' }, items: [{ id: 1 }], summary: { total: 10 },
+    });
+    component.currentStep.set(1);
+    component.clienteSubStep.set(1);
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+    const projected = fixture.nativeElement.querySelector('.projected-delivery') as HTMLElement | null;
+    expect(projected?.textContent).toContain('Dirección junto al cliente');
+    expect(projected?.closest('.step-panel')?.classList.contains('step-hidden')).toBeFalse();
+    expect(fixture.debugElement.queryAll(By.directive(ShippingStub)).length).toBe(1);
   });
 
   it('Entrega-llevar avanza; mesa sin mesa abre el picker sin avanzar', () => {

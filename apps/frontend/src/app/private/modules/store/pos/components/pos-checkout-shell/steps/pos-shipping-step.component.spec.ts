@@ -401,11 +401,11 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     mount();
     component.execute({
       mode: 'contado', method: { id: '1', type: 'cash' },
-      tip: 1500, tipType: 'percentage', tipValue: 10, tipWaiterId: 7,
+      tip: 1500, tipType: 'percentage', tipValue: 1500, tipWaiterId: 7,
     } as any);
     const request = payment.processShippingSale.calls.mostRecent().args[2];
     expect(request).toEqual(jasmine.objectContaining({
-      tip_amount: 1500, tip_type: 'percentage', tip_value: 10, tip_waiter_id: 7,
+      tip_amount: 1500, tip_type: 'percentage', tip_value: 1500, tip_waiter_id: 7,
     }));
   });
 
