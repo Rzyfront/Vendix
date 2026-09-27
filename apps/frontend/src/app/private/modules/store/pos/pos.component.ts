@@ -4228,7 +4228,9 @@ export class PosComponent {
             ? Number((taxAmount / lineUnits).toFixed(2))
             : 0;
         })(),
-        tax_rate: item?.taxRate ?? null,
+        ...(item?.taxRate != null && item.taxRate !== ''
+          ? { tax_rate: Number(item.taxRate) }
+          : {}),
         tax_category_id: item?.taxCategoryId ?? null,
         applied_price_tier_id: item?.applied_price_tier_id ?? null,
         notes: item?.notes ?? null,

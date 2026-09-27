@@ -813,7 +813,23 @@ export class PosCartService {
     const candidates = [item.products, item.product, item.item_product];
     for (const c of candidates) {
       if (c && typeof c === 'object' && (c.id || c.sku || c.name)) {
-        return c as Product;
+        // GET /orders/:id embeds Prisma's product row (`stock_quantity`),
+        // while the POS cart consumes its own normalized `stock` field. A
+        // bare cast made every adopted draft look like stock=0, producing a
+        // false oversell warning even when the grid showed availability.
+        const stock = Number(c.stock ?? c.available_stock ?? c.stock_quantity ?? 0);
+        return {
+          ...c,
+          id: String(c.id),
+          stock,
+          available_stock: Number(c.available_stock ?? c.stock_quantity ?? stock),
+          product_variants: Array.isArray(c.product_variants)
+            ? c.product_variants.map((variant: any) => ({
+                ...variant,
+                stock: Number(variant.stock ?? variant.available_stock ?? variant.stock_quantity ?? 0),
+              }))
+            : [],
+        } as Product;
       }
     }
     return null;

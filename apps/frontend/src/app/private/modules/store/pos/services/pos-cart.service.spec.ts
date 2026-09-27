@@ -154,6 +154,23 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
     });
   });
 
+  it('normaliza stock_quantity e imagen del producto embebido al reabrir borrador', (done) => {
+    inventorySettings.set({ inventory: { allow_negative_stock: true } });
+    const order = buildOrder([buildItem(302, {
+      ...embeddedProduct(302),
+      stock_quantity: 11,
+      track_inventory: true,
+      image_url: 'https://images.example.test/coca-cola.jpg',
+    })]);
+    service.loadFromOrder(order).subscribe((state) => {
+      expect(state.items[0].product.stock).toBe(11);
+      expect(state.items[0].product.image_url).toBe('https://images.example.test/coca-cola.jpg');
+      expect(service.getOversellWarningForItem(state.items[0])).toBeNull();
+      expect(productService.getProductById).not.toHaveBeenCalled();
+      done();
+    });
+  });
+
   it('sólo pide los productos genuinamente ausentes', (done) => {
     productService.getProductById.and.returnValue(
       of(embeddedProduct(2) as any),

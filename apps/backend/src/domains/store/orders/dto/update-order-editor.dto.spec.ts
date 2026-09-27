@@ -4,7 +4,7 @@
 import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { UpdateOrderEditorItemDto } from './update-order-editor.dto';
+import { UpdateOrderEditorDto, UpdateOrderEditorItemDto } from './update-order-editor.dto';
 
 /**
  * F-075 (major) — piso de las cuatro columnas monetarias de la línea del
@@ -109,5 +109,25 @@ describe('UpdateOrderEditorItemDto — piso de las columnas monetarias (F-075)',
     });
 
     expect(errores).toHaveLength(0);
+  });
+
+  it('acepta decimales opcionales null del editor POS como ausencia, no NaN', async () => {
+    const item = plainToInstance(UpdateOrderEditorItemDto, {
+      ...itemBase,
+      tax_rate: null,
+      final_unit_price: null,
+      tax_amount_item: null,
+      cost: null,
+      weight: null,
+    }, { enableImplicitConversion: true });
+    expect(await validate(item, OPCIONES_DEL_PIPE_GLOBAL)).toHaveLength(0);
+    expect(item.tax_rate).toBeUndefined();
+
+    const order = plainToInstance(UpdateOrderEditorDto, {
+      items: [itemBase], shipping_cost: null, manual_shipping_price: null,
+    }, { enableImplicitConversion: true });
+    expect(await validate(order, OPCIONES_DEL_PIPE_GLOBAL)).toHaveLength(0);
+    expect(order.shipping_cost).toBeUndefined();
+    expect(order.manual_shipping_price).toBeUndefined();
   });
 });
