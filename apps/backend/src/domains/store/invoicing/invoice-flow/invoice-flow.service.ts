@@ -751,6 +751,59 @@ export class InvoiceFlowService {
    * comportamiento histórico y no es motivo de rechazo: la DIAN valida
    * `cbc:PayableAmount` sin mirar ese grupo (Anexo 1.9 §11.9.1).
    */
+  /**
+   * Proyecta `invoice_items` (ya cargadas por `INVOICE_INCLUDE`) a lo que
+   * `resolveSufferedByOperation` necesita para agrupar bienes vs servicios:
+   * `product_type` sale de UNA sola consulta a `products` por lote (nunca
+   * por línea) filtrada por los `product_id` distintos de la factura;
+   * `base`/`ivaAmount` de cada línea salen de `total_amount − tax_amount` /
+   * `tax_amount` (invariante: `total_amount = line_extension + tax_amount`,
+   * la misma que persiste `InvoicingService.recalculateDocument`). `products`
+   * es `store_scoped` en `StorePrismaService`, así que el filtro de tienda ya
+   * lo aplica la extensión — igual que `InvoicingService.
+   * resolveLinePricingSnapshots`, que resuelve esta misma tabla.
+   */
+  private async buildSufferedOperationItems(
+    invoice_items: Array<{
+      product_id?: number | null;
+      total_amount: Prisma.Decimal | number | string | null;
+      tax_amount: Prisma.Decimal | number | string | null;
+    }>,
+  ): Promise<
+    Array<{ product_type?: string | null; base: number; ivaAmount: number }>
+  > {
+    const product_ids = Array.from(
+      new Set(
+        invoice_items
+          .map((item) => item.product_id)
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    );
+
+    const products = product_ids.length
+      ? await this.prisma.products.findMany({
+          where: { id: { in: product_ids } },
+          select: { id: true, product_type: true },
+        })
+      : [];
+    const product_type_by_id = new Map<number, string | null>(
+      products.map((p) => [p.id, p.product_type]),
+    );
+
+    return invoice_items.map((item) => {
+      const tax_amount = Number(item.tax_amount ?? 0);
+      const total_amount = Number(item.total_amount ?? 0);
+      return {
+        product_type:
+          item.product_id != null
+            ? (product_type_by_id.get(item.product_id) ?? null)
+            : null,
+        base: total_amount - tax_amount,
+        ivaAmount: tax_amount,
+      };
+    });
+  }
+
   private async resolveWithholdingBatches(
     invoice: any,
     is_support_document: boolean,
@@ -781,13 +834,19 @@ export class InvoiceFlowService {
       // propósito: ver arriba.
       const customer_id =
         invoice.customer_id != null ? Number(invoice.customer_id) : null;
+      // Retención POR TIPO DE OPERACIÓN (decisión del dueño 2026-09-26):
+      // bienes y servicios se agrupan aparte, cada uno con su propia base e
+      // IVA. `self` sigue usando el agregado del documento — no depende de lo
+      // vendido, sólo de la calidad del emisor.
+      const items = await this.buildSufferedOperationItems(
+        invoice.invoice_items ?? [],
+      );
       const [suffered, self] = await Promise.all([
-        this.withholdingFlow.resolveSuffered({
+        this.withholdingFlow.resolveSufferedByOperation({
           organization_id,
           store_id,
           customer_id,
-          base,
-          ivaAmount,
+          items,
         }),
         this.withholdingFlow.resolveSelf({
           organization_id,

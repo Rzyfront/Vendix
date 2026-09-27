@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsNumber, IsOptional } from 'class-validator';
+import { IsIn, IsInt, IsNumber, IsOptional, IsString } from 'class-validator';
 
 /**
  * Preview-only payload for the withholding resolver. Mirrors the params the
@@ -42,4 +42,17 @@ export class PreviewWithholdingDto {
   @IsOptional()
   @IsInt()
   year?: number;
+
+  /**
+   * Sólo para `role='suffered'`: `products.product_type` de lo vendido en
+   * este preview (`'physical' | 'service' | 'prepared'`, etc). Decide si la
+   * retención se resuelve como bien o como servicio
+   * (`WithholdingFlowService.resolveSufferedByOperation`). Ausente → cuenta
+   * como bien (`purchase`), igual que una línea sin producto o `prepared`.
+   * El cart del POS/POP hoy resuelve un único agregado por preview; una
+   * venta mixta necesita un preview por grupo (fuera de alcance de este DTO).
+   */
+  @IsOptional()
+  @IsString()
+  product_type?: string;
 }

@@ -102,6 +102,16 @@ import { PaymentError, LEGACY_TO_NEW } from '../../payments/utils/payment-errors
 import { PaymentGatewayService } from '../../payments/services/payment-gateway.service';
 import { OrderHistoryService } from '../order-history/order-history.service';
 import type { OrderEventSource } from '../order-history/order-history.types';
+import {
+  resolvePaymentReceivedSaleFields,
+  type PaymentReceivedSaleFields,
+} from '../../payments/utils/payment-sale-share.util';
+import { buildOrderSaleTaxPayload } from '../../payments/utils/order-sale-tax-payload.util';
+import { buildPaymentReceivedEvents } from '../../payments/utils/payment-received-event.util';
+import {
+  WithholdingFlowService,
+  type WithholdingResolution,
+} from '../../withholding-tax/withholding-flow.service';
 
 type OrderState = order_state_enum;
 type DraftReservationKey = {
@@ -285,6 +295,14 @@ export class OrderFlowService {
     // históricos. Sin resolver (specs, o tarifa fuera de las opciones
     // calculadas) `shipOrder` cae al atajo histórico.
     @Optional() private readonly shippingCalculatorService?: ShippingCalculatorService,
+    // Plan PLAN-pago-multimetodo-pendientes paso 2 — `payment.received` para
+    // cobros directos de `payOrder`/`confirmPayment` reconoce retención
+    // sufrida igual que el POS (`payments.service.ts`).
+    // `@Optional()` + posición final por la misma razón que el resto de
+    // dependencias tardías: no romper las ~20 construcciones posicionales de
+    // los specs históricos. Sin resolver, `emitLegPaymentReceivedEvents`
+    // degrada a retención vacía (`logger.warn`), nunca falla el cobro.
+    @Optional() private readonly withholdingFlow?: WithholdingFlowService,
   ) {}
 
   /**
@@ -1173,12 +1191,20 @@ export class OrderFlowService {
    * - Direct payment: goes to finished
    * - Online payment: goes to pending_payment
    *
-   * Round 1 MAJOR #11: cada rechazo de negocio (estado ilegal, método
-   * desconocido, monto recibido menor, falta de stock del finish, cocina
+   * Round 1 MAJOR #11: cada rechazo de negocio por CONFLICTO DE ESTADO
+   * (estado ilegal, método desconocido, falta de stock del finish, cocina
    * pendiente, etc.) se traduce a `ORD_FLOW_PAYMENT_FAILED_001` con el
    * código tipado original en `details.cause_code`. El cliente ve un
    * 409 con un único código de superficie (`ORD_FLOW_PAYMENT_FAILED_001`)
    * y el `cause_code` lo mapea a la causa real para soporte y la UI.
+   *
+   * PLAN-pago-multimetodo-pendientes paso 3: esto NO aplica a un rechazo de
+   * VALIDACIÓN de payload (Σ de tramos ≠ total, método no directo, más de
+   * un tramo en efectivo, monto recibido menor al tramo en efectivo, cuenta
+   * bancaria inválida/ajena) — esos ya vienen tipados de
+   * `normalizePaymentLegs`/`resolveAndValidateBankAccount` y se relanzan tal
+   * cual: 400 con su propio `error_code` (`PAY_MULTI_TENDER_*`,
+   * `PAY_INVALID_AMOUNT_001`, `PAY_VALIDATE_001`), nunca el 409 genérico.
    */
   async payOrder(
     orderId: number,
@@ -1628,9 +1654,15 @@ export class OrderFlowService {
     // online crea un pago `pending` y admite pasarela, así que no normaliza.
     // El escalar reutiliza el `paymentMethod` ya cargado (sin `findMany`
     // extra); con `payments[]` los métodos se cargan por `id IN (...)` bajo
-    // el scope de tienda. Los errores del normalizador se envuelven para
-    // preservar la superficie histórica `ORD_FLOW_PAYMENT_FAILED_001` con el
-    // código tipado en `cause_code` (contrato que ve la app móvil).
+    // el scope de tienda. PLAN-pago-multimetodo-pendientes paso 3 — el
+    // contrato de la app móvil distingue las dos superficies: un payload
+    // inválido (montos, método no permitido, Σ≠total) es un rechazo de
+    // VALIDACIÓN y sale como 400 con su propio `error_code`
+    // (`PAY_MULTI_TENDER_*`/`PAY_INVALID_AMOUNT_001`), tal cual lo tipa el
+    // normalizador — ya NO se envuelve. Sólo un conflicto de ESTADO del
+    // flujo (orden no cobrable, cocina pendiente, finish bloqueado, etc.)
+    // sigue siendo 409 `ORD_FLOW_PAYMENT_FAILED_001` con la causa tipada en
+    // `details.cause_code`.
     const isPreClaimDeliveredOrFinished =
       preClaimState === 'delivered' || preClaimState === 'finished';
     const isImmediateCharge =
@@ -1691,6 +1723,18 @@ export class OrderFlowService {
         legs = normalized.legs;
         change = normalized.change;
       } catch (err) {
+        // PLAN-pago-multimetodo-pendientes paso 3 — el normalizador ya tipa
+        // el rechazo (`PAY_MULTI_TENDER_SUM_MISMATCH`,
+        // `PAY_MULTI_TENDER_METHOD_NOT_ALLOWED`,
+        // `PAY_MULTI_TENDER_MULTIPLE_CASH`, `PAY_INVALID_AMOUNT_001`, …): es
+        // un rechazo de VALIDACIÓN de payload, no un conflicto de estado del
+        // flujo. Se relanza tal cual SIN envolver para que la superficie sea
+        // 400 con su propio `error_code` — mismo criterio que la guarda
+        // `payment_type: 'online' + payments[]` de arriba (~:1537). Sólo un
+        // error no tipado (infra) cae al 409 genérico de `wrapPaymentFailure`.
+        if (err instanceof VendixHttpException) {
+          throw err;
+        }
         throw this.wrapPaymentFailure('multi_tender_legs', err as Error);
       }
     }
@@ -1742,6 +1786,11 @@ export class OrderFlowService {
 
       // Compute and persist ETA
       await this.computeAndPersistEta(orderId, new Date());
+
+      // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received` por
+      // tramo, SÓLO en el camino de éxito (el `updateOrderState` de arriba ya
+      // terminó bien).
+      await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
 
       // Contra entrega de una orden POS: el pago de este cobro la deja saldada.
       await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.shipped');
@@ -1812,6 +1861,13 @@ export class OrderFlowService {
       this.logger.log(
         `Order #${orderId} payment registered while delivered (settled, awaiting finalize)`,
       );
+
+      // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received` por
+      // tramo, SÓLO en el camino de éxito (el `updateOrderState` de arriba ya
+      // terminó bien). A diferencia de `shipped`/`finished`, esta rama no
+      // llama a `emitPosSaleCompletedIfFullyPaid` (la venta aún no se cierra
+      // aquí), pero el pago SÍ existe y debe reconocer su caja/banco.
+      await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
 
       for (const { payment, leg } of legPayments) {
         this.recordPayOrderCashMovement(
@@ -1897,6 +1953,11 @@ export class OrderFlowService {
         ).catch(() => {});
       }
 
+      // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received` por
+      // tramo, SÓLO en el camino de éxito (el `updateOrderState` de arriba ya
+      // terminó bien).
+      await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
+
       await this.emitPosSaleCompletedIfFullyPaid(
         orderId,
         `pay_order.${preClaimState}`,
@@ -1962,6 +2023,10 @@ export class OrderFlowService {
 
         // Compute and persist ETA
         await this.computeAndPersistEta(orderId, new Date());
+
+        // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received`
+        // por tramo, SÓLO en el camino de éxito.
+        await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
 
         await this.emitPosSaleCompletedIfFullyPaid(
           orderId,
@@ -2045,6 +2110,9 @@ export class OrderFlowService {
         }
 
         await this.computeAndPersistEta(orderId, new Date());
+        // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received`
+        // por tramo, SÓLO en el camino de éxito.
+        await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
         await this.emitPosSaleCompletedIfFullyPaid(
           orderId,
           'pay_order.processing_kitchen_pending',
@@ -2120,6 +2188,12 @@ export class OrderFlowService {
 
       // Compute and persist ETA
       await this.computeAndPersistEta(orderId, new Date());
+
+      // PLAN-pago-multimetodo-pendientes paso 2 — un `payment.received` por
+      // tramo, SÓLO en el camino de éxito (el `updateOrderState` de arriba ya
+      // terminó bien; las ramas compensadas arriba (`finish_blocked*`,
+      // `kitchen_items_pending`) ya salieron por `throw` y nunca llegan acá).
+      await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
 
       await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.finished');
       await this.projectPaidOrderToTable(orderId, legPayments[0].payment.id);
@@ -2277,7 +2351,12 @@ export class OrderFlowService {
       await lockOrderLifecycle(tx, orderId, initial.store_id);
       const order = await this.getOrder(orderId, tx);
       if (!['pending_payment', 'shipped'].includes(order.state)) {
-        return { order, applied: false, previousState: order.state };
+        return {
+          order,
+          applied: false,
+          previousState: order.state,
+          confirmedPaymentId: null as number | null,
+        };
       }
       const pendingPayment = order.payments.find((p) => p.state === 'pending');
       if (pendingPayment) {
@@ -2339,7 +2418,16 @@ export class OrderFlowService {
           source: opts?.source,
         });
       }
-      return { order: await this.getOrder(orderId, tx), applied: true, previousState: order.state };
+      return {
+        order: await this.getOrder(orderId, tx),
+        applied: true,
+        previousState: order.state,
+        // PLAN-pago-multimetodo-pendientes paso 2 — id del pago que ESTA
+        // llamada confirmó (pending → succeeded), para emitir su
+        // `payment.received` después del commit. `null` cuando la orden ya
+        // no traía un pago `pending` (no-op de re-confirmación).
+        confirmedPaymentId: pendingPayment?.id ?? null,
+      };
     });
 
     // A gateway callback and the staff confirm endpoint both land here. The
@@ -2379,6 +2467,73 @@ export class OrderFlowService {
       }
     }
     for (const effect of afterCommit) await effect();
+
+    // PLAN-pago-multimetodo-pendientes paso 2 — `payment.received` para el
+    // pago que ESTA llamada confirmó (pending → succeeded).
+    //
+    // DESVIACIÓN reportada: se omite a propósito cuando `opts?.source ===
+    // 'webhook'`. `WebhookHandlerService.updatePaymentStatus` YA emite
+    // `payment.received` para el mismo pago vía `emitPaymentReceivedAccounting`
+    // ANTES de llamar a `confirmPayment(orderId, { source: 'webhook' })`
+    // (ver `webhook-handler.service.ts` ~250-320): emitir aquí también
+    // duplicaría el evento para todo pago confirmado por pasarela. El
+    // dedupe de `AutoEntryService` (clave `source_type`+`source_id`) sólo
+    // detecta y descarta el duplicado — no lo previene — y está documentado
+    // como sensible a condiciones de carrera; evitar la doble emisión es más
+    // conservador y respeta la regla del plan ("todo cobro directo succeeded
+    // reconoce su caja/banco EXACTAMENTE una vez"). El llamador de planta
+    // (`POST flow/confirm-payment`, `order-flow.controller.ts`) no pasa
+    // `opts`, así que sigue recibiendo el evento normalmente.
+    if (
+      result.applied &&
+      result.confirmedPaymentId != null &&
+      opts?.source !== 'webhook'
+    ) {
+      try {
+        const confirmedPayment = result.order.payments.find(
+          (p: any) => p.id === result.confirmedPaymentId,
+        );
+        if (confirmedPayment) {
+          const methodRow = await this.prisma.store_payment_methods.findFirst({
+            where: { id: confirmedPayment.store_payment_method_id },
+            select: {
+              display_name: true,
+              system_payment_method: { select: { display_name: true } },
+            },
+          });
+          const display_name =
+            (methodRow as any)?.display_name ||
+            methodRow?.system_payment_method?.display_name ||
+            'Unknown';
+          const sale_share = await resolvePaymentReceivedSaleFields(
+            this.prisma,
+            {
+              order_id: orderId,
+              payment_id: confirmedPayment.id,
+              amount: Number(confirmedPayment.amount),
+            },
+          );
+          await this.emitLegPaymentReceivedEvents(orderId, result.order, [
+            {
+              payment: { ...confirmedPayment, sale_share },
+              leg: {
+                amount: Number(confirmedPayment.amount),
+                display_name,
+              } as unknown as NormalizedLeg,
+            },
+          ]);
+        }
+      } catch (error) {
+        // Mismo contrato que `emitLegPaymentReceivedEvents`: nunca convertir
+        // un pago ya confirmado en un error HTTP.
+        this.logger.error(
+          `[confirmPayment payment.received failed] order=${orderId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
     // Después del commit: el pago online quedó `succeeded`. Sólo si la
     // confirmación se aplicó — un no-op (orden ya confirmada o cancelada) no es
     // una venta nueva que facturar.
@@ -7049,12 +7204,19 @@ export class OrderFlowService {
           );
         resolvedBankAccountIds.set(leg, account.id);
       } catch (err) {
+        // PLAN-pago-multimetodo-pendientes paso 3 — cuenta bancaria inválida
+        // (inexistente, inactiva o ajena a la tienda/organización) es un
+        // rechazo de VALIDACIÓN de payload, no un conflicto de estado del
+        // cobro. Se relanza SIN envolver, mismo criterio que el POS
+        // (`payments.service.ts` ~:239-241, :282-284, :336-338, :368-370):
+        // el gateway tipa `PaymentError`, se mapea con `LEGACY_TO_NEW` y sale
+        // como 400 `PAY_VALIDATE_001`. Un error no tipado (infra del
+        // gateway) sí cae al 409 genérico de `wrapPaymentFailure` — igual
+        // que la falta de contexto de tienda/validador arriba, que sigue
+        // envuelta como `SYS_INTERNAL_001` / 500.
         if (err instanceof PaymentError) {
           const mapped = LEGACY_TO_NEW[err.code];
-          throw this.wrapPaymentFailure(
-            'bank_account_invalid',
-            new VendixHttpException(mapped, err.message, err.details),
-          );
+          throw new VendixHttpException(mapped, err.message, err.details);
         }
         throw this.wrapPaymentFailure('bank_account_invalid', err as Error);
       }
@@ -7110,6 +7272,35 @@ export class OrderFlowService {
             paymentId: payment.id,
             amount: leg.amount,
           });
+        }
+        // PLAN-pago-multimetodo-pendientes paso 2 — porción de venta del
+        // evento `payment.received`, calculada SECUENCIALMENTE (mismo patrón
+        // que `processMultiLegDirectPayment` del POS,
+        // `payments.service.ts:5450`): en este punto de la transacción sólo
+        // existen los tramos ANTERIORES, así que son los únicos
+        // `prior_amounts` posibles y el último tramo toma el remanente
+        // exacto. Calcularlo por lote DESPUÉS de crear todos los tramos
+        // rompería esta garantía: cada uno vería a sus hermanos como
+        // "previos" y la Σ de porciones dejaría de cuadrar con la orden.
+        //
+        // Envuelto en try/catch: esto es enriquecimiento de LECTURA para el
+        // evento que se emite más tarde (`emitLegPaymentReceivedEvents`),
+        // nunca el registro del cobro en sí. Un fallo acá (p.ej. un mock de
+        // test sin `orders.findUnique`, o una lectura que revienta) degrada
+        // a `sale_share: undefined` — el payload cae íntegro a los totales
+        // de la orden (mismo contrato que el pago escalar) — pero JAMÁS debe
+        // abortar la transacción que ya está creando la fila `succeeded`.
+        try {
+          (payment as any).sale_share = await resolvePaymentReceivedSaleFields(
+            tx,
+            { order_id: orderId, payment_id: payment.id, amount: Number(leg.amount) },
+          );
+        } catch (error) {
+          this.logger.warn(
+            `resolvePaymentReceivedSaleFields failed for order ${orderId} payment ${payment.id}; payment.received usará los totales de la orden: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
         }
       }
       return created;
@@ -7670,6 +7861,182 @@ export class OrderFlowService {
       },
       { timeout: 30_000 },
     );
+  }
+
+  /**
+   * Emite `payment.received` por cada tramo/pago de un cobro directo de
+   * `payOrder`/`confirmPayment` — MISMA forma y MISMAS fuentes de datos que
+   * el emisor de referencia del POS (`payments.service.ts` ~1674-1891):
+   * lee `order_items` con sus impuestos tipados, arma `sale_tax` con
+   * `buildOrderSaleTaxPayload` como respaldo, resuelve la retención sufrida
+   * POR TIPO DE OPERACIÓN (`resolveSufferedByOperation`, decisión del dueño
+   * 2026-09-26) UNA vez por orden y arma los payloads con
+   * `buildPaymentReceivedEvents` (cada pago usa su propio `sale_share`,
+   * prorrateado SECUENCIALMENTE por `createLegPayments` al crearse).
+   *
+   * SÓLO se invoca desde el camino de ÉXITO de cada rama de `payOrder`/
+   * `confirmPayment` (después de que el `updateOrderState` que cierra el
+   * cobro terminó bien), nunca desde una compensación (`cancelLegPayments`):
+   * una carga compensada no debe dejar ni evento emitido ni retención
+   * persistida.
+   *
+   * Decisión de diseño (retención + huérfanos en compensación): la
+   * retención se resuelve y persiste ACÁ — después del commit del estado —
+   * y NO dentro de la transacción de `createLegPayments`. Si se persistiera
+   * ahí (junto con los `payments.create` de cada tramo) y el `updateOrderState`
+   * posterior fallara, `cancelLegPayments` sólo anula los `payments`
+   * (los marca `cancelled`); nunca toca `withholding_calculations`, así que
+   * las filas de retención de una venta que nunca se cerró quedarían
+   * huérfanas. Persistir aquí, gateado por el mismo punto de llamada que el
+   * evento, garantiza la regla: carga compensada = sin retención persistida
+   * y sin evento.
+   *
+   * Envuelta en try/catch que sólo loguea — mismo contrato que
+   * `emitPosSaleCompletedIfFullyPaid`: un fallo leyendo impuestos o
+   * resolviendo retención nunca debe convertir un cobro ya exitoso en un
+   * error HTTP, y ninguna especificación histórica con mocks incompletos
+   * puede romperse por esto.
+   */
+  private async emitLegPaymentReceivedEvents(
+    orderId: number,
+    order: Awaited<ReturnType<OrderFlowService['getOrder']>>,
+    legPayments: Array<{ payment: any; leg: NormalizedLeg }>,
+  ): Promise<void> {
+    try {
+      if (!legPayments || legPayments.length === 0) return;
+      // Con 2+ tramos, un tramo sin `sale_share` caería a los totales de la
+      // orden y cada tramo reconocería el ingreso completo. Sin asiento es
+      // mejor que ingreso duplicado: se registra el error y no se emite.
+      if (
+        legPayments.length > 1 &&
+        legPayments.some(({ payment }) => !(payment as any).sale_share)
+      ) {
+        this.logger.error(
+          `[emitLegPaymentReceivedEvents skipped] order=${orderId}: tramo sin sale_share en cobro multitramo; payment.received no emitido`,
+        );
+        return;
+      }
+      const orderItemsWithTaxes = await this.prisma.order_items.findMany({
+        where: { order_id: orderId, cancelled_at: null },
+        select: {
+          total_price: true,
+          quantity: true,
+          tax_amount_item: true,
+          weight: true,
+          price_unit_quantity: true,
+          item_type: true,
+          order_item_taxes: {
+            select: { tax_type: true, tax_amount: true, tax_rate: true },
+          },
+        },
+      });
+      const sale_tax = buildOrderSaleTaxPayload({
+        product_tax_rows: orderItemsWithTaxes.flatMap((item) =>
+          (item.order_item_taxes || []).map((tax) => ({
+            ...tax,
+            taxable_amount: Number(item.total_price || 0),
+          })),
+        ),
+        order: order as any,
+        order_items: orderItemsWithTaxes as any,
+      });
+
+      let wh: WithholdingResolution = {
+        lines: [],
+        uvt_value_used: 0,
+        counterparty_type: null,
+      };
+      if (this.withholdingFlow) {
+        try {
+          const customer_id = order.customer_id
+            ? Number(order.customer_id)
+            : null;
+          const withholdingItems = orderItemsWithTaxes.map((item) => ({
+            product_type: item.item_type,
+            base: Number(item.total_price || 0),
+            ivaAmount: (item.order_item_taxes || []).reduce(
+              (sum, tax) => sum + Number(tax.tax_amount || 0),
+              0,
+            ),
+          }));
+          wh = await this.withholdingFlow.resolveSufferedByOperation({
+            organization_id: order.stores?.organization_id,
+            store_id: order.store_id,
+            customer_id,
+            items: withholdingItems,
+          });
+        } catch (error) {
+          this.logger.warn(
+            `resolveSufferedByOperation failed for order ${orderId}; degrading to no withholding: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          wh = { lines: [], uvt_value_used: 0, counterparty_type: null };
+        }
+      } else {
+        this.logger.warn(
+          `WithholdingFlowService no disponible para la orden ${orderId}; payment.received se emite sin retención.`,
+        );
+      }
+
+      const payloads = buildPaymentReceivedEvents({
+        order: {
+          id: orderId,
+          order_number: order.order_number,
+          store_id: order.store_id,
+          organization_id: order.stores?.organization_id,
+          customer_id: order.customer_id,
+          subtotal_amount: order.subtotal_amount,
+          tip_amount: order.tip_amount,
+        },
+        sale_tax,
+        payments: legPayments.map(({ payment, leg }) => ({
+          id: payment.id,
+          amount: leg.amount,
+          currency: payment.currency,
+          display_name: leg.display_name,
+          sale_share: (payment as any).sale_share as
+            | PaymentReceivedSaleFields
+            | undefined,
+        })),
+        withholding_lines: wh.lines,
+        currency: order.currency || legPayments[0].payment.currency,
+        user_id: RequestContextService.getUserId() ?? null,
+      });
+
+      // En serie: el listener contable numera el asiento con MAX+1, así que
+      // dos tramos emitidos a la vez chocan en `entry_number` (P2002).
+      for (const payload of payloads) {
+        try {
+          await this.eventEmitter.emitAsync('payment.received', payload);
+        } catch (error) {
+          this.logger.error(
+            `[payment.received listener failed] order=${orderId} payment=${payload.payment_id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+
+      if (this.withholdingFlow) {
+        await this.withholdingFlow.persistWithholdingLines({
+          organization_id: order.stores?.organization_id,
+          store_id: order.store_id,
+          invoice_id: null,
+          customer_id: order.customer_id ? Number(order.customer_id) : null,
+          role: 'suffered',
+          counterparty_type: wh.counterparty_type,
+          uvt_value_used: wh.uvt_value_used,
+          lines: wh.lines,
+        });
+      }
+    } catch (error) {
+      this.logger.error(
+        `[emitLegPaymentReceivedEvents failed] order=${orderId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   /**

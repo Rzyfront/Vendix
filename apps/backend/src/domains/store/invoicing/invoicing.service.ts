@@ -1718,8 +1718,12 @@ export class InvoicingService {
           store_id: context.store_id,
           customer_id: resolved_customer_id,
           base: calculated.totals.total_before_tax,
-          iva_amount: calculated.totals.tax_amount,
           issue_date,
+          items: this.buildWithholdingOperationItems(
+            dto.items,
+            line_snapshots,
+            calculated.lines,
+          ),
         });
 
     // Generate invoice number from resolution
@@ -2113,8 +2117,12 @@ export class InvoicingService {
           store_id: context.store_id,
           customer_id: dto.customer_id,
           base: calculated.totals.total_before_tax,
-          iva_amount: calculated.totals.tax_amount,
           issue_date,
+          items: this.buildWithholdingOperationItems(
+            dto.items,
+            line_snapshots,
+            calculated.lines,
+          ),
         });
 
     const document_type = this.toFiscalDocumentType(dto.invoice_type);
@@ -5870,19 +5878,53 @@ export class InvoicingService {
    * valida `cbc:PayableAmount` sin mirar `cac:WithholdingTaxTotal`, y restarla
    * descuadra el documento. Vale para los tres roles.
    */
+  /**
+   * Proyecta `dto.items` + su snapshot de catálogo + el recálculo del motor a
+   * lo que `resolveSufferedByOperation` necesita para agrupar bienes vs
+   * servicios: `product_type` sale del snapshot (ya resuelto por
+   * `resolveLinePricingSnapshots` en la MISMA consulta a `products` que
+   * resuelve `account_code`/`unit_code` — no agrega una consulta nueva);
+   * `base`/`ivaAmount` salen del recálculo por línea (`line_extension_amount`
+   * / `tax_amount`), no del agregado del documento, porque cada línea aporta
+   * su parte al grupo al que pertenece.
+   */
+  private buildWithholdingOperationItems(
+    items: CreateInvoiceItemDto[],
+    snapshots: InvoiceLinePricingSnapshot[],
+    lines: CalculatedLine[],
+  ): Array<{ product_type?: string | null; base: number; ivaAmount: number }> {
+    return items.map((_item, index) => ({
+      product_type: snapshots[index]?.product_type ?? null,
+      base: Number(lines[index]?.line_extension_amount ?? 0),
+      ivaAmount: Number(lines[index]?.tax_amount ?? 0),
+    }));
+  }
+
   private async resolveWithholdingAmount(params: {
     organization_id?: number;
     store_id?: number;
     customer_id?: number | null;
+    /** Base agregada del documento. Sólo la usa `self` (autorretención). */
     base: string;
-    iva_amount: string;
     issue_date: Date;
+    /**
+     * Una entrada por línea del documento (mismo orden que `dto.items`), con
+     * su `product_type` (bien vs servicio), su base neta y su IVA — para que
+     * `resolveSufferedByOperation` agrupe la retención POR TIPO DE OPERACIÓN
+     * en vez de resolverla sobre el agregado del documento entero. `self`
+     * (autorretención) sigue usando `base`: no depende de lo vendido, sólo de
+     * la calidad del emisor.
+     */
+    items: Array<{
+      product_type?: string | null;
+      base: number;
+      ivaAmount: number;
+    }>;
   }): Promise<Prisma.Decimal | null> {
     if (typeof params.organization_id !== 'number') return null;
 
     try {
       const base = Number(params.base);
-      const ivaAmount = Number(params.iva_amount);
       // Step 8 — año civil de emisión en la zona de la tienda.
       const year = await this.resolveCivilYear(params.issue_date, {
         store_id: params.store_id ?? null,
@@ -5890,12 +5932,11 @@ export class InvoicingService {
       });
 
       const [suffered, self] = await Promise.all([
-        this.withholdingFlow.resolveSuffered({
+        this.withholdingFlow.resolveSufferedByOperation({
           organization_id: params.organization_id,
           store_id: params.store_id ?? null,
           customer_id: params.customer_id ?? null,
-          base,
-          ivaAmount,
+          items: params.items,
           year,
         }),
         this.withholdingFlow.resolveSelf({
@@ -6651,6 +6692,12 @@ export class InvoicingService {
             price_unit_quantity: true,
             account_code: true,
             stock_uom: { select: { code: true } },
+            // Retención sufrida POR TIPO DE OPERACIÓN (decisión del dueño
+            // 2026-09-26): una sola consulta por lote, reusando este join
+            // que ya trae `products` por `product_id` — evita un N+1 sólo
+            // para clasificar bienes vs servicios en
+            // `resolveWithholdingAmount`.
+            product_type: true,
           },
         })
       : [];
@@ -6661,6 +6708,7 @@ export class InvoicingService {
         price_unit_quantity: number | null;
         account_code: string | null;
         stock_uom: { code: string } | null;
+        product_type: string | null;
       }
     >(products.map((p) => [p.id, p]));
 
@@ -6748,6 +6796,10 @@ export class InvoicingService {
             ? resolveUneceUnitCode(product.stock_uom.code)
             : undefined),
         account_code: account_code || undefined,
+        // `null` cuando la línea no referencia un producto del catálogo
+        // (ítem libre/manual): `resolveWithholdingAmount` lo trata igual que
+        // `physical`/`prepared` — cuenta como bien, nunca como servicio.
+        product_type: product?.product_type ?? null,
       };
     });
   }
@@ -6763,6 +6815,13 @@ interface InvoiceLinePricingSnapshot {
   unit_code?: string;
   /** Cuenta ya resuelta: línea → variante → producto. `undefined` ⇒ mapping. */
   account_code?: string;
+  /**
+   * `products.product_type` de la línea (`physical` | `service` | `prepared`),
+   * o `null` cuando la línea no referencia un producto del catálogo. Consumida
+   * por `resolveWithholdingAmount` para agrupar bienes vs servicios
+   * (`WithholdingFlowService.resolveSufferedByOperation`).
+   */
+  product_type?: string | null;
 }
 
 /**

@@ -359,6 +359,7 @@ jobs:
           --include='**/print-formats/services/print-annex-validator.service.spec.ts'
           --include='**/settings/shipping/components/add-rate-wizard-modal/add-rate-wizard-modal.component.spec.ts'
           --include='**/settings/shipping/components/method-zones-inline/method-zones-inline.component.spec.ts'
+          --include='**/shared/components/payment-collector/payment-collector.component.spec.ts'
 
   backend-build:
     name: Backend Build (prisma + nest)

@@ -1,4 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
 import { signal } from '@angular/core';
 import { By } from '@angular/platform-browser';
@@ -19,6 +21,13 @@ describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting',
       const num = Number(amount) || 0;
       return `$${num.toLocaleString('es-CO')}`;
     },
+    // Requeridos por CurrencyPipe real (constructor llama loadCurrency()) y
+    // por el propio componente (currencySymbol se lee como campo de clase).
+    // Mismo patrón que buildMultiCurrencyMock() más abajo en este archivo.
+    loadCurrency: () => Promise.resolve(null),
+    currencySymbol: signal('$'),
+    currencyDecimals: signal(0),
+    currencyFormatStyle: signal('dot_comma'),
     currentCurrency: signal({
       code: 'COP',
       symbol: '$',
@@ -37,6 +46,11 @@ describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting',
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        // El template importa StoreUserSelectComponent (context 'order' +
+        // allowAmountOverride) cuyo StoreUserLookupService inyecta HttpClient
+        // (providedIn: 'root'); sin este provider, detectChanges lanza NG0201.
+        provideHttpClient(),
+        provideHttpClientTesting(),
         { provide: CurrencyFormatService, useValue: mockCurrencyService },
         { provide: PaymentMethodsCatalogService, useValue: mockCatalog },
       ],
@@ -44,6 +58,11 @@ describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting',
 
     fixture = TestBed.createComponent(PaymentCollectorComponent);
     component = fixture.componentInstance;
+    // `amount` es un input.required<number>() consumido por effectiveBase()/
+    // effectiveTotal(), que a su vez lee un effect() del constructor en cada
+    // detectChanges(). Sin setInput aquí, cualquier test de este describe
+    // dispara NG0950 aunque no le importe `amount` (vendix-zoneless-signals).
+    fixture.componentRef.setInput('amount', 100000);
   });
 
   describe('formatInstallmentDate', () => {
