@@ -900,6 +900,8 @@ export class CheckoutService {
   private async getCheckoutSettings(): Promise<{
     require_registration: boolean;
     require_payment_receipt: boolean;
+    whatsapp_checkout: boolean;
+    whatsapp_number: string;
   }> {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) {
@@ -917,6 +919,13 @@ export class CheckoutService {
       require_registration: !!checkout.require_registration,
       // Opt-in por tienda (default `false` ⇒ comprobante opcional).
       require_payment_receipt: !!checkout.require_payment_receipt,
+      // pending_shipping_assignment: la tienda debe tener el checkout por
+      // WhatsApp activo Y un número configurado para recibirlo.
+      whatsapp_checkout: checkout.whatsapp_checkout === true,
+      whatsapp_number:
+        typeof checkout.whatsapp_number === 'string'
+          ? checkout.whatsapp_number.trim()
+          : '',
     };
   }
 
@@ -927,6 +936,37 @@ export class CheckoutService {
     if (checkoutSettings.require_registration) {
       throw new BadRequestException(
         'Debes iniciar sesión o registrarte para completar esta compra',
+      );
+    }
+  }
+
+  /**
+   * Paso 1 (checkout-whatsapp-location-fallback): valida el flag
+   * `pending_shipping_assignment`. El backend nunca confía en el frontend —
+   * revalida todo el contrato aunque el frontend ya lo haya gateado en UI.
+   */
+  private async assertPendingShippingAssignmentAllowed(
+    dto: CheckoutDto,
+  ): Promise<void> {
+    if (!dto.pending_shipping_assignment) return;
+
+    if (
+      dto.channel !== 'whatsapp' ||
+      dto.shipping_method_id != null ||
+      dto.shipping_rate_id != null
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_PENDING_SHIPPING_001,
+      );
+    }
+
+    const checkoutSettings = await this.getCheckoutSettings();
+    if (
+      !checkoutSettings.whatsapp_checkout ||
+      checkoutSettings.whatsapp_number.length === 0
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_PENDING_SHIPPING_001,
       );
     }
   }
@@ -1443,6 +1483,7 @@ export class CheckoutService {
 
   private async runCheckout(dto: CheckoutDto, file?: Express.Multer.File) {
     await this.assertGuestCheckoutAllowed();
+    await this.assertPendingShippingAssignmentAllowed(dto);
 
     const user_id = RequestContextService.getUserId();
     const is_guest = !user_id;
@@ -1545,43 +1586,52 @@ export class CheckoutService {
       cart?.currency || (await this.settingsService.getStoreCurrency());
 
     // store_id se aplica automáticamente
-    const payment_method = await this.prisma.store_payment_methods.findFirst({
-      where: {
-        id: dto.payment_method_id,
-        state: 'enabled',
-      },
-      include: { system_payment_method: true },
-    });
+    // pending_shipping_assignment: sin payment_method_id (el pago se acuerda
+    // por fuera del sistema), así que se omite toda la resolución/validación
+    // de método de pago. OJO: `dto.payment_method_id` puede venir undefined
+    // aquí — Prisma ignoraría el filtro `id: undefined` y devolvería un
+    // método arbitrario, por eso el guard salta todo el bloque en vez de
+    // dejar que la query corra igual.
+    let payment_method: any = null;
+    if (!dto.pending_shipping_assignment) {
+      payment_method = await this.prisma.store_payment_methods.findFirst({
+        where: {
+          id: dto.payment_method_id,
+          state: 'enabled',
+        },
+        include: { system_payment_method: true },
+      });
 
-    if (!payment_method) {
-      throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_002);
-    }
+      if (!payment_method) {
+        throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_002);
+      }
 
-    // FIX QUI-467: block wallet payment for anonymous users. Even if a guest
-    // crafts a request manually, the server must refuse wallet — the wallet
-    // is per-customer (prepaid balance) and needs an authenticated identity.
-    if (
-      payment_method.system_payment_method.type === 'wallet' &&
-      !RequestContextService.getUserId()
-    ) {
-      throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_005);
-    }
+      // FIX QUI-467: block wallet payment for anonymous users. Even if a guest
+      // crafts a request manually, the server must refuse wallet — the wallet
+      // is per-customer (prepaid balance) and needs an authenticated identity.
+      if (
+        payment_method.system_payment_method.type === 'wallet' &&
+        !RequestContextService.getUserId()
+      ) {
+        throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_005);
+      }
 
-    // Soporte obligatorio por tienda: con
-    // `ecommerce.checkout.require_payment_receipt` activo, bank_transfer /
-    // voucher sin `file` se rechaza aquí (fail-fast, antes de crear orden y
-    // pago). Con el flag apagado el flujo queda idéntico al actual.
-    if (
-      (payment_method.system_payment_method.type === 'bank_transfer' ||
-        payment_method.system_payment_method.type === 'voucher') &&
-      !file
-    ) {
-      const checkoutSettings = await this.getCheckoutSettings();
-      if (checkoutSettings.require_payment_receipt) {
-        throw new VendixHttpException(
-          ErrorCodes.ECOM_CHECKOUT_001,
-          'El comprobante de pago es obligatorio para este método de pago',
-        );
+      // Soporte obligatorio por tienda: con
+      // `ecommerce.checkout.require_payment_receipt` activo, bank_transfer /
+      // voucher sin `file` se rechaza aquí (fail-fast, antes de crear orden y
+      // pago). Con el flag apagado el flujo queda idéntico al actual.
+      if (
+        (payment_method.system_payment_method.type === 'bank_transfer' ||
+          payment_method.system_payment_method.type === 'voucher') &&
+        !file
+      ) {
+        const checkoutSettings = await this.getCheckoutSettings();
+        if (checkoutSettings.require_payment_receipt) {
+          throw new VendixHttpException(
+            ErrorCodes.ECOM_CHECKOUT_001,
+            'El comprobante de pago es obligatorio para este método de pago',
+          );
+        }
       }
     }
 
@@ -1643,7 +1693,12 @@ export class CheckoutService {
       return true;
     });
 
-    if (hasPhysicalItems && !dto.shipping_method_id && !dto.shipping_rate_id) {
+    if (
+      hasPhysicalItems &&
+      !dto.pending_shipping_assignment &&
+      !dto.shipping_method_id &&
+      !dto.shipping_rate_id
+    ) {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
@@ -1785,6 +1840,16 @@ export class CheckoutService {
       delivery_type = deriveDeliveryType(method.type);
     }
 
+    if (dto.pending_shipping_assignment) {
+      // pending_shipping_assignment: ninguna rama de arriba corrió
+      // (shipping_method_id/shipping_rate_id están prohibidos por el guard
+      // de assertPendingShippingAssignmentAllowed), así que se fuerza aquí.
+      // shipping_cost/shipping_method_id/shipping_rate_id quedan en sus
+      // defaults (0/null/null) y selected_rate en null — resolveConfirmShippingCost
+      // nunca se invoca porque su llamada está condicionada a `selected_rate`.
+      delivery_type = 'other';
+    }
+
     if (
       hasPhysicalItems &&
       delivery_type !== 'pickup' &&
@@ -1799,6 +1864,7 @@ export class CheckoutService {
 
     // QUI-850: El pago en efectivo solo está disponible para entrega 'pickup' (recoger en tienda).
     if (
+      payment_method &&
       payment_method.system_payment_method.type === 'cash' &&
       delivery_type !== 'pickup'
     ) {
@@ -2107,7 +2173,7 @@ export class CheckoutService {
         // collection) and the order auto-finished unpaid. Scoped to
         // ON_DELIVERY only: online/transfer methods keep their historical
         // shape (their confirmation settles the order).
-        ...(payment_method.system_payment_method?.processing_mode ===
+        ...(payment_method?.system_payment_method?.processing_mode ===
         payment_processing_mode_enum.ON_DELIVERY
           ? { total_paid: 0, remaining_balance: grand_total }
           : {}),
@@ -2115,6 +2181,13 @@ export class CheckoutService {
         shipping_address_snapshot,
         state: 'pending_payment',
         internal_notes: dto.notes,
+        // Nota staff-only (nunca expuesta al cliente, columna existente —
+        // sin migración) para que la tienda vea en el detalle de la orden
+        // por qué no hay método/costo de envío: falta contactar al
+        // comprador por WhatsApp y acordarlo.
+        notes: dto.pending_shipping_assignment
+          ? 'Pedido por WhatsApp con envío pendiente de asignar. Contactar al comprador para acordar el método y costo de envío.'
+          : undefined,
         placed_at: new Date(),
         order_items: {
           create: itemsWithTaxes.map((item) => ({
@@ -2201,8 +2274,9 @@ export class CheckoutService {
     let receipt_s3_key: string | null = null;
     let receipt_uploaded_at: Date | null = null;
     const receiptEligibleMethodType =
-      payment_method.system_payment_method.type === 'bank_transfer' ||
-      payment_method.system_payment_method.type === 'voucher';
+      payment_method != null &&
+      (payment_method.system_payment_method.type === 'bank_transfer' ||
+        payment_method.system_payment_method.type === 'voucher');
 
     if (file && receiptEligibleMethodType) {
       receipt_s3_key = await this.uploadCheckoutReceipt(file);
@@ -2234,22 +2308,26 @@ export class CheckoutService {
     // QUI-728 — capturamos el `id` del pago recién creado para devolverlo al
     // comprador en la respuesta y permitirle releer su comprobante más tarde
     // (solo si subió archivo — sin `receipt_s3_key` no hay qué re-leer).
-    const created_payment = await this.prisma.payments.create({
-      data: {
-        order_id: order.id,
-        amount: grand_total,
-        currency: cart_currency,
-        state: 'pending',
-        store_payment_method_id: dto.payment_method_id,
-        receipt_s3_key,
-        receipt_uploaded_at,
-        bank_account_id: resolved_bank_account_id,
-      },
-      select: { id: true },
-    });
-    const payment_id_with_receipt: number | null = receipt_s3_key
-      ? created_payment.id
-      : null;
+    // pending_shipping_assignment: sin payment_method_id no hay pago que
+    // registrar — la tienda cobra por fuera del sistema tras acordar envío.
+    let created_payment: { id: number } | null = null;
+    if (!dto.pending_shipping_assignment) {
+      created_payment = await this.prisma.payments.create({
+        data: {
+          order_id: order.id,
+          amount: grand_total,
+          currency: cart_currency,
+          state: 'pending',
+          store_payment_method_id: dto.payment_method_id,
+          receipt_s3_key,
+          receipt_uploaded_at,
+          bank_account_id: resolved_bank_account_id,
+        },
+        select: { id: true },
+      });
+    }
+    const payment_id_with_receipt: number | null =
+      receipt_s3_key && created_payment ? created_payment.id : null;
 
     // Bucle POR ÍNDICE: dos líneas del mismo producto en presentaciones
     // distintas son dos reservas independientes, y la suma de ambas es lo que
@@ -2326,9 +2404,13 @@ export class CheckoutService {
       }
     }
 
-    const invoice_id = is_guest
-      ? null
-      : await this.createInvoiceIfConfigured(order.id);
+    // pending_shipping_assignment: nunca facturar DIAN automáticamente — el
+    // envío ($0 en este punto) todavía no está acordado con el comprador, y
+    // una factura con costo de envío en cero sería incorrecta.
+    const invoice_id =
+      dto.pending_shipping_assignment || is_guest
+        ? null
+        : await this.createInvoiceIfConfigured(order.id);
     const guestArtifacts = is_guest
       ? await this.createGuestOrderArtifacts(order.id, guest_customer)
       : null;

@@ -4,6 +4,8 @@ import {
   IsString,
   IsArray,
   IsIn,
+  IsBoolean,
+  ValidateIf,
   ValidateNested,
   Min,
   Max,
@@ -149,9 +151,15 @@ export class CheckoutDto {
   @Type(() => GuestCheckoutCustomerDto)
   guest_customer?: GuestCheckoutCustomerDto;
 
+  /**
+   * pago opcional solo cuando `pending_shipping_assignment` es true: la
+   * orden se crea sin fila de `payments`, la tienda cobra por fuera del
+   * sistema tras contactar al comprador por WhatsApp para acordar envío.
+   */
+  @ValidateIf((o) => !o.pending_shipping_assignment)
   @IsInt()
   @Min(1)
-  payment_method_id: number;
+  payment_method_id?: number;
 
   /**
    * ID de la cuenta bancaria destino para `bank_transfer` / `voucher`.
@@ -203,6 +211,27 @@ export class CheckoutDto {
   @IsOptional()
   @IsIn(['ecommerce', 'whatsapp'])
   channel?: string;
+
+  /**
+   * Fallback de checkout cuando no se pudo ubicar al comprador (sin
+   * coordenadas ni geocode válido — ver `vendix-shipping-distance-pricing`
+   * regla 6). El comprador confirma la orden por WhatsApp SIN método/tarifa
+   * de envío elegidos; la tienda asigna el envío después (`assignShipping`)
+   * al contactarlo. Requiere `channel='whatsapp'`, prohíbe
+   * `shipping_method_id`/`shipping_rate_id`, y exige que la tienda tenga
+   * `ecommerce.checkout.whatsapp_checkout=true` con `whatsapp_number`
+   * configurado (`ECOM_CHECKOUT_PENDING_SHIPPING_001` en cualquier otro
+   * caso). La orden se crea con `delivery_type='other'`, `shipping_cost=0`,
+   * sin fila de `payments` y sin factura DIAN automática.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Cuando es true, crea la orden por WhatsApp con envío por asignar (sin método/tarifa, la tienda lo resuelve después). Requiere channel=whatsapp y la tienda con checkout por WhatsApp habilitado.',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  pending_shipping_assignment?: boolean;
 }
 
 class CheckoutBookingDto {
