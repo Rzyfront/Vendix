@@ -474,10 +474,11 @@ export class PosCheckoutShellComponent {
       : null,
   );
 
-  /** Total shown in the Resumen rail / footer (adds flete on delivery). */
+  /** Display total includes the collector's resolved tip; deliveryAmount stays untipped. */
   readonly totalToPay = computed<number>(() => {
     const base = this.cartState()?.summary?.total || 0;
-    return this.effectiveIntent() === 'delivery' ? base + this.shippingCost() : base;
+    const shipping = this.effectiveIntent() === 'delivery' ? this.shippingCost() : 0;
+    return base + shipping + (this.paymentStep()?.tipAmount() ?? 0);
   });
 
   // ── Sale mode (tri-state) + Anonymous ownership ─────────────────────────

@@ -368,7 +368,7 @@ export function resolvePosPaymentCustomerName(
             (cashOpenClicked)="showSessionOpenModal.set(true)"
             (cashCloseClicked)="showSessionCloseModal.set(true)"
             (cashMovementClicked)="showCashMovementModal.set(true)"
-            (detailClicked)="showSessionDetailModal.set(true)"
+            (cashDetailClicked)="showSessionDetailModal.set(true)"
             (create)="onOpenCreateModal()"
             (saveDraft)="onSaveDraft()"
             (checkout)="onCheckout()"

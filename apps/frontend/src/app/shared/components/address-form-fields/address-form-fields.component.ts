@@ -116,6 +116,16 @@ export interface AddressPayload {
 export class AddressFormFieldsComponent {
   /** Address to prefill the form with (edición). Null on create. */
   readonly initialAddress = input<AddressPayload | null>(null);
+  /** POS opt-in: keep optional address fields behind a secondary action. */
+  readonly compact = input<boolean>(false);
+  readonly advancedOpen = signal(false);
+  readonly showAdvanced = computed<boolean>(() =>
+    !this.compact() || this.advancedOpen() ||
+    !!this.initialAddress()?.address_line2 ||
+    !!this.initialAddress()?.postal_code ||
+    (this.initialAddress()?.country_code != null &&
+      this.initialAddress()?.country_code !== COLOMBIA_COUNTRY_CODE),
+  );
   /** Optional map center coordinate (e.g. existing lat/lng or GPS fix). */
   readonly center = input<LatLng | null>(null);
   /**
