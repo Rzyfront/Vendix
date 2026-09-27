@@ -28,6 +28,7 @@ import {
   FilterConfig,
   DropdownAction,
   FilterValues,
+  HeaderPinConfig,
 } from './options-dropdown.interfaces';
 
 @Component({
@@ -70,6 +71,14 @@ export class OptionsDropdownComponent {
 
   /** Whether the component is in a loading state */
   readonly isLoading = input<boolean>(false);
+
+  /**
+   * Pin opcional en el header del dropdown de filtros, junto a "Limpiar".
+   * Escribe `headerPin.key` en `FilterValues` (`'true'` | `null`) por el mismo
+   * path con debounce que el checkbox por filtro y NO cuenta como filtro
+   * activo. `null` (default) = sin pin.
+   */
+  readonly headerPin = input<HeaderPinConfig | null>(null);
 
   /** Emits when filter values change (after debounce) */
   readonly filterChange = output<FilterValues>();
@@ -399,5 +408,21 @@ export class OptionsDropdownComponent {
 
   onCheckboxChange(key: string, checked: boolean): void {
     this.onFilterChange(key, checked ? 'true' : null);
+  }
+
+  /**
+   * Toggle del pin de header. Reutiliza el path del checkbox por filtro
+   * (escritura `'true'|null` + debounce); no cuenta como filtro activo.
+   */
+  onHeaderPinChange(checked: boolean): void {
+    const pin = this.headerPin();
+    if (!pin) return;
+    this.onCheckboxChange(pin.key, checked);
+  }
+
+  /** Estado del pin de header (misma lectura que el checkbox por filtro). */
+  getHeaderPinValue(): boolean {
+    const pin = this.headerPin();
+    return pin ? this.getCheckboxValue(pin.key) : false;
   }
 }

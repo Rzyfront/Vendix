@@ -78,16 +78,29 @@
       >
       <div class="dropdown-header">
         <h3 class="dropdown-title">Filtros</h3>
-        @if (activeFiltersCount() > 0) {
-          <button
-            class="clear-all-btn"
-            (click)="onClearAllFilters()"
-            type="button"
-            >
-            <app-icon name="x" [size]="14"></app-icon>
-            Limpiar
-          </button>
-        }
+        <div class="dropdown-header-actions">
+          @if (headerPin(); as pin) {
+            <label class="header-pin">
+              <input
+                type="checkbox"
+                [ngModel]="getHeaderPinValue()"
+                (ngModelChange)="onHeaderPinChange($event)"
+                [disabled]="pin.disabled || false"
+                />
+              <span class="header-pin-label">{{ pin.label }}</span>
+            </label>
+          }
+          @if (activeFiltersCount() > 0) {
+            <button
+              class="clear-all-btn"
+              (click)="onClearAllFilters()"
+              type="button"
+              >
+              <app-icon name="x" [size]="14"></app-icon>
+              Limpiar
+            </button>
+          }
+        </div>
       </div>
       <!-- Filters Body -->
       <div class="filters-body">
