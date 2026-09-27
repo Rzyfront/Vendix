@@ -1163,6 +1163,22 @@ export class PaymentsService {
           );
         };
 
+        // BUG 1 (no-overselling-stock-guard-plan.md, 2026-09-26): a table
+        // order that had one item delivered (`deliverOrderItem` → its stock
+        // is already consumed via `OrderStockCommitService.commitOrderLines`
+        // and the reservation that covered it is gone — consumed, not
+        // active) or cancelled (`cancelOrderItem` — its reservation was
+        // released, nothing to claim) has NOTHING left to demand when the
+        // table pays. Re-demanding it here double-counted stock that either
+        // already left (delivered) or was never going to be sold
+        // (cancelled), and could 409 a payment even when the real shortfall
+        // is zero.
+        const isAlreadySettledLine = (item: {
+          inventory_committed?: boolean | null;
+          cancelled_at?: Date | string | null;
+        }): boolean =>
+          item.inventory_committed === true || item.cancelled_at != null;
+
         // no-overselling-stock-guard plan, Step 4: lines of the SAME
         // product+variant are summed before comparing against available
         // stock (`StockValidatorService.assertLinesAvailable`) — two lines
@@ -1175,9 +1191,12 @@ export class PaymentsService {
           quantity: number;
           stock_units_consumed?: number | null;
           skip_kds?: boolean | null;
+          inventory_committed?: boolean | null;
+          cancelled_at?: Date | string | null;
         }>) {
           if (!item.product_id) continue;
           if (isFiredToKitchenLine(item)) continue;
+          if (isAlreadySettledLine(item)) continue;
 
           const product = stockProductById.get(item.product_id);
 
@@ -1232,6 +1251,11 @@ export class PaymentsService {
           // kitchen reserves nothing against its OWN stock row — only its
           // ingredients move, at fire time.
           if (isFiredToKitchenLine(item)) continue;
+          // BUG 1 — same exclusion as the demand loop above: a delivered or
+          // cancelled line has nothing left to reserve (`demandByIdentity`
+          // would already be 0 for it, but skipping here avoids a wasted
+          // `stock_reservations.aggregate` query per settled line).
+          if (isAlreadySettledLine(item)) continue;
           const identity = `${item.product_id}:${item.product_variant_id ?? 'base'}`;
           if (processedIdentities.has(identity)) continue;
           processedIdentities.add(identity);
@@ -1652,6 +1676,7 @@ export class PaymentsService {
               tx,
               order,
               createPosPaymentDto.items,
+              stockWarnings,
             )
           ).totalCost;
         }
@@ -5879,16 +5904,44 @@ export class PaymentsService {
     tx: any,
     order: any,
     posItems?: PosOrderItemDto[],
+    stockWarnings?: InsufficientStockItem[],
   ): Promise<CommitResult> {
+    // BUG 2 (no-overselling-stock-guard-plan.md, 2026-09-26): this delivery
+    // commit used to hardcode `blockOnInsufficient: true`, ignoring the same
+    // per-store "Permitir sobreventa" switch every other stock-facing path in
+    // this transaction already resolves (`allowOversell` above, from
+    // `StockValidatorService.resolveInventoryPolicy(order.store_id, tx)`).
+    // With the switch ON a direct-delivery POS sale of a product at 0
+    // available still 409'd (`INV_STOCK_002`) instead of going negative like
+    // the reservation step already allows. The DTO's own `allow_oversell`
+    // field stays intentionally ignored — this is governed ONLY by the store
+    // setting, resolved server-side inside this same tx.
+    const inventoryPolicy = await this.stockValidatorService.resolveInventoryPolicy(
+      order.store_id,
+      tx,
+    );
+    const allowOversell = inventoryPolicy.allowOversell === true;
     return this.orderStockCommit.commitOrderDelivery(
       order.id,
       {
         movementType: 'sale',
-        blockOnInsufficient: true,
+        blockOnInsufficient: !allowOversell,
+        allowNegativeOnShortfall: allowOversell,
         consumeSerials: true,
         reason: 'POS Sale',
         userId: order.created_by ?? RequestContextService.getUserId?.(),
         posSelection: posItems,
+        onShortfall: allowOversell
+          ? (item) =>
+              stockWarnings?.push({
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id ?? null,
+                product_name: item.product_name,
+                kind: 'product',
+                requested: item.requested,
+                available: item.available,
+              })
+          : undefined,
       },
       tx,
     );

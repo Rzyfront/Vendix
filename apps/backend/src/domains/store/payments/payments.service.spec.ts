@@ -3571,6 +3571,80 @@ describe('PaymentsService', () => {
       expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
     });
 
+    // BUG 2 (no-overselling-stock-guard-plan.md, 2026-09-26):
+    // `updateInventoryFromOrder` hardcodeaba `blockOnInsufficient: true` sin
+    // mirar el switch de tienda "Permitir sobreventa"
+    // (`store_settings.inventory.allow_negative_stock`). Con el switch en
+    // `true`, una venta POS de mostrador de un producto en 0 disponible
+    // seguía rechazando 409 `INV_STOCK_002` — la MISMA reserva de la línea
+    // (§1.5, más arriba en este archivo) ya toleraba el negativo bajo el
+    // mismo switch, pero el commit de entrega lo ignoraba. El campo
+    // `allow_oversell` del DTO público sigue intencionalmente ignorado: esto
+    // lo gobierna solo el ajuste de tienda, resuelto server-side dentro del
+    // mismo tx (`resolveInventoryPolicyMock`, ya inyectado a nivel de
+    // describe con default `allowOversell:false` para el resto de la suite).
+    it('BUG 2: con allow_negative_stock=true, la entrega directa NO bloquea (INV_STOCK_002 evitado)', async () => {
+      const { order } = arrangePosSale('cash');
+      resolveInventoryPolicyMock.mockResolvedValue({
+        allowOversell: true,
+        allowIngredientOveruse: true,
+      });
+
+      jest
+        .spyOn(service as any, 'processPosPaymentTransaction')
+        .mockResolvedValue({ id: 7, state: 'succeeded' });
+      jest
+        .spyOn(service as any, 'hasPendingKitchenItemsTx')
+        .mockResolvedValue(false);
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_INVENTORY);
+
+      expect(commitOrderDeliveryMock).toHaveBeenCalledTimes(1);
+      expect(commitOrderDeliveryMock).toHaveBeenCalledWith(
+        order.id,
+        expect.objectContaining({
+          blockOnInsufficient: false,
+          allowNegativeOnShortfall: true,
+          onShortfall: expect.any(Function),
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('BUG 2: default (allow_negative_stock=false) sigue bloqueando igual que antes (no-regresión)', async () => {
+      const { order } = arrangePosSale('cash');
+      // resolveInventoryPolicyMock ya resuelve allowOversell:false por
+      // default (beforeEach) — se deja explícito para que el intento no
+      // dependa de la resolución.
+      resolveInventoryPolicyMock.mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: true,
+      });
+
+      jest
+        .spyOn(service as any, 'processPosPaymentTransaction')
+        .mockResolvedValue({ id: 7, state: 'succeeded' });
+      jest
+        .spyOn(service as any, 'hasPendingKitchenItemsTx')
+        .mockResolvedValue(false);
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_INVENTORY);
+
+      expect(commitOrderDeliveryMock).toHaveBeenCalledWith(
+        order.id,
+        expect.objectContaining({
+          blockOnInsufficient: true,
+          allowNegativeOnShortfall: false,
+          onShortfall: undefined,
+        }),
+        expect.anything(),
+      );
+    });
+
     it('el efectivo SÍ consume en el acto: el dinero ya entró (no-regresión)', async () => {
       const { order } = arrangePosSale('cash');
 
@@ -3671,6 +3745,66 @@ describe('PaymentsService', () => {
       }), posUser)).rejects.toThrow();
       expect(order.state).toBe('draft');
       expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+    });
+
+    // no-overselling-stock-guard-plan.md, BUG 1 (2026-09-26): una mesa con
+    // un ítem YA entregado (`inventory_committed=true` — su stock ya se
+    // descontó en `deliverOrderItem`, la reserva que lo cubría ya fue
+    // consumida) volvía a demandarse en el precheck previo a
+    // `assertLinesAvailable`. El precheck solo excluía las líneas que van a
+    // cocina (`isFiredToKitchenLine`); una línea entregada y una cancelada
+    // colaban igual y el pago moría con un 409 falso incluso con stock 0
+    // disponible siendo exactamente lo esperado (ya no queda nada que
+    // reclamar: la unidad ya salió).
+    it('BUG 1: una línea ya entregada (inventory_committed) no se vuelve a demandar antes de cobrar', async () => {
+      const { order, tx } = arrangePosSale('cash');
+      order.order_items.push({
+        id: 950,
+        product_id: 501,
+        product_variant_id: null,
+        quantity: 2,
+        stock_units_consumed: null,
+        skip_kds: false,
+        inventory_committed: true,
+        cancelled_at: null,
+      } as any);
+      tx.products = {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 501, name: 'MODELO', track_inventory: true, product_type: 'physical' },
+        ]),
+      };
+      // Sonda: si el precheck todavía incluyera la línea entregada en la
+      // demanda, `assertLinesAvailable` se llamaría con ella y este mock la
+      // rechaza (mismo 409 que produciría un stock realmente en 0). Con el
+      // fix, la demanda queda vacía y el mock NUNCA se invoca.
+      assertLinesAvailableMock.mockImplementation((lines: any[]) => {
+        if (lines.length > 0) {
+          throw new VendixHttpException(
+            ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+            'Stock insuficiente para MODELO',
+            { items: [{ product_name: 'MODELO', requested: 2, available: 0 }] },
+          );
+        }
+        return Promise.resolve([]);
+      });
+      // Con la única línea del pedido ya asentada (entregada), no queda
+      // nada que reservar ni ningún gasto de inventario que aplicar —
+      // `is_draft`+`requires_payment:false` saltan también el bloque de
+      // eventos/impuestos/retenciones/cupón (`!is_draft`). La transacción
+      // llega limpia hasta el refresh final de `orders` (§ respuesta,
+      // justo antes del `return`); un stub que revienta ahí es la señal
+      // determinista de que nada de lo anterior — en particular la
+      // demanda de stock — disparó un 409.
+      const REACHED_END_OF_TX = 'reached-end-of-tx';
+      tx.orders.findUnique = jest
+        .fn()
+        .mockRejectedValue(new Error(REACHED_END_OF_TX));
+
+      await expect(service.processPosPayment(
+        buildPosDto({ is_draft: true, requires_payment: false }), posUser,
+      )).rejects.toThrow(REACHED_END_OF_TX);
+
+      expect(assertLinesAvailableMock).not.toHaveBeenCalled();
     });
   });
 
