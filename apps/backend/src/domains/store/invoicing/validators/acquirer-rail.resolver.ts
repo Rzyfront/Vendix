@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { onlyDigits } from '@common/utils/nit.util';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
@@ -6,6 +7,9 @@ import {
   DIAN_FINAL_CONSUMER_NAME,
   DIAN_FINAL_CONSUMER_TYPE_CODE,
 } from './customer-fiscal-identity.validator';
+import { resolveMissingAcquirerDocumentType } from '../utils/acquirer-identity.resolver';
+
+const logger = new Logger('AcquirerRailResolver');
 
 /**
  * QUÉ ADQUIRIENTE SE PERSISTE AL CREAR LA FACTURA — ANTES de numerar.
@@ -80,6 +84,12 @@ export interface AcquirerRailInput {
   legal_name?: string | null;
   first_name?: string | null;
   last_name?: string | null;
+  /** Valor CRUDO (sin derivar) de `users.person_type` — opcional; no todo
+   *  llamador lo tiene a mano. Alimenta la política de P1-B (ver
+   *  `resolveMissingAcquirerDocumentType`). */
+  person_type?: string | null;
+  /** Sólo para trazabilidad (`logger.warn`) cuando se infiere el tipo. */
+  customer_id?: number | string | null;
 }
 
 /** Identidad YA resuelta, lista para persistir en `invoices.customer_*`. */
@@ -130,16 +140,22 @@ const FINAL_CONSUMER_IDENTITY: AcquirerRailIdentity = Object.freeze({
  * destino de todo lo que no alcanza a ser nominativo.
  *
  * YA NO es incondicionalmente libre de excepciones: un adquiriente nominativo
- * (número Y nombre reales) sin tipo de identificación declarado LANZA en vez
- * de inventar `'CC'`. Antes, `(input.document_type ?? '').trim() || 'CC'`
- * completaba en silencio y esta identidad a medias se persistía en
- * `invoices.customer_document_type` — de ahí viajaba intacta hasta
- * `DianDirectProvider.buildCustomerData`, que repetía el mismo `|| 'CC'` y
- * transmitía a la DIAN una Cédula de Ciudadanía para un adquiriente cuyo
- * documento real era un NIT (incidente Óptica Panorama SAS / Pollo Árabe).
- * Lanzar AQUÍ —antes de que `InvoicingService.createFromOrder` numere el
- * documento— es estrictamente mejor que dejar que la emisión lo descubra con
- * el consecutivo ya tomado.
+ * (número Y nombre reales) sin tipo de identificación declarado, con SEÑAL de
+ * persona jurídica, LANZA en vez de inventar `'CC'`. Antes,
+ * `(input.document_type ?? '').trim() || 'CC'` completaba en silencio y esta
+ * identidad a medias se persistía en `invoices.customer_document_type` — de
+ * ahí viajaba intacta hasta `DianDirectProvider.buildCustomerData`, que
+ * repetía el mismo `|| 'CC'` y transmitía a la DIAN una Cédula de Ciudadanía
+ * para un adquiriente cuyo documento real era un NIT (incidente Óptica
+ * Panorama SAS / Pollo Árabe). Lanzar AQUÍ —antes de que
+ * `InvoicingService.createFromOrder` numere el documento— es estrictamente
+ * mejor que dejar que la emisión lo descubra con el consecutivo ya tomado.
+ *
+ * P1-B corrige el sobre-alcance de ese cierre: prod tiene 67 fichas antiguas
+ * con número+nombre y `document_type` NULL (sólo 21 con forma de NIT). Sin
+ * señal de riesgo (`resolveMissingAcquirerDocumentType`), se infiere `'CC'` y
+ * se sigue — bloquear las 67 rompía ventas POS de clientes que llevan años
+ * siendo persona natural.
  */
 export function resolveAcquirerRail(
   input: AcquirerRailInput,
@@ -159,12 +175,25 @@ export function resolveAcquirerRail(
     return { rail: 'final_consumer', identity: FINAL_CONSUMER_IDENTITY };
   }
 
-  const document_type = (input.document_type ?? '').trim();
+  let document_type = (input.document_type ?? '').trim();
   if (!document_type) {
-    throw new VendixHttpException(
-      ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED,
-      'No se puede emitir: el adquiriente tiene número de identificación y nombre pero no tiene tipo de documento (CC, NIT, CE, …). Complétalo en la ficha del cliente antes de facturar, o emite la venta como Consumidor Final si el comprador no se identifica.',
-      { document_number, has_name: true },
+    const decision = resolveMissingAcquirerDocumentType({
+      document_number,
+      legal_name: input.legal_name,
+      person_type: input.person_type,
+    });
+
+    if (decision.should_block) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED,
+        'No se puede emitir: el adquiriente tiene número de identificación y nombre pero no tiene tipo de documento (CC, NIT, CE, …). Complétalo en la ficha del cliente antes de facturar, o emite la venta como Consumidor Final si el comprador no se identifica.',
+        { document_number, has_name: true },
+      );
+    }
+
+    document_type = decision.inferred_document_type ?? 'CC';
+    logger.warn(
+      `Adquiriente sin document_type declarado (customer_id=${input.customer_id ?? 'n/a'}, documento=${document_number}): se infiere '${document_type}' por política (sin señal de persona jurídica).`,
     );
   }
 

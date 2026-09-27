@@ -118,4 +118,58 @@ describe('resolveAcquirerRail', () => {
     expect(result.identity.document_number).toBe('1118860776');
     expect(result.identity.name).toBe('Consumidor Final');
   });
+
+  // P1-B — corrección del sobre-alcance: 67 fichas prod con número+nombre y
+  // document_type NULL, sólo 21 con forma de NIT. Sin señal de riesgo, se
+  // infiere 'CC' en vez de bloquear.
+  it('persona natural, número SIN forma de NIT, sin legal_name ni tipo declarado ⇒ infiere CC, no bloquea', () => {
+    const result = resolveAcquirerRail({
+      document_number: '1118860776',
+      first_name: 'Juan',
+      last_name: 'Pérez',
+    });
+
+    expect(result.rail).toBe('nominative_minimal');
+    expect(result.identity.document_type).toBe('CC');
+    expect(result.identity.document_number).toBe('1118860776');
+  });
+
+  it('número CON forma de NIT (8/9 + 8 dígitos), sin legal_name ni tipo declarado ⇒ BLOQUEA igual (señal de riesgo por forma)', () => {
+    let caught: unknown;
+    try {
+      resolveAcquirerRail({
+        document_number: '900123456',
+        first_name: 'Juan',
+        last_name: 'Pérez',
+      });
+      fail('esperaba que resolveAcquirerRail lanzara');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(VendixHttpException);
+    expect((caught as VendixHttpException).errorCode).toBe(
+      ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED.code,
+    );
+  });
+
+  it('person_type explícito JURIDICA con número SIN forma de NIT y sin legal_name ⇒ BLOQUEA igual (señal de riesgo por person_type)', () => {
+    let caught: unknown;
+    try {
+      resolveAcquirerRail({
+        document_number: '1118860776',
+        first_name: 'Empresa',
+        last_name: 'X',
+        person_type: 'JURIDICA',
+      });
+      fail('esperaba que resolveAcquirerRail lanzara');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(VendixHttpException);
+    expect((caught as VendixHttpException).errorCode).toBe(
+      ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED.code,
+    );
+  });
 });

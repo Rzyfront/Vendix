@@ -33,7 +33,10 @@ import {
   dianSum,
 } from '../../utils/dian-money.util';
 import { dianPartyId, onlyDigits } from '../../../../../common/utils/nit.util';
-import { normalizeAcquirerDocumentType } from '../../utils/acquirer-identity.resolver';
+import {
+  normalizeAcquirerDocumentType,
+  resolveMissingAcquirerDocumentType,
+} from '../../utils/acquirer-identity.resolver';
 import { resolveIssuerFiscalIdentity } from '../../utils/fiscal-issuer.util';
 import { DianSoapClient, WsSecurityCredentials } from './dian-soap.client';
 import { DianXmlSignerService } from './dian-xml-signer.service';
@@ -2290,7 +2293,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   ): Promise<DianCustomerData> {
     const address = this.normalizeAddress(invoice_data.customer_address);
 
-    const declared_type = invoice_data.customer_document_type
+    let declared_type = invoice_data.customer_document_type
       ?.trim()
       .toUpperCase();
     const declared_number = String(invoice_data.customer_tax_id ?? '').trim();
@@ -2389,20 +2392,49 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       );
     }
 
-    // Literal from `users.document_type`. YA NO se completa con 'CC' cuando
-    // falta: eso era la mitad exacta del incidente Óptica Panorama SAS / Pollo
-    // Árabe — un NIT de persona jurídica sin tipo declarado salía transmitido
-    // como Cédula de persona natural. `CustomerFiscalIdentityValidator` (vía
-    // `acquirer-rail.resolver.ts` en creación e
-    // `INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED` acá en emisión) ya debería
-    // haber bloqueado esto antes de llegar aquí; este throw es defensa en
-    // profundidad para cualquier documento que alcance `send()` sin haber
-    // pasado por esa puerta.
+    // Literal from `users.document_type`. YA NO se completa ciegamente con
+    // 'CC' cuando falta: eso era la mitad exacta del incidente Óptica Panorama
+    // SAS / Pollo Árabe — un NIT de persona jurídica sin tipo declarado salía
+    // transmitido como Cédula de persona natural. `CustomerFiscalIdentityValidator`
+    // (vía `acquirer-rail.resolver.ts` en creación) ya debería haber bloqueado
+    // esto antes de llegar aquí; este bloque es defensa en profundidad para
+    // cualquier documento que alcance `send()` sin haber pasado por esa
+    // puerta (p.ej. notas crédito/débito que arman su propio
+    // `ProviderInvoiceData`).
+    //
+    // P1-B: se aplica la MISMA política que el resolvedor único
+    // (`resolveMissingAcquirerDocumentType` en `acquirer-identity.resolver.ts`)
+    // usa en validación y en `acquirer-rail.resolver.ts` en creación, para que
+    // los tres puntos juzguen lo mismo. Antes, CUALQUIER ficha con número+nombre
+    // y `document_type` NULL bloqueaba acá — 67 fichas en prod, de las cuales
+    // sólo 21 tienen forma de NIT (9 dígitos que arrancan en 8/9). Ahora sólo
+    // bloquea cuando hay señal real de persona jurídica (persona_type
+    // JURIDICA, razón social, o número con forma de NIT); el resto infiere 'CC'
+    // y deja constancia con `logger.warn`.
     if (!declared_type) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED,
-        'No se puede emitir: el adquiriente tiene identificación y nombre pero no tipo de documento (CC, NIT, CE, …). Complétalo en la ficha del cliente antes de emitir.',
-        { role, document_number: declared_number },
+      // OJO: `declared_name` (`ProviderInvoiceData.customer_name`) es el
+      // nombre genérico — natural o jurídica — y a esta altura SIEMPRE está
+      // presente (el throw de arriba ya exigió `declared_number` y
+      // `declared_name` juntos). NO se pasa como `legal_name`: ese campo de
+      // la política es la razón social JURIDICA-only del resolvedor único
+      // (`customer.legal_name`, ausente en `ProviderInvoiceData`); pasar el
+      // nombre genérico ahí volvería `should_block` siempre verdadero y
+      // anularía la corrección. La señal disponible acá es `person_type` +
+      // forma de NIT.
+      const decision = resolveMissingAcquirerDocumentType({
+        document_number: declared_number,
+        person_type: invoice_data.customer_person_type,
+      });
+      if (decision.should_block) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED,
+          'No se puede emitir: el adquiriente tiene identificación y nombre pero no tipo de documento (CC, NIT, CE, …). Complétalo en la ficha del cliente antes de emitir.',
+          { role, document_number: declared_number },
+        );
+      }
+      declared_type = decision.inferred_document_type ?? 'CC';
+      this.logger.warn(
+        `[DIAN] Documento ${invoice_data.invoice_number}: adquiriente sin document_type declarado (documento=${declared_number}); se infiere '${declared_type}' por política (sin señal de persona jurídica).`,
       );
     }
     const document_type_literal = declared_type;

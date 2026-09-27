@@ -3192,6 +3192,21 @@ export const ErrorCodes = {
       'Invoice data request has already been submitted or completed; the link accepts data only once',
   },
   /**
+   * P1-B — mismo `document_number` ya existe en la organización con un
+   * `document_type` DECLARADO que difiere del que el comprador acaba de
+   * escribir en el formulario público del token. Reusar esa ficha
+   * sobrescribiendo en silencio inventaría un hecho sobre un cliente que la
+   * tienda ya conocía con otro tipo; crear un segundo usuario duplicaría el
+   * `document_number` bajo la misma organización. Se bloquea para que un
+   * humano decida — no hay una tercera opción segura.
+   */
+  INVOICING_DATA_REQUEST_005: {
+    code: 'INVOICING_DATA_REQUEST_005',
+    httpStatus: 409,
+    devMessage:
+      'Existing customer with this document_number already has a declared document_type that differs from the one submitted in the token form',
+  },
+  /**
    * REENVÍO DE FACTURA (E.6, `POST /store/invoicing/:id/deliver`).
    *
    * Los tres códigos cubren el ciclo del reenvío a un correo distinto del

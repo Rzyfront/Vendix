@@ -69,6 +69,21 @@ describe('InvoiceDataRequestsService (nominative conversion)', () => {
       users: {
         // Existing customer found, skips creation path
         findFirst: jest.fn().mockResolvedValue({ id: CUSTOMER_ID }),
+        // P1-B — el carril 'accepted' valida identidad/carril del NUEVO
+        // adquiriente ANTES de emitir la NC espejo (`resolveAcquirerRail`).
+        // Persona natural con cédula plana (sin forma de NIT): no bloquea.
+        findUnique: jest.fn().mockResolvedValue({
+          id: CUSTOMER_ID,
+          document_type: 'CC',
+          document_number: '123456',
+          legal_name: null,
+          first_name: 'Ana',
+          last_name: 'Diaz',
+          person_type: null,
+        }),
+        update: jest.fn().mockImplementation(({ data }) =>
+          Promise.resolve({ id: CUSTOMER_ID, ...data }),
+        ),
         create: jest.fn(),
         ...overrides.users,
       },
@@ -240,24 +255,18 @@ describe('InvoiceDataRequestsService (nominative conversion)', () => {
       expect.objectContaining({
         related_invoice_id: 100,
         reason: 'Conversión a factura nominativa por solicitud del cliente',
-        items: [
-          expect.objectContaining({
-            description: 'Prod',
-            quantity: 2,
-            unit_price: 100,
-            tax_amount: 38,
-          }),
-        ],
-        taxes: [
-          expect.objectContaining({
-            tax_name: 'IVA 19%',
-            tax_rate: 19,
-            taxable_amount: 200,
-            tax_amount: 38,
-            tax_type: 'iva',
-          }),
-        ],
+        currency: 'COP',
       }),
+    );
+    // P2(c) — la NC espejo es un REEMPLAZO TOTAL (verbatim) del documento
+    // aceptado, no una devolución parcial: sin `items:` ni `taxes:` en el
+    // DTO, `createNote` copia cabecera + líneas + el vínculo tributo↔línea
+    // directamente de `related_invoice` (carril TOTAL, P2(a)/P2(c)).
+    expect(credit_notes.createCreditNote.mock.calls[0][0]).not.toHaveProperty(
+      'items',
+    );
+    expect(credit_notes.createCreditNote.mock.calls[0][0]).not.toHaveProperty(
+      'taxes',
     );
     expect(invoicing.createFromOrder).toHaveBeenCalledWith(ORDER_ID);
     // Both the mirror credit note and the new invoice are validated and sent

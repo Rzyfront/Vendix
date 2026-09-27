@@ -1,4 +1,19 @@
+import { Logger } from '@nestjs/common';
+import { onlyDigits } from '@common/utils/nit.util';
 import { DIAN_ID_TYPES } from '../providers/dian-direct/constants/dian-document-types';
+
+const logger = new Logger('AcquirerIdentityResolver');
+
+/**
+ * `''` (y whitespace puro) cuentan como AUSENTE, nunca como un valor
+ * declarado. Ver el JSDoc de `resolveAcquirerIdentity` (P1-B) para el defecto
+ * que esto cierra: encadenar con `??` un campo que puede llegar en `''` deja
+ * pasar la cadena vacía como si fuera dato real y nunca cae al respaldo.
+ */
+function orNullIfEmpty(value: string | null | undefined): string | null {
+  const trimmed = (value ?? '').trim();
+  return trimmed || null;
+}
 
 /**
  * IDENTIDAD EFECTIVA DEL ADQUIRIENTE — fuente única para validación y emisión.
@@ -60,6 +75,8 @@ export interface AcquirerIdentitySnapshot {
  * preservar `first_name`/`last_name` que `toCustomerInvoiceData` ya compone.
  */
 export interface AcquirerIdentityCustomer {
+  /** Sólo para trazabilidad (`logger.warn`) — el resolver no lo lee para nada más. */
+  id?: number | string | null;
   legal_name?: string | null;
   first_name?: string | null;
   last_name?: string | null;
@@ -169,6 +186,83 @@ export function resolveAcquirerPersonType(
 }
 
 /**
+ * NIT asignados a personas jurídicas en Colombia: 9 dígitos (antes del DV)
+ * que empiezan por 8 o 9 (rangos DIAN para sociedades/entidades). Un número
+ * con esta forma, declarado sin `document_type`, es mucho más probablemente
+ * un NIT mal capturado como "número" suelto que una CC natural — tratarlo
+ * como señal de riesgo, no inferir sobre él.
+ */
+const NIT_SHAPE_REGEX = /^[89]\d{8}$/;
+
+export function hasNitShape(document_number: string | null | undefined): boolean {
+  return NIT_SHAPE_REGEX.test(onlyDigits(document_number ?? ''));
+}
+
+export interface MissingAcquirerDocumentTypeInput {
+  document_number?: string | null;
+  /** `users.legal_name` de la ficha — NO el nombre compuesto del snapshot. */
+  legal_name?: string | null;
+  /** Valor CRUDO (sin derivar): 'JURIDICA'/'NATURAL'/'1'/'2'/etc. */
+  person_type?: string | null;
+}
+
+export interface MissingAcquirerDocumentTypeDecision {
+  /** `true` ⇒ bloquear con `INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED`. */
+  should_block: boolean;
+  /** Tipo inferido cuando NO se bloquea. Siempre `'CC'` hoy: el único vacío
+   *  seguro de rellenar es persona natural con cédula. */
+  inferred_document_type: 'CC' | null;
+}
+
+/**
+ * POLÍTICA ÚNICA para fichas con `document_type` NULL — P1-B.
+ *
+ * ## El defecto que corrige
+ *
+ * `resolveAcquirerRail` (creación) empezó a LANZAR
+ * `INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED` para todo cliente con
+ * número+nombre y `document_type` NULL — correcto para el incidente Óptica
+ * Panorama SAS (un NIT real transmitido como Cédula), pero prod tiene 67
+ * fichas ANTIGUAS en esa forma, de las cuales sólo 21 «tienen forma de NIT».
+ * Bloquear las 67 rompía ventas POS de clientes que llevan años siendo
+ * persona natural y nunca declararon tipo de documento porque el formulario
+ * antiguo no lo pedía.
+ *
+ * ## La regla
+ *
+ * Bloquea sólo cuando hay una señal real de que la ficha PUEDE ser jurídica:
+ * `person_type` declarado JURIDICA, `legal_name` con contenido, o un número
+ * con forma de NIT (`hasNitShape`). En cualquier otro caso, infiere `'CC'`
+ * (persona natural) — el vacío más común y el único seguro de rellenar sin
+ * inventar un hecho sobre el adquiriente.
+ *
+ * MISMA decisión en LOS TRES puntos que juzgan esto, para que ninguno
+ * contradiga a los otros con el consecutivo ya tomado:
+ *   1. `acquirer-rail.resolver.ts` (creación)
+ *   2. `resolveAcquirerIdentity` (abajo — validación + payload de emisión)
+ *   3. `DianDirectProvider.buildCustomerData` (defensa en profundidad en
+ *      `send()`, para cualquier documento que la alcance sin pasar por 1/2)
+ */
+export function resolveMissingAcquirerDocumentType(
+  input: MissingAcquirerDocumentTypeInput,
+): MissingAcquirerDocumentTypeDecision {
+  const legal_name = (input.legal_name ?? '').trim();
+  const declared_person_type = (input.person_type ?? '').trim().toUpperCase();
+  const is_juridica =
+    declared_person_type === 'JURIDICA' ||
+    declared_person_type === 'JURÍDICA' ||
+    declared_person_type === '1';
+
+  const should_block =
+    is_juridica || Boolean(legal_name) || hasNitShape(input.document_number);
+
+  return {
+    should_block,
+    inferred_document_type: should_block ? null : 'CC',
+  };
+}
+
+/**
  * LA función. Ver el JSDoc de este archivo para la regla de precedencia y el
  * incidente que cierra.
  */
@@ -178,18 +272,55 @@ export function resolveAcquirerIdentity(params: {
 }): ResolvedAcquirerIdentity {
   const { snapshot, customer } = params;
 
+  // P1-B — `''` cuenta como AUSENTE en el respaldo ficha→snapshot. `??` sólo
+  // cae al lado derecho cuando el izquierdo es `null`/`undefined`, así que una
+  // ficha con la columna en `''` (no `NULL`) le GANABA al snapshot y el
+  // resultado colapsaba a `null` sin darle nunca la palabra al valor real que
+  // el snapshot sí tenía — el mismo efecto que un `document_type` NULL, pero
+  // encubierto detrás de una cadena vacía en vez de ausencia de columna.
   const raw_document_type =
-    customer?.document_type ?? snapshot.customer_document_type ?? null;
-  const { literal: document_type_literal, code: document_type_code } =
+    orNullIfEmpty(customer?.document_type) ??
+    orNullIfEmpty(snapshot.customer_document_type) ??
+    null;
+  let { literal: document_type_literal, code: document_type_code } =
     normalizeAcquirerDocumentType(raw_document_type);
 
   const document_number =
-    (customer?.document_number ?? snapshot.customer_tax_id ?? null) || null;
+    orNullIfEmpty(customer?.document_number) ??
+    orNullIfEmpty(snapshot.customer_tax_id) ??
+    null;
+
+  // P1-B — FICHA ANTIGUA SIN `document_type`. Sólo aplica cuando SÍ hay
+  // número: sin él tampoco hay nombre nominativo que juzgar, y es la venta de
+  // mostrador legítima que `identification_mode` resuelve aparte (forzar
+  // 'CC' ahí inventaría un tipo sobre una identidad de verdad vacía). MISMA
+  // política que `acquirer-rail.resolver.ts` — ver el JSDoc de
+  // `resolveMissingAcquirerDocumentType`.
+  if (!document_type_literal && document_number) {
+    const decision = resolveMissingAcquirerDocumentType({
+      document_number,
+      legal_name: customer?.legal_name,
+      person_type: customer?.person_type,
+    });
+
+    if (!decision.should_block && decision.inferred_document_type) {
+      logger.warn(
+        `Adquiriente sin document_type declarado (customer_id=${customer?.id ?? 'snapshot'}, documento=${document_number}): se infiere '${decision.inferred_document_type}' por política (sin señal de persona jurídica).`,
+      );
+      ({ literal: document_type_literal, code: document_type_code } =
+        normalizeAcquirerDocumentType(decision.inferred_document_type));
+    }
+    // `should_block === true`: se deja `document_type_literal` en `null` a
+    // propósito, para que `CustomerFiscalIdentityValidator`
+    // (`DOCUMENT_TYPE_REQUIRED`) y `DianDirectProvider.buildCustomerData`
+    // bloqueen con el mismo criterio — nunca inventar aquí lo que el gate de
+    // creación (`acquirer-rail.resolver.ts`) ya se negó a inferir.
+  }
 
   const verification_digit =
-    (customer?.verification_digit ??
-      snapshot.customer_verification_digit ??
-      null) || null;
+    orNullIfEmpty(customer?.verification_digit) ??
+    orNullIfEmpty(snapshot.customer_verification_digit) ??
+    null;
 
   const { person_type, declared_raw } = resolveAcquirerPersonType(
     customer?.person_type,
@@ -206,10 +337,14 @@ export function resolveAcquirerIdentity(params: {
   const name =
     composed_from_customer || (snapshot.customer_name ?? '').trim() || null;
 
-  const email = (customer?.email ?? snapshot.customer_email ?? null) || null;
-  const phone = (customer?.phone ?? snapshot.customer_phone ?? null) || null;
+  const email =
+    orNullIfEmpty(customer?.email) ?? orNullIfEmpty(snapshot.customer_email) ?? null;
+  const phone =
+    orNullIfEmpty(customer?.phone) ?? orNullIfEmpty(snapshot.customer_phone) ?? null;
   const tax_regime =
-    (customer?.tax_regime ?? snapshot.customer_tax_regime ?? null) || null;
+    orNullIfEmpty(customer?.tax_regime) ??
+    orNullIfEmpty(snapshot.customer_tax_regime) ??
+    null;
 
   const snapshot_responsibilities = Array.isArray(
     snapshot.customer_fiscal_responsibilities,

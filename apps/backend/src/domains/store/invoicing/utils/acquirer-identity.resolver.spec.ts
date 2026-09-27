@@ -2,6 +2,8 @@ import {
   normalizeAcquirerDocumentType,
   resolveAcquirerPersonType,
   resolveAcquirerIdentity,
+  resolveMissingAcquirerDocumentType,
+  hasNitShape,
 } from './acquirer-identity.resolver';
 
 describe('normalizeAcquirerDocumentType', () => {
@@ -223,5 +225,139 @@ describe('resolveAcquirerIdentity', () => {
 
     expect(result.person_type).toBe('JURIDICA'); // derivado por código 31
     expect(result.person_type_raw).toBe('garbage-value'); // crudo, sin perder
+  });
+
+  // P1-B — ficha antigua sin document_type, sin señal de riesgo: infiere CC.
+  it('ficha con document_type NULL, número SIN forma de NIT y sin legal_name/person_type ⇒ infiere CC (no bloquea)', () => {
+    const result = resolveAcquirerIdentity({
+      snapshot: {},
+      customer: {
+        id: 4242,
+        document_number: '1118860776',
+        first_name: 'Juan',
+        last_name: 'Pérez',
+      },
+    });
+
+    expect(result.document_type_literal).toBe('CC');
+    expect(result.document_type_code).toBe('13');
+    expect(result.document_number).toBe('1118860776');
+  });
+
+  it('ficha con document_type NULL, número CON forma de NIT ⇒ NO infiere, queda null (bloqueo aguas arriba)', () => {
+    const result = resolveAcquirerIdentity({
+      snapshot: {},
+      customer: {
+        id: 99,
+        document_number: '900123456',
+        first_name: 'Juan',
+        last_name: 'Pérez',
+      },
+    });
+
+    expect(result.document_type_literal).toBeNull();
+    expect(result.document_type_code).toBeNull();
+  });
+
+  it('ficha con document_type NULL, número plano pero legal_name presente ⇒ NO infiere, queda null (señal jurídica)', () => {
+    const result = resolveAcquirerIdentity({
+      snapshot: {},
+      customer: {
+        id: 100,
+        document_number: '1118860776',
+        legal_name: 'Comercializadora ACME SAS',
+      },
+    });
+
+    expect(result.document_type_literal).toBeNull();
+  });
+
+  // P1-B — `''` cuenta como AUSENTE en el respaldo ficha→snapshot, no como
+  // valor declarado que le gane al snapshot.
+  it("ficha con document_type en '' (no NULL) NO le gana al snapshot: cae al respaldo real", () => {
+    const result = resolveAcquirerIdentity({
+      snapshot: { customer_document_type: 'NIT' },
+      customer: {
+        document_type: '',
+        document_number: '800214345',
+      },
+    });
+
+    expect(result.document_type_literal).toBe('NIT');
+    expect(result.document_type_code).toBe('31');
+  });
+
+  it("ficha con email en '' (no NULL) NO le gana al snapshot: cae al correo real", () => {
+    const result = resolveAcquirerIdentity({
+      snapshot: { customer_email: 'snapshot@fallback.example' },
+      customer: { email: '' },
+    });
+
+    expect(result.email).toBe('snapshot@fallback.example');
+  });
+});
+
+describe('hasNitShape', () => {
+  it('9 dígitos que empiezan en 8 o 9 tienen forma de NIT', () => {
+    expect(hasNitShape('800214345')).toBe(true);
+    expect(hasNitShape('900123456')).toBe(true);
+  });
+
+  it('cédulas típicas (menos de 9 dígitos, o que no empiezan en 8/9) no tienen forma de NIT', () => {
+    expect(hasNitShape('1118860776')).toBe(false); // 10 dígitos
+    expect(hasNitShape('700123456')).toBe(false); // empieza en 7
+    expect(hasNitShape('12345678')).toBe(false); // 8 dígitos
+  });
+
+  it('acepta el número con puntos/guiones (sólo compara dígitos)', () => {
+    expect(hasNitShape('800.214.345')).toBe(true);
+  });
+
+  it('null/undefined/vacío no tienen forma de NIT', () => {
+    expect(hasNitShape(null)).toBe(false);
+    expect(hasNitShape(undefined)).toBe(false);
+    expect(hasNitShape('')).toBe(false);
+  });
+});
+
+describe('resolveMissingAcquirerDocumentType', () => {
+  it('sin ninguna señal de riesgo ⇒ infiere CC', () => {
+    const result = resolveMissingAcquirerDocumentType({
+      document_number: '1118860776',
+    });
+    expect(result.should_block).toBe(false);
+    expect(result.inferred_document_type).toBe('CC');
+  });
+
+  it('person_type JURIDICA ⇒ bloquea', () => {
+    const result = resolveMissingAcquirerDocumentType({
+      document_number: '1118860776',
+      person_type: 'JURIDICA',
+    });
+    expect(result.should_block).toBe(true);
+    expect(result.inferred_document_type).toBeNull();
+  });
+
+  it("person_type crudo '1' (código DIAN de persona jurídica) ⇒ bloquea", () => {
+    const result = resolveMissingAcquirerDocumentType({
+      document_number: '1118860776',
+      person_type: '1',
+    });
+    expect(result.should_block).toBe(true);
+  });
+
+  it('legal_name con contenido ⇒ bloquea aunque el número no tenga forma de NIT', () => {
+    const result = resolveMissingAcquirerDocumentType({
+      document_number: '1118860776',
+      legal_name: 'Comercializadora ACME SAS',
+    });
+    expect(result.should_block).toBe(true);
+  });
+
+  it('número con forma de NIT ⇒ bloquea aunque no haya legal_name ni person_type', () => {
+    const result = resolveMissingAcquirerDocumentType({
+      document_number: '900123456',
+    });
+    expect(result.should_block).toBe(true);
   });
 });

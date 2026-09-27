@@ -121,6 +121,56 @@ describe('DianDirectProvider.buildCustomerData — identidad del adquiriente', (
     expect(customer.document_number).toBe('222222222222');
     expect(customer.person_type).toBe('NATURAL');
   });
+
+  // P1-B — defensa en profundidad: MISMA política de
+  // `resolveMissingAcquirerDocumentType` que ya aplican `acquirer-rail.resolver.ts`
+  // (creación) y `resolveAcquirerIdentity` (validación/emisión), para que
+  // `send()` no vuelva a bloquear las 67 fichas antiguas sin `document_type`
+  // (sólo 21 de ellas con forma de NIT).
+  it('ficha antigua: número SIN forma de NIT, sin document_type ni customer_person_type ⇒ infiere CC, no bloquea', async () => {
+    const provider = buildProvider();
+
+    const customer = await (provider as any).buildCustomerData(
+      {
+        invoice_number: 'SETP990000204',
+        customer_tax_id: '1118860776',
+        customer_name: 'Juan Pérez',
+        customer_address: FISCAL_ADDRESS,
+        // sin customer_document_type, sin customer_person_type
+      },
+      'adquiriente',
+      { issuer: {} as any, config: {} as any },
+    );
+
+    expect(customer.document_type).toBe('CC');
+    expect(customer.document_number).toBe('1118860776');
+  });
+
+  it('customer_person_type=JURIDICA sin document_type, número SIN forma de NIT ⇒ BLOQUEA igual (señal de riesgo por person_type)', async () => {
+    const provider = buildProvider();
+
+    let caught: unknown;
+    try {
+      await (provider as any).buildCustomerData(
+        {
+          invoice_number: 'SETP990000205',
+          customer_tax_id: '1118860776',
+          customer_name: 'Empresa Sin NIT Shape',
+          customer_person_type: 'JURIDICA',
+        },
+        'adquiriente',
+        { issuer: {} as any, config: {} as any },
+      );
+      fail('esperaba que buildCustomerData lanzara');
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(VendixHttpException);
+    expect((caught as VendixHttpException).errorCode).toBe(
+      ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED.code,
+    );
+  });
 });
 
 describe('DianDirectProvider.translatePersonTypeToStructural — deriva por CÓDIGO, no por literal', () => {
