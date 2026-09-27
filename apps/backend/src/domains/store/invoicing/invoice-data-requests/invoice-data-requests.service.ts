@@ -17,7 +17,6 @@ import { InvoicingService } from '../invoicing.service';
 import { CreditNotesService } from '../credit-notes/credit-notes.service';
 import { InvoiceFlowService } from '../invoice-flow/invoice-flow.service';
 import { CreateCreditNoteDto } from '../credit-notes/dto/create-credit-note.dto';
-import { CreateInvoiceTaxDto } from '../dto/create-invoice.dto';
 import {
   DEFAULT_STORE_TIMEZONE,
   localDateString,
@@ -1376,6 +1375,15 @@ export class InvoiceDataRequestsService {
       // emitters, so the emitter's fiscal day is always Bogotá's.
       issue_date: localDateString(new Date(), DEFAULT_STORE_TIMEZONE),
       currency: originalInvoice.currency || undefined,
+      // F-INC6 (paso 7) — sin `taxes:` a propósito. Esta nota es siempre
+      // PARCIAL (`items` no viene vacío), así que `createNote` la deriva por
+      // el kernel único (`derivePartialNoteLinesViaKernel`) leyendo
+      // `invoice_items`/`invoice_taxes` de la FACTURA (no de este DTO), que
+      // ya resuelve el esquema por línea y liga `invoice_item_id` por
+      // documento — incluidos los mixtos IVA+INC. Copiar aquí un `taxes:`
+      // plano (como antes) no puede cargar esa correlación por línea: el DTO
+      // sólo admite un arreglo de cabecera, así que duplicaba un carril que
+      // no podía respetar el invariante de `invoice_taxes.invoice_item_id`.
       items: (originalInvoice.invoice_items || []).map((item) => ({
         product_id: item.product_id ?? undefined,
         product_variant_id: item.product_variant_id ?? undefined,
@@ -1384,15 +1392,6 @@ export class InvoiceDataRequestsService {
         unit_price: Number(item.unit_price),
         discount_amount: Number(item.discount_amount || 0),
         tax_amount: Number(item.tax_amount || 0),
-      })),
-      taxes: (originalInvoice.invoice_taxes || []).map((tax) => ({
-        tax_rate_id: tax.tax_rate_id ?? undefined,
-        tax_name: tax.tax_name,
-        tax_rate: Number(tax.tax_rate),
-        taxable_amount: Number(tax.taxable_amount),
-        tax_amount: Number(tax.tax_amount),
-        tax_type: (tax.tax_type ??
-          undefined) as CreateInvoiceTaxDto['tax_type'],
       })),
     };
 
