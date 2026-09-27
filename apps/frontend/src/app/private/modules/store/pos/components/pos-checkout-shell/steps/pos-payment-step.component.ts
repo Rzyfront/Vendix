@@ -576,7 +576,7 @@ export class PosPaymentStepComponent implements OnInit {
     if (cur < last) {
       if (cur < c.modoOffset()) {
         c.goToSubStep(c.modoOffset()); // Forma de pago → Método / Plan
-      } else if (!c.selectedMethod()) {
+      } else if (c.multiEnabled() ? !c.isMultiValid() : !c.selectedMethod()) {
         c.flashValidation(); // Método sin elegir → decir qué falta, no ignorar el clic
         return true;
       } else {

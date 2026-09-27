@@ -381,6 +381,22 @@ describe('PaymentCollectorComponent — modo multi «Varios métodos» (Paso 5)'
     expect(balance.nativeElement.textContent).toContain('Falta');
   });
 
+  it('Enter no pasa de Método a Monto si una transferencia hace sobrar dinero', () => {
+    fixture.componentRef.setInput('layout', 'stepped');
+    fixture.detectChanges();
+    component.setMultiEnabled(true);
+    component.setLegAmount(0, 50000);
+    component.addLeg();
+    component.setLegAmount(1, 60000);
+    component.goToSubStep(component.modoOffset());
+    fixture.detectChanges();
+
+    expect(component.remaining()).toBe(-10000);
+    component.handleEnter();
+    expect(component.subStep()).toBe(component.modoOffset());
+    expect(component.flashMessage()).toContain('Sobra');
+  });
+
   it('efectivo ya usado no reaparece en el selector de tramos', () => {
     component.setMultiEnabled(true);
     fixture.detectChanges();

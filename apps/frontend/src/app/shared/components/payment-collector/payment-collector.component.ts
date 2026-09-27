@@ -837,9 +837,9 @@ export class PaymentCollectorComponent implements OnInit {
       if (this.subStep() < this.montoIndex()) {
         if (this.subStep() < this.modoOffset()) {
           this.goToSubStep(this.modoOffset());
-          // 5c — en multi el paso Método muestra tramos y selectedMethod() es
-          // residual: el avance exige tramos (la validez total sigue en los gates).
-        } else if (this.multiEnabled() ? this.legs().length === 0 : !this.selectedMethod()) {
+          // En multi el paso Método ya contiene importes, cuenta y referencia:
+          // no llegar a Monto con un «Sobra» u otra combinación inválida.
+        } else if (this.multiEnabled() ? !this.isMultiValid() : !this.selectedMethod()) {
           this.flashValidation();
         } else {
           this.goToSubStep(this.montoIndex());

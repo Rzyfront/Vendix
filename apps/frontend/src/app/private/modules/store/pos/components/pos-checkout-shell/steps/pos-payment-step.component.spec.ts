@@ -2,6 +2,40 @@ import { of } from 'rxjs';
 import { signal } from '@angular/core';
 import { PosPaymentStepComponent } from './pos-payment-step.component';
 
+describe('PosPaymentStepComponent — cobro múltiple no salta validaciones', () => {
+  const makeStep = (valid: boolean) => {
+    const collector = {
+      subSteps: () => [{ label: 'Forma' }, { label: 'Método' }, { label: 'Monto' }],
+      subStep: () => 1,
+      modoOffset: () => 1,
+      montoIndex: () => 2,
+      multiEnabled: () => true,
+      isMultiValid: () => valid,
+      selectedMethod: () => ({ id: '1', type: 'cash' }),
+      flashValidation: jasmine.createSpy('flashValidation'),
+      goToSubStep: jasmine.createSpy('goToSubStep'),
+    };
+    const step = Object.assign(Object.create(PosPaymentStepComponent.prototype), {
+      collector: () => collector,
+    });
+    return { step, collector };
+  };
+
+  it('mantiene al cajero en Método y explica un tramo inválido', () => {
+    const { step, collector } = makeStep(false);
+    expect(step.advanceSubStepOrConfirm()).toBeTrue();
+    expect(collector.flashValidation).toHaveBeenCalledTimes(1);
+    expect(collector.goToSubStep).not.toHaveBeenCalled();
+  });
+
+  it('permite llegar a Monto cuando todos los tramos son válidos', () => {
+    const { step, collector } = makeStep(true);
+    expect(step.advanceSubStepOrConfirm()).toBeTrue();
+    expect(collector.goToSubStep).toHaveBeenCalledWith(2);
+    expect(collector.flashValidation).not.toHaveBeenCalled();
+  });
+});
+
 describe('PosPaymentStepComponent — B.5 cleaning warning', () => {
   const originalRegister = localStorage.getItem('pos_register_id');
 
