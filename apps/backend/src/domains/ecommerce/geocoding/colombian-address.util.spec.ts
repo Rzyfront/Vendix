@@ -142,7 +142,9 @@ describe('normalizeColombianAddress', () => {
   });
 
   it('parses Urbanización + Mz + Lote as kind manzana', () => {
-    const r = normalizeColombianAddress('Urbanización Los Alcaravanes, Mz 4 Lote 8');
+    const r = normalizeColombianAddress(
+      'Urbanización Los Alcaravanes, Mz 4 Lote 8',
+    );
     expect(r.kind).toBe('manzana');
     expect(r.urbanizacion).toBe('Los Alcaravanes');
     expect(r.complementos.manzana).toBe('4');
@@ -150,7 +152,9 @@ describe('normalizeColombianAddress', () => {
   });
 
   it('parses Corregimiento + Sector + Casa as kind rural', () => {
-    const r = normalizeColombianAddress('Corregimiento Pasacaballos, Sector La Plaza, Casa 4');
+    const r = normalizeColombianAddress(
+      'Corregimiento Pasacaballos, Sector La Plaza, Casa 4',
+    );
     expect(r.kind).toBe('rural');
     expect(r.rural?.corregimiento).toBe('Pasacaballos');
     expect(r.rural?.sector).toBe('La Plaza');
@@ -158,7 +162,9 @@ describe('normalizeColombianAddress', () => {
   });
 
   it('parses Km + Vía + Finca as kind rural', () => {
-    const r = normalizeColombianAddress('Km 7 Vía Tunja - Paipa, Finca La Esperanza');
+    const r = normalizeColombianAddress(
+      'Km 7 Vía Tunja - Paipa, Finca La Esperanza',
+    );
     expect(r.kind).toBe('rural');
     expect(r.rural?.km).toBe('7');
     expect(r.rural?.via).toBe('Tunja - Paipa');
@@ -166,7 +172,9 @@ describe('normalizeColombianAddress', () => {
   });
 
   it('parses Vereda + Sector + Predio as kind rural', () => {
-    const r = normalizeColombianAddress('Vereda El Hato, Sector El Amparo, Predio San José');
+    const r = normalizeColombianAddress(
+      'Vereda El Hato, Sector El Amparo, Predio San José',
+    );
     expect(r.kind).toBe('rural');
     expect(r.rural?.vereda).toBe('El Hato');
     expect(r.rural?.sector).toBe('El Amparo');
@@ -183,7 +191,9 @@ describe('normalizeColombianAddress', () => {
   });
 
   it('parses a legacy parenthesised via name', () => {
-    const r = normalizeColombianAddress('Avenida del Ferrocarril (Carrera 15) # 22 - 04');
+    const r = normalizeColombianAddress(
+      'Avenida del Ferrocarril (Carrera 15) # 22 - 04',
+    );
     expect(r.legacyName).toBe('Avenida del Ferrocarril');
     expect(r.viaTipo).toBe('Carrera');
     expect(r.viaNum).toBe('15');
@@ -345,7 +355,9 @@ describe('normalizeColombianAddress', () => {
 
 describe('parseFreeTextQuery', () => {
   it('splits address/city/state and drops trailing Colombia', () => {
-    const r = parseFreeTextQuery('Cra 13 # 62-40, Bogotá, Bogotá D.C., Colombia');
+    const r = parseFreeTextQuery(
+      'Cra 13 # 62-40, Bogotá, Bogotá D.C., Colombia',
+    );
     expect(r.addressLine).toBe('Cra 13 # 62-40');
     expect(r.city).toBe('Bogotá');
     expect(r.state).toBe('Bogotá D.C.');
@@ -375,7 +387,9 @@ describe('selectBestCandidate', () => {
   }
 
   it('discards city/admin-only candidates', () => {
-    const candidates = [candidate({ addresstype: 'city', address: { city: 'Bogotá' } })];
+    const candidates = [
+      candidate({ addresstype: 'city', address: { city: 'Bogotá' } }),
+    ];
     expect(selectBestCandidate(candidates)).toBeNull();
   });
 

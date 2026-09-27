@@ -20,7 +20,12 @@ export type ViaTipo =
   | 'Autopista'
   | 'Vía';
 
-export type AddressKind = 'dane' | 'interseccion' | 'manzana' | 'rural' | 'libre';
+export type AddressKind =
+  | 'dane'
+  | 'interseccion'
+  | 'manzana'
+  | 'rural'
+  | 'libre';
 
 export interface ComplementosColombianos {
   torre?: string;
@@ -185,14 +190,12 @@ const COMPLEMENT_RE =
 
 /** Accent-insensitive, lowercased normalization for comparisons. */
 function normText(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .trim();
+  return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 }
 
-function matchViaTipo(text: string): { tipo: ViaTipo; consumed: number } | null {
+function matchViaTipo(
+  text: string,
+): { tipo: ViaTipo; consumed: number } | null {
   for (const { re, tipo } of VIA_TIPO_TABLE) {
     const m = text.match(re);
     if (m) return { tipo, consumed: m[0].length };
@@ -309,13 +312,16 @@ function extractComplement(text: string): {
   const fragments: string[] = [];
   const map: ComplementosColombianos = {};
   const cleaned = text
-    .replace(COMPLEMENT_RE, (full, keyword: string, ident: string | undefined) => {
-      fragments.push(full.trim());
-      const key = COMPLEMENT_KEY_MAP[keyword.toLowerCase()];
-      if (key && ident) map[key] = ident;
-      else if (key && !map[key]) map[key] = '';
-      return ' ';
-    })
+    .replace(
+      COMPLEMENT_RE,
+      (full, keyword: string, ident: string | undefined) => {
+        fragments.push(full.trim());
+        const key = COMPLEMENT_KEY_MAP[keyword.toLowerCase()];
+        if (key && ident) map[key] = ident;
+        else if (key && !map[key]) map[key] = '';
+        return ' ';
+      },
+    )
     .replace(/\s+/g, ' ')
     .trim();
   return { cleaned, fragments, map };
@@ -349,14 +355,18 @@ function tryExtractAreaSegment(segment: string): {
   via?: string;
 } {
   let m: RegExpMatchArray | null;
-  if ((m = segment.match(/^barrio\s+(.+)$/i))) return { kind: 'barrio', value: m[1].trim() };
+  if ((m = segment.match(/^barrio\s+(.+)$/i)))
+    return { kind: 'barrio', value: m[1].trim() };
   if ((m = segment.match(/^urbanizaci[oó]n\s+(.+)$/i)))
     return { kind: 'urbanizacion', value: m[1].trim() };
-  if ((m = segment.match(/^conjunto\s+(.+)$/i))) return { kind: 'conjunto', value: m[1].trim() };
+  if ((m = segment.match(/^conjunto\s+(.+)$/i)))
+    return { kind: 'conjunto', value: m[1].trim() };
   if ((m = segment.match(/^corregimiento\s+(.+)$/i)))
     return { kind: 'corregimiento', value: m[1].trim() };
-  if ((m = segment.match(/^sector\s+(.+)$/i))) return { kind: 'sector', value: m[1].trim() };
-  if ((m = segment.match(/^vereda\s+(.+)$/i))) return { kind: 'vereda', value: m[1].trim() };
+  if ((m = segment.match(/^sector\s+(.+)$/i)))
+    return { kind: 'sector', value: m[1].trim() };
+  if ((m = segment.match(/^vereda\s+(.+)$/i)))
+    return { kind: 'vereda', value: m[1].trim() };
   if ((m = segment.match(/^(?:finca|predio)\s+(.+)$/i)))
     return { kind: 'finca', value: m[1].trim() };
   if ((m = segment.match(/^km\.?\s*(\d+)\s+v[ií]a\s+(.+)$/i)))
@@ -429,14 +439,25 @@ function parseMainSegment(cleaned: string): MainParse {
       placaRangoFin = parsePlacaTokens(endSplit.placa).placa;
     }
 
-    const { cruceNum: cruceRaw, placa: placaRaw } = splitCrossAndPlate(afterSep);
+    const { cruceNum: cruceRaw, placa: placaRaw } =
+      splitCrossAndPlate(afterSep);
     const via = parseViaNumberTokens(viaNumRaw);
     const cruce = parseViaNumberTokens(cruceRaw);
     const { placa, cuadrante: placaCuadrante } = parsePlacaTokens(placaRaw);
 
     const isDaneFormat = Boolean(via.num && cruce.num && placa);
-    const viaNumFull = buildNumToken(via.num, via.letra, via.bis, via.cuadrante);
-    const cruceNumFull = buildNumToken(cruce.num, cruce.letra, cruce.bis, cruce.cuadrante);
+    const viaNumFull = buildNumToken(
+      via.num,
+      via.letra,
+      via.bis,
+      via.cuadrante,
+    );
+    const cruceNumFull = buildNumToken(
+      cruce.num,
+      cruce.letra,
+      cruce.bis,
+      cruce.cuadrante,
+    );
     const normalized = isDaneFormat
       ? `${tipo} ${viaNumFull} # ${cruceNumFull}-${placa}${placaCuadrante ? ' ' + placaCuadrante : ''}`
       : [tipo, viaNumFull].filter(Boolean).join(' ');
@@ -477,16 +498,28 @@ function parseMainSegment(cleaned: string): MainParse {
     // WHOLE cruceNum (no plate) — "Kr 26" is just "cruceNum = 26", not
     // "cruceNum = null, placa = 26".
     const dashIdx = crossRest.lastIndexOf('-');
-    const cruceRaw = dashIdx >= 0 ? crossRest.slice(0, dashIdx).trim() : crossRest;
+    const cruceRaw =
+      dashIdx >= 0 ? crossRest.slice(0, dashIdx).trim() : crossRest;
     const placaRaw = dashIdx >= 0 ? crossRest.slice(dashIdx + 1).trim() : null;
     const cruce = parseViaNumberTokens(cruceRaw || null);
     const { placa, cuadrante: placaCuadrante } = parsePlacaTokens(placaRaw);
 
-    const viaNumFull = buildNumToken(via.num, via.letra, via.bis, via.cuadrante);
-    const cruceNumFull = buildNumToken(cruce.num, cruce.letra, cruce.bis, cruce.cuadrante);
+    const viaNumFull = buildNumToken(
+      via.num,
+      via.letra,
+      via.bis,
+      via.cuadrante,
+    );
+    const cruceNumFull = buildNumToken(
+      cruce.num,
+      cruce.letra,
+      cruce.bis,
+      cruce.cuadrante,
+    );
     const normalized =
-      `${tipo} ${viaNumFull} con ${crossTipo ?? ''} ${cruceNumFull}`.replace(/\s+/g, ' ').trim() +
-      (placa ? ` - ${placa}` : '');
+      `${tipo} ${viaNumFull} con ${crossTipo ?? ''} ${cruceNumFull}`
+        .replace(/\s+/g, ' ')
+        .trim() + (placa ? ` - ${placa}` : '');
 
     return {
       normalized,
@@ -514,12 +547,24 @@ function parseMainSegment(cleaned: string): MainParse {
   );
   if (noSepMatch) {
     const via = parseViaNumberTokens(noSepMatch[1]);
-    const { cruceNum: cruceRaw, placa: placaRaw } = splitCrossAndPlate(noSepMatch[2]);
+    const { cruceNum: cruceRaw, placa: placaRaw } = splitCrossAndPlate(
+      noSepMatch[2],
+    );
     const cruce = parseViaNumberTokens(cruceRaw);
     const { placa, cuadrante: placaCuadrante } = parsePlacaTokens(placaRaw);
     const isDaneFormat = Boolean(via.num && cruce.num && placa);
-    const viaNumFull = buildNumToken(via.num, via.letra, via.bis, via.cuadrante);
-    const cruceNumFull = buildNumToken(cruce.num, cruce.letra, cruce.bis, cruce.cuadrante);
+    const viaNumFull = buildNumToken(
+      via.num,
+      via.letra,
+      via.bis,
+      via.cuadrante,
+    );
+    const cruceNumFull = buildNumToken(
+      cruce.num,
+      cruce.letra,
+      cruce.bis,
+      cruce.cuadrante,
+    );
     const normalized = `${tipo} ${viaNumFull} # ${cruceNumFull}-${placa}${
       placaCuadrante ? ' ' + placaCuadrante : ''
     }`;
@@ -545,7 +590,9 @@ function parseMainSegment(cleaned: string): MainParse {
 
   // (4) Via type recognized but nothing else usable — keep expanded via type.
   const via = parseViaNumberTokens(rest);
-  const viaNumFull = via.num ? buildNumToken(via.num, via.letra, via.bis, via.cuadrante) : rest || null;
+  const viaNumFull = via.num
+    ? buildNumToken(via.num, via.letra, via.bis, via.cuadrante)
+    : rest || null;
   return {
     ...EMPTY_MAIN,
     normalized: rest ? `${tipo} ${rest}` : tipo,
@@ -559,7 +606,9 @@ function parseMainSegment(cleaned: string): MainParse {
  * into structured DANE-ish parts. Never throws — an unparseable line comes
  * back with `kind: 'libre'` and every specific part null.
  */
-export function normalizeColombianAddress(input: string): ParsedColombianAddress {
+export function normalizeColombianAddress(
+  input: string,
+): ParsedColombianAddress {
   const raw = input;
   let collapsed = input.replace(/[–—]/g, '-').replace(/\s+/g, ' ').trim();
 
@@ -623,9 +672,12 @@ export function normalizeColombianAddress(input: string): ParsedColombianAddress
     if (COUNTRY_SEGMENT_RE.test(seg)) continue;
     const area = tryExtractAreaSegment(seg);
     if (area.kind === 'barrio') barrio = barrio ?? area.value ?? null;
-    else if (area.kind === 'urbanizacion') urbanizacion = urbanizacion ?? area.value ?? null;
-    else if (area.kind === 'conjunto') conjunto = conjunto ?? area.value ?? null;
-    else if (area.kind === 'corregimiento') rural.corregimiento = rural.corregimiento ?? area.value;
+    else if (area.kind === 'urbanizacion')
+      urbanizacion = urbanizacion ?? area.value ?? null;
+    else if (area.kind === 'conjunto')
+      conjunto = conjunto ?? area.value ?? null;
+    else if (area.kind === 'corregimiento')
+      rural.corregimiento = rural.corregimiento ?? area.value;
     else if (area.kind === 'sector') rural.sector = rural.sector ?? area.value;
     else if (area.kind === 'vereda') rural.vereda = rural.vereda ?? area.value;
     else if (area.kind === 'finca') rural.finca = rural.finca ?? area.value;
@@ -660,7 +712,12 @@ export function normalizeColombianAddress(input: string): ParsedColombianAddress
   const main = cleanedMain ? parseMainSegment(cleanedMain) : { ...EMPTY_MAIN };
 
   const hasRural = Boolean(
-    rural.km || rural.via || rural.vereda || rural.corregimiento || rural.sector || rural.finca,
+    rural.km ||
+    rural.via ||
+    rural.vereda ||
+    rural.corregimiento ||
+    rural.sector ||
+    rural.finca,
   );
 
   let kind: AddressKind;
@@ -721,7 +778,9 @@ export function normalizeColombianAddress(input: string): ParsedColombianAddress
     conjunto,
     rural: hasRural ? rural : Object.keys(rural).length ? rural : null,
     legacyName,
-    complement: complementFragments.length ? complementFragments.join(', ') : null,
+    complement: complementFragments.length
+      ? complementFragments.join(', ')
+      : null,
     isDaneFormat: main.isDaneFormat,
   };
 }
@@ -771,7 +830,9 @@ export function viaTipoAxis(tipo: ViaTipo | null): 'calle' | 'carrera' | null {
 }
 
 /** The via type the DANE house number's cross axis is generated from. */
-export function crossViaTipoLabel(tipo: ViaTipo | null): 'Calle' | 'Carrera' | null {
+export function crossViaTipoLabel(
+  tipo: ViaTipo | null,
+): 'Calle' | 'Carrera' | null {
   const axis = viaTipoAxis(tipo);
   if (axis === 'calle') return 'Carrera';
   if (axis === 'carrera') return 'Calle';
@@ -804,9 +865,16 @@ export interface GeocodeCandidate {
   addresstype?: string;
   importance?: number;
   address?: GeocodeCandidateAddress;
+  /** Nominatim `/search` boundingbox: [south, north, west, east] as strings. */
+  boundingbox?: string[];
 }
 
-export type GeocodePrecision = 'exact' | 'interpolated' | 'intersection' | 'street' | 'area';
+export type GeocodePrecision =
+  | 'exact'
+  | 'interpolated'
+  | 'intersection'
+  | 'street'
+  | 'area';
 
 const ADMIN_TYPES = new Set([
   'city',
@@ -820,10 +888,24 @@ const ADMIN_TYPES = new Set([
   'state_district',
   'region',
 ]);
-const AREA_TYPES = new Set(['suburb', 'neighbourhood', 'quarter', 'residential', 'hamlet']);
-const STREET_TYPES = new Set(['road', 'pedestrian', 'footway', 'living_street', 'unclassified']);
+const AREA_TYPES = new Set([
+  'suburb',
+  'neighbourhood',
+  'quarter',
+  'residential',
+  'hamlet',
+]);
+const STREET_TYPES = new Set([
+  'road',
+  'pedestrian',
+  'footway',
+  'living_street',
+  'unclassified',
+]);
 
-function classifyCandidate(candidate: GeocodeCandidate): 'exact' | 'street' | 'area' | 'admin' {
+function classifyCandidate(
+  candidate: GeocodeCandidate,
+): 'exact' | 'street' | 'area' | 'admin' {
   const t = (candidate.addresstype || candidate.type || '').toLowerCase();
   if (t === 'house' || candidate.address?.house_number) return 'exact';
   if (STREET_TYPES.has(t) || candidate.class === 'highway') return 'street';
@@ -834,7 +916,9 @@ function classifyCandidate(candidate: GeocodeCandidate): 'exact' | 'street' | 'a
 
 function candidateCity(candidate: GeocodeCandidate): string | null {
   const a = candidate.address;
-  return a?.city ?? a?.town ?? a?.village ?? a?.municipality ?? a?.county ?? null;
+  return (
+    a?.city ?? a?.town ?? a?.village ?? a?.municipality ?? a?.county ?? null
+  );
 }
 
 /**
@@ -848,7 +932,11 @@ export function selectBestCandidate(
   candidates: GeocodeCandidate[],
   wantedCity?: string | null,
 ): { candidate: GeocodeCandidate; precision: GeocodePrecision } | null {
-  const RANK: Record<'exact' | 'street' | 'area', number> = { exact: 3, street: 2, area: 1 };
+  const RANK: Record<'exact' | 'street' | 'area', number> = {
+    exact: 3,
+    street: 2,
+    area: 1,
+  };
   const wanted = wantedCity ? normText(wantedCity) : null;
 
   let best: {
@@ -863,16 +951,22 @@ export function selectBestCandidate(
 
     const lat = Number(candidate.lat);
     const lon = Number(candidate.lon);
-    if (!candidate.lat || !candidate.lon || Number.isNaN(lat) || Number.isNaN(lon)) continue;
+    if (
+      !candidate.lat ||
+      !candidate.lon ||
+      Number.isNaN(lat) ||
+      Number.isNaN(lon)
+    )
+      continue;
 
-    const cityMatch = wanted ? normText(candidateCity(candidate) ?? '') === wanted : false;
+    const cityMatch = wanted
+      ? normText(candidateCity(candidate) ?? '') === wanted
+      : false;
 
     if (
       !best ||
       RANK[kind] > RANK[best.kind] ||
-      (RANK[kind] === RANK[best.kind] &&
-        cityMatch &&
-        !best.cityMatch) ||
+      (RANK[kind] === RANK[best.kind] && cityMatch && !best.cityMatch) ||
       (RANK[kind] === RANK[best.kind] &&
         cityMatch === best.cityMatch &&
         (candidate.importance ?? 0) > (best.candidate.importance ?? 0))
