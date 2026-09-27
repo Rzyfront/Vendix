@@ -33,6 +33,39 @@
   border-radius: 0.75rem;
   overflow: hidden;
   border: 1px solid var(--color-border, #e5e7eb);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+/*
+ * Requirement 2 (coordinator, 2026-09): grabs the operator's eye right after
+ * `focusMapForWarning()` force-opens the map on a forward-geocode failure.
+ * `mapHighlight()` clears itself after ~2s (see the component), so this is a
+ * transient pulse, not a persistent state.
+ */
+.map-wrapper--highlight {
+  border-color: var(--color-primary, #16a34a);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.35);
+  animation: address-form-fields-pulse 1s ease-in-out 2;
+}
+
+@keyframes address-form-fields-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.35); }
+  50% { box-shadow: 0 0 0 6px rgba(22, 163, 74, 0.15); }
+}
+
+/*
+ * Requirement 3 (coordinator, 2026-09): POS passes `[allowGeolocation]="false"`
+ * because the cashier's own device sits at the store — offering to geolocate
+ * THEM would place the pin on the wrong point. Hides only the map's native
+ * "locate me" control; `.maplibregl-ctrl-geolocate` is unique to it
+ * (`NavigationControl`/`FullscreenControl` share the generic
+ * `.maplibregl-ctrl-group` wrapper, not this class), so nothing else on the
+ * map is affected. `AddressMapPickerComponent` uses
+ * `ViewEncapsulation.None`, so its DOM is reached with `::ng-deep` scoped
+ * under this component's own `.map-wrapper.no-gps` — never global.
+ */
+.map-wrapper.no-gps ::ng-deep .maplibregl-ctrl-geolocate {
+  display: none;
 }
 
 .address-warning {
@@ -46,14 +79,6 @@
   color: #92400e;
   font-size: 0.85rem;
   line-height: 1.25rem;
-}
-
-.reverse-loading {
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
-  background: var(--color-surface, #f9fafb);
-  color: var(--color-text-muted, #6b7280);
-  font-size: 0.85rem;
 }
 
 /* Wraps a single field + its inline error so the message stays attached to the

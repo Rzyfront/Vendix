@@ -46,7 +46,12 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
   const cart = (): CartState => ({
     items: [{ product: { id: '7' }, itemType: 'product', quantity: 1, totalPrice: 1000 }],
     customer: { id: 99, first_name: 'Cliente', phone: '3001234567', addresses: [
-      { id: 1, address_line1: 'Casa principal 1', city: 'Bogotá', state_province: 'Bogotá', country_code: 'CO', is_primary: true },
+      // Requirement 3 (coordinator, 2026-09) — a delivery method never quotes
+      // without a resolved point: this saved address needs real coordinates
+      // so the pre-existing method/rate/manual-cost tests below (which are
+      // NOT about location-gating) keep exercising `/shipping/calculate`.
+      // The location-gating itself gets its own dedicated tests further down.
+      { id: 1, address_line1: 'Casa principal 1', city: 'Bogotá', state_province: 'Bogotá', country_code: 'CO', is_primary: true, latitude: 4.65, longitude: -74.05 },
       { ...originalAddress, id: 33, is_primary: false },
     ] },
     summary: { total: 1000 }, linkedOrderId: 700,
@@ -820,6 +825,73 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.shippingRateId()).toBe(202);
     expect(component.shippingCost()).toBe(9500);
     expect(component.totalWithShipping()).toBe(10500);
+  });
+
+  // ── Requirement 3 (coordinator, 2026-09): a delivery method must never
+  // quote/charge a default rate for an address with no resolved point. ──────
+  describe('location-required shipping gate', () => {
+    it('never calls /shipping/calculate for a delivery address with no coordinates', () => {
+      const state = cart();
+      state.shippingContext = undefined;
+      state.linkedOrderId = null;
+      state.customer = { ...state.customer!, addresses: [
+        { id: 5, address_line1: 'Calle sin geocodificar 1', city: 'Neiva', country_code: 'CO', is_primary: true, type: 'shipping' },
+      ] };
+      mount(state);
+
+      expect(calculate).not.toHaveBeenCalled();
+      expect(component.hasResolvedLocation()).toBeFalse();
+      expect(component.canConfirm()).toBeFalse();
+      component.flashValidation();
+      expect(component.flashMessage()).toBe('Marca la ubicación en el mapa para calcular el envío');
+    });
+
+    it('a manually typed cost cannot bypass the no-coordinates block', () => {
+      const state = cart();
+      state.shippingContext = undefined;
+      state.linkedOrderId = null;
+      state.customer = { ...state.customer!, addresses: [
+        { id: 5, address_line1: 'Calle sin geocodificar 1', city: 'Neiva', country_code: 'CO', is_primary: true, type: 'shipping' },
+      ] };
+      mount(state);
+      component.manualCostOverride.set(true);
+      component.shippingCost.set(15000);
+      fixture.detectChanges();
+
+      expect(component.canConfirm()).toBeFalse();
+    });
+
+    it('resolving coordinates (e.g. a confirmed map pin) unblocks the automatic quote', () => {
+      const state = cart();
+      state.shippingContext = undefined;
+      state.linkedOrderId = null;
+      state.customer = { ...state.customer!, addresses: [] };
+      mount(state);
+      component.onAddressChange({ ...originalAddress, pin_confirmed: true }, true);
+      component.addressValid.set(true);
+      fixture.detectChanges();
+
+      expect(calculate).toHaveBeenCalled();
+      // Fresh cart auto-selects the first active method (id 1), not `originalMethod` (id 7).
+      latestQuote().next([quote(1, 9000, 93)]);
+      fixture.detectChanges();
+
+      expect(component.hasResolvedLocation()).toBeTrue();
+      expect(component.shippingRateId()).toBe(93);
+      expect(component.canConfirm()).toBeTrue();
+    });
+
+    it('a resolved location with zero matching rates blocks with the no-rate message, not the no-location one', () => {
+      mount();
+      component.selectShippingMethod(firstMethod);
+      fixture.detectChanges();
+      latestQuote().next([]); // /shipping/calculate resolved but found no rate for this method/zone.
+      fixture.detectChanges();
+
+      expect(component.hasResolvedLocation()).toBeTrue();
+      expect(component.quoteError()).toBe('No hay tarifa de envío para esta ubicación');
+      expect(component.canConfirm()).toBeFalse();
+    });
   });
 });
 

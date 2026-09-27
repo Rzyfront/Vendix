@@ -269,6 +269,21 @@ export class PosShippingStepComponent {
     return !!m && m.type !== 'pickup';
   });
 
+  /**
+   * Coordinator directive (requirement 3, 2026-09): a delivery method may
+   * NEVER quote/charge a default rate for an address that has no resolved
+   * point — neither a forward-geocode hit nor a confirmed map pin. This is
+   * the single source of truth `getFirstValidationError`/`calculateShippingCost`
+   * key off. The cashier's own device sits at the store, so the POS never
+   * offers GPS (`[allowGeolocation]="false"` on both `app-address-form-fields`
+   * usages below) — marking the pin on the map is the only path to a location
+   * once geocoding fails.
+   */
+  readonly hasResolvedLocation = computed<boolean>(() => {
+    const a = this.address();
+    return !!a && Number.isFinite(a.latitude) && Number.isFinite(a.longitude);
+  });
+
   /** Keep the missing-method reason visible for a delivery address, not only
    * during the short validation flash shown after an attempted charge. */
   readonly missingShippingMethodReason = computed<string | null>(() =>
@@ -920,6 +935,22 @@ export class PosShippingStepComponent {
     if (!method || !this.cartState()?.items?.length || method.type === 'pickup') return;
     const a = this.address();
     if (!a?.city) return;
+    // Requirement 3 (coordinator, 2026-09): a delivery method must NEVER
+    // quote/auto-select a default rate for an address with no resolved
+    // point. Skip the network call entirely rather than let the backend
+    // return a flat/zone rate that ignores the missing coordinate —
+    // `getFirstValidationError` blocks the confirm gate on
+    // `!hasResolvedLocation()` regardless, but not calling here also means
+    // no rate is ever auto-selected/shown while the location is unresolved.
+    if (!this.hasResolvedLocation()) {
+      this.calculatedShippingCost.set(null);
+      this.shippingRateId.set(null);
+      // Never leave a stale amount (from a previous method/address) sitting
+      // in the totals while the location is unresolved — the confirm gate
+      // already blocks on this, but the displayed total must not lie either.
+      if (!this.manualCostOverride()) this.shippingCost.set(0);
+      return;
+    }
     this.isCalculatingShipping.set(true);
     const items = this.cartState()!.items.filter((item) => item.itemType !== 'custom')
       .map((item) => ({
@@ -954,7 +985,7 @@ export class PosShippingStepComponent {
         } else {
           this.calculatedShippingCost.set(null);
           this.shippingRateId.set(null);
-          this.quoteError.set('No hay tarifa para el método y la dirección elegidos. Selecciona otra opción o ingresa un costo válido.');
+          this.quoteError.set('No hay tarifa de envío para esta ubicación');
         }
       },
       error: (error) => {
@@ -1061,6 +1092,25 @@ export class PosShippingStepComponent {
     }
     if (this.quoteError()) {
       return { section: 'shipping-method', message: this.quoteError()! };
+    }
+    // Requirement 3 (coordinator, 2026-09): hard gate, no manual-cost escape
+    // hatch — a delivery method must never confirm/charge a default rate for
+    // an address with no resolved point (neither a forward-geocode hit nor a
+    // confirmed map pin). Placed before the generic shippingCost-finite check
+    // on purpose: a manually typed shipping cost
+    // (`onShippingCostChange`/`quoteManualCost`) sets `shippingCost` to a
+    // finite value regardless of location, which would otherwise slip past
+    // that check and let the cashier confirm a made-up cost for a location
+    // that was never resolved.
+    //
+    // Deliberately keyed on `hasResolvedLocation()`, NOT `shippingRateId()`:
+    // a `null` `shippingRateId` also covers the pre-existing, unrelated
+    // "manual cost, no automated rate table at all" path (alias deliveries,
+    // methods with no configured `shipping_rates`) — see `quoteManualCost`'s
+    // own comment. That path has real coords and is a legitimate cashier
+    // override, not the "no default rate" case this gate targets.
+    if (this.requiresAddress() && !this.hasResolvedLocation()) {
+      return { section: 'address', message: 'Marca la ubicación en el mapa para calcular el envío' };
     }
     if (!Number.isFinite(this.shippingCost()) || this.shippingCost() < 0) {
       return { section: 'shipping-method', message: 'Ingresa un costo de envío válido' };

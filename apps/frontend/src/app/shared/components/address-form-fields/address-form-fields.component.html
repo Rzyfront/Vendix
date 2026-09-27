@@ -13,7 +13,9 @@
     </button>
 
     @if (showMap()) {
-      <div class="map-wrapper mt-3">
+      <div #mapWrapper class="map-wrapper mt-3"
+        [class.no-gps]="!allowGeolocation()"
+        [class.map-wrapper--highlight]="mapHighlight()">
         <app-address-map-picker
           [center]="coordsSignal()"
           (located)="onLocated($event)"
@@ -28,12 +30,6 @@
     <div class="address-warning" role="status">
       <app-icon name="alert-triangle" [size]="16"></app-icon>
       <span>{{ addressWarning() }}</span>
-    </div>
-  }
-
-  @if (reverseLoading()) {
-    <div class="reverse-loading" role="status">
-      <span>Resolviendo dirección desde el mapa…</span>
     </div>
   }
 
