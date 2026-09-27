@@ -229,12 +229,16 @@
 // Content
 .checkout-content {
     display: grid;
-    grid-template-columns: 1fr 360px;
+    // minmax(0, 1fr), not 1fr: a bare 1fr track never shrinks below its
+    // content's min-content width, and the MapLibre canvas has a fixed pixel
+    // width — once it measures wider than the viewport the track grows with it
+    // and the whole checkout scrolls sideways on mobile.
+    grid-template-columns: minmax(0, 1fr) 360px;
     gap: 2rem;
     align-items: start;
 
     @media (max-width: 992px) {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 
