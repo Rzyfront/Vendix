@@ -215,6 +215,17 @@ export class AddressFormFieldsComponent {
   /** Coordinate derived from the form (lat/lng controls or map center). */
   readonly coordsSignal = signal<LatLng | null>(null);
   /**
+   * City/vereda centroid from an 'area'-precision geocode hit — NOT a
+   * resolved point (bug reported E2E 2026-09-27: a nonsense rural address
+   * resolved to the city centroid and was silently treated as located).
+   * Kept SEPARATE from `coordsSignal` so the map can re-center near the city
+   * (`coordsSignal() ?? mapCenterHint()` in the template) without it ever
+   * counting toward `has_location`/`hasResolvedLocation` or being persisted
+   * to `latitude`/`longitude`. Superseded automatically once `coordsSignal`
+   * resolves to a real point (the `??` favors it).
+   */
+  readonly mapCenterHint = signal<LatLng | null>(null);
+  /**
    * True for a couple seconds right after a forward-geocode failure force-opens
    * the map, so the operator's eye lands on it (see {@link focusMapForWarning}).
    */
@@ -774,6 +785,20 @@ export class AddressFormFieldsComponent {
             this.focusMapForWarning();
             return;
           }
+          if (res.precision === 'area') {
+            // City/vereda centroid, not a resolved point (see
+            // `mapCenterHint` doc). Re-center the map near it so the
+            // operator can find themselves, but treat it exactly like an
+            // unresolved geocode: coords stay cleared, same warning + CTA +
+            // focus path as a null/error result.
+            this.mapCenterHint.set({ lat: res.lat, lng: res.lng });
+            this.clearCoords();
+            this.addressWarning.set(
+              'No pudimos ubicar tu dirección. Marca el punto en el mapa para calcular la tarifa de envío.',
+            );
+            this.focusMapForWarning();
+            return;
+          }
           this.addressWarning.set(null);
           this.form.get('latitude')?.setValue(res.lat, { emitEvent: false });
           this.form.get('longitude')?.setValue(res.lng, { emitEvent: false });
@@ -784,7 +809,7 @@ export class AddressFormFieldsComponent {
           // Low-precision hit: open the map — even in compact mode — so the
           // operator can confirm or drag the pin. Non-blocking: nothing here
           // gates `validChange`/submit.
-          if (res.precision === 'street' || res.precision === 'area') {
+          if (res.precision === 'street') {
             this.showMap.set(true);
             this.advancedOverride.set(true);
           }

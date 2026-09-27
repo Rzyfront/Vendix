@@ -812,6 +812,51 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     }));
   });
 
+  // BUG 2 (E2E roku-shop.vendix.com/checkout, 2026-09-27): 'area' precision is
+  // a city/vereda centroid, NOT a resolved point. Before this fix, any
+  // non-null forward-geocode result (including 'area') was applied to
+  // latitude/longitude and unblocked the quote — a nonsense rural address
+  // resolved to the city centroid and could get quoted/charged silently.
+  // Mirrors the 'exact' test above but asserts the location gate STAYS shut.
+  it("BUG 2 — 'area' precision does not resolve a location or unblock the quote", async () => {
+    const geocoding = TestBed.inject(GeocodingService) as unknown as { forward: jasmine.Spy };
+    geocoding.forward = jasmine.createSpy('forward').and.returnValue(
+      of({ lat: 11.5444, lng: -72.907, precision: 'area', label: 'Riohacha, La Guajira' }),
+    );
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [] };
+    jasmine.clock().install();
+    jasmine.clock().mockDate();
+    try {
+      mount(state);
+      component.goToShipSubStep(1);
+      fixture.detectChanges();
+      jasmine.clock().tick(600);
+
+      const form = fixture.debugElement.query(By.directive(AddressFormFieldsComponent))
+        .componentInstance as AddressFormFieldsComponent;
+      form.form.markAsDirty();
+      form.form.get('address_line1')!.setValue('Vereda Xyzqwerty Km 99 Via Inexistente');
+      form.form.get('city')!.setValue('Riohacha');
+      form.form.get('state_province')!.setValue('La Guajira');
+      jasmine.clock().tick(600);
+      await fixture.whenStable();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+    fixture.detectChanges();
+
+    expect(geocoding.forward).toHaveBeenCalled();
+    expect(component.address()?.latitude).toBeNull();
+    expect(component.address()?.longitude).toBeNull();
+    expect(component.addressGeocodePrecision()).toBeNull();
+    expect(component.hasResolvedLocation()).toBeFalse();
+    expect(component.canConfirm()).toBeFalse();
+    expect(calculate).not.toHaveBeenCalled();
+  });
+
   it('B6 — cambiar de tarifa en el selector actualiza el costo de envío', () => {
     mount();
     component.selectShippingMethod(firstMethod);

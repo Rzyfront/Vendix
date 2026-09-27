@@ -17,7 +17,7 @@
         [class.no-gps]="!allowGeolocation()"
         [class.map-wrapper--highlight]="mapHighlight()">
         <app-address-map-picker
-          [center]="coordsSignal()"
+          [center]="coordsSignal() ?? mapCenterHint()"
           (located)="onLocated($event)"
         />
       </div>

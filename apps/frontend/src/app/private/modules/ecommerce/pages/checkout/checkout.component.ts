@@ -548,7 +548,7 @@ export class CheckoutComponent implements OnInit {
         // resolves.
         if (!this.hasResolvedCoords()) return;
         const key = this.currentAddressKey();
-        if (!key || key === this.shipping_quote_key) return;
+        if (!key || key === this.shipping_quote_key()) return;
         // Anti-carrera A→B→A (auditoría D.3): solo la última clave programa;
         // al disparar se revalida que siga vigente antes de cotizar.
         if (this.shipping_fetch_timer) clearTimeout(this.shipping_fetch_timer);
@@ -949,6 +949,19 @@ export class CheckoutComponent implements OnInit {
             return;
           }
           const coords = { lat: res.lat, lng: res.lng };
+          // 'area' = city/vereda centroid, NOT a resolved point for pricing
+          // (bug reported E2E 2026-09-27: a nonsense rural address resolved
+          // to the city centroid and silently quoted/charged from there).
+          // Center the map near the city so the buyer can find themselves,
+          // but never write the centroid into lat/lng — treat it exactly
+          // like an unresolved geocode (explicit warning + "Usar mi
+          // ubicación automática" + focusMapHint), so it can never quote or
+          // block-pass Continuar on its own.
+          if (res.precision === 'area') {
+            this.map_center.set(coords);
+            this.handleUnresolvedGeocode();
+            return;
+          }
           this.map_center.set(coords);
           this.addressWarning.set(null);
           this.geocodePrecision.set(res.precision ?? null);
@@ -965,7 +978,7 @@ export class CheckoutComponent implements OnInit {
           this.bumpCoordsVersion();
           // Low-precision hit and no manual confirmation yet: nudge the
           // buyer to check the pin — non-blocking, never stops Continuar.
-          if (res.precision === 'street' || res.precision === 'area') {
+          if (res.precision === 'street') {
             this.focusMapHint();
           }
         },
@@ -1440,11 +1453,30 @@ export class CheckoutComponent implements OnInit {
    */
   readonly shippingCost = computed(() => this.shipping_cost());
 
-  /** Texto del envío: "Gratis" cuando es 0, formato moneda cuando no. */
+  /**
+   * Texto del envío: "Pendiente" mientras el domicilio no tiene tarifa
+   * resuelta (`shippingBlockedReason()` no nulo — sin coords, cotización
+   * obsoleta/en vuelo, o sin cobertura), "Gratis" cuando el costo real es 0,
+   * formato moneda en cualquier otro caso. Bug reportado E2E 2026-09-27: el
+   * resumen mostraba "Gratis" (y luego un costo) ANTES de que se resolviera
+   * ninguna tarifa para domicilio — `shippingBlockedReason` ya es null para
+   * pickup/servicio-solo, así que esta rama nunca oculta el costo real de
+   * esos casos.
+   */
   readonly shippingDisplay = computed(() => {
+    if (this.shippingBlockedReason() !== null) return 'Pendiente';
     const cost = this.shippingCost();
     return cost === 0 ? 'Gratis' : cost.toString();
   });
+
+  /**
+   * Costo de envío a sumar en el "Total estimado" del resumen. Mientras el
+   * domicilio está pendiente de resolver (`shippingBlockedReason()`), el
+   * total NUNCA debe incluir un monto de envío — ver `shippingDisplay`.
+   */
+  readonly shippingCostForTotal = computed<number>(() =>
+    this.shippingBlockedReason() !== null ? 0 : this.shippingCost(),
+  );
 
   /**
    * Cupón actual del carrito: prioriza el que el cliente tipeó en el input
@@ -1561,8 +1593,14 @@ export class CheckoutComponent implements OnInit {
    * Clave de la dirección con la que se cotizó lo que hoy muestra
    * `shipping_options`. Si el comprador la cambia, la cotización queda
    * obsoleta y hay que recotizar antes de avanzar (ver `nextStep`).
+   *
+   * Signal (no propiedad plana): `shippingBlockedReason` la lee dentro de un
+   * `computed()` — un campo plano nunca dispara recomputación cuando se
+   * asigna, dejando el botón Continuar bloqueado en "Calculando…" para
+   * siempre aunque la cotización ya haya llegado (bug reportado E2E
+   * 2026-09-27).
    */
-  private shipping_quote_key: string | null = null;
+  private readonly shipping_quote_key = signal<string | null>(null);
   private shipping_fetch_promise: Promise<void> | null = null;
   private shipping_fetch_timer: ReturnType<typeof setTimeout> | null = null;
   /** Paso 10 — temporizador del overlay de éxito pedido→detalle. */
@@ -1655,7 +1693,7 @@ export class CheckoutComponent implements OnInit {
       return 'Necesitamos tu ubicación exacta para calcular el envío. Marca el punto en el mapa o usa tu ubicación automática.';
     }
     const key = this.currentAddressKey();
-    const quoteFresh = !!key && key === this.shipping_quote_key;
+    const quoteFresh = !!key && key === this.shipping_quote_key();
     if (!quoteFresh || this.loading_shipping()) {
       return 'Calculando la tarifa de envío para tu ubicación…';
     }
@@ -1768,7 +1806,7 @@ export class CheckoutComponent implements OnInit {
     this.selected_delivery.set(mode);
     this.error_message.set('');
     // Toda selección de envío anterior queda obsoleta al cambiar de modo.
-    this.shipping_quote_key = null;
+    this.shipping_quote_key.set(null);
     this.shipping_options.set([]);
     this.selected_shipping_method_id = null;
     this.selected_shipping_option_id = null;
@@ -1922,7 +1960,7 @@ export class CheckoutComponent implements OnInit {
       // Solo sella si la dirección no cambió durante el vuelo (la respuesta
       // lenta de una clave vieja nunca pisa la cotización vigente).
       if (this.currentAddressKey() === key) {
-        this.shipping_quote_key = key;
+        this.shipping_quote_key.set(key);
       }
     });
     this.shipping_fetch_promise = p;
@@ -2393,7 +2431,7 @@ export class CheckoutComponent implements OnInit {
       const key = this.currentAddressKey();
       if (
         key &&
-        (key !== this.shipping_quote_key ||
+        (key !== this.shipping_quote_key() ||
           this.selected_shipping_option_id == null)
       ) {
         await this.refreshShippingQuote(key);

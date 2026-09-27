@@ -698,6 +698,8 @@
                     <p class="delivery-summary__hint">
                       @if (selected_shipping_option_id == null) {
                         Elige tu tarifa de envío abajo
+                      } @else if (shippingBlockedReason() !== null) {
+                        {{ selectedShippingOptionName() }} — Pendiente
                       } @else {
                         {{ selectedShippingOptionName() }}
                         @if (shippingCost() > 0) {
@@ -1065,8 +1067,9 @@
               <div class="summary-row">
                 <span>Envio</span>
                 <span>{{
-                  shippingDisplay() === "Gratis"
-                    ? "Gratis"
+                  shippingDisplay() === "Gratis" ||
+                  shippingDisplay() === "Pendiente"
+                    ? shippingDisplay()
                     : (shippingCost() | currency)
                 }}</span>
               </div>
@@ -1125,7 +1128,7 @@
               <span>Total estimado</span>
               <span>{{
                 (cart()!.promotional_subtotal ?? cart()!.subtotal) +
-                  shippingCost() | currency
+                  shippingCostForTotal() | currency
               }}</span>
             </div>
           }

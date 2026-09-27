@@ -172,3 +172,113 @@ describe('AddressFormFieldsComponent — H7 municipio DANE en modo compact', () 
     expect(component.form.get('municipality_code')!.value).toBeNull();
   });
 });
+
+/**
+ * BUG 2 (E2E roku-shop.vendix.com/checkout, 2026-09-27): un forward-geocode
+ * con precisión 'area' (centroide de ciudad/vereda) se estaba tratando como
+ * una coordenada resuelta — una dirección sin sentido en Riohacha resolvió al
+ * centroide de la ciudad y el checkout cotizó/cobró envío sin que el
+ * comprador jamás marcara un punto. Regla nueva: 'area' = NO resuelto para
+ * precio. Debe recentrar el mapa cerca de la ciudad (`mapCenterHint`) SIN
+ * escribir lat/lng, y seguir el mismo camino que un geocode nulo (warning +
+ * CTA "Usar mi ubicación automática" + foco en el mapa).
+ */
+describe('AddressFormFieldsComponent — geocode precisión "area" no es una ubicación resuelta', () => {
+  let fixture: ComponentFixture<AddressFormFieldsComponent>;
+  let component: AddressFormFieldsComponent;
+  let forward: jasmine.Spy;
+
+  const renderAndFlushInitialCycle = async () => {
+    jasmine.clock().install();
+    jasmine.clock().mockDate();
+    fixture.detectChanges();
+    jasmine.clock().tick(600);
+    await fixture.whenStable();
+  };
+
+  const editAddressAndFlushDebounce = async () => {
+    component.form.markAsDirty();
+    component.form.get('address_line1')!.setValue('Vereda Xyzqwerty Km 99 Via Inexistente');
+    component.form.get('city')!.setValue('Riohacha');
+    component.form.get('state_province')!.setValue('La Guajira');
+    jasmine.clock().tick(600);
+    await fixture.whenStable();
+  };
+
+  beforeEach(async () => {
+    forward = jasmine.createSpy('forward');
+    TestBed.configureTestingModule({
+      imports: [AddressFormFieldsComponent],
+      providers: [
+        { provide: CountryService, useValue: { getCountries: () => of([{ code: 'CO', name: 'Colombia' }]) } },
+        {
+          provide: DianMunicipalityLookupService,
+          useValue: { resolveByName: () => of(null), resolveByCode: () => of(null), setBaseUrl: () => {} },
+        },
+        { provide: GeocodingService, useValue: { forward, reverse: () => of(null) } },
+        {
+          provide: CurrencyFormatService,
+          useValue: {
+            currencySymbol: signal('$'),
+            currencyFormatStyle: () => 'comma_dot',
+            currencyDecimals: () => 0,
+            loadCurrency: () => {},
+            format: (v: number) => `$${v}`,
+          },
+        },
+      ],
+    });
+    fixture = TestBed.createComponent(AddressFormFieldsComponent);
+    component = fixture.componentInstance;
+  });
+
+  it('area: no fija latitude/longitude, no cuenta como has_location, y centra el mapa por separado', async () => {
+    forward.and.returnValue(
+      of({ lat: 11.5444, lng: -72.907, precision: 'area', label: 'Riohacha, La Guajira' }),
+    );
+
+    let lastEmitted: any = null;
+    component.addressChange.subscribe((v) => (lastEmitted = v));
+
+    try {
+      await renderAndFlushInitialCycle();
+      await editAddressAndFlushDebounce();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+    fixture.detectChanges();
+
+    expect(component.form.get('latitude')!.value).toBeNull();
+    expect(component.form.get('longitude')!.value).toBeNull();
+    expect(component.coordsSignal()).toBeNull();
+    expect(component.precision()).toBeNull();
+    expect(component.mapCenterHint()).toEqual({ lat: 11.5444, lng: -72.907 });
+    expect(component.addressWarning()).toContain('Marca el punto en el mapa');
+    expect(lastEmitted?.has_location).toBeFalse();
+    expect(lastEmitted?.latitude).toBeNull();
+    expect(lastEmitted?.longitude).toBeNull();
+  });
+
+  it('street: sigue aceptándose como resuelto (badge de baja precisión, no bloquea)', async () => {
+    forward.and.returnValue(
+      of({ lat: 4.601, lng: -74.081, precision: 'street', label: 'Carrera 7, Bogotá' }),
+    );
+
+    let lastEmitted: any = null;
+    component.addressChange.subscribe((v) => (lastEmitted = v));
+
+    try {
+      await renderAndFlushInitialCycle();
+      await editAddressAndFlushDebounce();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+    fixture.detectChanges();
+
+    expect(component.form.get('latitude')!.value).toBe(4.601);
+    expect(component.form.get('longitude')!.value).toBe(-74.081);
+    expect(component.coordsSignal()).toEqual({ lat: 4.601, lng: -74.081 });
+    expect(component.precision()).toBe('street');
+    expect(lastEmitted?.has_location).toBeTrue();
+  });
+});
