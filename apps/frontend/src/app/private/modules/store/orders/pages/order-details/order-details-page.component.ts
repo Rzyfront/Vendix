@@ -515,6 +515,32 @@ export function orderStateLabel(status: string | null | undefined): string {
 }
 
 /**
+ * Texto veraz del «Cancelar pago» según el estado en que se anula (espejo de
+ * `OrderFlowService.cancelPayment`): `shipped`/`delivered` conservan su
+ * estado; `pending_payment`/`processing` vuelven a «Creada». En ningún caso
+ * se vuelve a descontar el stock ya entregado al cobrar de nuevo. Pura, para
+ * spec sin TestBed.
+ */
+export function cancelPaymentCopy(state: string | null | undefined): {
+  confirm: string;
+  success: string;
+} {
+  const keepsState = state === 'shipped' || state === 'delivered';
+  if (keepsState) {
+    return {
+      confirm:
+        '¿Estás seguro de cancelar el pago de esta orden? La orden conserva su estado y podrás registrar el pago de nuevo.',
+      success: 'Pago cancelado exitosamente. La orden conserva su estado; registra el pago de nuevo.',
+    };
+  }
+  return {
+    confirm:
+      '¿Estás seguro de cancelar el pago de esta orden? La orden volverá al estado "Creada" y podrás registrar el pago de nuevo. Los productos ya entregados no se vuelven a descontar del inventario.',
+    success: 'Pago cancelado exitosamente. La orden ha vuelto a estado "Creada".',
+  };
+}
+
+/**
  * order-truth-and-invoice-tz plan, Step 7 — deterministic label map by
  * `event_type` for the order_events-backed timeline (`legacy:false`). Pure:
  * takes the amount formatter as a parameter instead of reaching for
@@ -541,6 +567,13 @@ export function orderEventLabel(
   if (evt.event_type === 'invoice_issued') {
     const number = evt.payload?.['invoice_number'];
     return number ? `Factura emitida — ${number}` : 'Factura emitida';
+  }
+  if (evt.event_type === 'kitchen_fired') {
+    const base = evt.payload?.['resend'] === true ? 'Reenviado a cocina' : 'Enviado a cocina';
+    const itemIds = evt.payload?.['order_item_ids'];
+    const count = Array.isArray(itemIds) ? itemIds.length : 0;
+    if (count === 0) return base;
+    return `${base} — ${count} ${count === 1 ? 'plato' : 'platos'}`;
   }
   const labels: Partial<Record<OrderEventType, string>> = {
     payment_cancelled: 'Pago anulado',
@@ -4160,10 +4193,11 @@ export class OrderDetailsPageComponent {
       return;
     }
 
+    const copy = cancelPaymentCopy(this.order()?.state);
     this.dialogService
       .confirm({
         title: 'Cancelar Pago',
-        message: '¿Estás seguro de cancelar el pago de esta orden? La orden volverá al estado "Creada" y podrás registrar un nuevo pago.',
+        message: copy.confirm,
         confirmText: 'Cancelar Pago',
         cancelText: 'Volver',
         confirmVariant: 'danger',
@@ -4182,7 +4216,7 @@ export class OrderDetailsPageComponent {
           .subscribe({
             next: () => {
               this.isProcessingAction.set(false);
-              this.toastService.success('Pago cancelado exitosamente. La orden ha vuelto a estado "Creada".');
+              this.toastService.success(copy.success);
               this.loadData();
             },
             error: (err) => {

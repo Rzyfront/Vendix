@@ -6,6 +6,7 @@ import {
   CANCELABLE_ORDER_STATES,
   hasNonDirectSettledPayment,
   FULFILLED_PAYMENT_CANCELABLE_STATES,
+  PAYMENT_CANCELABLE_STATES,
 } from './order-cancellation-policy.util';
 import {
   canPay,
@@ -500,11 +501,6 @@ export class OrderFlowService {
     if (!current) throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
     assertNoActiveFinancialSplit(current);
     return locked;
-  }
-
-  private assertCancellationAllowed(order: Parameters<typeof getCancellationBlocker>[0]): void {
-    const blocker = getCancellationBlocker(order);
-    if (blocker) throw new VendixHttpException(ErrorCodes[blocker]);
   }
 
   private async assertNoOpenTableForDraft(
@@ -2648,7 +2644,20 @@ export class OrderFlowService {
 
   /**
    * Cancel payment of an order.
-   * - `pending_payment`/`processing` -> `created` (original behavior).
+   * - `pending_payment`/`processing` -> `created`. Owner rule: «cancelar el
+   *   pago» corrects a wrongly registered payment method so it can be
+   *   re-registered; it is NOT blocked by committed/consumed stock (that
+   *   blocker, `ORD_CANCEL_STOCK_COMMITTED_001`, belongs to cancelOrder
+   *   only). Same guards as the fulfilled branch: direct-only settled legs
+   *   and no issued sales invoice. Stock is untouched here, and re-paying
+   *   never deducts twice: `payOrder` accepts `created` and funnels the
+   *   finish through `commitOrderDelivery`, whose per-line atomic claim on
+   *   `order_items.inventory_committed` skips lines already delivered
+   *   (`deliverOrderItem`) or consumed at fire. `processing` cannot be kept
+   *   as-is because the `payOrder` state claim does not admit it (that
+   *   claim IS the double-click serializer), so `created` is the only
+   *   re-chargeable target; `pending_payment` goes to `created` too since
+   *   no payment is pending any more after the void.
    * - B4 (release-855) / B1b (order-truth-and-invoice-tz plan): `shipped`/
    *   `delivered` -> SAME state (never collapses `shipped` back to
    *   `created`, never collapses either back to `delivered` from `shipped`),
@@ -2699,16 +2708,15 @@ export class OrderFlowService {
       );
     }
 
-    if (isFulfilledCancel) {
-      // Cheap read-side guards before taking the lifecycle lock; re-checked
-      // again inside the transaction against the freshly-locked row.
-      if (hasNonDirectSettledPayment(order.payments)) {
-        throw new VendixHttpException(
-          ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
-        );
-      }
-      await this.assertNoIssuedSalesInvoiceForPaymentCancel(orderId);
+    // Cheap read-side guards before taking the lifecycle lock; re-checked
+    // again inside the transaction against the freshly-locked row. Same
+    // pair for every cancelable state (`canCancelPayment` mirrors it).
+    if (hasNonDirectSettledPayment(order.payments)) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
+      );
     }
+    await this.assertNoIssuedSalesInvoiceForPaymentCancel(orderId);
 
     let cancelledPaymentIds: number[] = [];
     // Captured inside the transaction (fresh `payments` + their resolved
@@ -2739,18 +2747,16 @@ export class OrderFlowService {
         throw new BadRequestException('La orden cambió de estado; actualiza antes de anular el pago.');
       }
 
-      if (freshIsFulfilledCancel) {
-        // Re-run under the lock: a concurrent request could have changed the
-        // payment mix or triggered invoicing between the read above and here.
-        if (hasNonDirectSettledPayment(freshOrder.payments)) {
-          throw new VendixHttpException(
-            ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
-          );
-        }
-        await this.assertNoIssuedSalesInvoiceForPaymentCancel(orderId, tx);
-      } else {
-        this.assertCancellationAllowed(freshOrder);
+      // Re-run under the lock: a concurrent request could have changed the
+      // payment mix or triggered invoicing between the read above and here.
+      // No stock check: committed stock blocks cancelOrder, never the
+      // payment cancel (owner rule, see docblock).
+      if (hasNonDirectSettledPayment(freshOrder.payments)) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
+        );
       }
+      await this.assertNoIssuedSalesInvoiceForPaymentCancel(orderId, tx);
 
       // (a) B4 — void EVERY succeeded/pending payment of the order, not just
       // the first match: with multi-tender (`payments[]`) a partial `.find`
@@ -2815,12 +2821,18 @@ export class OrderFlowService {
           },
         });
       } else {
-        // Bypass state machine — revert order to 'created'
+        // Bypass state machine — revert order to 'created'. Every
+        // succeeded/pending leg was just voided, so the money bookkeeping
+        // resets too (same as the fulfilled branch): `registerCreditPayment`
+        // and `applyDispatchCodPayment` add onto the stored `total_paid`, so
+        // leaving the old value would double-count the next collection.
         await tx.orders.update({
           where: { id: orderId },
           data: {
             state: 'created',
             completed_at: null,
+            total_paid: 0,
+            remaining_balance: freshOrder.grand_total,
             updated_at: new Date(),
           },
         });
@@ -3558,7 +3570,8 @@ export class OrderFlowService {
       if (hasSettledPayment) {
         const hasIssuedSalesInvoice =
           state !== 'finished' &&
-          FULFILLED_PAYMENT_CANCELABLE_STATES.has(state) &&
+          (FULFILLED_PAYMENT_CANCELABLE_STATES.has(state) ||
+            PAYMENT_CANCELABLE_STATES.has(state)) &&
           !hasNonDirectSettledPayment(order.payments)
             ? !!(await this.findBlockingSalesInvoiceForPaymentCancel(orderId))
             : undefined;
@@ -5509,8 +5522,8 @@ export class OrderFlowService {
       // recibida (`succeeded`/`captured`) no-efectivo deriva abajo a un
       // reembolso `requested` y el pago original queda como hecho histórico.
       // Solo el bloqueo de inventario/entrega sigue siendo fatal aquí;
-      // `cancelPayment` conserva la política completa (incluido ERR-38) vía
-      // assertCancellationAllowed.
+      // `cancelPayment` exige piernas directas y sin factura emitida, pero
+      // NUNCA lo bloquea el stock (regla del dueño).
       const cancelBlocker = getCancellationBlocker(freshOrder);
       if (cancelBlocker !== null && cancelBlocker !== 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001') {
         throw new VendixHttpException(ErrorCodes[cancelBlocker]);

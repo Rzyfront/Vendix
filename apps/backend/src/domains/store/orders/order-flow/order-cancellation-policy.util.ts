@@ -35,7 +35,12 @@ export const CANCELABLE_ORDER_STATES = [
   'draft', 'created', 'pending_payment', 'processing',
 ] as const;
 const CANCELABLE_STATES = new Set<string>(CANCELABLE_ORDER_STATES);
-const PAYMENT_CANCELABLE_STATES = new Set(['pending_payment', 'processing']);
+/** States where `cancelPayment` voids the payment and reverts the order to
+ * `created` (see {@link canCancelUnfulfilledPayment}). */
+export const PAYMENT_CANCELABLE_STATES: ReadonlySet<string> = new Set([
+  'pending_payment',
+  'processing',
+]);
 const DELIVERED_STATES = new Set(['delivered', 'finished', 'refunded']);
 export const SETTLED_PAYMENT_STATES: ReadonlySet<string> = new Set([
   'succeeded', 'captured', 'partially_refunded', 'refunded',
@@ -58,9 +63,10 @@ function hasDeliveryMetadata(notes?: string | null): boolean {
  * True when at least one SETTLED payment on the order was collected through
  * a non-direct method (online gateway, wallet, or anything whose
  * `processing_mode` is not `DIRECT`/`ON_DELIVERY` and whose legacy `type` is
- * not a known direct one). Shared by {@link getCancellationBlocker} (full
- * order cancellation) and B4's `cancelPayment()` on `delivered`/`finished`
- * orders (release-855): both need the exact same "is this money reversible
+ * not a known direct one). `bank_transfer` is always locally voidable
+ * (manually confirmed, no gateway), whatever its `processing_mode`.
+ * Shared by {@link getCancellationBlocker} (full order cancellation) and
+ * B4's `cancelPayment()` on `delivered`/`finished` orders (release-855): both need the exact same "is this money reversible
  * locally, or does it need a processor/reconciliation step" answer.
  */
 export function hasNonDirectSettledPayment(
@@ -69,6 +75,13 @@ export function hasNonDirectSettledPayment(
   return (payments ?? []).some((payment) => {
     if (!SETTLED_PAYMENT_STATES.has(payment.state)) return false;
     const method = payment.store_payment_method?.system_payment_method;
+    // Decisión del dueño: una transferencia bancaria es un cobro confirmado
+    // a mano por el operador — no hay pasarela que reversar, así que se anula
+    // localmente igual que el efectivo. Va ANTES del chequeo ONLINE porque el
+    // seed de `system_payment_methods` la siembra con `processing_mode:
+    // 'ONLINE'` en todas las tiendas. Wompi/wallet/otros ONLINE siguen
+    // exigiendo reversa en el procesador.
+    if (method?.type === 'bank_transfer') return false;
     if (method?.processing_mode === 'ONLINE') return true;
     if (method?.type === 'wompi' || method?.type === 'wallet') return true;
     if (
@@ -153,6 +166,33 @@ function canCancelFulfilledPayment(
   return hasSettledPayment && !hasNonDirectSettledPayment(order.payments);
 }
 
+/**
+ * Regla del dueño: «cancelar el pago» corrige un medio de pago mal
+ * registrado para volver a cobrarlo — se permite en cualquier estado salvo
+ * `finished` (ahí sólo cabe un reembolso). En `pending_payment`/`processing`
+ * NO lo bloquea el stock ya comprometido/entregado: ese bloqueo
+ * (`ORD_CANCEL_STOCK_COMMITTED_001`) es exclusivo de cancelar la ORDEN.
+ * Anular el pago no toca inventario, y volver a cobrar no descuenta dos
+ * veces: el commit de stock reclama cada línea con un UPDATE condicional
+ * sobre `order_items.inventory_committed` (`OrderStockCommitService
+ * .processLine`), así que una línea ya entregada se salta.
+ *
+ * Lo que sí bloquea: un cobro liquidado por pasarela/billetera (requiere
+ * reversa en el procesador). La factura DIAN emitida no está en este
+ * snapshot síncrono — `OrderFlowService.cancelPayment` la re-chequea
+ * (`ORD_PAYMENT_CANCEL_INVOICED_001`) y `canCancelPayment` la recibe
+ * ya resuelta. El candado de split financiero lo aplican el servicio y
+ * `canCancelPayment`.
+ */
+export function canCancelUnfulfilledPayment(
+  order: OrderCancellationSnapshot,
+): boolean {
+  return (
+    PAYMENT_CANCELABLE_STATES.has(order.state) &&
+    !hasNonDirectSettledPayment(order.payments)
+  );
+}
+
 /** Read-side policy; write callers must re-read under the lifecycle lock. */
 export function getOrderCancellationPolicy(
   order: OrderCancellationSnapshot,
@@ -165,9 +205,11 @@ export function getOrderCancellationPolicy(
   );
   return {
     can_cancel: reason_code === null && CANCELABLE_STATES.has(order.state),
+    // `reason_code` describes the cancel-ORDER blocker only: a committed-
+    // stock order can still cancel its PAYMENT (see
+    // `canCancelUnfulfilledPayment`).
     can_cancel_payment:
-      (reason_code === null && PAYMENT_CANCELABLE_STATES.has(order.state)) ||
-      canCancelFulfilledPayment(order),
+      canCancelUnfulfilledPayment(order) || canCancelFulfilledPayment(order),
     reason_code,
   };
 }

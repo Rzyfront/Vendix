@@ -61,6 +61,16 @@ function gatewayPayment(amount: number): NonNullable<OrderActionSnapshot['paymen
   };
 }
 
+function bankTransferPayment(amount: number): NonNullable<OrderActionSnapshot['payments']>[number] {
+  // Sembrada `processing_mode: 'ONLINE'` en todas las tiendas, pero se
+  // confirma a mano: no hay pasarela que reversar.
+  return {
+    state: 'succeeded',
+    amount,
+    store_payment_method: { system_payment_method: { processing_mode: 'ONLINE', type: 'bank_transfer' } },
+  };
+}
+
 describe('order-action-policy — canPay (B1b)', () => {
   it.each(['draft', 'created', 'pending_payment', 'shipped', 'delivered', 'finished'])(
     'enables pay on unpaid %s',
@@ -132,6 +142,23 @@ describe('order-action-policy — canCancelPayment (B4/B1b)', () => {
       });
     },
   );
+
+  it.each(['shipped', 'delivered', 'pending_payment', 'processing'])(
+    'enables cancel_payment on %s for a settled bank transfer seeded ONLINE (local void, like cash)',
+    (state) => {
+      expect(canCancelPayment(order({ state, payments: [bankTransferPayment(100)] }))).toEqual({
+        enabled: true,
+      });
+    },
+  );
+
+  it('keeps requiring a gateway reversal when a bank transfer is mixed with a Wompi leg', () => {
+    expect(
+      canCancelPayment(
+        order({ state: 'delivered', payments: [bankTransferPayment(50), gatewayPayment(50)] }),
+      ),
+    ).toEqual({ enabled: false, reason: REVERSAL_REQUIRED });
+  });
 
   it.each(['shipped', 'delivered'])(
     'rejects on %s once a sales invoice has already been issued',
@@ -759,5 +786,45 @@ describe('order-action-policy — canCollectViaShip', () => {
 
   it('disables outside processing', () => {
     expect(canCollectViaShip(collectOrder({ state: 'pending_payment' })).enabled).toBe(false);
+  });
+});
+
+describe('D — canCancelPayment: el stock comprometido NO bloquea cancelar el pago (regla del dueño)', () => {
+  const committed = [{ inventory_committed: true, inventory_consumed_at_fire: false }];
+
+  it.each(['processing', 'pending_payment'])(
+    '%s con stock comprometido + pago directo → cancelar pago habilitado; cancelar orden sigue bloqueado',
+    (state) => {
+      const snap = order({ state, order_items: committed, payments: [directPayment(100)] });
+      expect(canCancelPayment(snap)).toEqual({ enabled: true });
+      expect(canCancel(snap)).toEqual(
+        expect.objectContaining({ enabled: false, reason: 'ORD_CANCEL_STOCK_COMMITTED_001' }),
+      );
+    },
+  );
+
+  it('processing con factura de venta emitida → ORD_PAYMENT_CANCEL_INVOICED_001 (misma regla que el servicio)', () => {
+    expect(
+      canCancelPayment(order({
+        state: 'processing',
+        order_items: committed,
+        payments: [directPayment(100)],
+        hasIssuedSalesInvoice: true,
+      })),
+    ).toEqual({ enabled: false, reason: INVOICED });
+  });
+
+  it('processing con pasarela liquidada → sigue exigiendo reversa, con o sin stock comprometido', () => {
+    for (const order_items of [committed, [{ inventory_committed: false, inventory_consumed_at_fire: false }]]) {
+      expect(
+        canCancelPayment(order({ state: 'processing', order_items, payments: [gatewayPayment(100)] })),
+      ).toEqual({ enabled: false, reason: REVERSAL_REQUIRED });
+    }
+  });
+
+  it('finished sigue rechazando aunque el stock esté comprometido y el pago sea efectivo', () => {
+    expect(
+      canCancelPayment(order({ state: 'finished', order_items: committed, payments: [directPayment(100)] })),
+    ).toEqual({ enabled: false, reason: CANCEL_FINISHED });
   });
 });

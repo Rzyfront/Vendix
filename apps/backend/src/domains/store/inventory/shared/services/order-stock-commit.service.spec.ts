@@ -110,6 +110,31 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
     );
   });
 
+  it('D — entregar, anular el pago y volver a cobrar descuenta el stock UNA sola vez (claim con estado real)', async () => {
+    // Fila en memoria: el `updateMany` condicional se comporta como Postgres
+    // (sólo reclama si `inventory_committed` sigue en false) y cada lectura
+    // de la orden ve el flag actual — sin forzar el count a mano.
+    const row = buildOrder();
+    txMock.orders.findUnique.mockImplementation(async () => row);
+    txMock.orders.findFirst.mockImplementation(async () => row);
+    txMock.order_items.updateMany.mockImplementation(async ({ where, data }: any) => {
+      const item = row.order_items.find((i) => i.id === where.id);
+      if (!item || item.inventory_committed !== where.inventory_committed) return { count: 0 };
+      item.inventory_committed = data.inventory_committed;
+      return { count: 1 };
+    });
+
+    // 1) Entrega (deliverOrderItem / cobro inicial): descuenta.
+    await service.commitOrderLines(1, [10], { ...OPTS, tx: txMock });
+    expect(stockLevelManagerMock.updateStock).toHaveBeenCalledTimes(1);
+
+    // 2) `cancelPayment` no toca `order_items` → el flag sigue en true.
+    // 3) Re-cobro directo → `updateOrderState('finished')` → commitOrderDelivery.
+    const again = await service.commitOrderDelivery(1, { ...OPTS, reason: 'Order completed' }, txMock);
+    expect(stockLevelManagerMock.updateStock).toHaveBeenCalledTimes(1);
+    expect(again.committedItemCount).toBe(0);
+  });
+
   it('perdedor de la carrera (updateMany count=0) NO deduce stock ni marca committed', async () => {
     txMock.order_items.updateMany.mockResolvedValue({ count: 0 });
 
