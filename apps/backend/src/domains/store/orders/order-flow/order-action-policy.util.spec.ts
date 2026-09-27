@@ -311,6 +311,21 @@ describe('order-action-policy — canDeliverItem (B1b)', () => {
     });
   });
 
+  it('gates a physical order item whose product is prepared and KDS is pending', () => {
+    expect(canDeliverItem(item({ item_type: 'physical', product_type: 'prepared', latestKitchenStatus: 'pending' }))).toEqual({
+      enabled: false,
+      reason: ITEM_NOT_DELIVERABLE,
+    });
+  });
+
+  it('allows a prepared stock item to bypass KDS only without a ticket', () => {
+    expect(canDeliverItem(item({ item_type: 'physical', product_type: 'prepared', skip_kds: true }))).toEqual({ enabled: true });
+    expect(canDeliverItem(item({ item_type: 'physical', product_type: 'prepared', skip_kds: true, latestKitchenStatus: 'pending' }))).toEqual({
+      enabled: false,
+      reason: ITEM_NOT_DELIVERABLE,
+    });
+  });
+
   it('allows a non-prepared (retail) item with no kitchen gate at all', () => {
     expect(canDeliverItem(item({ item_type: 'retail' }))).toEqual({ enabled: true });
   });

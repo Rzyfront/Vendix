@@ -989,6 +989,55 @@ describe('OrdersService', () => {
       });
     });
 
+    it('shows only one home-delivery dispatch action on COD detail while payment is pending', async () => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1, organization_id: 1, user_id: 1, roles: ['owner'],
+      } as any);
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 53,
+        state: 'pending_payment',
+        delivery_type: 'home_delivery',
+        shipping_method_id: 9,
+        shipping_method: { type: 'own_fleet' },
+        payment_form: '1',
+        grand_total: 43_000,
+        payments: [{ state: 'pending', amount: 43_000 }],
+        refunds: [],
+        order_items: [{ id: 531, item_type: 'direct', kitchen_ticket_items: [] }],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const order = await service.findOne(53);
+      const actions = (order as any).available_actions as Array<{ code: string }>;
+      expect(actions.filter((action) => action.code === 'dispatch_order')).toHaveLength(1);
+      expect(actions.some((action) => action.code === 'manual_ship')).toBe(false);
+      expect(actions.some((action) => action.code === 'ready_for_pickup')).toBe(false);
+    });
+
+    it('does not show legacy tracking/ready actions alongside dispatch on processing home delivery', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 54,
+        state: 'processing',
+        delivery_type: 'home_delivery',
+        shipping_method_id: 9,
+        shipping_method: { type: 'own_fleet' },
+        payment_form: '1',
+        grand_total: 43_000,
+        payments: [{ state: 'succeeded', amount: 43_000 }],
+        refunds: [],
+        order_items: [{ id: 541, item_type: 'direct', kitchen_ticket_items: [] }],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const order = await service.findOne(54);
+      const codes = ((order as any).available_actions as Array<{ code: string }>).map((action) => action.code);
+      expect(codes.filter((code) => code === 'dispatch_order')).toHaveLength(1);
+      expect(codes).not.toContain('ship_with_tracking');
+      expect(codes).not.toContain('ready_for_pickup');
+    });
+
     it('attaches item-level available_actions (deliver/cancel/reverse_delivered/resend) per order item', async () => {
       mockPrismaService.orders.findFirst.mockResolvedValue({
         id: 51,
@@ -1022,6 +1071,23 @@ describe('OrdersService', () => {
           expect.objectContaining({ code: 'cancel', enabled: true }),
           expect.objectContaining({ code: 'reverse_delivered', enabled: false }),
         ]),
+      );
+    });
+
+    it('does not advertise item delivery for a physical line with a prepared product pending in KDS', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 55, state: 'pending_payment', delivery_type: 'home_delivery',
+        payments: [], refunds: [], order_promotions: [], coupon_uses: [],
+        order_items: [{
+          id: 551, item_type: 'physical', skip_kds: false, delivered_at: null,
+          products: { product_type: 'prepared' },
+          kitchen_ticket_items: [{ status: 'pending' }],
+        }],
+      });
+
+      const order = await service.findOne(55);
+      expect((order as any).order_items[0].available_actions).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'deliver', enabled: false })]),
       );
     });
   });

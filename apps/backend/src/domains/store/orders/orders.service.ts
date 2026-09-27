@@ -1642,6 +1642,8 @@ export class OrdersService {
       available_actions: computeItemActions({
         order_state: order.state,
         item_type: item.item_type,
+        product_type: item.products?.product_type,
+        skip_kds: item.skip_kds,
         delivered_at: item.delivered_at,
         latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
         orderHasSettledPayment,
@@ -1774,27 +1776,31 @@ export class OrdersService {
       }
       actions.push({ code: 'cancel', label_key: 'ORD_ACTION_CANCEL', ...canCancel(snapshot) });
 
-      if (offersDispatchFlow || isPickupDelivery) {
+      // Keep the detail projection in lockstep with OrderFlowService:
+      // only one fulfillment action applies to this delivery type.
+      if (requiresDispatch) {
         actions.push({
           code: 'dispatch_order',
           label_key: 'ORD_ACTION_DISPATCH_ORDER',
           ...canDispatchOrder(snapshot),
         });
-        actions.push({
-          code: 'manual_ship',
-          label_key: 'ORD_ACTION_MANUAL_SHIP',
-          ...canManualShip(snapshot),
-        });
+      } else if (isPickupDelivery) {
         actions.push({
           code: 'ready_for_pickup',
           label_key: 'ORD_ACTION_READY_FOR_PICKUP',
           ...canReadyForPickupBeforePayment(snapshot),
         });
+      } else if (offersDispatchFlow) {
+        actions.push({
+          code: 'manual_ship',
+          label_key: 'ORD_ACTION_MANUAL_SHIP',
+          ...canManualShip(snapshot),
+        });
       }
     }
 
     if (state === 'processing') {
-      if (!hasMethod && !isDirectDelivery) {
+      if (!offersDispatchFlow && !hasMethod && !isDirectDelivery) {
         actions.push({
           code: 'assign_shipping',
           label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
@@ -1812,7 +1818,7 @@ export class OrdersService {
           enabled: false,
           reason: 'ORD_SHIP_REQUIRED_001',
         });
-      } else if (hasMethod) {
+      } else if (!offersDispatchFlow && hasMethod) {
         if (shippingMethodType === 'pickup') {
           actions.push({
             code: 'ready_for_pickup',

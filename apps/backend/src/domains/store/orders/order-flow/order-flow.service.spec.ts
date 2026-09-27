@@ -2405,6 +2405,23 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
     return { service, prismaMock, eventEmitter, kitchenFireService, orderView, commitOrderLines };
   };
 
+  it('rechaza entrega de plato physical aún pendiente en cocina sin mover stock ni sello', async () => {
+    const { service, prismaMock, commitOrderLines } = buildService({
+      item: readyItem({
+        item_type: 'physical',
+        products: { product_type: 'prepared' },
+        skip_kds: false,
+        kitchen_ticket_items: [{ id: 900, status: 'pending' }],
+      }),
+    });
+
+    await expect(service.deliverOrderItem(ORDER_ID, ITEM_ID)).rejects.toMatchObject({
+      errorCode: ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE.code,
+    });
+    expect(commitOrderLines).not.toHaveBeenCalled();
+    expect(prismaMock.order_items.updateMany).not.toHaveBeenCalled();
+  });
+
   it('faltante al entregar no estampa delivered_at ni actualiza cocina', async () => {
     const { service, prismaMock, commitOrderLines } = buildService({});
     commitOrderLines.mockRejectedValueOnce(new VendixHttpException(ErrorCodes.INV_STOCK_002));

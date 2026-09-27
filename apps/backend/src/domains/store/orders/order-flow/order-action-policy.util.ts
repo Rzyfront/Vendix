@@ -502,6 +502,8 @@ export function canCollectViaShip(
 export interface OrderItemActionSnapshot {
   order_state: string;
   item_type?: string | null;
+  product_type?: string | null;
+  skip_kds?: boolean | null;
   delivered_at?: Date | string | null;
   /** Latest (most recent) kitchen-ticket-item status for this order item,
    * when it was ever fired — mirrors `deliverOrderItem`'s
@@ -530,7 +532,13 @@ export function canDeliverItem(item: OrderItemActionSnapshot): OrderActionResult
     // not as blocked.
     return { enabled: true };
   }
-  if (item.item_type === 'prepared' && item.latestKitchenStatus !== 'ready') {
+  // `order_items.item_type` is normally `physical` even for a prepared
+  // product. A stock-backed plate explicitly marked skip_kds may bypass the
+  // kitchen only if it has no ticket; an existing ticket always wins.
+  const requiresKitchen = item.item_type === 'prepared' ||
+    (item.product_type === 'prepared' && !item.skip_kds) ||
+    item.latestKitchenStatus != null;
+  if (requiresKitchen && item.latestKitchenStatus !== 'ready') {
     return { enabled: false, reason: ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE.code };
   }
   return { enabled: true };

@@ -3954,6 +3954,8 @@ export class OrderFlowService {
         order_id: true,
         product_name: true,
         item_type: true,
+        skip_kds: true,
+        products: { select: { product_type: true } },
         delivered_at: true,
         kitchen_ticket_items: {
           orderBy: { id: 'desc' },
@@ -3999,15 +4001,22 @@ export class OrderFlowService {
     const stockWarnings: InsufficientStockItem[] = [];
 
     if (!alreadyDelivered) {
-      // 3. Compuerta de cocina para items preparados.
-      if (item.item_type === 'prepared') {
-        const kitchenStatus = item.kitchen_ticket_items[0]?.status ?? null;
-        if (kitchenStatus !== 'ready') {
-          throw new VendixHttpException(
-            ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE,
-            `El plato "${item.product_name}" todavía no está listo (estado: ${kitchenStatus ?? 'sin enviar'}). Espera a que cocina lo marque como listo en el KDS antes de entregarlo.`,
-          );
-        }
+      // 3. The same item policy used by order detail gates the write. Do not
+      // check item_type alone: prepared products persist as `physical` items.
+      const kitchenStatus = item.kitchen_ticket_items[0]?.status ?? null;
+      const kitchenGate = canDeliverItem({
+        order_state: order.state,
+        item_type: item.item_type,
+        product_type: item.products?.product_type,
+        skip_kds: item.skip_kds,
+        latestKitchenStatus: kitchenStatus,
+        delivered_at: null,
+      });
+      if (!kitchenGate.enabled) {
+        throw new VendixHttpException(
+          ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE,
+          `El plato "${item.product_name}" todavía no está listo (estado: ${kitchenStatus ?? 'sin enviar'}). Espera a que cocina lo marque como listo en el KDS antes de entregarlo.`,
+        );
       }
 
       // 4. docs/plans/no-overselling-stock-guard-plan.md step 5 — consume
