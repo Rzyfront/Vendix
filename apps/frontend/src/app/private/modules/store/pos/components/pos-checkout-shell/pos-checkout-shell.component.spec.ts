@@ -617,6 +617,40 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     expect(component.currentStep()).toBe(2);
   });
 
+  it('tras resolver un cliente de domicilio, el siguiente clic valida dirección sin resolverlo otra vez', () => {
+    component.entregaChoice.set('enviar');
+    component.currentStep.set(1);
+    component.clienteSubStep.set(1);
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+    const selector = fixture.debugElement.query(By.directive(CustomerSelectorStub)).componentInstance as CustomerSelectorStub;
+    const ship = fixture.debugElement.query(By.directive(ShippingStub)).componentInstance as ShippingStub;
+    let identifiers = true;
+    spyOn(selector, 'hasFormIdentifiers').and.callFake(() => identifiers);
+    const resolve = spyOn(selector, 'resolveIfNeeded').and.callFake(() => {
+      identifiers = false; // The real selector resets its form after a successful resolution.
+      selector.customerSelected.emit({ id: 99, first_name: 'Ana' });
+      return of(true);
+    });
+    const validate = spyOn(ship, 'validateDetailsForCliente').and.returnValue(false);
+
+    component.attemptNextStep();
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(component.currentStep()).toBe(1);
+    fixture.componentRef.setInput('cartState', {
+      customer: { id: 99, first_name: 'Ana' }, items: [{ id: 1 }], summary: { total: 10 },
+    });
+    fixture.detectChanges();
+    component.attemptNextStep();
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(validate).toHaveBeenCalledTimes(1);
+    expect(component.currentStep()).toBe(1);
+    validate.and.returnValue(true);
+    component.attemptNextStep();
+    expect(component.currentStep()).toBe(2);
+  });
+
   it('proyecta los detalles de domicilio del único componente Envío junto al cliente', () => {
     component.entregaChoice.set('enviar');
     fixture.componentRef.setInput('cartState', {
