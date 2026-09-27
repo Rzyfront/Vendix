@@ -705,7 +705,22 @@ describe('InvoiceFlowService support documents', () => {
       customer_phone: null,
       customer_tax_regime: null,
       customer_fiscal_responsibilities: ['O-48'],
-      customer_address: null,
+      // Sin `order_id`/`sales_order_id`: es la factura MANUAL del incidente.
+      // P1-A bloquea esta combinación (jurídica O manual) cuando NO hay
+      // dirección — así que el fixture por defecto SÍ trae una (snapshot
+      // real, no la de la tienda), para que este describe siga probando
+      // identidad y no se vea interceptado por el bloqueo de dirección. El
+      // caso "sin dirección" tiene su propio test, que sobreescribe esto a
+      // `null`.
+      customer_address: {
+        address_line: 'Calle 100 # 20-30',
+        municipality_code: '11001',
+        city: 'Bogotá',
+        department_code: '11',
+        state_province: 'Bogotá D.C.',
+        country_code: 'CO',
+        postal_code: '110111',
+      },
       subtotal_amount: { toString: () => '1000.00' },
       discount_amount: { toString: () => '0.00' },
       tax_amount: { toString: () => '190.00' },
@@ -803,8 +818,185 @@ describe('InvoiceFlowService support documents', () => {
           customer_person_type: 'JURIDICA',
           customer_email: 'facturacion@opticapanorama.co',
           customer_name: 'Óptica Panorama SAS',
+          // P1-A: la dirección transmitida es la del SNAPSHOT de la propia
+          // factura manual (municipio Bogotá 11001 declarado por el
+          // fixture), nunca la de la tienda emisora — esa cascada de
+          // respaldo sólo entra cuando NINGUNA dirección real existe.
+          customer_address: expect.objectContaining({
+            address_line: 'Calle 100 # 20-30',
+            municipality_code: '11001',
+          }),
         }),
       );
+    });
+
+    it('P1-A: factura MANUAL sin ficha vinculada (NIT) y SIN dirección en el snapshot: validate() real bloquea con ADDRESS_UNRESOLVABLE', async () => {
+      // Mismo incidente Óptica Panorama, pero sin la dirección que el
+      // fixture por defecto ahora trae — el caso que P1-A corrige: antes
+      // `other_addresses` quedaba `undefined` (por no haber `invoice.customer`
+      // vinculado) y el bloqueo nunca disparaba, así que esta factura manual
+      // (sin `order_id`/`sales_order_id`) emitía sin dirección real ninguna,
+      // con la dirección FISCAL de la tienda impresa en su lugar al firmar.
+      const findFirst = jest.fn().mockResolvedValue(
+        buildIncidentInvoice({ id: 503, status: 'draft', customer_address: null }),
+      );
+      const { service } = createService({
+        prisma: { invoices: { findFirst } },
+      });
+      (service as any).acquirerIdentity = new CustomerFiscalIdentityValidator();
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.validate(503)),
+      ).rejects.toMatchObject({
+        errorCode: 'INVOICING_VALIDATE_001',
+        message: expect.stringMatching(/no tiene dirección fiscal propia/i),
+      });
+    });
+
+    // Fixture común a los dos tests "nacidos de orden" (POS/ecommerce) que
+    // siguen: MISMA forma que `linkedCustomerNoAddress` (arriba), pero con
+    // `order_id` poblado — el carril `sale_rail: 'on_demand'` que nunca captura
+    // dirección del cliente en el mostrador.
+    const buildPosInvoice = (overrides: any) => ({
+      id: overrides.id,
+      organization_id: 1,
+      store_id: 2,
+      accounting_entity_id: 77,
+      invoice_number: 'FV-700',
+      invoice_type: 'sales_invoice',
+      status: 'draft',
+      order_id: 900,
+      sales_order_id: null,
+      supplier_id: null,
+      supplier: null,
+      customer_name: null,
+      customer_tax_id: null,
+      customer_document_type: null,
+      customer_verification_digit: null,
+      customer_email: null,
+      customer_phone: null,
+      customer_tax_regime: null,
+      customer_fiscal_responsibilities: null,
+      customer_address: null,
+      subtotal_amount: { toString: () => '1000.00' },
+      discount_amount: { toString: () => '0.00' },
+      tax_amount: { toString: () => '190.00' },
+      withholding_amount: { toString: () => '0.00' },
+      total_amount: { toString: () => '1190.00' },
+      currency: 'COP',
+      issue_date: new Date('2026-03-10T10:00:00.000Z'),
+      due_date: new Date('2026-03-20T00:00:00.000Z'),
+      invoice_items: [
+        {
+          id: 1,
+          description: 'Producto de mostrador',
+          quantity: { toString: () => '1' },
+          unit_price: { toString: () => '1000.00' },
+          discount_amount: { toString: () => '0.00' },
+          tax_amount: { toString: () => '190.00' },
+          total_amount: { toString: () => '1190.00' },
+        },
+      ],
+      invoice_taxes: [
+        {
+          tax_name: 'IVA',
+          tax_rate: { toString: () => '19' },
+          taxable_amount: { toString: () => '1000.00' },
+          tax_amount: { toString: () => '190.00' },
+        },
+      ],
+      resolution: {
+        id: 7001,
+        resolution_number: '18760000001',
+        prefix: 'FV',
+        range_from: 1,
+        range_to: 999999999,
+        valid_from: new Date('2020-01-01T00:00:00.000Z'),
+        valid_to: new Date('2035-01-01T00:00:00.000Z'),
+        is_active: true,
+      },
+      related_invoice: null,
+      notes: null,
+      financial_account_id: null,
+      ...overrides,
+    });
+
+    it('P1-A: POS — persona NATURAL nacida de una orden, SIN dirección propia: validate() real emite (regresión de 1109a03d7)', async () => {
+      // Cliente CC registrado sólo con nombre+documento (nunca se le pidió
+      // dirección en el POS) — exactamente la regresión reportada: antes de
+      // este fix, CUALQUIER `customer_id` vinculado poblaba `other_addresses`
+      // y esta venta quedaba bloqueada por `ADDRESS_UNRESOLVABLE`.
+      const posInvoice = buildPosInvoice({
+        id: 700,
+        customer_id: 400,
+        customer: {
+          id: 400,
+          legal_name: null,
+          first_name: 'Juan',
+          last_name: 'Pérez',
+          document_type: 'CC',
+          document_number: '1118860776',
+          verification_digit: null,
+          addresses: [],
+        },
+      });
+      const findFirst = jest.fn().mockResolvedValue(posInvoice);
+      const { service } = createService({
+        prisma: {
+          invoices: {
+            findFirst,
+            // Este escenario SÍ llega al final feliz de `validate()`
+            // (identidad resuelta, ya numerada) — a diferencia de los demás
+            // "P1-A: POS" de este bloque, que rechazan antes de este punto.
+            // El override reemplaza `invoices` COMPLETO (spread superficial
+            // en `createService`), así que sin este mock explícito la llamada
+            // real `this.prisma.invoices.update({ data: { status:
+            // 'validated' } })` revienta con "is not a function".
+            update: jest
+              .fn()
+              .mockResolvedValue({ ...posInvoice, status: 'validated' }),
+          },
+        },
+      });
+      (service as any).acquirerIdentity = new CustomerFiscalIdentityValidator();
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.validate(700)),
+      ).resolves.toBeDefined();
+    });
+
+    it('P1-A: POS — persona JURÍDICA (NIT) nacida de una orden, SIN dirección propia: validate() real bloquea con ADDRESS_UNRESOLVABLE', async () => {
+      // La excepción declarada por la política: aun naciendo de una orden, un
+      // adquiriente jurídico SÍ exige dirección — la DIAN la cruza para
+      // exógena/retenciones y no hay excusa de "el POS nunca la pidió" para
+      // una razón social.
+      const findFirst = jest.fn().mockResolvedValue(
+        buildPosInvoice({
+          id: 701,
+          customer_id: 401,
+          customer: {
+            id: 401,
+            legal_name: 'Distribuidora Jurídica SAS',
+            first_name: null,
+            last_name: null,
+            document_type: 'NIT',
+            document_number: '900555666',
+            verification_digit: '1',
+            addresses: [],
+          },
+        }),
+      );
+      const { service } = createService({
+        prisma: { invoices: { findFirst } },
+      });
+      (service as any).acquirerIdentity = new CustomerFiscalIdentityValidator();
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.validate(701)),
+      ).rejects.toMatchObject({
+        errorCode: 'INVOICING_VALIDATE_001',
+        message: expect.stringMatching(/no tiene dirección fiscal propia/i),
+      });
     });
 
     // Requisito #4 del incidente: cuando el adquiriente NOMINATIVO no tiene

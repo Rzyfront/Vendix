@@ -2292,20 +2292,43 @@ export class InvoiceFlowService {
     // aparte de la ya intentada como `address` (la primaria/`[0]`). Poblado
     // ⇒ `CustomerFiscalIdentityValidator.checkAddress` puede distinguir «el
     // cliente no tiene NINGUNA dirección propia» (bloqueo
-    // `ADDRESS_UNRESOLVABLE`, item 4 del incidente: nunca más la dirección
-    // fiscal de la TIENDA sale impresa como si fuera la del cliente sin que
-    // esto la haya bloqueado antes) de «tiene otra, no la primaria» (aviso).
+    // `ADDRESS_UNRESOLVABLE`) de «tiene otra, no la primaria» (aviso).
     // Deliberadamente NO incluye la dirección de la tienda emisora: ese
     // respaldo sigue existiendo en `acquirer-address.resolver.ts` (fuera de
     // alcance de este cambio) para el momento de la emisión, pero ya no se
     // usa para decidir SI el documento puede numerarse.
-    const other_addresses: CustomerFiscalAddressInput[] | undefined = Array.isArray(
-      invoice.customer?.addresses,
-    )
-      ? (invoice.customer.addresses as any[])
-          .map((raw: any) => this.normalizeCustomerAddressForFiscalCheck(raw))
-          .filter((a): a is CustomerFiscalAddressInput => a !== null)
-      : undefined;
+    //
+    // P1-A — bloqueante SÓLO para dos carriles, no para todo adquiriente:
+    //
+    //   (a) Persona jurídica / NIT (código DIAN 31): la DIAN cruza el
+    //       municipio del adquiriente jurídico (exógena, retenciones), y no
+    //       hay cascada de emisor que sustituya honestamente ese dato.
+    //   (b) Factura MANUAL (`order_id`/`sales_order_id` ambos ausentes): nace
+    //       en el módulo de facturación electrónica con el cliente capturado
+    //       a mano — el mismo carril `sale_rail: 'advanced'` que ya exige
+    //       identidad fiscal completa unas líneas más abajo (`send()`). Aquí
+    //       vive el incidente Óptica Panorama SAS/Pollo Árabe: un NIT sin
+    //       ficha vinculada y sin `customer_address` en el snapshot.
+    //
+    // Fuera de esos dos carriles —persona NATURAL facturada desde una orden
+    // (POS/ecommerce, `sale_rail: 'on_demand'`)— se preserva el comportamiento
+    // PREVIO a `1109a03d7`: `other_addresses` quieto en `undefined`, así que
+    // `checkAddress` cae al aviso no bloqueante `ADDRESS_REQUIRED` y confía en
+    // la cascada de respaldo del emisor al transmitir. Bloquear ahí era la
+    // regresión: clientes de mostrador con sólo nombre+documento (sin
+    // dirección, porque el POS nunca la pide) dejaban de poder facturar.
+    const is_juridica_acquirer = identity.person_type === 'JURIDICA';
+    const born_from_order = Boolean(invoice.order_id || invoice.sales_order_id);
+    const address_is_blocking = is_juridica_acquirer || !born_from_order;
+
+    const other_addresses: CustomerFiscalAddressInput[] | undefined =
+      address_is_blocking
+        ? Array.isArray(invoice.customer?.addresses)
+          ? (invoice.customer.addresses as any[])
+              .map((raw: any) => this.normalizeCustomerAddressForFiscalCheck(raw))
+              .filter((a): a is CustomerFiscalAddressInput => a !== null)
+          : []
+        : undefined;
 
     return {
       identification_mode: mode,
