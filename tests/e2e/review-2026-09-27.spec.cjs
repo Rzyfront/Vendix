@@ -302,6 +302,35 @@ async function main() {
           await page.setViewportSize({ width: 1280, height: 720 });
         }
       });
+      await runScenario('R8: mobile customer search preserves names without a status badge', ['R8'], async () => {
+        await page.setViewportSize({ width: 390, height: 844 });
+        try {
+          const search = page.locator('app-customer-list input[placeholder="Buscar clientes..."]');
+          await openUiView(page, `${adminBase}/admin/customers/all`, search,
+            'La búsqueda móvil de clientes');
+          const originalCard = page.locator('app-customer-list app-item-list .item-card').first();
+          await originalCard.waitFor();
+          const customerName = (await originalCard.locator('.card-title').innerText()).trim();
+          const searchToken = customerName.split(/\s+/)[0];
+          assert(searchToken.length >= 2, `Nombre de fixture no buscable: ${customerName}`);
+          await search.fill(searchToken);
+          const card = page.locator('app-customer-list app-item-list .item-card')
+            .filter({ hasText: customerName }).first();
+          await card.waitFor({ timeout: 20_000 });
+          assert.equal((await card.locator('.card-title').innerText()).trim(), customerName);
+          assert.equal(await card.locator('.card-badge-wrap').count(), 0);
+          await search.fill('QA-NONEXISTENT-REVIEW-20260927');
+          await page.getByText('No se encontraron clientes').waitFor({ timeout: 20_000 });
+          assert.equal(await card.count(), 0);
+          await search.fill(searchToken);
+          await card.waitFor({ timeout: 20_000 });
+          assert.equal(await card.locator('.card-badge-wrap').count(), 0);
+          assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2),
+            'La búsqueda móvil creó desbordamiento horizontal.');
+        } finally {
+          await page.setViewportSize({ width: 1280, height: 720 });
+        }
+      });
       await runScenario('R13: orders list shows refund net and partial badge', ['R13'], async () => {
         await openUiView(page, `${adminBase}/admin/orders/sales`,
           page.getByRole('columnheader', { name: 'Neto actual' }), 'El listado de órdenes');
