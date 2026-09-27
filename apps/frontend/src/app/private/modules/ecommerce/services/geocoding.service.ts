@@ -25,9 +25,21 @@ export interface NormalizedAddress {
  * Forward-geocoding result (free-text address → coordinate). `lat`/`lng` are
  * null when the backend could not resolve the query.
  */
+export type GeocodePrecision =
+  | 'exact'
+  | 'interpolated'
+  | 'intersection'
+  | 'street'
+  | 'area';
+
 export interface ForwardGeocodeResult {
   lat: number | null;
   lng: number | null;
+  /** How precise the coordinate is (see backend `ForwardGeocodeResult`). */
+  precision?: GeocodePrecision;
+  source?: 'osm' | 'google';
+  /** Canonical address the coordinate belongs to, for display. */
+  label?: string;
 }
 
 /**

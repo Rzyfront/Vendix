@@ -36,14 +36,40 @@ export interface ForwardGeocodeResult {
   lng: number | null;
   /**
    * How the coordinate was resolved, in decreasing accuracy order:
-   * `exact` (house-numbered Nominatim match) > `intersection` (DANE
-   * cross-street computed via Overpass) > `street` (Nominatim matched the
-   * named street but not a specific house) > `area` (barrio/suburb
-   * centroid, last resort). Optional and purely additive — omitted when the
-   * query could not be resolved at all, or on a code path that predates
-   * this field. Never treat its absence as an error.
+   * `exact` (house-numbered match) > `interpolated` (DANE plate walked
+   * `placa` metres from the corner along the main street, or Google
+   * RANGE_INTERPOLATED) > `intersection` (DANE cross-street corner) >
+   * `street` (named street matched, no specific house) > `area`
+   * (barrio/suburb/vereda centroid, last resort). Optional and purely
+   * additive — omitted when the query could not be resolved at all. Never
+   * treat its absence as an error.
    */
-  precision?: 'exact' | 'intersection' | 'street' | 'area';
+  precision?: GeocodePrecision;
+  /** Provider that produced the winning coordinate. */
+  source?: 'osm' | 'google';
+  /** Canonical, human-readable address the coordinate belongs to. */
+  label?: string;
+}
+
+export type GeocodePrecision =
+  | 'exact'
+  | 'interpolated'
+  | 'intersection'
+  | 'street'
+  | 'area';
+
+/**
+ * Optional hints for {@link GeocodingService.forward}. Every field is
+ * additive: omitting them keeps the plain `(query, city, state)` behaviour.
+ */
+export interface ForwardGeocodeOptions {
+  /** DANE municipality code (5 digits) — pins the municipality exactly. */
+  municipalityCode?: string;
+  /**
+   * Fallback geographic bias when no city is known (e.g. the shipping
+   * method origin of the store). Used only to bound/rank candidates.
+   */
+  bias?: { lat: number; lng: number };
 }
 
 /** Subset of the Nominatim `address` object we read (jsonv2 + addressdetails=1). */
@@ -277,6 +303,8 @@ export class GeocodingService {
     query: string,
     city?: string,
     state?: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    opts?: ForwardGeocodeOptions,
   ): Promise<ForwardGeocodeResult> {
     const q = query.trim().replace(/\s+/g, ' ');
     if (q.length < 3) return { lat: null, lng: null };
