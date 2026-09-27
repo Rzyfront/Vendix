@@ -59,6 +59,7 @@ describe('normalizePaymentLegs', () => {
         bank_account_id: undefined,
         is_cash: false,
         display_name: 'Unknown',
+        accounting_method: 'Unknown',
       },
     ]);
     expect(change).toBe(0);
@@ -241,6 +242,34 @@ describe('normalizePaymentLegs', () => {
       methodsById,
     );
     expect(legs.map((leg) => leg.display_name)).toEqual([
+      'Efectivo',
+      'Unknown',
+    ]);
+  });
+
+  // PR #858 hallazgo 1 — la etiqueta contable (la que decide Caja/Bancos en
+  // el asiento) es la del sistema, independiente del nombre de la tienda.
+  it('accounting_method sale de methodsById, separado de display_name; sin él cae a Unknown', () => {
+    const { legs } = normalizePaymentLegs(
+      {
+        payments: [
+          { store_payment_method_id: CASH, amount: 20000, amount_received: 20000 },
+          { store_payment_method_id: TRANSFER, amount: 80000 },
+        ],
+      },
+      100000,
+      {
+        ...methodsById,
+        [CASH]: {
+          type: 'cash',
+          processing_mode: 'DIRECT',
+          display_name: 'Caja',
+          accounting_method: 'Efectivo',
+        },
+      },
+    );
+    expect(legs.map((leg) => leg.display_name)).toEqual(['Caja', 'Unknown']);
+    expect(legs.map((leg) => leg.accounting_method)).toEqual([
       'Efectivo',
       'Unknown',
     ]);

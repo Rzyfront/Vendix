@@ -1696,6 +1696,13 @@ export class OrderFlowService {
               (row as any)?.display_name ||
               row?.system_payment_method?.display_name ||
               'Unknown',
+            // PR #858 hallazgo 1 — etiqueta CONTABLE, separada de la de UI:
+            // `payment.received` la lleva como `payment_method` y
+            // `resolveCashBankKey` elige Caja/Bancos con ella. Un efectivo
+            // que la tienda renombró «Caja» no debe caer en Bancos. Misma
+            // fuente que el POS (`payments.service.ts` ~1880).
+            accounting_method:
+              row?.system_payment_method?.display_name || 'Unknown',
           };
         }
       } else {
@@ -1708,6 +1715,8 @@ export class OrderFlowService {
               (paymentMethod as any)?.display_name ||
               paymentMethod.system_payment_method?.display_name ||
               'Unknown',
+            accounting_method:
+              paymentMethod.system_payment_method?.display_name || 'Unknown',
           },
         };
       }
@@ -2497,14 +2506,14 @@ export class OrderFlowService {
           const methodRow = await this.prisma.store_payment_methods.findFirst({
             where: { id: confirmedPayment.store_payment_method_id },
             select: {
-              display_name: true,
               system_payment_method: { select: { display_name: true } },
             },
           });
-          const display_name =
-            (methodRow as any)?.display_name ||
-            methodRow?.system_payment_method?.display_name ||
-            'Unknown';
+          // PR #858 hallazgo 1 — este tramo sólo alimenta `payment.received`
+          // (no hay respuesta con nombre visible): va la etiqueta CONTABLE
+          // del sistema, nunca el nombre renombrable de la tienda.
+          const accounting_method =
+            methodRow?.system_payment_method?.display_name || 'Unknown';
           const sale_share = await resolvePaymentReceivedSaleFields(
             this.prisma,
             {
@@ -2518,7 +2527,7 @@ export class OrderFlowService {
               payment: { ...confirmedPayment, sale_share },
               leg: {
                 amount: Number(confirmedPayment.amount),
-                display_name,
+                accounting_method,
               } as unknown as NormalizedLeg,
             },
           ]);
@@ -7954,10 +7963,13 @@ export class OrderFlowService {
           const withholdingItems = orderItemsWithTaxes.map((item) => ({
             product_type: item.item_type,
             base: Number(item.total_price || 0),
-            ivaAmount: (item.order_item_taxes || []).reduce(
-              (sum, tax) => sum + Number(tax.tax_amount || 0),
-              0,
-            ),
+            // PR #858 hallazgo 4 — reteIVA se calcula sobre el IVA de la
+            // operación, no sobre todos los impuestos de la línea: INC/ICA
+            // no entran. `tax_type` nulo = IVA (filas legadas sin tipar,
+            // regla de `vendix-tax-typing`).
+            ivaAmount: (item.order_item_taxes || [])
+              .filter((tax) => (tax.tax_type ?? 'iva') === 'iva')
+              .reduce((sum, tax) => sum + Number(tax.tax_amount || 0), 0),
           }));
           wh = await this.withholdingFlow.resolveSufferedByOperation({
             organization_id: order.stores?.organization_id,
@@ -7994,7 +8006,7 @@ export class OrderFlowService {
           id: payment.id,
           amount: leg.amount,
           currency: payment.currency,
-          display_name: leg.display_name,
+          accounting_method: leg.accounting_method,
           sale_share: (payment as any).sale_share as
             | PaymentReceivedSaleFields
             | undefined,
