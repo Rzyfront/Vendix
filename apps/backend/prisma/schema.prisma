@@ -1662,6 +1662,7 @@ model orders {
   order_items                                     order_items[]
   order_installments                              order_installments[]
   order_events                                     order_events[]
+  withholding_calculations                         withholding_calculations[]
   addresses_orders_billing_address_idToaddresses  addresses?                @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   addresses_orders_shipping_address_idToaddresses addresses?                @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   stores                                          stores                    @relation(fields: [store_id], references: [id], onUpdate: NoAction)
@@ -8892,6 +8893,7 @@ model withholding_calculations {
   store_id             Int?
   accounting_entity_id Int?
   invoice_id           Int?
+  order_id             Int?
   supplier_id          Int?
   customer_id          Int?
   concept_id           Int
@@ -8909,6 +8911,7 @@ model withholding_calculations {
   store             stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
   accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
   invoice           invoices?            @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order             orders?              @relation(fields: [order_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   supplier          suppliers?           @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   customer          users?               @relation("customer_withholdings", fields: [customer_id], references: [id], onDelete: SetNull)
   concept           withholding_concepts @relation(fields: [concept_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -8918,6 +8921,7 @@ model withholding_calculations {
   @@index([organization_id, customer_id, year])
   @@index([accounting_entity_id])
   @@index([store_id])
+  @@index([order_id])
 }
 
 // ── Información Exógena DIAN ──────────────────────────────
