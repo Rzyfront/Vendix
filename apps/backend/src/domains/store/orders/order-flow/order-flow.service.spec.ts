@@ -1230,6 +1230,7 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
         source_module: 'order_item_cancellation',
         create_movement: true,
         validate_availability: false,
+        allow_negative: true,
       });
       expect(movement.reason).toContain(`orden #${ORDER_ID} ítem #${ITEM_ID}`);
       expect(movement).not.toHaveProperty('order_item_id');

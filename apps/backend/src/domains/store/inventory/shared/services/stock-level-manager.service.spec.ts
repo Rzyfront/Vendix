@@ -725,6 +725,38 @@ describe('StockLevelManager', () => {
         expect(prismaService.stock_levels.updateMany).not.toHaveBeenCalled();
       });
 
+      it('returns only the consumed units when an overused ingredient remains negative', async () => {
+        prismaService.stock_levels.findFirst.mockResolvedValue({
+          ...mockStockLevel,
+          quantity_on_hand: -1200,
+          quantity_reserved: 0,
+          quantity_available: -1200,
+        } as any);
+        prismaService.stock_levels.update.mockResolvedValue({
+          ...mockStockLevel,
+          quantity_on_hand: -900,
+          quantity_reserved: 0,
+          quantity_available: -900,
+        });
+
+        await service.updateStock({
+          ...updateStockParams,
+          quantity_change: 300,
+          movement_type: 'return',
+          validate_availability: false,
+          allow_negative: true,
+        });
+
+        expect(prismaService.stock_levels.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              quantity_on_hand: -900,
+              quantity_available: -900,
+            }),
+          }),
+        );
+      });
+
       it('still clamps to 0 when allow_negative is omitted (every other caller)', async () => {
         prismaService.stock_levels.update.mockResolvedValue({
           ...mockStockLevel,

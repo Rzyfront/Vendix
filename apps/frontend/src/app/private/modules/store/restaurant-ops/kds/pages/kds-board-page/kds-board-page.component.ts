@@ -1302,22 +1302,14 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
 
   /**
    * Ejecuta una mutación de ticket y mantiene el spinner activo hasta
-   * que el board CONFIRME el cambio por SSE (anti condición de carrera).
+   * que el servidor CONFIRME el cambio por SSE o por la respuesta del POST.
    *
    * Estrategia (ver `mutationBaselines` + el effect reconciliador del
    * constructor): antes de mutar capturamos un baseline del ticket
-   * (`status` + `updated_at`). En el `next` del HTTP NO limpiamos el
-   * spinner de inmediato (el viejo comportamiento optimista creaba una
-   * carrera: el id se liberaba antes de que el evento SSE reconciliara
-   * el estado, dejando que la card mostrara el estado viejo por un
-   * instante o que un segundo click disparara una transición inválida).
-   * En su lugar:
-   *  - dejamos el id en `mutatingIds`;
-   *  - un único `effect` observa `tickets()` y libera el id cuando ese
-   *    ticket cambia respecto al baseline (status distinto o updated_at
-   *    posterior) — es decir, cuando llegó el SSE;
-   *  - un `setTimeout` de seguridad (5s) libera el id igualmente si el
-   *    SSE nunca llega, para no dejar el spinner colgado.
+   * (`status` + `updated_at`). La respuesta exitosa del POST es estado
+   * confirmado, no optimismo: se aplica al cache ANTES de liberar el
+   * spinner, evitando que un evento SSE perdido deje la card vieja hasta
+   * recargar. El effect observa SSE y el timeout cubre respuestas incompletas.
    * En `error` limpiamos el id + toast (como antes).
    */
   /**
@@ -1456,10 +1448,10 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     obsFactory()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
-          // No limpiamos aquí: dejamos que el effect reconcilie contra
-          // el evento SSE (con fallback por timeout). Esto evita la
-          // carrera HTTP-next vs SSE-event.
+        next: (confirmedTicket) => {
+          if (confirmedTicket?.id !== ticketId) return;
+          this.kdsSse.reconcileConfirmedTicket(confirmedTicket);
+          this.finishMutation(ticketId);
         },
         error: (err: unknown) => {
           this.finishMutation(ticketId);

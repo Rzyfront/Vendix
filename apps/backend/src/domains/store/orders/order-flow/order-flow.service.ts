@@ -391,6 +391,9 @@ export class OrderFlowService {
           source_module: 'order_item_cancellation',
           create_movement: true,
           validate_availability: false,
+          // Keep an existing negative ingredient balance when restoring just
+          // this item's consumed units; the default floor would mint stock.
+          allow_negative: true,
           afterCommit,
         }, tx);
         // updateStock(return) restores quantity/value snapshots but does not

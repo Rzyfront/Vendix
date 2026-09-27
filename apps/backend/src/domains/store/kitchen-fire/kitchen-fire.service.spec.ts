@@ -71,6 +71,7 @@ describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', (
     await service.cancelTicket(55, 'waste');
     expect(stock.updateStock).toHaveBeenCalledWith(expect.objectContaining({
       product_id: 400, quantity_change: 2, movement_type: 'return',
+      allow_negative: true,
     }), tx);
     expect(tx.inventory_cost_layers.create).toHaveBeenCalledTimes(1);
     expect(accounting.onPreparedDishDisposition).toHaveBeenCalledWith(expect.objectContaining({

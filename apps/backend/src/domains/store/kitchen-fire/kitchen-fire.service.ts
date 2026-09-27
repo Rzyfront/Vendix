@@ -3268,6 +3268,10 @@ export class KitchenFireService {
               source_module: 'kitchen_ticket_cancellation',
               create_movement: true,
               validate_availability: false,
+              // A prior ingredient overuse can leave this location negative.
+              // Returning only this ticket's consumption must reduce that debt
+              // by exactly `quantity`, not floor the whole location to zero.
+              allow_negative: true,
               afterCommit,
             }, tx);
             await tx.inventory_cost_layers.create({

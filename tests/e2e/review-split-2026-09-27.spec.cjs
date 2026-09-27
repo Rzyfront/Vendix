@@ -16,6 +16,11 @@
  * QA_EMAIL=... QA_PASSWORD=... QA_SPLIT_ALLOW_MUTATION=1 \
  * QA_SPLIT_FIXTURES='{"table":{"sessionId":...,"orderId":...,"orderNumber":"...","tableLabel":"...","totalCents":...,"partialFirstCents":...,"aliases":["...","...","...","..."]},"detail":{"orderId":...,"orderNumber":"...","totalCents":...,"aliases":["...","...","...","..."]},"taxedShipping":{"orderId":...,"orderNumber":"...","totalCents":...,"taxCents":...,"shippingCents":...,"shippingTaxCents":...,"aliases":["...","...","...","..."]}}' \
  * NODE_PATH=/opt/homebrew/lib/node_modules node tests/e2e/review-split-2026-09-27.spec.cjs
+ * For a recovery run ONLY after the table split was created by this suite
+ * but before any payment: QA_SPLIT_RESUME_TABLE=1 verifies all four aliases
+ * and zero payments before continuing. Never use it on an arbitrary split.
+ * QA_SPLIT_RESUME_SHIPPING=1 applies the same guard to an already-created
+ * taxed-shipping split; it rechecks source IVA and persisted account totals.
  *
  * Never run against production. No direct API requests, DB writes, saved
  * browser state, credentials in source, or PASS before browser assertions.
@@ -144,6 +149,14 @@ async function run(name, scheme, fn) {
   }
 }
 
+async function waitEnabled(button, label) {
+  for (let attempt = 0; attempt < 80; attempt++) {
+    if (await button.isEnabled()) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`${label} did not become enabled after the UI recalculated.`);
+}
+
 async function openTable(page, fixture) {
   // Table page does not render order_number. Verify the declared order and
   // unique table name in its detail first, then return to the table session.
@@ -157,17 +170,33 @@ async function openTable(page, fixture) {
   assert(body.includes(fixture.tableLabel), `Session ${fixture.sessionId} is not ${fixture.tableLabel}.`);
   assert(body.includes('Cuenta abierta'), 'Table fixture is closed; use a fresh open session.');
   const panel = page.locator('app-split-accounts-panel section.split-panel').first();
+  if (process.env.QA_SPLIT_RESUME_TABLE === '1') {
+    const rows = await accountRows(panel, fixture, 'Cuentas creadas');
+    for (let i = 0; i < 4; i++) {
+      assert.equal(await rows.nth(i).locator('small').filter({ hasText: /^Pago #/ }).count(), 0,
+        'Recovery is only safe before the first payment; refusing replay.');
+    }
+    return;
+  }
   assert.equal(await panel.getByRole('heading', { name: 'Cuentas creadas' }).count(), 0,
     'Table already has financial accounts; refusing to reuse a stale fixture.');
   assert.equal(await panel.locator('small').filter({ hasText: /^Pago #/ }).count(), 0,
     'Table already has split payments; refusing to mutate a stale fixture.');
 }
 
-async function openDetail(page, fixture) {
+async function openDetail(page, fixture, allowExisting = false) {
   await openUi(page, `${BASE}/admin/orders/${fixture.orderId}`,
     page.getByRole('heading', { name: `Orden #${fixture.orderNumber}` }), 'Order detail');
   const panel = page.locator('app-split-accounts-panel section.split-panel').first();
   await panel.waitFor();
+  if (allowExisting) {
+    const rows = await accountRows(panel, fixture, 'Cuentas creadas');
+    for (let i = 0; i < 4; i++) {
+      assert.equal(await rows.nth(i).locator('small').filter({ hasText: /^Pago #/ }).count(), 0,
+        'Recovery is only safe before any account payment.');
+    }
+    return panel;
+  }
   assert.equal(await panel.getByRole('heading', { name: 'Cuentas creadas' }).count(), 0,
     `Order ${fixture.orderNumber} already has a split; use a fresh fixture.`);
   assert(await panel.getByRole('button', { name: 'Ver vista previa del reparto' }).isVisible(),
@@ -178,7 +207,10 @@ async function openDetail(page, fixture) {
 async function configureFour(panel, fixture) {
   const input = panel.locator('app-input[label="Número de comensales / cuentas"] input');
   await input.fill('4');
-  const cards = panel.locator('.split-accounts .split-card').filter({ has: panel.locator('h4') });
+  // The editable rows are DIVs; preview/created account rows are ARTICLEs.
+  // A `has: panel.locator('h4')` starts from the panel root inside each row
+  // and matches nothing, even though all four editable cards are visible.
+  const cards = panel.locator('.split-accounts > div.split-card');
   await panel.getByText('4 cuentas para gestionar.').waitFor();
   assert.equal(await cards.count(), 4, 'Choosing four diners must immediately show four editable account cards.');
   for (let i = 0; i < 4; i++) {
@@ -223,7 +255,7 @@ async function previewAndCreate(panel, fixture, testStalePreview) {
     await accountRows(panel, fixture, 'Vista previa — aún no se han creado las cuentas');
   }
   const create = panel.getByRole('button', { name: 'Crear 4 cuentas' });
-  assert(await create.isEnabled(), 'Fresh preview must enable Crear 4 cuentas.');
+  await waitEnabled(create, 'Fresh preview / Crear 4 cuentas');
   await create.click();
   return accountRows(panel, fixture, 'Cuentas creadas');
 }
@@ -232,7 +264,11 @@ async function payCash(page, panel, fixture, ordinal, amountCents, doubleSubmit 
   const row = (await accountRows(panel, fixture, 'Cuentas creadas')).nth(ordinal - 1);
   const before = await row.locator('small').filter({ hasText: /^Pago #/ }).count();
   await row.getByRole('button', { name: /^Cobrar/ }).click();
-  const modal = page.locator('app-payment-modal');
+  // Table detail can mount a second, inactive payment-modal host. Scope every
+  // assertion/action to the one whose accessible title belongs to this account.
+  const modal = page.locator('app-payment-modal').filter({
+    has: page.getByRole('heading', { name: `Cobrar Cuenta ${ordinal}` }),
+  });
   await modal.getByRole('heading', { name: `Cobrar Cuenta ${ordinal}` }).waitFor();
   if (amountCents != null) {
     await modal.locator('input[placeholder="Usar monto sugerido"]')
@@ -241,6 +277,11 @@ async function payCash(page, panel, fixture, ordinal, amountCents, doubleSubmit 
   await modal.locator('button.payment-method-btn').filter({ hasText: 'Efectivo' }).click();
   const submit = modal.getByRole('button', { name: /^Cobrar / }).last();
   await submit.waitFor({ state: 'visible' });
+  // The collector recomputes its cash-received default on the next Angular
+  // render after method selection. An immediate isEnabled() sees the stale
+  // disabled gate even though the form becomes valid within a frame.
+  await page.waitForFunction((button) => !button.disabled,
+    await submit.elementHandle(), { timeout: 10_000 });
   assert(await submit.isEnabled(), 'Cash payment form should be valid before submit.');
   if (doubleSubmit) {
     // Two synchronous browser clicks exercise the UI busy/idempotency gate;
@@ -293,6 +334,9 @@ async function assertSourceShippingTax(page, fixture) {
 
 async function main() {
   const fixture = fixtureGate(); // Fail BEFORE browser launch or login.
+  const group = process.env.QA_SPLIT_GROUP || 'all';
+  assert(['all', 'table', 'detail', 'shipping'].includes(group),
+    'QA_SPLIT_GROUP must be all, table, detail or shipping.');
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
@@ -302,17 +346,19 @@ async function main() {
   try {
     await login(page);
 
-    await run('Four-person table split, partial/full pay, reload and close', 'happy/integrity', async () => {
+    if (group === 'all' || group === 'table') await run('Four-person table split, partial/full pay, reload and close', 'happy/integrity', async () => {
       const f = fixture.table;
       await openTable(page, f);
-      await page.locator('[dropdown-trigger]').filter({ hasText: 'Opciones' }).click();
-      await page.getByRole('button', { name: 'Dividir cuenta' }).click();
-      const modal = page.locator('app-split-order-modal');
-      const panel = modal.locator('section.split-panel');
-      await panel.waitFor();
-      await previewAndCreate(panel, f, true);
-      await page.keyboard.press('Escape');
-      await modal.waitFor({ state: 'hidden' });
+      if (process.env.QA_SPLIT_RESUME_TABLE !== '1') {
+        await page.locator('[dropdown-trigger]').filter({ hasText: 'Opciones' }).click();
+        await page.getByRole('button', { name: 'Dividir cuenta' }).click();
+        const modal = page.locator('app-split-order-modal');
+        const panel = modal.locator('section.split-panel');
+        await panel.waitFor();
+        await previewAndCreate(panel, f, true);
+        await page.keyboard.press('Escape');
+        await modal.waitFor({ state: 'hidden' });
+      }
       const tablePanel = page.locator('app-split-accounts-panel section.split-panel').first();
       await accountRows(tablePanel, f, 'Cuentas creadas');
       await page.reload({ waitUntil: 'commit' });
@@ -337,7 +383,7 @@ async function main() {
       return `${f.orderNumber}: four titular accounts, 5 payments total (first split into 2), table closed, order detail paid`;
     });
 
-    await run('Create four accounts from order detail and persist after reload', 'happy/sad', async () => {
+    if (group === 'all' || group === 'detail') await run('Create four accounts from order detail and persist after reload', 'happy/sad', async () => {
       const f = fixture.detail;
       const panel = await openDetail(page, f);
       await previewAndCreate(panel, f, true);
@@ -347,17 +393,22 @@ async function main() {
       return `${f.orderNumber}: detail split created and four titular amounts survive reload`;
     });
 
-    await run('Taxed shipping is distributed without erasing IVA', 'fiscal/integrity', async () => {
+    if (group === 'all' || group === 'shipping') await run('Taxed shipping is distributed without erasing IVA', 'fiscal/integrity', async () => {
       const f = fixture.taxedShipping;
-      const panel = await openDetail(page, f);
+      const resume = process.env.QA_SPLIT_RESUME_SHIPPING === '1';
+      const panel = await openDetail(page, f, resume);
       await assertSourceShippingTax(page, f);
-      await configureFour(panel, f);
-      await panel.getByRole('button', { name: 'Ver vista previa del reparto' }).click();
-      await accountRows(panel, f, 'Vista previa — aún no se han creado las cuentas');
-      assert.deepEqual(await readFiscalTotals(panel),
-        { tax: f.taxCents, shipping: f.shippingCents },
-        'Preview must preserve the source tax and shipping to the cent.');
-      await panel.getByRole('button', { name: 'Crear 4 cuentas' }).click();
+      if (!resume) {
+        await configureFour(panel, f);
+        await panel.getByRole('button', { name: 'Ver vista previa del reparto' }).click();
+        await accountRows(panel, f, 'Vista previa — aún no se han creado las cuentas');
+        assert.deepEqual(await readFiscalTotals(panel),
+          { tax: f.taxCents, shipping: f.shippingCents },
+          'Preview must preserve the source tax and shipping to the cent.');
+        const create = panel.getByRole('button', { name: 'Crear 4 cuentas' });
+        await waitEnabled(create, 'Taxed shipping / Crear 4 cuentas');
+        await create.click();
+      }
       await accountRows(panel, f, 'Cuentas creadas');
       await page.reload({ waitUntil: 'commit' });
       const reloaded = page.locator('app-split-accounts-panel section.split-panel').first();
@@ -372,7 +423,8 @@ async function main() {
   } finally {
     await browser.close();
   }
-  assert.equal(results.length, 3, 'All three R12 browser scenarios must execute.');
+  assert.equal(results.length, group === 'all' ? 3 : 1,
+    'Every selected R12 browser scenario must execute.');
   assert(results.every((result) => result.status === 'passed'), 'R12 contains a failed browser scenario.');
 }
 

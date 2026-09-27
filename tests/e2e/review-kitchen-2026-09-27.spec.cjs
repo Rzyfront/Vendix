@@ -33,6 +33,7 @@ const { chromium } = require('playwright');
 
 const BASE = process.env.QA_BASE_URL || 'https://vendix.com';
 const results = [];
+const observedCancelResponses = [];
 
 function parseFixtures() {
   assert(process.env.QA_EMAIL && process.env.QA_PASSWORD,
@@ -71,13 +72,15 @@ function parseFixtures() {
 
 async function openView(page, url, ready, label) {
   let last = '';
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       await page.goto(url, { waitUntil: 'commit', timeout: 25_000 });
       await ready.waitFor({ timeout: 15_000 });
       return;
     } catch (error) {
-      last = String(error?.message ?? error).slice(0, 180);
+      last = `${String(error?.message ?? error).slice(0, 180)}; url=${page.url()}; ` +
+        `ui=${(await page.locator('body').innerText().catch(() => '')).slice(-180)}`;
+      if (attempt < 4) await page.goto('about:blank', { waitUntil: 'commit' }).catch(() => {});
     }
   }
   throw new Error(`${label} did not render via UI at ${page.url()}: ${last}`);
@@ -95,7 +98,9 @@ async function login(page) {
       return Boolean(JSON.parse(localStorage.getItem('vendix_auth_state') || '{}')?.tokens?.access_token);
     } catch { return false; }
   }, null, { timeout: 20_000 });
-  await openView(page, `${BASE}/admin/pos`, page.getByText('Punto de Venta', { exact: true }).first(), 'POS admin');
+  await openView(page, `${BASE}/admin/pos`,
+    page.getByRole('list', { name: 'Resultados de productos' }).getByRole('listitem').first(),
+    'POS admin');
   const storyClose = page.getByRole('button', { name: 'Cerrar Tu semana en Vendix' });
   if (await storyClose.isVisible()) await storyClose.click();
 }
@@ -105,8 +110,15 @@ async function openKds(page) {
     page.getByRole('heading', { name: 'KDS — Pantalla de Cocina' }), 'KDS');
   await page.locator('.kds-board__loading').waitFor({ state: 'hidden', timeout: 20_000 });
   const picker = page.locator('.kds-station-picker');
-  assert(!(await picker.isVisible()),
-    'KDS station picker is open: choose the fixture ticket station in the UI before this run.');
+  await page.waitForFunction(() =>
+    Boolean(document.querySelector('.kds-station-picker')?.getClientRects().length) ||
+    Boolean(document.querySelector('section.kds-column[data-column="pending"]')?.getClientRects().length),
+  null, { timeout: 15_000 });
+  if (await picker.isVisible()) {
+    const station = process.env.QA_KDS_STATION_NAME || 'Cocina';
+    await picker.getByRole('button').filter({ hasText: station }).click();
+    await picker.waitFor({ state: 'hidden' });
+  }
   await page.locator('section.kds-column[data-column=pending]').waitFor();
 }
 
@@ -120,7 +132,16 @@ function ticketCard(page, column, fixture) {
 
 async function requireTicket(page, column, fixture) {
   const card = ticketCard(page, column, fixture);
-  await card.waitFor({ timeout: 15_000 });
+  try {
+    await card.waitFor({ timeout: 15_000 });
+  } catch {
+    const currentColumn = await page.locator(`section.kds-column[data-column="${column}"]`)
+      .innerText().catch(() => '(column not rendered)');
+    throw new Error(`${fixture.orderNumber} did not appear in ${column}; ` +
+      `url=${page.url()}; ui=${currentColumn.slice(-250)}; ` +
+      `body=${(await page.locator('body').innerText()).slice(-230)}; ` +
+      `post=${JSON.stringify(observedCancelResponses.slice(-2))}`);
+  }
   assert.equal(await card.count(), 1,
     `Expected one ${column} KDS card for ${fixture.orderNumber}/${fixture.dishName}.`);
   return card;
@@ -128,15 +149,16 @@ async function requireTicket(page, column, fixture) {
 
 async function requireOwnKdsShift(page) {
   const own = page.locator('app-kds-session-status-bar [aria-label="Cerrar mi turno"]');
-  assert(await own.isVisible(),
-    'The QA account must open its OWN KDS station shift through the UI before mutating tickets.');
+  await own.waitFor({ state: 'visible', timeout: 12_000 }).catch(async () => {
+    throw new Error('The QA account must open its OWN KDS station shift through the UI before mutating tickets. ' +
+      (await page.locator('app-kds-session-status-bar').innerText()).slice(0, 220));
+  });
 }
 
 async function readAvailableStock(page, productId) {
-  await openView(page, `${BASE}/admin/inventory/stock/${productId}`,
-    page.getByRole('heading', { name: 'Stock por Bodega' }), `Stock ${productId}`);
   const stat = page.locator('app-stats').filter({ hasText: 'Disponible en esta tienda' });
-  await stat.locator('.stat-value').waitFor();
+  await openView(page, `${BASE}/admin/inventory/stock/${productId}`,
+    stat.locator('.stat-value'), `Stock ${productId}`);
   const raw = (await stat.locator('.stat-value').innerText()).trim();
   const normalized = raw.replace(/[.\s\u00a0]/g, '').replace(',', '.');
   const number = Number(normalized);
@@ -174,7 +196,7 @@ async function run(name, reviewId, scheme, fn) {
     results.push({ name, reviewId, scheme, status: 'passed', evidence, ms: Date.now() - started });
     process.stdout.write(`PASS ${reviewId} ${scheme}: ${evidence}\n`);
   } catch (error) {
-    const message = String(error?.message ?? error).slice(0, 900);
+    const message = String(error?.message ?? error).slice(0, 1_800);
     results.push({ name, reviewId, scheme, status: 'failed', evidence: message, ms: Date.now() - started });
     process.stderr.write(`FAIL ${reviewId} ${scheme}: ${message}\n`);
     // Mutating flows must stop after an unexpected state; later assertions
@@ -185,40 +207,63 @@ async function run(name, reviewId, scheme, fn) {
 
 async function main() {
   const fixtures = parseFixtures(); // Fail before opening a browser or mutating anything.
+  const group = process.env.QA_KITCHEN_GROUP || 'all';
+  assert(['all', 'r6', 'r18', 'pending', 'reuse', 'waste'].includes(group),
+    'QA_KITCHEN_GROUP must be all, r6, r18, pending, reuse or waste.');
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const admin = await context.newPage();
-  const kds = await context.newPage();
-  const stock = await context.newPage();
-  for (const page of [admin, kds, stock]) page.setDefaultTimeout(15_000);
+  // One tab avoids the local vhost resetting KDS station selection while a
+  // second tab loads inventory. Each scenario navigates UI between surfaces.
+  const kds = admin;
+  kds.on('response', async (response) => {
+    if (response.request().method() !== 'POST' ||
+        !/\/kitchen-fire\/tickets\/\d+\/cancel$/.test(new URL(response.url()).pathname)) return;
+    try {
+      const body = await response.json();
+      observedCancelResponses.push({
+        http: response.status(), id: body?.data?.id ?? null,
+        status: body?.data?.status ?? null,
+        orderNumber: body?.data?.order?.order_number ?? null,
+      });
+    } catch {
+      observedCancelResponses.push({ http: response.status(), unreadable: true });
+    }
+  });
+  const stock = admin;
+  admin.setDefaultTimeout(15_000);
   try {
     await login(admin);
 
-    await run('Mixed direct + prepared item cannot dispatch past pending KDS', 'R6', 'sad/integrity', async () => {
+    if (group === 'all' || group === 'r6') await run('Mixed direct + prepared item cannot dispatch past pending KDS', 'R6', 'sad/integrity', async () => {
       const fixture = fixtures.r6;
       await openView(admin, `${BASE}/admin/orders/${fixture.orderId}`,
-        admin.getByText('Articulos del Pedido', { exact: true }), 'R6 order detail');
+        admin.getByRole('heading', { name: `Orden #${fixture.orderNumber}` }), 'R6 order detail');
       assert((await admin.locator('body').innerText()).includes(fixture.orderNumber),
         `Order ID ${fixture.orderId} does not display ${fixture.orderNumber}; wrong fixture.`);
       const items = admin.locator('.items-compact > div');
-      const direct = items.filter({ has: admin.locator('h3').filter({ hasText: fixture.directName }) });
-      const dish = items.filter({ has: admin.locator('h3').filter({ hasText: fixture.dishName }) });
+      const direct = items.filter({ hasText: fixture.directName });
+      const dish = items.filter({ hasText: fixture.dishName });
       assert.equal(await direct.count(), 1, 'Direct item must appear exactly once.');
       assert.equal(await dish.count(), 1, 'Prepared dish must appear exactly once.');
       await admin.getByText(/plato\(s\) pendientes de cocina/).waitFor();
       assert.equal(await dish.getByRole('button', { name: 'Entregar', exact: true }).count(), 0,
         'Pending prepared dish must not offer individual delivery.');
-      const dispatch = admin.getByRole('button', { name: 'Despachar Orden' });
+      // A disabled app-button sets aria-label to the blocking reason; the
+      // visible text still says Despachar Orden but its accessible name does
+      // not. Select the visible wrapper and inspect its native button.
+      const dispatch = admin.locator('app-button:visible')
+        .filter({ hasText: 'Despachar Orden' }).locator('button');
       assert.equal(await dispatch.count(), 1, 'Exactly one dispatch action should be projected.');
       assert(await dispatch.isDisabled(), 'Whole-order dispatch must remain disabled while dish is pending.');
       await direct.getByRole('button', { name: 'Entregar', exact: true }).click();
       await direct.getByText('Entregado', { exact: true }).waitFor();
       await admin.reload({ waitUntil: 'commit' });
-      await admin.getByText('Articulos del Pedido', { exact: true }).waitFor();
+      await admin.getByRole('heading', { name: `Orden #${fixture.orderNumber}` }).waitFor();
       const after = admin.locator('.items-compact > div');
-      await after.filter({ has: admin.locator('h3').filter({ hasText: fixture.directName }) })
+      await after.filter({ hasText: fixture.directName })
         .getByText('Entregado', { exact: true }).waitFor();
-      const dishAfter = after.filter({ has: admin.locator('h3').filter({ hasText: fixture.dishName }) });
+      const dishAfter = after.filter({ hasText: fixture.dishName });
       assert.equal(await dishAfter.getByText('Entregado', { exact: true }).count(), 0,
         'Delivering direct item must not mark the dish delivered after reload.');
       await openKds(kds);
@@ -226,12 +271,15 @@ async function main() {
       return `${fixture.orderNumber}: direct delivered; dish/KDS remained pending; dispatch disabled after reload`;
     });
 
-    await run('Pending KDS cancellation automatically restores each ingredient once', 'R18', 'happy/integrity', async () => {
+    if (['all', 'r18', 'pending'].includes(group)) await run('Pending KDS cancellation automatically restores each ingredient once', 'R18', 'happy/integrity', async () => {
       const fixture = fixtures.pending;
       await openKds(kds);
       await requireOwnKdsShift(kds);
-      const card = await requireTicket(kds, 'pending', fixture);
+      await requireTicket(kds, 'pending', fixture);
       const before = await snapshotStock(stock, fixture);
+      await openKds(kds);
+      await requireOwnKdsShift(kds);
+      const card = await requireTicket(kds, 'pending', fixture);
       await card.getByRole('button', { name: 'Cancelar', exact: true }).click();
       const dialog = kds.getByRole('dialog', { name: 'Cancelar ticket' });
       await dialog.getByText(/insumos se reintegrarán automáticamente/).waitFor();
@@ -240,7 +288,7 @@ async function main() {
       await dialog.getByRole('button', { name: 'Cancelar ticket' }).click();
       await requireTicket(kds, 'cancelled', fixture);
       await assertStockDelta(stock, fixture, before, 1);
-      await kds.reload({ waitUntil: 'commit' });
+      await openKds(kds);
       await requireTicket(kds, 'cancelled', fixture);
       assert.equal(await ticketCard(kds, 'pending', fixture).count(), 0,
         'Cancelled ticket must not return to pending or offer a second cancellation.');
@@ -248,41 +296,48 @@ async function main() {
       return `${fixture.orderNumber}: automatic +recipe stock, cancelled after reload, no second reintegration`;
     });
 
-    await run('Advanced cancellation can be abandoned; reuse restores stock only once', 'R18', 'sad/integrity', async () => {
+    if (['all', 'r18', 'reuse'].includes(group)) await run('Advanced cancellation can be abandoned; reuse restores stock only once', 'R18', 'sad/integrity', async () => {
       const fixture = fixtures.reuse;
       await openKds(kds);
       await requireOwnKdsShift(kds);
-      let card = await requireTicket(kds, 'in_preparation', fixture);
+      await requireTicket(kds, 'in_preparation', fixture);
       const before = await snapshotStock(stock, fixture);
+      await openKds(kds);
+      await requireOwnKdsShift(kds);
+      let card = await requireTicket(kds, 'in_preparation', fixture);
       await card.getByRole('button', { name: 'Cancelar', exact: true }).click();
       let dialog = kds.getByRole('dialog', { name: 'Cancelar plato en preparación' });
       await dialog.getByRole('button', { name: 'Volver' }).click();
       await requireTicket(kds, 'in_preparation', fixture);
       await assertStockDelta(stock, fixture, before, 0);
+      await openKds(kds);
       card = await requireTicket(kds, 'in_preparation', fixture);
       await card.getByRole('button', { name: 'Cancelar', exact: true }).click();
       dialog = kds.getByRole('dialog', { name: 'Cancelar plato en preparación' });
       await dialog.getByRole('button', { name: 'Reutilizar y reintegrar' }).click();
       await requireTicket(kds, 'cancelled', fixture);
       await assertStockDelta(stock, fixture, before, 1);
-      await kds.reload({ waitUntil: 'commit' });
+      await openKds(kds);
       await requireTicket(kds, 'cancelled', fixture);
       await assertStockDelta(stock, fixture, before, 1);
       return `${fixture.orderNumber}: Volver left stock/state intact; reuse restored once`;
     });
 
-    await run('Advanced waste records cancellation without returning ingredient stock', 'R18', 'happy/integrity', async () => {
+    if (['all', 'r18', 'waste'].includes(group)) await run('Advanced waste records cancellation without returning ingredient stock', 'R18', 'happy/integrity', async () => {
       const fixture = fixtures.waste;
       await openKds(kds);
       await requireOwnKdsShift(kds);
-      const card = await requireTicket(kds, 'in_preparation', fixture);
+      await requireTicket(kds, 'in_preparation', fixture);
       const before = await snapshotStock(stock, fixture);
+      await openKds(kds);
+      await requireOwnKdsShift(kds);
+      const card = await requireTicket(kds, 'in_preparation', fixture);
       await card.getByRole('button', { name: 'Cancelar', exact: true }).click();
       const dialog = kds.getByRole('dialog', { name: 'Cancelar plato en preparación' });
       await dialog.getByRole('button', { name: 'Desechar insumos' }).click();
       await requireTicket(kds, 'cancelled', fixture);
       await assertStockDelta(stock, fixture, before, 0);
-      await kds.reload({ waitUntil: 'commit' });
+      await openKds(kds);
       await requireTicket(kds, 'cancelled', fixture);
       await assertStockDelta(stock, fixture, before, 0);
       return `${fixture.orderNumber}: waste left ingredient stock unchanged after reload`;

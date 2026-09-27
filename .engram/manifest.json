@@ -2728,6 +2728,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "fd9a3526",
+      "created_by": "rzy",
+      "created_at": "2026-09-27T12:59:56Z",
+      "sessions": 0,
+      "memories": 16,
+      "prompts": 0
     }
   ]
 }
