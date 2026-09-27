@@ -162,6 +162,21 @@ describe('PosPaymentService.processSaleWithPayment — prior table status', () =
       expect(result.order?.id).toBe(1124);
     });
   }
+
+  it('persists a fresh restaurant tip separately from product totals', async () => {
+    post.and.returnValue(of({ data: { success: true, order: { id: 1124 } } }));
+    await firstValueFrom(service.processSaleWithPayment(cart, {
+      ...request, tip_amount: 100, tip_type: 'percentage', tip_value: 100,
+      tip_waiter_id: 7, cashReceived: 1100,
+    }, 'current_user'));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.total_amount).toBe(1000);
+    expect(payload.tip_amount).toBe(100);
+    expect(payload.tip_type).toBe('percentage');
+    expect(payload.tip_value).toBe(100);
+    expect(payload.tip_waiter_id).toBe(7);
+    expect(payload.amount_received).toBe(1100);
+  });
 });
 
 describe('PosPaymentService.processShippingSale — B7 nota de envío + B11 cobro multimétodo', () => {
@@ -244,6 +259,24 @@ describe('PosPaymentService.processShippingSale — B7 nota de envío + B11 cobr
     expect(payload.store_payment_method_id).toBe(1);
     expect(payload.amount_received).toBe(2000);
   });
+
+  it('adds tip fields to a delivery multi-tender sale without adding tip to shipping', async () => {
+    await firstValueFrom(service.processShippingSale(cart(), shipping, {
+      paymentMethod: { id: '1', type: 'cash' },
+      tip_amount: 100, tip_type: 'fixed', tip_value: 100,
+      tip_waiter_id: 7,
+      payments: [
+        { store_payment_method_id: 1, amount: 1000, amount_received: 1000 },
+        { store_payment_method_id: 2, amount: 600 },
+      ],
+    } as any, 'current_user'));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.total_amount).toBe(1500);
+    expect(payload.shipping_cost).toBe(500);
+    expect(payload.tip_amount).toBe(100);
+    expect(payload.tip_waiter_id).toBe(7);
+    expect(payload.payments[1].amount).toBe(600);
+  });
 });
 
 describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada multimétodo enruta a flow/pay', () => {
@@ -321,6 +354,26 @@ describe('PosPaymentService.processSaleWithPayment — B15(2) orden adoptada mul
 
     expect(flowPayOrder).not.toHaveBeenCalled();
     expect(processPaymentForExistingOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes a tipped adopted cash order through flow/pay so the tip is persisted', async () => {
+    await firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '1', type: 'cash' }, cashReceived: 1100,
+      tip_amount: 100, tip_type: 'fixed', tip_value: 100,
+    } as any, 'current_user'));
+    expect(processPaymentForExistingOrder).not.toHaveBeenCalled();
+    expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      store_payment_method_id: 1, amount_received: 1100, tip_amount: 100,
+    }));
+  });
+
+  it('rejects tipped adopted bank transfer before losing the bank account', async () => {
+    await expectAsync(firstValueFrom(service.processSaleWithPayment(cart, {
+      paymentMethod: { id: '3', type: 'bank_transfer' },
+      bank_account_id: 44, tip_amount: 100,
+    } as any, 'current_user'))).toBeRejectedWithError(/no permite agregar propina/);
+    expect(flowPayOrder).not.toHaveBeenCalled();
+    expect(processPaymentForExistingOrder).not.toHaveBeenCalled();
   });
 });
 

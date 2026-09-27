@@ -546,6 +546,14 @@ export class PosPaymentService {
       total_amount: Number(
         parseFloat(cartState.summary.total.toString()).toFixed(2),
       ),
+      ...(paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0
+        ? {
+            tip_amount: paymentRequest.tip_amount,
+            tip_type: paymentRequest.tip_type,
+            tip_value: paymentRequest.tip_value,
+            tip_waiter_id: paymentRequest.tip_waiter_id,
+          }
+        : {}),
       requires_payment: true,
       payment_form: '1', // DIAN: contado
       ...(hasMultiPayments
@@ -719,6 +727,14 @@ export class PosPaymentService {
       ),
       promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: totalWithShipping,
+      ...(paymentRequest?.tip_amount != null && paymentRequest.tip_amount > 0
+        ? {
+            tip_amount: paymentRequest.tip_amount,
+            tip_type: paymentRequest.tip_type,
+            tip_value: paymentRequest.tip_value,
+            tip_waiter_id: paymentRequest.tip_waiter_id,
+          }
+        : {}),
       // Shipping fields
       delivery_type: shippingData.deliveryType,
       shipping_method_id: shippingData.shippingMethodId,
@@ -1221,6 +1237,14 @@ export class PosPaymentService {
     const multiPayments = (
       paymentRequest as { payments?: PosPaymentLeg[] }
     ).payments;
+    const tipFields = paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0
+      ? {
+          tip_amount: paymentRequest.tip_amount,
+          tip_type: paymentRequest.tip_type,
+          tip_value: paymentRequest.tip_value,
+          tip_waiter_id: paymentRequest.tip_waiter_id,
+        }
+      : {};
     if (Array.isArray(multiPayments) && multiPayments.length >= 2) {
       return this.ordersService
         .flowPayOrder(String(orderId), {
@@ -1229,6 +1253,7 @@ export class PosPaymentService {
           store_payment_method_id: multiPayments[0].store_payment_method_id,
           payment_type: 'direct',
           payments: multiPayments,
+          ...tipFields,
         } as any)
         .pipe(
           map((response: any) => {
@@ -1255,6 +1280,40 @@ export class PosPaymentService {
             };
           }),
         );
+    }
+
+    // `/store/payments` has no tip contract. Direct methods can instead use
+    // flow/pay, which recalculates the order balance with the tip before charge.
+    // Gateway/ON_DELIVERY methods need the existing payment processor metadata,
+    // so never silently discard their tip or send it to an unsupported DTO.
+    if (paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0) {
+      const methodType = paymentRequest.paymentMethod.type;
+      const processingMode = (paymentRequest.paymentMethod.original as any)
+        ?.system_payment_method?.processing_mode;
+      if (methodType === 'wompi' || methodType === 'wallet' ||
+          methodType === 'bank_transfer' ||
+          (processingMode != null && processingMode !== 'DIRECT')) {
+        return throwError(() => new Error(
+          'Este método no permite agregar propina al cobrar una orden ya creada. Usa efectivo o tarjeta, o cobra la propina por separado.',
+        ));
+      }
+      return this.ordersService.flowPayOrder(String(orderId), {
+        store_payment_method_id: Number(paymentRequest.paymentMethod.id),
+        payment_type: 'direct',
+        amount_received: paymentRequest.cashReceived,
+        payment_reference: paymentRequest.reference,
+        ...tipFields,
+      }).pipe(map((response: any) => ({
+        success: true,
+        order: {
+          id: orderId,
+          order_number: orderNumber,
+          status: response?.order?.state,
+        },
+        payment: response?.payment,
+        message: response?.message ?? 'Pago aplicado a la orden',
+        change: response?.change ?? response?.payment?.change,
+      })));
     }
 
     const amount = Number(cartState.summary.total.toFixed(2));

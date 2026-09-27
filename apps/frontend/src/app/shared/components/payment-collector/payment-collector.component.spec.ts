@@ -547,3 +547,45 @@ describe('PaymentModalComponent — arbitraje NG8002 allowMultiTender (Paso 5c)'
     expect(collector.config().allowMultiTender).toBe(true);
   });
 });
+
+describe('PaymentCollectorComponent — restaurant tip amount', () => {
+  let fixture: ComponentFixture<PaymentCollectorComponent>;
+  let component: PaymentCollectorComponent;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [PaymentCollectorComponent],
+      providers: [
+        { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
+        { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
+      ],
+    }).compileComponents();
+    fixture = TestBed.createComponent(PaymentCollectorComponent);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('amount', 105000); // products net + shipping
+    fixture.componentRef.setInput('tipBase', 119000); // products gross, before discount
+    fixture.componentRef.setInput('allowTip', true);
+    fixture.detectChanges();
+  });
+
+  afterEach(() => fixture.destroy());
+
+  it('resolves percentage against gross products and charges the resolved money amount', () => {
+    component.tipType.set('percentage');
+    component.tipControl.setValue(10);
+    fixture.detectChanges();
+
+    expect(component.tipAmount()).toBe(11900);
+    expect(component.effectiveTotal()).toBe(116900);
+    expect(component.quickAmounts()[0]).toBe(116900);
+  });
+
+  it('does not add a hidden tip to a credit plan', () => {
+    component.mode.set('credito');
+    component.tipControl.setValue(5000);
+    fixture.detectChanges();
+
+    expect(component.effectiveTotal()).toBe(105000);
+    expect(fixture.debugElement.query(By.css('.pc-tip-mode'))).toBeNull();
+  });
+});
