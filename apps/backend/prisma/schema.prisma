@@ -533,7 +533,8 @@ model order_events {
   /// Unión cerrada en TypeScript (`OrderEventType`): state_changed |
   /// payment_registered | payment_cancelled | refund_created | refund_resolved
   /// | customer_changed | item_delivered | item_cancelled |
-  /// item_delivery_reverted | shipping_assigned | invoice_issued.
+  /// item_delivery_reverted | shipping_assigned | invoice_issued |
+  /// kitchen_fired.
   event_type      String             @db.VarChar(50)
   from_state      order_state_enum?
   to_state        order_state_enum?

@@ -997,7 +997,8 @@ export type OrderEventType =
   | 'item_cancelled'
   | 'item_delivery_reverted'
   | 'shipping_assigned'
-  | 'invoice_issued';
+  | 'invoice_issued'
+  | 'kitchen_fired';
 
 /** Mirrors the backend's `OrderEventSource` (order-history.types.ts). */
 export type OrderEventSource = 'http' | 'webhook' | 'job' | 'listener' | 'system';
