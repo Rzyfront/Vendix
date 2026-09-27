@@ -1645,6 +1645,7 @@ export class OrdersService {
         product_type: item.products?.product_type,
         skip_kds: item.skip_kds,
         delivered_at: item.delivered_at,
+        cancelled_at: item.cancelled_at,
         latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
         orderHasSettledPayment,
       }),

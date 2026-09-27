@@ -451,7 +451,7 @@ export class TableSessionPageComponent implements OnInit {
   );
 
   readonly deliveredCount = computed(() =>
-    this.items().filter((it) => this.isDelivered(it)).length,
+    this.items().filter((it) => !it.cancelled_at && this.isDelivered(it)).length,
   );
 
   readonly filteredItems = computed<TableSessionOrderItem[]>(() => {
@@ -467,7 +467,7 @@ export class TableSessionPageComponent implements OnInit {
       });
     }
     if (filter === 'delivered') {
-      return all.filter((it) => this.isDelivered(it));
+      return all.filter((it) => !it.cancelled_at && this.isDelivered(it));
     }
     return all;
   });

@@ -361,6 +361,12 @@ describe('order-action-policy — canCancelItem', () => {
 });
 
 describe('order-action-policy — canReverseDeliveredItem', () => {
+  it('does not offer a second reversal after a delivered item was cancelled', () => {
+    expect(canReverseDeliveredItem(item({
+      delivered_at: new Date(), cancelled_at: new Date(),
+    }))).toEqual({ enabled: false, reason: 'TABLE_SESSION_ITEM_NOT_REMOVABLE' });
+  });
+
   it.each(['cancelled', 'refunded', 'finished'])('rejects on order state %s', (order_state) =>
     expect(canReverseDeliveredItem(item({ order_state, delivered_at: new Date() }))).toEqual({
       enabled: false,

@@ -591,6 +591,7 @@ export interface OrderItemActionSnapshot {
   product_type?: string | null;
   skip_kds?: boolean | null;
   delivered_at?: Date | string | null;
+  cancelled_at?: Date | string | null;
   /** Latest (most recent) kitchen-ticket-item status for this order item,
    * when it was ever fired — mirrors `deliverOrderItem`'s
    * `kitchen_ticket_items[0].status` read. `undefined` for an item never
@@ -662,6 +663,9 @@ export function canCancelItem(item: OrderItemActionSnapshot): OrderActionResult 
 export function canReverseDeliveredItem(item: OrderItemActionSnapshot): OrderActionResult {
   if (['cancelled', 'refunded', 'finished'].includes(item.order_state)) {
     return { enabled: false, reason: 'ORD_ITEM_CANCEL_STATE_001' };
+  }
+  if (item.cancelled_at) {
+    return { enabled: false, reason: 'TABLE_SESSION_ITEM_NOT_REMOVABLE' };
   }
   if (item.orderHasSettledPayment) {
     return { enabled: false, reason: 'ORD_ITEM_CANCEL_PAID_001' };

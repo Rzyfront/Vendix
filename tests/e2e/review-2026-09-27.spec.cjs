@@ -543,28 +543,61 @@ async function main() {
     }
 
     if (results[0]?.status === 'passed' && (group === 'table_cancel' || group === 'all')) {
-      await runScenario('R18: table bill retains pending, preparing and ready cancellations after reload', ['R18'], async () => {
+      await runScenario('R18: table bill retains pending, preparing, ready and reversed-delivery cancellations', ['R18'], async () => {
         const total = page.locator('.totals-row--grand');
         await openUiView(page, `${adminBase}/admin/restaurant-ops/tables/session/160`,
           total, 'La cuenta de mesa con platos cancelados');
         assert.match(await total.innerText(), /Total\s*\$0/i);
         const cancelled = page.locator('.item-cancelled-badge');
-        assert.equal(await cancelled.count(), 4, 'La mesa perdió alguno de sus cuatro platos cancelados');
+        assert.equal(await cancelled.count(), 5, 'La mesa perdió alguno de sus cinco platos cancelados');
         const badges = await cancelled.allInnerTexts();
-        assert.equal(badges.filter((label) => label.includes('reuso')).length, 2);
+        assert.equal(badges.filter((label) => label.includes('reuso')).length, 3);
         assert.equal(badges.filter((label) => label.includes('merma')).length, 2);
         const reasons = await page.locator('.item-cancelled-reason').allInnerTexts();
         for (const reason of ['QA R18 mesa pendiente', 'QA R18 mesa avanzada desechar',
-          'QA R18 mesa avanzada reusar', 'QA R18 mesa lista desechar']) {
+          'QA R18 mesa avanzada reusar', 'QA R18 mesa lista desechar',
+          'QA R18 entrega sin cobro reutilizar']) {
           assert(reasons.some((line) => line.includes(reason)), `Falta motivo persistido: ${reason}`);
         }
         assert.equal(await page.getByRole('button', {
           name: 'Eliminar Pollo Árabe E2E de la cuenta', exact: true,
         }).count(), 0, 'Un plato cancelado se puede cancelar dos veces');
+        await page.getByText('Entrega reversada', { exact: true }).waitFor();
+        assert.match(await page.locator('body').innerText(), /Entregados\s*0/);
         await openUiView(page, `${adminBase}/admin/restaurant-ops/tables/session/160`,
           total, 'La cuenta de mesa tras recarga');
         assert.match(await total.innerText(), /Total\s*\$0/i);
-        assert.equal(await cancelled.count(), 4);
+        assert.equal(await cancelled.count(), 5);
+      });
+    }
+
+    if (results[0]?.status === 'passed' && (group === 'delivered_reverse' || group === 'all')) {
+      await runScenario('R18: unpaid delivered dish reversed once restores ingredients exactly', ['R18'], async () => {
+        const heading = page.getByRole('heading', { name: 'Orden #T-1790520816706-805' });
+        await openUiView(page, `${adminBase}/admin/orders/1377`, heading,
+          'La orden de mesa con entrega reversada');
+        const item = page.locator('.items-compact > div').filter({
+          hasText: 'QA R18 entrega sin cobro reutilizar',
+        });
+        await item.getByText('Cancelado', { exact: true }).waitFor();
+        assert.equal(await item.getByRole('button', { name: 'Reversar' }).count(), 0,
+          'La reversa ya aplicada no debe ofrecer un segundo reintegro');
+        const summary = page.locator('app-card').filter({
+          has: page.getByRole('heading', { name: 'Resumen de Pago' }),
+        });
+        assert.match(await summary.innerText(), /Total\s*\$0/i);
+
+        const stockValue = async (productId) => {
+          const title = page.getByText('Inventario / Stock', { exact: true }).first();
+          await openUiView(page, `${adminBase}/admin/products/edit/${productId}?fromPage=1`,
+            title, `Inventario del insumo ${productId}`);
+          const card = page.locator('div.p-3.bg-surface').filter({
+            has: page.getByText('En inventario', { exact: true }),
+          }).first();
+          return (await card.locator('span.text-xl').first().innerText()).trim();
+        };
+        assert.equal(await stockValue(427), '-900', 'Pollo no recuperó 300 unidades exactas');
+        assert.equal(await stockValue(428), '570', 'Especias no recuperaron 10 unidades exactas');
       });
     }
 
