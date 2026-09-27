@@ -459,6 +459,25 @@ async function main() {
         assert.match(fullText, /Reembolsada/);
         assert.match(fullText, /\$0(?:\D|$)/);
       });
+      await runScenario('R13: requested and processing refunds do not reduce the current net', ['R13'], async () => {
+        await openUiView(page, `${adminBase}/admin/orders/sales`,
+          page.getByRole('columnheader', { name: 'Neto actual' }),
+          'El listado para reembolsos sin completar');
+        const search = page.locator('input[placeholder="Buscar órdenes..."]');
+        for (const [orderNumber, expectedNet] of [
+          ['POS-2026-0340', '$1.500'], // refund requested for $750
+          ['POS-2026-0362', '$44.000'], // refund processing for $44.000
+        ]) {
+          await search.fill(orderNumber);
+          const row = page.getByRole('row').filter({ hasText: orderNumber });
+          await row.waitFor({ timeout: 20_000 });
+          const text = await row.innerText();
+          assert.match(text, /Cancelada/);
+          assert(text.includes(expectedNet), `${orderNumber} neto pendiente no debe restarse: ${text}`);
+          assert.doesNotMatch(text, /Reembolso parcial|Reembolsada/,
+            `${orderNumber} no tiene todavía una devolución completada.`);
+        }
+      });
       await runScenario('R13: mobile order cards retain refund badge and current net', ['R13'], async () => {
         await page.setViewportSize({ width: 390, height: 844 });
         try {
@@ -478,6 +497,14 @@ async function main() {
           await full.waitFor({ timeout: 20_000 });
           assert.match(await full.locator('.card-badge-wrap').innerText(), /Reembolsada/);
           assert.match(await full.locator('.card-footer').innerText(), /Neto actual[\s\S]*\$0(?:\D|$)/i);
+          await search.fill('POS-2026-0340');
+          const requested = page.locator('app-orders-list app-item-list .item-card')
+            .filter({ hasText: 'POS-2026-0340' });
+          await requested.waitFor({ timeout: 20_000 });
+          assert.match(await requested.locator('.card-footer').innerText(),
+            /Neto actual[\s\S]*\$1\.500/i);
+          assert.doesNotMatch(await requested.locator('.card-badge-wrap').innerText(),
+            /Reembolso parcial|Reembolsada/);
         } finally {
           await page.setViewportSize({ width: 1280, height: 720 });
         }
