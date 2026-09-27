@@ -257,6 +257,42 @@ describe('ShippingDistanceService', () => {
       );
     });
 
+    it("precisión 'area' (centroide de ciudad) → null: sin punto real no hay tarifa por km", async () => {
+      const geocoding = {
+        forward: jest.fn().mockResolvedValue({
+          lat: 11.5444,
+          lng: -72.9072,
+          precision: 'area',
+        }),
+      } as any;
+      const service = new ShippingDistanceService(undefined, geocoding);
+      await expect(
+        service.resolveBuyerCoords({
+          address_line1: 'Vereda Inexistente Km 99',
+          city: 'Riohacha',
+          country_code: 'CO',
+        }),
+      ).resolves.toBeNull();
+    });
+
+    it("precisión 'street' se acepta", async () => {
+      const geocoding = {
+        forward: jest.fn().mockResolvedValue({
+          lat: 4.6052773,
+          lng: -74.0805474,
+          precision: 'street',
+        }),
+      } as any;
+      const service = new ShippingDistanceService(undefined, geocoding);
+      await expect(
+        service.resolveBuyerCoords({
+          address_line1: 'Calle 14 # 26-13',
+          city: 'Bogotá',
+          country_code: 'CO',
+        }),
+      ).resolves.toMatchObject({ precision: 'street', source: 'geocoded' });
+    });
+
     it('forward devuelve lat/lng null → null (rige zona)', async () => {
       const geocoding = {
         forward: jest.fn().mockResolvedValue({ lat: null, lng: null }),

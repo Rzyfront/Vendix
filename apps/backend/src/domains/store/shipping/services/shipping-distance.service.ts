@@ -272,6 +272,9 @@ export class ShippingDistanceService {
         'buyer:geocoded',
       );
       if (!coords) return null;
+      // Un centroide de ciudad/barrio ('area') no ubica la dirección: cobrar
+      // por km desde ahí inventa la distancia. Sin punto real, sin tarifa.
+      if (result?.precision === 'area') return null;
       return { ...coords, precision: result?.precision, source: 'geocoded' };
     } catch (err) {
       this.logger.warn(
