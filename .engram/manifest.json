@@ -2840,6 +2840,14 @@
       "sessions": 3,
       "memories": 7,
       "prompts": 0
+    },
+    {
+      "id": "da320fec",
+      "created_by": "rzy",
+      "created_at": "2026-09-27T16:35:27Z",
+      "sessions": 0,
+      "memories": 5,
+      "prompts": 0
     }
   ]
 }

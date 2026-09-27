@@ -500,11 +500,15 @@ jobs:
     # O sea que el resultado del job no lo decidia el codigo sino el reloj: la
     # unica compuerta de backend venia siendo un volado. Un `cancelled` se lee
     # igual que el `cancelled` que deja un push encadenado, asi que ademas
-    # confundia las dos causas. 45 minutos da ~50 % de margen sobre la corrida
-    # verde conocida. El arreglo de fondo es partir los seis carriles en jobs
+    # confundia las dos causas. PR #860 (2026-09-27): con el arbol ampliado,
+    # 45 min cancelaron el job en `jest — invoicing` tras 86/111 specs verdes
+    # de ese carril y los otros cinco carriles verdes. Faltaban ~25 specs a
+    # ~12s cada una, mas cierre/subida de artefactos: 75 min deja margen real
+    # sobre los ~51 min proyectados sin cambiar el nombre del check requerido.
+    # El arreglo de fondo es partir los seis carriles en jobs
     # paralelos (hoy corren en serie en un solo runner), pero eso cambia los
     # required status checks del ruleset y no se toca sin acuerdo.
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
