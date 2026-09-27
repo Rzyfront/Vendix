@@ -2096,6 +2096,12 @@ export class DispatchNotesService {
       );
     }
 
+    // Envío por asignar (checkout por WhatsApp sin ubicación): sin método no
+    // hay con qué despachar ni qué cobrar de envío. Primero se asigna.
+    if (order.delivery_type === 'other' && order.shipping_method_id == null) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
+    }
+
     // Delivery address gate: a remisión needs a place to deliver. The address
     // comes from the order's snapshot JSON or its populated shipping-address
     // relation. Without either we cannot generate the remisión.
@@ -3326,6 +3332,7 @@ export class DispatchNotesService {
         id: true,
         state: true,
         delivery_type: true,
+        shipping_method_id: true,
         dispatch_fulfillment: true,
         dispatch_pool_at: true,
       },
@@ -3371,6 +3378,10 @@ export class DispatchNotesService {
         ErrorCodes.DSP_ORDER_DELIVERY_001,
         `La orden #${order_id} tiene tipo de entrega "${order.delivery_type}", que se entrega en el acto y no va al pool de despacho. Si necesita envío, corrija el tipo de entrega antes de publicarla.`,
       );
+    }
+
+    if (order.delivery_type === 'other' && order.shipping_method_id == null) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
     // Ya remitida al 100% → sólo se rechaza si NO queda nada que un repartidor
