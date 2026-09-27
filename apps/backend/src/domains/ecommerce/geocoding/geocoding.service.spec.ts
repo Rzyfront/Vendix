@@ -171,6 +171,43 @@ const TWO_CROSSINGS_ELEMENTS = {
   ],
 };
 
+/**
+ * An independent Nominatim structured-search anchor near the REAL Carrera 7
+ * x Calle 32 corner (~500m away) — what a real Nominatim `street=` search
+ * would plausibly return. Used to prove the plausibility gate accepts the
+ * Bogotá corner (not just the tie-break) once it is cross-checked.
+ */
+const CARRERA7_ANCHOR: GeocodeCandidate[] = [
+  {
+    lat: '4.6150',
+    lon: '-74.0700',
+    addresstype: 'road',
+    address: { road: 'Carrera 7', city: 'Bogotá' },
+  },
+];
+
+/**
+ * A single, isolated "Carrera 13"/"Calle 62" OSM crossing far (~31km) from
+ * the real one — reproducing the live 2026-09-27 bug where "Calle 14 # 26-13,
+ * Bogotá" matched an OSM way pair ~15km from the real Ricaurte/Paloquemao
+ * corner: Bogotá D.C.'s administrative bbox reaches rural corregimientos far
+ * from the urban core, so a bbox-only filter cannot reject it, and with only
+ * ONE candidate corner the multi-crossing tie-break never engages either.
+ * Only the plausibility gate (anchor cross-check) can catch this shape.
+ */
+const FAR_SINGLE_CROSSING_ELEMENTS = {
+  elements: [
+    {
+      tags: { name: 'Carrera 13', highway: 'residential' },
+      geometry: [{ lat: 4.85, lon: -74.25 }],
+    },
+    {
+      tags: { name: 'Calle 62', highway: 'residential' },
+      geometry: [{ lat: 4.85, lon: -74.25 }],
+    },
+  ],
+};
+
 describe('GeocodingService.forward — cascade + candidate selection (mocked fetch)', () => {
   let redis: {
     get: jest.Mock<Promise<string | null>, unknown[]>;
@@ -200,7 +237,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
     jest.restoreAllMocks();
   });
 
-  it('resolves via the DANE intersection step after resolving the municipality bbox, never touching structured/free-text Nominatim search', async () => {
+  it('resolves via the DANE intersection step after resolving the municipality bbox and verifying the corner with a single anchor probe, never falling through to full free-text search', async () => {
     fetchMock.mockImplementation((url: string) => {
       const u = String(url);
       if (u.includes('overpass'))
@@ -213,6 +250,9 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
       ) {
         return Promise.resolve(jsonResponse(BBOX_CANDIDATE));
       }
+      // Anchor probe (street=) comes up empty here — the gate falls back to
+      // the primary street's own centroid, which for this single-vertex
+      // fixture IS the corner, so it still passes.
       return Promise.resolve(jsonResponse([]));
     });
 
@@ -231,10 +271,18 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
         u.includes('city=') &&
         !u.includes('street=') &&
         !u.includes('q=');
-      expect(u.includes('overpass') || isBboxLookup).toBe(true);
-      expect(u.includes('street=')).toBe(false);
+      const isAnchorProbe = isNominatimSearch(u) && u.includes('street=');
+      expect(u.includes('overpass') || isBboxLookup || isAnchorProbe).toBe(
+        true,
+      );
       expect(u.includes('q=')).toBe(false);
     }
+    // Exactly one anchor probe — the full structured-search cascade (which
+    // also queries `street=`, but only after the intersection step fails)
+    // never runs because the intersection step already succeeded.
+    expect(
+      urls.filter((u) => isNominatimSearch(u) && u.includes('street=')).length,
+    ).toBe(1);
   });
 
   it('interpolates the plate ~40 metres from the DANE corner along the main way', async () => {
@@ -458,6 +506,14 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
       ) {
         return Promise.resolve(jsonResponse(BBOX_CANDIDATE));
       }
+      if (isNominatimSearch(u) && u.includes('street=')) {
+        // The primary way's OWN vertices span both Bogotá and Soacha in this
+        // fixture (that is what proves the tie-break), so a blind centroid
+        // of it would sit ~7.6km from the winning corner and wrongly fail
+        // the plausibility gate. A real Nominatim search does not share
+        // that artifact — it independently confirms the Bogotá corner.
+        return Promise.resolve(jsonResponse(CARRERA7_ANCHOR));
+      }
       return Promise.resolve(jsonResponse([]));
     });
 
@@ -468,6 +524,38 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
     expect(result.precision).toBe('intersection');
     expect(result.lat).toBeCloseTo(4.6195, 2);
     expect(result.lng).toBeCloseTo(-74.0685, 2);
+  });
+
+  it("rejects a single Overpass corner that lands far from the address's own Nominatim anchor and falls back to structured search's honest precision", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes('overpass'))
+        return Promise.resolve(jsonResponse(FAR_SINGLE_CROSSING_ELEMENTS));
+      if (
+        isNominatimSearch(u) &&
+        u.includes('city=') &&
+        !u.includes('street=') &&
+        !u.includes('q=')
+      ) {
+        return Promise.resolve(jsonResponse(BBOX_CANDIDATE));
+      }
+      if (isNominatimSearch(u) && u.includes('street=')) {
+        return Promise.resolve(jsonResponse(EXACT_MATCH));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+
+    const result = await service.forward('Cra 13 # 62-40, Bogotá, Colombia');
+
+    // The Overpass corner (4.85, -74.25) is ~31km from the Nominatim anchor
+    // (4.651, -74.051) — the gate must reject it outright, never reporting
+    // 'intersection'/'interpolated' with false confidence, and fall back to
+    // structured search's own (honest) resolution of the same address.
+    expect(result.precision).not.toBe('intersection');
+    expect(result.precision).not.toBe('interpolated');
+    expect(result.precision).toBe('exact');
+    expect(result.lat).toBeCloseTo(4.651);
+    expect(result.lng).toBeCloseTo(-74.051);
   });
 
   it('never contacts the Swiss-only Overpass mirror and races exactly the three usable mirrors', async () => {
@@ -594,7 +682,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('caches a resolved result for 7 days and a null result for 6 hours under the v4 prefix', async () => {
+  it('caches a resolved result for 7 days and a null result for 6 hours under the v5 prefix', async () => {
     fetchMock.mockImplementation((url: string) => {
       const u = String(url);
       if (u.includes('overpass'))
@@ -612,7 +700,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
 
     await service.forward('Cra 13 # 62-40, Bogotá, Colombia');
     expect(redis.set).toHaveBeenCalledWith(
-      expect.stringContaining('geocode:fwd:v4:'),
+      expect.stringContaining('geocode:fwd:v5:'),
       expect.any(String),
       'EX',
       604800,
@@ -622,7 +710,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
     fetchMock.mockImplementation(() => Promise.reject(new Error('down')));
     await service.forward('texto sin formato DANE, Bogotá, Colombia');
     expect(redis.set).toHaveBeenCalledWith(
-      expect.stringContaining('geocode:fwd:v4:'),
+      expect.stringContaining('geocode:fwd:v5:'),
       expect.any(String),
       'EX',
       21600,
@@ -683,7 +771,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
     const fwdKeys = new Set(
       redis.set.mock.calls
         .map(([key]) => String(key))
-        .filter((key) => key.startsWith('geocode:fwd:v4:')),
+        .filter((key) => key.startsWith('geocode:fwd:v5:')),
     );
     expect(fwdKeys.size).toBe(1);
     for (const key of fwdKeys) expect(key).not.toContain('bias:');
@@ -698,7 +786,7 @@ describe('GeocodingService.forward — cascade + candidate selection (mocked fet
 
     const fwdKey = redis.set.mock.calls
       .map(([key]) => String(key))
-      .find((key) => key.startsWith('geocode:fwd:v4:'));
+      .find((key) => key.startsWith('geocode:fwd:v5:'));
     expect(fwdKey).toBeDefined();
     expect(fwdKey).toContain('bias:4.61,-74.10');
   });

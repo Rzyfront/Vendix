@@ -230,6 +230,19 @@ export class GeocodingService {
    * the cascade stops advancing to the next attempt with whatever it has.
    */
   private static readonly FORWARD_OVERALL_BUDGET_MS = 15000;
+  /**
+   * Plausibility gate for an Overpass intersection corner (2026-09-27 live
+   * finding): "Calle 14 # 26-13, Bogotá" matched an OSM way pair named
+   * "Calle 14"/"Carrera 26" ~15km from the real Ricaurte/Paloquemao corner
+   * (Bogotá D.C.'s administrative bbox reaches rural corregimientos far from
+   * the urban core, so a bbox-only filter cannot reject it) — the cascade
+   * reported it as 'interpolated' with false confidence. A corner is now
+   * only accepted within this radius of an independent anchor (same-address
+   * Nominatim search, or failing that the primary street's own centroid);
+   * otherwise it is discarded and the cascade falls through to Nominatim's
+   * honest 'street'/'area' precision. See {@link resolveIntersectionAnchor}.
+   */
+  private static readonly INTERSECTION_ANCHOR_MAX_METERS = 2000;
 
   constructor(
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
@@ -357,7 +370,12 @@ export class GeocodingService {
     // Bogotá/Soacha corner disambiguation) — a v3-cached 'street'/'area'
     // result for an address that now resolves to 'intersection'/
     // 'interpolated' must not shadow the improved result for its 7-day TTL.
-    return `geocode:fwd:v4:${parts.join('|')}`;
+    // v5: bumped from v4 when the intersection corner plausibility gate was
+    // added (2026-09-27 live finding: "Calle 14 # 26-13, Bogotá" matched an
+    // OSM way pair ~15km from the real corner and was cached as
+    // 'interpolated' with false confidence) — a v4-cached false-confident
+    // corner must not shadow the now-gated, honest result for its 7-day TTL.
+    return `geocode:fwd:v5:${parts.join('|')}`;
   }
 
   // ------------------------------------------------------------- Cascade
@@ -401,7 +419,7 @@ export class GeocodingService {
     } else {
       if ((parsed.kind === 'dane' || parsed.kind === 'interseccion') && city) {
         attempts.push(() =>
-          this.tryIntersection(parsed, city, bbox, bias, budget),
+          this.tryIntersection(parsed, city, state, bbox, bias, budget),
         );
       }
       if (parsed.viaTipo && parsed.viaNum) {
@@ -753,6 +771,7 @@ export class GeocodingService {
   private async tryIntersection(
     parsed: ParsedColombianAddress,
     city: string,
+    state: string | null,
     bbox: MunicipalityBbox | null,
     bias: { lat: number; lng: number } | null,
     budget: RequestBudget,
@@ -828,8 +847,67 @@ export class GeocodingService {
     );
     if (primaryWays.length === 0 || crossWays.length === 0) return null;
 
-    const corner = this.selectBestCorner(primaryWays, crossWays, bbox, bias);
-    if (!corner) return null;
+    const cornerCandidate = this.selectBestCorner(
+      primaryWays,
+      crossWays,
+      bbox,
+      bias,
+    );
+    if (!cornerCandidate) return null;
+    const corner = { lat: cornerCandidate.lat, lng: cornerCandidate.lng };
+
+    // Plausibility gate — ONLY for an isolated match (candidateCount === 1).
+    // Live 2026-09-27 finding: a real, densely-tagged urban grid intersection
+    // (e.g. Carrera 7 x Calle 32) produces MANY nearby way fragments once
+    // filtered to the bbox (Overpass returned 15+ clustered candidates there),
+    // so `selectBestCorner`'s own proximity-to-bbox-center/bias tie-break
+    // already self-corroborates a multi-candidate result — no extra check
+    // needed, and none is applied here for that case.
+    //
+    // A genuinely wrong match (Calle 14 x Carrera 26 resolving to an isolated
+    // rural corregimiento ~15km from the real Ricaurte/Paloquemao corner) is
+    // structurally different: Overpass found exactly ONE matched pair for the
+    // whole city-wide bbox, with no alternative cluster to corroborate it.
+    // That is the case this gate targets: cross-check the sole candidate
+    // against an independent anchor (same-address Nominatim search, or the
+    // primary street's own centroid) and discard it if implausible.
+    //
+    // NOTE: Nominatim's structured search was empirically proven (live,
+    // 2026-09-27) to be an UNRELIABLE anchor for common/long Bogotá streets
+    // regardless of house-number qualification — its closest of 10 ranked
+    // results for "Carrera 7" sat 5.6km+ from a verified-correct corner. That
+    // is exactly why this gate is scoped to the single-candidate path only:
+    // applying it universally caused false rejections of legitimate,
+    // multi-candidate corners on common streets.
+    if (cornerCandidate.candidateCount <= 1) {
+      const anchor = await this.resolveIntersectionAnchor(
+        parsed,
+        city,
+        state,
+        bbox,
+        primaryWays,
+        budget,
+      );
+      if (!anchor) {
+        // No independent anchor at all AND no alternative candidate to
+        // corroborate against — cannot verify this corner, discard it.
+        return null;
+      }
+      const anchorDistM = this.approxMeters(
+        corner.lat,
+        corner.lng,
+        anchor.lat,
+        anchor.lng,
+      );
+      if (anchorDistM > GeocodingService.INTERSECTION_ANCHOR_MAX_METERS) {
+        this.logger.warn(
+          `Intersection corner rejected: ${anchorDistM.toFixed(0)}m from ` +
+            `${anchor.source} anchor (>${GeocodingService.INTERSECTION_ANCHOR_MAX_METERS}m) — ` +
+            `falling back to Nominatim's own precision`,
+        );
+        return null;
+      }
+    }
 
     if (parsed.placa) {
       const placaMeters = Number(parsed.placa.replace(/[^\d]/g, ''));
@@ -864,6 +942,17 @@ export class GeocodingService {
    * decreasing one next. Returns null (keep the corner) when neither
    * direction has enough geometry — never invents a point past the
    * available way length.
+   *
+   * KNOWN LIMITATION (2026-09-27 live finding): "Cra 13 # 62-40" resolved
+   * ~99m from the expected corner — outside the 80m live-verification goal.
+   * The increasing/decreasing choice here is purely the OSM way's own vertex
+   * order, which has no guaranteed relationship to which physical direction
+   * house numbers actually increase in. A correct fix would need a real
+   * directionality signal (e.g. `addr:housenumber`-tagged nodes along the
+   * way) to calibrate against — checked live for this exact corner and none
+   * exist in OSM for this street, so there is no cheap way to verify or fix
+   * the walk direction here without a different, unvalidated heuristic.
+   * Left as-is per explicit instruction to document rather than guess.
    */
   private walkAlongWayFromPoint(
     ways: OverpassElement[],
@@ -1240,7 +1329,7 @@ export class GeocodingService {
     crossWays: OverpassElement[],
     bbox: MunicipalityBbox | null,
     bias: { lat: number; lng: number } | null,
-  ): { lat: number; lng: number } | null {
+  ): { lat: number; lng: number; candidateCount: number } | null {
     const THRESHOLD_M = 40;
     const corners: { lat: number; lng: number; dist: number }[] = [];
 
@@ -1264,7 +1353,10 @@ export class GeocodingService {
       ? corners.filter((c) => this.isWithinBbox(c.lat, c.lng, bbox))
       : corners;
     const candidates = inBbox.length ? inBbox : corners;
-    if (candidates.length === 1) return candidates[0];
+    const candidateCount = candidates.length;
+    if (candidates.length === 1) {
+      return { lat: candidates[0].lat, lng: candidates[0].lng, candidateCount };
+    }
 
     const target =
       bias ??
@@ -1275,14 +1367,119 @@ export class GeocodingService {
           }
         : null);
     if (target) {
-      return candidates.reduce((best, c) =>
+      const best = candidates.reduce((best, c) =>
         this.approxMeters(c.lat, c.lng, target.lat, target.lng) <
         this.approxMeters(best.lat, best.lng, target.lat, target.lng)
           ? c
           : best,
       );
+      return { lat: best.lat, lng: best.lng, candidateCount };
     }
-    return candidates.reduce((best, c) => (c.dist < best.dist ? c : best));
+    const best = candidates.reduce((best, c) =>
+      c.dist < best.dist ? c : best,
+    );
+    return { lat: best.lat, lng: best.lng, candidateCount };
+  }
+
+  /**
+   * Independent plausibility anchor for an intersection corner, tried in
+   * order: (1) a lightweight Nominatim structured search for the SAME
+   * address — cheap (1 budget unit) insurance against a wrong OSM
+   * street/way match; (2) the centroid of the primary street's own Overpass
+   * geometry — free, since it was already fetched by the intersection query
+   * itself. Returns null only when neither is available (budget exhausted
+   * and, somehow, no primary-way geometry — should not happen in practice
+   * since callers already require `primaryWays.length > 0`).
+   *
+   * CRITICAL: the Nominatim query MUST include the house number/cross-street
+   * qualifier (the same variant {@link tryStructuredSearch} tries first),
+   * NOT a bare street name — "Carrera 13" alone can be many kilometres long,
+   * and a bare-street search legitimately (and correctly) returns Nominatim's
+   * own representative point for the whole street, which can sit >2km from
+   * the specific corner being verified even when that corner is fine. A live
+   * 2026-09-27 run proved this: an early version anchored on the bare street
+   * name and rejected every real Bogotá corner as ">12km from anchor".
+   */
+  private async resolveIntersectionAnchor(
+    parsed: ParsedColombianAddress,
+    city: string | null,
+    state: string | null,
+    bbox: MunicipalityBbox | null,
+    primaryWays: OverpassElement[],
+    budget: RequestBudget,
+  ): Promise<{
+    lat: number;
+    lng: number;
+    source: 'nominatim' | 'street-centroid';
+  } | null> {
+    if (parsed.viaTipo && parsed.viaNum && budget.canSpend()) {
+      const streetBase = [
+        parsed.viaTipo,
+        parsed.viaNum,
+        parsed.viaLetra,
+        parsed.viaBis,
+        parsed.viaCuadrante,
+      ]
+        .filter(Boolean)
+        .join(' ');
+      // Same house-number-first shape as tryStructuredSearch's best variant
+      // — pins the anchor to the specific corner/house, not just "somewhere
+      // on this street".
+      const streetQuery =
+        parsed.cruceNum && parsed.placa
+          ? `${parsed.cruceNum}-${parsed.placa} ${streetBase}`
+          : streetBase;
+      budget.spend();
+      const params = new URLSearchParams({
+        format: 'jsonv2',
+        street: streetQuery,
+        country: 'Colombia',
+        countrycodes: 'co',
+        addressdetails: '1',
+        limit: '1',
+        'accept-language': 'es',
+      });
+      if (city) params.set('city', city);
+      if (state) params.set('state', state);
+      this.applyViewbox(params, bbox);
+
+      const candidates = await this.fetchNominatimSearch(
+        params,
+        GeocodingService.STRUCTURED_TIMEOUT_MS,
+      );
+      const filtered = this.filterWithinBbox(candidates, bbox);
+      const first = filtered[0] ?? candidates[0];
+      if (first) {
+        const lat = Number(first.lat);
+        const lng = Number(first.lon);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          return { lat, lng, source: 'nominatim' };
+        }
+      }
+    }
+
+    const centroid = this.streetCentroid(primaryWays);
+    if (centroid) return { ...centroid, source: 'street-centroid' };
+
+    return null;
+  }
+
+  /** Plain average of every vertex across all matched ways for one street name. */
+  private streetCentroid(
+    ways: OverpassElement[],
+  ): { lat: number; lng: number } | null {
+    let sumLat = 0;
+    let sumLng = 0;
+    let count = 0;
+    for (const way of ways) {
+      for (const pt of way.geometry ?? []) {
+        sumLat += pt.lat;
+        sumLng += pt.lon;
+        count++;
+      }
+    }
+    if (count === 0) return null;
+    return { lat: sumLat / count, lng: sumLng / count };
   }
 
   /** Flat-earth point-to-point distance in metres (fine at city scale). */
