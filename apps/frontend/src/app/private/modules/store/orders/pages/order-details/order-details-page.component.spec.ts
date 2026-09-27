@@ -5,6 +5,7 @@ import {
   isRefundAuditRow, isConfirmedStateTransition, buildOrderActionButtons,
   orderStateLabel, orderEventLabel, orderEventActorLabel, isRefundOrderEvent,
   cancelPaymentCopy,
+  isCodAwaitingConfirmation, isOrderEligibleForSplitCreation,
 } from './order-details-page.component';
 import { Order, OrderItem, OrderEvent } from '../../interfaces/order.interface';
 import {
@@ -22,6 +23,25 @@ describe('OrderDetailsPageComponent — vocabulario de entrega', () => {
     expect(ORDER_DELIVERY_STEP_LABELS.pickup['shipped']).toBe('Lista para recogida');
     expect(ORDER_DELIVERY_STEP_LABELS.pickup['delivered']).toBe('Recogida en tienda');
     expect(ORDER_DELIVERY_STEP_LABELS.dine_in['delivered']).toBe('Servida en mesa');
+  });
+});
+
+describe('OrderDetailsPageComponent — contra entrega y cuentas', () => {
+  it('recognizes only an unsettled ON_DELIVERY marker as COD awaiting actual tender', () => {
+    const marker = { state: 'pending', store_payment_method: { system_payment_method: { type: 'cash_on_delivery', processing_mode: 'ON_DELIVERY' } } };
+    expect(isCodAwaitingConfirmation({ payments: [marker] } as any)).toBeTrue();
+    expect(isCodAwaitingConfirmation({ payments: [{ ...marker, state: 'cancelled' }] } as any)).toBeFalse();
+  });
+
+  it('permits split creation only for an eligible order with outstanding balance', () => {
+    const order = {
+      id: 1, state: 'created', grand_total: 100, payment_form: '1',
+      order_items: [{ id: 1, cancelled_at: null }], payments: [], invoices: [],
+    } as unknown as Order;
+    expect(isOrderEligibleForSplitCreation(order)).toBeTrue();
+    expect(isOrderEligibleForSplitCreation({ ...order, payments: [{ state: 'pending' }] } as Order)).toBeFalse();
+    expect(isOrderEligibleForSplitCreation({ ...order, state: 'cancelled' })).toBeFalse();
+    expect(isOrderEligibleForSplitCreation({ ...order, payments: [{ state: 'succeeded', amount: 100 }] } as Order)).toBeFalse();
   });
 });
 
@@ -219,6 +239,16 @@ describe('order-truth-and-invoice-tz plan (Objetivo 3) — isItemActionEnabled',
 });
 
 describe('order-truth-and-invoice-tz plan (Objetivos 3/11/12) — buildOrderActionButtons', () => {
+  it('labels a shipped unpaid COD order Confirmar Pago without turning COD into the actual tender', () => {
+    const order = {
+      state: 'shipped', delivery_type: 'home_delivery',
+      payments: [{ state: 'pending', store_payment_method: { system_payment_method: { processing_mode: 'ON_DELIVERY' } } }],
+      available_actions: [{ code: 'pay', label_key: 'ORD_ACTION_PAY', enabled: true }],
+    } as any;
+    expect(buildOrderActionButtons(order)).toEqual([
+      jasmine.objectContaining({ id: 'pay', label: 'Confirmar Pago', enabled: true }),
+    ]);
+  });
   it('sin available_actions (respuesta vieja) no pinta ningún botón', () => {
     expect(buildOrderActionButtons({ state: 'created', available_actions: undefined } as any)).toEqual([]);
     expect(buildOrderActionButtons({ state: 'created', available_actions: [] } as any)).toEqual([]);

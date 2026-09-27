@@ -196,9 +196,9 @@
       (actionClicked)="onHeaderAction($event)"
     ></app-sticky-header>
 
-    @if (orderData.active_financial_split_id) {
+    @if (orderData.active_financial_split_id || canCreateFinancialSplit()) {
       <div class="max-w-[1600px] mx-auto mb-4">
-        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="false" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" />
+        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="canCreateFinancialSplit()" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" />
       </div>
     }
 
@@ -2704,7 +2704,7 @@
       [isOpen]="cancellationModalOpen()"
       (isOpenChange)="!$event && closeItemCancellationModal()"
       [itemName]="cancellationTarget()?.item?.product_name || ''"
-      [showDestination]="cancellationTarget()?.mode === 'reverse' || cancellationPreparedFired()"
+      [showDestination]="cancellationTarget()?.mode === 'reverse' || cancellationNeedsDisposition()"
       [canReuse]="canReuseCancellation()"
       [inFlight]="cancellingItemId() !== null || reversingItemId() !== null"
       [serverError]="cancellationError()"
@@ -2756,7 +2756,7 @@
         <app-order-payment-modal
           [isOpen]="showPayModal()"
           [order]="orderData"
-          [paymentMethods]="paymentMethods()"
+          [paymentMethods]="isCodPending() ? codActualMethods() : paymentMethods()"
           [isCreditOrder]="isCreditOrder()"
           [remainingBalance]="remainingBalance()"
           [installments]="orderData.order_installments || []"

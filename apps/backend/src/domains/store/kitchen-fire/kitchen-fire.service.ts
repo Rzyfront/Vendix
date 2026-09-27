@@ -17,6 +17,9 @@ import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities
 import { KdsSessionsService } from '../kds/sessions/kds-sessions.service';
 import { roundMoney2 } from '../taxes/utils/final-price.util';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
+import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
+import { AuditResource } from '../../../common/audit/audit.service';
+import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 
 /** Historical delivered_* values are read-only aliases of the canonical decisions. */
 const POST_CANCEL_REMAKE_TYPES = new Set([
@@ -301,6 +304,7 @@ export class KitchenFireService {
     // escritores (OrderFlowService) — sin él el fire funciona igual y los
     // specs que construyen el servicio a mano no necesitan cablearlo.
     @Optional() private readonly orderHistoryService?: OrderHistoryService,
+    @Optional() private readonly autoEntryService?: AutoEntryService,
   ) {}
 
   /**
@@ -3160,7 +3164,7 @@ export class KitchenFireService {
    * `already_delivered`) so the KDS toasts are actionable instead of
    * the generic dev-message.
    */
-  async cancelTicket(ticketId: number) {
+  async cancelTicket(ticketId: number, requestedDisposition?: 'reuse' | 'waste') {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
 
     // Ver `startPreparation` — station-lock guard uniforme.
@@ -3191,26 +3195,139 @@ export class KitchenFireService {
       );
     }
 
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const t = await tx.kitchen_tickets.update({
-        where: { id: ticketId },
+    if (ticket.status !== 'pending' && requestedDisposition !== 'reuse' && requestedDisposition !== 'waste') {
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_TICKET_INVALID_STATE,
+        'El ticket ya entró en preparación: elige reutilizar los insumos o desecharlos antes de cancelar.',
+      );
+    }
+    // A pending ticket has not used its ingredients. Ignore even an explicit
+    // "waste" payload here: this inventory return is automatic by state.
+    const disposition = ticket.status === 'pending' ? 'reuse' : requestedDisposition!;
+    const posted: Array<{
+      orderItemId: number; organizationId: number; totalCost: number;
+    }> = [];
+    const afterCommit: Array<() => void> = [];
+
+    await this.prisma.$transaction(async (tx) => {
+      if (ticket.order_id != null) {
+        await lockOrderLifecycle(tx, ticket.order_id, store_id);
+      }
+      const claim = await tx.kitchen_tickets.updateMany({
+        where: { id: ticketId, store_id, status: ticket.status },
         data: { status: 'cancelled', updated_at: new Date() },
       });
+      if (claim.count !== 1) {
+        throw new VendixHttpException(
+          ErrorCodes.KITCHEN_TICKET_INVALID_STATE,
+          'El ticket cambió de estado. Actualiza cocina y vuelve a elegir qué hacer con los insumos.',
+        );
+      }
+      for (const orderItemId of new Set<number>(
+        ticket.items.map((item) => Number(item.order_item_id)).filter((id) => Number.isInteger(id) && id > 0),
+      )) {
+        if (ticket.order_id == null) continue;
+        // A prior disposition is the idempotency marker across KDS and order
+        // cancellation. The ticket claim serializes repeat clicks; the audit
+        // check prevents a later order cancellation from returning twice.
+        const existing = await tx.audit_logs.findFirst({
+          where: {
+            action: 'order_item.prepared_disposition',
+            resource_id: ticket.order_id,
+            metadata: { path: ['order_item_id'], equals: orderItemId },
+          },
+          select: { id: true },
+        });
+        if (existing) continue;
+        const consumed = await tx.inventory_transactions.findMany({
+          where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
+          select: {
+            organization_id: true, product_id: true, product_variant_id: true,
+            quantity_change: true, unit_cost: true, total_cost: true,
+          },
+        });
+        if (consumed.length === 0) continue;
+        let totalCost = 0;
+        for (const ct of consumed) {
+          const quantity = Math.abs(ct.quantity_change);
+          const cost = Number(ct.total_cost ?? 0);
+          const unitCost = Number(ct.unit_cost ?? (quantity > 0 ? cost / quantity : 0));
+          totalCost += cost;
+          if (disposition === 'reuse') {
+            const locationId = await this.stockLevelManager.getDefaultLocationForProduct(
+              ct.product_id, ct.product_variant_id ?? undefined,
+            );
+            await this.stockLevelManager.updateStock({
+              product_id: ct.product_id,
+              variant_id: ct.product_variant_id ?? undefined,
+              location_id: locationId,
+              quantity_change: quantity,
+              movement_type: 'return',
+              movement_unit_cost: unitCost > 0 ? unitCost : undefined,
+              reason: `REUSO-INSUMO: ticket KDS #${ticketId}, ítem #${orderItemId}`,
+              source_module: 'kitchen_ticket_cancellation',
+              create_movement: true,
+              validate_availability: false,
+              afterCommit,
+            }, tx);
+            await tx.inventory_cost_layers.create({
+              data: {
+                organization_id: ct.organization_id,
+                product_id: ct.product_id,
+                product_variant_id: ct.product_variant_id,
+                location_id: locationId,
+                quantity_remaining: quantity,
+                unit_cost: new Prisma.Decimal(unitCost),
+                received_at: new Date(),
+              },
+            });
+          }
+        }
+        await tx.audit_logs.create({
+          data: {
+            user_id: RequestContextService.getUserId() ?? null,
+            organization_id: consumed[0].organization_id,
+            store_id,
+            action: 'order_item.prepared_disposition',
+            resource: AuditResource.ORDERS,
+            resource_id: ticket.order_id,
+            metadata: {
+              order_id: ticket.order_id, order_item_id: orderItemId,
+              ticket_id: ticketId, reason: 'Cancelación de ticket KDS',
+              destination: disposition, consumed_cost: totalCost,
+            } as Prisma.InputJsonValue,
+          },
+        });
+        posted.push({ orderItemId, organizationId: consumed[0].organization_id, totalCost });
+      }
       await tx.kitchen_ticket_items.updateMany({
         where: { kitchen_ticket_id: ticketId, status: { not: 'delivered' } },
         data: { status: 'cancelled', updated_at: new Date() },
       });
-      return t;
     });
 
+    for (const publish of afterCommit) publish();
+    for (const entry of posted) {
+      if (entry.totalCost <= 0) continue;
+      if (!this.autoEntryService) {
+        this.logger.error(`AutoEntryService no disponible: disposición del ticket #${ticketId} requiere conciliación`);
+        continue;
+      }
+      try {
+        await this.autoEntryService.onPreparedDishDisposition({
+          order_id: ticket.order_id!, order_item_id: entry.orderItemId,
+          organization_id: entry.organizationId, store_id,
+          disposition, total_cost: entry.totalCost,
+          user_id: RequestContextService.getUserId() ?? undefined,
+        });
+      } catch (error) {
+        this.logger.error(`Reclasificación pendiente para ticket #${ticketId}`, error as Error);
+      }
+    }
+
     const full = await this.getTicketForStore(ticketId);
-    // QUI-760 — imputa las inventory_transactions del ticket a la sesión
-    // abierta de la KDS. El insumo YA se gastó al cocinar: cancelar el
-    // ticket no lo devuelve al stock (la acción no distingue «no se llegó
-    // a preparar» de «se cocinó y se canceló»), y la merma queda cargada
-    // al turno que la produjo. Coherente con la regla "atribución es de
-    // quien cocina". Mismo patrón push-primero-try-catch-después que los
-    // otros tres handlers: la difusión operativa no depende del helper.
+    // QUI-760 — atribución histórica del consumo a la sesión KDS; la
+    // disposición de inventario/COGS ya se decidió y persistió arriba.
     this.pushKitchenEvent(store_id, {
       type: 'ticket.cancelled',
       ticket: full.ticket,
@@ -3274,6 +3391,34 @@ export class KitchenFireService {
       where: { kitchen_ticket_id: ticketId, status: { not: 'delivered' } },
       data: { status: 'cancelled', updated_at: new Date() },
     });
+  }
+
+  /** Cancel only one pending line in a shared ticket. The internal resend
+   * helper above intentionally remains whole-ticket; using it for an order
+   * item would cancel innocent sibling dishes. */
+  async cancelTicketItemInTx(
+    tx: Prisma.TransactionClient,
+    ticketId: number,
+    orderItemId: number,
+    expectedStatus: 'pending' | 'in_preparation' | 'ready' = 'pending',
+  ): Promise<'cancelled' | 'updated'> {
+    const changed = await tx.kitchen_ticket_items.updateMany({
+      where: { kitchen_ticket_id: ticketId, order_item_id: orderItemId, status: expectedStatus },
+      data: { status: 'cancelled', updated_at: new Date() },
+    });
+    if (changed.count === 0) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_TICKET_INVALID_STATE,
+        'El plato avanzó en cocina. Actualiza el ticket y elige qué hacer con los insumos.');
+    }
+    const remaining = await tx.kitchen_ticket_items.count({
+      where: { kitchen_ticket_id: ticketId, status: { notIn: ['cancelled', 'delivered'] } },
+    });
+    if (remaining > 0) return 'updated';
+    await tx.kitchen_tickets.update({
+      where: { id: ticketId },
+      data: { status: 'cancelled', updated_at: new Date() },
+    });
+    return 'cancelled';
   }
 
   /**
@@ -3421,11 +3566,13 @@ export class KitchenFireService {
    *   in_preparation → pending
    *   ready          → in_preparation
    *   delivered      → ready
-   *   cancelled      → ready
+   *   cancelled      → ready only for legacy tickets without a persisted
+   *                      inventory/COGS disposition
    *
-   * Inventario: NO se toca. Los insumos se consumen en el fire (no en las
-   * transiciones del ticket), así que reactivar un ticket NUNCA re-consume ni
-   * devuelve stock. Al revertir delivered → ready también se limpian las
+   * Inventario: NO se toca. Tickets cancelled with a disposition may have
+   * returned ingredients or reclassified COGS and therefore cannot simply
+   * revert; the operator must create a new kitchen fire. Al revertir
+   * delivered → ready también se limpian las
    * marcas de entrega de las líneas de ESTE ticket, en la misma transacción.
    *
    * Bloqueo SÍNCRONO antes de mutar: cuando el ticket es terminal
@@ -3459,6 +3606,23 @@ export class KitchenFireService {
         undefined,
         { from: ticket.status },
       );
+    }
+
+    if (ticket.status === 'cancelled' && ticket.order_id != null) {
+      const disposed = await this.prisma.audit_logs.findFirst({
+        where: {
+          action: 'order_item.prepared_disposition',
+          resource_id: ticket.order_id,
+          metadata: { path: ['ticket_id'], equals: ticketId },
+        },
+        select: { id: true },
+      });
+      if (disposed) {
+        throw new VendixHttpException(
+          ErrorCodes.KITCHEN_TICKET_CANNOT_REVERT,
+          'El ticket cancelado ya devolvió o reclasificó insumos; envía un nuevo ticket a cocina en vez de revertirlo.',
+        );
+      }
     }
 
     const wasTerminal =

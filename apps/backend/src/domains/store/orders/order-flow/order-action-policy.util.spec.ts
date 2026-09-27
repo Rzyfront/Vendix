@@ -16,6 +16,7 @@ import {
   canReadyForPickupBeforePayment,
   canDirectDeliver,
   canCollectViaShip,
+  hasKitchenLinesAwaitingHandoff,
   canDeliverItem,
   canCancelItem,
   canReverseDeliveredItem,
@@ -614,7 +615,7 @@ describe('order-action-policy — canCreditPayment', () => {
 });
 
 function dispatchOrder(
-  overrides: Partial<{ state: string; delivery_type: string | null; isKitchenOrder: boolean }> = {},
+  overrides: Partial<{ state: string; delivery_type: string | null; isKitchenOrder: boolean; hasPendingKitchen: boolean }> = {},
 ) {
   return {
     state: 'pending_payment',
@@ -625,6 +626,11 @@ function dispatchOrder(
 }
 
 describe('order-action-policy — canDispatchOrder', () => {
+  it('blocks whole-order dispatch until kitchen hand-off', () => {
+    expect(canDispatchOrder(dispatchOrder({ state: 'processing', delivery_type: 'home_delivery', hasPendingKitchen: true }))).toEqual({
+      enabled: false, reason: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
+    });
+  });
   it.each(['pending_payment', 'processing'])('enables for a home_delivery order in %s', (state) =>
     expect(canDispatchOrder(dispatchOrder({ state, delivery_type: 'home_delivery' }))).toEqual({
       enabled: true,
@@ -654,6 +660,29 @@ describe('order-action-policy — canDispatchOrder', () => {
         false,
       ),
   );
+});
+
+describe('order-action-policy — kitchen hand-off', () => {
+  const prepared = (status?: string, skip_kds = false) => ({
+    cancelled_at: null,
+    skip_kds,
+    products: { product_type: 'prepared' },
+    kitchen_ticket_items: status ? [{ status }] : [],
+  });
+
+  it('blocks an unfired, pending or ready dish in a mixed order', () => {
+    const direct = { products: { product_type: 'physical' }, kitchen_ticket_items: [] };
+    for (const status of [undefined, 'pending', 'in_preparation', 'ready']) {
+      expect(hasKitchenLinesAwaitingHandoff([direct, prepared(status)])).toBe(true);
+    }
+  });
+
+  it('allows handed-off, financially cancelled and stocked skip-KDS dishes', () => {
+    expect(hasKitchenLinesAwaitingHandoff([prepared('delivered')])).toBe(false);
+    expect(hasKitchenLinesAwaitingHandoff([prepared('cancelled')])).toBe(true);
+    expect(hasKitchenLinesAwaitingHandoff([prepared(undefined, true)])).toBe(false);
+    expect(hasKitchenLinesAwaitingHandoff([{ ...prepared('pending'), cancelled_at: new Date() }])).toBe(false);
+  });
 });
 
 describe('order-action-policy — canManualShip', () => {

@@ -56,6 +56,7 @@ import {
   RouteStopSequenceInput,
 } from '../dispatch-routes/utils/route-stop-calc';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { hasKitchenLinesAwaitingHandoff } from '../orders/order-flow/order-action-policy.util';
 import {
   resolveOrderLineTaxTotal,
   roundMoney2,
@@ -1988,7 +1989,14 @@ export class DispatchNotesService {
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },
       include: {
-        order_items: true,
+        order_items: {
+          include: {
+            products: { select: { product_type: true } },
+            kitchen_ticket_items: {
+              select: { status: true }, orderBy: { id: 'desc' }, take: 1,
+            },
+          },
+        },
         users: {
           select: {
             id: true,
@@ -2017,6 +2025,20 @@ export class DispatchNotesService {
 
     if (!order) {
       throw new VendixHttpException(ErrorCodes.DSP_ORDER_FIND_001);
+    }
+
+    // Explicit partial dispatch may contain only ordinary direct-delivery
+    // lines while a dish is still in KDS. The quick-accept/full-order path
+    // must wait for every prepared line's kitchen hand-off. Never let a
+    // retail line in a mixed order turn the implicit ALL into a KDS bypass.
+    const requestedItemIds = Array.isArray(dto.items) && dto.items.length > 0
+      ? new Set(dto.items.map((item) => item.order_item_id))
+      : null;
+    const kitchenCandidates = requestedItemIds
+      ? order.order_items.filter((item) => requestedItemIds.has(item.id))
+      : order.order_items;
+    if (hasKitchenLinesAwaitingHandoff(kitchenCandidates)) {
+      throw new VendixHttpException(ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS);
     }
 
     // A dispatch note (remisión) only makes sense for orders that are being

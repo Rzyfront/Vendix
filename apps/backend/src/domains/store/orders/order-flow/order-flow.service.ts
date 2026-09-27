@@ -26,6 +26,7 @@ import {
   canReadyForPickupBeforePayment,
   canDirectDeliver,
   canCollectViaShip,
+  hasKitchenLinesAwaitingHandoff,
   OrderActionSnapshot,
 } from './order-action-policy.util';
 import { OrderSseService } from '../services/order-sse.service';
@@ -216,6 +217,14 @@ const RECONCILE_LADDER: OrderState[] = [
   'finished',
 ];
 
+/** COD describes timing, not the eventual tender. Stripe/gateway cards are
+ * not physical datáfono payments; the seeded voucher method is. */
+export function isActualCodTender(method: { type?: string | null; processing_mode?: string | null } | null | undefined): boolean {
+  if (!method || method.processing_mode === 'ON_DELIVERY') return false;
+  return ['cash', 'bank_transfer', 'voucher'].includes(method.type ?? '') ||
+    (method.type === 'card' && method.processing_mode === 'DIRECT');
+}
+
 @Injectable()
 export class OrderFlowService {
   private readonly logger = new Logger(OrderFlowService.name);
@@ -335,6 +344,15 @@ export class OrderFlowService {
     reason: string,
     afterCommit: Array<() => void>,
   ): Promise<ConsumedLeafDisposition[]> {
+    const priorDisposition = await tx.audit_logs.findFirst({
+      where: {
+        action: 'order_item.prepared_disposition',
+        resource_id: orderId,
+        metadata: { path: ['order_item_id'], equals: orderItemId },
+      },
+      select: { id: true },
+    });
+    if (priorDisposition) return [];
     const consumed = await tx.inventory_transactions.findMany({
       where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
       select: {
@@ -439,6 +457,15 @@ export class OrderFlowService {
     disposition: 'reuse' | 'waste',
     leaves: ConsumedLeafDisposition[],
   ): Promise<void> {
+    const priorDisposition = await tx.audit_logs.findFirst({
+      where: {
+        action: 'order_item.prepared_disposition',
+        resource_id: orderId,
+        metadata: { path: ['order_item_id'], equals: orderItemId },
+      },
+      select: { id: true },
+    });
+    if (priorDisposition) return;
     const requestId = RequestContextService.getRequestId();
     await tx.audit_logs.create({
       data: {
@@ -548,6 +575,26 @@ export class OrderFlowService {
       },
     });
     return pendingCount > 0;
+  }
+
+  /** Whole-order fulfillment is never allowed to use a retail line as a
+   * shortcut around an un-fired or undelivered prepared line. Item-level
+   * delivery has its own guard and remains available for retail lines. */
+  private async assertKitchenReadyForWholeOrder(orderId: number): Promise<void> {
+    const items = await this.prisma.order_items.findMany({
+      where: { order_id: orderId },
+      select: {
+        cancelled_at: true,
+        skip_kds: true,
+        products: { select: { product_type: true } },
+        kitchen_ticket_items: {
+          select: { status: true }, orderBy: { id: 'desc' }, take: 1,
+        },
+      },
+    });
+    if (hasKitchenLinesAwaitingHandoff(items)) {
+      throw new VendixHttpException(ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS);
+    }
   }
 
   private validateTransition(
@@ -1567,6 +1614,17 @@ export class OrderFlowService {
       });
     }
 
+    const isCodSettlement = (order.payments ?? []).some((payment) =>
+      payment.state === 'pending' &&
+      payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY',
+    );
+    if (isCodSettlement && dto.payment_type !== PaymentType.DIRECT) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_MULTI_TENDER_METHOD_NOT_ALLOWED,
+        'Al confirmar un pago contra entrega selecciona el medio recibido: efectivo, transferencia o datáfono.',
+      );
+    }
+
     if (
       preClaimState === 'pending_payment' &&
       dto.payment_type === PaymentType.ONLINE &&
@@ -1691,6 +1749,17 @@ export class OrderFlowService {
       total_paid: paidBalance,
       remaining_balance: 0,
     };
+    const codPendingPaymentIds = (order.payments ?? [])
+      .filter((payment) =>
+        payment.state === 'pending' &&
+        payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY',
+      )
+      .map((payment) => payment.id);
+    const paymentHistoryCtx = {
+      storeId: order.store_id,
+      organizationId: order.stores?.organization_id,
+      codPendingPaymentIds,
+    };
 
     // Cobro multimétodo de contado — normalización única (escalar → 1 tramo).
     // Sólo en los carriles que cobran de inmediato (shipped/direct): el carril
@@ -1726,6 +1795,12 @@ export class OrderFlowService {
           where: { id: { in: legMethodIds } },
           include: { system_payment_method: true },
         });
+        if (isCodSettlement && legRows.some((row) => !isActualCodTender(row.system_payment_method))) {
+          throw new VendixHttpException(
+            ErrorCodes.PAY_MULTI_TENDER_METHOD_NOT_ALLOWED,
+            'Contra entrega solo admite el método realmente recibido: efectivo, transferencia o datáfono.',
+          );
+        }
         methodsById = {};
         for (const row of legRows) {
           methodsById[row.id] = {
@@ -1749,6 +1824,12 @@ export class OrderFlowService {
           };
         }
       } else {
+        if (isCodSettlement && !isActualCodTender(paymentMethod.system_payment_method)) {
+          throw new VendixHttpException(
+            ErrorCodes.PAY_MULTI_TENDER_METHOD_NOT_ALLOWED,
+            'Contra entrega solo admite el método realmente recibido: efectivo, transferencia o datáfono.',
+          );
+        }
         methodsById = {
           [dto.store_payment_method_id]: {
             type: paymentMethod.system_payment_method?.type ?? '',
@@ -1801,13 +1882,14 @@ export class OrderFlowService {
         order.currency,
         legs,
         change,
-        { storeId: order.store_id, organizationId: order.stores?.organization_id },
+        paymentHistoryCtx,
       );
       paymentPersisted = true;
 
       // The claim temporarily moved shipped -> processing. Restore its
       // logistics state and persist the settled balance with the payment.
       await this.updateOrderState(orderId, 'shipped', settledBalanceMetadata, { historyFromState: preClaimState });
+      await this.voidCodPendingMarkers(codPendingPaymentIds);
 
       // Round 1 MAJOR #13 — cupón en `flow/pay` (shipped):
       // si la orden trae `coupon_id` y no existe `coupon_uses` aún,
@@ -1872,7 +1954,7 @@ export class OrderFlowService {
         order.currency,
         legs,
         change,
-        { storeId: order.store_id, organizationId: order.stores?.organization_id },
+        paymentHistoryCtx,
       );
       paymentPersisted = true;
 
@@ -1900,15 +1982,7 @@ export class OrderFlowService {
       // Void the COD pending marker(s) so they never count as a second,
       // parallel settlement of the same order (analytics/cash-register
       // dedupe by `payments.state`, not by count).
-      const pendingMarkerPayments = (order.payments ?? []).filter(
-        (p: any) => p.state === 'pending',
-      );
-      if (pendingMarkerPayments.length > 0) {
-        await this.prisma.payments.updateMany({
-          where: { id: { in: pendingMarkerPayments.map((p: any) => p.id) } },
-          data: { state: 'cancelled', updated_at: new Date() },
-        });
-      }
+      await this.voidCodPendingMarkers(codPendingPaymentIds);
 
       this.logger.log(
         `Order #${orderId} payment registered while delivered (settled, awaiting finalize)`,
@@ -1952,7 +2026,7 @@ export class OrderFlowService {
         order.currency,
         legs,
         change,
-        { storeId: order.store_id, organizationId: order.stores?.organization_id },
+        paymentHistoryCtx,
       );
       paymentPersisted = true;
 
@@ -1981,15 +2055,7 @@ export class OrderFlowService {
       // Void the COD pending marker(s) so they never count as a second,
       // parallel settlement of the same order (analytics/cash-register
       // dedupe by `payments.state`, not by count).
-      const pendingMarkerPayments = (order.payments ?? []).filter(
-        (p: any) => p.state === 'pending',
-      );
-      if (pendingMarkerPayments.length > 0) {
-        await this.prisma.payments.updateMany({
-          where: { id: { in: pendingMarkerPayments.map((p: any) => p.id) } },
-          data: { state: 'cancelled', updated_at: new Date() },
-        });
-      }
+      await this.voidCodPendingMarkers(codPendingPaymentIds);
 
       this.logger.log(
         `Order #${orderId} payment registered while finished (orphaned/COD) -> finished`,
@@ -2032,7 +2098,7 @@ export class OrderFlowService {
         order.currency,
         legs,
         change,
-        { storeId: order.store_id, organizationId: order.stores?.organization_id },
+        paymentHistoryCtx,
       );
       paymentPersisted = true;
 
@@ -2057,6 +2123,7 @@ export class OrderFlowService {
           },
           { historyFromState: preClaimState },
         );
+        await this.voidCodPendingMarkers(codPendingPaymentIds);
 
         this.logger.log(
           `Order #${orderId} paid directly, moved to processing (requires fulfillment)`,
@@ -2146,6 +2213,7 @@ export class OrderFlowService {
           },
           { historyFromState: preClaimState },
         );
+        await this.voidCodPendingMarkers(codPendingPaymentIds);
 
         this.logger.log(
           `Order #${orderId} paid directly with pending kitchen items, moved to processing`,
@@ -2194,6 +2262,7 @@ export class OrderFlowService {
           finished_at: new Date(),
           ...settledBalanceMetadata,
         }, { historyFromState: preClaimState });
+        await this.voidCodPendingMarkers(codPendingPaymentIds);
       } catch (e) {
         if (e instanceof VendixHttpException) {
           await this.cancelLegPayments(
@@ -2452,6 +2521,14 @@ export class OrderFlowService {
         };
       }
       const pendingPayment = order.payments.find((p) => p.state === 'pending');
+      if (order.payments.some((payment) =>
+        payment.state === 'pending' &&
+        payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY',
+      )) {
+        throw new BadRequestException(
+          'El pago contra entrega aún no se ha recibido. Selecciona el método real (efectivo, transferencia o datáfono) en Registrar Pago.',
+        );
+      }
       // A reserved wallet/Wompi charge is not proof of money received.
       // Only its ledger settlement or provider webhook may change the payment
       // to succeeded; the generic staff confirmation must never bypass them.
@@ -3145,6 +3222,8 @@ export class OrderFlowService {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
+    await this.assertKitchenReadyForWholeOrder(orderId);
+
     if (!order.shipping_method_id && dto.shipping_method_id) {
       const method = await this.prisma.shipping_methods.findFirst({
         where: { id: dto.shipping_method_id, is_active: true },
@@ -3367,14 +3446,15 @@ export class OrderFlowService {
       this.prisma.order_items.findMany({
         where: { order_id: orderId },
         select: {
-          kitchen_ticket_items: { select: { status: true }, orderBy: { id: 'desc' } },
+          cancelled_at: true,
+          skip_kds: true,
+          products: { select: { product_type: true } },
+          kitchen_ticket_items: { select: { status: true }, orderBy: { id: 'desc' }, take: 1 },
         },
       }),
     ]);
     const isKitchenOrder = itemsWithKitchen.some((item) => item.kitchen_ticket_items.length > 0);
-    const hasPendingKitchen = itemsWithKitchen.some((item) =>
-      item.kitchen_ticket_items.some((k) => k.status !== 'delivered' && k.status !== 'cancelled'),
-    );
+    const hasPendingKitchen = hasKitchenLinesAwaitingHandoff(itemsWithKitchen);
     const offersDispatchFlow = requiresDispatch || isKitchenOrder;
 
     const snapshot: OrderActionSnapshot & {
@@ -3454,27 +3534,29 @@ export class OrderFlowService {
       // at all when the order could plausibly offer one of the three — a
       // plain non-kitchen `direct_delivery`/mesa order shows none of them,
       // exactly like the web.
-      if (offersDispatchFlow || isPickupDelivery) {
+      if (requiresDispatch) {
         actions.push({
           code: 'dispatch_order',
           label_key: 'ORD_ACTION_DISPATCH_ORDER',
           ...canDispatchOrder(snapshot),
         });
-        actions.push({
-          code: 'manual_ship',
-          label_key: 'ORD_ACTION_MANUAL_SHIP',
-          ...canManualShip(snapshot),
-        });
+      } else if (isPickupDelivery) {
         actions.push({
           code: 'ready_for_pickup',
           label_key: 'ORD_ACTION_READY_FOR_PICKUP',
           ...canReadyForPickupBeforePayment(snapshot),
         });
+      } else if (offersDispatchFlow) {
+        actions.push({
+          code: 'manual_ship',
+          label_key: 'ORD_ACTION_MANUAL_SHIP',
+          ...canManualShip(snapshot),
+        });
       }
     }
 
     if (state === 'processing') {
-      if (!hasMethod && !isDirectDelivery) {
+      if (!offersDispatchFlow && !hasMethod && !isDirectDelivery) {
         actions.push({
           code: 'assign_shipping',
           label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
@@ -3492,7 +3574,7 @@ export class OrderFlowService {
           enabled: false,
           reason: 'ORD_SHIP_REQUIRED_001',
         });
-      } else if (hasMethod) {
+      } else if (!offersDispatchFlow && hasMethod) {
         const method = await this.prisma.shipping_methods.findFirst({
           where: { id: order.shipping_method_id },
           select: { type: true },
@@ -3504,13 +3586,15 @@ export class OrderFlowService {
           actions.push({
             code: 'ready_for_pickup',
             label_key: 'ORD_ACTION_READY_FOR_PICKUP',
-            enabled: true,
+            enabled: !hasPendingKitchen,
+            ...(hasPendingKitchen ? { reason: ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS.code } : {}),
           });
         } else {
           actions.push({
             code: 'ship_with_tracking',
             label_key: 'ORD_ACTION_SHIP_WITH_TRACKING',
-            enabled: true,
+            enabled: !hasPendingKitchen,
+            ...(hasPendingKitchen ? { reason: ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS.code } : {}),
           });
         }
       }
@@ -3527,11 +3611,13 @@ export class OrderFlowService {
       // which is left untouched (different signal: the ASSIGNED method's
       // own `type`, not the kitchen/home-delivery fulfillment axis).
       if (offersDispatchFlow) {
-        actions.push({
-          code: 'dispatch_order',
-          label_key: 'ORD_ACTION_DISPATCH_ORDER',
-          ...canDispatchOrder(snapshot),
-        });
+        if (requiresDispatch) {
+          actions.push({
+            code: 'dispatch_order',
+            label_key: 'ORD_ACTION_DISPATCH_ORDER',
+            ...canDispatchOrder(snapshot),
+          });
+        }
         if (isPickupDelivery) {
           actions.push({
             code: 'direct_deliver',
@@ -3716,6 +3802,8 @@ export class OrderFlowService {
         `Cannot deliver order in state '${order.state}'. Order must be in 'shipped' state.`,
       );
     }
+
+    await this.assertKitchenReadyForWholeOrder(orderId);
 
     if (!force) {
       this.validateTransition(order.state as OrderState, 'delivered');
@@ -4317,20 +4405,11 @@ export class OrderFlowService {
     // 4. Derivar el tipo contable si el caller no lo proveyó + motivo
     //    obligatorio (defensa en profundidad; el DTO ya lo exige).
     const wasFired = orderItem.inventory_consumed_at_fire === true;
-    const resolvedType: 'before_fire' | 'after_fire_waste' | 'after_fire_reused' =
-      cancellationType ?? (wasFired ? 'after_fire_waste' : 'before_fire');
     const preparedFired = wasFired && orderItem.products?.product_type === 'prepared';
     const preparedOrganizationId = preparedFired ? Number(order.stores?.organization_id) : 0;
     if (preparedFired && (!Number.isInteger(preparedOrganizationId) || preparedOrganizationId <= 0)) {
       throw new InternalServerErrorException('La organización de la orden no está disponible para la reclasificación');
     }
-    if (preparedFired && resolvedType === 'before_fire') {
-      throw new VendixHttpException(
-        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
-        'Un plato disparado no puede cancelarse como antes de cocina',
-      );
-    }
-
     if (!reason || reason.trim().length < 3) {
       throw new VendixHttpException(
         ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
@@ -4344,6 +4423,22 @@ export class OrderFlowService {
     const ticketStatus = activeKti?.kitchen_ticket?.status ?? null;
     const ticketId = activeKti?.kitchen_ticket?.id ?? null;
     const isPendingTicket = wasFired && ticketStatus === 'pending';
+    if (preparedFired && !isPendingTicket && !cancellationType) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'El plato ya está en preparación o más avanzado: elige reutilizar los insumos o desecharlos antes de cancelar.',
+      );
+    }
+    const resolvedType: 'before_fire' | 'after_fire_waste' | 'after_fire_reused' =
+      preparedFired && isPendingTicket
+        ? 'after_fire_reused'
+        : cancellationType ?? (wasFired ? 'after_fire_waste' : 'before_fire');
+    if (preparedFired && resolvedType === 'before_fire') {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'Un plato disparado no puede cancelarse como antes de cocina',
+      );
+    }
 
     // El KDS es obligatorio para este seam (un ticket `pending` huérfano
     // dejaría al cocinero cocinando un plato cancelado). Falla fuerte si el
@@ -4356,6 +4451,7 @@ export class OrderFlowService {
     }
 
     let cancelledTicketId: number | null = null;
+    let updatedTicketId: number | null = null;
     let preparedDisposition: 'reuse' | 'waste' | null = null;
     let preparedLeaves: ConsumedLeafDisposition[] = [];
     const preparedStockAfterCommit: Array<() => void> = [];
@@ -4401,12 +4497,25 @@ export class OrderFlowService {
           select: { status: true },
         });
         if (freshTicket && freshTicket.status === 'pending') {
-          await kds.cancelTicketInTx(tx, ticketId);
-          cancelledTicketId = ticketId;
+          const result = await kds.cancelTicketItemInTx(tx, ticketId, orderItemId);
+          if (result === 'cancelled') cancelledTicketId = ticketId;
+          else updatedTicketId = ticketId;
+        } else {
+          throw new VendixHttpException(
+            ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+            'El ticket cambió de estado en cocina. Actualiza la orden y vuelve a elegir qué hacer con los insumos.',
+          );
         }
         // Si el ticket ya no está pending al iniciar el tx, no lo
         // cancelamos pero la cancelación del ítem sigue adelante
         // (registrada como merma).
+      }
+
+      if (preparedFired && !isPendingTicket && ticketId != null &&
+          (activeKti?.status === 'in_preparation' || activeKti?.status === 'ready')) {
+        const result = await kds.cancelTicketItemInTx(tx, ticketId, orderItemId, activeKti.status);
+        if (result === 'cancelled') cancelledTicketId = ticketId;
+        else updatedTicketId = ticketId;
       }
 
       // Reversión de stock SOLO en before_fire (no fired). En
@@ -4593,6 +4702,9 @@ export class OrderFlowService {
           }`,
         );
       }
+    }
+    if (updatedTicketId != null) {
+      await kds.emitTicketUpdatedEvent(updatedTicketId);
     }
 
     this.logger.log(
@@ -5038,6 +5150,8 @@ export class OrderFlowService {
         },
       );
     }
+
+    await this.assertKitchenReadyForWholeOrder(orderId);
 
     this.validateTransition(order.state as OrderState, 'finished');
     const updatedOrder = await this.updateOrderState(orderId, 'finished', {
@@ -5612,6 +5726,13 @@ export class OrderFlowService {
     // CLAIM + payment-cancel + KDS/item branch + metadata write share ONE
     // transaction so they commit atomically (pattern of reactivateOrder).
     const cancelledTicketIds: number[] = [];
+    const updatedTicketIds: number[] = [];
+    const preparedStockAfterCommit: Array<() => void> = [];
+    const preparedDispositions: Array<{
+      itemId: number;
+      disposition: 'reuse' | 'waste';
+      leaves: ConsumedLeafDisposition[];
+    }> = [];
     const updatedOrder = await this.prisma.$transaction(async (tx) => {
       await lockOrderLifecycle(tx, orderId, order.store_id);
       const freshOrder = await this.getOrder(orderId, tx);
@@ -5787,8 +5908,7 @@ export class OrderFlowService {
       }
 
       // Ramificación KDS por ítem (espejo de `cancelOrderItem` in-tx):
-      // - `pending` → cancela el ticket con relectura TOCTOU dentro del tx
-      //   y marca el ítem como merma (el insumo ya se consumió al fire).
+      // - `pending` → cancela el ticket y devuelve el insumo aún sin usar.
       // - `advanced` → exige la decisión (422 aborta el tx y el claim hace
       //   rollback); `reuse` revierte cada consumo del ítem, `waste` no.
       for (const item of kitchenItems) {
@@ -5810,14 +5930,24 @@ export class OrderFlowService {
                 'KitchenFireService no disponible en OrderFlowService (revisar imports de OrderFlowModule)',
               );
             }
-            await kds.cancelTicketInTx(tx, meta.ticketId);
-            cancelledTicketIds.push(meta.ticketId);
+            const result = await kds.cancelTicketItemInTx(tx, meta.ticketId, item.id);
+            if (result === 'cancelled') cancelledTicketIds.push(meta.ticketId);
+            else updatedTicketIds.push(meta.ticketId);
+            const leaves = await this.disposeConsumedPreparedLeaves(
+              tx, orderId, item.id, Number(freshOrder.stores?.organization_id),
+              'reuse', dto.reason.trim(), preparedStockAfterCommit,
+            );
+            await this.auditPreparedDispositionInTx(
+              tx, orderId, item.id, Number(freshOrder.stores?.organization_id),
+              freshOrder.store_id, dto.reason.trim(), 'reuse', leaves,
+            );
+            preparedDispositions.push({ itemId: item.id, disposition: 'reuse', leaves });
             await tx.order_items.update({
               where: { id: item.id },
               data: {
                 cancelled_at: new Date(),
                 cancellation_reason: dto.reason.trim(),
-                cancellation_type: 'after_fire_waste',
+                cancellation_type: 'after_fire_reused',
                 updated_at: new Date(),
               },
             });
@@ -5833,7 +5963,7 @@ export class OrderFlowService {
               orderItemId: item.id,
               payload: {
                 reason: dto.reason.trim(),
-                cancellation_type: 'after_fire_waste',
+                cancellation_type: 'after_fire_reused',
                 cascade: true,
               },
             });
@@ -5854,45 +5984,31 @@ export class OrderFlowService {
         const cancellationType =
           disposition === 'reuse' ? 'after_fire_reused' : 'after_fire_waste';
 
-        if (disposition === 'reuse') {
-          const consumptionTxns =
-            await tx.inventory_transactions.findMany({
-              where: {
-                order_item_id: item.id,
-                quantity_change: { lt: 0 },
-              },
-              select: {
-                product_id: true,
-                product_variant_id: true,
-                quantity_change: true,
-              },
-            });
-          for (const ct of consumptionTxns) {
-            const locationId =
-              await this.stockLevelManager.getDefaultLocationForProduct(
-                ct.product_id,
-                ct.product_variant_id ?? undefined,
-              );
-            await this.stockLevelManager.updateStock(
-              {
-                product_id: ct.product_id,
-                variant_id: ct.product_variant_id ?? undefined,
-                location_id: locationId,
-                quantity_change: Math.abs(ct.quantity_change),
-                movement_type: 'return',
-                reason:
-                  `REUSO-INSUMO: orden #${orderId} ítem #${item.id} ` +
-                  `ticket #${meta.ticketId ?? 's/t'} — revierte consumo fire`,
-                source_module: 'order_item_cancellation',
-                // SIN order_item_id: la reversa no debe crear un hijo que
-                // apunte al order_item cancelado (FK onDelete: Restrict).
-                create_movement: true,
-                validate_availability: false,
-              },
-              tx,
-            );
+        if (meta.ticketId != null) {
+          const currentKdsItem = await tx.kitchen_ticket_items.findFirst({
+            where: { kitchen_ticket_id: meta.ticketId, order_item_id: item.id },
+            orderBy: { id: 'desc' },
+            select: { status: true },
+          });
+          if (currentKdsItem?.status === 'in_preparation' || currentKdsItem?.status === 'ready') {
+            if (!kds) {
+              throw new InternalServerErrorException('KitchenFireService no disponible para cancelar el plato en cocina');
+            }
+            const result = await kds.cancelTicketItemInTx(tx, meta.ticketId, item.id, currentKdsItem.status);
+            if (result === 'cancelled') cancelledTicketIds.push(meta.ticketId);
+            else updatedTicketIds.push(meta.ticketId);
           }
         }
+
+        const leaves = await this.disposeConsumedPreparedLeaves(
+          tx, orderId, item.id, Number(freshOrder.stores?.organization_id),
+          disposition, dto.reason.trim(), preparedStockAfterCommit,
+        );
+        await this.auditPreparedDispositionInTx(
+          tx, orderId, item.id, Number(freshOrder.stores?.organization_id),
+          freshOrder.store_id, dto.reason.trim(), disposition, leaves,
+        );
+        preparedDispositions.push({ itemId: item.id, disposition, leaves });
 
         await tx.order_items.update({
           where: { id: item.id },
@@ -5931,11 +6047,19 @@ export class OrderFlowService {
       });
     });
 
+    for (const publish of preparedStockAfterCommit) publish();
+    for (const entry of preparedDispositions) {
+      await this.postPreparedDispositionAfterCommit(
+        orderId, entry.itemId, Number(order.stores?.organization_id),
+        order.store_id, entry.disposition, entry.leaves,
+      );
+    }
+
     // Post-commit best-effort: `ticket.cancelled` por cada ticket KDS
     // auto-cancelado in-tx (espejo de `cancelOrderItem`; el helper ya es
     // best-effort interno, se envuelve igual por simetría).
     if (kds) {
-      for (const ticketId of cancelledTicketIds) {
+      for (const ticketId of new Set(cancelledTicketIds)) {
         try {
           await kds.emitTicketCancelledEvent(ticketId);
         } catch (err) {
@@ -5944,6 +6068,11 @@ export class OrderFlowService {
               (err as Error).message
             }`,
           );
+        }
+      }
+      for (const ticketId of new Set(updatedTicketIds)) {
+        if (!cancelledTicketIds.includes(ticketId)) {
+          await kds.emitTicketUpdatedEvent(ticketId);
         }
       }
     }
@@ -7288,12 +7417,24 @@ export class OrderFlowService {
    * los tramos no-efectivo no la traen para que el lector ("primer pago con
    * recibido") nunca tome el recibido de una tarjeta.
    */
+  private async voidCodPendingMarkers(paymentIds: number[]): Promise<void> {
+    if (paymentIds.length === 0) return;
+    await this.prisma.payments.updateMany({
+      where: { id: { in: paymentIds }, state: 'pending' },
+      data: { state: 'cancelled', updated_at: new Date() },
+    });
+  }
+
   private async createLegPayments(
     orderId: number,
     currency: string,
     legs: NormalizedLeg[],
     change: number,
-    historyCtx?: { storeId: number; organizationId?: number | null },
+    historyCtx?: {
+      storeId: number;
+      organizationId?: number | null;
+      codPendingPaymentIds?: number[];
+    },
   ): Promise<
     Array<{ payment: any; leg: NormalizedLeg; transactionId: string }>
   > {
@@ -7376,8 +7517,16 @@ export class OrderFlowService {
               payment_type: 'direct',
               amount_received: leg.amount_received,
               change: leg.is_cash ? change : 0,
-              ...(leg.is_cash
-                ? { metadata: { amount_received: legReceived } }
+              ...(leg.is_cash || historyCtx?.codPendingPaymentIds?.length
+                ? { metadata: {
+                    ...(leg.is_cash ? { amount_received: legReceived } : {}),
+                    ...(historyCtx?.codPendingPaymentIds?.length
+                      ? {
+                          payment_origin: 'cash_on_delivery',
+                          original_pending_payment_ids: historyCtx.codPendingPaymentIds,
+                        }
+                      : {}),
+                  } }
                 : {}),
             },
           },
@@ -7394,6 +7543,14 @@ export class OrderFlowService {
             type: 'payment_registered',
             paymentId: payment.id,
             amount: leg.amount,
+            ...(historyCtx.codPendingPaymentIds?.length
+              ? { payload: {
+                  payment_origin: 'cash_on_delivery',
+                  original_pending_payment_ids: historyCtx.codPendingPaymentIds,
+                  actual_store_payment_method_id: leg.store_payment_method_id,
+                  actual_method: leg.accounting_method,
+                } }
+              : {}),
           });
         }
         // PLAN-pago-multimetodo-pendientes paso 2 — porción de venta del

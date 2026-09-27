@@ -108,6 +108,28 @@ describe('DispatchNotesService — createFromOrder prorratea el impuesto de lín
 
   afterEach(() => jest.restoreAllMocks());
 
+  it('blocks whole-order remisión while a prepared line still waits for kitchen, even alongside a direct product', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue(orderWith([
+      orderItem({ products: { product_type: 'prepared' }, kitchen_ticket_items: [{ status: 'pending' }] }),
+      orderItem({ id: 12, product_id: 353, products: { product_type: 'physical' }, kitchen_ticket_items: [] }),
+    ]));
+    await expect(service.createFromOrder(ORDER_ID, { items: [] } as any)).rejects.toMatchObject({
+      errorCode: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
+    });
+    expect(txCreate).not.toHaveBeenCalled();
+  });
+
+  it('still permits an explicit direct-product line while a different dish waits in KDS', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue(orderWith([
+      orderItem({ id: 12, product_id: 353, products: { product_type: 'prepared' }, kitchen_ticket_items: [{ status: 'pending' }] }),
+      orderItem({ products: { product_type: 'physical' }, kitchen_ticket_items: [] }),
+    ]));
+    await service.createFromOrder(ORDER_ID, {
+      items: [{ order_item_id: ORDER_ITEM_ID, dispatched_quantity: 1, location_id: LOCATION_ID }],
+    } as any);
+    expect(txCreate).toHaveBeenCalledTimes(1);
+  });
+
   it('despacho completo qty 5 base 50.000 IVA 19 % persiste tax 47.500 y total 297.500', async () => {
     const { persisted } = await runCreate([orderItem()], 5);
 

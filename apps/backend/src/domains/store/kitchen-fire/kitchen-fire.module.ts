@@ -6,6 +6,7 @@ import { RecipesModule } from '../recipes/recipes.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { KdsModule } from '../kds/kds.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
+import { AccountingModule } from '../accounting/accounting.module';
 import { KitchenFireController } from './kitchen-fire.controller';
 import { KitchenFireService } from './kitchen-fire.service';
 
@@ -39,6 +40,7 @@ import { KitchenFireService } from './kitchen-fire.service';
     NotificationsModule,
     KdsModule,
     OrderHistoryModule,
+    AccountingModule,
   ],
   controllers: [KitchenFireController],
   providers: [KitchenFireService],

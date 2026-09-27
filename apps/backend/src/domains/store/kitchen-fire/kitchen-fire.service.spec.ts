@@ -20,6 +20,102 @@ interface FakeStockLevel {
   cost_per_unit: any;
 }
 
+describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', () => {
+  const harness = (status: 'pending' | 'in_preparation' | 'ready') => {
+    const ticket = {
+      id: 55, order_id: 100, store_id: 1, kds_id: 2, status,
+      items: [{ id: 501, order_item_id: 77, status }],
+    };
+    const tx: any = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'processing' }]),
+      kitchen_tickets: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      kitchen_ticket_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      audit_logs: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 9 }),
+      },
+      inventory_transactions: { findMany: jest.fn().mockResolvedValue([{
+        organization_id: 3, product_id: 400, product_variant_id: null,
+        quantity_change: -2, unit_cost: 5, total_cost: 10,
+      }]) },
+      inventory_cost_layers: { create: jest.fn().mockResolvedValue({ id: 1 }) },
+    };
+    const prisma: any = {
+      kitchen_tickets: {
+        findFirst: jest.fn().mockResolvedValue(ticket),
+        findMany: jest.fn().mockResolvedValue([{ status: 'cancelled' }]),
+      },
+      $transaction: jest.fn((fn: (tx: any) => Promise<unknown>) => fn(tx)),
+    };
+    const stock = {
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(8),
+      updateStock: jest.fn().mockResolvedValue({}),
+    };
+    const accounting = { onPreparedDishDisposition: jest.fn().mockResolvedValue({ id: 7 }) };
+    const service = new KitchenFireService(
+      prisma, {} as any, stock as any, {} as any,
+      { emit: jest.fn() } as any, { push: jest.fn() } as any,
+      { assertCanMutateStationTicket: jest.fn(), attributeOpenSessionToTicketConsumption: jest.fn() } as any,
+      undefined, accounting as any,
+    );
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+      store_id: 1, organization_id: 3, user_id: 9,
+    } as any);
+    return { service, tx, stock, accounting };
+  };
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('pending restores each consumed leaf once and reverses COGS even when waste was requested', async () => {
+    const { service, tx, stock, accounting } = harness('pending');
+    await service.cancelTicket(55, 'waste');
+    expect(stock.updateStock).toHaveBeenCalledWith(expect.objectContaining({
+      product_id: 400, quantity_change: 2, movement_type: 'return',
+    }), tx);
+    expect(tx.inventory_cost_layers.create).toHaveBeenCalledTimes(1);
+    expect(accounting.onPreparedDishDisposition).toHaveBeenCalledWith(expect.objectContaining({
+      disposition: 'reuse', total_cost: 10,
+    }));
+  });
+
+  it('in preparation requires a choice before any transaction starts', async () => {
+    const { service, tx } = harness('in_preparation');
+    await expect(service.cancelTicket(55)).rejects.toMatchObject({ errorCode: 'KITCHEN_TICKET_INVALID_STATE' });
+    expect(tx.kitchen_tickets.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('advanced waste keeps stock out and reclassifies COGS', async () => {
+    const { service, tx, stock, accounting } = harness('ready');
+    await service.cancelTicket(55, 'waste');
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(accounting.onPreparedDishDisposition).toHaveBeenCalledWith(expect.objectContaining({ disposition: 'waste' }));
+    expect(tx.audit_logs.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('a concurrent second cancellation loses the ticket claim and cannot return stock twice', async () => {
+    const { service, tx, stock } = harness('pending');
+    tx.kitchen_tickets.updateMany.mockResolvedValue({ count: 0 });
+    await expect(service.cancelTicket(55)).rejects.toMatchObject({ errorCode: 'KITCHEN_TICKET_INVALID_STATE' });
+    expect(stock.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('item cancellation leaves a shared ticket active until its sibling leaves', async () => {
+    const { service } = harness('pending');
+    const tx: any = {
+      kitchen_ticket_items: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        count: jest.fn().mockResolvedValue(1),
+      },
+      kitchen_tickets: { update: jest.fn() },
+    };
+    await expect(service.cancelTicketItemInTx(tx, 55, 77)).resolves.toBe('updated');
+    expect(tx.kitchen_tickets.update).not.toHaveBeenCalled();
+    expect(tx.kitchen_ticket_items.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { kitchen_ticket_id: 55, order_item_id: 77, status: 'pending' },
+    }));
+  });
+});
+
 describe('KitchenFireService — post-cancel remake vocabulary', () => {
   const item = (cancellation_type: string | null) => ({ cancellation_type });
 
@@ -1287,9 +1383,12 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       );
       prismaMock.$transaction.mockImplementation(async (cb: any) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'processing' }]),
           kitchen_tickets: {
-            update: jest.fn().mockResolvedValue({}),
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           },
+          audit_logs: { findFirst: jest.fn().mockResolvedValue(null) },
+          inventory_transactions: { findMany: jest.fn().mockResolvedValue([]) },
           kitchen_ticket_items: {
             updateMany: jest.fn().mockResolvedValue({}),
           },
@@ -1381,9 +1480,12 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     const setupCancelTx = () => {
       prismaMock.$transaction.mockImplementation(async (cb: any) =>
         cb({
+          $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'processing' }]),
           kitchen_tickets: {
-            update: jest.fn().mockResolvedValue({}),
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           },
+          audit_logs: { findFirst: jest.fn().mockResolvedValue(null) },
+          inventory_transactions: { findMany: jest.fn().mockResolvedValue([]) },
           kitchen_ticket_items: {
             updateMany: jest.fn().mockResolvedValue({}),
           },

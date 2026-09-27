@@ -121,8 +121,8 @@ export class KitchenTicketsService {
     return this.mutateTicket(ticketId, 'delivered');
   }
 
-  cancel(ticketId: number): Observable<KitchenTicket> {
-    return this.mutateTicket(ticketId, 'cancel');
+  cancel(ticketId: number, disposition?: 'reuse' | 'waste'): Observable<KitchenTicket> {
+    return this.mutateTicket(ticketId, 'cancel', disposition ? { disposition } : {});
   }
 
   /**
@@ -246,11 +246,12 @@ export class KitchenTicketsService {
   private mutateTicket(
     ticketId: number,
     action: 'start' | 'ready' | 'delivered' | 'cancel' | 'revert',
+    body: Record<string, string> = {},
   ): Observable<KitchenTicket> {
     return this.http
       .post<ApiResponse<KitchenTicket>>(
         `${this.apiUrl}${this.basePath}/tickets/${ticketId}/${action}`,
-        {},
+        body,
       )
       .pipe(
         map((res) => res.data),

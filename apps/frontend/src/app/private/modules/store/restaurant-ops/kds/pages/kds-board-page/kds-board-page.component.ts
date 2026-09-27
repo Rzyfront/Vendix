@@ -1244,10 +1244,14 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   }
 
   cancelTicket(ticket: KitchenTicket): void {
+    if (ticket.status !== 'pending') {
+      this.cancelDispositionTicket.set(ticket);
+      return;
+    }
     this.dialogService
       .confirm({
         title: 'Cancelar ticket',
-        message: `¿Cancelar el ticket #${ticket.id}? Esta acción no se puede deshacer.`,
+        message: `¿Cancelar el ticket #${ticket.id}? Aún está pendiente: los insumos se reintegrarán automáticamente al inventario.`,
         confirmText: 'Cancelar ticket',
         cancelText: 'Volver',
         confirmVariant: 'danger',
@@ -1258,6 +1262,19 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
           this.ticketsService.cancel(ticket.id),
         );
       });
+  }
+
+  readonly cancelDispositionTicket = signal<KitchenTicket | null>(null);
+
+  closeCancelDisposition(): void {
+    this.cancelDispositionTicket.set(null);
+  }
+
+  confirmCancelDisposition(disposition: 'reuse' | 'waste'): void {
+    const ticket = this.cancelDispositionTicket();
+    if (!ticket) return;
+    this.cancelDispositionTicket.set(null);
+    this.runMutation(ticket.id, () => this.ticketsService.cancel(ticket.id, disposition));
   }
 
   /**
