@@ -334,15 +334,25 @@ export class CheckoutService {
   /**
    * Recalcula el costo de envío por distancia al confirmar, con el mismo
    * resolver del cotizador (`ShippingDistanceService`) y las coords de la
-   * dirección final. Sin método-distancia/escala/coords, o con el motor
-   * caído, rige el precio de zona (con un warn estructurado — ver abajo);
-   * si la distancia cae fuera de todos los rangos (`matchTier`, SIN
-   * tolerancia de borde) la selección ya no es válida (el cotizador nunca la
-   * habría ofrecido) y el checkout se rechaza con 400 `ECOM_CHECKOUT_003` —
-   * rechazo estricto, deliberado: no hay margen de tolerancia por diseño de
-   * negocio, así que un comprador justo en el borde de un tramo (o fuera de
-   * él) debe volver a cotizar en vez de recibir una tarifa que el cotizador
-   * nunca ofreció.
+   * dirección final. Sin método-distancia/escala, sin ORIGEN del método, o
+   * con el motor de ruteo caído/lanzando, rige el precio de zona (con un
+   * warn estructurado — ver abajo): eso es infraestructura, no la dirección
+   * del comprador. Si la distancia cae fuera de todos los rangos
+   * (`matchTier`, SIN tolerancia de borde) la selección ya no es válida (el
+   * cotizador nunca la habría ofrecido) y el checkout se rechaza con 400
+   * `ECOM_CHECKOUT_003` — rechazo estricto, deliberado: no hay margen de
+   * tolerancia por diseño de negocio, así que un comprador justo en el
+   * borde de un tramo (o fuera de él) debe volver a cotizar en vez de
+   * recibir una tarifa que el cotizador nunca ofreció.
+   *
+   * Cambio de negocio (2026-09-27): sin coords del comprador Y sin poder
+   * geocodificar su dirección (`resolveBuyerCoords` devuelve `null` — sin
+   * `address_line1`, país no-CO, o el geocoder no resuelve), el checkout
+   * TAMBIÉN se rechaza con el mismo 400 `ECOM_CHECKOUT_003` (antes
+   * degradaba a zona) — sin saber dónde está el comprador no hay forma
+   * honesta de cobrar por distancia, y el cotizador ya excluyó esa tarifa
+   * de las opciones (`ShippingCalculatorService.applyDistancePrice`), así
+   * que el frontend nunca debió ofrecerla.
    *
    * `toCoords` (origen y destino) es el MISMO helper que usa el cotizador
    * (`ShippingCalculatorService.resolveQuoteDistances`): redondea a 6
@@ -450,12 +460,22 @@ export class CheckoutService {
       }
     }
     if (!buyer) {
+      // Cambio de negocio 2026-09-27: ya NO degrada a zona — sin coords del
+      // comprador y sin poder geocodificar su dirección, no hay forma
+      // honesta de medir el envío por distancia, así que se rechaza igual
+      // que "fuera de todos los tramos" (mismo ECOM_CHECKOUT_003, reason
+      // distinto en el warn para que siga siendo diagnosticable). El origen
+      // faltante y el motor de ruteo caído SÍ siguen degradando a zona más
+      // abajo — eso es infraestructura, no la dirección del comprador.
       this.logger.warn({
         event: 'checkout.shipping_distance_unavailable',
         ...logCtx,
         reason: 'buyer_geocode_failed',
       });
-      return zone_cost;
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_003,
+        'No pudimos ubicar la dirección de entrega. Marca la ubicación en el mapa para calcular el envío.',
+      );
     }
     let distanceKm: number | null;
     try {

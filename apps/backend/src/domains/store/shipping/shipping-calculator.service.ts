@@ -380,9 +380,12 @@ export class ShippingCalculatorService {
    * ninguno debe reimplementar el atajo `flat = base_cost` por su cuenta.
    *
    * `null` cuando la tarifa no aparece entre las opciones calculadas (zona
-   * sin cobertura, tarifa inactiva, o distancia fuera de todos los tramos
-   * — ver `vendix-shipping-distance-pricing`). El llamador decide el
-   * fallback (zona/flat) en ese caso.
+   * sin cobertura, tarifa inactiva, distancia fuera de todos los tramos, o
+   * — cambio de negocio 2026-09-27 — sin coords del comprador y sin poder
+   * geocodificar su dirección: ver `vendix-shipping-distance-pricing`). El
+   * llamador decide el fallback (zona/flat) en ese caso, EXCEPTO que ya no
+   * debe inventar un costo cuando la razón es la dirección del comprador
+   * (ver blockers reportados en payments.service.ts / orders.service.ts).
    */
   async quoteRateGross(
     storeId: number,
@@ -407,20 +410,28 @@ export class ShippingCalculatorService {
    * compartida por todas las tarifas de la cotización. Tarifas sin escala ni
    * siquiera rutean (su precio de zona rige igual).
    *
-   * Cuando la distancia no se puede calcular (coords de origen/destino
-   * ausentes o inválidas, o el motor de ruteo falla) el precio de zona rige
-   * igual (fail-open, sin cambios), pero se deja un warn ESTRUCTURADO con
-   * `store_id` + `shipping_method_id` + motivo para que el caso sea
-   * diagnosticable — antes fallaba en silencio y solo un `docker logs` con
-   * suerte de timing lo mostraba.
+   * Cuando el ORIGEN del método falta/es inválido, o el motor de ruteo
+   * falla/lanza, el precio de zona rige igual (fail-open, sin cambios) —
+   * eso es infraestructura, no responsabilidad del comprador — pero se deja
+   * un warn ESTRUCTURADO con `store_id` + `shipping_method_id` + motivo
+   * para que el caso sea diagnosticable — antes fallaba en silencio y solo
+   * un `docker logs` con suerte de timing lo mostraba.
    *
    * Sin `latitude`/`longitude` del comprador, se intenta UNA vez
    * `ShippingDistanceService.resolveBuyerCoords` (forward-geocode de
-   * `address_line1`/`city`/`state_province`) antes de rendirse a zona, con
-   * el origen del PRIMER método candidato como `bias` — el mismo campo y el
+   * `address_line1`/`city`/`state_province`) antes de rendirse, con el
+   * origen del PRIMER método candidato como `bias` — el mismo campo y el
    * mismo bias que usa `CheckoutService.resolveConfirmShippingCost`, para
    * que cotización y confirmación midan desde el mismo punto (el `forward`
    * cachea por dirección normalizada).
+   *
+   * Cambio de negocio (2026-09-27): si esa dirección del comprador NO se
+   * puede resolver (ni coords del cliente ni geocode), el método con
+   * distancia activa YA NO degrada a zona — la tarifa se marca con el
+   * centinela `'buyer_geocode_failed'` (ver `applyDistancePrice`) y
+   * `calculateRates` la EXCLUYE de las opciones, igual que "fuera de todos
+   * los tramos": no hay forma honesta de cobrar por distancia sin saber
+   * dónde está el comprador, así que no se ofrece en vez de adivinar.
    */
   private async resolveQuoteDistances(
     storeId: number,
@@ -434,8 +445,11 @@ export class ShippingCalculatorService {
       } | null;
     }>,
     address: AddressDTO,
-  ): Promise<Map<string, number | null>> {
-    const distances = new Map<string, number | null>();
+  ): Promise<Map<string, number | null | 'buyer_geocode_failed'>> {
+    const distances = new Map<
+      string,
+      number | null | 'buyer_geocode_failed'
+    >();
     if (!this.distanceService) return distances;
 
     // Métodos con distancia activa Y escala utilizable: son los únicos cuyo
@@ -500,11 +514,18 @@ export class ShippingCalculatorService {
       }
     }
     if (!buyer) {
+      // Cambio de negocio 2026-09-27: ya NO se cobra zona — la tarifa se
+      // excluye (centinela `'buyer_geocode_failed'`, leído por
+      // `applyDistancePrice`) para CADA origen candidato, así
+      // `calculateRates` la descarta como si estuviera fuera de rango.
       for (const { methodId } of candidates) {
         this.logger.warn(
           `Distancia no calculable (store_id=${storeId}, shipping_method_id=${methodId}, reason=buyer_geocode_failed): ` +
-            'coords de destino ausentes o no geocodificables; se cobra tarifa de zona.',
+            'coords de destino ausentes o no geocodificables; la tarifa no se ofrece.',
         );
+      }
+      for (const key of origins.keys()) {
+        distances.set(key, 'buyer_geocode_failed');
       }
       return distances;
     }
@@ -532,8 +553,11 @@ export class ShippingCalculatorService {
 
   /**
    * Override por distancia para UNA tarifa: precio del tramo, `'excluded'`
-   * cuando la distancia cae fuera de todos los rangos, o `null` cuando rige
-   * el precio de zona.
+   * cuando la distancia cae fuera de todos los rangos O cuando no se pudo
+   * resolver la dirección del comprador (`'buyer_geocode_failed'` —
+   * cambio de negocio 2026-09-27, ver `resolveQuoteDistances`), o `null`
+   * cuando rige el precio de zona (sin origen, o motor de ruteo caído —
+   * infraestructura, no la dirección).
    */
   private applyDistancePrice(
     rate: {
@@ -544,7 +568,7 @@ export class ShippingCalculatorService {
         origin_longitude?: unknown;
       } | null;
     },
-    distanceKmByOrigin: Map<string, number | null>,
+    distanceKmByOrigin: Map<string, number | null | 'buyer_geocode_failed'>,
   ): number | 'excluded' | null {
     if (!this.distanceService) return null;
     const method = rate.shipping_method;
@@ -554,8 +578,10 @@ export class ShippingCalculatorService {
       method.origin_longitude,
     );
     if (!origin) return null;
-    const distanceKm =
+    const distanceEntry =
       distanceKmByOrigin.get(`${origin.latitude},${origin.longitude}`) ?? null;
+    if (distanceEntry === 'buyer_geocode_failed') return 'excluded';
+    const distanceKm = distanceEntry;
     const resolved = this.distanceService.resolveRatePrice(
       rate.distance_tiers,
       distanceKm,

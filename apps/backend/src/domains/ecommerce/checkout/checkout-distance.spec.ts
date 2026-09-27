@@ -409,17 +409,33 @@ describe('CheckoutService - recálculo por distancia al confirmar', () => {
     expect(result.total).toBe(18000);
   });
 
-  it('sin coords en la dirección cobra precio de zona (5000)', async () => {
+  it('cambio de negocio 2026-09-27: sin coords Y sin poder geocodificar (buyer_geocode_failed) rechaza con 400 ECOM_CHECKOUT_003, YA NO cobra zona', async () => {
+    // Antes del cambio de negocio, esto degradaba a precio de zona (5000).
+    // Ahora: sin coords del comprador y con `resolveBuyerCoords` fallando
+    // (mock por defecto del `beforeEach`), no hay forma honesta de medir el
+    // envío por distancia — se rechaza igual que "fuera de todos los
+    // tramos", con el MISMO error_code (fijado, no solo la clase) para que
+    // un futuro revert accidental a la degradación no pase la prueba con un
+    // código distinto.
     const dto = buildDto();
     delete dto.shipping_address.latitude;
     delete dto.shipping_address.longitude;
 
-    const result: any = await service.checkout(dto);
+    let caught: unknown;
+    try {
+      await service.checkout(dto);
+    } catch (error) {
+      caught = error;
+    }
 
     expect(distance.resolveDistanceKm).not.toHaveBeenCalled();
-    const orderArgs = prisma.orders.create.mock.calls[0][0].data;
-    expect(orderArgs.shipping_cost).toBe(5000);
-    expect(result.total).toBe(15000);
+    expect(distance.resolveBuyerCoords).toHaveBeenCalled();
+    expect(caught).toBeInstanceOf(VendixHttpException);
+    expect((caught as VendixHttpException).errorCode).toBe(
+      'ECOM_CHECKOUT_003',
+    );
+    expect((caught as VendixHttpException).getStatus()).toBe(400);
+    expect(prisma.orders.create).not.toHaveBeenCalled();
   });
 
   it('motor caído cobra precio de zona sin romper el checkout', async () => {
