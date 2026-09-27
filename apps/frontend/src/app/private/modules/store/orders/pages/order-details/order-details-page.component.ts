@@ -1567,12 +1567,19 @@ export class OrderDetailsPageComponent {
     // TODO el arreglo de botones; ahora el backend ya decide qué botón vive
     // habilitado/deshabilitado, esto solo avisa).
     if (this.blockedByMissingShipping()) {
+      // checkout-whatsapp-location-fallback: una orden 'other' sin metodo de
+      // envio casi siempre viene del fallback de WhatsApp (el comprador no
+      // pudo ubicarse en el mapa) en vez de un gate generico de envio.
+      const pendingFromWhatsappFallback =
+        order.delivery_type === 'other' && !order.shipping_method_id;
       alerts.push({
         id: 'shipping-required-info',
         type: 'alert',
         color: 'warning',
         icon: 'alert-triangle',
-        label: 'Asigna un metodo de envio para continuar con el flujo.',
+        label: pendingFromWhatsappFallback
+          ? 'Envío por asignar — el cliente no pudo ubicarse en el mapa. Asigna método y tarifa antes de cobrar o despachar.'
+          : 'Asigna un metodo de envio para continuar con el flujo.',
       } as OrderActionConfig);
     }
 
