@@ -608,7 +608,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     const validate = spyOn(ship, 'validateDetailsForCliente').and.returnValue(false);
     component.onSelectCustomerAndAdvance({ id: 99, first_name: 'Ana' } as any);
     expect(component.currentStep()).toBe(1);
-    fixture.componentRef.setInput('cartState', { customer: { id: 99, first_name: 'Ana' }, items: [{ id: 1 }], summary: { total: 10 } });
+    fixture.componentRef.setInput('cartState', { customer: { id: 99, first_name: 'Ana' }, items: [{ id: 1, product: { name: 'Producto' } }], summary: { total: 10 } });
     fixture.detectChanges();
     component.attemptNextStep();
     expect(validate).toHaveBeenCalled();
@@ -626,6 +626,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     wireStubs();
     fixture.detectChanges();
     const selector = fixture.debugElement.query(By.directive(CustomerSelectorStub)).componentInstance as CustomerSelectorStub;
+    bindSlot('customerSelector', selector);
     const ship = fixture.debugElement.query(By.directive(ShippingStub)).componentInstance as ShippingStub;
     let identifiers = true;
     spyOn(selector, 'hasFormIdentifiers').and.callFake(() => identifiers);
@@ -640,7 +641,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(component.currentStep()).toBe(1);
     fixture.componentRef.setInput('cartState', {
-      customer: { id: 99, first_name: 'Ana' }, items: [{ id: 1 }], summary: { total: 10 },
+      customer: { id: 99, first_name: 'Ana' }, items: [{ id: 1, product: { name: 'Producto' } }], summary: { total: 10 },
     });
     fixture.detectChanges();
     component.attemptNextStep();
@@ -655,7 +656,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   it('proyecta los detalles de domicilio del único componente Envío junto al cliente', () => {
     component.entregaChoice.set('enviar');
     fixture.componentRef.setInput('cartState', {
-      customer: { id: 99, first_name: 'Ana' }, items: [{ id: 1 }], summary: { total: 10 },
+      customer: { id: 99, first_name: 'Ana' }, items: [{ id: 1, product: { name: 'Producto' } }], summary: { total: 10 },
     });
     component.currentStep.set(1);
     component.clienteSubStep.set(1);
@@ -1159,7 +1160,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   it('muestra la propina una sola vez en el resumen sin alterar la base del cobro', () => {
     fixture.componentRef.setInput('cartState', {
       customer: { id: 99, first_name: 'Ana' },
-      items: [{ id: 1 }],
+      items: [{ id: 1, product: { name: 'Producto' } }],
       summary: { total: 11900, subtotal: 10000, taxAmount: 1900 },
     });
     fixture.detectChanges();

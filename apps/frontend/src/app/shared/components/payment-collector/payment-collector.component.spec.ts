@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
 import { signal } from '@angular/core';
 import { By } from '@angular/platform-browser';
+import { provideHttpClient } from '@angular/common/http';
 
 import { PaymentCollectorComponent } from './payment-collector.component';
 import { PaymentModalComponent } from './payment-modal.component';
@@ -14,20 +15,7 @@ describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting',
   let fixture: ComponentFixture<PaymentCollectorComponent>;
   let component: PaymentCollectorComponent;
 
-  const mockCurrencyService = {
-    format: (amount: number | string | null | undefined) => {
-      const num = Number(amount) || 0;
-      return `$${num.toLocaleString('es-CO')}`;
-    },
-    currentCurrency: signal({
-      code: 'COP',
-      symbol: '$',
-      decimal_places: 0,
-      position: 'before',
-      format_style: 'dot_comma',
-    }),
-    resolution: signal('resolved'),
-  };
+  const mockCurrencyService = buildMultiCurrencyMock();
 
   const mockCatalog = {
     getEnabledMethods: () => of([]),
@@ -37,6 +25,7 @@ describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting',
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: mockCurrencyService },
         { provide: PaymentMethodsCatalogService, useValue: mockCatalog },
       ],
@@ -44,6 +33,7 @@ describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting',
 
     fixture = TestBed.createComponent(PaymentCollectorComponent);
     component = fixture.componentInstance;
+    fixture.componentRef.setInput('amount', 0);
   });
 
   describe('formatInstallmentDate', () => {
@@ -345,6 +335,7 @@ describe('PaymentCollectorComponent — modo multi «Varios métodos» (Paso 5)'
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
@@ -459,6 +450,7 @@ describe('PaymentCollectorComponent — B15(1) setLegAmount no deja amountReceiv
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
@@ -524,6 +516,7 @@ describe('PaymentModalComponent — arbitraje NG8002 allowMultiTender (Paso 5c)'
     await TestBed.configureTestingModule({
       imports: [PaymentModalComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
@@ -556,6 +549,7 @@ describe('PaymentCollectorComponent — restaurant tip amount', () => {
     await TestBed.configureTestingModule({
       imports: [PaymentCollectorComponent],
       providers: [
+        provideHttpClient(),
         { provide: CurrencyFormatService, useValue: buildMultiCurrencyMock() },
         { provide: PaymentMethodsCatalogService, useValue: multiCatalogMock },
       ],
