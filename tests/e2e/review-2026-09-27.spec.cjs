@@ -34,11 +34,19 @@ async function runScenario(name, reviewIds, fn) {
 async function login(page) {
   assert(process.env.QA_EMAIL && process.env.QA_PASSWORD,
     'Set QA_EMAIL and QA_PASSWORD in the process environment.');
-  await page.goto('https://vendix.com/auth/login', { waitUntil: 'networkidle' });
+  await page.goto('https://vendix.com/auth/login', { waitUntil: 'domcontentloaded' });
+  await page.locator('input[type="email"]').waitFor();
   await page.locator('input[type="email"]').fill(process.env.QA_EMAIL);
   await page.locator('input[type="password"]').fill(process.env.QA_PASSWORD);
-  await page.getByRole('button', { name: 'Iniciar Sesión' }).click();
-  await page.waitForURL(/\/admin\//, { timeout: 20_000 });
+  if (await page.getByText('Demasiados intentos de inicio de sesión').isVisible()) {
+    throw new Error('La cuenta QA sigue temporalmente bloqueada; esperar el contador de la UI.');
+  }
+  await page.getByRole('button', { name: 'Iniciar Sesión' }).click({ force: true });
+  await Promise.race([
+    page.waitForURL(/\/admin\//, { timeout: 20_000 }),
+    page.getByText('Demasiados intentos de inicio de sesión').waitFor({ timeout: 20_000 })
+      .then(() => { throw new Error('La cuenta QA está temporalmente bloqueada por límite de intentos; esperar el contador de la UI antes de reintentar.'); }),
+  ]);
   await page.getByText('Punto de Venta', { exact: true }).first().waitFor();
 }
 
@@ -59,9 +67,9 @@ async function main() {
       assert.equal(consoleErrors.length, 0, `Browser console errors: ${consoleErrors.join(' | ')}`);
     });
 
-    if (group === 'lists' || group === 'all') {
+    if (results[0]?.status === 'passed' && (group === 'lists' || group === 'all')) {
       await runScenario('R8: customer desktop table omits Estado', ['R8'], async () => {
-        await page.goto('https://vendix.com/admin/customers/all', { waitUntil: 'networkidle' });
+        await page.goto('https://vendix.com/admin/customers/all', { waitUntil: 'domcontentloaded' });
         await page.getByRole('heading', { name: /clientes/i }).first().waitFor();
         const table = page.getByRole('table').first();
         await table.waitFor();
