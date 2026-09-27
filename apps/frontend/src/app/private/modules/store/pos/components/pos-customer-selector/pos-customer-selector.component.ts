@@ -505,24 +505,8 @@ export class PosCustomerSelectorComponent {
     return this.customerService.resolveCustomer(request).pipe(
       map(
         (result): boolean => {
-          // BLOQUEADOR (ver nota de scope): `PosCustomerService.resolveCustomer()`
-          // (apps/frontend/.../pos/services/pos-customer.service.ts, líneas
-          // ~107-121, fuera de mi scope — no es sibling de este componente y
-          // lo consumen pos.component.ts / dispatch-notes/party-step.component.ts
-          // además de este selector y pos-customer-modal) mapea la respuesta
-          // del backend a `{customer, was_created, was_updated, matched_by}` y
-          // DESCARTA `document_conflict`, que el backend SÍ devuelve
-          // (`customers.service.ts findOrCreateByEmailOrDocument`, líneas
-          // ~698-704, confirmado leyendo el archivo — backend fuera de scope,
-          // solo lectura). Hasta que ese servicio compartido agregue
-          // `document_conflict: !!payload.document_conflict` a su `map()` (y
-          // al tipo de retorno), este campo llega siempre `undefined` en
-          // runtime y el bloqueo de abajo nunca se activa — el cast solo
-          // documenta el contrato objetivo, no lo repara.
-          const document_conflict =
-            (result as { document_conflict?: boolean }).document_conflict ===
-            true;
-          const { customer, was_created, was_updated } = result;
+          const { customer, was_created, was_updated, document_conflict } =
+            result;
 
           if (document_conflict && this.requiresElectronicInvoicing()) {
             this.documentConflict.set(true);
