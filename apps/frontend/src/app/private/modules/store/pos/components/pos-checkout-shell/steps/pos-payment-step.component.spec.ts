@@ -164,6 +164,9 @@ describe('PosPaymentStepComponent — tip contract', () => {
     const flowPayOrder = jasmine.createSpy('flowPayOrder').and.returnValue(of({
       order: { id: 42, state: 'paid' }, payment: { id: 77 },
     }));
+    const digital = jasmine.createSpy('processExistingDigitalTip').and.returnValue(of({
+      success: true, order: { id: 42 }, payment: { id: 77, state: 'succeeded' },
+    }));
     const step = Object.assign(Object.create(PosPaymentStepComponent.prototype), {
       cartState: () => ({ items: [], customer: null, summary: { total: 1000 } }),
       cartWithConfirmedSerials: () => ({ items: [], customer: null, summary: { total: 1000 } }),
@@ -175,7 +178,7 @@ describe('PosPaymentStepComponent — tip contract', () => {
       isWithinBusinessHours: () => true,
       cashRegisterEnabled: () => false, autoCreateDefaultRegister: () => true,
       editingOrderId: () => editingOrderId,
-      paymentService: { processSaleWithPayment: charge },
+      paymentService: { processSaleWithPayment: charge, processExistingDigitalTip: digital },
       ordersService: { flowPayOrder },
       processing: signal(false), submittedWompiSubMethod: signal(null),
       toastService: { info: jasmine.createSpy('info'), show: jasmine.createSpy('show') },
@@ -184,7 +187,7 @@ describe('PosPaymentStepComponent — tip contract', () => {
       paymentCompleted: { emit: jasmine.createSpy('emit') },
       destroyRef: { onDestroy: () => {} },
     });
-    return { step, charge, flowPayOrder };
+    return { step, charge, flowPayOrder, digital };
   };
 
   it('carries resolved tip and waiter to a fresh POS payment', () => {
@@ -206,6 +209,21 @@ describe('PosPaymentStepComponent — tip contract', () => {
     } as any);
     expect(flowPayOrder.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
       amount: 1100, tip_amount: 100, tip_type: 'fixed', tip_value: 100, tip_waiter_id: 7,
+    }));
+  });
+
+  it('routes a tipped edited Wompi order through the reserved digital processor', () => {
+    const { step, flowPayOrder, digital } = makeStep(42);
+    step.onCollectorSubmit({
+      mode: 'contado', method: { id: '5', type: 'wompi' },
+      tip: 100, tipType: 'fixed', tipValue: 100,
+      wompi: { subMethod: 'NEQUI', payload: { type: 'NEQUI' } },
+    } as any);
+    expect(flowPayOrder).not.toHaveBeenCalled();
+    expect(digital.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      tip_amount: 100, metadata: jasmine.objectContaining({
+        wompiPaymentMethod: { type: 'NEQUI' },
+      }),
     }));
   });
 });
