@@ -60,7 +60,7 @@
     <div class="checkout-grid">
       <!-- Columna principal: paso activo -->
       <div class="checkout-main">
-        <!-- Paso · Entrega (Consumir / Para llevar / Enviar). Siempre primero
+        <!-- Paso · Pedido (mesa / para llevar / domicilio). Siempre primero
              (paso 0). Se mantiene MONTADO mientras 'entrega' esté en stepKeys
              para que el shell lea checkoutTableId()/needsTable(). -->
         @if (stepKeys().includes('entrega')) {
@@ -313,6 +313,12 @@
                   }
                 }
               }
+              @if (requiresAddress() && clienteSubStep() === 1 &&
+                (saleMode() === 'alias' || cartState()?.customer)) {
+                @if (shippingStep()?.clientDeliveryDetails(); as deliveryDetails) {
+                  <ng-container [ngTemplateOutlet]="deliveryDetails"></ng-container>
+                }
+              }
             </div>
 
             <!-- Columna del stepper: a la derecha en desktop; debajo (DOM-last)
@@ -346,6 +352,7 @@
               [cartState]="cartState()"
               [customerAlias]="saleMode() === 'alias' ? customerAlias().trim() : ''"
               [editingOrderId]="editingOrderId()"
+              [detailsInCliente]="true"
               (shippingCompleted)="onShippingCompleted($event)"
             ></app-pos-shipping-step>
           </div>

@@ -2,6 +2,7 @@ import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, model
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ReactiveFormsModule } from '@angular/forms';
+import { NgTemplateOutlet } from '@angular/common';
 import { of } from 'rxjs';
 
 import { PosCheckoutShellComponent } from './pos-checkout-shell.component';
@@ -128,6 +129,8 @@ class ShippingStub {
   readonly cartState = input<unknown>(null);
   readonly customerAlias = input<string>('');
   readonly editingOrderId = input<number | null>(null);
+  readonly detailsInCliente = input(false);
+  readonly clientDeliveryDetails = signal<any>(null);
   readonly shippingCompleted = output<unknown>();
   readonly shippingCost = signal(0);
   readonly shipSubStep = signal(0);
@@ -147,6 +150,7 @@ class ShippingStub {
     return false;
   }
   flashValidation(): void {}
+  validateDetailsForCliente(): boolean { return true; }
   execute(_submit: unknown): void {}
 }
 
@@ -320,6 +324,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
           ShippingStub,
           CustomerSelectorStub,
           AddressStub,
+          NgTemplateOutlet,
           CurrencyStubPipe,
         ],
       },
@@ -588,6 +593,28 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     component.entregaChoice.set('enviar');
     fixture.detectChanges();
     expect(component.stepKeys()).toEqual(['entrega', 'cliente', 'envio', 'cobro']);
+    expect(component.steps()[0].label).toBe('Pedido');
+  });
+
+  it('mantiene Cliente visible al elegirlo para domicilio y valida detalles antes de Envío', () => {
+    component.entregaChoice.set('enviar');
+    component.currentStep.set(1);
+    component.clienteSubStep.set(1);
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+    const ship = fixture.debugElement.query(By.directive(ShippingStub)).componentInstance as ShippingStub;
+    const validate = spyOn(ship, 'validateDetailsForCliente').and.returnValue(false);
+    component.onSelectCustomerAndAdvance({ id: 99, first_name: 'Ana' } as any);
+    expect(component.currentStep()).toBe(1);
+    fixture.componentRef.setInput('cartState', { customer: { id: 99, first_name: 'Ana' }, items: [{ id: 1 }], summary: { total: 10 } });
+    fixture.detectChanges();
+    component.attemptNextStep();
+    expect(validate).toHaveBeenCalled();
+    expect(component.currentStep()).toBe(1);
+    validate.and.returnValue(true);
+    component.attemptNextStep();
+    expect(component.currentStep()).toBe(2);
   });
 
   it('Entrega-llevar avanza; mesa sin mesa abre el picker sin avanzar', () => {
