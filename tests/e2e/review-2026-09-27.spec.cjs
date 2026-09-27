@@ -112,18 +112,48 @@ async function login(page) {
   await dismissWeeklyStories(page);
 }
 
+async function openUiView(page, url, visibleLocator, description) {
+  let lastNavigationError = '';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.goto(url, { waitUntil: 'commit', timeout: 20_000 });
+    } catch (error) {
+      lastNavigationError = String(error?.message ?? error).slice(0, 180);
+      continue;
+    }
+    try {
+      await visibleLocator.waitFor({ timeout: 12_000 });
+      return;
+    } catch {
+      // Local domain bootstrap can commit a blank Angular shell after a
+      // cross-vhost navigation while nginx/backend watches reconnect.
+      // Retry through the browser; do not treat an empty bootstrap as a
+      // product-price assertion or bypass the UI with a direct API request.
+    }
+  }
+  const view = await page.locator('body').innerText({ timeout: 2_000 }).catch(() => '(sin body)');
+  throw new Error(`${description} no apareció después de tres navegaciones UI; URL=${page.url()}; navegación=${lastNavigationError}; vista=${view.slice(0, 300)}`);
+}
+
 async function main() {
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
+  // Keep each vhost on its own tab: the admin shell holds long-lived SSE
+  // connections and its cross-origin teardown can strand storefront navigation.
+  const shop = await context.newPage();
   page.setDefaultTimeout(15_000);
+  shop.setDefaultTimeout(15_000);
   const consoleErrors = [];
-  page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(message.text());
-  });
+  for (const tab of [page, shop]) {
+    tab.on('console', (message) => {
+      if (message.type() === 'error') consoleErrors.push(message.text());
+    });
+  }
 
   try {
-    if (group === 'pricing' || group === 'all') {
+    if (group === 'pricing' || group === 'storefront' || group === 'all') {
+      if (group !== 'storefront') {
       await runScenario('R9/R21: taxed offer preview and storefront compare gross with gross', ['R9', 'R21'], async () => {
         // Samsung has no tax assignment in the Roku fixture. Exercise a
         // genuinely taxed product instead, and restore its original config.
@@ -154,9 +184,8 @@ async function main() {
           await page.getByRole('button', { name: 'Guardar', exact: true }).click();
           await page.waitForURL(/\/admin\/products\?page=1/, { timeout: 15_000 });
 
-          await page.goto('https://roku-shop.vendix.com/sale', { waitUntil: 'domcontentloaded' });
-          const card = page.locator('article.product-card').filter({ hasText: 'Frutas Orgánicas Mix 1kg' });
-          await card.waitFor({ timeout: 20_000 });
+          const card = shop.locator('article.product-card').filter({ hasText: 'Frutas Orgánicas Mix 1kg' });
+          await openUiView(shop, 'https://roku-shop.vendix.com/sale', card, 'La tarjeta de oferta con IVA');
           assert.equal((await card.locator('.product-price .price').innerText()).trim(), '$23.800');
           assert.equal((await card.locator('.product-price .original-price').innerText()).trim(), '$26.180');
         } finally {
@@ -171,26 +200,92 @@ async function main() {
           }
         }
       });
+      }
 
       await runScenario('R14: storefront variant switch changes the actual selling price', ['R14'], async () => {
-        await page.goto('https://roku-shop.vendix.com/products/tv-samsung-55-4k', { waitUntil: 'domcontentloaded' });
-        const title = page.getByRole('heading', { name: 'Smart TV Samsung 55" 4K UHD' }).first();
-        await title.waitFor();
-        const main = page.locator('main').first();
+        await openUiView(shop,
+          'https://roku-shop.vendix.com/products/tv-samsung-55-4k',
+          shop.getByRole('heading', { name: 'Smart TV Samsung 55" 4K UHD' }).first(),
+          'La ficha de variante Samsung');
+        const main = shop.locator('main').first();
         const price = () => main.locator('.price-line').first().innerText();
         const initial = await price();
-        await page.locator('.variants-btns button').filter({ hasText: '65"' }).click();
+        await shop.locator('.variants-btns button').filter({ hasText: '65"' }).click();
         await main.locator('.price-line .current-price').getByText('$3.299.000').waitFor();
         const medium = await price();
-        await page.locator('.variants-btns button').filter({ hasText: '55"' }).click();
+        await shop.locator('.variants-btns button').filter({ hasText: '55"' }).click();
         await main.locator('.price-line .current-price').getByText('$2.199.000').waitFor();
         const small = await price();
         assert.notEqual(initial, medium, `75→65 dejó el mismo precio: ${initial}`);
         assert.notEqual(medium, small, `65→55 dejó el mismo precio: ${medium}`);
       });
+
+      await runScenario('R14: quick view follows the chosen variant instead of the base price', ['R14'], async () => {
+        // Catalog cards intentionally route variants to the full product page;
+        // the actual quick-view entry is the related-products carousel.
+        const url = 'https://roku-shop.vendix.com/products/tv-lg-50-nanocell';
+        const card = shop.locator('app-product-carousel .carousel-item')
+          .filter({ hasText: 'Smart TV Samsung 55" 4K UHD' });
+        await openUiView(shop, url, card, 'La recomendación Samsung');
+        await card.click();
+        const modal = shop.locator('app-product-quick-view-modal');
+        await modal.locator('.variant-chip').first().waitFor();
+        const current = modal.locator('.product-price .current-price');
+        await modal.locator('.variant-chip').filter({ hasText: '65"' }).click();
+        await current.getByText('$3.299.000').waitFor();
+        await modal.locator('.variant-chip').filter({ hasText: '55"' }).click();
+        await current.getByText('$2.199.000').waitFor();
+      });
+
+      await runScenario('R14: mobile storefront keeps variant price and selector usable', ['R14'], async () => {
+        await shop.setViewportSize({ width: 390, height: 844 });
+        await openUiView(shop,
+          'https://roku-shop.vendix.com/products/tv-samsung-55-4k',
+          shop.getByRole('heading', { name: 'Smart TV Samsung 55" 4K UHD' }).first(),
+          'La ficha móvil Samsung');
+        await shop.locator('.variants-btns button').filter({ hasText: '65"' }).click();
+        await shop.locator('main .price-line .current-price').getByText('$3.299.000').waitFor();
+        await shop.locator('.variants-btns button').filter({ hasText: '55"' }).click();
+        await shop.locator('main .price-line .current-price').getByText('$2.199.000').waitFor();
+      });
+
+      await runScenario('R14: a variant without photo keeps the product gallery image', ['R14'], async () => {
+        await shop.setViewportSize({ width: 1440, height: 900 });
+        await openUiView(shop,
+          'https://roku-shop.vendix.com/products/tv-samsung-55-4k',
+          shop.getByRole('heading', { name: 'Smart TV Samsung 55" 4K UHD' }).first(),
+          'La galería Samsung');
+        const image = shop.locator('.main-image-wrapper img.main-image');
+        const baseSrc = await image.getAttribute('src');
+        assert(baseSrc, 'No base photo exists for the fallback fixture');
+        for (const size of ['65"', '55"']) {
+          await shop.locator('.variants-btns button').filter({ hasText: size }).click();
+          assert.equal(await image.getAttribute('src'), baseSrc,
+            `La variante ${size} sin foto no heredó la fotografía base`);
+          assert(await image.evaluate((img) => img.complete && img.naturalWidth > 0),
+            `La foto de la variante ${size} no cargó`);
+        }
+      });
+
+      await runScenario('R14: selected variant reaches guest cart with its own price', ['R14'], async () => {
+        await shop.setViewportSize({ width: 1440, height: 900 });
+        await openUiView(shop,
+          'https://roku-shop.vendix.com/products/tv-samsung-55-4k',
+          shop.getByRole('heading', { name: 'Smart TV Samsung 55" 4K UHD' }).first(),
+          'La ficha Samsung para carrito');
+        await shop.locator('.variants-btns button').filter({ hasText: '65"' }).click();
+        await shop.locator('main .price-line .current-price').getByText('$3.299.000').waitFor();
+        await shop.locator('app-button button.btn-cart').click();
+        await shop.locator('.cart-btn .cart-badge').getByText('1').waitFor();
+        await shop.locator('.cart-btn').hover();
+        await shop.locator('.cart-dropdown .cart-header').click();
+        await shop.getByRole('heading', { name: 'Resumen del pedido' }).waitFor();
+        await shop.locator('.summary-row.total').getByText('$3.299.000').waitFor();
+        assert.match(await shop.locator('app-cart-item-card').first().innerText(), /65"/);
+      });
     }
 
-    if (group !== 'pricing' && group !== 'all') {
+    if (group !== 'pricing' && group !== 'storefront' && group !== 'all') {
       await runScenario('baseline: login and open admin UI', [], async () => {
         await login(page);
         assert.match(page.url(), /\/admin\//);
@@ -199,7 +294,8 @@ async function main() {
 
     if (results[0]?.status === 'passed' && (group === 'lists' || group === 'all')) {
       await runScenario('R8: customer desktop table omits Estado', ['R8'], async () => {
-        await page.goto(`${adminBase}/admin/customers/all`, { waitUntil: 'domcontentloaded' });
+        await openUiView(page, `${adminBase}/admin/customers/all`,
+          page.getByRole('heading', { name: /clientes/i }).first(), 'El listado de clientes');
         await dismissWeeklyStories(page);
         await page.getByRole('heading', { name: /clientes/i }).first().waitFor();
         const table = page.getByRole('table').first();
@@ -209,7 +305,8 @@ async function main() {
           `Unexpected Estado column: ${headers.join(', ')}`);
       });
       await runScenario('R13: orders list shows refund net and partial badge', ['R13'], async () => {
-        await page.goto(`${adminBase}/admin/orders/sales`, { waitUntil: 'domcontentloaded' });
+        await openUiView(page, `${adminBase}/admin/orders/sales`,
+          page.getByRole('columnheader', { name: 'Neto actual' }), 'El listado de órdenes');
         await dismissWeeklyStories(page);
         await page.getByRole('columnheader', { name: 'Neto actual' }).waitFor();
         const search = page.locator('input[placeholder="Buscar órdenes..."]');
@@ -218,10 +315,17 @@ async function main() {
         await row.waitFor({ timeout: 20_000 });
         assert.match(await row.innerText(), /Reembolso parcial/);
         assert.match(await row.innerText(), /\$8\.000/);
+        await search.fill('POS-2026-0388');
+        const fullyRefunded = page.getByRole('row').filter({ hasText: 'POS-2026-0388' });
+        await fullyRefunded.waitFor({ timeout: 20_000 });
+        const fullText = await fullyRefunded.innerText();
+        assert.match(fullText, /Reembolsada/);
+        assert.match(fullText, /\$0(?:\D|$)/);
       });
 
       await runScenario('R10: orders filter by settled payment method', ['R10'], async () => {
-        await page.goto(`${adminBase}/admin/orders/sales`, { waitUntil: 'domcontentloaded' });
+        await openUiView(page, `${adminBase}/admin/orders/sales`,
+          page.getByRole('columnheader', { name: 'Neto actual' }), 'El listado de órdenes');
         await dismissWeeklyStories(page);
         await page.getByRole('button', { name: 'Filtros' }).click();
         const method = page.locator('.filter-section').filter({ hasText: 'Forma de pago' });
@@ -229,11 +333,21 @@ async function main() {
         await page.waitForURL(/payment_method_id=5/, { timeout: 10_000 });
         assert.match(await method.innerText(), /Efectivo/);
         await page.getByRole('columnheader', { name: 'Neto actual' }).waitFor();
+        const search = page.locator('input[placeholder="Buscar órdenes..."]');
+        await search.fill('POS-2026-0382');
+        const mixedTender = page.getByRole('row').filter({ hasText: 'POS-2026-0382' });
+        await mixedTender.waitFor({ timeout: 20_000 });
+        assert.match(await mixedTender.innerText(), /POS-2026-0382/);
       });
     }
   } finally {
-    const coveredIds = new Set(results.flatMap((result) =>
-      result.status === 'passed' ? result.reviewIds : []));
+    // An ID is green only when EVERY registered scenario for it is green.
+    // Otherwise a passing price assertion could mask a failed photo/cart test
+    // under the same R14 label, falsely claiming coverage in --all.
+    const coveredIds = new Set(allReviewIds.filter((id) => {
+      const scenarios = results.filter((result) => result.reviewIds.includes(id));
+      return scenarios.length > 0 && scenarios.every((result) => result.status === 'passed');
+    }));
     const missingIds = allReviewIds.filter((id) => !coveredIds.has(id));
     const report = {
       group,
@@ -251,7 +365,8 @@ async function main() {
 
   if (results.some((result) => result.status === 'failed')) process.exitCode = 1;
   if (group === 'all' && allReviewIds.some((id) =>
-    !results.some((result) => result.status === 'passed' && result.reviewIds.includes(id)))) {
+    !results.some((result) => result.reviewIds.includes(id)) ||
+    results.some((result) => result.reviewIds.includes(id) && result.status !== 'passed'))) {
     process.exitCode = 1;
   }
 }
