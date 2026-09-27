@@ -1191,12 +1191,20 @@ export class OrderFlowService {
    * - Direct payment: goes to finished
    * - Online payment: goes to pending_payment
    *
-   * Round 1 MAJOR #11: cada rechazo de negocio (estado ilegal, método
-   * desconocido, monto recibido menor, falta de stock del finish, cocina
+   * Round 1 MAJOR #11: cada rechazo de negocio por CONFLICTO DE ESTADO
+   * (estado ilegal, método desconocido, falta de stock del finish, cocina
    * pendiente, etc.) se traduce a `ORD_FLOW_PAYMENT_FAILED_001` con el
    * código tipado original en `details.cause_code`. El cliente ve un
    * 409 con un único código de superficie (`ORD_FLOW_PAYMENT_FAILED_001`)
    * y el `cause_code` lo mapea a la causa real para soporte y la UI.
+   *
+   * PLAN-pago-multimetodo-pendientes paso 3: esto NO aplica a un rechazo de
+   * VALIDACIÓN de payload (Σ de tramos ≠ total, método no directo, más de
+   * un tramo en efectivo, monto recibido menor al tramo en efectivo, cuenta
+   * bancaria inválida/ajena) — esos ya vienen tipados de
+   * `normalizePaymentLegs`/`resolveAndValidateBankAccount` y se relanzan tal
+   * cual: 400 con su propio `error_code` (`PAY_MULTI_TENDER_*`,
+   * `PAY_INVALID_AMOUNT_001`, `PAY_VALIDATE_001`), nunca el 409 genérico.
    */
   async payOrder(
     orderId: number,
@@ -1646,9 +1654,15 @@ export class OrderFlowService {
     // online crea un pago `pending` y admite pasarela, así que no normaliza.
     // El escalar reutiliza el `paymentMethod` ya cargado (sin `findMany`
     // extra); con `payments[]` los métodos se cargan por `id IN (...)` bajo
-    // el scope de tienda. Los errores del normalizador se envuelven para
-    // preservar la superficie histórica `ORD_FLOW_PAYMENT_FAILED_001` con el
-    // código tipado en `cause_code` (contrato que ve la app móvil).
+    // el scope de tienda. PLAN-pago-multimetodo-pendientes paso 3 — el
+    // contrato de la app móvil distingue las dos superficies: un payload
+    // inválido (montos, método no permitido, Σ≠total) es un rechazo de
+    // VALIDACIÓN y sale como 400 con su propio `error_code`
+    // (`PAY_MULTI_TENDER_*`/`PAY_INVALID_AMOUNT_001`), tal cual lo tipa el
+    // normalizador — ya NO se envuelve. Sólo un conflicto de ESTADO del
+    // flujo (orden no cobrable, cocina pendiente, finish bloqueado, etc.)
+    // sigue siendo 409 `ORD_FLOW_PAYMENT_FAILED_001` con la causa tipada en
+    // `details.cause_code`.
     const isPreClaimDeliveredOrFinished =
       preClaimState === 'delivered' || preClaimState === 'finished';
     const isImmediateCharge =
@@ -1709,6 +1723,18 @@ export class OrderFlowService {
         legs = normalized.legs;
         change = normalized.change;
       } catch (err) {
+        // PLAN-pago-multimetodo-pendientes paso 3 — el normalizador ya tipa
+        // el rechazo (`PAY_MULTI_TENDER_SUM_MISMATCH`,
+        // `PAY_MULTI_TENDER_METHOD_NOT_ALLOWED`,
+        // `PAY_MULTI_TENDER_MULTIPLE_CASH`, `PAY_INVALID_AMOUNT_001`, …): es
+        // un rechazo de VALIDACIÓN de payload, no un conflicto de estado del
+        // flujo. Se relanza tal cual SIN envolver para que la superficie sea
+        // 400 con su propio `error_code` — mismo criterio que la guarda
+        // `payment_type: 'online' + payments[]` de arriba (~:1537). Sólo un
+        // error no tipado (infra) cae al 409 genérico de `wrapPaymentFailure`.
+        if (err instanceof VendixHttpException) {
+          throw err;
+        }
         throw this.wrapPaymentFailure('multi_tender_legs', err as Error);
       }
     }
@@ -7178,12 +7204,19 @@ export class OrderFlowService {
           );
         resolvedBankAccountIds.set(leg, account.id);
       } catch (err) {
+        // PLAN-pago-multimetodo-pendientes paso 3 — cuenta bancaria inválida
+        // (inexistente, inactiva o ajena a la tienda/organización) es un
+        // rechazo de VALIDACIÓN de payload, no un conflicto de estado del
+        // cobro. Se relanza SIN envolver, mismo criterio que el POS
+        // (`payments.service.ts` ~:239-241, :282-284, :336-338, :368-370):
+        // el gateway tipa `PaymentError`, se mapea con `LEGACY_TO_NEW` y sale
+        // como 400 `PAY_VALIDATE_001`. Un error no tipado (infra del
+        // gateway) sí cae al 409 genérico de `wrapPaymentFailure` — igual
+        // que la falta de contexto de tienda/validador arriba, que sigue
+        // envuelta como `SYS_INTERNAL_001` / 500.
         if (err instanceof PaymentError) {
           const mapped = LEGACY_TO_NEW[err.code];
-          throw this.wrapPaymentFailure(
-            'bank_account_invalid',
-            new VendixHttpException(mapped, err.message, err.details),
-          );
+          throw new VendixHttpException(mapped, err.message, err.details);
         }
         throw this.wrapPaymentFailure('bank_account_invalid', err as Error);
       }

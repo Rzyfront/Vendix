@@ -421,7 +421,14 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
       id: 1, system_payment_method: { type: 'cash' },
     });
     const error = await h.service.payOrder(1, { ...DTO, amount_received: 50 }).catch((failure) => failure);
-    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    // PLAN-pago-multimetodo-pendientes paso 3 — el efectivo corto lo rechaza
+    // el normalizador (`PAY_MULTI_TENDER_CASH_INSUFFICIENT`, rechazo de
+    // VALIDACIÓN de payload) y se relanza SIN envolver: 400 de superficie,
+    // ya NO el 409 `ORD_FLOW_PAYMENT_FAILED_001`. La restauración (liberar la
+    // reserva del draft) es igual para cualquier error, sin depender del código.
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('PAY_MULTI_TENDER_CASH_INSUFFICIENT');
+    expect(error.getStatus()).toBe(400);
     expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
     expect(h.stock.releaseReservationQuantity).toHaveBeenCalledTimes(1);
     expect(h.reservations[0].status).toBe('consumed');
@@ -4885,7 +4892,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     expect(result.payments).toHaveLength(2);
   });
 
-  it('Σ ≠ total → 409 envuelto con cause PAY_MULTI_TENDER_SUM_MISMATCH, sin filas', async () => {
+  it('Σ ≠ total → 400 sin envolver con error_code PAY_MULTI_TENDER_SUM_MISMATCH, orden restaurada y sin filas', async () => {
     const h = buildHarness();
 
     const error = await h.service
@@ -4898,18 +4905,21 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       })
       .catch((failure) => failure);
 
+    // PLAN-pago-multimetodo-pendientes paso 3 — rechazo de VALIDACIÓN de
+    // payload: la superficie es el propio error_code del normalizador
+    // (`PAY_MULTI_TENDER_SUM_MISMATCH`, 400), ya NO el 409 genérico
+    // `ORD_FLOW_PAYMENT_FAILED_001` envuelto.
     expect(error).toBeInstanceOf(VendixHttpException);
-    // Superficie histórica preservada; el código tipado viaja en cause_code.
-    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
-    expect(error.getResponse()).toEqual(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          stage: 'multi_tender_legs',
-          cause_code: 'PAY_MULTI_TENDER_SUM_MISMATCH',
-        }),
-      }),
-    );
+    expect(error.errorCode).toBe('PAY_MULTI_TENDER_SUM_MISMATCH');
+    expect(error.getStatus()).toBe(400);
     expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    // El claim ya había movido la orden a `processing`; el rechazo de
+    // validación restaura igual que cualquier otro error (el catch externo
+    // de payOrder no distingue por código).
+    expect(h.prismaMock.orders.updateMany).toHaveBeenCalledWith({
+      where: { id: 1, state: 'processing' },
+      data: expect.objectContaining({ state: 'created' }),
+    });
   });
 
   // Plan PLAN-pago-multimetodo-fixes paso 1 — objetivo 1: atomicidad. Si el
@@ -4941,11 +4951,13 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     });
   });
 
-  // Plan PLAN-pago-multimetodo-fixes paso 1 — objetivo 4: una cuenta que no
-  // pertenece a la tienda se rechaza ANTES de crear ninguna fila, con el
-  // mismo código tipado (`PAY_VALIDATE_001`) que ya usa el gateway del POS,
-  // preservado en `cause_code` (mismo contrato que el resto de `payOrder`).
-  it('bank_account_id ajeno a la tienda → rechazo con cause_code PAY_VALIDATE_001 y cero payments.create', async () => {
+  // PLAN-pago-multimetodo-pendientes paso 3 — una cuenta que no pertenece a
+  // la tienda se rechaza ANTES de crear ninguna fila, con el mismo código
+  // tipado (`PAY_VALIDATE_001`) que ya usa el gateway del POS, relanzado SIN
+  // envolver: la superficie es 400 `PAY_VALIDATE_001` de superficie (rechazo
+  // de validación), ya NO el 409 `ORD_FLOW_PAYMENT_FAILED_001` con
+  // cause_code.
+  it('bank_account_id ajeno a la tienda → 400 sin envolver con error_code PAY_VALIDATE_001 y cero payments.create', async () => {
     const h = buildHarness();
     h.paymentGatewayService.resolveAndValidateBankAccount.mockRejectedValue(
       new PaymentError(
@@ -4959,16 +4971,12 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       .catch((failure) => failure);
 
     expect(error).toBeInstanceOf(VendixHttpException);
-    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
-    expect(error.getResponse()).toEqual(
-      expect.objectContaining({
-        details: expect.objectContaining({
-          stage: 'bank_account_invalid',
-          cause_code: ErrorCodes.PAY_VALIDATE_001.code,
-        }),
-      }),
-    );
+    expect(error.errorCode).toBe(ErrorCodes.PAY_VALIDATE_001.code);
+    expect(error.getStatus()).toBe(400);
     expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    // El claim ya había movido la orden a `processing`; el rechazo de
+    // validación restaura igual que cualquier otro error (el catch externo
+    // de payOrder no distingue por código).
     expect(h.prismaMock.orders.updateMany).toHaveBeenCalledWith({
       where: { id: 1, state: 'processing' },
       data: expect.objectContaining({ state: 'created' }),
