@@ -1176,6 +1176,7 @@ export class PosComponent {
   private posSettingsHydrationRequested = false;
   private queueSubscriptionInitialized = false;
   private cashRegisterSessionInitialized = false;
+  private validatedAdoptedOrderId: number | null = null;
 
   private destroyRef = inject(DestroyRef);
   private cartService = inject(PosCartService);
@@ -1362,6 +1363,41 @@ export class PosComponent {
     this.setupSubscriptions();
     this.loadStoreSettings();
     this.checkEditMode();
+    // The cart can hydrate AFTER checkEditMode's initial queryParams emission.
+    // Observe the linked id itself so a cancelled order left in the root POS
+    // cart by another screen is cleared even on a fresh /admin/pos visit.
+    effect(() => {
+      const linkedId = this.cartService.cartState().linkedOrderId;
+      if (linkedId == null) {
+        this.validatedAdoptedOrderId = null;
+        return;
+      }
+      if (
+        this.route.snapshot.queryParamMap.has('editOrder') ||
+        this.validatedAdoptedOrderId === linkedId
+      ) return;
+      this.validatedAdoptedOrderId = linkedId;
+      this.ordersService.getOrderById(String(linkedId))
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (response: any) => {
+            const order: Order = response?.data ?? response;
+            if (
+              this.cartService.getCurrentState().linkedOrderId === linkedId &&
+              ['cancelled', 'refunded', 'finished'].includes(order?.state)
+            ) {
+              this.resetEditState();
+              this.cartService.clearCartAfterCompletedSale()
+                .pipe(takeUntilDestroyed(this.destroyRef))
+                .subscribe();
+              this.toastService.info(
+                `La orden #${order.order_number ?? linkedId} ya no se puede editar. Inicia una venta nueva.`,
+              );
+            }
+          },
+          error: () => { this.validatedAdoptedOrderId = null; },
+        });
+    });
     this.checkQuotationMode();
     this.checkLayawayMode();
     this.validateScheduleOnInit();
