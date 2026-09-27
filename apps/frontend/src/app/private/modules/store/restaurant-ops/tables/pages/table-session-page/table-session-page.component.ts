@@ -210,6 +210,14 @@ export class TableSessionPageComponent implements OnInit {
   readonly cancellationPreparedFired = computed(
     () => this.cancellationTarget()?.inventory_consumed_at_fire === true,
   );
+  readonly cancellationAutoRestorePending = computed(() => {
+    const item = this.cancellationTarget();
+    return !!item && this.cancellationPreparedFired() &&
+      this.kitchenStatusFor(item) === 'pending';
+  });
+  readonly cancellationNeedsDisposition = computed(() =>
+    this.cancellationPreparedFired() && !this.cancellationAutoRestorePending(),
+  );
   /**
    * D.4 — mesa NO pasa preview: el GET de sesión no trae `order_item_taxes`
    * por línea ni `tip_*` de la orden, así que el espejo no puede correr
@@ -1265,8 +1273,9 @@ export class TableSessionPageComponent implements OnInit {
       this.cancellationError.set('El motivo debe tener entre 3 y 500 caracteres.');
       return;
     }
-    const preparedFired = item.inventory_consumed_at_fire === true;
-    const cancellation_type = cancellationTypeForDestination(result.destination, preparedFired);
+    const autoRestorePending = this.cancellationAutoRestorePending();
+    const needsDisposition = this.cancellationNeedsDisposition();
+    const cancellation_type = cancellationTypeForDestination(result.destination, needsDisposition);
     this.removingItemId.set(item.id);
     this.cancellationError.set(null);
     this.tablesService
@@ -1283,7 +1292,11 @@ export class TableSessionPageComponent implements OnInit {
           this.session.set(s);
           this.seedKitchenStateFromOrder(s);
           this.toastService.success(
-            preparedFired ? 'Plato cancelado como merma' : 'Plato cancelado de la cuenta',
+            autoRestorePending || (needsDisposition && result.destination === 'reuse')
+              ? 'Plato cancelado; insumos reintegrados al inventario'
+              : needsDisposition
+                ? 'Plato cancelado como merma'
+                : 'Plato cancelado de la cuenta',
           );
         },
         error: (err: unknown) => {

@@ -502,6 +502,46 @@ async function main() {
       });
     }
 
+    if (results[0]?.status === 'passed' && (group === 'item_cancel' || group === 'all')) {
+      await runScenario('R18/R20: pending dish cancellation keeps COD amount and subtotal aligned', ['R18', 'R20'], async () => {
+        const heading = page.getByRole('heading', { name: 'Orden #POS-2026-0427' });
+        await openUiView(page, `${adminBase}/admin/orders/1375`, heading,
+          'La orden COD con plato cancelado en pendiente');
+        const dish = page.locator('.items-compact > div').filter({ hasText: 'Pollo Árabe E2E' });
+        await dish.getByText('Cocina: Cancelado').waitFor();
+        assert.equal(await dish.getByRole('button', { name: 'Cancelar' }).count(), 0);
+        const coke = page.locator('.items-compact > div').filter({ hasText: 'Coca-Cola 400ml' });
+        assert.equal(await coke.getByRole('button', { name: 'Entregar' }).count(), 1);
+        const summary = page.locator('app-card').filter({
+          has: page.getByRole('heading', { name: 'Resumen de Pago' }),
+        });
+        const summaryText = await summary.innerText();
+        assert.match(summaryText, /Subtotal[\s\S]*\$38\.000[\s\S]*Envio[\s\S]*\$5\.000[\s\S]*Total[\s\S]*\$43\.000/i);
+        const history = page.getByRole('heading', { name: /Historial de Pagos/i }).locator('xpath=..');
+        assert.match(await history.innerText(), /\$43\.000[\s\S]*PENDIENTE[\s\S]*Pago Contra Entrega/);
+        await openUiView(page, `${adminBase}/admin/orders/1375`, heading,
+          'El plato cancelado tras recarga');
+        assert.match(await summary.innerText(), /Subtotal[\s\S]*\$38\.000[\s\S]*Total[\s\S]*\$43\.000/i);
+        assert.equal(await dish.getByRole('button', { name: 'Cancelar' }).count(), 0);
+      });
+
+      await runScenario('R18/R20: whole-order cancellation restores history without collectable debt', ['R18', 'R20'], async () => {
+        const heading = page.getByRole('heading', { name: 'Orden #POS-2026-0428' });
+        await openUiView(page, `${adminBase}/admin/orders/1376`, heading,
+          'La orden con cocina pendiente cancelada');
+        await page.locator('app-sticky-header').getByText('Cancelada', { exact: true }).waitFor();
+        const dish = page.locator('.items-compact > div').filter({ hasText: 'Pollo Árabe E2E' });
+        await dish.getByText('Cocina: Cancelado').waitFor();
+        const summary = page.locator('app-card').filter({
+          has: page.getByRole('heading', { name: 'Resumen de Pago' }),
+        });
+        assert.match(await summary.innerText(), /Importe original[\s\S]*\$33\.000[\s\S]*Saldo a cobrar[\s\S]*\$0/i);
+        const history = page.getByRole('heading', { name: /Historial de Pagos/i }).locator('xpath=..');
+        assert.match(await history.innerText(), /\$33\.000[\s\S]*CANCELADO[\s\S]*Pago Contra Entrega/);
+        assert.equal(await page.getByRole('button', { name: 'Confirmar Pago' }).count(), 0);
+      });
+    }
+
     if (results[0]?.status === 'passed' && (group === 'credit' || group === 'all')) {
       await runScenario('R7: installment down payment is a currency input in POS', ['R7'], async () => {
         await openUiView(page, `${adminBase}/admin/pos`,

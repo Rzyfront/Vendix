@@ -729,12 +729,13 @@ export class OrderDetailsPageComponent {
   });
   /**
    * Release-853 paso 10 — Subtotal BRUTO del Resumen de Pago: Σ de las
-   * líneas en bruto (`final_total_price ?? total_price`). El IVA va
-   * incluido, no suma; el persistido `subtotal_amount` puede traer otra
+   * líneas ACTIVAS en bruto (`final_total_price ?? total_price`). Las
+   * canceladas siguen visibles para auditoría, pero ya no se cobran. El IVA
+   * va incluido, no suma; el persistido `subtotal_amount` puede traer otra
    * base según el canal que creó la orden.
    */
   readonly grossSubtotal = computed(() =>
-    (this.order()?.order_items ?? []).reduce(
+    (this.order()?.order_items ?? []).filter((item) => item.cancelled_at == null).reduce(
       (sum, item) =>
         sum + Number(item.final_total_price ?? item.total_price ?? 0),
       0,

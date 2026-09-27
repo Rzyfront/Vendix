@@ -2330,6 +2330,27 @@
               Resumen de Pago
             </h2>
 
+            @if (orderData.state === 'cancelled') {
+              <div class="space-y-2.5">
+                <p class="text-sm text-text-secondary">
+                  Orden cancelada: los importes originales se conservan para el historial, pero no hay saldo por cobrar.
+                </p>
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Importe original</span>
+                  <span class="font-semibold text-gray-900">{{ orderData.grand_total || 0 | currency }}</span>
+                </div>
+                @if (totalRefunded() > 0) {
+                  <div class="flex justify-between items-center text-sm">
+                    <span class="text-text-secondary">Reembolsado</span>
+                    <span class="font-semibold text-orange-600">-{{ totalRefunded() | currency }}</span>
+                  </div>
+                }
+                <div class="pt-3 mt-1 border-t border-border flex justify-between items-center">
+                  <span class="text-base font-bold text-gray-900">Saldo a cobrar</span>
+                  <span class="text-xl sm:text-2xl font-black text-gray-900 font-mono tracking-tighter">{{ 0 | currency }}</span>
+                </div>
+              </div>
+            } @else {
             <div class="space-y-2.5">
               <!-- Desglose completo: valores persistidos tal cual (base gross).
                    Subtotal = suma de líneas en bruto (grossSubtotal); IVA va incluido, no suma. -->
@@ -2475,6 +2496,7 @@
                 </div>
               }
             </div>
+            }
 
             <!-- Credit Payment Progress -->
             @if (isCreditOrder()) {
@@ -2706,6 +2728,7 @@
       [itemName]="cancellationTarget()?.item?.product_name || ''"
       [showDestination]="cancellationTarget()?.mode === 'reverse' || cancellationNeedsDisposition()"
       [canReuse]="canReuseCancellation()"
+      [autoRestorePending]="cancellationPreparedFired() && !cancellationNeedsDisposition()"
       [inFlight]="cancellingItemId() !== null || reversingItemId() !== null"
       [serverError]="cancellationError()"
       [currentTotal]="order()?.grand_total || 0"

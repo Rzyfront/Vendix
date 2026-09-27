@@ -1908,7 +1908,10 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
       inventory_transactions: { findMany: jest.fn().mockResolvedValue([]) },
       audit_logs: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ id: 1 }) },
       inventory_cost_layers: { create: jest.fn().mockResolvedValue({ id: 1 }) },
-      payments: { findFirst: jest.fn().mockResolvedValue(null) },
+      payments: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       order_items: {
         update: jest.fn().mockResolvedValue({}),
         findMany: jest.fn().mockResolvedValue(
@@ -2119,6 +2122,50 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     expect(Number(updateData.grand_total)).toBe(78000);
     expect(kitchenFireService.cancelTicketItemInTx).not.toHaveBeenCalled();
     expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
+  });
+
+  it('ajusta el marcador COD pendiente al nuevo total tras cancelar un ítem', async () => {
+    const { service, txMock } = buildService({
+      order: {
+        id: ORDER_ID, store_id: 4, state: 'pending_payment',
+        shipping_cost: 5000,
+        payments: [{
+          id: 88, state: 'pending', amount: 71000,
+          store_payment_method: {
+            system_payment_method: { processing_mode: 'ON_DELIVERY' },
+          },
+        }],
+      },
+      activeItems: [{ total_price: 38000, order_item_taxes: [] }],
+    });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'plato cancelado');
+
+    const orderData = txMock.orders.update.mock.calls[0][0].data;
+    expect(Number(orderData.subtotal_amount)).toBe(38000);
+    expect(Number(orderData.grand_total)).toBe(43000);
+    expect(txMock.payments.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [88] }, order_id: ORDER_ID, state: 'pending' },
+      data: { amount: expect.anything(), updated_at: expect.any(Date) },
+    });
+    expect(Number(txMock.payments.updateMany.mock.calls[0][0].data.amount)).toBe(43000);
+  });
+
+  it('no ajusta un pago pendiente de pasarela al cancelar un ítem', async () => {
+    const { service, txMock } = buildService({
+      order: {
+        id: ORDER_ID, store_id: 4, state: 'pending_payment',
+        payments: [{
+          id: 89, state: 'pending', amount: 71000,
+          store_payment_method: {
+            system_payment_method: { processing_mode: 'ONLINE' },
+          },
+        }],
+      },
+    });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'plato cancelado');
+    expect(txMock.payments.updateMany).not.toHaveBeenCalled();
   });
 
   // C.8/F-082 (blocker) — antes el recálculo escribía `grand_total` como
@@ -2770,7 +2817,10 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
   }) => {
     const txMock: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
-      payments: { findFirst: jest.fn().mockResolvedValue(null) },
+      payments: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       order_items: {
         update: jest.fn().mockResolvedValue({}),
         findMany: jest.fn().mockResolvedValue(
@@ -2909,6 +2959,32 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
       ORDER_ID, ITEM_ID, 'mosca en el plato', 'waste',
     );
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('reprecio COD pendiente al reversar una línea entregada sin cobrar', async () => {
+    const { service, txMock } = buildService({
+      order: {
+        state: 'delivered', shipping_cost: 5000,
+        payments: [{
+          id: 92, state: 'pending', amount: 71000,
+          store_payment_method: {
+            system_payment_method: { processing_mode: 'ON_DELIVERY' },
+          },
+        }],
+      },
+      activeItems: [{ total_price: 38000, order_item_taxes: [] }],
+    });
+
+    await service.cancelDeliveredOrderItem(
+      ORDER_ID, ITEM_ID, 'plato devuelto sin cobro', 'waste',
+    );
+
+    expect(Number(txMock.orders.update.mock.calls[0][0].data.grand_total)).toBe(43000);
+    expect(txMock.payments.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [92] }, order_id: ORDER_ID, state: 'pending' },
+      data: { amount: expect.anything(), updated_at: expect.any(Date) },
+    });
+    expect(Number(txMock.payments.updateMany.mock.calls[0][0].data.amount)).toBe(43000);
   });
 
   it('restock: devuelve stock, cancela suave y audita con destino', async () => {

@@ -4329,6 +4329,32 @@ export class OrderFlowService {
     return Math.round((raw + Number.EPSILON) * 100) / 100;
   }
 
+  /** A COD marker is an unpaid amount to collect, not a settled receipt. */
+  private async syncPendingCodAmountInTx(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    payments: Array<{
+      id: number;
+      state: string;
+      store_payment_method?: {
+        system_payment_method?: { processing_mode?: string | null } | null;
+      } | null;
+    }>,
+    grandTotal: number,
+  ): Promise<void> {
+    const ids = payments
+      .filter((payment) =>
+        payment.state === 'pending' &&
+        payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY',
+      )
+      .map((payment) => payment.id);
+    if (ids.length === 0) return;
+    await tx.payments.updateMany({
+      where: { id: { in: ids }, order_id: orderId, state: 'pending' },
+      data: { amount: new Prisma.Decimal(grandTotal), updated_at: new Date() },
+    });
+  }
+
   async cancelOrderItem(
     orderId: number,
     orderItemId: number,
@@ -4691,6 +4717,7 @@ export class OrderFlowService {
           updated_at: new Date(),
         },
       });
+      await this.syncPendingCodAmountInTx(tx, orderId, order.payments ?? [], grandTotal);
     });
 
     if (alreadyCancelledInTx) return this.getOrder(orderId);
@@ -5027,6 +5054,7 @@ export class OrderFlowService {
           updated_at: new Date(),
         },
       });
+      await this.syncPendingCodAmountInTx(tx, orderId, order.payments ?? [], grandTotal);
     });
 
     if (alreadyCancelledInTx) return this.getOrder(orderId);
