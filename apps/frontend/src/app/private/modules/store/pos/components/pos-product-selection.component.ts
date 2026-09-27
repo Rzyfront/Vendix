@@ -2482,7 +2482,9 @@ export class PosProductSelectionComponent {
       }
 
       if (Number(product.stock ?? 0) <= 0 && !this.allowNegativeStock()) {
-        this.toastService.warning(`Stock insuficiente de ${product.name}. Disponible: ${product.stock ?? 0} unidades`);
+        this.toastService.warning(
+          `No puedes agregar ${product.name}: no hay unidades disponibles. Actualiza el inventario o pide habilitar «Permitir sobreventa» en Configuración → Logística.`,
+        );
         return;
       }
     }

@@ -3107,11 +3107,13 @@ export class PosCartService {
       if (totalRequiredStock > availableStock) {
         const packageHint =
           requiredPerUnit > 1 ? ` (${requiredPerUnit} unidades por empaque)` : '';
+        const visibleAvailable = Math.max(0, availableStock);
+        const stockAdvice = 'Actualiza el inventario o pide habilitar «Permitir sobreventa» en Configuración → Logística.';
         errors.push({
           field: 'quantity',
           message: currentCartQuantity > 0
-            ? `Stock insuficiente de ${request.product.name}. Ya tienes ${currentCartQuantity} en el carrito${packageHint}. Disponible: ${availableStock} unidades`
-            : `Stock insuficiente de ${request.product.name}. Disponible: ${availableStock} unidades`,
+            ? `No puedes agregar ${request.product.name}: ya tienes ${currentCartQuantity} en el carrito${packageHint} y solo hay ${visibleAvailable} unidades disponibles. ${stockAdvice}`
+            : `No puedes agregar ${request.product.name}: solo hay ${visibleAvailable} unidades disponibles. ${stockAdvice}`,
         });
       }
     }

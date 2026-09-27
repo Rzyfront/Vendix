@@ -1832,8 +1832,9 @@ export class TableSessionPageComponent implements OnInit {
     this.dialogService
       .confirm({
         title: 'Cerrar mesa',
-        message:
-          '¿Cerrar la mesa? La cuenta seguirá activa para ser cobrada después.',
+        message: this.isPaid()
+          ? '¿Cerrar la mesa? La cuenta ya está pagada; los cobros registrados se conservarán.'
+          : '¿Cerrar la mesa? La cuenta seguirá activa para ser cobrada después.',
         confirmText: 'Cerrar mesa',
         cancelText: 'Volver',
         confirmVariant: 'danger',
