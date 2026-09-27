@@ -14,6 +14,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NgTemplateOutlet } from '@angular/common';
 
 import {
   ModalComponent,
@@ -82,6 +83,7 @@ export type { EntregaChoice };
     PosEntregaStepComponent,
     PosPaymentStepComponent,
     PosShippingStepComponent,
+    NgTemplateOutlet,
   ],
   templateUrl: './pos-checkout-shell.component.html',
   styleUrl: './pos-checkout-shell.component.scss',
@@ -361,19 +363,19 @@ export class PosCheckoutShellComponent {
   readonly steps = computed<StepsLineItem[]>(() => {
     if (this.effectiveMode() === 'create-draft') {
       if (this.entregaChoice() === 'enviar') {
-        return [{ label: 'Entrega' }, { label: 'Cliente' }, { label: 'Envío' }];
+        return [{ label: 'Pedido' }, { label: 'Cliente' }, { label: 'Envío' }];
       }
-      return [{ label: 'Entrega' }, { label: 'Cliente' }];
+      return [{ label: 'Pedido' }, { label: 'Cliente' }];
     }
     if (this.entregaChoice() === 'enviar') {
       return [
-        { label: 'Entrega' },
+        { label: 'Pedido' },
         { label: 'Cliente' },
         { label: 'Envío' },
         { label: 'Cobro' },
       ];
     }
-    return [{ label: 'Entrega' }, { label: 'Cliente' }, { label: 'Cobro' }];
+    return [{ label: 'Pedido' }, { label: 'Cliente' }, { label: 'Cobro' }];
   });
 
   /** Parallel key array (same order/length as {@link steps}) used to render the
@@ -423,7 +425,7 @@ export class PosCheckoutShellComponent {
   readonly stepSubtitle = computed<string>(() => {
     switch (this.currentStepKey()) {
       case 'entrega':
-        return 'Entrega · Tipo de entrega';
+        return 'Pedido · Cómo lo recibirá';
       case 'cliente': {
         const sub = this.clienteSubSteps()[this.clienteSubStep()]?.label ?? 'Tipo';
         return `Cliente · ${sub}`;
@@ -432,7 +434,7 @@ export class PosCheckoutShellComponent {
         const ship = this.shippingStep();
         const subIndex = ship?.shipSubStep() ?? 0;
         const subSteps = ship?.shipSubSteps() ?? [];
-        const label = subSteps[subIndex]?.label ?? 'Método';
+        const label = subSteps[subIndex]?.label ?? 'Costo';
         return `Envío · ${label}`;
       }
       case 'cobro': {
@@ -1023,8 +1025,8 @@ export class PosCheckoutShellComponent {
           if (this.cartState()?.customer) {
             this.customerCleared.emit();
           }
-          // El alias queda confirmado; la dirección de domicilio se captura en Envío.
-          this.nextStep();
+          // El alias queda confirmado; la dirección de domicilio se captura aquí.
+          this.advanceAfterCliente();
           return;
         }
         // QUI-723 — Sub-step unificado: si no hay cliente seleccionado, el
@@ -1051,13 +1053,13 @@ export class PosCheckoutShellComponent {
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe((resolved) => {
               if (!resolved) return; // toast ya emitido por el selector.
-              this.nextStep();
+              if (!this.requiresAddress()) this.nextStep();
             });
           return;
         }
 
         // Cliente ya seleccionado → avanzamos.
-        this.nextStep();
+        this.advanceAfterCliente();
         return;
       }
       this.nextStep();
@@ -1114,6 +1116,12 @@ export class PosCheckoutShellComponent {
       return;
     }
 
+    this.nextStep();
+  }
+
+  /** Delivery details are captured beside the selected customer, not a step later. */
+  private advanceAfterCliente(): void {
+    if (this.requiresAddress() && !this.shippingStep()?.validateDetailsForCliente()) return;
     this.nextStep();
   }
 
@@ -1617,11 +1625,12 @@ export class PosCheckoutShellComponent {
     if (mode === 'alias') {
       // Re-clic en alias ya activo → avanza el wizard (alias tiene [Tipo, Alias]).
       if (this.saleMode() === 'alias') {
-        this.nextStep();
+        this.attemptNextStep();
         return;
       }
       this.userOverrideAnonymous.set(false);
       this.saleMode.set('alias');
+      if (this.cartState()?.customer) this.customerCleared.emit();
       this.goToClienteSubStep(1); // sub-paso Alias (input)
       return;
     }
@@ -1832,7 +1841,7 @@ export class PosCheckoutShellComponent {
   /** Cliente elegido/creado: preserva la lógica de selectCustomer y avanza al siguiente paso. */
   onSelectCustomerAndAdvance(customer: PosCustomer): void {
     this.selectCustomer(customer);
-    this.nextStep();
+    if (!this.requiresAddress()) this.nextStep();
   }
 
   // ── Cliente step handlers ───────────────────────────────────────────────

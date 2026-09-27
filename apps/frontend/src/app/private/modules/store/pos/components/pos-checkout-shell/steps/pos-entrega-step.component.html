@@ -6,13 +6,13 @@
       [size]="18"
       class="section-title__icon"
     ></app-icon>
-    <h3 class="section-title__text">Tipo de entrega</h3>
+    <h3 class="section-title__text">Pedido</h3>
   </div>
 
   <div
     class="option-list"
     role="radiogroup"
-    aria-label="Tipo de entrega"
+    aria-label="Pedido"
     (keydown)="onKeyDown($event)"
   >
     <!-- Consumo en mesa (solo para restaurante) -->
@@ -30,7 +30,7 @@
           <app-icon name="utensils" [size]="24"></app-icon>
         </span>
         <span class="option-row__body">
-          <span class="option-row__title">Consumo en mesa</span>
+          <span class="option-row__title">Para consumir en mesa</span>
           <span class="option-row__desc">Requiere abrir o asignar una mesa</span>
         </span>
         <span
@@ -79,7 +79,7 @@
         <app-icon name="truck" [size]="24"></app-icon>
       </span>
       <span class="option-row__body">
-        <span class="option-row__title">Enviar a domicilio</span>
+        <span class="option-row__title">Domicilio</span>
         <span class="option-row__desc">Requiere dirección y flete</span>
       </span>
       <span

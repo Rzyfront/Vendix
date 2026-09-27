@@ -50,6 +50,9 @@ describe('PosEntregaStepComponent', () => {
       const options = fixture.debugElement.queryAll(By.css('.option-row'));
       expect(options.length).toBe(3);
       expect(component.availableChoices()).toEqual(['mesa', 'llevar', 'enviar']);
+      expect(fixture.nativeElement.querySelector('[role="radiogroup"]').getAttribute('aria-label')).toBe('Pedido');
+      expect(options.map((option) => option.nativeElement.querySelector('.option-row__title')?.textContent?.trim()))
+        .toEqual(['Para consumir en mesa', 'Para llevar', 'Domicilio']);
     });
 
     it('re-seleccionar opción mesa sin mesa abre el picker de mesa', () => {
