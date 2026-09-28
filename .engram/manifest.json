@@ -2968,6 +2968,14 @@
       "sessions": 3,
       "memories": 3,
       "prompts": 0
+    },
+    {
+      "id": "9ee95d6b",
+      "created_by": "dmin",
+      "created_at": "2026-09-28T08:07:31Z",
+      "sessions": 0,
+      "memories": 3,
+      "prompts": 0
     }
   ]
 }
