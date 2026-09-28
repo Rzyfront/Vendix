@@ -23,6 +23,9 @@ export class StorePrismaService extends BasePrismaService {
     'order_financial_accounts',
     'order_financial_lines',
     'order_financial_line_taxes',
+    // Plan order-truth-and-invoice-tz, paso 4: historial veraz de orden.
+    // store_id propio y NO nullable — igual que `orders`, scoping directo.
+    'order_events',
 
     'store_payment_methods',
     'addresses',
@@ -1788,6 +1791,13 @@ export class StorePrismaService extends BasePrismaService {
 
   get order_financial_line_taxes() {
     return this.scoped_client.order_financial_line_taxes;
+  }
+
+  // Plan order-truth-and-invoice-tz, paso 4/5: historial veraz de orden.
+  // Escrito únicamente por OrderHistoryService, casi siempre dentro de una
+  // transacción (tx sin scope: ver OrderHistoryService.record).
+  get order_events() {
+    return this.scoped_client.order_events;
   }
 
   get table_sessions() {

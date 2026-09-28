@@ -97,6 +97,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PAY_DUPLICATE_001: 'Ya se registro un pago para esta orden.',
   PAY_FIND_001: 'Pago no encontrado.',
   PAY_VALIDATE_001: 'La validacion de los datos de pago fallo.',
+  PAY_MULTI_TENDER_WALLET_INSUFFICIENT:
+    'El saldo Wallet no cubre los tramos asignados. No se cobró ningún método.',
   PAY_PERM_001: 'No tiene permisos para acceder a este recurso de pago.',
 
   // Authentication
@@ -126,6 +128,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ECOM_CHECKOUT_001: 'Error en el proceso de compra.',
   ECOM_CHECKOUT_002: 'Metodo de pago invalido.',
   ECOM_CHECKOUT_003: 'Metodo de envio invalido.',
+  ECOM_CHECKOUT_PENDING_SHIPPING_001:
+    'Esta tienda no recibe pedidos por WhatsApp. Marca tu ubicación en el mapa para calcular el envío.',
   // Ecommerce checkout — validación cliente de dirección de envío
   ECOM_CHECKOUT_ADDR_REQUIRED_001:
     'Completa la dirección de envío para continuar.',
@@ -286,6 +290,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ORD_SHIP_INVALID_METHOD_001: 'El método de envío no pertenece a esta tienda.',
   ORD_SHIP_RATE_MISMATCH_001:
     'La tarifa seleccionada no corresponde al método de envío.',
+  ORD_SHIP_CHARGED_COST_CHANGE_001:
+    'La orden ya tiene pagos aplicados: no se puede cambiar el costo de envío. Elige una tarifa con el mismo costo o revierte el pago primero.',
   // Respaldo estático: la impresión masiva ya muestra el mensaje dinámico del
   // backend ("Ninguna de las 20 órdenes … 12 canceladas, 8 no encontradas"),
   // que es más útil. Este texto solo aparece si ese detalle no llega.
@@ -332,6 +338,15 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INV_PERM_001: 'No tiene permisos para acceder al inventario.',
   INV_CONTEXT_001: 'Debe seleccionar una organizacion.',
   INV_STOCK_001: 'Stock insuficiente.',
+  // No overselling — guardia de reserva/entrega (order-stock-commit.service.ts).
+  // Este canned copy es sólo el respaldo: el backend ya manda el mensaje
+  // humano en español con el producto y las cantidades (ver
+  // isPresentableApiMessage en parse-api-error.ts), así que normalmente lo que
+  // ve el operador es ESE texto, no éste.
+  INV_STOCK_002:
+    'No se puede entregar: no hay stock suficiente. Quita el producto de la orden o desactiva «Maneja inventario» en su ficha.',
+  INV_STOCK_INSUFFICIENT_LINES:
+    'No hay stock suficiente para uno o más productos o insumos. Quítalos de la orden o desactiva «Maneja inventario» en el producto.',
   INV_LOC_001: 'Ubicacion no encontrada.',
   INV_ADJ_001: 'Ajuste no encontrado.',
   INV_BULK_001: 'El archivo esta vacio o no contiene datos validos.',

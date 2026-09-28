@@ -14,6 +14,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NgTemplateOutlet } from '@angular/common';
 
 import {
   ModalComponent,
@@ -48,8 +49,10 @@ import { PosOrderCreateResult } from '../../models/order.model';
 import { resolveLineUnits } from '../../utils/line-units.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
+import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
 import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
 
 export type CheckoutIntent = 'pickup' | 'delivery';
@@ -81,6 +84,7 @@ export type { EntregaChoice };
     PosEntregaStepComponent,
     PosPaymentStepComponent,
     PosShippingStepComponent,
+    NgTemplateOutlet,
   ],
   templateUrl: './pos-checkout-shell.component.html',
   styleUrl: './pos-checkout-shell.component.scss',
@@ -148,6 +152,7 @@ export class PosCheckoutShellComponent {
 
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
+  private readonly authFacade = inject(AuthFacade);
   private readonly cartService = inject(PosCartService);
   private readonly paymentService = inject(PosPaymentService);
   private readonly integration = inject(PosRestaurantIntegrationService);
@@ -360,19 +365,19 @@ export class PosCheckoutShellComponent {
   readonly steps = computed<StepsLineItem[]>(() => {
     if (this.effectiveMode() === 'create-draft') {
       if (this.entregaChoice() === 'enviar') {
-        return [{ label: 'Entrega' }, { label: 'Cliente' }, { label: 'Envío' }];
+        return [{ label: 'Pedido' }, { label: 'Cliente' }, { label: 'Envío' }];
       }
-      return [{ label: 'Entrega' }, { label: 'Cliente' }];
+      return [{ label: 'Pedido' }, { label: 'Cliente' }];
     }
     if (this.entregaChoice() === 'enviar') {
       return [
-        { label: 'Entrega' },
+        { label: 'Pedido' },
         { label: 'Cliente' },
         { label: 'Envío' },
         { label: 'Cobro' },
       ];
     }
-    return [{ label: 'Entrega' }, { label: 'Cliente' }, { label: 'Cobro' }];
+    return [{ label: 'Pedido' }, { label: 'Cliente' }, { label: 'Cobro' }];
   });
 
   /** Parallel key array (same order/length as {@link steps}) used to render the
@@ -422,7 +427,7 @@ export class PosCheckoutShellComponent {
   readonly stepSubtitle = computed<string>(() => {
     switch (this.currentStepKey()) {
       case 'entrega':
-        return 'Entrega · Tipo de entrega';
+        return 'Pedido · Cómo lo recibirá';
       case 'cliente': {
         const sub = this.clienteSubSteps()[this.clienteSubStep()]?.label ?? 'Tipo';
         return `Cliente · ${sub}`;
@@ -431,7 +436,7 @@ export class PosCheckoutShellComponent {
         const ship = this.shippingStep();
         const subIndex = ship?.shipSubStep() ?? 0;
         const subSteps = ship?.shipSubSteps() ?? [];
-        const label = subSteps[subIndex]?.label ?? 'Método';
+        const label = subSteps[subIndex]?.label ?? 'Costo';
         return `Envío · ${label}`;
       }
       case 'cobro': {
@@ -471,10 +476,11 @@ export class PosCheckoutShellComponent {
       : null,
   );
 
-  /** Total shown in the Resumen rail / footer (adds flete on delivery). */
+  /** Display total includes the collector's resolved tip; deliveryAmount stays untipped. */
   readonly totalToPay = computed<number>(() => {
     const base = this.cartState()?.summary?.total || 0;
-    return this.effectiveIntent() === 'delivery' ? base + this.shippingCost() : base;
+    const shipping = this.effectiveIntent() === 'delivery' ? this.shippingCost() : 0;
+    return base + shipping + (this.paymentStep()?.tipAmount() ?? 0);
   });
 
   // ── Sale mode (tri-state) + Anonymous ownership ─────────────────────────
@@ -495,16 +501,6 @@ export class PosCheckoutShellComponent {
 
   readonly isAnonymousSale = computed(() => this.saleMode() === 'anonymous');
   readonly userOverrideAnonymous = signal<boolean | null>(null);
-  /**
-   * Paso 9 — «Facturar a nombre de»: link secundario bajo "Venta Anónima" que
-   * despliega inline los 5 campos mínimos de facturación nominativa (sin
-   * pasar por "Con Cliente" ni por el buscador general). Al resolver un
-   * cliente aquí, `selectCustomer()` sigue el mismo camino que "Con Cliente"
-   * (el backend no distingue el origen de la captura); esto solo evita que
-   * el cajero navegue por un flujo pensado para búsqueda de CRM cuando lo
-   * único que quiere es poner un nombre en la factura.
-   */
-  readonly showAnonymousInvoiceCapture = signal(false);
   /** Guard: apply the config-driven anonymous default only on the first render. */
   private readonly anonymousDefaultSynced = signal(false);
   /**
@@ -515,6 +511,12 @@ export class PosCheckoutShellComponent {
   private wasOpen = false;
   private openedOrderId: number | null = null;
 
+  /** La venta sale con factura electrónica automática (misma regla que la confirmación POS). */
+  readonly requiresElectronicInvoicing = computed<boolean>(() => {
+    const areas = (this.authFacade.activeFiscalAreas() || []) as string[];
+    if (!areas.includes('invoicing')) return false;
+    return Boolean(this.settingsFacade.settings()?.invoicing?.pos?.auto_emit ?? true);
+  });
   readonly allowAnonymousSales = computed(
     () => this.settingsFacade.pos()?.allow_anonymous_sales ?? false,
   );
@@ -1032,8 +1034,8 @@ export class PosCheckoutShellComponent {
           if (this.cartState()?.customer) {
             this.customerCleared.emit();
           }
-          // El alias queda confirmado; la dirección de domicilio se captura en Envío.
-          this.nextStep();
+          // El alias queda confirmado; la dirección de domicilio se captura aquí.
+          this.advanceAfterCliente();
           return;
         }
         // QUI-723 — Sub-step unificado: si no hay cliente seleccionado, el
@@ -1060,13 +1062,13 @@ export class PosCheckoutShellComponent {
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe((resolved) => {
               if (!resolved) return; // toast ya emitido por el selector.
-              this.nextStep();
+              if (!this.requiresAddress()) this.nextStep();
             });
           return;
         }
 
         // Cliente ya seleccionado → avanzamos.
-        this.nextStep();
+        this.advanceAfterCliente();
         return;
       }
       this.nextStep();
@@ -1123,6 +1125,12 @@ export class PosCheckoutShellComponent {
       return;
     }
 
+    this.nextStep();
+  }
+
+  /** Delivery details are captured beside the selected customer, not a step later. */
+  private advanceAfterCliente(): void {
+    if (this.requiresAddress() && !this.shippingStep()?.validateDetailsForCliente()) return;
     this.nextStep();
   }
 
@@ -1476,6 +1484,9 @@ export class PosCheckoutShellComponent {
             shipping_method_id: context.shippingMethodId,
             shipping_rate_id: context.shippingRateId ?? undefined,
             shipping_cost: context.shippingCost,
+            ...(context.manualCostOverride && context.shippingRateId != null
+              ? { manual_shipping_price: context.manualShippingPrice }
+              : {}),
           },
           warning: null,
         };
@@ -1626,11 +1637,12 @@ export class PosCheckoutShellComponent {
     if (mode === 'alias') {
       // Re-clic en alias ya activo → avanza el wizard (alias tiene [Tipo, Alias]).
       if (this.saleMode() === 'alias') {
-        this.nextStep();
+        this.attemptNextStep();
         return;
       }
       this.userOverrideAnonymous.set(false);
       this.saleMode.set('alias');
+      if (this.cartState()?.customer) this.customerCleared.emit();
       this.goToClienteSubStep(1); // sub-paso Alias (input)
       return;
     }
@@ -1841,32 +1853,18 @@ export class PosCheckoutShellComponent {
   /** Cliente elegido/creado: preserva la lógica de selectCustomer y avanza al siguiente paso. */
   onSelectCustomerAndAdvance(customer: PosCustomer): void {
     this.selectCustomer(customer);
-    this.nextStep();
+    if (!this.requiresAddress()) this.nextStep();
   }
 
   // ── Cliente step handlers ───────────────────────────────────────────────
   toggleAnonymousSale(enabled: boolean): void {
     this.userOverrideAnonymous.set(enabled);
     this.saleMode.set(enabled ? 'anonymous' : 'customer');
-    // Al salir de anónima, colapsa "Facturar a nombre de" para no dejarlo
-    // abierto detrás de la opción "Con Cliente" cuando el cajero vuelva.
-    if (!enabled) this.showAnonymousInvoiceCapture.set(false);
-  }
-
-  /**
-   * Paso 9 — abre/cierra el mini-formulario de 5 campos bajo "Venta Anónima".
-   * No toca `saleMode`: sigue siendo una venta anónima hasta que el cajero
-   * efectivamente resuelva un cliente (entonces `selectCustomer()` la
-   * convierte en 'customer', igual que si hubiera entrado por "Con Cliente").
-   */
-  toggleAnonymousInvoiceCapture(): void {
-    this.showAnonymousInvoiceCapture.update((v) => !v);
   }
 
   /** Cliente elegido/creado en el selector inline. */
   selectCustomer(customer: PosCustomer): void {
     this.userOverrideAnonymous.set(false);
-    this.showAnonymousInvoiceCapture.set(false);
     this.saleMode.set('customer');
     // QUI-737 (B.4) — un cliente real gana: cualquier alias previo se limpia.
     this.customerAlias.set('');
@@ -1960,13 +1958,53 @@ export class PosCheckoutShellComponent {
     }
 
     const isRestaurant = this.integration.isRestaurantMode();
-    const hasPrepared = this.hasUnfiredPreparedItems();
     const session = this.integration.currentTableSession();
 
     if (isRestaurant && session?.order_id) {
-      this.appendToTableAndFire(state, session);
+      // B12 — la sesión cacheada puede sobrevivir a la venta anterior
+      // (cobrar/"Nueva venta" no siempre la limpian) y apuntar a una orden
+      // que YA NO está en draft. Reusarla a ciegas revienta
+      // `addItemsToTableSession` con TABLE_SESSION_ORDER_NOT_DRAFT. Se
+      // refresca contra el servidor antes de reusarla; si ya no sirve, se
+      // descarta y el flujo sigue como si no hubiera sesión abierta.
+      this.integration
+        .refreshTableSession(session.id)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (freshSession) => {
+            const stillDraftable =
+              !!freshSession &&
+              !freshSession.closed_at &&
+              freshSession.order?.state === 'draft';
+            if (stillDraftable) {
+              this.appendToTableAndFire(state, freshSession);
+            } else {
+              this.integration.clearTableSession();
+              this.continueSaveDraftWithoutTableSession(state);
+            }
+          },
+          error: () => {
+            // Sesión ilegible en servidor (borrada/expirada): mismo
+            // tratamiento que "ya no sirve" — nunca bloquear Guardar por esto.
+            this.integration.clearTableSession();
+            this.continueSaveDraftWithoutTableSession(state);
+          },
+        });
       return;
     }
+
+    this.continueSaveDraftWithoutTableSession(state);
+  }
+
+  /**
+   * Resto de `onSaveDraft` cuando no hay (o ya no sirve) una sesión de mesa
+   * cacheada. Extraído para que B12 pueda re-entrar aquí tras descartar una
+   * sesión obsoleta sin duplicar las ramas mesa-elegida / mostrador-con-fire
+   * / retail.
+   */
+  private continueSaveDraftWithoutTableSession(state: CartState): void {
+    const isRestaurant = this.integration.isRestaurantMode();
+    const hasPrepared = this.hasUnfiredPreparedItems();
 
     // QUI-535: el picker ya no abre la mesa al elegirla, así que un borrador
     // sobre una mesa elegida debe abrir su cuenta AQUÍ. Guardar el borrador de
@@ -1979,7 +2017,7 @@ export class PosCheckoutShellComponent {
       return;
     }
 
-    if (isRestaurant && hasPrepared && !session) {
+    if (isRestaurant && hasPrepared && !this.integration.currentTableSession()) {
       this.createCounterAndFire(state);
       return;
     }
@@ -2244,6 +2282,11 @@ export class PosCheckoutShellComponent {
             this.toastService.success('Orden creada y enviada a cocina');
           } else {
             this.toastService.success('Orden creada');
+          }
+          if (fireRes?.stock_warnings?.length) {
+            this.toastService.warning(
+              formatStockWarningSummary(fireRes.stock_warnings),
+            );
           }
           this.finishPersistedDraft(orderId, orderItemIds, fired, fallbackOrder);
         },

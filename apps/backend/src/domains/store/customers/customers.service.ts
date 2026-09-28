@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { user_state_enum } from '@prisma/client';
+import { user_state_enum, persona_type_enum } from '@prisma/client';
+
+// Local alias mirroring `create-customer.dto.ts`'s own PascalCase alias for
+// `persona_type_enum` — the DTO does not export it, so it is redeclared here.
+type PersonaType = (typeof persona_type_enum)[keyof typeof persona_type_enum];
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { ResolveCustomerDto } from './dto/resolve-customer.dto';
@@ -129,6 +133,46 @@ export class CustomersService {
       `'${nit}': el módulo 11 de la DIAN da '${expected}'. Si escribiste el ` +
       `NIT con el DV pegado, sepáralos: el número va sin DV y el DV en su ` +
       `propio campo.`
+    );
+  }
+
+  /**
+   * Coherencia persona/documento (identidad dual DIAN).
+   *
+   * `NIT` = persona jurídica; cualquier otro tipo de documento
+   * (CC/CE/TI/RC/PA/PEP/PPT/DIE/NUIP) = persona natural. Las dos identidades
+   * DIAN son mutuamente excluyentes (`cac:PartyLegalEntity/RegistrationName`
+   * vs `cac:Person/FirstName+FamilyName`, ver `vendix-dian-issuer-identity`),
+   * y `JuridicaNameRule` ya impide que `legal_name` y `first_name`/`last_name`
+   * convivan — pero nunca cruza esa validación contra `document_type`. Sin
+   * esta compuerta, un cliente puede quedar `person_type='JURIDICA'` con una
+   * cédula (CC) — exactamente el incidente de producción que motivó esta
+   * regla: un NIT facturado como persona natural, en reversa.
+   *
+   * Sólo rechaza cuando AMBOS campos están presentes y en conflicto: un
+   * `document_type` ausente no es "un tipo de documento de persona natural",
+   * así que no exige NIT incondicionalmente — eso sería una política más
+   * amplia, fuera de este alcance. `CUST_VALIDATE_001` es el código de
+   * validación de cliente más cercano ya declarado en `error-codes.ts` sin
+   * uso previo (los códigos dedicados `CUSTOMER_LEGAL_NAME_REQUIRED` /
+   * `CUSTOMER_INVALID_FISCAL_RESPONSIBILITY` son inalcanzables: sólo viven en
+   * mensajes de validadores DTO cross-field, que el `ValidationPipe` global
+   * colapsa a `SYS_VALIDATION_001` antes de que su código específico llegue
+   * al cliente).
+   */
+  private assertPersonaDocumentCoherence(
+    personType: string | null | undefined,
+    documentType: string | null | undefined,
+  ): void {
+    if (personType !== 'JURIDICA') return;
+    if (!documentType) return;
+    if (documentType === 'NIT') return;
+    throw new VendixHttpException(
+      ErrorCodes.CUST_VALIDATE_001,
+      `person_type 'JURIDICA' requiere document_type 'NIT'; '${documentType}' ` +
+        'es un tipo de documento de persona natural y no puede combinarse con ' +
+        'persona jurídica.',
+      { field: 'person_type', person_type: personType, document_type: documentType },
     );
   }
 
@@ -576,6 +620,11 @@ export class CustomersService {
           first_name: existing.first_name,
           last_name: existing.last_name,
           phone: existing.phone,
+          person_type: existing.person_type,
+          legal_name: existing.legal_name,
+          verification_digit: existing.verification_digit,
+          tax_regime: existing.tax_regime,
+          fiscal_responsibilities: existing.fiscal_responsibilities,
         },
         dto,
       );
@@ -608,6 +657,35 @@ export class CustomersService {
         ) {
           document_conflict = true;
         }
+      }
+
+      // Task 2 safety net: `buildUpdatePayload`'s fill-if-blank completion
+      // could otherwise recreate exactly the incoherence `create()`/`update()`
+      // block via `assertPersonaDocumentCoherence` — completing
+      // `person_type='JURIDICA'` from the incoming payload onto an EXISTING
+      // customer whose stored (or just-backfilled) document type is a
+      // natural-person type. A live POS checkout must not fail over a
+      // pre-existing data-quality gap on an existing customer, so this is a
+      // SILENT skip (drop the field, keep the sale moving) — same
+      // non-blocking posture as `document_conflict` above, never a 400.
+      // Same reasoning for `verification_digit`: it only means something
+      // against a NIT.
+      const effectiveDocumentTypeForCompletion =
+        (updateData.document_type as string | undefined) ??
+        existing.document_type ??
+        null;
+      if (
+        updateData.person_type === 'JURIDICA' &&
+        effectiveDocumentTypeForCompletion &&
+        effectiveDocumentTypeForCompletion !== 'NIT'
+      ) {
+        delete updateData.person_type;
+      }
+      if (
+        updateData.verification_digit !== undefined &&
+        effectiveDocumentTypeForCompletion !== 'NIT'
+      ) {
+        delete updateData.verification_digit;
       }
 
       let was_updated = false;
@@ -752,6 +830,11 @@ export class CustomersService {
       first_name: string | null;
       last_name: string | null;
       phone: string | null;
+      person_type?: string | null;
+      legal_name?: string | null;
+      verification_digit?: string | null;
+      tax_regime?: string | null;
+      fiscal_responsibilities?: string[] | null;
     },
     incoming: CreateCustomerDto,
   ): Record<string, unknown> {
@@ -778,6 +861,69 @@ export class CustomersService {
     maybeWrite(incoming.first_name, 'first_name', toTitleCase, existing.first_name);
     maybeWrite(incoming.last_name, 'last_name', toTitleCase, existing.last_name);
     maybeWrite(incoming.phone, 'phone', undefined, existing.phone);
+
+    // Task 2 (QUI-728 follow-up) — ficha completion, FILL-IF-BLANK semantics.
+    //
+    // Distinct on purpose from `maybeWrite` above: those three fields use
+    // overwrite-with-diff (whatever the cashier just typed wins). The fiscal
+    // ficha fields below must NEVER overwrite an existing, different value —
+    // a POS quick-resolve is not the place to silently correct a customer's
+    // fiscal identity. They only fill a field the stored row still has
+    // blank/null, so a customer resolved by email/document/name at checkout
+    // walks away with a more complete ficha instead of one perpetually stuck
+    // at whatever the very first sale happened to capture.
+    const maybeComplete = <T,>(
+      incomingValue: T | null | undefined,
+      field:
+        | 'person_type'
+        | 'legal_name'
+        | 'verification_digit'
+        | 'tax_regime'
+        | 'fiscal_responsibilities',
+      currentValue: T | null | undefined,
+      isBlank: (value: T | null | undefined) => boolean,
+    ) => {
+      if (incomingValue === undefined || incomingValue === null) return;
+      if (!isBlank(currentValue)) return; // already has a value: never overwritten here
+      if (isBlank(incomingValue)) return; // nothing useful to fill with
+      data[field] = incomingValue;
+    };
+
+    const isBlankString = (value: string | null | undefined) =>
+      !value || !value.trim();
+    const isBlankArray = (value: string[] | null | undefined) =>
+      !value || value.length === 0;
+
+    maybeComplete(
+      incoming.person_type,
+      'person_type',
+      existing.person_type,
+      isBlankString,
+    );
+    maybeComplete(
+      incoming.legal_name,
+      'legal_name',
+      existing.legal_name,
+      isBlankString,
+    );
+    maybeComplete(
+      incoming.verification_digit,
+      'verification_digit',
+      existing.verification_digit,
+      isBlankString,
+    );
+    maybeComplete(
+      incoming.tax_regime,
+      'tax_regime',
+      existing.tax_regime,
+      isBlankString,
+    );
+    maybeComplete(
+      incoming.fiscal_responsibilities,
+      'fiscal_responsibilities',
+      existing.fiscal_responsibilities,
+      isBlankArray,
+    );
 
     return data;
   }
@@ -1034,7 +1180,29 @@ export class CustomersService {
     // already validated the cross-field rules (JuridicaNameRule, NitDvMatches,
     // FiscalResponsibilityInCatalogRule); here we only translate the validated
     // payload into the canonical shape the UBL builder expects.
-    const isJuridica = dto.person_type === 'JURIDICA';
+    //
+    // Coherencia persona/documento (identidad dual): una NIT es SIEMPRE
+    // persona jurídica; un tipo de documento de persona natural
+    // (CC/CE/TI/RC/PA/PEP/PPT/DIE/NUIP) nunca puede convivir con
+    // `person_type='JURIDICA'` — esa mezcla es la raíz del incidente de
+    // producción (NIT facturado como persona natural con cédula). Si llega
+    // NIT sin `person_type` explícito y sin nombre de persona natural, se
+    // infiere JURIDICA (una NIT sin nombre no puede ser natural); el
+    // `person_type` explícito del payload SIEMPRE gana sobre la inferencia.
+    const derivedPersonType: PersonaType | null | undefined =
+      dto.person_type !== undefined && dto.person_type !== null
+        ? dto.person_type
+        : normalizedDoc.type === 'NIT' &&
+            !!normalizedDoc.number &&
+            !dto.first_name?.trim() &&
+            !dto.last_name?.trim()
+          ? ('JURIDICA' as PersonaType)
+          : dto.person_type;
+    this.assertPersonaDocumentCoherence(
+      derivedPersonType ?? null,
+      normalizedDoc.type,
+    );
+    const isJuridica = derivedPersonType === 'JURIDICA';
 
     // Persona natural → first/last populated. Persona jurídica → both forced
     // to null so the UBL builder emits `cac:PartyLegalEntity/RegistrationName`
@@ -1094,7 +1262,7 @@ export class CustomersService {
         document_number: finalDocumentNumber,
         verification_digit: finalVerificationDigit,
         tax_regime: this.normalizeOptionalString(dto.tax_regime) as any,
-        person_type: this.normalizeOptionalString(dto.person_type) as any,
+        person_type: this.normalizeOptionalString(derivedPersonType) as any,
         fiscal_responsibilities: dto.fiscal_responsibilities ?? [],
         ciiu_code:
           dto.ciiu_code !== undefined
@@ -1411,8 +1579,24 @@ export class CustomersService {
 
     // QUI-728 — NIT + verification_digit split. If the merchant typed a DV
     // that disagrees with computeNitDv(), refuse BEFORE persisting.
-    let nextDocumentNumber: string | null | undefined = undefined;
-    let nextVerificationDigit: string | null | undefined = undefined;
+    //
+    // Bug: `nextDocumentNumber` used to start at `undefined` and only got
+    // assigned inside the NIT branch below, so for CC/CE/PA/TI/PEP/PPT the
+    // normalized number never reached the `prisma.users.update()` call
+    // (which only writes `document_number` when the value is `!== undefined`)
+    // — the FE kept showing the old number/type. `create()` initializes
+    // `finalDocumentNumber = normalizedDoc.number` unconditionally (~1057);
+    // mirror that here whenever the caller is actually changing the
+    // document, and let the NIT branch overwrite it with the split
+    // number+DV. `verification_digit` only applies to NIT, so when the
+    // document changes to (or stays) a non-NIT type we clear any DV
+    // inherited from a previous NIT classification.
+    let nextDocumentNumber: string | null | undefined = isChangingDocument
+      ? normalizedDoc.number
+      : undefined;
+    let nextVerificationDigit: string | null | undefined = isChangingDocument
+      ? null
+      : undefined;
     if (
       isChangingDocument &&
       normalizedDoc.type === 'NIT' &&
@@ -1442,16 +1626,50 @@ export class CustomersService {
     // changes JURIDICA → NATURAL we clear `legal_name`. When it switches the
     // other way we require `legal_name` (validated at DTO layer) and clear
     // first/last names so the UBL builder emits the right branch.
-    const effectivePersonType =
-      dto.person_type !== undefined ? dto.person_type : user.person_type;
-    const nextIsJuridica = effectivePersonType === 'JURIDICA';
+    //
+    // Task 1 — coherencia persona/documento: mismo criterio de inferencia que
+    // `create()`. Sólo se infiere JURIDICA cuando ESTA llamada cambia el
+    // documento a NIT (`isChangingDocument`) y no queda nombre de persona
+    // natural (payload o almacenado) — gateado en `isChangingDocument` para
+    // no inferir nada a partir de un NIT que ya estaba ahí de antes en un
+    // PATCH que sólo toca, por ejemplo, el teléfono. `person_type` explícito
+    // del payload siempre gana sobre la inferencia.
+    const effectiveFirstName =
+      dto.first_name !== undefined ? dto.first_name : user.first_name;
+    const effectiveLastName =
+      dto.last_name !== undefined ? dto.last_name : user.last_name;
+    const derivedPersonType: PersonaType | null | undefined =
+      dto.person_type !== undefined
+        ? dto.person_type
+        : isChangingDocument &&
+            normalizedDoc.type === 'NIT' &&
+            !!normalizedDoc.number &&
+            !effectiveFirstName?.trim() &&
+            !effectiveLastName?.trim()
+          ? ('JURIDICA' as PersonaType)
+          : (user.person_type as PersonaType | null);
+
+    // Sólo se audita la coherencia cuando ESTA petición toca `person_type` o
+    // el documento: un PATCH ajeno (teléfono, email) no debe bloquearse por
+    // un dato ya incoherente que nadie está tocando ahora.
+    if (dto.person_type !== undefined || isChangingDocument) {
+      this.assertPersonaDocumentCoherence(
+        derivedPersonType ?? null,
+        normalizedDoc.type,
+      );
+    }
+
+    const nextIsJuridica = derivedPersonType === 'JURIDICA';
+    const shouldWritePersonType =
+      dto.person_type !== undefined ||
+      (derivedPersonType ?? null) !== (user.person_type ?? null);
 
     // Persona switches NATURAL → JURIDICA on update: caller must include
     // `legal_name` (DTO enforces this). We also null first/last so the
     // existing natural name doesn't leak into the jurídica record.
     let firstNameUpdate: string | undefined = undefined;
     let lastNameUpdate: string | undefined = undefined;
-    if (dto.person_type !== undefined && nextIsJuridica) {
+    if (shouldWritePersonType && nextIsJuridica) {
       firstNameUpdate = '';
       lastNameUpdate = '';
     }
@@ -1478,10 +1696,9 @@ export class CustomersService {
           dto.tax_regime !== undefined
             ? (this.normalizeOptionalString(dto.tax_regime) as any)
             : undefined,
-        person_type:
-          dto.person_type !== undefined
-            ? (this.normalizeOptionalString(dto.person_type) as any)
-            : undefined,
+        person_type: shouldWritePersonType
+          ? (this.normalizeOptionalString(derivedPersonType) as any)
+          : undefined,
         fiscal_responsibilities:
           dto.fiscal_responsibilities !== undefined
             ? dto.fiscal_responsibilities

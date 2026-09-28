@@ -6,6 +6,7 @@ import { environment } from '../../../../../../../environments/environment';
 import {
   parseApiError,
   withApiErrorReference,
+  InsufficientStockItem,
 } from '../../../../../../../app/core/utils/parse-api-error';
 import { DEFAULT_ERROR_MESSAGE } from '../../../../../../../app/core/utils/error-messages';
 import {
@@ -21,6 +22,13 @@ export interface FireOrderItemsResult {
   cogs_total: number;
   order_id: number;
   ticket?: KitchenTicket;
+  /**
+   * Presente cuando `allow_negative_stock` / `allow_ingredient_overuse`
+   * dejaron pasar la operación con faltantes: no bloqueó, pero el
+   * inventario quedó en negativo. Plan no-overselling-stock-guard-plan.md
+   * paso 9 — el frontend lo muestra como toast de advertencia.
+   */
+  stock_warnings?: InsufficientStockItem[];
 }
 
 /** Result of `POST /store/kitchen-fire/resend` (QUI-762). */
@@ -29,6 +37,8 @@ export interface ResendOrderItemsResult {
   ticketIds?: number[];
   firedItemIds?: number[];
   cancelledTicketIds?: number[];
+  /** Ver `FireOrderItemsResult.stock_warnings`. */
+  stock_warnings?: InsufficientStockItem[];
 }
 
 /** Motivo declarado al reenviar un plato a cocina. QUI-762. */
@@ -111,8 +121,8 @@ export class KitchenTicketsService {
     return this.mutateTicket(ticketId, 'delivered');
   }
 
-  cancel(ticketId: number): Observable<KitchenTicket> {
-    return this.mutateTicket(ticketId, 'cancel');
+  cancel(ticketId: number, disposition?: 'reuse' | 'waste'): Observable<KitchenTicket> {
+    return this.mutateTicket(ticketId, 'cancel', disposition ? { disposition } : {});
   }
 
   /**
@@ -236,11 +246,12 @@ export class KitchenTicketsService {
   private mutateTicket(
     ticketId: number,
     action: 'start' | 'ready' | 'delivered' | 'cancel' | 'revert',
+    body: Record<string, string> = {},
   ): Observable<KitchenTicket> {
     return this.http
       .post<ApiResponse<KitchenTicket>>(
         `${this.apiUrl}${this.basePath}/tickets/${ticketId}/${action}`,
-        {},
+        body,
       )
       .pipe(
         map((res) => res.data),

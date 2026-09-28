@@ -46,6 +46,30 @@ describe('PrintTemplateCompilerService', () => {
     expect(res.compiled).toContain('$50.000');
   });
 
+  /**
+   * Step 8 (order-truth-and-invoice-tz-plan.md) — `{{date path}}` usaba
+   * `toLocaleDateString('es-CO')` sin zona, que formatea con la del
+   * CONTENEDOR (siempre UTC en producción), no con la de la tienda. Un
+   * `compile()` sin `tz` explícita sigue viendo el default
+   * (`DEFAULT_STORE_TIMEZONE` = America/Bogota); pasando una zona distinta
+   * el resultado cambia, lo que prueba que el parámetro sí se usa.
+   */
+  it('should format {{date path}} in the store timezone, not the container UTC', () => {
+    const template = '<span>{{date document.date}}</span>';
+    // 02:30 UTC del 26-sep = 21:30 del 25-sep en Bogotá (UTC-5).
+    const data = { document: { date: '2026-09-26T02:30:00.000Z' } };
+
+    const default_tz_result = service.compile(template, data);
+    expect(default_tz_result.compiled).toBe('<span>25/09/2026</span>');
+
+    const explicit_bogota = service.compile(template, data, 'dummy', 'America/Bogota');
+    expect(explicit_bogota.compiled).toBe('<span>25/09/2026</span>');
+
+    // Misma fecha, otra zona (UTC+9): ya es 26-sep ahí.
+    const tokyo_result = service.compile(template, data, 'dummy', 'Asia/Tokyo');
+    expect(tokyo_result.compiled).toBe('<span>26/09/2026</span>');
+  });
+
   it('should handle {{#if condition}} blocks correctly', () => {
     const template = '{{#if customer.tax_id}}NIT: {{customer.tax_id}}{{else}}Consumidor Final{{/if}}';
     const dataWithNit = { customer: { tax_id: '900123' } };

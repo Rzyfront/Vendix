@@ -170,10 +170,10 @@
                       </span>
                       @if (
                         item.product?.is_on_sale &&
-                        item.product?.sale_price != null
+                        (item.product?.regular_final_price ?? 0) > dishPrice(item)
                       ) {
                         <span class="original-price">
-                          {{ item.product?.base_price | currency }}
+                          {{ item.product?.regular_final_price | currency }}
                         </span>
                       }
                     </div>

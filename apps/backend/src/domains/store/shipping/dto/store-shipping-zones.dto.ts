@@ -280,7 +280,7 @@ export class CreateRateDto {
 
   @ApiPropertyOptional({
     description:
-      'Optional tax category (IVA/INC, exactly one rate > 0) always INCLUDED in the rate price. null = no tax.',
+      'Optional tax category (IVA/INC, exactly one rate > 0). null = no tax. Mode via tax_is_inclusive.',
     nullable: true,
     example: 12,
   })
@@ -297,6 +297,15 @@ export class CreateRateDto {
   @IsInt()
   @Min(1)
   tax_category_id?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Tax mode of the rate: true = INCLUDED in the rate price (default), false = ADDED on top (bruto = base + trunc(base·r)). The category is_inclusive only preselects new rates, never enters the calculation.',
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  tax_is_inclusive?: boolean;
 
   @ApiPropertyOptional({
     description:

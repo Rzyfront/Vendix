@@ -28,7 +28,20 @@ import {
   FilterConfig,
   DropdownAction,
   FilterValues,
+  HeaderPinConfig,
 } from './options-dropdown.interfaces';
+
+/**
+ * Array vacío ESTABLE para multi-selects sin valor.
+ *
+ * `getMultiFilterValues()` se evalúa en CADA ciclo de detección de cambios y
+ * su resultado alimenta `[ngModel]` → `writeValue` → `signal.set`, que en
+ * Zoneless agenda un nuevo ciclo. Devolver un literal `[]` fresco por ciclo
+ * encadena ciclos infinitos y congela la app al abrir el dropdown.
+ * El multi-selector nunca muta el array in-place (toggle/remove crean uno
+ * nuevo), así que compartir esta referencia es seguro.
+ */
+const EMPTY_MULTI_VALUES: string[] = [];
 
 @Component({
   selector: 'app-options-dropdown',
@@ -70,6 +83,14 @@ export class OptionsDropdownComponent {
 
   /** Whether the component is in a loading state */
   readonly isLoading = input<boolean>(false);
+
+  /**
+   * Pin opcional en el header del dropdown de filtros, junto a "Limpiar".
+   * Escribe `headerPin.key` en `FilterValues` (`'true'` | `null`) por el mismo
+   * path con debounce que el checkbox por filtro y NO cuenta como filtro
+   * activo. `null` (default) = sin pin.
+   */
+  readonly headerPin = input<HeaderPinConfig | null>(null);
 
   /** Emits when filter values change (after debounce) */
   readonly filterChange = output<FilterValues>();
@@ -386,7 +407,7 @@ export class OptionsDropdownComponent {
     if (Array.isArray(value)) {
       return value;
     }
-    return [];
+    return EMPTY_MULTI_VALUES;
   }
 
   /**
@@ -399,5 +420,21 @@ export class OptionsDropdownComponent {
 
   onCheckboxChange(key: string, checked: boolean): void {
     this.onFilterChange(key, checked ? 'true' : null);
+  }
+
+  /**
+   * Toggle del pin de header. Reutiliza el path del checkbox por filtro
+   * (escritura `'true'|null` + debounce); no cuenta como filtro activo.
+   */
+  onHeaderPinChange(checked: boolean): void {
+    const pin = this.headerPin();
+    if (!pin) return;
+    this.onCheckboxChange(pin.key, checked);
+  }
+
+  /** Estado del pin de header (misma lectura que el checkbox por filtro). */
+  getHeaderPinValue(): boolean {
+    const pin = this.headerPin();
+    return pin ? this.getCheckboxValue(pin.key) : false;
   }
 }

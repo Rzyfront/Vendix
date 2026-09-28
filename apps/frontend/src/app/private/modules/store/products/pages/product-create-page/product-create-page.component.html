@@ -400,6 +400,12 @@
                   >
                   </app-input>
                 </div>
+                <div class="flex flex-col gap-0.5" aria-live="polite">
+                  <span class="text-sm font-bold text-rose-700">
+                    Oferta final: {{ salePriceWithTax | currency }}
+                  </span>
+                  <span class="text-xs text-rose-600">{{ saleTaxExplanation }}</span>
+                </div>
               </div>
             }
           </div>

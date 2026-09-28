@@ -224,6 +224,7 @@ export type {
   FilterType,
   DropdownAction,
   FilterValues,
+  HeaderPinConfig,
 } from './options-dropdown';
 export type {
   TimelineStep,

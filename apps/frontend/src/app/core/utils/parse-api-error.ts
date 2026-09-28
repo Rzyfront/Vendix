@@ -1,4 +1,5 @@
 import { ERROR_MESSAGES, DEFAULT_ERROR_MESSAGE } from './error-messages';
+import { formatStockShortageSummary } from './stock-shortage.util';
 
 export interface ParsedApiError {
   errorCode: string | null;
@@ -18,6 +19,15 @@ export interface ParsedApiError {
    * envolvió) lo deja `undefined`; mostrarlo SOLO cuando existe.
    */
   request_id?: string;
+  /**
+   * Faltantes de stock normalizados, cuando el error trae `details.items[]`
+   * (`INV_STOCK_INSUFFICIENT_LINES`) o el `details` plano de un único
+   * faltante (`INV_STOCK_002`). Ver {@link readInsufficientStockItems}.
+   * `undefined` cuando el error no trae ninguna de las dos formas — así una
+   * pantalla puede hacer `if (parsed.stockShortages) { … }` sin comprobar
+   * longitud primero.
+   */
+  stockShortages?: InsufficientStockItem[];
 }
 
 /**
@@ -97,6 +107,76 @@ export function readApiBlockers(details: unknown): ApiBlocker[] {
 }
 
 /**
+ * UNA LÍNEA (O INSUMO) SIN STOCK SUFICIENTE.
+ *
+ * Espejo de `VendixHttpExceptionDetails['items'][number]` que la compuerta de
+ * inventario manda en `INV_STOCK_INSUFFICIENT_LINES` (409, ver
+ * `order-stock-commit.service.ts`) — una fila por producto/insumo que no
+ * alcanza. También cubre la forma plana de `INV_STOCK_002` (un solo faltante,
+ * sin `items[]`), que expone las mismas cuatro claves numéricas/string sueltas
+ * en `details`. Ver {@link readInsufficientStockItems}.
+ */
+export interface InsufficientStockItem {
+  product_id: number;
+  product_variant_id: number | null;
+  product_name: string;
+  /** `'ingredient'` cuando lo que falta es un insumo de receta, no el plato en sí. */
+  kind: 'product' | 'ingredient';
+  requested: number;
+  available: number;
+  /** Para un insumo: en qué platos de la orden se usa (p. ej. `['Mojito']`). */
+  used_by?: string[];
+}
+
+/**
+ * Lee los faltantes de stock de un `details` de error, ya normalizado.
+ *
+ * TOLERANTE por el mismo motivo que {@link readApiBlockers}: acepta la forma
+ * con arreglo (`details.items[]`, de `INV_STOCK_INSUFFICIENT_LINES`) Y la
+ * forma plana de una sola fila (`details` mismo, de `INV_STOCK_002`, que no
+ * trae `product_name` hoy pero sí `product_id/requested/available` —una fila
+ * sin nombre se descarta porque no hay nada legible que mostrar). Cualquier
+ * entrada sin las tres claves mínimas (`product_name`, `requested`,
+ * `available`) se descarta en vez de fallar: un error leyendo un error deja
+ * al usuario sin ninguna explicación.
+ */
+export function readInsufficientStockItems(details: unknown): InsufficientStockItem[] {
+  const source = asRecord(details);
+  if (!source) return [];
+
+  const rawItems = Array.isArray(source['items']) ? source['items'] : [source];
+
+  return rawItems.reduce<InsufficientStockItem[]>((acc, entry) => {
+    const row = asRecord(entry);
+    if (!row) return acc;
+
+    const product_name = readNonEmptyString(row['product_name']);
+    const requested = toFiniteNumber(row['requested']);
+    const available = toFiniteNumber(row['available']);
+    if (!product_name || requested === null || available === null) return acc;
+
+    const product_id = toFiniteNumber(row['product_id']) ?? 0;
+    const product_variant_id = toFiniteNumber(row['product_variant_id']);
+    const kind = row['kind'] === 'ingredient' ? 'ingredient' : 'product';
+    const usedByRaw = row['used_by'];
+    const used_by = Array.isArray(usedByRaw)
+      ? usedByRaw.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      : undefined;
+
+    acc.push({
+      product_id,
+      product_variant_id,
+      product_name,
+      kind,
+      requested,
+      available,
+      ...(used_by?.length ? { used_by } : {}),
+    });
+    return acc;
+  }, []);
+}
+
+/**
  * Palabras y signos que sólo aparecen en prosa española.
  *
  * SIRVEN DE ADUANA, no de traductor. `VendixHttpException` pone en `message` el
@@ -160,14 +240,15 @@ export function isPresentableApiMessage(value: unknown): value is string {
  * las validaciones. Revisa los datos.» — que es el mismo defecto que el enlatado
  * pretendía evitar. El orden ahora es:
  *
- *   1. `details.blockers[0].problem` (+ su `fix`) — el diagnóstico por campo.
- *   2. `message` del backend, SI pasa la aduana de {@link isPresentableApiMessage}.
- *   3. `ERROR_MESSAGES[error_code]` — el copy curado.
- *   4. `DEFAULT_ERROR_MESSAGE`.
+ *   1. En errores de stock, `details.items[]` (o la fila plana) — todos los faltantes.
+ *   2. `details.blockers[0].problem` (+ su `fix`) — el diagnóstico por campo.
+ *   3. `message` del backend, SI pasa la aduana de {@link isPresentableApiMessage}.
+ *   4. `ERROR_MESSAGES[error_code]` — el copy curado.
+ *   5. `DEFAULT_ERROR_MESSAGE`.
  *
  * ## LO QUE NO CAMBIA
  *
- * La FIRMA y los cuatro campos del retorno son los mismos: media aplicación
+ * La FIRMA y los campos originales del retorno siguen iguales: media aplicación
  * consume esta función y ninguno de sus llamadores necesita tocarse.
  * `devMessage` sigue siendo el `message` crudo del backend —para el log— aunque
  * ahora, cuando es presentable, también alimente `userMessage`.
@@ -188,12 +269,24 @@ export function parseApiError(error: any): ParsedApiError {
     ? (ERROR_MESSAGES[errorCode] ?? DEFAULT_ERROR_MESSAGE)
     : DEFAULT_ERROR_MESSAGE;
 
+  const stockShortages = readInsufficientStockItems(details);
+  // La lista estructurada es la fuente de verdad: el mensaje del backend
+  // puede abreviar varios faltantes y TablesService/KitchenTicketsService
+  // convierten el error a string antes de entregarlo a la pantalla.
+  const causeCode = readNonEmptyString(asRecord(details)?.['cause_code']);
+  const isStockError = [errorCode, causeCode].some(
+    (code) => code === 'INV_STOCK_INSUFFICIENT_LINES' || code === 'INV_STOCK_002',
+  );
+
   return {
     errorCode,
-    userMessage: resolveUserMessage(devMessage, details, cannedMessage),
+    userMessage: isStockError && stockShortages.length
+      ? formatStockShortageSummary(stockShortages)
+      : resolveUserMessage(devMessage, details, cannedMessage),
     devMessage,
     details,
     request_id: readNonEmptyString(body?.request_id) ?? undefined,
+    stockShortages: stockShortages.length ? stockShortages : undefined,
   };
 }
 
@@ -276,4 +369,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function readNonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/** Números que a veces viajan como string (query params, algún serializer). */
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return null;
 }

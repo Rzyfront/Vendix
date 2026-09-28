@@ -17,6 +17,7 @@ import { InventoryValidationService } from './services/inventory-validation.serv
 import { InventoryIntegrationService } from './shared/services/inventory-integration.service';
 import { StockLevelManager } from './shared/services/stock-level-manager.service';
 import { StockValidatorService } from './shared/services/stock-validator.service';
+import { SellableStockAllocator } from './shared/services/sellable-stock-allocator.service';
 import { InventoryBatchesService } from './batches/inventory-batches.service';
 import { InventorySerialNumbersModule } from './serial-numbers/inventory-serial-numbers.module';
 import { InventoryTransactionsService } from './transactions/inventory-transactions.service';
@@ -41,6 +42,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
     InventoryIntegrationService,
     StockLevelManager,
     StockValidatorService,
+    SellableStockAllocator,
     InventoryBatchesService,
     InventoryTransactionsService,
   ],
@@ -55,6 +57,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
     InventoryIntegrationService,
     StockLevelManager,
     StockValidatorService,
+    SellableStockAllocator,
     InventoryBatchesService,
     InventoryTransactionsService,
   ],

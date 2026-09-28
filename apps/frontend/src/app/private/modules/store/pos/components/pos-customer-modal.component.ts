@@ -29,12 +29,14 @@ import {
   ToggleComponent,
   ToastService,
   DialogService,
+  AlertBannerComponent,
   type AddressPayload } from '../../../../../shared/components';
 import {
   DOCUMENT_TYPES,
   findDocumentType,
   DocumentTypeOption,
 } from '../../../../../shared/constants/document-types';
+import { computeNitDv } from '../../../../../shared/utils/nit.util';
 import { PosCustomerService } from '../services/pos-customer.service';
 import { PosQueueService, QueueEntry } from '../services/pos-queue.service';
 import {
@@ -60,6 +62,7 @@ import { CreateCustomerRequest } from '../../customers/models/customer.model';
     IconComponent,
     InputsearchComponent,
     ToggleComponent,
+    AlertBannerComponent,
     CustomerModalComponent
 ],
   template: `
@@ -325,31 +328,45 @@ import { CreateCustomerRequest } from '../../customers/models/customer.model';
                 (blur)="onFieldBlur('email')"
                 >
               </app-input>
-              <!-- Name -->
-              <div class="grid grid-cols-2 gap-4">
+              <!-- Name / Razón social (según tipo de persona) -->
+              @if (personTypeValue() !== 'JURIDICA') {
+                <div class="grid grid-cols-2 gap-4">
+                  <app-input
+                    formControlName="firstName"
+                    label="Nombre"
+                    placeholder="Juan"
+                    type="text"
+                    [size]="'md'"
+                    [required]="true"
+                    [error]="getFieldError('firstName')"
+                    (blur)="onFieldBlur('firstName')"
+                    >
+                  </app-input>
+                  <app-input
+                    formControlName="lastName"
+                    label="Apellido"
+                    placeholder="Pérez"
+                    type="text"
+                    [size]="'md'"
+                    [required]="true"
+                    [error]="getFieldError('lastName')"
+                    (blur)="onFieldBlur('lastName')"
+                    >
+                  </app-input>
+                </div>
+              } @else {
                 <app-input
-                  formControlName="firstName"
-                  label="Nombre"
-                  placeholder="Juan"
+                  formControlName="legalName"
+                  label="Razón social"
+                  placeholder="Acme S.A.S"
                   type="text"
                   [size]="'md'"
                   [required]="true"
-                  [error]="getFieldError('firstName')"
-                  (blur)="onFieldBlur('firstName')"
+                  [error]="getFieldError('legalName')"
+                  (blur)="onFieldBlur('legalName')"
                   >
                 </app-input>
-                <app-input
-                  formControlName="lastName"
-                  label="Apellido"
-                  placeholder="Pérez"
-                  type="text"
-                  [size]="'md'"
-                  [required]="true"
-                  [error]="getFieldError('lastName')"
-                  (blur)="onFieldBlur('lastName')"
-                  >
-                </app-input>
-              </div>
+              }
               <!-- Phone -->
               <app-input
                 formControlName="phone"
@@ -389,6 +406,36 @@ import { CreateCustomerRequest } from '../../customers/models/customer.model';
                   >
                 </app-input>
               </div>
+              @if (selectedDocumentType()?.code === 'NIT') {
+                <!-- A.8 — el DV nunca viaja tecleado: se deriva del NIT con
+                     módulo 11 (misma regla de invoice-create-page) y sólo se
+                     muestra como referencia; el valor enviado se recalcula
+                     fresco al guardar. -->
+                <p class="text-xs text-[var(--color-text-secondary)] -mt-2">
+                  Dígito de verificación: <strong>{{ computedVerificationDigit() ?? '—' }}</strong> (calculado automáticamente)
+                </p>
+              }
+              @if (legalPersonDocumentTypeWarning()) {
+                <!--
+                  P2 — el candado JURIDICA→NIT normalmente fuerza y bloquea
+                  el tipo de documento, pero esta ficha ya existía como
+                  JURIDICA con un tipo distinto de NIT (dato guardado antes
+                  de esa regla, o corregido a mano). Se respeta lo guardado en
+                  vez de reescribirlo en silencio: el campo queda editable y
+                  el backend rechazará el guardado si la combinación sigue
+                  siendo incoherente.
+                -->
+                <app-alert-banner
+                  variant="warning"
+                  icon="alert-triangle"
+                  tone="token"
+                  heading="Persona jurídica debe usar NIT"
+                >
+                  Esta ficha es persona jurídica pero su tipo de documento no
+                  es NIT. Corrige el tipo de documento antes de guardar; de lo
+                  contrario el guardado será rechazado.
+                </app-alert-banner>
+              }
               <!-- Información fiscal -->
               <div class="pt-2 border-t border-[var(--color-border)]">
                 <h3 class="text-sm font-semibold text-[var(--color-text-primary)] mb-3">
@@ -610,6 +657,32 @@ export class PosCustomerModalComponent {
   /** Tipo de documento seleccionado (reactivo a cambios del FormControl). */
   readonly selectedDocumentType = signal<DocumentTypeOption | undefined>(undefined);
 
+  /** Tipo de persona (reactivo), para togglear nombre/apellido vs razón social. */
+  readonly personTypeValue = signal<string>('');
+
+  /**
+   * `true` cuando la ficha cargada es JURIDICA con un `document_type`
+   * distinto de NIT (dato guardado antes del candado, o corregido a mano).
+   * El candado JURIDICA→NIT normalmente fuerza el valor a NIT y bloquea el
+   * campo; en ese caso NO lo hace (ver el efecto que lo escribe, en el
+   * constructor) para no reescribir en silencio una ficha real. La plantilla
+   * usa esta señal para mostrar la advertencia visible.
+   */
+  readonly legalPersonDocumentTypeWarning = signal(false);
+
+  /** Número de documento (reactivo), para derivar el DV automáticamente. */
+  readonly documentNumberValue = signal<string>('');
+
+  /**
+   * DV derivado del NIT con módulo 11 (mismo criterio que
+   * `invoice-create-page.component.ts`: "el DV nunca viaja tecleado, se
+   * deriva del NIT"). Sólo aplica cuando el tipo elegido es NIT.
+   */
+  readonly computedVerificationDigit = computed(() => {
+    if (this.selectedDocumentType()?.code !== 'NIT') return null;
+    return computeNitDv(this.documentNumberValue());
+  });
+
   /** Placeholder dinámico para el input de número de documento. */
   readonly documentNumberPlaceholder = computed(() => {
     const type = this.selectedDocumentType();
@@ -733,12 +806,68 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       ctrl.updateValueAndValidity({ emitEvent: false });
     });
 
-    // Live counter for the helper text — updates as the cashier types.
+    // Live counter for the helper text — updates as the cashier types. Se
+    // reutiliza para alimentar `documentNumberValue` (DV derivado en vivo).
     this.customerForm.controls['documentNumber'].valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((v: string | null) => {
         this.documentNumberLength.set((v ?? '').length);
+        this.documentNumberValue.set(v ?? '');
       });
+
+    // Bridge person_type valueChanges -> signal (para swap jurídica/natural).
+    const personTypeControl = this.customerForm.controls['personType'];
+    const personTypeSignalValue = toSignal(personTypeControl.valueChanges, {
+      initialValue: personTypeControl.value as string | null,
+    });
+
+    effect(() => {
+      this.personTypeValue.set(personTypeSignalValue() ?? '');
+      this.applyPersonTypeValidators();
+    });
+
+    // Persona jurídica en Colombia sólo tiene NIT (nunca CC): se fija y se
+    // bloquea el selector (mismo criterio que
+    // customer-modal.component.ts). Natural puede conservar un NIT si el
+    // usuario lo dejó así explícitamente (autónomo con RUT), así que sólo se
+    // libera el candado en esa dirección, nunca se cambia el valor.
+    effect(() => {
+      const isJuridica = this.personTypeValue() === 'JURIDICA';
+      const docTypeCtrl = this.customerForm.controls['documentType'];
+      const loadedCustomer = this.customer();
+      // P2 — una ficha JURIDICA vieja pudo quedar guardada con CC (dato de
+      // antes de este candado, o corregido a mano). Si el estado actual
+      // coincide EXACTO con lo que la ficha ya traía guardado, no es una
+      // elección en vivo — es el `patchValue` de `populateFormForEdit` — y
+      // forzar NIT aquí la reescribiría en silencio. Se respeta el dato, se
+      // avisa (`legalPersonDocumentTypeWarning`), y el campo queda editable
+      // para que el usuario lo corrija (el backend rechaza la combinación
+      // incoherente si se toca).
+      const isLoadedInconsistentJuridica =
+        isJuridica &&
+        docTypeCtrl.value !== 'NIT' &&
+        loadedCustomer?.person_type === 'JURIDICA' &&
+        loadedCustomer?.document_type === docTypeCtrl.value;
+
+      this.legalPersonDocumentTypeWarning.set(isLoadedInconsistentJuridica);
+
+      if (isJuridica) {
+        if (isLoadedInconsistentJuridica) {
+          if (docTypeCtrl.disabled) {
+            docTypeCtrl.enable({ emitEvent: false });
+          }
+        } else {
+          if (docTypeCtrl.value !== 'NIT') {
+            docTypeCtrl.setValue('NIT');
+          }
+          if (docTypeCtrl.enabled) {
+            docTypeCtrl.disable({ emitEvent: false });
+          }
+        }
+      } else if (docTypeCtrl.disabled) {
+        docTypeCtrl.enable({ emitEvent: false });
+      }
+    });
 
     // If customer is provided, populate form for editing
     effect(() => {
@@ -765,7 +894,39 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       documentNumber: ['', [Validators.required]],
       taxRegime: ['', [Validators.required]],
       personType: ['', [Validators.required]],
+      // Razón social (JURIDICA). Validators reales los pone
+      // `applyPersonTypeValidators()` según person_type — ver constructor.
+      legalName: ['', [Validators.maxLength(255)]],
       isWithholdingAgent: [false] });
+  }
+
+  /**
+   * Alterna requerido first_name/last_name <-> legal_name según person_type
+   * (mismo criterio que el backend `JuridicaNameRule`: jurídica exige razón
+   * social y prohíbe nombre/apellido; natural es al revés).
+   */
+  private applyPersonTypeValidators(): void {
+    const isJuridica = this.personTypeValue() === 'JURIDICA';
+    const first = this.customerForm.controls['firstName'];
+    const last = this.customerForm.controls['lastName'];
+    const legal = this.customerForm.controls['legalName'];
+
+    if (isJuridica) {
+      first.clearValidators();
+      last.clearValidators();
+      first.setValue(null, { emitEvent: false });
+      last.setValue(null, { emitEvent: false });
+      legal.setValidators([Validators.required, Validators.maxLength(255)]);
+    } else {
+      legal.clearValidators();
+      legal.setValue(null, { emitEvent: false });
+      first.setValidators([Validators.required, Validators.minLength(2)]);
+      last.setValidators([Validators.required, Validators.minLength(2)]);
+    }
+
+    first.updateValueAndValidity({ emitEvent: false });
+    last.updateValueAndValidity({ emitEvent: false });
+    legal.updateValueAndValidity({ emitEvent: false });
   }
 
   private setupSearchSubscription(): void {
@@ -853,6 +1014,10 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
         documentNumber: this.customer()!.document_number || '',
         taxRegime: this.customer()!.tax_regime || '',
         personType: this.customer()!.person_type || '',
+        // Sin esto, editar un cliente JURIDICA lo degradaba a natural: el
+        // patch nunca traía legal_name, así que el submit salía sin razón
+        // social (root cause del incidente Óptica Panorama SAS).
+        legalName: this.customer()!.legal_name || '',
         isWithholdingAgent: this.customer()!.is_withholding_agent ?? false });
     }
   }
@@ -904,6 +1069,8 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
             return 'Selecciona un régimen tributario';
           case 'personType':
             return 'Selecciona un tipo de persona';
+          case 'legalName':
+            return 'La razón social es requerida';
           default:
             return 'Este campo es requerido';
         }
@@ -950,14 +1117,32 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
 
     this.loading.set(true);
 
-    const formData = this.customerForm.value;
+    // getRawValue() (no .value): documentType puede estar disabled+locked en
+    // NIT cuando person_type=JURIDICA (ver efecto de bloqueo en el
+    // constructor); .value la omitiría y el payload perdería el tipo.
+    const formData = this.customerForm.getRawValue();
+    const isJuridica = formData.personType === 'JURIDICA';
+    const documentType = formData.documentType || undefined;
+    const documentNumber = formData.documentNumber || undefined;
+    // A.8 — el DV nunca viaja tecleado: se recalcula fresco al guardar con
+    // el mismo módulo 11 compartido (computeNitDv), sólo para NIT.
+    const verificationDigit =
+      documentType === 'NIT' && documentNumber
+        ? (computeNitDv(documentNumber) ?? undefined)
+        : undefined;
+
     const customerData: CreatePosCustomerRequest = {
       email: formData.email,
-      first_name: formData.firstName,
-      last_name: formData.lastName || undefined,
+      // Jurídica: first_name vacío satisface el tipado no-opcional Y la
+      // regla backend JuridicaNameRule (exige legal_name, prohíbe
+      // first/last_name). Ver apps/backend/.../juridica-name.validator.ts.
+      first_name: isJuridica ? '' : formData.firstName,
+      last_name: isJuridica ? undefined : (formData.lastName || undefined),
+      legal_name: isJuridica ? formData.legalName || undefined : undefined,
       phone: formData.phone || undefined,
-      document_type: formData.documentType,
-      document_number: formData.documentNumber,
+      document_type: documentType,
+      document_number: documentNumber,
+      verification_digit: verificationDigit,
       // Mapeo camelCase (form) -> snake_case (request backend).
       tax_regime: formData.taxRegime || undefined,
       person_type: formData.personType || undefined,

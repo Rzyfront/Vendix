@@ -39,8 +39,11 @@ interface RefundItemState {
   inventoryAction: InventoryAction;
   locationId: number | null;
   // CP-REFUND-FLOW-REDESIGN paso 6/8 — disposición de plato guiada por
-  // estado: `isFiredDish` (cocinado) solo admite `write_off` con motivo;
-  // `isPreparedDish` no disparado admite `restock` con reversa BOM.
+  // estado. `isFiredDish` (ya disparado a cocina) admite las 3 acciones:
+  // `restock` revierte las hojas BOM del disparo a stock, `write_off` las
+  // registra como merma (con motivo) y `no_return` deja el consumo como
+  // costo de venta. `isPreparedDish` no disparado admite `restock` con
+  // reversa BOM. `dishReason` solo viaja cuando la acción es `write_off`.
   isPreparedDish: boolean;
   isFiredDish: boolean;
   dishReason: string;
@@ -240,11 +243,13 @@ interface RefundItemState {
 
                 <!-- Paso 6/8 — disposición de plato guiada por estado. -->
                 @if (item.isFiredDish) {
-                  <div class="mb-2 p-2 rounded-lg bg-red-50 border border-red-200 flex items-start gap-2">
-                    <app-icon name="flame" size="14" class="text-red-600 mt-0.5 flex-shrink-0"></app-icon>
-                    <p class="text-[11px] text-red-800">
-                      Plato cocinado (disparado a cocina): solo admite
-                      <strong>baja con motivo</strong>. Los insumos no vuelven a stock.
+                  <div class="mb-2 p-2 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-2">
+                    <app-icon name="flame" size="14" class="text-amber-600 mt-0.5 flex-shrink-0"></app-icon>
+                    <p class="text-[11px] text-amber-800">
+                      Plato ya disparado a cocina. <strong>Reabastecer</strong> devuelve
+                      los insumos de la receta a stock; <strong>Dar de baja</strong> los
+                      registra como merma; <strong>No devolver</strong> deja el consumo
+                      como costo de venta.
                     </p>
                   </div>
                 } @else if (item.isPreparedDish) {
@@ -261,9 +266,7 @@ interface RefundItemState {
                 <div class="grid grid-cols-3 gap-1.5">
                   <button
                     (click)="setInventoryAction(item.orderItem.id, 'restock')"
-                    [disabled]="item.isFiredDish"
-                    [title]="item.isFiredDish ? 'Plato cocinado: el insumo no puede volver a stock' : ''"
-                    class="p-2 rounded-lg border text-center transition-all text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                    class="p-2 rounded-lg border text-center transition-all text-xs font-medium"
                     [ngClass]="{
                       'border-green-400 bg-green-50 text-green-700 ring-1 ring-green-200': item.inventoryAction === 'restock',
                       'border-border hover:bg-gray-50 text-gray-600': item.inventoryAction !== 'restock'
@@ -285,9 +288,7 @@ interface RefundItemState {
                   </button>
                   <button
                     (click)="setInventoryAction(item.orderItem.id, 'no_return')"
-                    [disabled]="item.isFiredDish"
-                    [title]="item.isFiredDish ? 'Plato cocinado: requiere baja con motivo' : ''"
-                    class="p-2 rounded-lg border text-center transition-all text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                    class="p-2 rounded-lg border text-center transition-all text-xs font-medium"
                     [ngClass]="{
                       'border-gray-400 bg-gray-50 text-gray-700 ring-1 ring-gray-200': item.inventoryAction === 'no_return',
                       'border-border hover:bg-gray-50 text-gray-600': item.inventoryAction !== 'no_return'
@@ -298,7 +299,7 @@ interface RefundItemState {
                   </button>
                 </div>
 
-                @if (item.isFiredDish) {
+                @if (item.isPreparedDish && item.inventoryAction === 'write_off') {
                   <div class="mt-2">
                     <app-textarea
                       label="Motivo de la baja"
@@ -688,9 +689,10 @@ export class OrderRefundModalComponent {
       .map((oi) => {
         const alreadyRefunded = refundedMap.get(oi.id) || 0;
         const maxQuantity = oi.quantity - alreadyRefunded;
-        // Paso 6/8 — plato cocinado (`prepared` + disparado a cocina): el
-        // backend solo admite `write_off`, así que nace preseleccionado y
-        // bloqueado (ver paso Inventario + `setInventoryAction`).
+        // Paso 6/8 — plato ya disparado a cocina (`prepared` + consumido al
+        // disparar): nace preseleccionado en `write_off` (lo más habitual: el
+        // plato se cocinó), pero el usuario puede cambiar a `restock` o
+        // `no_return` en el paso Inventario.
         const isPreparedDish = oi.products?.product_type === 'prepared';
         const isFiredDish = isPreparedDish && oi.inventory_consumed_at_fire === true;
         return {
@@ -870,10 +872,6 @@ export class OrderRefundModalComponent {
     this.refundItems.update((items) =>
       items.map((i) => {
         if (i.orderItem.id !== orderItemId) return i;
-        // Paso 6/8 — defensa en profundidad: el plato cocinado solo admite
-        // `write_off` (el backend responde 400 ante cualquier otra). Los
-        // botones ya nacen deshabilitados; esto cubre llamadas directas.
-        if (i.isFiredDish && action !== 'write_off') return i;
         return {
           ...i,
           inventoryAction: action,
@@ -942,9 +940,14 @@ export class OrderRefundModalComponent {
             : undefined,
         bank_account_id:
           method === 'bank_transfer' ? bankAccountId : undefined,
-        // Paso 6/8 — motivo de la baja del plato cocinado. Opcional: el
+        // Paso 6/8 — motivo de la baja del plato. Solo se envía con
+        // `write_off` (el textarea solo se muestra en ese caso; un motivo
+        // tecleado antes de cambiar de acción no debe viajar). Opcional: el
         // backend usa el motivo general del reembolso como fallback.
-        reason: item.dishReason.trim() || undefined,
+        reason:
+          item.inventoryAction === 'write_off'
+            ? item.dishReason.trim() || undefined
+            : undefined,
       })),
       include_shipping: this.includeShipping(),
       refund_method: method,

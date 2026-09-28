@@ -21,6 +21,7 @@ import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
 // `invoice.organization`/`invoice.store`, ya en memoria vía
 // `FISCAL_DOCUMENT_PRINT_INCLUDE`.
 import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
+import { resolveStoreTimezone } from '../../../../common/utils/store-timezone.util';
 
 @Injectable()
 export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
@@ -66,6 +67,8 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
     }
 
     const signedLogoUrl = await signStoreLogoUrl(this.s3Service, resolveRawLogoKey(invoice), this.logger);
+    // B17 — fecha/hora del documento en la zona de la tienda, no la del contenedor.
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
 
     return mapFiscalDocumentToPrintData(invoice, {
       qrBase64,
@@ -77,6 +80,7 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
         invoice.organization,
         invoice.store,
       ),
+      tz,
     });
   }
 

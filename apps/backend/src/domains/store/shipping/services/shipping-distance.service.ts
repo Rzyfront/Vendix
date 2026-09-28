@@ -1,5 +1,9 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { RoutingService } from '../../../ecommerce/routing/routing.service';
+import {
+  GeocodePrecision,
+  GeocodingService,
+} from '../../../ecommerce/geocoding/geocoding.service';
 
 /** Un tramo de la escala de km (`shipping_rates.distance_tiers`). */
 export interface DistanceTier {
@@ -14,6 +18,28 @@ export interface DistanceCoords {
   longitude: number;
 }
 
+/** Dirección mínima que `resolveBuyerCoords` necesita para geocodificar. */
+export interface BuyerAddressInput {
+  address_line1?: string | null;
+  city?: string | null;
+  state_province?: string | null;
+  country_code?: string | null;
+  latitude?: unknown;
+  longitude?: unknown;
+}
+
+export interface ResolvedBuyerCoords extends DistanceCoords {
+  /** Precisión reportada por el geocoder; ausente cuando `source === 'client'`. */
+  precision?: GeocodePrecision;
+  /**
+   * `'client'`: el pin/coords que mandó el comprador (SIEMPRE gana, puede ser
+   * un pin confirmado por el usuario). `'geocoded'`: no había coords y se
+   * resolvieron por `GeocodingService.forward` a partir de la dirección
+   * escrita.
+   */
+  source: 'client' | 'geocoded';
+}
+
 /**
  * Resolver compartido del cobro por distancia (cotizador + confirmación).
  *
@@ -25,8 +51,26 @@ export interface DistanceCoords {
 @Injectable()
 export class ShippingDistanceService {
   private readonly logger = new Logger(ShippingDistanceService.name);
+  /** Logger para los métodos `static` (no pueden usar `this.logger`). */
+  private static readonly staticLogger = new Logger(
+    ShippingDistanceService.name,
+  );
 
-  constructor(@Optional() private readonly routing?: RoutingService) {}
+  /**
+   * Bbox aproximado de Colombia, usado SOLO para detectar lat/lng invertido
+   * (heurística geográfica, no un límite de cobertura de negocio).
+   */
+  private static readonly COLOMBIA_BBOX = {
+    minLat: -4.3,
+    maxLat: 13.5,
+    minLng: -82,
+    maxLng: -66.8,
+  };
+
+  constructor(
+    @Optional() private readonly routing?: RoutingService,
+    @Optional() private readonly geocoding?: GeocodingService,
+  ) {}
 
   /**
    * Matcher puro: primer tramo con `from_km <= d` y (`to_km == null` o
@@ -77,35 +121,84 @@ export class ShippingDistanceService {
   }
 
   /**
-   * Normaliza coordenadas (Decimal de Prisma, string o number) con rangos
-   * WGS84, o `null` cuando no son utilizables.
+   * Normaliza coordenadas (Decimal de Prisma, string o number): valida rango
+   * WGS84, detecta y corrige lat/lng invertido, y redondea a 6 decimales
+   * (~0.1 m). Es el ÚNICO punto de normalización de coordenadas — lo usan
+   * tanto el cotizador (`ShippingCalculatorService`) como la confirmación
+   * (`CheckoutService.resolveConfirmShippingCost`), para origen y destino
+   * por igual, así que un mismo punto siempre produce las mismas coords (y
+   * por lo tanto la misma llave de caché de `RoutingService`) sin importar
+   * si viene del float completo de la cotización o del `Decimal(10,8)`
+   * redondeado del snapshot de confirmación.
+   *
+   * `label` es solo para el mensaje de warn cuando se detecta un swap (p.ej.
+   * `"origin"` / `"buyer"`) — no afecta el resultado.
+   *
+   * @returns `null` cuando no son utilizables.
    */
   static toCoords(
     latitude: unknown,
     longitude: unknown,
+    label?: string,
   ): DistanceCoords | null {
-    const lat = Number(latitude);
-    const lng = Number(longitude);
     if (
       latitude == null ||
       longitude == null ||
       latitude === '' ||
-      longitude === '' ||
-      !Number.isFinite(lat) ||
-      !Number.isFinite(lng) ||
-      lat < -90 ||
-      lat > 90 ||
-      lng < -180 ||
-      lng > 180
+      longitude === ''
     ) {
       return null;
     }
-    return { latitude: lat, longitude: lng };
+    let lat = Number(latitude);
+    let lng = Number(longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return null;
+    }
+
+    // lat/lng invertido: en Colombia, lat≈4.7 y lng≈-74.1 escritos al revés
+    // (lat≈-74.1, lng≈4.7) siguen cayendo cada uno dentro del rango WGS84
+    // individual (-90..90 / -180..180), así que la validación de rango NO lo
+    // detecta. La señal es geográfica: el par ORIGINAL cae fuera del bbox de
+    // Colombia mientras el INTERCAMBIADO sí cae dentro. Esto también cubre
+    // el caso |lat| > 90 (literalmente inválido como latitud): el bbox de
+    // Colombia es mucho más angosto que el rango WGS84, así que un valor
+    // fuera de rango solo "corrige" si el intercambio aterriza en Colombia;
+    // si no, sigue cayendo en el `return null` de más abajo.
+    if (
+      !ShippingDistanceService.isWithinColombiaBbox(lat, lng) &&
+      ShippingDistanceService.isWithinColombiaBbox(lng, lat)
+    ) {
+      ShippingDistanceService.staticLogger.warn(
+        `lat/lng invertido detectado${label ? ` (${label})` : ''}: ` +
+          `(${lat}, ${lng}) fuera del bbox de Colombia, (${lng}, ${lat}) sí — se corrige intercambiando`,
+      );
+      [lat, lng] = [lng, lat];
+    }
+
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return null;
+    }
+    return {
+      latitude: ShippingDistanceService.round6(lat),
+      longitude: ShippingDistanceService.round6(lng),
+    };
+  }
+
+  /** `true` cuando `(lat, lng)` cae dentro del bbox aproximado de Colombia. */
+  private static isWithinColombiaBbox(lat: number, lng: number): boolean {
+    const b = ShippingDistanceService.COLOMBIA_BBOX;
+    return lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng;
+  }
+
+  /** Redondea a 6 decimales (~0.1 m de precisión GPS). */
+  private static round6(value: number): number {
+    return Math.round(value * 1e6) / 1e6;
   }
 
   /**
    * Distancia real por calles (km) entre el origen del método y el comprador,
-   * vía `RoutingService` (Valhalla shortest + fallback OSRM + caché Redis).
+   * vía `RoutingService` (Valhalla costing `auto` estándar + fallback OSRM
+   * (primera ruta) + caché Redis).
    * `null` ante cualquier fallo: el llamador cobra zona.
    */
   async resolveDistanceKm(
@@ -124,6 +217,68 @@ export class ShippingDistanceService {
     } catch (err) {
       this.logger.warn(
         `Ruteo origen→comprador falló, se cobra zona: ${err instanceof Error ? err.message : err}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Resuelve las coords del comprador para el cobro por distancia: el pin/
+   * coords que el comprador ya mandó SIEMPRE gana (puede ser un pin
+   * confirmado a mano, más confiable que un forward-geocode). Solo cuando no
+   * hay coords utilizables se intenta `GeocodingService.forward` con la
+   * dirección escrita (`address_line1` + `city` + `state_province`), con
+   * `bias` (típicamente el origen del método) para desambiguar candidatos.
+   *
+   * Usar el MISMO helper desde el cotizador y la confirmación (con los
+   * mismos campos de entrada y el mismo bias) es lo que mantiene ambos
+   * midiendo desde el mismo punto: `GeocodingService.forward` cachea por la
+   * dirección normalizada, así que la segunda llamada (confirmación) es un
+   * HIT del mismo resultado que ya vio el cotizador.
+   *
+   * `null` ante cualquier fallo (sin `GeocodingService` inyectado, país
+   * distinto de Colombia/vacío, sin `address_line1`, o el geocoder no
+   * resuelve la dirección) — el llamador cobra zona.
+   */
+  async resolveBuyerCoords(
+    address: BuyerAddressInput,
+    bias?: { lat: number; lng: number },
+  ): Promise<ResolvedBuyerCoords | null> {
+    const client = ShippingDistanceService.toCoords(
+      address?.latitude,
+      address?.longitude,
+      'buyer',
+    );
+    if (client) return { ...client, source: 'client' };
+
+    if (!this.geocoding) return null;
+
+    const country = (address?.country_code ?? '').trim().toUpperCase();
+    if (country && country !== 'CO') return null;
+
+    const line1 = (address?.address_line1 ?? '').trim();
+    if (!line1) return null;
+
+    try {
+      const result = await this.geocoding.forward(
+        line1,
+        address?.city ?? undefined,
+        address?.state_province ?? undefined,
+        bias ? { bias } : undefined,
+      );
+      const coords = ShippingDistanceService.toCoords(
+        result?.lat,
+        result?.lng,
+        'buyer:geocoded',
+      );
+      if (!coords) return null;
+      // Un centroide de ciudad/barrio ('area') no ubica la dirección: cobrar
+      // por km desde ahí inventa la distancia. Sin punto real, sin tarifa.
+      if (result?.precision === 'area') return null;
+      return { ...coords, precision: result?.precision, source: 'geocoded' };
+    } catch (err) {
+      this.logger.warn(
+        `Forward geocode del comprador falló, se cobra zona: ${err instanceof Error ? err.message : err}`,
       );
       return null;
     }

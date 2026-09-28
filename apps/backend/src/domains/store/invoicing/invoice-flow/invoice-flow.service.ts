@@ -71,9 +71,8 @@ import {
 } from 'src/common/interfaces/withholding-breakdown.interface';
 import {
   DEFAULT_STORE_TIMEZONE,
-  localDateString,
-  localOffsetString,
-  localTimeString,
+  fiscalIssueDate,
+  fiscalIssueTime,
   resolveOrganizationTimezone,
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
@@ -82,13 +81,15 @@ import { resolveInvoiceControl } from '../../../../common/helpers/invoice-contro
 // declara piezas donde hubo kilos. La versión que devuelve `null` permite
 // rechazar el documento en vez de emitirlo con una unidad inventada.
 import { resolveUneceUnitCodeStrict } from '../../products/services/uom-uncefact.util';
+import { CUSTOMER_FOR_INVOICE_SELECT } from '../utils/customer-invoice-data.adapter';
 import {
-  CUSTOMER_FOR_INVOICE_SELECT,
-  toCustomerInvoiceData,
-} from '../utils/customer-invoice-data.adapter';
+  resolveAcquirerIdentity,
+  ResolvedAcquirerIdentity,
+} from '../utils/acquirer-identity.resolver';
 import { onlyDigits } from '../../../../common/utils/nit.util';
 import {
   AcquirerIdentificationMode,
+  CustomerFiscalAddressInput,
   CustomerFiscalIdentityFinding,
   CustomerFiscalIdentityInput,
   CustomerFiscalIdentityReport,
@@ -752,6 +753,59 @@ export class InvoiceFlowService {
    * comportamiento histórico y no es motivo de rechazo: la DIAN valida
    * `cbc:PayableAmount` sin mirar ese grupo (Anexo 1.9 §11.9.1).
    */
+  /**
+   * Proyecta `invoice_items` (ya cargadas por `INVOICE_INCLUDE`) a lo que
+   * `resolveSufferedByOperation` necesita para agrupar bienes vs servicios:
+   * `product_type` sale de UNA sola consulta a `products` por lote (nunca
+   * por línea) filtrada por los `product_id` distintos de la factura;
+   * `base`/`ivaAmount` de cada línea salen de `total_amount − tax_amount` /
+   * `tax_amount` (invariante: `total_amount = line_extension + tax_amount`,
+   * la misma que persiste `InvoicingService.recalculateDocument`). `products`
+   * es `store_scoped` en `StorePrismaService`, así que el filtro de tienda ya
+   * lo aplica la extensión — igual que `InvoicingService.
+   * resolveLinePricingSnapshots`, que resuelve esta misma tabla.
+   */
+  private async buildSufferedOperationItems(
+    invoice_items: Array<{
+      product_id?: number | null;
+      total_amount: Prisma.Decimal | number | string | null;
+      tax_amount: Prisma.Decimal | number | string | null;
+    }>,
+  ): Promise<
+    Array<{ product_type?: string | null; base: number; ivaAmount: number }>
+  > {
+    const product_ids = Array.from(
+      new Set(
+        invoice_items
+          .map((item) => item.product_id)
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    );
+
+    const products = product_ids.length
+      ? await this.prisma.products.findMany({
+          where: { id: { in: product_ids } },
+          select: { id: true, product_type: true },
+        })
+      : [];
+    const product_type_by_id = new Map<number, string | null>(
+      products.map((p) => [p.id, p.product_type]),
+    );
+
+    return invoice_items.map((item) => {
+      const tax_amount = Number(item.tax_amount ?? 0);
+      const total_amount = Number(item.total_amount ?? 0);
+      return {
+        product_type:
+          item.product_id != null
+            ? (product_type_by_id.get(item.product_id) ?? null)
+            : null,
+        base: total_amount - tax_amount,
+        ivaAmount: tax_amount,
+      };
+    });
+  }
+
   private async resolveWithholdingBatches(
     invoice: any,
     is_support_document: boolean,
@@ -782,13 +836,19 @@ export class InvoiceFlowService {
       // propósito: ver arriba.
       const customer_id =
         invoice.customer_id != null ? Number(invoice.customer_id) : null;
+      // Retención POR TIPO DE OPERACIÓN (decisión del dueño 2026-09-26):
+      // bienes y servicios se agrupan aparte, cada uno con su propia base e
+      // IVA. `self` sigue usando el agregado del documento — no depende de lo
+      // vendido, sólo de la calidad del emisor.
+      const items = await this.buildSufferedOperationItems(
+        invoice.invoice_items ?? [],
+      );
       const [suffered, self] = await Promise.all([
-        this.withholdingFlow.resolveSuffered({
+        this.withholdingFlow.resolveSufferedByOperation({
           organization_id,
           store_id,
           customer_id,
-          base,
-          ivaAmount,
+          items,
         }),
         this.withholdingFlow.resolveSelf({
           organization_id,
@@ -837,12 +897,49 @@ export class InvoiceFlowService {
     const customer_id =
       invoice.customer_id != null ? Number(invoice.customer_id) : null;
 
+    const order_id = invoice.order_id != null ? Number(invoice.order_id) : null;
+
     const persisted: WithholdingLine[] = [];
 
     for (const batch of batches) {
       if (batch.resolution.lines.length === 0) continue;
 
       try {
+        // PR #858 hallazgo 2 — el cobro de la orden (`flow/pay` o POS) ya
+        // persistió la retención SUFRIDA con `invoice_id: null` y su
+        // `order_id`. Insertarla otra vez al aceptar la factura la duplicaba
+        // (el certificado suma todas las filas `suffered` del cliente y el
+        // año). Si existen, se ENLAZAN a esta factura y no se inserta nada.
+        // `practiced`/`self` siguen como antes. Sin orden, o sin filas
+        // previas (filas históricas sin `order_id`), se inserta como siempre.
+        if (batch.role === 'suffered' && order_id != null) {
+          const prior = await this.prisma.withholding_calculations.findMany({
+            where: {
+              organization_id,
+              order_id,
+              role: 'suffered',
+              invoice_id: null,
+            },
+            select: { id: true },
+          });
+          if (prior.length > 0) {
+            await this.prisma.withholding_calculations.updateMany({
+              where: { id: { in: prior.map((row) => row.id) } },
+              data: {
+                invoice_id,
+                ...(accounting_entity_id != null
+                  ? { accounting_entity_id }
+                  : {}),
+              },
+            });
+            // Payload de `invoice.accepted` intacto respecto del histórico:
+            // la sufrida sigue viajando en `withholding_breakdown` (el asiento
+            // no se toca en este cambio; ver `findPriorSaleRecognition`).
+            persisted.push(...batch.resolution.lines);
+            continue;
+          }
+        }
+
         await this.withholdingFlow.persistWithholdingLines({
           organization_id,
           store_id,
@@ -1237,17 +1334,12 @@ export class InvoiceFlowService {
    * ausencia del parámetro mantiene la lectura UTC.
    */
   private formatIssueDate(value: Date, timezone?: string): string {
-    const has_real_time =
-      value.getUTCHours() !== 0 ||
-      value.getUTCMinutes() !== 0 ||
-      value.getUTCSeconds() !== 0;
-    if (has_real_time && timezone) return localDateString(value, timezone);
-
-    return [
-      String(value.getUTCFullYear()).padStart(4, '0'),
-      String(value.getUTCMonth() + 1).padStart(2, '0'),
-      String(value.getUTCDate()).padStart(2, '0'),
-    ].join('-');
+    // Delegado a `fiscalIssueDate` (store-timezone.util.ts, Step 8) para que
+    // los demás lectores de la fecha fiscal (dian-events, invoice-delivery,
+    // fiscal-document.validator) compartan la MISMA bifurcación. El wrapper
+    // se conserva (en vez de reemplazar las llamadas internas) porque es
+    // privado y no cuesta nada mantenerlo.
+    return fiscalIssueDate(value, timezone);
   }
 
   /**
@@ -1265,29 +1357,9 @@ export class InvoiceFlowService {
     timezone: string,
     created_at?: Date | null,
   ): string {
-    const has_real_time =
-      value.getUTCHours() !== 0 ||
-      value.getUTCMinutes() !== 0 ||
-      value.getUTCSeconds() !== 0;
-    if (has_real_time) return localTimeString(value, timezone);
-
-    const civil_date = this.formatIssueDate(value);
-    if (created_at && localDateString(created_at, timezone) === civil_date) {
-      return localTimeString(created_at, timezone);
-    }
-
-    // Mediodía UTC como sonda del desfase: evita que un cambio de horario de
-    // verano en la medianoche misma etiquete la hora con el desfase del día
-    // contiguo. Colombia no lo tiene, pero el emisor no siempre será Colombia.
-    const probe = new Date(
-      Date.UTC(
-        value.getUTCFullYear(),
-        value.getUTCMonth(),
-        value.getUTCDate(),
-        12,
-      ),
-    );
-    return `00:00:00${localOffsetString(probe, timezone)}`;
+    // Delegado a `fiscalIssueTime` (store-timezone.util.ts, Step 8) — misma
+    // razón que `formatIssueDate`.
+    return fiscalIssueTime(value, timezone, created_at);
   }
 
   /** Timezone of the emitting tenant: store first, organization as fallback. */
@@ -2154,15 +2226,28 @@ export class InvoiceFlowService {
   private buildAcquirerIdentityInput(
     invoice: any,
   ): CustomerFiscalIdentityInput {
-    const customer = invoice.customer
-      ? toCustomerInvoiceData(invoice.customer)
-      : undefined;
+    // Fuente ÚNICA de identidad — la MISMA función que `send()` llama para
+    // armar `provider_data.customer_*` (ver Step 8 más abajo), con los MISMOS
+    // dos argumentos. Ver el JSDoc de `acquirer-identity.resolver.ts` para el
+    // incidente que esto cierra: antes, `document_type`/`verification_digit`/
+    // `email`/`phone`/`tax_regime`/`tax_responsibilities`/`person_type` sólo
+    // tenían fallback al snapshot AQUÍ (en el validador) pero no en `send()`
+    // (en la emisión) — así que el gate podía aprobar un documento con datos
+    // que la transmisión real nunca llegaba a declarar.
+    const identity: ResolvedAcquirerIdentity = resolveAcquirerIdentity({
+      snapshot: invoice,
+      customer: invoice.customer ?? undefined,
+    });
 
+    // El `supplier` (documento soporte / factura legacy sin `customer`) NO es
+    // parte de la regla ficha↔snapshot que resuelve `resolveAcquirerIdentity`
+    // —es una tercera fuente, histórica, y sólo aplica cuando ni la ficha ni
+    // el snapshot dijeron nada— así que se aplica COMO CAPA ADICIONAL encima
+    // del resultado ya resuelto, nunca dentro del resolver compartido.
+    const document_type =
+      identity.document_type_literal ?? invoice.supplier?.document_type ?? null;
     const document_number =
-      customer?.customer_tax_id ??
-      invoice.customer_tax_id ??
-      invoice.supplier?.tax_id ??
-      null;
+      identity.document_number ?? invoice.supplier?.tax_id ?? null;
 
     // El número oficial de Consumidor Final cuenta como «sin identificar» aun
     // cuando SÍ viaja un valor: desde que `InvoicingService.createFromOrder`
@@ -2197,67 +2282,110 @@ export class InvoiceFlowService {
     // reporte en vez de leer propiedades de un `string` y obtener `undefined`
     // silencioso en cada campo.
     const raw_address =
-      customer?.customer_address ??
+      invoice.customer?.addresses?.[0] ??
       invoice.customer_address ??
       invoice.supplier?.addresses?.[0] ??
       null;
-    const address =
-      typeof raw_address === 'string'
-        ? { address_line: raw_address }
-        : (raw_address as Record<string, any> | null);
+    const address = this.normalizeCustomerAddressForFiscalCheck(raw_address);
+
+    // `other_addresses` — el UNIVERSO de direcciones reales del cliente,
+    // aparte de la ya intentada como `address` (la primaria/`[0]`). Poblado
+    // ⇒ `CustomerFiscalIdentityValidator.checkAddress` puede distinguir «el
+    // cliente no tiene NINGUNA dirección propia» (bloqueo
+    // `ADDRESS_UNRESOLVABLE`) de «tiene otra, no la primaria» (aviso).
+    // Deliberadamente NO incluye la dirección de la tienda emisora: ese
+    // respaldo sigue existiendo en `acquirer-address.resolver.ts` (fuera de
+    // alcance de este cambio) para el momento de la emisión, pero ya no se
+    // usa para decidir SI el documento puede numerarse.
+    //
+    // P1-A — bloqueante SÓLO para dos carriles, no para todo adquiriente:
+    //
+    //   (a) Persona jurídica / NIT (código DIAN 31): la DIAN cruza el
+    //       municipio del adquiriente jurídico (exógena, retenciones), y no
+    //       hay cascada de emisor que sustituya honestamente ese dato.
+    //   (b) Factura MANUAL (`order_id`/`sales_order_id` ambos ausentes): nace
+    //       en el módulo de facturación electrónica con el cliente capturado
+    //       a mano — el mismo carril `sale_rail: 'advanced'` que ya exige
+    //       identidad fiscal completa unas líneas más abajo (`send()`). Aquí
+    //       vive el incidente Óptica Panorama SAS/Pollo Árabe: un NIT sin
+    //       ficha vinculada y sin `customer_address` en el snapshot.
+    //
+    // Fuera de esos dos carriles —persona NATURAL facturada desde una orden
+    // (POS/ecommerce, `sale_rail: 'on_demand'`)— se preserva el comportamiento
+    // PREVIO a `1109a03d7`: `other_addresses` quieto en `undefined`, así que
+    // `checkAddress` cae al aviso no bloqueante `ADDRESS_REQUIRED` y confía en
+    // la cascada de respaldo del emisor al transmitir. Bloquear ahí era la
+    // regresión: clientes de mostrador con sólo nombre+documento (sin
+    // dirección, porque el POS nunca la pide) dejaban de poder facturar.
+    const is_juridica_acquirer = identity.person_type === 'JURIDICA';
+    const born_from_order = Boolean(invoice.order_id || invoice.sales_order_id);
+    const address_is_blocking = is_juridica_acquirer || !born_from_order;
+
+    const other_addresses: CustomerFiscalAddressInput[] | undefined =
+      address_is_blocking
+        ? Array.isArray(invoice.customer?.addresses)
+          ? (invoice.customer.addresses as any[])
+              .map((raw: any) => this.normalizeCustomerAddressForFiscalCheck(raw))
+              .filter((a): a is CustomerFiscalAddressInput => a !== null)
+          : []
+        : undefined;
 
     return {
       identification_mode: mode,
-      document_type:
-        customer?.customer_document_type ??
-        invoice.customer_document_type ??
-        invoice.supplier?.document_type ??
-        null,
+      document_type,
       document_number,
       verification_digit:
-        customer?.customer_verification_digit ??
-        invoice.customer_verification_digit ??
-        invoice.supplier?.verification_digit ??
-        null,
-      person_type: customer?.customer_person_type ?? null,
-      legal_name:
-        customer?.customer_name ??
-        invoice.customer_name ??
-        invoice.supplier?.name ??
-        null,
-      first_name: invoice.customer?.first_name ?? null,
-      last_name: invoice.customer?.last_name ?? null,
-      tax_regime:
-        customer?.customer_regime ??
-        invoice.customer_tax_regime ??
-        invoice.supplier?.tax_regime ??
-        null,
-      tax_responsibilities:
-        customer?.customer_tax_responsibilities ??
-        (Array.isArray(invoice.customer_fiscal_responsibilities)
-          ? (invoice.customer_fiscal_responsibilities as string[])
-          : null),
-      email: customer?.customer_email ?? invoice.customer_email ?? null,
-      phone: customer?.customer_phone ?? invoice.customer_phone ?? null,
-      address: address
-        ? {
-            address_line: address.address_line1 ?? address.address_line ?? null,
-            // `municipality_code` es el DANE de 5 dígitos; el departamento son
-            // sus dos primeros. No se inventa: si el municipio no está, el
-            // departamento tampoco, y el validador lo reporta.
-            city_code: address.municipality_code ?? address.city_code ?? null,
-            city_name: address.city ?? address.city_name ?? null,
-            department_code:
-              address.department_code ??
-              (address.municipality_code
-                ? String(address.municipality_code).slice(0, 2)
-                : null),
-            department_name:
-              address.state_province ?? address.department_name ?? null,
-            country_code: address.country_code ?? null,
-            postal_code: address.postal_code ?? null,
-          }
+        identity.verification_digit ?? invoice.supplier?.verification_digit ?? null,
+      // CRUDO, sin derivar: si viene basura reconocible ni como '1'/'2' ni
+      // como 'NATURAL'/'JURIDICA', el validador debe poder avisarlo
+      // (`resolvePersonType`/`PERSON_TYPE_UNKNOWN`) en vez de que este método
+      // ya se lo trague resuelto.
+      person_type: identity.person_type_raw,
+      legal_name: identity.name ?? invoice.supplier?.name ?? null,
+      first_name: identity.first_name,
+      last_name: identity.last_name,
+      tax_regime: identity.tax_regime ?? invoice.supplier?.tax_regime ?? null,
+      tax_responsibilities: identity.tax_responsibilities.length
+        ? identity.tax_responsibilities
         : null,
+      email: identity.email,
+      phone: identity.phone,
+      address,
+      other_addresses,
+    };
+  }
+
+  /**
+   * Normaliza una fila de dirección (forma `users.addresses` /
+   * `invoice.customer_address` JSONB) al contrato de
+   * `CustomerFiscalIdentityInput.address` /
+   * `CustomerFiscalIdentityInput.other_addresses`. Extraído para que la
+   * dirección primaria Y cada una de las `other_addresses` compartan
+   * EXACTAMENTE el mismo mapeo de campos — antes sólo la primaria lo tenía.
+   */
+  private normalizeCustomerAddressForFiscalCheck(
+    raw: any,
+  ): CustomerFiscalAddressInput | null {
+    const record =
+      typeof raw === 'string'
+        ? { address_line: raw }
+        : (raw as Record<string, any> | null | undefined);
+    if (!record) return null;
+    return {
+      address_line: record.address_line1 ?? record.address_line ?? null,
+      // `municipality_code` es el DANE de 5 dígitos; el departamento son
+      // sus dos primeros. No se inventa: si el municipio no está, el
+      // departamento tampoco, y el validador lo reporta.
+      city_code: record.municipality_code ?? record.city_code ?? null,
+      city_name: record.city ?? record.city_name ?? null,
+      department_code:
+        record.department_code ??
+        (record.municipality_code
+          ? String(record.municipality_code).slice(0, 2)
+          : null),
+      department_name: record.state_province ?? record.department_name ?? null,
+      country_code: record.country_code ?? null,
+      postal_code: record.postal_code ?? null,
     };
   }
 
@@ -3758,43 +3886,33 @@ export class InvoiceFlowService {
 
     // Step 8 — customer-side wiring for the provider payload.
     //
-    // The customer_* fields used to read directly from `invoice.supplier`
-    // (the EMISOR's document_type/tax_regime — see the historical bug the
-    // plan documents), so the UBL builder emitted the issuer's ID under
-    // `cac:AccountingCustomerParty` for every invoice.
-    //
-    // Today the data path is:
-    //   invoice.customer ──► toCustomerInvoiceData() ──► customer_*
-    // `INVOICE_INCLUDE` (above) loads the customer row + primary address, the
-    // adapter does the 1:1 mapping to `ProviderInvoiceData.customer_*`, and
-    // `dian-direct.provider.ts:buildCustomerData` consumes the result. Each
-    // hop is a no-op on `invoice.customer` being null: sales invoices always
-    // have a customer, support documents don't — the support-document branch
-    // below keeps the historical supplier-fallback so the existing
-    // support-document fixture (no customer row) still passes its assertions.
-    const customerFieldsFromAdapter = invoice.customer
-      ? toCustomerInvoiceData(invoice.customer)
-      : {};
+    // MISMA función, MISMOS dos argumentos que `buildAcquirerIdentityInput`
+    // (arriba, para `validate()`): `resolveAcquirerIdentity` es la fuente
+    // ÚNICA de identidad del adquiriente, así que lo que este método juzga y
+    // lo que ESTE método transmite a la DIAN son exactamente lo mismo. Antes
+    // `customer_document_type`/`customer_verification_digit`/`customer_email`/
+    // `customer_phone`/`customer_regime`/`customer_tax_responsibilities`/
+    // `customer_person_type` sólo leían `customerFields.X` (vía
+    // `toCustomerInvoiceData`, `{}` cuando `invoice.customer` es null) SIN caer
+    // al snapshot de la factura — a diferencia de `customer_name`/
+    // `customer_tax_id`/`customer_address`, que sí lo hacían. Una factura
+    // manual (`customer_id` NULL) con NIT y DV persistidos en su propio
+    // snapshot transmitía sin tipo de documento ni DV, y
+    // `DianDirectProvider.buildCustomerData` completaba con Cédula + persona
+    // natural en silencio (incidente Óptica Panorama SAS / Pollo Árabe).
+    const acquirer_identity: ResolvedAcquirerIdentity = resolveAcquirerIdentity({
+      snapshot: invoice,
+      customer: invoice.customer ?? undefined,
+    });
     // Documento soporte: NO tiene `customer` (la contraparte es el
     // `supplier`). El comportamiento histórico copiaba `supplier.document_type`
     // y `supplier.tax_regime` a los campos `customer_*` para que el builder UBL
-    // recibiera datos. Lo preservamos AQUÍ para no romper el spec del support
-    // document, pero SOLO en este branch; ventas (donde sí hay customer) ya no
-    // toca supplier.
-    const supportDocSupplierFallback =
-      !invoice.customer && invoice.supplier
-        ? {
-            customer_document_type:
-              invoice.supplier.document_type || undefined,
-            customer_regime: invoice.supplier.tax_regime || undefined,
-            customer_verification_digit:
-              invoice.supplier.verification_digit || undefined,
-          }
-        : {};
-    const customerFields = {
-      ...customerFieldsFromAdapter,
-      ...supportDocSupplierFallback,
-    };
+    // recibiera datos. Se preserva AQUÍ, como capa ENCIMA de
+    // `resolveAcquirerIdentity` (que no conoce `supplier`), para no romper el
+    // spec del support document; ventas (donde sí hay `customer`) nunca tocan
+    // `supplier` porque `acquirer_identity` ya resolvió desde ficha o snapshot.
+    const support_doc_supplier_fallback_active =
+      !invoice.customer && !!invoice.supplier;
 
     // Las líneas del payload se arman APARTE y antes que el resto porque los
     // tributos por línea se reconstruyen sobre la base que estas mismas líneas
@@ -3892,41 +4010,51 @@ export class InvoiceFlowService {
       due_date: invoice.due_date
         ? this.formatIssueDate(invoice.due_date, timezone)
         : undefined,
-      // Step 8 — `customer_name` / `customer_tax_id` / `customer_address`
-      // prefieren el adapter; caen al valor persistido en la invoice para
-      // facturas creadas con la API legacy (esos `invoice.customer_*` siguen
-      // siendo la fuente del nombre/ID/dirección en `invoicing.service.ts`),
-      // y por último al `supplier` cuando son documentos soporte.
+      // Step 8 — `acquirer_identity` (ficha ⟶ snapshot, ver arriba) manda;
+      // `supplier` sólo entra cuando es documento soporte sin `customer`.
       customer_name:
-        customerFields.customer_name ??
-        invoice.customer_name ??
-        invoice.supplier?.name ??
-        undefined,
+        acquirer_identity.name ?? invoice.supplier?.name ?? undefined,
       customer_tax_id:
-        customerFields.customer_tax_id ??
-        invoice.customer_tax_id ??
+        acquirer_identity.document_number ??
         invoice.supplier?.tax_id ??
         undefined,
       customer_address:
-        customerFields.customer_address ??
+        invoice.customer?.addresses?.[0] ??
         invoice.customer_address ??
         invoice.supplier?.addresses ??
         undefined,
-      customer_email: customerFields.customer_email,
-      customer_phone: customerFields.customer_phone,
-      // Antes: `invoice.supplier?.document_type || undefined` — el bug del
-      // plan. Ahora viene del customer (o fallback de soporte).
-      customer_document_type: customerFields.customer_document_type,
-      customer_verification_digit: customerFields.customer_verification_digit,
-      customer_person_type: customerFields.customer_person_type,
-      // Antes: `invoice.supplier?.tax_regime || undefined` — el bug. Ahora
-      // viene del customer (o fallback de soporte).
-      customer_regime: customerFields.customer_regime,
-      customer_tax_responsibilities:
-        customerFields.customer_tax_responsibilities,
-      customer_ciiu_code: customerFields.customer_ciiu_code,
-      customer_is_withholding_agent:
-        customerFields.customer_is_withholding_agent,
+      customer_email: acquirer_identity.email ?? undefined,
+      customer_phone: acquirer_identity.phone ?? undefined,
+      // Antes: sólo `customerFields.customer_document_type` (ficha viva),
+      // SIN caer al snapshot de la factura — el bug del incidente. Ahora
+      // `acquirer_identity` ya resuelve ficha→snapshot; `supplier` sigue
+      // siendo el único respaldo adicional, y sólo para documento soporte.
+      customer_document_type:
+        acquirer_identity.document_type_literal ??
+        (support_doc_supplier_fallback_active
+          ? invoice.supplier?.document_type
+          : undefined) ??
+        undefined,
+      customer_verification_digit:
+        acquirer_identity.verification_digit ??
+        (support_doc_supplier_fallback_active
+          ? invoice.supplier?.verification_digit
+          : undefined) ??
+        undefined,
+      // SIEMPRE resuelto ('NATURAL'/'JURIDICA', nunca ambiguo): deriva del
+      // CÓDIGO DIAN del documento cuando no vino declarado explícitamente.
+      // `translatePersonTypeToStructural` ya no tiene que adivinar.
+      customer_person_type: acquirer_identity.person_type,
+      // Antes: sólo la ficha viva, SIN caer al snapshot — el mismo bug.
+      customer_regime:
+        acquirer_identity.tax_regime ??
+        (support_doc_supplier_fallback_active
+          ? invoice.supplier?.tax_regime
+          : undefined) ??
+        undefined,
+      customer_tax_responsibilities: acquirer_identity.tax_responsibilities,
+      customer_ciiu_code: acquirer_identity.ciiu_code,
+      customer_is_withholding_agent: acquirer_identity.is_withholding_agent,
       // Anexo §12.2: a document re-sent after contingency must keep its prefix and
       // number and declare InvoiceTypeCode 04, not 01. Absent on a first send.
       contingency_type: invoice.contingency_type ?? undefined,

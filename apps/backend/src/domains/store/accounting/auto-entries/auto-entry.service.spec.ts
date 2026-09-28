@@ -708,3 +708,191 @@ describe('AutoEntryService resolveCashBankKey — etiqueta "Datáfono"', () => {
     expect((service as any).resolveCashBankKey('Datáfono')).toBe('payment.received.bank');
   });
 });
+
+describe('AutoEntryService.onPaymentVoided — reversa del asiento de payment.received', () => {
+  const originalEntryFixture = (overrides: any = {}) => ({
+    id: 501,
+    accounting_entity_id: 77,
+    accounting_entry_lines: [
+      {
+        debit_amount: 100,
+        credit_amount: 0,
+        third_party_id: null,
+        third_party_type: null,
+        third_party_name: null,
+        third_party_tax_id: null,
+        account: { code: '1105' },
+      },
+      {
+        debit_amount: 0,
+        credit_amount: 90,
+        third_party_id: 44,
+        third_party_type: 'customer',
+        third_party_name: 'Cliente Demo',
+        third_party_tax_id: '900123456',
+        account: { code: '1305' },
+      },
+      {
+        debit_amount: 0,
+        credit_amount: 10,
+        third_party_id: null,
+        third_party_type: null,
+        third_party_name: null,
+        third_party_tax_id: null,
+        account: { code: '238005' },
+      },
+    ],
+    ...overrides,
+  });
+
+  const createService = (findFirstImpl: (args: any) => any) => {
+    const accounting_entries = { findFirst: jest.fn(findFirstImpl) };
+    const prisma = {
+      withoutScope: jest.fn().mockReturnValue({ accounting_entries }),
+    };
+    const service = new AutoEntryService(
+      prisma as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    const createAutoEntry = jest
+      .spyOn(service, 'createAutoEntry')
+      .mockResolvedValue({ id: 999 } as any);
+    return { service, createAutoEntry, accounting_entries };
+  };
+
+  it('invierte débito↔crédito de cada línea del asiento original y llama a createAutoEntry con la clave payment.voided', async () => {
+    const original = originalEntryFixture();
+    const { service, createAutoEntry, accounting_entries } = createService(
+      (args: any) => {
+        if (args.where.source_type === 'payment.received') return original;
+        // already_reversed check
+        return null;
+      },
+    );
+
+    const result = await service.onPaymentVoided({
+      payment_id: 321,
+      organization_id: 1,
+      store_id: 2,
+      order_id: 70,
+      user_id: 9,
+    });
+
+    // Localiza el asiento original por la MISMA clave que fija onPaymentReceived.
+    expect(accounting_entries.findFirst).toHaveBeenNthCalledWith(1, {
+      where: {
+        organization_id: 1,
+        source_type: 'payment.received',
+        source_id: 321,
+        status: 'posted',
+      },
+      select: expect.objectContaining({
+        id: true,
+        accounting_entity_id: true,
+        accounting_entry_lines: expect.anything(),
+      }),
+    });
+
+    expect(createAutoEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source_type: 'payment.voided',
+        source_id: 321,
+        organization_id: 1,
+        store_id: 2,
+        accounting_entity_id: 77,
+        description: 'Anulación de pago #321 de orden #70',
+        user_id: 9,
+        lines: [
+          expect.objectContaining({
+            account_code: '1105',
+            debit_amount: 0,
+            credit_amount: 100,
+          }),
+          expect.objectContaining({
+            account_code: '1305',
+            debit_amount: 90,
+            credit_amount: 0,
+            third_party: {
+              id: 44,
+              type: 'customer',
+              name: 'Cliente Demo',
+              tax_id: '900123456',
+            },
+          }),
+          expect.objectContaining({
+            account_code: '238005',
+            debit_amount: 10,
+            credit_amount: 0,
+          }),
+        ],
+      }),
+    );
+
+    // Balanceado: la reversa es un swap 1:1, así que SIEMPRE cuadra igual que
+    // el original.
+    const lines = createAutoEntry.mock.calls[0][0].lines as any[];
+    const total_debit = lines.reduce((s, l) => s + l.debit_amount, 0);
+    const total_credit = lines.reduce((s, l) => s + l.credit_amount, 0);
+    expect(total_debit).toBe(total_credit);
+    expect(total_debit).toBe(100);
+
+    expect(result).toEqual({ id: 999 });
+  });
+
+  it('no-op: si nunca existió asiento payment.received para ese pago, no crea nada', async () => {
+    const { service, createAutoEntry, accounting_entries } = createService(
+      () => null,
+    );
+    const debug = jest.spyOn((service as any).logger, 'debug').mockImplementation(() => undefined);
+
+    const result = await service.onPaymentVoided({
+      payment_id: 321,
+      organization_id: 1,
+      store_id: 2,
+      order_id: 70,
+    });
+
+    expect(accounting_entries.findFirst).toHaveBeenCalledTimes(1);
+    expect(createAutoEntry).not.toHaveBeenCalled();
+    expect(result).toBeNull();
+    expect(debug).toHaveBeenCalledWith(expect.stringContaining('#321'));
+    debug.mockRestore();
+  });
+
+  it('no-op: si el asiento ya fue revertido antes, no duplica la reversa', async () => {
+    const original = originalEntryFixture();
+    const already = { id: 777 };
+    const { service, createAutoEntry, accounting_entries } = createService(
+      (args: any) => {
+        if (args.where.source_type === 'payment.received') return original;
+        if (args.where.source_type === 'payment.voided') return already;
+        return null;
+      },
+    );
+    const debug = jest.spyOn((service as any).logger, 'debug').mockImplementation(() => undefined);
+
+    const result = await service.onPaymentVoided({
+      payment_id: 321,
+      organization_id: 1,
+      store_id: 2,
+      order_id: 70,
+    });
+
+    expect(accounting_entries.findFirst).toHaveBeenNthCalledWith(2, {
+      where: {
+        organization_id: 1,
+        source_type: 'payment.voided',
+        source_id: 321,
+        accounting_entity_id: 77,
+      },
+      select: { id: true },
+    });
+    expect(createAutoEntry).not.toHaveBeenCalled();
+    expect(result).toEqual(already);
+    expect(debug).toHaveBeenCalledWith(expect.stringContaining('ya revertido'));
+    debug.mockRestore();
+  });
+});

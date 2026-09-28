@@ -97,6 +97,28 @@ export interface UpdateStockParams {
    * puede ocurrir antes de que la estación abra sesión.
    */
   kds_session_id?: number | null;
+  /**
+   * Explicit opt-in (plan step 9, docs/plans/no-overselling-stock-guard-plan.md)
+   * to skip the `Math.max(0, …)` floor and let `quantity_on_hand` /
+   * `quantity_available` go NEGATIVE. Default `false` (undefined) — every
+   * existing caller keeps the current clamp-to-zero behavior unchanged.
+   *
+   * ONLY the two per-store overuse/oversell paths may pass `true`, and only
+   * after resolving the store's policy via
+   * `StockValidatorService.resolveInventoryPolicy`:
+   *   - Ingredient over-use (`allow_ingredient_overuse=true`): kitchen-fire
+   *     and production-orders consumption of a tracked ingredient.
+   *   - Oversell (`allow_negative_stock=true`): `OrderStockCommitService`
+   *     delivery/commit of a tracked product line.
+   *
+   * When `true`, callers MUST also pass `validate_availability: false` (or
+   * omit it) — the atomic `validate_availability && quantity_change < 0`
+   * branch enforces a `gte` floor via a conditional `updateMany` and throws
+   * `ConflictException` on an insufficient claim regardless of this flag, by
+   * design: those two conditions describe mutually exclusive intents ("block
+   * if short" vs "let it go negative").
+   */
+  allow_negative?: boolean;
 }
 
 export interface StockUpdateResult {
@@ -168,7 +190,15 @@ export class StockLevelManager {
       },
     });
 
-    if (!productForTracking || !productForTracking.track_inventory) {
+    const trackingVariant = params.variant_id != null && productForTracking
+      ? await prisma.product_variants.findUnique({
+          where: { id: params.variant_id },
+          select: { track_inventory_override: true },
+        })
+      : null;
+    const effectiveTracking =
+      trackingVariant?.track_inventory_override ?? productForTracking?.track_inventory;
+    if (!productForTracking || !effectiveTracking) {
       return {
         stock_level: null,
         transaction: null,
@@ -237,15 +267,23 @@ export class StockLevelManager {
     // idéntico al cero de "se agotó normal". Por eso no es inofensivo, pero
     // tampoco es lo que gobierna la venta.
     //
-    // `store_settings.inventory.allow_negative_stock` NO lo controla — nadie la
-    // lee (ver settings-schemas.dto.ts). Si algún día se quiere que el faltante
-    // quede registrado en vez de taparse, hay que tocar los cuatro sitios a la
-    // vez: aquí (~223 y ~992), movements.service.ts (~371, ~382),
-    // inventory-integration.service.ts (~228) y
-    // sellable-stock-allocator.service.ts (~108-130).
+    // `params.allow_negative` (plan step 9, 2026-09-26) es el ÚNICO opt-in que
+    // salta este recorte, y sólo lo pasan los dos caminos de sobre-uso/sobreventa
+    // ya resueltos vía `StockValidatorService.resolveInventoryPolicy` (kitchen-fire
+    // / production-orders para insumos, `OrderStockCommitService` para productos).
+    // `store_settings.inventory.allow_negative_stock` sigue sin controlar este
+    // sitio directamente — el caller lo resuelve y pasa `allow_negative`
+    // explícito; ver esos tres archivos. Si algún día se quiere el mismo
+    // comportamiento en los otros sitios de recorte, hay que tocarlos a la vez:
+    // movements.service.ts (~371, ~382), inventory-integration.service.ts (~228)
+    // y sellable-stock-allocator.service.ts (~108-130).
     const stockUpdateData: any = {
-      quantity_on_hand: Math.max(0, new_quantity_on_hand),
-      quantity_available: Math.max(0, new_quantity_available),
+      quantity_on_hand: params.allow_negative
+        ? new_quantity_on_hand
+        : Math.max(0, new_quantity_on_hand),
+      quantity_available: params.allow_negative
+        ? new_quantity_available
+        : Math.max(0, new_quantity_available),
       last_updated: new Date(),
       updated_at: new Date(),
     };
@@ -283,12 +321,39 @@ export class StockLevelManager {
       }
     }
 
-    const updated_stock = await prisma.stock_levels.update({
-      where: {
-        id: existing_stock_level.id,
-      },
-      data: stockUpdateData,
-    });
+    let updated_stock: typeof existing_stock_level;
+    if (params.validate_availability && params.quantity_change < 0) {
+      // The earlier availability read is only a helpful fast rejection.
+      // Kitchen fire and delivery can race another stock exit, so the write
+      // itself must be conditional. Both counters move relative to the row's
+      // CURRENT values; an absolute write from the stale read could revive
+      // units or consume the same last ingredient twice.
+      const amount = Math.abs(params.quantity_change);
+      const claimed = await prisma.stock_levels.updateMany({
+        where: {
+          id: existing_stock_level.id,
+          quantity_available: { gte: amount },
+          quantity_on_hand: { gte: amount },
+        },
+        data: {
+          quantity_on_hand: { decrement: amount },
+          quantity_available: { decrement: amount },
+          last_updated: stockUpdateData.last_updated,
+          updated_at: stockUpdateData.updated_at,
+        },
+      });
+      if (claimed.count !== 1) {
+        throw new ConflictException('Insufficient stock available');
+      }
+      updated_stock = await prisma.stock_levels.findUnique({
+        where: { id: existing_stock_level.id },
+      });
+    } else {
+      updated_stock = await prisma.stock_levels.update({
+        where: { id: existing_stock_level.id },
+        data: stockUpdateData,
+      });
+    }
 
     // 5. Crear inventory transaction
     // Nota: transactionsService debe manejar su propia conexión o aceptar prisma client si queremos que sea parte de la misma tx.
@@ -756,6 +821,34 @@ export class StockLevelManager {
         : quantity;
 
     const execute = async (prisma: any) => {
+      // 0. No-overselling guard — un producto/variante sin seguimiento de
+      // inventario nunca se valida contra stock_levels, así que tampoco debe
+      // reservar contra ella: crear la reserva igual dejaría un pasivo
+      // (`quantity_reserved`) que ninguna venta futura va a liberar porque el
+      // flujo normal (release/commit) también la ignora. `no-op` silencioso,
+      // igual que `skip_reservation`.
+      const trackingProduct = await prisma.products.findFirst({
+        where: { id: product_id },
+        select: { track_inventory: true },
+      });
+      let trackingOverride: boolean | null | undefined;
+      if (variant_id) {
+        const variant = await prisma.product_variants.findFirst({
+          where: { id: variant_id },
+          select: { track_inventory_override: true },
+        });
+        trackingOverride = variant?.track_inventory_override;
+      }
+      // Producto no encontrado aquí no es este método el que debe fallar: se
+      // trata como "tracked" por defecto para que el chequeo de existencia
+      // real (más abajo, en getOrCreateStockLevel) sea el que reporte
+      // PROD_FIND_001.
+      const effectiveTracking =
+        trackingOverride ?? trackingProduct?.track_inventory ?? true;
+      if (effectiveTracking === false) {
+        return;
+      }
+
       // Validar contexto
       const context = RequestContextService.getContext();
       const organization_id =
@@ -798,7 +891,42 @@ export class StockLevelManager {
         );
       }
 
-      // 3. Crear reserva
+      // 3. Claim stock atomically before creating the reservation. A plain
+      // read followed by an absolute update loses a concurrent reservation:
+      // two tables can both observe one available unit and each persist a
+      // reservation. The conditional update serializes on the stock_levels
+      // row and the second transaction sees count=0 after the first commits.
+      const stockMutation = {
+        quantity_reserved: { increment: effectiveQuantity },
+        quantity_available: { decrement: effectiveQuantity },
+        last_updated: new Date(),
+        updated_at: new Date(),
+      };
+      if (allow_negative_available) {
+        await prisma.stock_levels.update({
+          where: { id: stock_level.id },
+          data: stockMutation,
+        });
+      } else {
+        const claimed = await prisma.stock_levels.updateMany({
+          where: {
+            id: stock_level.id,
+            quantity_available: { gte: effectiveQuantity },
+          },
+          data: stockMutation,
+        });
+        if (claimed.count !== 1) {
+          if (validate_availability) {
+            throw new ConflictException('Insufficient stock available for reservation');
+          }
+          throw new VendixHttpException(
+            ErrorCodes.INV_STOCK_001,
+            `Stock insuficiente al reservar producto ${product_id}${variant_id ? `, variante ${variant_id}` : ''} en bodega ${location_id}.`,
+          );
+        }
+      }
+
+      // 4. Crear reserva dentro de la misma transacción que el claim.
       await prisma.stock_reservations.create({
         data: {
           organization_id: organization_id,
@@ -815,17 +943,6 @@ export class StockLevelManager {
               ? expires_at
               : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // null = no expira (layaway), undefined = default 7 días
           created_at: new Date(),
-        },
-      });
-
-      // 4. Actualizar stock level (use id to avoid composite key null issues)
-      await prisma.stock_levels.update({
-        where: { id: stock_level.id },
-        data: {
-          quantity_reserved: stock_level.quantity_reserved + effectiveQuantity,
-          quantity_available: resulting_available,
-          last_updated: new Date(),
-          updated_at: new Date(),
         },
       });
 
@@ -1055,6 +1172,179 @@ export class StockLevelManager {
     } else {
       await this.prisma.$transaction(async (prisma) => execute(prisma));
     }
+  }
+
+  /**
+   * Libera EXACTAMENTE `quantity` unidades de reserva para una referencia +
+   * producto/variante, recorriendo las reservas ACTIVAS de esa identidad de
+   * más antigua a más nueva (oldest-first).
+   *
+   * Existe porque `releaseReservationsByReference` libera TODA la reserva de
+   * la referencia completa — correcto para un commit de orden entera, pero
+   * incorrecto cuando dos líneas de la misma orden reservan el mismo
+   * producto/variante y solo UNA se entrega/comita: liberar "por referencia"
+   * también apagaría la reserva de la línea hermana todavía no entregada.
+   *
+   * Semántica de reserva parcial: si la reserva más antigua cubre más de lo
+   * pedido, se decrementa su `quantity` y permanece `active` por el resto —
+   * nunca se marca consumida/cancelada una reserva que aún protege stock de
+   * otra línea.
+   *
+   * `status`:
+   * - `'consumed'`: entrega física. Por defecto decrementa `quantity_on_hand`
+   *   igual que `releaseReservationsByReference`; los callers que ya
+   *   decrementan `on_hand` por su cuenta (vía `updateStock`, que es la única
+   *   fuente de costeo/movimientos/valuación) deben pasar
+   *   `{ decrementOnHand: false }` para no descontar dos veces.
+   * - `'cancelled'`: aborto sin entrega. Restaura `quantity_available` y
+   *   nunca toca `quantity_on_hand`.
+   *
+   * Sin clamping que oculte faltante: si las reservas activas de esa
+   * identidad suman menos que `quantity`, se libera lo que hay y se retorna
+   * el total realmente liberado (puede ser menor que `quantity`) — el caller
+   * decide si eso es un error.
+   *
+   * @returns unidades efectivamente liberadas (0 si no había reservas activas).
+   */
+  async releaseReservationQuantity(
+    reference_type: ReservationRefType,
+    reference_id: number,
+    product_id: number,
+    variant_id: number | null | undefined,
+    quantity: number,
+    status: 'consumed' | 'cancelled',
+    tx?: Prisma.TransactionClient,
+    options: { decrementOnHand?: boolean; newestFirst?: boolean } = {},
+  ): Promise<number> {
+    const execute = async (prisma: any): Promise<number> => {
+      if (!(quantity > 0)) return 0;
+
+      const reservationWhere = {
+        reserved_for_type: reference_type,
+        reserved_for_id: reference_id,
+        product_id,
+        product_variant_id: variant_id ?? null,
+        status: 'active' as const,
+      };
+      const candidates = await prisma.stock_reservations.findMany({
+        where: reservationWhere,
+        select: { id: true },
+      });
+      if (candidates.length === 0) return 0;
+
+      // Two lines may share a reservation row. Lock in a deterministic order,
+      // then re-read quantities/status so a second delivery cannot release a
+      // stale amount after the first one committed.
+      await prisma.$queryRaw`
+        SELECT id FROM stock_reservations
+        WHERE id IN (${Prisma.join(candidates.map((r: { id: number }) => r.id))})
+        ORDER BY id FOR UPDATE
+      `;
+      const reservations = await prisma.stock_reservations.findMany({
+        where: {
+          ...reservationWhere,
+        },
+        orderBy: [
+          { created_at: options.newestFirst ? 'desc' : 'asc' },
+          { id: options.newestFirst ? 'desc' : 'asc' },
+        ],
+      });
+
+      if (reservations.length === 0) return 0;
+
+      let remaining = quantity;
+      let released = 0;
+      // location_id -> unidades liberadas en esa ubicación, para actualizar
+      // stock_levels por ubicación (una referencia puede repartirse en varias).
+      const perLocation = new Map<number, number>();
+
+      for (const r of reservations) {
+        if (remaining <= 0) break;
+        const take = Math.min(r.quantity, remaining);
+        if (take <= 0) continue;
+
+        if (take >= r.quantity) {
+          // Reserva se libera completa.
+          await prisma.stock_reservations.update({
+            where: { id: r.id },
+            data: { status, updated_at: new Date() },
+          });
+        } else {
+          // Liberación parcial: el resto sigue activo protegiendo a la línea
+          // hermana.
+          await prisma.stock_reservations.update({
+            where: { id: r.id },
+            data: { quantity: r.quantity - take, updated_at: new Date() },
+          });
+        }
+
+        perLocation.set(
+          r.location_id,
+          (perLocation.get(r.location_id) || 0) + take,
+        );
+        released += take;
+        remaining -= take;
+      }
+
+      if (released === 0) return 0;
+
+      for (const [location_id, released_at_location] of perLocation) {
+        const stock_level = await prisma.stock_levels.findFirst({
+          where: {
+            product_id,
+            product_variant_id: variant_id ?? null,
+            location_id,
+          },
+        });
+        if (!stock_level) continue;
+        await prisma.$queryRaw`
+          SELECT id FROM stock_levels WHERE id = ${stock_level.id} FOR UPDATE
+        `;
+        const lockedStockLevel = await prisma.stock_levels.findFirst({
+          where: { id: stock_level.id },
+        });
+        if (!lockedStockLevel) continue;
+
+        const newReserved = Math.max(
+          0,
+          lockedStockLevel.quantity_reserved - released_at_location,
+        );
+        const data: any = {
+          quantity_reserved: newReserved,
+          last_updated: new Date(),
+          updated_at: new Date(),
+        };
+
+        if (status === 'consumed') {
+          const newOnHand =
+            options.decrementOnHand === false
+              ? lockedStockLevel.quantity_on_hand
+              : Math.max(
+                  0,
+                  lockedStockLevel.quantity_on_hand - released_at_location,
+                );
+          data.quantity_on_hand = newOnHand;
+          data.quantity_available = Math.max(0, newOnHand - newReserved);
+        } else {
+          data.quantity_available =
+            lockedStockLevel.quantity_available + released_at_location;
+        }
+
+        await prisma.stock_levels.update({
+          where: { id: stock_level.id },
+          data,
+        });
+      }
+
+      await this.syncProductStock(prisma, product_id, variant_id ?? undefined);
+
+      return released;
+    };
+
+    if (tx) {
+      return execute(tx);
+    }
+    return this.prisma.$transaction(async (prisma) => execute(prisma));
   }
 
   /**

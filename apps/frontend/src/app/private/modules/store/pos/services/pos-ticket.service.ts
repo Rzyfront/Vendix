@@ -755,9 +755,17 @@ export class PosTicketService {
     `;
     }
 
+    // Cobro multimétodo: cada método con su monto, mismo formato que el
+    // tiquete del backend («Efectivo $20.000 · Transferencia $80.000»).
+    const paymentMethodLine =
+      ticketData.paymentBreakdown && ticketData.paymentBreakdown.length > 0
+        ? ticketData.paymentBreakdown
+            .map((leg) => `${leg.label} ${this.currencyService.format(leg.amount)}`)
+            .join(' · ')
+        : ticketData.paymentMethod;
     html += `
       <div style="margin-bottom: 15px;">
-        <p style="margin: 2px 0; font-size: 12px;"><strong>Método de pago:</strong> ${ticketData.paymentMethod}</p>
+        <p style="margin: 2px 0; font-size: 12px;"><strong>Método de pago:</strong> ${paymentMethodLine}</p>
         ${
           ticketData.cashReceived
             ? `

@@ -63,6 +63,7 @@ const PRODUCT_BASE = {
   // the pricing logic these tests exist to cover.
   is_sellable: true,
   product_tax_assignments: [],
+  weight: 1,
 };
 
 const PRODUCT_CATEGORY = {
@@ -418,6 +419,32 @@ describe('CheckoutService - promotions and coupons', () => {
   }
 
   describe('checkout() — normal ecommerce flow', () => {
+    it('B8 — contra entrega persiste remaining_balance = grand_total', async () => {
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
+      mockOrderCreate(10000);
+      prisma.store_payment_methods.findFirst.mockResolvedValueOnce({
+        id: 7,
+        state: 'enabled',
+        system_payment_method: {
+          id: 3,
+          display_name: 'Contra entrega',
+          type: 'cash_on_delivery',
+          provider: 'manual',
+          processing_mode: 'ON_DELIVERY',
+        },
+      });
+
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Invitado' },
+      } as any);
+
+      const orderArgs = prisma.orders.create.mock.calls[0][0].data;
+      expect(orderArgs.total_paid).toBe(0);
+      expect(orderArgs.remaining_balance).toBe(10000);
+    });
+
     it('creates a guest checkout WITHOUT promotions (regression)', async () => {
       jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
       mockOrderCreate(10000);
@@ -438,6 +465,10 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(orderArgs.subtotal_amount).toBe(10000);
       expect(orderArgs.discount_amount).toBe(0);
       expect(orderArgs.grand_total).toBe(10000);
+      // B8 (release-855): el saldo explícito es sólo para contra entrega;
+      // una transferencia conserva la forma histórica (su confirmación salda).
+      expect(orderArgs.total_paid).toBeUndefined();
+      expect(orderArgs.remaining_balance).toBeUndefined();
 
       // Payment created for the same grand_total — never the cart-side estimate.
       expect(prisma.payments.create).toHaveBeenCalledWith(
@@ -805,6 +836,11 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(orderArgs.channel).toBe('whatsapp');
       expect(orderArgs.discount_amount).toBe(1500);
       expect(orderArgs.grand_total).toBe(8500);
+      // B8 (release-855): WhatsApp checkout never creates a `payments` row,
+      // so the schema default is even more wrong here — nothing has ever
+      // been collected for this order.
+      expect(orderArgs.total_paid).toBe(0);
+      expect(orderArgs.remaining_balance).toBe(8500);
 
       expect(promotionEngine.applyPromotion).toHaveBeenCalledWith(
         1,
@@ -1042,6 +1078,162 @@ describe('CheckoutService - promotions and coupons', () => {
   });
 
   /**
+   * checkout-whatsapp-location-fallback (Paso 1) — `pending_shipping_assignment`.
+   * Cuando el comprador no pudo ser ubicado (sin GPS/geocode), el storefront
+   * ofrece confirmar por WhatsApp SIN método/tarifa de envío; la tienda lo
+   * asigna después vía `assignShipping`. El backend NUNCA confía en el
+   * frontend: revalida channel, ausencia de shipping_method_id/rate_id, y la
+   * configuración de la tienda (whatsapp_checkout + whatsapp_number).
+   */
+  describe('pending_shipping_assignment — pedido WhatsApp con envío por asignar (Paso 1)', () => {
+    function mockWhatsappCheckoutEnabled(
+      overrides: Partial<{ whatsapp_checkout: boolean; whatsapp_number: string }> = {},
+    ) {
+      storePrisma.store_settings.findUnique.mockResolvedValue({
+        settings: {
+          ecommerce: {
+            checkout: {
+              whatsapp_checkout: overrides.whatsapp_checkout ?? true,
+              whatsapp_number: overrides.whatsapp_number ?? '+573001234567',
+            },
+          },
+        },
+      });
+    }
+
+    function baseDto(over: Record<string, unknown> = {}) {
+      return {
+        channel: 'whatsapp',
+        pending_shipping_assignment: true,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        ...over,
+      };
+    }
+
+    it('crea la orden sin método/tarifa de envío, delivery_type=other, sin fila de payments ni factura', async () => {
+      mockWhatsappCheckoutEnabled();
+      let capturedOrderData: any;
+      prisma.orders.create.mockImplementation(({ data }: any) => {
+        capturedOrderData = data;
+        return Promise.resolve({
+          id: 1,
+          store_id: STORE_ID,
+          order_number: data.order_number,
+          grand_total: 10000,
+          currency: data.currency,
+          state: data.state,
+          order_items: [],
+        });
+      });
+      const createInvoiceSpy = jest.spyOn(
+        service as any,
+        'createInvoiceIfConfigured',
+      );
+
+      const result: any = await service.checkout(baseDto() as any);
+
+      expect(capturedOrderData.channel).toBe('whatsapp');
+      expect(capturedOrderData.delivery_type).toBe('other');
+      expect(capturedOrderData.shipping_cost).toBe(0);
+      expect(capturedOrderData.shipping_method_id).toBeNull();
+      expect(capturedOrderData.shipping_rate_id).toBeNull();
+      expect(capturedOrderData.state).toBe('pending_payment');
+      // Nota staff-only sin migración (columna `notes`, existente).
+      expect(capturedOrderData.notes).toEqual(
+        expect.stringContaining('envío pendiente de asignar'),
+      );
+      expect(prisma.payments.create).not.toHaveBeenCalled();
+      expect(createInvoiceSpy).not.toHaveBeenCalled();
+      expect(result.channel).toBe('whatsapp');
+      expect(result.payment_id).toBeNull();
+    });
+
+    it("rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001 si channel no es 'whatsapp'", async () => {
+      mockWhatsappCheckoutEnabled();
+
+      const err = await service
+        .checkout(baseDto({ channel: 'ecommerce' }) as any)
+        .then(
+          () => null,
+          (e) => e,
+        );
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_PENDING_SHIPPING_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001 si viene shipping_method_id', async () => {
+      mockWhatsappCheckoutEnabled();
+
+      const err = await service
+        .checkout(baseDto({ shipping_method_id: 1 }) as any)
+        .then(
+          () => null,
+          (e) => e,
+        );
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_PENDING_SHIPPING_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001 si viene shipping_rate_id', async () => {
+      mockWhatsappCheckoutEnabled();
+
+      const err = await service
+        .checkout(baseDto({ shipping_rate_id: 5 }) as any)
+        .then(
+          () => null,
+          (e) => e,
+        );
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_PENDING_SHIPPING_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001 si la tienda no activó whatsapp_checkout', async () => {
+      mockWhatsappCheckoutEnabled({ whatsapp_checkout: false });
+
+      const err = await service.checkout(baseDto() as any).then(
+        () => null,
+        (e) => e,
+      );
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_PENDING_SHIPPING_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001 si falta whatsapp_number', async () => {
+      mockWhatsappCheckoutEnabled({ whatsapp_number: '' });
+
+      const err = await service.checkout(baseDto() as any).then(
+        () => null,
+        (e) => e,
+      );
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_PENDING_SHIPPING_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('sin store_settings configurados (null), rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001', async () => {
+      storePrisma.store_settings.findUnique.mockResolvedValue(null);
+
+      const err = await service.checkout(baseDto() as any).then(
+        () => null,
+        (e) => e,
+      );
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_PENDING_SHIPPING_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * QUI-INC — el tipo fiscal se COPIA de la fila fuente; el punto de escritura
    * no lo fabrica.
    *
@@ -1234,6 +1426,185 @@ describe('CheckoutService - promotions and coupons', () => {
         shipping_rate_id: 31,
         shipping_cost: 15000,
         grand_total: 25000,
+      });
+    });
+  });
+
+  describe('paso 14 — productores unificados con la cotización', () => {
+    const IVA_SNAPSHOT = {
+      shipping_tax_rate_id: 5,
+      shipping_tax_name: 'IVA 19%',
+      shipping_tax_type: 'iva',
+      shipping_tax_rate: 0.19,
+      shipping_tax_amount: 1900,
+    };
+    const EMPTY_SNAPSHOT = {
+      shipping_tax_rate_id: null,
+      shipping_tax_name: null,
+      shipping_tax_type: null,
+      shipping_tax_rate: null,
+      shipping_tax_amount: 0,
+    };
+    const address = {
+      address_line1: 'Calle 1', city: 'Bogotá', country_code: 'CO',
+    };
+    const rate = (over: Record<string, unknown> = {}) => ({
+      id: 32,
+      is_active: true,
+      type: 'flat',
+      base_cost: 10000,
+      shipping_method_id: 4,
+      shipping_method: { id: 4, type: 'delivery' },
+      shipping_zone: { id: 2, store_id: STORE_ID },
+      ...over,
+    });
+    let snapshotForRate: jest.Mock;
+    let chargeForRate: jest.Mock;
+
+    beforeEach(() => {
+      snapshotForRate = jest.fn().mockResolvedValue({ ...IVA_SNAPSHOT });
+      // Sin impuesto por defecto: el precio es el bruto (igual que el
+      // cotizador cuando la tarifa no tiene categoría gravada).
+      chargeForRate = jest.fn().mockImplementation(
+        async (_client: unknown, _rate_id: number, price: unknown) => ({
+          applies: false,
+          gross: Number(price),
+          base: Number(price),
+          tax: 0,
+          reason: 'no_category',
+        }),
+      );
+      (service as any).shippingTaxService = { snapshotForRate, chargeForRate };
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
+    });
+
+    it('checkout agregado 10.000 IVA 19%: cobra 11.900 y guarda modo false', async () => {
+      storePrisma.shipping_rates.findFirst.mockResolvedValue(rate());
+      chargeForRate.mockResolvedValue({
+        applies: true, gross: 11900, base: 10000, tax: 1900, reason: 'exclusive',
+      });
+      mockOrderCreate(21900);
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Invitado' },
+        shipping_rate_id: 32,
+        shipping_address: address,
+      } as any);
+
+      // Cotizar ⇒ confirmar: el cálculo único recibe el precio de tarifa y
+      // la copia se deriva sobre el bruto cobrado.
+      expect(chargeForRate).toHaveBeenCalledWith(null, 32, 10000, { store_id: STORE_ID });
+      expect(snapshotForRate).toHaveBeenCalledWith(null, 32, 11900, { store_id: STORE_ID });
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        ...IVA_SNAPSHOT,
+        shipping_rate_id: 32,
+        shipping_cost: 11900,
+        shipping_tax_is_inclusive: false,
+        // 10000 + 0 − 0 + 11900
+        grand_total: 21900,
+      });
+    });
+
+    it('checkout weight_based cobra lo cotizado (base + per_unit × peso)', async () => {
+      storePrisma.shipping_rates.findFirst.mockResolvedValue(
+        rate({ id: 33, type: 'weight_based', base_cost: 5000, per_unit_cost: 1000 }),
+      );
+      snapshotForRate.mockResolvedValue({ ...EMPTY_SNAPSHOT });
+      prisma.products.findUnique.mockResolvedValue(buildProduct({ weight: 2 }));
+      mockOrderCreate(17000);
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Invitado' },
+        shipping_rate_id: 33,
+        shipping_address: address,
+      } as any);
+
+      // 5000 + 1000 × 2 kg, igual que /shipping/calculate.
+      expect(chargeForRate).toHaveBeenCalledWith(null, 33, 7000, { store_id: STORE_ID });
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        shipping_rate_id: 33,
+        shipping_cost: 7000,
+        shipping_tax_amount: 0,
+        shipping_tax_is_inclusive: null,
+        grand_total: 17000,
+      });
+    });
+
+    it('checkout con umbral de envío gratis alcanzado ⇒ 0 sin impuesto', async () => {
+      storePrisma.shipping_rates.findFirst.mockResolvedValue(
+        rate({ id: 34, base_cost: 15000, free_shipping_threshold: 20000 }),
+      );
+      snapshotForRate.mockResolvedValue({ ...EMPTY_SNAPSHOT });
+      mockOrderCreate(30000);
+      await service.checkout({
+        payment_method_id: 7,
+        // Bruto de productos 30000 ≥ umbral 20000.
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 3 }],
+        guest_customer: { first_name: 'Invitado' },
+        shipping_rate_id: 34,
+        shipping_address: address,
+      } as any);
+
+      expect(chargeForRate).not.toHaveBeenCalled();
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        shipping_rate_id: 34,
+        shipping_cost: 0,
+        shipping_tax_amount: 0,
+        shipping_tax_is_inclusive: null,
+        grand_total: 30000,
+      });
+    });
+
+    it('checkout tarifa free ⇒ 0 sin impuesto aunque base_cost traiga valor', async () => {
+      storePrisma.shipping_rates.findFirst.mockResolvedValue(
+        rate({ id: 35, type: 'free', base_cost: 5000 }),
+      );
+      snapshotForRate.mockResolvedValue({ ...EMPTY_SNAPSHOT });
+      mockOrderCreate(10000);
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Invitado' },
+        shipping_rate_id: 35,
+        shipping_address: address,
+      } as any);
+
+      expect(chargeForRate).not.toHaveBeenCalled();
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        shipping_rate_id: 35,
+        shipping_cost: 0,
+        shipping_tax_amount: 0,
+        shipping_tax_is_inclusive: null,
+        grand_total: 10000,
+      });
+    });
+
+    it('whatsappCheckout agregado cobra el bruto y guarda modo false', async () => {
+      storePrisma.shipping_rates.findFirst.mockResolvedValue(rate());
+      chargeForRate.mockResolvedValue({
+        applies: true, gross: 11900, base: 10000, tax: 1900, reason: 'exclusive',
+      });
+      mockOrderCreate(21900);
+      await service.whatsappCheckout({
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        shipping_rate_id: 32,
+      } as any);
+
+      expect(chargeForRate).toHaveBeenCalledWith(null, 32, 10000, { store_id: STORE_ID });
+      expect(snapshotForRate).toHaveBeenCalledWith(null, 32, 11900, { store_id: STORE_ID });
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({
+        ...IVA_SNAPSHOT,
+        shipping_rate_id: 32,
+        shipping_cost: 11900,
+        shipping_tax_is_inclusive: false,
+        grand_total: 21900,
       });
     });
   });

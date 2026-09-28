@@ -246,6 +246,7 @@ describe('credit-notes · parcial por kernel (B.1/F-020)', () => {
           taxable_amount: 12605.04,
           tax_amount: 2394.96,
           tax_type: 'iva',
+          line_index: 0,
         },
       ]);
     });

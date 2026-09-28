@@ -1,6 +1,7 @@
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { InvoiceFlowService } from './invoice-flow.service';
+import { CustomerFiscalIdentityValidator } from '../validators/customer-fiscal-identity.validator';
 
 describe('InvoiceFlowService support documents', () => {
   const requestContext = {
@@ -162,6 +163,13 @@ describe('InvoiceFlowService support documents', () => {
       // la resolución revienta y el `try/catch` degrada a cero retenciones, con
       // lo que el test pasaría verde sin haber ejercido nunca ese camino.
       resolveSuffered: jest
+        .fn()
+        .mockResolvedValue({ lines: [], uvt_value_used: 0, counterparty_type: null }),
+      // `resolveWithholdingBatches` agrupa por bien/servicio y llama a este
+      // método en vez de `resolveSuffered` directo (Step 1 del plan
+      // pago-multimetodo-pendientes). Sin este stub la resolución revienta y
+      // el `try/catch` degrada a cero, tapando cualquier regresión ahí.
+      resolveSufferedByOperation: jest
         .fn()
         .mockResolvedValue({ lines: [], uvt_value_used: 0, counterparty_type: null }),
       resolveSelf: jest
@@ -660,5 +668,542 @@ describe('InvoiceFlowService support documents', () => {
 
       expect(numberGenerator.generateNextNumber).not.toHaveBeenCalled();
     });
+  });
+
+  // Incidente Óptica Panorama SAS (NIT 800214345-7) / Pollo Árabe: una factura
+  // MANUAL (`customer_id` NULL) cuyo snapshot trae NIT/31 + DV 7 + correo salió
+  // transmitida a la DIAN como Cédula + persona natural, sin DV ni correo.
+  // `resolveAcquirerIdentity` (`utils/acquirer-identity.resolver.ts`) es ahora la
+  // fuente ÚNICA que alimenta TANTO `buildAcquirerIdentityInput` (la puerta de
+  // `validate()`, vía `CustomerFiscalIdentityValidator` REAL — sin mockear en
+  // este bloque, a propósito) COMO la construcción de `provider_data` dentro de
+  // `send()`. Este describe ejercita los DOS puntos de entrada reales sobre la
+  // MISMA factura — no llama a `resolveAcquirerIdentity` dos veces por su
+  // cuenta, que sería la prueba tautológica que ya se documentó como
+  // antipatrón — y comprueba que lo que el validador real aprueba es
+  // exactamente lo que la emisión transmite.
+  describe('Paridad real — incidente Óptica Panorama SAS: validate() real y send() coinciden', () => {
+    const buildIncidentInvoice = (overrides: any) => ({
+      id: overrides.id,
+      organization_id: 1,
+      store_id: 2,
+      accounting_entity_id: 77,
+      invoice_number: 'FV-500',
+      invoice_type: 'sales_invoice',
+      customer_id: null,
+      customer: null,
+      supplier_id: null,
+      supplier: null,
+      // El snapshot de la factura MANUAL — sin ficha vinculada — es la ÚNICA
+      // fuente de identidad. Antes de este fix, `send()` no leía estos campos
+      // salvo `customer_name`/`customer_tax_id`/`customer_address`.
+      customer_name: 'Óptica Panorama SAS',
+      customer_tax_id: '800214345',
+      customer_document_type: '31',
+      customer_verification_digit: '7',
+      customer_email: 'facturacion@opticapanorama.co',
+      customer_phone: null,
+      customer_tax_regime: null,
+      customer_fiscal_responsibilities: ['O-48'],
+      // Sin `order_id`/`sales_order_id`: es la factura MANUAL del incidente.
+      // P1-A bloquea esta combinación (jurídica O manual) cuando NO hay
+      // dirección — así que el fixture por defecto SÍ trae una (snapshot
+      // real, no la de la tienda), para que este describe siga probando
+      // identidad y no se vea interceptado por el bloqueo de dirección. El
+      // caso "sin dirección" tiene su propio test, que sobreescribe esto a
+      // `null`.
+      customer_address: {
+        address_line: 'Calle 100 # 20-30',
+        municipality_code: '11001',
+        city: 'Bogotá',
+        department_code: '11',
+        state_province: 'Bogotá D.C.',
+        country_code: 'CO',
+        postal_code: '110111',
+      },
+      subtotal_amount: { toString: () => '1000.00' },
+      discount_amount: { toString: () => '0.00' },
+      tax_amount: { toString: () => '190.00' },
+      withholding_amount: { toString: () => '0.00' },
+      total_amount: { toString: () => '1190.00' },
+      currency: 'COP',
+      issue_date: new Date('2026-03-10T10:00:00.000Z'),
+      due_date: new Date('2026-03-20T00:00:00.000Z'),
+      invoice_items: [
+        {
+          id: 1,
+          description: 'Consulta óptica',
+          quantity: { toString: () => '1' },
+          unit_price: { toString: () => '1000.00' },
+          discount_amount: { toString: () => '0.00' },
+          tax_amount: { toString: () => '190.00' },
+          total_amount: { toString: () => '1190.00' },
+        },
+      ],
+      invoice_taxes: [
+        {
+          tax_name: 'IVA',
+          tax_rate: { toString: () => '19' },
+          taxable_amount: { toString: () => '1000.00' },
+          tax_amount: { toString: () => '190.00' },
+        },
+      ],
+      resolution: {
+        id: 7001,
+        resolution_number: '18760000001',
+        prefix: 'FV',
+        range_from: 1,
+        range_to: 999999999,
+        valid_from: new Date('2020-01-01T00:00:00.000Z'),
+        valid_to: new Date('2035-01-01T00:00:00.000Z'),
+        is_active: true,
+      },
+      related_invoice: null,
+      notes: null,
+      financial_account_id: null,
+      ...overrides,
+    });
+
+    it('validate() (validador real) aprueba la factura y send() transmite NIT/31 + DV 7 + jurídica + correo — nunca CC', async () => {
+      const findFirst = jest.fn().mockImplementation(async ({ where }: any) =>
+        where.id === 501
+          ? buildIncidentInvoice({ id: 501, status: 'draft' })
+          : buildIncidentInvoice({ id: 502, status: 'validated' }),
+      );
+      const update = jest.fn().mockImplementation(async ({ where, data }: any) => ({
+        ...buildIncidentInvoice({ id: where.id, status: 'validated' }),
+        ...data,
+      }));
+
+      const { service, provider } = createService({
+        prisma: { invoices: { findFirst, update } },
+      });
+      // ÚNICO mock reemplazado por la implementación REAL: el resto de la
+      // infraestructura (Prisma, proveedor, cola de reintentos…) sigue
+      // simulada — lo que se ejercita de verdad es la puerta de identidad.
+      (service as any).acquirerIdentity = new CustomerFiscalIdentityValidator();
+      // El default de `createService` deja `sendInvoice` sin resolver (a
+      // diferencia de `sendSupportDocument`); esta factura es `sales_invoice`,
+      // así que necesita su propia respuesta de aceptación simulada.
+      provider.sendInvoice.mockResolvedValue({
+        success: true,
+        tracking_id: 'track-fv-500',
+        cufe: 'a'.repeat(96),
+        qr_code: 'qr',
+        xml_document: '<xml/>',
+        provider_data: { mock: true },
+      });
+
+      // ENTRADA REAL 1 — `validate()`. Si el validador real siguiera viendo
+      // esto como Cédula/persona natural incompleta no habría bloqueante que
+      // lo delate (el tipo SÍ está declarado), pero de haber cualquier
+      // discrepancia con lo que `send()` transmite, este test la vuelve visible
+      // comparando ambos resultados sobre la MISMA factura.
+      await expect(
+        RequestContextService.run(requestContext, () => service.validate(501)),
+      ).resolves.toBeDefined();
+
+      // ENTRADA REAL 2 — `send()`.
+      await RequestContextService.run(requestContext, () => service.send(502));
+
+      expect(provider.sendInvoice).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customer_tax_id: '800214345',
+          // El snapshot trae el CÓDIGO DIAN ('31'); `resolveAcquirerIdentity`
+          // lo normaliza al LITERAL canónico ('NIT') antes de que
+          // `DianDirectProvider`/`UblCommonBuilder` lo consuman — nunca el
+          // código crudo ni, sobre todo, el 'CC' que inventaba el defecto.
+          customer_document_type: 'NIT',
+          customer_verification_digit: '7',
+          customer_person_type: 'JURIDICA',
+          customer_email: 'facturacion@opticapanorama.co',
+          customer_name: 'Óptica Panorama SAS',
+          // P1-A: la dirección transmitida es la del SNAPSHOT de la propia
+          // factura manual (municipio Bogotá 11001 declarado por el
+          // fixture), nunca la de la tienda emisora — esa cascada de
+          // respaldo sólo entra cuando NINGUNA dirección real existe.
+          customer_address: expect.objectContaining({
+            address_line: 'Calle 100 # 20-30',
+            municipality_code: '11001',
+          }),
+        }),
+      );
+    });
+
+    it('P1-A: factura MANUAL sin ficha vinculada (NIT) y SIN dirección en el snapshot: validate() real bloquea con ADDRESS_UNRESOLVABLE', async () => {
+      // Mismo incidente Óptica Panorama, pero sin la dirección que el
+      // fixture por defecto ahora trae — el caso que P1-A corrige: antes
+      // `other_addresses` quedaba `undefined` (por no haber `invoice.customer`
+      // vinculado) y el bloqueo nunca disparaba, así que esta factura manual
+      // (sin `order_id`/`sales_order_id`) emitía sin dirección real ninguna,
+      // con la dirección FISCAL de la tienda impresa en su lugar al firmar.
+      const findFirst = jest.fn().mockResolvedValue(
+        buildIncidentInvoice({ id: 503, status: 'draft', customer_address: null }),
+      );
+      const { service } = createService({
+        prisma: { invoices: { findFirst } },
+      });
+      (service as any).acquirerIdentity = new CustomerFiscalIdentityValidator();
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.validate(503)),
+      ).rejects.toMatchObject({
+        errorCode: 'INVOICING_VALIDATE_001',
+        message: expect.stringMatching(/no tiene dirección fiscal propia/i),
+      });
+    });
+
+    // Fixture común a los dos tests "nacidos de orden" (POS/ecommerce) que
+    // siguen: MISMA forma que `linkedCustomerNoAddress` (arriba), pero con
+    // `order_id` poblado — el carril `sale_rail: 'on_demand'` que nunca captura
+    // dirección del cliente en el mostrador.
+    const buildPosInvoice = (overrides: any) => ({
+      id: overrides.id,
+      organization_id: 1,
+      store_id: 2,
+      accounting_entity_id: 77,
+      invoice_number: 'FV-700',
+      invoice_type: 'sales_invoice',
+      status: 'draft',
+      order_id: 900,
+      sales_order_id: null,
+      supplier_id: null,
+      supplier: null,
+      customer_name: null,
+      customer_tax_id: null,
+      customer_document_type: null,
+      customer_verification_digit: null,
+      customer_email: null,
+      customer_phone: null,
+      customer_tax_regime: null,
+      customer_fiscal_responsibilities: null,
+      customer_address: null,
+      subtotal_amount: { toString: () => '1000.00' },
+      discount_amount: { toString: () => '0.00' },
+      tax_amount: { toString: () => '190.00' },
+      withholding_amount: { toString: () => '0.00' },
+      total_amount: { toString: () => '1190.00' },
+      currency: 'COP',
+      issue_date: new Date('2026-03-10T10:00:00.000Z'),
+      due_date: new Date('2026-03-20T00:00:00.000Z'),
+      invoice_items: [
+        {
+          id: 1,
+          description: 'Producto de mostrador',
+          quantity: { toString: () => '1' },
+          unit_price: { toString: () => '1000.00' },
+          discount_amount: { toString: () => '0.00' },
+          tax_amount: { toString: () => '190.00' },
+          total_amount: { toString: () => '1190.00' },
+        },
+      ],
+      invoice_taxes: [
+        {
+          tax_name: 'IVA',
+          tax_rate: { toString: () => '19' },
+          taxable_amount: { toString: () => '1000.00' },
+          tax_amount: { toString: () => '190.00' },
+        },
+      ],
+      resolution: {
+        id: 7001,
+        resolution_number: '18760000001',
+        prefix: 'FV',
+        range_from: 1,
+        range_to: 999999999,
+        valid_from: new Date('2020-01-01T00:00:00.000Z'),
+        valid_to: new Date('2035-01-01T00:00:00.000Z'),
+        is_active: true,
+      },
+      related_invoice: null,
+      notes: null,
+      financial_account_id: null,
+      ...overrides,
+    });
+
+    it('P1-A: POS — persona NATURAL nacida de una orden, SIN dirección propia: validate() real emite (regresión de 1109a03d7)', async () => {
+      // Cliente CC registrado sólo con nombre+documento (nunca se le pidió
+      // dirección en el POS) — exactamente la regresión reportada: antes de
+      // este fix, CUALQUIER `customer_id` vinculado poblaba `other_addresses`
+      // y esta venta quedaba bloqueada por `ADDRESS_UNRESOLVABLE`.
+      const posInvoice = buildPosInvoice({
+        id: 700,
+        customer_id: 400,
+        customer: {
+          id: 400,
+          legal_name: null,
+          first_name: 'Juan',
+          last_name: 'Pérez',
+          document_type: 'CC',
+          document_number: '1118860776',
+          verification_digit: null,
+          addresses: [],
+        },
+      });
+      const findFirst = jest.fn().mockResolvedValue(posInvoice);
+      const { service } = createService({
+        prisma: {
+          invoices: {
+            findFirst,
+            // Este escenario SÍ llega al final feliz de `validate()`
+            // (identidad resuelta, ya numerada) — a diferencia de los demás
+            // "P1-A: POS" de este bloque, que rechazan antes de este punto.
+            // El override reemplaza `invoices` COMPLETO (spread superficial
+            // en `createService`), así que sin este mock explícito la llamada
+            // real `this.prisma.invoices.update({ data: { status:
+            // 'validated' } })` revienta con "is not a function".
+            update: jest
+              .fn()
+              .mockResolvedValue({ ...posInvoice, status: 'validated' }),
+          },
+        },
+      });
+      (service as any).acquirerIdentity = new CustomerFiscalIdentityValidator();
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.validate(700)),
+      ).resolves.toBeDefined();
+    });
+
+    it('P1-A: POS — persona JURÍDICA (NIT) nacida de una orden, SIN dirección propia: validate() real bloquea con ADDRESS_UNRESOLVABLE', async () => {
+      // La excepción declarada por la política: aun naciendo de una orden, un
+      // adquiriente jurídico SÍ exige dirección — la DIAN la cruza para
+      // exógena/retenciones y no hay excusa de "el POS nunca la pidió" para
+      // una razón social.
+      const findFirst = jest.fn().mockResolvedValue(
+        buildPosInvoice({
+          id: 701,
+          customer_id: 401,
+          customer: {
+            id: 401,
+            legal_name: 'Distribuidora Jurídica SAS',
+            first_name: null,
+            last_name: null,
+            document_type: 'NIT',
+            document_number: '900555666',
+            verification_digit: '1',
+            addresses: [],
+          },
+        }),
+      );
+      const { service } = createService({
+        prisma: { invoices: { findFirst } },
+      });
+      (service as any).acquirerIdentity = new CustomerFiscalIdentityValidator();
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.validate(701)),
+      ).rejects.toMatchObject({
+        errorCode: 'INVOICING_VALIDATE_001',
+        message: expect.stringMatching(/no tiene dirección fiscal propia/i),
+      });
+    });
+
+    // Requisito #4 del incidente: cuando el adquiriente NOMINATIVO no tiene
+    // dirección propia, `send()` ya no debe poder caer en la dirección FISCAL
+    // de la propia tienda sin que `validate()` lo haya bloqueado antes.
+    // `buildAcquirerIdentityInput` alimenta `other_addresses` con el universo
+    // REAL de direcciones del cliente (`invoice.customer.addresses`, aquí
+    // vacío) — deliberadamente SIN la dirección de la tienda — así que
+    // `CustomerFiscalIdentityValidator.checkAddress` (mecanismo preexistente,
+    // antes nunca alimentado) encuentra el arreglo poblado y ningún rescate:
+    // ADDRESS_UNRESOLVABLE bloquea ANTES de numerar/transmitir.
+    it('adquiriente nominativo con ficha vinculada SIN ninguna dirección propia: validate() real bloquea con ADDRESS_UNRESOLVABLE', async () => {
+      const linkedCustomerNoAddress = {
+        id: 601,
+        organization_id: 1,
+        store_id: 2,
+        accounting_entity_id: 77,
+        invoice_number: 'FV-600',
+        invoice_type: 'sales_invoice',
+        status: 'draft',
+        customer_id: 300,
+        customer: {
+          id: 300,
+          legal_name: 'Cliente Sin Dirección SAS',
+          document_type: 'NIT',
+          document_number: '900555666',
+          verification_digit: '1',
+          // Ficha REAL, vinculada, sin ninguna fila de dirección.
+          addresses: [],
+        },
+        supplier_id: null,
+        supplier: null,
+        customer_name: null,
+        customer_tax_id: null,
+        customer_document_type: null,
+        customer_verification_digit: null,
+        customer_email: null,
+        customer_phone: null,
+        customer_tax_regime: null,
+        customer_fiscal_responsibilities: null,
+        customer_address: null,
+        subtotal_amount: { toString: () => '1000.00' },
+        discount_amount: { toString: () => '0.00' },
+        tax_amount: { toString: () => '190.00' },
+        withholding_amount: { toString: () => '0.00' },
+        total_amount: { toString: () => '1190.00' },
+        currency: 'COP',
+        issue_date: new Date('2026-03-10T10:00:00.000Z'),
+        due_date: new Date('2026-03-20T00:00:00.000Z'),
+        invoice_items: [
+          {
+            id: 1,
+            description: 'Servicio',
+            quantity: { toString: () => '1' },
+            unit_price: { toString: () => '1000.00' },
+            discount_amount: { toString: () => '0.00' },
+            tax_amount: { toString: () => '190.00' },
+            total_amount: { toString: () => '1190.00' },
+          },
+        ],
+        invoice_taxes: [
+          {
+            tax_name: 'IVA',
+            tax_rate: { toString: () => '19' },
+            taxable_amount: { toString: () => '1000.00' },
+            tax_amount: { toString: () => '190.00' },
+          },
+        ],
+        resolution: null,
+        related_invoice: null,
+        notes: null,
+      };
+
+      const { service } = createService({
+        prisma: {
+          invoices: {
+            findFirst: jest.fn().mockResolvedValue(linkedCustomerNoAddress),
+          },
+        },
+      });
+      (service as any).acquirerIdentity = new CustomerFiscalIdentityValidator();
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.validate(601)),
+      ).rejects.toMatchObject({
+        errorCode: 'INVOICING_VALIDATE_001',
+        message: expect.stringMatching(/no tiene dirección fiscal propia/i),
+      });
+    });
+  });
+});
+
+// PR #858 hallazgo 2 — el cobro de la orden ya persistió la retención
+// SUFRIDA con `invoice_id: null` + `order_id`. Al aceptarse la factura de esa
+// orden se ENLAZAN esas filas (updateMany con `invoice_id`) y no se inserta
+// otra `suffered`; `self` sigue insertándose. Sin filas previas, o sin orden,
+// se inserta como siempre.
+describe('InvoiceFlowService.persistWithholdingBatches — enlace de la sufrida del cobro', () => {
+  const sufferedLine = {
+    withholding_type: 'retefuente',
+    concept_code: 'RF-COMPRAS',
+    concept_id: 5,
+    rate: 0.025,
+    base: 100000,
+    amount: 2500,
+    role: 'suffered',
+    account_role: 'withholding.suffered.retefuente_receivable',
+  } as any;
+  const selfLine = {
+    ...sufferedLine,
+    concept_code: 'AUTO',
+    concept_id: 6,
+    role: 'self',
+    amount: 400,
+    account_role: 'withholding.self.retefuente_payable',
+  } as any;
+  const batches = [
+    {
+      role: 'suffered',
+      resolution: { lines: [sufferedLine], uvt_value_used: 49799, counterparty_type: 'juridica' },
+    },
+    {
+      role: 'self',
+      resolution: { lines: [selfLine], uvt_value_used: 49799, counterparty_type: null },
+    },
+  ];
+  const invoice = {
+    id: 300,
+    organization_id: 1,
+    store_id: 2,
+    accounting_entity_id: 77,
+    customer_id: 44,
+    supplier_id: null,
+    order_id: 900,
+  };
+
+  const build = (priorRows: Array<{ id: number }>) => {
+    const prisma = {
+      withholding_calculations: {
+        findMany: jest.fn().mockResolvedValue(priorRows),
+        updateMany: jest.fn().mockResolvedValue({ count: priorRows.length }),
+      },
+    };
+    const withholdingFlow = {
+      persistWithholdingLines: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new InvoiceFlowService(
+      prisma as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      withholdingFlow as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    return { service, prisma, withholdingFlow };
+  };
+
+  it('con filas sufridas previas de la orden: las enlaza y no inserta suffered', async () => {
+    const { service, prisma, withholdingFlow } = build([{ id: 11 }, { id: 12 }]);
+
+    const breakdown = await (service as any).persistWithholdingBatches(invoice, batches);
+
+    expect(prisma.withholding_calculations.findMany).toHaveBeenCalledWith({
+      where: { organization_id: 1, order_id: 900, role: 'suffered', invoice_id: null },
+      select: { id: true },
+    });
+    expect(prisma.withholding_calculations.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [11, 12] } },
+      data: { invoice_id: 300, accounting_entity_id: 77 },
+    });
+    const persistedRoles = withholdingFlow.persistWithholdingLines.mock.calls.map(
+      (call: any[]) => call[0].role,
+    );
+    expect(persistedRoles).toEqual(['self']);
+    // El payload de `invoice.accepted` no cambia respecto del histórico.
+    expect(breakdown).toEqual([sufferedLine, selfLine]);
+  });
+
+  it('sin filas previas: inserta la suffered como siempre', async () => {
+    const { service, prisma, withholdingFlow } = build([]);
+
+    await (service as any).persistWithholdingBatches(invoice, batches);
+
+    expect(prisma.withholding_calculations.updateMany).not.toHaveBeenCalled();
+    const persistedRoles = withholdingFlow.persistWithholdingLines.mock.calls.map(
+      (call: any[]) => call[0].role,
+    );
+    expect(persistedRoles).toEqual(['suffered', 'self']);
+    expect(withholdingFlow.persistWithholdingLines.mock.calls[0][0]).toMatchObject({
+      invoice_id: 300,
+      customer_id: 44,
+      lines: [sufferedLine],
+    });
+  });
+
+  it('factura sin orden: ni busca filas previas, inserta como siempre', async () => {
+    const { service, prisma, withholdingFlow } = build([{ id: 11 }]);
+
+    await (service as any).persistWithholdingBatches({ ...invoice, order_id: null }, batches);
+
+    expect(prisma.withholding_calculations.findMany).not.toHaveBeenCalled();
+    expect(prisma.withholding_calculations.updateMany).not.toHaveBeenCalled();
+    expect(withholdingFlow.persistWithholdingLines).toHaveBeenCalledTimes(2);
   });
 });

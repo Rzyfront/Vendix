@@ -47,6 +47,22 @@ interface ApiResponse<T> {
   meta?: any;
 }
 
+/**
+ * Copy en español para los rechazos del cobro multimétodo. `parseApiError`
+ * no tiene estos códigos en `ERROR_MESSAGES` (catálogo fuera del alcance de
+ * este paso), así que `handleError` los traduce aquí.
+ */
+const MULTI_TENDER_ERROR_COPY: Record<string, string> = {
+  PAY_MULTI_TENDER_SUM_MISMATCH:
+    'La suma de los métodos no coincide con el total a cobrar. Revisa los montos e inténtalo de nuevo.',
+  PAY_MULTI_TENDER_METHOD_NOT_ALLOWED:
+    'Uno de los métodos no permite cobro combinado. Usa solo efectivo, tarjeta o transferencia.',
+  PAY_MULTI_TENDER_MULTIPLE_CASH:
+    'Solo se permite un pago en efectivo dentro del cobro combinado.',
+  PAY_MULTI_TENDER_CASH_INSUFFICIENT:
+    'El efectivo recibido es menor que el monto en efectivo. Revisa el recibido.',
+};
+
 interface PaginatedApiResponse<T> {
   success: boolean;
   data: T[];
@@ -567,26 +583,35 @@ export class TablesService {
    * current `subtotal_amount` / `grand_total`.
    */
   payTableSession(payload: PayTableSessionDto): Observable<PayTableSessionResult> {
+    // Cobro multimétodo: con 2+ tramos se envía `payments[]` tal cual y se
+    // OMITEN las claves escalares de método (el backend prefiere
+    // `payments[]`). Con uno, el body escalar es idéntico al actual.
+    const hasMultiPayments =
+      Array.isArray(payload.payments) && payload.payments.length >= 2;
     const body = {
       table_session_id: payload.table_session_id,
       subtotal: payload.subtotal,
       total_amount: payload.total_amount,
-      store_payment_method_id: payload.store_payment_method_id,
-      ...(payload.amount_received != null
-        ? { amount_received: payload.amount_received }
-        : {}),
-      ...(payload.payment_reference
-        ? { payment_reference: payload.payment_reference }
-        : {}),
+      ...(hasMultiPayments
+        ? { payments: payload.payments }
+        : {
+            store_payment_method_id: payload.store_payment_method_id,
+            ...(payload.amount_received != null
+              ? { amount_received: payload.amount_received }
+              : {}),
+            ...(payload.payment_reference
+              ? { payment_reference: payload.payment_reference }
+              : {}),
+            // CP-POLLO-ARABE-727 F.1 Round 2 (M) — el mesero elige la cuenta en el
+            // collector (table-payment-modal la emite en TablePaymentSubmit) y el
+            // body del POST /store/payments/pos la descartaba: el cierre de mesa con
+            // transferencia llegaba sin bank_account_id y se perseguía NULL.
+            ...(payload.bank_account_id != null
+              ? { bank_account_id: payload.bank_account_id }
+              : {}),
+          }),
       ...(payload.tip_amount != null && payload.tip_amount > 0
         ? { tip_amount: payload.tip_amount }
-        : {}),
-      // CP-POLLO-ARABE-727 F.1 Round 2 (M) — el mesero elige la cuenta en el
-      // collector (table-payment-modal la emite en TablePaymentSubmit) y el
-      // body del POST /store/payments/pos la descartaba: el cierre de mesa con
-      // transferencia llegaba sin bank_account_id y se perseguía NULL.
-      ...(payload.bank_account_id != null
-        ? { bank_account_id: payload.bank_account_id }
         : {}),
     };
     return this.http
@@ -754,6 +779,13 @@ export class TablesService {
       parsed.errorCode === 'ORDER_ITEM_NOT_DELIVERABLE'
         ? ERROR_MESSAGES['ORDER_ITEM_NOT_DELIVERABLE']
         : parsed.userMessage;
+
+    // Cobro multimétodo: el `errorCode` viene en superficie vía
+    // `parseApiError`; sin entrada en `ERROR_MESSAGES` caería al mensaje
+    // genérico, así que se traduce al copy en español.
+    if (parsed.errorCode && MULTI_TENDER_ERROR_COPY[parsed.errorCode]) {
+      message = MULTI_TENDER_ERROR_COPY[parsed.errorCode];
+    }
 
     if (message === DEFAULT_ERROR_MESSAGE) {
       message = tablesStatusErrorCopy(error);

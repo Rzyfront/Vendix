@@ -8,9 +8,10 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke:
+    - "Splitting withholding across multi-tender payment legs"
     - "Adding new automatic journal entries"
     - "Debugging missing accounting entries"
     - "Adding new mapping keys to accounting"
@@ -132,6 +133,32 @@ layer. Keep `source_id` unique per real business event when wiring a new flow:
 - When adding a new flow that can fire more than once per parent record (partial
   fulfillment, partial payment, retries), identify the correct atomic child id to
   use as `source_id` — do not default to the parent id.
+
+## Withholding On Multi-Tender Payments (N `payment.received` per sale)
+
+A customer that is a withholding agent (retención sufrida) is recognized ONCE
+per order. A multi-tender POS payment emits one `payment.received` per leg, so
+each leg's `withholding_breakdown` carries only its prorated share:
+
+- Pure `splitWithholdingLines(lines, legAmounts)` in
+  `apps/backend/src/domains/store/payments/utils/payment-sale-share.util.ts`
+  splits each line by leg amount in integer cents, residue on the LAST leg
+  (same criterion as `sale_share` / `resolvePaymentReceivedSaleFields`), so
+  Σ portions = original line to the cent. `legAmounts.length <= 1` returns the
+  original lines untouched (historical payload).
+- Used in `payments.service.ts` in the per-leg emission loop
+  (`withholdingByLeg[legIndex]`, ~:1815).
+- Why: all withholding on one leg unbalances that entry (every
+  `payment.received` must balance on its own); repeating it on every leg posts
+  it N times.
+- Anti-pattern: `withholding_breakdown: wh.lines` inside the per-leg loop.
+  (`credit_sale.created` is a single event and keeps `wh.lines`.)
+- Known issue (QUI-576, open): the no-invoice branch of
+  `AutoEntryService.onPaymentReceived` (`auto-entry.service.ts` ~:3386-3476)
+  debits cash/bank for the leg's GROSS `amount` and also DR 1355 for the
+  withholding → imbalance equal to the withholding (E2E evidence:
+  `debit=33000, credit=30000`, rows in `accounting_entry_failures`). Net vs
+  gross decision pending — do NOT "fix" the proration to compensate.
 
 ## Third-Party Snapshot On Journal Lines
 

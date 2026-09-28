@@ -437,6 +437,69 @@ describe('UblCommonBuilder.buildCustomerParty — Anexo Técnico 19 structural b
     );
   });
 
+  it('persona jurídica derivada del CÓDIGO DIAN "31" sin person_type explícito (incidente Óptica Panorama) — emite cac:PartyLegalEntity, no cac:Person', () => {
+    // Antes: `customer.person_type ?? (document_type_literal === 'NIT' ? …)`
+    // comparaba por el LITERAL. Un `document_type` que llega como código DIAN
+    // sin normalizar ('31', sin pasar por `normalizeAcquirerDocumentType`
+    // aguas arriba) caía a NATURAL. Acá se fija `document_type: '31'`
+    // (código, NO el literal 'NIT') y `person_type: null` (nada explícito).
+    const xml = buildCustomerPartyXml({
+      document_type: '31',
+      document_number: '800214345',
+      verification_digit: '7',
+      person_type: null,
+      legal_name: 'Óptica Panorama SAS',
+      tax_responsibilities: ['O-48'],
+      ciiu_code: null,
+    });
+
+    expect(xml).toContain('<cac:PartyLegalEntity>');
+    expect(xml).not.toContain('<cac:Person>');
+    const customer_block = customerPartyXml(xml);
+    expect(customer_block).toMatch(
+      /<cbc:AdditionalAccountID>1<\/cbc:AdditionalAccountID>/,
+    );
+  });
+
+  it('cliente responsable de IVA (O-48 en el RUT) ⇒ cac:TaxScheme del adquiriente emite 01/IVA, no ZZ', () => {
+    // Regresión del defecto: `customer.tax_regime === '48'` era
+    // estructuralmente imposible (`tax_regime` sólo vale '1'/'2' en este
+    // objeto), así que TODO adquiriente resolvía 'ZZ' sin importar su
+    // responsabilidad real de IVA. Ahora se deriva de
+    // `tax_responsibilities` (RUT casilla 53) vía `resolveFiscalResponsibilityFlags`.
+    const xml = buildCustomerPartyXml({
+      document_type: 'NIT',
+      document_number: '800214345',
+      verification_digit: '7',
+      person_type: 'JURIDICA',
+      legal_name: 'Óptica Panorama SAS',
+      tax_responsibilities: ['O-48'],
+      ciiu_code: null,
+    });
+
+    const customer_block = customerPartyXml(xml);
+    expect(customer_block).toMatch(
+      /<cac:TaxScheme>\s*<cbc:ID>01<\/cbc:ID>\s*<cbc:Name>IVA<\/cbc:Name>\s*<\/cac:TaxScheme>/,
+    );
+  });
+
+  it('cliente NO responsable de IVA (sin O-48 en el RUT) ⇒ cac:TaxScheme del adquiriente emite ZZ/No aplica', () => {
+    const xml = buildCustomerPartyXml({
+      document_type: 'NIT',
+      document_number: '800214345',
+      verification_digit: '7',
+      person_type: 'JURIDICA',
+      legal_name: 'Sin Responsabilidad IVA SAS',
+      tax_responsibilities: ['O-13'],
+      ciiu_code: null,
+    });
+
+    const customer_block = customerPartyXml(xml);
+    expect(customer_block).toMatch(
+      /<cac:TaxScheme>\s*<cbc:ID>ZZ<\/cbc:ID>\s*<cbc:Name>No aplica<\/cbc:Name>\s*<\/cac:TaxScheme>/,
+    );
+  });
+
   it('cliente agente de retención — emite UN solo cbc:AdditionalAccountID y declara O-23 en cbc:TaxLevelCode cuando el RUT lo trae', () => {
     const xml = buildCustomerPartyXml({
       document_type: 'NIT',

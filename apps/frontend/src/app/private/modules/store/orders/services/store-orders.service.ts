@@ -31,6 +31,7 @@ import {
   RefundCoverageResult,
   FastTrackOrderDto,
   AssignShippingMethodDto,
+  OrderTimelineResponse,
 } from '../interfaces/order.interface';
 
 /**
@@ -86,6 +87,33 @@ export type KitchenDisposition = 'reuse' | 'waste';
  */
 export interface FlowCancelOrderDto extends CancelOrderDto {
   kitchenDisposition?: KitchenDisposition;
+}
+
+/**
+ * B5 — Acción de reparación de `POST /store/orders/:id/shipping-tax/repair`.
+ * Espejo de `RepairShippingTaxAction` en el backend
+ * (`orders/dto/repair-shipping-tax.dto.ts`), declarado aquí para no tocar
+ * `order.interface.ts` fuera del alcance de este cambio.
+ */
+export type RepairShippingTaxAction = 'complete_rate' | 'clear';
+
+/** Copia del impuesto del envío tal como queda tras la reparación. */
+export interface RepairedShippingTaxCopy {
+  shipping_tax_rate_id: number | null;
+  shipping_tax_name: string | null;
+  shipping_tax_type: string | null;
+  shipping_tax_rate: number | null;
+  shipping_tax_amount: number;
+}
+
+/** Espejo de `RepairShippingTaxResult` (backend). */
+export interface RepairShippingTaxResult {
+  order_id: number;
+  action: RepairShippingTaxAction;
+  shipping_tax: RepairedShippingTaxCopy;
+  /** Eco de lectura: la reparación nunca los modifica. */
+  shipping_cost: number;
+  grand_total: number;
 }
 
 export interface UpdateAddressPayload {
@@ -331,17 +359,40 @@ export class StoreOrdersService {
     );
   }
 
-  getOrderTimeline(orderId: string): Observable<any[]> {
+  /**
+   * order-truth-and-invoice-tz plan, Step 7 — the backend now forks:
+   * `{legacy:false, events: OrderEvent[]}` for an order with `order_events`
+   * rows, `{legacy:true, events: <raw audit_logs>}` for one without (fallback,
+   * rendered exactly as before). This unwraps the `{success, data}` envelope
+   * and defensively falls back to `{legacy:true, events:[]}` for any other
+   * shape (envelope-unwrap failure, network error), matching the old
+   * fail-open behaviour of returning an empty history instead of crashing
+   * the order detail page.
+   */
+  getOrderTimeline(orderId: string): Observable<OrderTimelineResponse> {
     const url = `${this.apiUrl}/store/orders/${orderId}/timeline`;
 
     return this.http.get<any>(url).pipe(
-      map((r) => (Array.isArray(r?.data) ? r.data : Array.isArray(r) ? r : [])),
+      map((r) => {
+        const body = r && typeof r === 'object' && 'data' in r ? r.data : r;
+        if (body && typeof body === 'object' && Array.isArray(body.events)) {
+          return {
+            legacy: body.legacy !== false,
+            events: body.events,
+          } as OrderTimelineResponse;
+        }
+        // Defensive: a bare array is the pre-fork legacy shape.
+        if (Array.isArray(body)) {
+          return { legacy: true, events: body } as OrderTimelineResponse;
+        }
+        return { legacy: true, events: [] } as OrderTimelineResponse;
+      }),
       catchError((error) => {
         console.error('Error fetching order timeline:', error);
         // CP-POS-SVC-PERF-001 — never propagate as fatal: order detail
         // must render even when the timeline endpoint fails. The page
         // shows an empty history instead of a full crash.
-        return of([] as any[]);
+        return of({ legacy: true, events: [] } as OrderTimelineResponse);
       }),
     );
   }
@@ -874,6 +925,29 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error updating address:', error);
+        return throwError(() => this.buildApiError(error));
+      }),
+    );
+  }
+
+  /**
+   * B5 — `POST /store/orders/:id/shipping-tax/repair`.
+   *
+   * Repara la copia del impuesto del envío (`orders.shipping_tax_*`):
+   * `complete_rate` la completa desde su tarifa conservando el monto
+   * cobrado; `clear` la vacía (el backend responde 409 si el impuesto ya
+   * está contabilizado). Nunca toca `shipping_cost` ni `grand_total`.
+   */
+  repairShippingTax(
+    orderId: number,
+    action: RepairShippingTaxAction,
+    reason: string,
+  ): Observable<RepairShippingTaxResult> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/shipping-tax/repair`;
+    return this.http.post<any>(url, { action, reason }).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error repairing shipping tax:', error);
         return throwError(() => this.buildApiError(error));
       }),
     );

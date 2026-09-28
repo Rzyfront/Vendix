@@ -33,6 +33,10 @@ import {
   dianSum,
 } from '../../utils/dian-money.util';
 import { dianPartyId, onlyDigits } from '../../../../../common/utils/nit.util';
+import {
+  normalizeAcquirerDocumentType,
+  resolveMissingAcquirerDocumentType,
+} from '../../utils/acquirer-identity.resolver';
 import { resolveIssuerFiscalIdentity } from '../../utils/fiscal-issuer.util';
 import { DianSoapClient, WsSecurityCredentials } from './dian-soap.client';
 import { DianXmlSignerService } from './dian-xml-signer.service';
@@ -91,6 +95,8 @@ import {
 import {
   DEFAULT_STORE_TIMEZONE,
   localOffsetString,
+  resolveOrganizationTimezone,
+  resolveStoreTimezone,
 } from '../../../../../common/utils/store-timezone.util';
 
 type DianConfigurationType =
@@ -2287,7 +2293,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   ): Promise<DianCustomerData> {
     const address = this.normalizeAddress(invoice_data.customer_address);
 
-    const declared_type = invoice_data.customer_document_type
+    let declared_type = invoice_data.customer_document_type
       ?.trim()
       .toUpperCase();
     const declared_number = String(invoice_data.customer_tax_id ?? '').trim();
@@ -2386,12 +2392,52 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       );
     }
 
-    // Literal from `users.document_type` — keep the source-of-truth string so
-    // `@schemeName` carries the canonical type name. Un adquiriente identificado
-    // con número y nombre pero sin tipo declarado es una cédula: es el documento
-    // que tiene una persona natural colombiana por defecto, y el tipo se deriva
-    // —no se inventa— del hecho de que el número existe.
-    const document_type_literal = declared_type || 'CC';
+    // Literal from `users.document_type`. YA NO se completa ciegamente con
+    // 'CC' cuando falta: eso era la mitad exacta del incidente Óptica Panorama
+    // SAS / Pollo Árabe — un NIT de persona jurídica sin tipo declarado salía
+    // transmitido como Cédula de persona natural. `CustomerFiscalIdentityValidator`
+    // (vía `acquirer-rail.resolver.ts` en creación) ya debería haber bloqueado
+    // esto antes de llegar aquí; este bloque es defensa en profundidad para
+    // cualquier documento que alcance `send()` sin haber pasado por esa
+    // puerta (p.ej. notas crédito/débito que arman su propio
+    // `ProviderInvoiceData`).
+    //
+    // P1-B: se aplica la MISMA política que el resolvedor único
+    // (`resolveMissingAcquirerDocumentType` en `acquirer-identity.resolver.ts`)
+    // usa en validación y en `acquirer-rail.resolver.ts` en creación, para que
+    // los tres puntos juzguen lo mismo. Antes, CUALQUIER ficha con número+nombre
+    // y `document_type` NULL bloqueaba acá — 67 fichas en prod, de las cuales
+    // sólo 21 tienen forma de NIT (9 dígitos que arrancan en 8/9). Ahora sólo
+    // bloquea cuando hay señal real de persona jurídica (persona_type
+    // JURIDICA, razón social, o número con forma de NIT); el resto infiere 'CC'
+    // y deja constancia con `logger.warn`.
+    if (!declared_type) {
+      // OJO: `declared_name` (`ProviderInvoiceData.customer_name`) es el
+      // nombre genérico — natural o jurídica — y a esta altura SIEMPRE está
+      // presente (el throw de arriba ya exigió `declared_number` y
+      // `declared_name` juntos). NO se pasa como `legal_name`: ese campo de
+      // la política es la razón social JURIDICA-only del resolvedor único
+      // (`customer.legal_name`, ausente en `ProviderInvoiceData`); pasar el
+      // nombre genérico ahí volvería `should_block` siempre verdadero y
+      // anularía la corrección. La señal disponible acá es `person_type` +
+      // forma de NIT.
+      const decision = resolveMissingAcquirerDocumentType({
+        document_number: declared_number,
+        person_type: invoice_data.customer_person_type,
+      });
+      if (decision.should_block) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED,
+          'No se puede emitir: el adquiriente tiene identificación y nombre pero no tipo de documento (CC, NIT, CE, …). Complétalo en la ficha del cliente antes de emitir.',
+          { role, document_number: declared_number },
+        );
+      }
+      declared_type = decision.inferred_document_type ?? 'CC';
+      this.logger.warn(
+        `[DIAN] Documento ${invoice_data.invoice_number}: adquiriente sin document_type declarado (documento=${declared_number}); se infiere '${declared_type}' por política (sin señal de persona jurídica).`,
+      );
+    }
+    const document_type_literal = declared_type;
 
     // CASCADA DE RESPALDO — dirección fiscal → otra del cliente → tienda.
     const resolved_address = await this.resolveAcquirerAddressForDocument({
@@ -2631,11 +2677,17 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
    *
    *   '1' / 'JURIDICA' / 'juridica'  → 'JURIDICA'
    *   '2' / 'NATURAL'  / 'natural'   → 'NATURAL'
-   *   absent                          → derive from the document type literal
-   *                                    (NIT → 'JURIDICA', else 'NATURAL');
-   *                                    mirrors the historical fallback so an
-   *                                    unset person_type still produces a
-   *                                    structurally sound customer block.
+   *   absent                          → derive from the document type's DIAN
+   *                                    CODE (31 → 'JURIDICA', else 'NATURAL'),
+   *                                    not from the literal. `document_type`
+   *                                    can legitimately arrive as either
+   *                                    vocabulary (see
+   *                                    `normalizeAcquirerDocumentType`); a
+   *                                    raw '31' compared against the literal
+   *                                    `'NIT'` never matched, which is the
+   *                                    other half of the Óptica Panorama SAS /
+   *                                    Pollo Árabe incident (NIT persona
+   *                                    jurídica emitida como natural).
    */
   private translatePersonTypeToStructural(
     raw: string | undefined,
@@ -2645,7 +2697,8 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     if (normalized === '1' || normalized === 'JURIDICA') return 'JURIDICA';
     if (normalized === '2' || normalized === 'NATURAL') return 'NATURAL';
     if (normalized) return null;
-    return document_type_literal === 'NIT' ? 'JURIDICA' : 'NATURAL';
+    const { code } = normalizeAcquirerDocumentType(document_type_literal);
+    return code === '31' ? 'JURIDICA' : 'NATURAL';
   }
 
   private normalizeDocumentType(document_type?: string): string {
@@ -2762,7 +2815,36 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       // La firma se estampa con el instante que el propio documento declara, no
       // con el reloj de pared. Ver `resolveSigningInstant`.
       this.resolveSigningInstant(xml),
+      // Step 8 — la civil date/hora de `xades:SigningTime` se estampa en la
+      // zona de la TIENDA EMISORA, no siempre Bogotá. `config` ya trae
+      // `store_id`/`organization_id`, así que no hace falta ensanchar la
+      // firma pública de `signXml` ni de sus 7 llamadores.
+      await this.resolveConfigTimezone(config),
     );
+  }
+
+  /**
+   * Zona horaria de la tienda (o de la organización si la factura es a nivel
+   * organización) dueña de `config`, para `xades:SigningTime` (Step 8).
+   * Nunca lanza: `dian-signing-instant.spec.ts` ejercita `signXml` sobre un
+   * `DianDirectProvider` armado a mano (`Object.create(...)`) sin `prisma` —
+   * un fallo de resolución cae a `DEFAULT_STORE_TIMEZONE`, que es
+   * exactamente el default que ya tenía `formatColombianTime`.
+   */
+  private async resolveConfigTimezone(
+    config: DianConfigDecrypted,
+  ): Promise<string> {
+    try {
+      if (config.store_id != null) {
+        return await resolveStoreTimezone(this.prisma, config.store_id);
+      }
+      return await resolveOrganizationTimezone(
+        this.prisma.withoutScope(),
+        config.organization_id,
+      );
+    } catch {
+      return DEFAULT_STORE_TIMEZONE;
+    }
   }
 
   /**

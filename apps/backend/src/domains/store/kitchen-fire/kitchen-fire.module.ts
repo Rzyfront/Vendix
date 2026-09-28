@@ -5,6 +5,8 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { RecipesModule } from '../recipes/recipes.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { KdsModule } from '../kds/kds.module';
+import { OrderHistoryModule } from '../orders/order-history/order-history.module';
+import { AccountingModule } from '../accounting/accounting.module';
 import { KitchenFireController } from './kitchen-fire.controller';
 import { KitchenFireService } from './kitchen-fire.service';
 
@@ -23,6 +25,8 @@ import { KitchenFireService } from './kitchen-fire.service';
  *     — reused for the KDS `kitchen:{store_id}` event channel.
  *   - KdsModule:          KdsSessionsService — QUI-760 imputa el consumo a
  *     la sesión abierta desde los handlers de gestión de ticket.
+ *   - OrderHistoryModule: OrderHistoryService — registra `kitchen_fired` en
+ *     `order_events` dentro del tx del fire/resend.
  *
  * Exports KitchenFireService for other domains that want to peek at
  * kitchen tickets.
@@ -35,6 +39,8 @@ import { KitchenFireService } from './kitchen-fire.service';
     RecipesModule,
     NotificationsModule,
     KdsModule,
+    OrderHistoryModule,
+    AccountingModule,
   ],
   controllers: [KitchenFireController],
   providers: [KitchenFireService],

@@ -1,7 +1,10 @@
 import {
   computePaymentSaleShare,
+  prorateWithholdingLines,
   resolvePaymentReceivedSaleFields,
+  splitWithholdingLines,
 } from './payment-sale-share.util';
+import type { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
 
 /**
  * Cuenta dividida: la porción de venta de cada pago debe cuadrar el asiento de
@@ -351,5 +354,186 @@ describe('resolvePaymentReceivedSaleFields', () => {
         .reduce((acc, row) => acc + c(row.tax_amount), 0);
     expect(typed('iva')).toBe(c(1900.01) + c(190));
     expect(typed('inc')).toBe(c(800.03));
+  });
+});
+
+/**
+ * La retención se reconoce UNA vez por orden: `splitWithholdingLines`
+ * prorratea cada línea de `wh.lines` entre los tramos de un cobro
+ * multimétodo en proporción a su monto, con el residuo en el ÚLTIMO tramo.
+ */
+describe('splitWithholdingLines', () => {
+  const c = (n: number) => Math.round(n * 100);
+  const RETEFUENTE: WithholdingLine = {
+    withholding_type: 'retefuente',
+    concept_code: 'RF-COMPRAS',
+    rate: 0.025,
+    base: 84034,
+    amount: 2100.85,
+    role: 'suffered',
+    account_role: 'withholding.suffered.retefuente_receivable',
+  };
+  const RETEICA: WithholdingLine = {
+    withholding_type: 'reteica',
+    concept_code: 'RI-COMERCIO',
+    rate: 0.007,
+    base: 84034,
+    amount: 588.24,
+    role: 'suffered',
+    account_role: 'withholding.suffered.reteica_receivable',
+  };
+
+  it('un solo tramo ⇒ líneas intactas envueltas en un arreglo', () => {
+    expect(splitWithholdingLines([RETEFUENTE, RETEICA], [16610])).toEqual([
+      [RETEFUENTE, RETEICA],
+    ]);
+  });
+
+  it('sin líneas ⇒ un arreglo vacío por tramo', () => {
+    expect(splitWithholdingLines([], [20000, 80000])).toEqual([[], []]);
+    expect(splitWithholdingLines(undefined, [20000, 80000])).toEqual([[], []]);
+  });
+
+  it('dos tramos (20.000 / 80.000): cada línea se reparte 1:4 y Σ = original al centavo', () => {
+    const [first, last] = splitWithholdingLines(
+      [RETEFUENTE, RETEICA],
+      [20000, 80000],
+    );
+    // RF: 2.100,85 × 0,2 = 420,17 exacto; RI: 588,24 × 0,2 = 117,648 ⇒ 117,64
+    // hacia abajo, remanente 470,60 en el último tramo.
+    expect(first).toEqual([
+      { ...RETEFUENTE, amount: 420.17 },
+      { ...RETEICA, amount: 117.64 },
+    ]);
+    expect(last).toEqual([
+      { ...RETEFUENTE, amount: 1680.68 },
+      { ...RETEICA, amount: 470.6 },
+    ]);
+    // Otros campos (tipo, concepto, tarifa, base, rol) viajan intactos.
+    expect(first[0].withholding_type).toBe('retefuente');
+    expect(first[0].rate).toBe(0.025);
+    expect(first[0].base).toBe(84034);
+
+    const total = (rows: WithholdingLine[][], concept: string) =>
+      rows.reduce(
+        (sum, leg) =>
+          sum +
+          c(leg.find((row) => row.concept_code === concept)?.amount ?? 0),
+        0,
+      );
+    expect(total([first, last], 'RF-COMPRAS')).toBe(c(RETEFUENTE.amount));
+    expect(total([first, last], 'RI-COMERCIO')).toBe(c(RETEICA.amount));
+  });
+
+  it('tres tramos iguales sobre 100,00: el redondeo cae en el ÚLTIMO tramo, no en el de mayor residuo', () => {
+    const line: WithholdingLine = { ...RETEFUENTE, amount: 100 };
+    const legs = splitWithholdingLines([line], [10000, 10000, 10000]);
+    // 100,00 / 3 = 33,33333…; floor por tramo = 33,33 para los dos primeros
+    // (empatados en residuo), y el remanente completo (33,34) va al ÚLTIMO,
+    // no al de menor índice como haría un reparto por mayor residuo.
+    expect(legs.map((leg) => leg[0]?.amount)).toEqual([33.33, 33.33, 33.34]);
+    expect(legs.reduce((sum, leg) => sum + c(leg[0]?.amount ?? 0), 0)).toBe(
+      c(100),
+    );
+  });
+
+  it('un tramo mínimo cuya porción redondea a cero queda fuera del desglose de ese tramo', () => {
+    const line: WithholdingLine = { ...RETEFUENTE, amount: 0.01 };
+    const [tiny, rest] = splitWithholdingLines([line], [1, 999999]);
+    // 0,01 × (1/1000000) redondea a 0 centavos ⇒ el tramo mínimo no lleva
+    // esa línea; el remanente completo (el centavo entero) va al último.
+    expect(tiny).toEqual([]);
+    expect(rest).toEqual([{ ...line, amount: 0.01 }]);
+  });
+});
+
+// PR #858 hallazgo 3 — con abonos previos, el cobro sólo reconoce la porción
+// de la retención que le corresponde (Σ tramos / grand_total).
+describe('prorateWithholdingLines', () => {
+  const retefuente: WithholdingLine = {
+    withholding_type: 'retefuente',
+    concept_code: 'RF-COMPRAS',
+    concept_id: 5,
+    rate: 0.025,
+    base: 100000,
+    amount: 2500,
+    role: 'suffered',
+    account_role: 'withholding.suffered.retefuente_receivable',
+  } as WithholdingLine;
+  const reteiva: WithholdingLine = {
+    ...retefuente,
+    withholding_type: 'reteiva',
+    concept_code: 'RIVA',
+    concept_id: 6,
+    rate: 0.15,
+    base: 19000,
+    amount: 2850,
+    account_role: 'withholding.suffered.reteiva_receivable',
+  } as WithholdingLine;
+
+  it('cobro por el total: devuelve las MISMAS líneas (identidad)', () => {
+    const lines = [retefuente, reteiva];
+    expect(prorateWithholdingLines(lines, 119000, 119000)).toBe(lines);
+  });
+
+  it('sin grand_total (0 o ausente) no prorratea', () => {
+    const lines = [retefuente];
+    expect(prorateWithholdingLines(lines, 50000, 0)).toBe(lines);
+  });
+
+  it('sin líneas o porción cero devuelve []', () => {
+    expect(prorateWithholdingLines(undefined, 10, 100)).toEqual([]);
+    expect(prorateWithholdingLines([retefuente], 0, 100)).toEqual([]);
+  });
+
+  it('abono del 40 %: escala monto y base, conserva la tarifa', () => {
+    const [line] = prorateWithholdingLines([retefuente], 47600, 119000);
+    expect(line.amount).toBe(1000);
+    expect(line.base).toBe(40000);
+    expect(line.rate).toBe(0.025);
+    expect(line.concept_id).toBe(5);
+  });
+
+  it('residuo por mayor resto: Σ porciones = round(Σ líneas × factor) al centavo', () => {
+    // 1/3 de 25,00 + 28,50 = 53,50 → 17,83 (17,8333…)
+    const out = prorateWithholdingLines(
+      [
+        { ...retefuente, amount: 25 },
+        { ...reteiva, amount: 28.5 },
+      ],
+      100,
+      300,
+    );
+    const cents = out.map((line) => Math.round(line.amount * 100));
+    expect(cents.reduce((a, b) => a + b, 0)).toBe(1783);
+    // 833,33 y 950 → floors 833 + 950 = 1783, sin resto que repartir.
+    expect(cents).toEqual([833, 950]);
+  });
+
+  it('el resto va a la línea de mayor fracción', () => {
+    // 2/3 de 0,10 + 0,10 = 0,1333… → 13 ¢; raw 6,67 y 6,67 → floors 6+6, resto 1 a la primera.
+    const out = prorateWithholdingLines(
+      [
+        { ...retefuente, amount: 0.1 },
+        { ...reteiva, amount: 0.1 },
+      ],
+      2,
+      3,
+    );
+    expect(out.map((line) => Math.round(line.amount * 100))).toEqual([7, 6]);
+  });
+
+  it('una línea que queda en cero se descarta', () => {
+    const out = prorateWithholdingLines(
+      [
+        { ...retefuente, amount: 1000 },
+        { ...reteiva, amount: 0.01 },
+      ],
+      1,
+      1000,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].concept_id).toBe(5);
+    expect(out[0].amount).toBe(1);
   });
 });

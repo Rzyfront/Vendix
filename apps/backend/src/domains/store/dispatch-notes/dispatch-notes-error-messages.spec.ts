@@ -58,6 +58,7 @@ describe('DispatchNotesService — errores accionables de orden', () => {
       id: orderId,
       state: 'finished',
       delivery_type: 'home_delivery',
+      order_items: [],
     });
 
     await expectRejection(
@@ -73,6 +74,7 @@ describe('DispatchNotesService — errores accionables de orden', () => {
       id: orderId,
       state: 'processing',
       delivery_type: 'direct_delivery',
+      order_items: [],
     });
 
     await expectRejection(

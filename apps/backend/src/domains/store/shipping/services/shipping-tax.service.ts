@@ -15,8 +15,11 @@ import {
   EMPTY_SHIPPING_TAX,
   buildShippingTaxBreakdownRow,
   evaluateShippingTaxCategory,
+  resolveShippingCharge,
   resolveShippingTaxSnapshot,
+  type ChargedShippingCost,
   type ShippingTaxBreakdownRow,
+  type ShippingTaxCategoryInput,
   type ShippingTaxOrderInput,
   type ShippingTaxSnapshot,
   type ShippingTaxType,
@@ -49,6 +52,12 @@ export interface ShippingRateTaxOptions {
     rate_percent: number | null;
     eligible: boolean;
     reason?: string;
+    /**
+     * Pista de preselección para tarifas NUEVAS (patrón
+     * `resolveCatalogInclusiveDefault`): el `is_inclusive` crudo de la
+     * categoría. Nunca entra al cálculo — el modo vive en la tarifa.
+     */
+    is_inclusive: boolean | null;
   }>;
   issuer: {
     vat_responsible: boolean;
@@ -68,6 +77,7 @@ export const SHIPPING_TAX_CATEGORY_SELECT = {
   id: true,
   name: true,
   tax_type: true,
+  is_inclusive: true,
   store_id: true,
   organization_id: true,
   tax_rates: { select: { id: true, name: true, rate: true } },
@@ -77,10 +87,26 @@ type CategoryRow = {
   id: number;
   name: string;
   tax_type: string | null;
+  is_inclusive: boolean | null;
   store_id: number | null;
   organization_id: number | null;
   tax_rates: Array<{ id: number; name: string; rate: unknown }>;
 };
+
+/**
+ * Contexto fiscal de una tarifa para el cálculo "precio → bruto". Una
+ * entrada por cotización (`loadRateTaxContext`): el consumidor llama al
+ * resolutor puro `resolveShippingCharge` por opción sin releer la DB.
+ */
+export interface RateTaxContext {
+  rate_id: number;
+  /** Modo de la tarifa (`shipping_rates.tax_is_inclusive`). */
+  tax_is_inclusive: boolean;
+  /** Categoría si está en el alcance de la tienda; null ⇒ sin impuesto. */
+  category: ShippingTaxCategoryInput | null;
+  vat_responsible: boolean;
+  inc_responsible: boolean;
+}
 
 interface IssuerContext {
   organization_id: number | null;
@@ -94,8 +120,9 @@ export const SHIPPING_INC_RESTAURANT_SUGGESTION =
 
 /**
  * Carga tarifa → categoría → tasa, aplica la regla del emisor y devuelve la
- * copia del impuesto del envío. También valida la configuración de la tarifa
- * y arma las opciones del wizard. La regla fiscal vive en
+ * copia del impuesto del envío o el costo cobrado (`chargeForRate`,
+ * `loadRateTaxContext`). También valida la configuración de la tarifa y arma
+ * las opciones del wizard. La regla fiscal vive en
  * `utils/shipping-tax.util.ts` (pura); aquí solo hay lectura y avisos.
  */
 @Injectable()
@@ -191,6 +218,144 @@ export class ShippingTaxService {
     return result.snapshot;
   }
 
+  /**
+   * Costo cobrado al cliente por la tarifa `rate_id` (`ChargedShippingCost`,
+   * siempre el BRUTO): incluido ⇒ bruto = precio de tarifa; agregado ⇒ bruto
+   * = base + trunc(base·r). Si el impuesto no aplica ⇒ bruto = precio: nunca
+   * hay recargo sin impuesto registrado.
+   *
+   * Nunca lanza por el impuesto (es accesorio a la venta): tarifa ajena o
+   * inexistente, sin categoría, categoría no elegible o fuera de alcance ⇒
+   * `applies:false` con el motivo. Emisor sin O-48/O-33 según el tipo ⇒
+   * `vat_not_responsible`/`inc_not_responsible` + warn.
+   *
+   * `client`: pasar el `tx` si se está dentro de una transacción. `store_id`
+   * explícito para no depender del contexto de request (webhooks, jobs).
+   */
+  async chargeForRate(
+    client: ShippingTaxDbClient | null | undefined,
+    rate_id: number | null | undefined,
+    rate_price: unknown,
+    options: { store_id: number },
+  ): Promise<ChargedShippingCost> {
+    const noRate = (tax_is_inclusive: boolean): ChargedShippingCost =>
+      resolveShippingCharge({
+        rate_price,
+        category: null,
+        tax_is_inclusive,
+      });
+    if (!rate_id || !options?.store_id) return noRate(true);
+
+    const db: ShippingTaxDbClient = client ?? this.prisma.withoutScope();
+    const store_id = options.store_id;
+
+    const rate = await db.shipping_rates.findFirst({
+      where: {
+        id: rate_id,
+        shipping_zone: {
+          OR: [{ store_id }, { is_system: true, store_id: null }],
+        },
+      },
+      select: {
+        id: true,
+        tax_is_inclusive: true,
+        tax_category: { select: SHIPPING_TAX_CATEGORY_SELECT },
+      },
+    });
+    if (!rate) return noRate(true);
+    const tax_is_inclusive = rate.tax_is_inclusive ?? true;
+    const category = (rate.tax_category ?? null) as CategoryRow | null;
+    if (!category) return noRate(tax_is_inclusive);
+
+    const issuer = await this.readIssuerContext(db, store_id);
+    if (!this.categoryInScope(category, store_id, issuer)) {
+      this.logger.warn(
+        `[shipping-tax] store=${store_id} rate=${rate_id} category=${category.id} ` +
+          'fuera del alcance fiscal de la tienda; el envío sale sin impuesto',
+      );
+      return noRate(tax_is_inclusive);
+    }
+
+    const charge = resolveShippingCharge({
+      rate_price,
+      category,
+      tax_is_inclusive,
+      vat_responsible: isVatResponsible(issuer?.fiscal_data ?? null),
+      inc_responsible: isIncResponsible(issuer?.fiscal_data ?? null),
+    });
+    if (!charge.applies && charge.reason !== 'no_price') {
+      this.logger.warn(
+        `[shipping-tax] store=${store_id} rate=${rate_id} category=${category.id} ` +
+          `envío sin impuesto (${charge.reason})`,
+      );
+    }
+    return charge;
+  }
+
+  /**
+   * Contexto fiscal de varias tarifas en UNA lectura (cotización): modo +
+   * categoría en alcance + responsabilidades del emisor (una sola lectura del
+   * emisor para todo el lote). Tarifas ajenas o inexistentes ⇒ ausentes del
+   * mapa (el consumidor cobra precio = bruto). Categoría fuera de alcance ⇒
+   * entrada con `category: null` + warn.
+   *
+   * `store_id` explícito cuando no hay contexto de request (storefront);
+   * omitido ⇒ contexto en curso.
+   */
+  async loadRateTaxContext(
+    rate_ids: readonly number[],
+    options?: { store_id?: number },
+  ): Promise<Map<number, RateTaxContext>> {
+    const out = new Map<number, RateTaxContext>();
+    const ids = [
+      ...new Set(
+        (rate_ids ?? []).filter(
+          (id): id is number => Number.isInteger(id) && id > 0,
+        ),
+      ),
+    ];
+    if (ids.length === 0) return out;
+    const store_id = options?.store_id ?? this.requireStoreId();
+
+    const db = this.prisma.withoutScope();
+    const issuer = await this.readIssuerContext(db, store_id);
+    const vat_responsible = isVatResponsible(issuer?.fiscal_data ?? null);
+    const inc_responsible = isIncResponsible(issuer?.fiscal_data ?? null);
+
+    const rates = await db.shipping_rates.findMany({
+      where: {
+        id: { in: ids },
+        shipping_zone: {
+          OR: [{ store_id }, { is_system: true, store_id: null }],
+        },
+      },
+      select: {
+        id: true,
+        tax_is_inclusive: true,
+        tax_category: { select: SHIPPING_TAX_CATEGORY_SELECT },
+      },
+    });
+    for (const rate of rates) {
+      const category = (rate.tax_category ?? null) as CategoryRow | null;
+      const in_scope =
+        !category || this.categoryInScope(category, store_id, issuer);
+      if (category && !in_scope) {
+        this.logger.warn(
+          `[shipping-tax] store=${store_id} rate=${rate.id} category=${category.id} ` +
+            'fuera del alcance fiscal de la tienda; el envío sale sin impuesto',
+        );
+      }
+      out.set(rate.id, {
+        rate_id: rate.id,
+        tax_is_inclusive: rate.tax_is_inclusive ?? true,
+        category: in_scope ? category : null,
+        vat_responsible,
+        inc_responsible,
+      });
+    }
+    return out;
+  }
+
   /** Fila de desglose del envío desde la COPIA de la orden (ver util). */
   buildShippingTaxBreakdownRow(
     order: ShippingTaxOrderInput | null | undefined,
@@ -264,6 +429,8 @@ export class ShippingTaxService {
 
     const categories: ShippingRateTaxOptions['categories'] = rows.map((row) => {
       const evaluation = evaluateShippingTaxCategory(row);
+      // Pista de preselección para tarifas nuevas; nunca entra al cálculo.
+      const is_inclusive = row.is_inclusive ?? null;
       if (!evaluation.eligible) {
         return {
           id: row.id,
@@ -272,6 +439,7 @@ export class ShippingTaxService {
           rate_percent: evaluation.rate_percent,
           eligible: false,
           reason: evaluation.reason,
+          is_inclusive,
         };
       }
       if (evaluation.tax_type === 'iva' && !vat_responsible) {
@@ -283,6 +451,7 @@ export class ShippingTaxService {
           eligible: false,
           reason:
             'Tu RUT no declara la responsabilidad O-48 (IVA). Completa tu configuración fiscal para cobrar IVA en el envío.',
+          is_inclusive,
         };
       }
       if (evaluation.tax_type === 'inc' && !inc_responsible) {
@@ -294,6 +463,7 @@ export class ShippingTaxService {
           eligible: false,
           reason:
             'Tu RUT no declara la responsabilidad O-33 (INC). Completa tu configuración fiscal para cobrar INC en el envío.',
+          is_inclusive,
         };
       }
       return {
@@ -302,6 +472,7 @@ export class ShippingTaxService {
         tax_type: evaluation.tax_type,
         rate_percent: evaluation.rate_percent,
         eligible: true,
+        is_inclusive,
       };
     });
 

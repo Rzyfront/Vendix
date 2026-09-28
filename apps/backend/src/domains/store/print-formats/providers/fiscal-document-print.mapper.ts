@@ -6,6 +6,10 @@ import { normalizeInvoiceTaxRateNumber } from '../../invoicing/utils/invoice-tax
 import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
 import { resolveFiscalIssuerForPrint } from '../services/fiscal-issuer-identity';
 import { roundMoney2 } from '../../taxes/utils/final-price.util';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  formatStoreDate,
+} from '@common/utils/store-timezone.util';
 
 /**
  * A.3 (CP-facturacion-impuesto-incluido-redondeo, F-066) — el mapeador es una
@@ -217,6 +221,15 @@ export interface FiscalDocumentPrintOptions {
    * Default `?? false` (R-2 de ADR-12: fail-closed, "un papel no se retracta").
    */
   prints_vat_breakdown?: boolean;
+  /**
+   * B17 — zona horaria de la tienda, resuelta por el provider llamante vía
+   * `resolveStoreTimezone()` (una sola vez por documento, igual que
+   * `signedLogoUrl`/`qrBase64`). Este mapeador es una función pura sin DI y
+   * no puede resolverla por su cuenta. Sin este campo cae a
+   * `DEFAULT_STORE_TIMEZONE` (America/Bogota) — mismo fallback que el resto
+   * del módulo de analítica/impresión.
+   */
+  tz?: string;
 }
 
 /**
@@ -257,6 +270,9 @@ export function mapFiscalDocumentToPrintData(
   const org = invoice.organization || {};
   const cust = invoice.customer || ({} as any);
   const res = invoice.resolution || ({} as any);
+  // B17 — antes formateaba con `toLocaleDateString('es-CO')`, que usa la
+  // zona del CONTENEDOR (UTC), no la de la tienda.
+  const tz = options.tz ?? DEFAULT_STORE_TIMEZONE;
 
   const items = (invoice.invoice_items || []).map((it: any, idx: number) => {
     const rawUnitPrice = Number(it.unit_price ?? it.price ?? 0);
@@ -488,13 +504,13 @@ export function mapFiscalDocumentToPrintData(
         ? new Date(invoice.issue_date).toISOString()
         : new Date().toISOString(),
       date_formatted: invoice.issue_date
-        ? new Date(invoice.issue_date).toLocaleDateString('es-CO')
-        : new Date().toLocaleDateString('es-CO'),
+        ? formatStoreDate(new Date(invoice.issue_date), tz)
+        : formatStoreDate(new Date(), tz),
       valid_until: invoice.due_date
         ? new Date(invoice.due_date).toISOString()
         : undefined,
       valid_until_formatted: invoice.due_date
-        ? new Date(invoice.due_date).toLocaleDateString('es-CO')
+        ? formatStoreDate(new Date(invoice.due_date), tz)
         : undefined,
       payment_method: paymentMethod,
       state: invoice.dian_status || 'draft',
@@ -520,13 +536,13 @@ export function mapFiscalDocumentToPrintData(
       resolution_range_from: res.range_from,
       resolution_range_to: res.range_to,
       resolution_date: res.resolution_date
-        ? new Date(res.resolution_date).toLocaleDateString('es-CO')
+        ? formatStoreDate(new Date(res.resolution_date), tz)
         : undefined,
       resolution_valid_from: res.valid_from
-        ? new Date(res.valid_from).toLocaleDateString('es-CO')
+        ? formatStoreDate(new Date(res.valid_from), tz)
         : undefined,
       resolution_valid_to: res.valid_to
-        ? new Date(res.valid_to).toLocaleDateString('es-CO')
+        ? formatStoreDate(new Date(res.valid_to), tz)
         : undefined,
     },
     items,

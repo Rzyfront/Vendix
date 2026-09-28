@@ -95,6 +95,40 @@ describe('DianEventsService', () => {
     expect(sent.generated_by).toBe('customer');
   });
 
+  /**
+   * Step 8 (order-truth-and-invoice-tz-plan.md) — `referenced_document_date`
+   * usaba `value.toISOString().slice(0, 10)`: fecha civil de UTC, no de la
+   * tienda emisora. Una factura emitida de madrugada UTC (noche anterior en
+   * Bogotá, UTC-5) referenciaba un día que, para el emisor, aún no había
+   * llegado. Ahora resuelve la tz de la tienda (`resolveInvoiceTimezone`,
+   * degradado a `DEFAULT_STORE_TIMEZONE` sin `store_settings`) y aplica la
+   * MISMA bifurcación fiscal que `cbc:IssueDate` (`fiscalIssueDate`).
+   */
+  it('referencia la factura con la fecha civil de la tienda, no la de UTC', async () => {
+    const { service, sendDocumentEvent } = createService({
+      prisma: {
+        invoices: {
+          findFirst: jest.fn().mockResolvedValue({
+            ...acceptedInvoice,
+            // 02:30 UTC del 26-sep = 21:30 del 25-sep en Bogotá (UTC-5).
+            issue_date: new Date('2026-09-26T02:30:00Z'),
+          }),
+        },
+      },
+    });
+
+    await service.register(55, {
+      event_code: DIAN_EVENT_CODES.ACKNOWLEDGEMENT,
+    });
+
+    const sent = sendDocumentEvent.mock.calls[0][0];
+    expect(sent.referenced_document_date).toBe('2026-09-25');
+    expect(sent.referenced_document_date).not.toBe('2026-09-26');
+    // La fecha del EVENTO (distinta de la referenciada) sigue siendo un
+    // `YYYY-MM-DD` bien formado, ahora resuelto también en zona de tienda.
+    expect(sent.issue_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
   it('sends 034 from the issuer side', async () => {
     const { service, sendDocumentEvent } = createService();
 

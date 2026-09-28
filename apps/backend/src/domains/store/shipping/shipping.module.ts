@@ -12,9 +12,20 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { SettingsModule } from '../settings/settings.module';
 import { RoutingModule } from '../../ecommerce/routing/routing.module';
+import { GeocodingModule } from '../../ecommerce/geocoding/geocoding.module';
 
 @Module({
-  imports: [PrismaModule, ResponseModule, SettingsModule, RoutingModule],
+  imports: [
+    PrismaModule,
+    ResponseModule,
+    SettingsModule,
+    RoutingModule,
+    // Provee GeocodingService.forward() para ShippingDistanceService.resolveBuyerCoords
+    // (geocodifica al comprador cuando el checkout no manda lat/lng). GeocodingModule
+    // no importa nada de store/*, así que no hay ciclo (mismo patrón que
+    // DispatchRoutesModule).
+    GeocodingModule,
+  ],
   controllers: [
     ShippingController,
     StoreShippingMethodsController,

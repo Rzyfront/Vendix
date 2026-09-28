@@ -286,6 +286,9 @@ export class StoreShippingZonesService {
     const created = await this.prisma.shipping_rates.create({
       data: {
         tax_category_id: dto.tax_category_id ?? null,
+        // El modo vive en la tarifa (default incluido); el update lo lleva el
+        // spread de `update_data` (el DTO lo declara opcional).
+        tax_is_inclusive: dto.tax_is_inclusive ?? true,
         shipping_zone_id: dto.shipping_zone_id,
         shipping_method_id: dto.shipping_method_id,
         name: dto.name,
@@ -489,6 +492,9 @@ export class StoreShippingZonesService {
             min_val: rate.min_val,
             max_val: rate.max_val,
             free_shipping_threshold: rate.free_shipping_threshold,
+            // El clonado copia el modo (sin impuesto: la categoría es de la
+            // tienda y la tarifa del sistema no la lleva).
+            tax_is_inclusive: rate.tax_is_inclusive,
             is_active: true,
             source_type: 'custom',
             copied_from_system_rate_id: rate.id,
@@ -538,7 +544,7 @@ export class StoreShippingZonesService {
     }
 
     // Create the rate copy (sin impuesto: la categoría es de la tienda y la
-    // tarifa del sistema no la lleva).
+    // tarifa del sistema no la lleva; el modo sí se copia).
     const copy = await this.prisma.shipping_rates.create({
       data: {
         shipping_zone_id: target_zone_id,
@@ -550,6 +556,7 @@ export class StoreShippingZonesService {
         min_val: system_rate.min_val,
         max_val: system_rate.max_val,
         free_shipping_threshold: system_rate.free_shipping_threshold,
+        tax_is_inclusive: system_rate.tax_is_inclusive,
         is_active: true,
         source_type: 'custom',
         copied_from_system_rate_id: system_rate.id,
@@ -673,6 +680,7 @@ export class StoreShippingZonesService {
               min_val: system_rate.min_val,
               max_val: system_rate.max_val,
               free_shipping_threshold: system_rate.free_shipping_threshold,
+              tax_is_inclusive: system_rate.tax_is_inclusive,
               updated_at: new Date(),
             },
           });
@@ -690,6 +698,7 @@ export class StoreShippingZonesService {
               min_val: system_rate.min_val,
               max_val: system_rate.max_val,
               free_shipping_threshold: system_rate.free_shipping_threshold,
+              tax_is_inclusive: system_rate.tax_is_inclusive,
               is_active: true,
               source_type: 'system_copy',
               copied_from_system_rate_id: system_rate.id,

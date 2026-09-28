@@ -13,6 +13,7 @@ import {
   UpdateStockParams,
 } from '../../inventory/shared/services/stock-level-manager.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
+import { StockValidatorService } from '../../inventory/shared/services/stock-validator.service';
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { PurchaseOrdersService } from '../../orders/purchase-orders/purchase-orders.service';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
@@ -85,6 +86,7 @@ export class DispatchNoteEventsListener {
     // order/KDS projection uses scoped Prisma, so restore the store context
     // explicitly instead of relying on the event emitter's async boundary.
     private readonly storeContextRunner?: StoreContextRunner,
+    private readonly stockValidator?: StockValidatorService,
   ) {}
 
   /**
@@ -634,15 +636,27 @@ export class DispatchNoteEventsListener {
       // referencia, y el transfer_in usa el dispatch_note.id de la transfer_in
       // (una remisión distinta). Para transfers standalone (sin order_id), el
       // guard anti-doble-deducción de stock_reservations arriba aplica.
+      // For order-linked POS deliveries, the same store switch that admitted
+      // the oversold order must also allow a negative stock_out on handoff.
+      // Standalone notes retain the legacy non-blocking floor-zero behavior.
+      const allowOversell = dispatch_note.order_id != null &&
+        (await this.stockValidator?.resolveInventoryPolicy(event.store_id))
+          ?.allowOversell === true;
       const userId = RequestContextService.getUserId();
       const res = await this.orderStockCommit.commitDispatchDelivery(
         dispatch_note,
         {
           movementType: 'stock_out',
           blockOnInsufficient: false,
+          allowNegativeOnShortfall: allowOversell,
           consumeSerials: false,
           reason: `Despacho remisión #${dispatch_note.id}`,
           userId: userId ?? undefined,
+          onShortfall: (item) => this.logger.error(
+            `[delivered] Remisión #${dispatch_note.id}: faltante de ${item.product_name} ` +
+            `(producto ${item.product_id}, variante ${item.product_variant_id ?? 'base'}): ` +
+            `requerido ${item.requested}, disponible ${item.available}. Conciliar inventario.`,
+          ),
         },
       );
 
