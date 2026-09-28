@@ -3000,6 +3000,14 @@
       "sessions": 0,
       "memories": 2,
       "prompts": 0
+    },
+    {
+      "id": "0b1f6385",
+      "created_by": "rzy",
+      "created_at": "2026-09-28T22:27:57Z",
+      "sessions": 4,
+      "memories": 5,
+      "prompts": 0
     }
   ]
 }
