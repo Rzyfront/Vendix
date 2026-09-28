@@ -52,7 +52,8 @@ export interface PaymentReportRow {
     channel: string | null;
   };
   customer: {
-    id: number;
+    /** null cuando la orden solo tiene `customer_alias` (venta sin cliente registrado). */
+    id: number | null;
     name: string;
     document: string | null;
     email: string | null;
@@ -60,7 +61,7 @@ export interface PaymentReportRow {
   payment_method: {
     id: number;
     display_name: string;
-    type: string;
+    type: string | null;
   } | null;
   bank_account: { id: number; name: string } | null;
   cash_register: { session_id: number; register_name: string } | null;
