@@ -42,6 +42,19 @@ export class PaymentTimeoutCleanupJob {
           payments: {
             none: { state: 'succeeded' },
           },
+          // checkout-whatsapp-location-fallback (Paso 1): órdenes con envío
+          // por asignar (`pending_shipping_assignment`) se crean SIN fila de
+          // `payments` a propósito — el comprador acordó el pago con la
+          // tienda por WhatsApp por fuera del sistema. Sin esta exclusión,
+          // este cron las auto-cancelaría a las 2h igual que un checkout
+          // abandonado, liberando el stock reservado antes de que la tienda
+          // alcance a contactar al comprador. Firma exacta de esas órdenes:
+          // delivery_type='other' + shipping_method_id=null (ver
+          // checkout.service.ts, runCheckout).
+          NOT: {
+            delivery_type: 'other',
+            shipping_method_id: null,
+          },
         },
         select: {
           id: true,

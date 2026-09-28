@@ -41,6 +41,8 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
           </div>
           <button
             (click)="onClose()"
+            type="button"
+            aria-label="Cerrar selección de variante"
             class="w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors"
           >
             <app-icon

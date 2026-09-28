@@ -10,6 +10,7 @@ import { PosPaymentService } from '../../../services/pos-payment.service';
 import { CustomersService } from '../../../../customers/services/customers.service';
 import { CartState } from '../../../models/cart.model';
 import {
+  PosManualShippingQuote,
   PosShippingMethod,
   PosShippingOption,
   posShippingRateIdForPayload,
@@ -46,7 +47,12 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
   const cart = (): CartState => ({
     items: [{ product: { id: '7' }, itemType: 'product', quantity: 1, totalPrice: 1000 }],
     customer: { id: 99, first_name: 'Cliente', phone: '3001234567', addresses: [
-      { id: 1, address_line1: 'Casa principal 1', city: 'Bogotá', state_province: 'Bogotá', country_code: 'CO', is_primary: true },
+      // Requirement 3 (coordinator, 2026-09) — a delivery method never quotes
+      // without a resolved point: this saved address needs real coordinates
+      // so the pre-existing method/rate/manual-cost tests below (which are
+      // NOT about location-gating) keep exercising `/shipping/calculate`.
+      // The location-gating itself gets its own dedicated tests further down.
+      { id: 1, address_line1: 'Casa principal 1', city: 'Bogotá', state_province: 'Bogotá', country_code: 'CO', is_primary: true, latitude: 4.65, longitude: -74.05 },
       { ...originalAddress, id: 33, is_primary: false },
     ] },
     summary: { total: 1000 }, linkedOrderId: 700,
@@ -313,6 +319,38 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.buildShippingContext()?.shippingAddressId).toBeUndefined();
   });
 
+  it('H6 — dirección guardada sin state_province muestra el formulario precargado y al completarla addressValid true', () => {
+    // `state_province` es nullable en Prisma; `phone_number` se rellena aparte
+    // desde `customer.phone` en `toAddressPayload` (comportamiento ya
+    // existente), así que solo el departamento queda ausente aquí.
+    const incompleteSaved = { ...originalAddress, id: 55, type: 'shipping', is_primary: true, state_province: null as any };
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [incompleteSaved] };
+    fixture.componentRef.setInput('detailsInCliente', true);
+    mount(state);
+
+    expect(component.addressId()).toBe(55);
+    expect(component.addressValid()).toBeFalse();
+    // Antes de este fix, la plantilla `#clientDeliveryDetails` solo mostraba
+    // resumen + "Usar otra dirección" (formulario vacío) para este caso; el
+    // fix reabre el mismo formulario precargado con la dirección guardada.
+    expect(component.addressEditing()).toBeTrue();
+    expect(component.initialAddress()).toEqual(jasmine.objectContaining({
+      address_line1: originalAddress.address_line1, city: originalAddress.city,
+      state_province: null,
+    }));
+    expect(component.missingAddressFieldsLabel()).toBe('el departamento');
+
+    // El cajero completa solo el campo faltante en el formulario precargado.
+    component.onAddressChange({ ...component.address()!, state_province: 'Valle' }, true);
+    component.onAddressValidChange(true);
+
+    expect(component.addressValid()).toBeTrue();
+    expect(component.addressId()).toBe(55); // sigue siendo UPDATE sobre el mismo id, no uno nuevo
+  });
+
   it('en Cliente muestra solo costo en Envío y exige método y dirección antes de avanzar', () => {
     const state = cart();
     state.shippingContext = undefined;
@@ -404,6 +442,39 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(context.manualShippingPrice).toBe(5000);
     expect(posShippingRateIdForPayload(context)).toBe(93);
     expect(manualQuote).toHaveBeenCalledWith(7, 93, 5000);
+  });
+
+  it('keeps a pending manual tax quote when a late address update invalidates the automatic quote', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = null;
+    mount(state);
+    component.selectedShippingMethod.set(firstMethod);
+    component.shippingRateId.set(93);
+    component.manualCostOverride.set(true);
+    const pendingQuote = new Subject<PosManualShippingQuote>();
+    manualQuote.and.returnValue(pendingQuote.asObservable());
+
+    component.onShippingCostChange(18000);
+    component.onAddressChange({ ...originalAddress, city: 'Riohacha' }, true);
+    pendingQuote.next({
+      shipping_rate_id: 93,
+      manual_shipping_price: 18000,
+      shipping_cost: 18000,
+      base: 15126.05,
+      shipping_tax_amount: 2873.95,
+      tax_is_inclusive: true,
+    });
+    fixture.detectChanges();
+
+    expect(manualQuote).toHaveBeenCalledWith(1, 93, 18000);
+    expect(component.shippingCost()).toBe(18000);
+    expect(component.manualQuotedShippingTax()).toEqual({
+      base: 15126.05,
+      tax: 2873.95,
+      taxIsInclusive: true,
+    });
   });
 
   it('quotes alias delivery with the same full destination fields used by a customer address', () => {
@@ -708,6 +779,160 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.shippingCost()).toBe(7000);
   });
 
+  // Zoneless: sin zone.js/testing, `fakeAsync` no existe en este arnés (ver
+  // pos-order-confirmation.component.spec.ts). Se usa `jasmine.clock()` para
+  // controlar el debounce de 500ms del forward-geocode del formulario real.
+  it('after geocode emits coords, /shipping/calculate payload includes latitude/longitude', async () => {
+    const geocoding = TestBed.inject(GeocodingService) as unknown as { forward: jasmine.Spy };
+    geocoding.forward = jasmine.createSpy('forward').and.returnValue(
+      of({ lat: 4.6097, lng: -74.0817, precision: 'exact' }),
+    );
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [] };
+    // `debounceTime`'s internal "did we really wait long enough" check reads
+    // `Date.now()` (via RxJS's `asyncScheduler`/`dateTimestampProvider`), which
+    // `jasmine.clock().install()` alone does NOT mock — only the timer
+    // functions (setTimeout/setInterval). Without `mockDate()`, `tick()` fires
+    // the fake interval, but the operator sees real wall-clock time barely
+    // advanced, decides it hasn't actually waited 500ms, and reschedules
+    // instead of emitting — the callback never runs and the spy is never
+    // called. `mockDate()` freezes/advances `Date` in lockstep with `tick()`
+    // so the operator's own time check agrees with the fake clock.
+    //
+    // Installed BEFORE the render that constructs `AddressFormFieldsComponent`
+    // (not just around the real edits below): its constructor's
+    // `initialAddress` prefill effect ALSO fires `municipality_code` through
+    // the same debounced `merge(...)` on first render (emitEvent:true, to
+    // bridge country/municipality into their signals — see that effect's own
+    // comment). `debounceTime` keeps a single shared "pending task" slot per
+    // subscription; if that first, harmless emission schedules its wait on the
+    // REAL scheduler (clock installed later), it silently claims that slot and
+    // every later value (ours) just updates the pending value/time without
+    // scheduling a NEW fake timer — so a `tick()` from an installed-afterward
+    // clock flushes nothing, ever. Ticking once right after that first render
+    // flushes the harmless cycle (address_line1 is still empty, so
+    // `forwardGeocodeFromForm` no-ops on its own length guard) and frees the
+    // slot for the real edits' own debounce below.
+    jasmine.clock().install();
+    jasmine.clock().mockDate();
+    try {
+      mount(state);
+      component.goToShipSubStep(1);
+      fixture.detectChanges();
+      jasmine.clock().tick(600);
+
+      const form = fixture.debugElement.query(By.directive(AddressFormFieldsComponent))
+        .componentInstance as AddressFormFieldsComponent;
+      form.form.markAsDirty();
+      form.form.get('address_line1')!.setValue('Carrera 7 # 32-16');
+      form.form.get('city')!.setValue('Bogotá');
+      form.form.get('state_province')!.setValue('Bogotá D.C.');
+      jasmine.clock().tick(600); // flush the shared component's 500ms forward-geocode debounce
+      await fixture.whenStable();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+    fixture.detectChanges();
+
+    expect(geocoding.forward).toHaveBeenCalled();
+    expect(component.address()).toEqual(jasmine.objectContaining({
+      latitude: 4.6097, longitude: -74.0817,
+    }));
+    expect(component.addressGeocodePrecision()).toBe('exact');
+    expect(calculate.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      latitude: 4.6097, longitude: -74.0817,
+    }));
+  });
+
+  // BUG 2 (E2E roku-shop.vendix.com/checkout, 2026-09-27): 'area' precision is
+  // a city/vereda centroid, NOT a resolved point. Before this fix, any
+  // non-null forward-geocode result (including 'area') was applied to
+  // latitude/longitude and unblocked the quote — a nonsense rural address
+  // resolved to the city centroid and could get quoted/charged silently.
+  // Mirrors the 'exact' test above but asserts the location gate STAYS shut.
+  it("BUG 2 — 'area' precision does not resolve a location or unblock the quote", async () => {
+    const geocoding = TestBed.inject(GeocodingService) as unknown as { forward: jasmine.Spy };
+    geocoding.forward = jasmine.createSpy('forward').and.returnValue(
+      of({ lat: 11.5444, lng: -72.907, precision: 'area', label: 'Riohacha, La Guajira' }),
+    );
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [] };
+    jasmine.clock().install();
+    jasmine.clock().mockDate();
+    try {
+      mount(state);
+      component.goToShipSubStep(1);
+      fixture.detectChanges();
+      jasmine.clock().tick(600);
+
+      const form = fixture.debugElement.query(By.directive(AddressFormFieldsComponent))
+        .componentInstance as AddressFormFieldsComponent;
+      form.form.markAsDirty();
+      form.form.get('address_line1')!.setValue('Vereda Xyzqwerty Km 99 Via Inexistente');
+      form.form.get('city')!.setValue('Riohacha');
+      form.form.get('state_province')!.setValue('La Guajira');
+      jasmine.clock().tick(600);
+      await fixture.whenStable();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+    fixture.detectChanges();
+
+    expect(geocoding.forward).toHaveBeenCalled();
+    expect(component.address()?.latitude).toBeNull();
+    expect(component.address()?.longitude).toBeNull();
+    expect(component.addressGeocodePrecision()).toBeNull();
+    expect(component.hasResolvedLocation()).toBeFalse();
+    expect(component.canConfirm()).toBeFalse();
+    expect(calculate).not.toHaveBeenCalled();
+  });
+
+  // GAP 1 (2026-09-27, `vendix-address-geocoding` / `vendix-shipping-distance-pricing`
+  // parity fix) — the SAVED-address coords backfill (`ensureSavedAddressCoords`,
+  // triggered by `loadDefaultAddress` for a fresh sale with no `shippingContext`)
+  // must reject an 'area' (city/vereda centroid) geocode exactly like the
+  // new-address form's own forward-geocode does (see "BUG 2" above): never
+  // write it to latitude/longitude, never PATCH `updateCustomerAddress` (that
+  // would poison the customer's saved address with a centroid forever), and
+  // leave `hasResolvedLocation()` false so the cashier still has to mark the map.
+  it("saved-address backfill — 'area' precision is not persisted and the location gate stays shut", () => {
+    const geocoding = TestBed.inject(GeocodingService) as unknown as { forward: jasmine.Spy };
+    geocoding.forward = jasmine.createSpy('forward').and.returnValue(
+      of({ lat: 11.5444, lng: -72.907, precision: 'area', label: 'Riohacha, La Guajira' }),
+    );
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = {
+      ...state.customer!,
+      addresses: [
+        {
+          id: 501,
+          address_line1: 'Vereda Xyzqwerty Km 99 Via Inexistente',
+          city: 'Riohacha',
+          state_province: 'La Guajira',
+          country_code: 'CO',
+          type: 'shipping',
+          is_primary: true,
+          latitude: null,
+          longitude: null,
+        },
+      ],
+    };
+    mount(state);
+
+    expect(geocoding.forward).toHaveBeenCalled();
+    expect(component.addressId()).toBe(501);
+    expect(component.address()?.latitude).toBeNull();
+    expect(component.address()?.longitude).toBeNull();
+    expect(component.hasResolvedLocation()).toBeFalse();
+    expect(customers.updateCustomerAddress).not.toHaveBeenCalled();
+  });
+
   it('B6 — cambiar de tarifa en el selector actualiza el costo de envío', () => {
     mount();
     component.selectShippingMethod(firstMethod);
@@ -721,6 +946,73 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.shippingRateId()).toBe(202);
     expect(component.shippingCost()).toBe(9500);
     expect(component.totalWithShipping()).toBe(10500);
+  });
+
+  // ── Requirement 3 (coordinator, 2026-09): a delivery method must never
+  // quote/charge a default rate for an address with no resolved point. ──────
+  describe('location-required shipping gate', () => {
+    it('never calls /shipping/calculate for a delivery address with no coordinates', () => {
+      const state = cart();
+      state.shippingContext = undefined;
+      state.linkedOrderId = null;
+      state.customer = { ...state.customer!, addresses: [
+        { id: 5, address_line1: 'Calle sin geocodificar 1', city: 'Neiva', country_code: 'CO', is_primary: true, type: 'shipping' },
+      ] };
+      mount(state);
+
+      expect(calculate).not.toHaveBeenCalled();
+      expect(component.hasResolvedLocation()).toBeFalse();
+      expect(component.canConfirm()).toBeFalse();
+      component.flashValidation();
+      expect(component.flashMessage()).toBe('Marca la ubicación en el mapa para calcular el envío');
+    });
+
+    it('a manually typed cost cannot bypass the no-coordinates block', () => {
+      const state = cart();
+      state.shippingContext = undefined;
+      state.linkedOrderId = null;
+      state.customer = { ...state.customer!, addresses: [
+        { id: 5, address_line1: 'Calle sin geocodificar 1', city: 'Neiva', country_code: 'CO', is_primary: true, type: 'shipping' },
+      ] };
+      mount(state);
+      component.manualCostOverride.set(true);
+      component.shippingCost.set(15000);
+      fixture.detectChanges();
+
+      expect(component.canConfirm()).toBeFalse();
+    });
+
+    it('resolving coordinates (e.g. a confirmed map pin) unblocks the automatic quote', () => {
+      const state = cart();
+      state.shippingContext = undefined;
+      state.linkedOrderId = null;
+      state.customer = { ...state.customer!, addresses: [] };
+      mount(state);
+      component.onAddressChange({ ...originalAddress, pin_confirmed: true }, true);
+      component.addressValid.set(true);
+      fixture.detectChanges();
+
+      expect(calculate).toHaveBeenCalled();
+      // Fresh cart auto-selects the first active method (id 1), not `originalMethod` (id 7).
+      latestQuote().next([quote(1, 9000, 93)]);
+      fixture.detectChanges();
+
+      expect(component.hasResolvedLocation()).toBeTrue();
+      expect(component.shippingRateId()).toBe(93);
+      expect(component.canConfirm()).toBeTrue();
+    });
+
+    it('a resolved location with zero matching rates blocks with the no-rate message, not the no-location one', () => {
+      mount();
+      component.selectShippingMethod(firstMethod);
+      fixture.detectChanges();
+      latestQuote().next([]); // /shipping/calculate resolved but found no rate for this method/zone.
+      fixture.detectChanges();
+
+      expect(component.hasResolvedLocation()).toBeTrue();
+      expect(component.quoteError()).toBe('No hay tarifa de envío para esta ubicación');
+      expect(component.canConfirm()).toBeFalse();
+    });
   });
 });
 

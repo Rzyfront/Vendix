@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import {
   AfterViewInit,
   ChangeDetectionStrategy,
@@ -99,7 +100,7 @@ class LocateButtonControl {
 @Component({
   selector: 'app-address-map-picker',
   standalone: true,
-  imports: [],
+  imports: [NgTemplateOutlet],
   templateUrl: './address-map-picker.component.html',
   styleUrls: ['./address-map-picker.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -123,6 +124,16 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
    * `locateRequested` themselves.
    */
   readonly delegateLocate = input(false);
+  /**
+   * Where the drag/type hint (`.amp-hint`) renders relative to the map.
+   * Default `'bottom'` keeps every existing consumer (POS
+   * `app-address-form-fields`, the customer-modal, the dispatch-note editor)
+   * unchanged: hint below the map. Checkout passes `'top'` (owner directive,
+   * 2026-09-27) so the hint sits in the same "map column" rhythm as the
+   * warning/loading-chip/precision-badge indicators that live ABOVE the map
+   * in the parent template — aviso → hint → mapa, one flex column, one gap.
+   */
+  readonly hintPosition = input<'top' | 'bottom'>('bottom');
   /** Emitted with the new coordinate whenever the marker is moved. */
   readonly located = output<LatLng>();
   /**
@@ -161,6 +172,15 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   private loadTimer: ReturnType<typeof setTimeout> | null = null;
   /** Delays collapsing the map credit so it flashes briefly (~0.3s) on load. */
   private attribTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Owner directive (2026-09-27): a consumer (checkout) can now resize the
+   * map container purely via CSS (`--amp-map-aspect-ratio: 1 / 1`, see
+   * `.scss`) — a change MapLibre never sees on its own, since it only
+   * measures the canvas on window `resize` or an explicit `.resize()` call.
+   * Observing the container itself catches ANY size change (aspect-ratio,
+   * grid reflow, sidebar collapse, etc.), not just a viewport resize.
+   */
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor() {
     // Re-center the map + (lazily) create the marker when the parent pushes a
@@ -237,6 +257,18 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
         new this.maplibregl.AttributionControl({ compact: true }),
         'bottom-right',
       );
+
+      // Keep the canvas in sync with a container whose size CSS controls
+      // (aspect-ratio, flex/grid reflow) rather than the viewport alone.
+      // Guarded by `this.map?.` so a resize firing after `ngOnDestroy` (the
+      // observer is disconnected there, but a queued callback can still run
+      // once) never throws on a null map.
+      if (typeof ResizeObserver !== 'undefined') {
+        this.resizeObserver = new ResizeObserver(() => {
+          this.map?.resize();
+        });
+        this.resizeObserver.observe(this.mapContainer().nativeElement);
+      }
 
       // A marker exists from the start ONLY if we already have a point.
       if (start) this.ensureMarker(start);
@@ -347,6 +379,8 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   ngOnDestroy(): void {
     this.clearLoadTimer();
     if (this.attribTimer) clearTimeout(this.attribTimer);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     try {
       this.marker?.remove?.();
       this.map?.remove?.();

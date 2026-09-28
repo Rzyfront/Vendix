@@ -1491,10 +1491,17 @@ export class DispatchRoutesService {
     const empty = { lat: null, lng: null, geocoded: false };
     try {
       const parts = this.extractAddressParts(dn, orderAddrRow, customerAddr);
-      const query = this.buildGeocodeQuery(parts);
-      if (!query) return empty;
+      if (!parts.line1) return empty;
 
-      const { lat, lng } = await this.geocoding.forward(query);
+      // Ciudad/departamento explícitos (no concatenados en `query`) — mismo
+      // contrato que `ShippingDistanceService.resolveBuyerCoords`, así
+      // `GeocodingService.forward` puede usarlos como filtro estructurado en
+      // vez de tener que re-parsearlos de una sola línea de texto libre.
+      const { lat, lng } = await this.geocoding.forward(
+        parts.line1,
+        parts.city ?? undefined,
+        parts.state ?? undefined,
+      );
       if (lat == null || lng == null) return empty;
 
       // Persist only when we hold a concrete addresses.id (never guess). The
@@ -1624,16 +1631,6 @@ export class DispatchRoutesService {
       .filter((p) => p.length > 0)
       .join(', ');
     return text.length > 0 ? text : null;
-  }
-
-  /** Geocoding query string ("line1, city, state, country"). Null when no line1. */
-  private buildGeocodeQuery(parts: AddressParts): string | null {
-    if (!parts.line1) return null;
-    const query = [parts.line1, parts.city, parts.state, parts.country]
-      .map((p) => (p ? p.trim() : ''))
-      .filter((p) => p.length > 0)
-      .join(', ');
-    return query.length > 0 ? query : null;
   }
 
   /** Read numeric lat/lng from a JSON address blob (accepts string or number). */

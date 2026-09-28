@@ -1084,7 +1084,11 @@ export class OrdersService {
           { customer_alias: { contains: search, mode: 'insensitive' } },
         ],
       }),
-      ...(status && !dispatchable && { state: status }),
+      // Paso 3 (multi-select ventas) — array usa `in` (equivalente a
+      // igualdad para un elemento); single conserva la igualdad exacta.
+      ...(status && !dispatchable && {
+        state: Array.isArray(status) ? { in: status } : status,
+      }),
       ...(customer_id && { customer_id }),
       // Carril B — B2: filtra órdenes que tengan al menos una table_session
       // apuntando a la mesa solicitada (incluye sesiones ya cerradas; la orden
@@ -1092,7 +1096,9 @@ export class OrdersService {
       ...(table_id && {
         table_sessions: { some: { table_id } },
       }),
-      ...(channel && { channel }),
+      ...(channel && {
+        channel: Array.isArray(channel) ? { in: channel } : channel,
+      }),
       // FIX admin-orders-filters (BUG A) — aplica el filtro de "Estado de
       // pago" del dropdown. Viaja como `payments_state_enum` en el DTO.
       // La columna destino NO está denormalizada en `orders` (sólo existe
@@ -1102,7 +1108,13 @@ export class OrdersService {
       // (parcialmente pagada, reembolsada parcial, etc.) y queremos
       // matchear si CUALQUIERA cumple.
       ...(payment_status && !payment_method_id && {
-        payments: { some: { state: payment_status } },
+        payments: {
+          some: {
+            state: Array.isArray(payment_status)
+              ? { in: payment_status }
+              : payment_status,
+          },
+        },
       }),
       ...(payment_method_id && {
         AND: [
@@ -1115,7 +1127,19 @@ export class OrdersService {
               payments_state_enum.refunded,
             ] },
           } } },
-          ...(payment_status ? [{ payments: { some: { state: payment_status } } }] : []),
+          ...(payment_status
+            ? [
+                {
+                  payments: {
+                    some: {
+                      state: Array.isArray(payment_status)
+                        ? { in: payment_status }
+                        : payment_status,
+                    },
+                  },
+                },
+              ]
+            : []),
         ],
       }),
       ...(query.missing_shipping_method && {
@@ -1614,16 +1638,25 @@ export class OrdersService {
       }
     }
 
-    // Release-854 follow-up paso 2 — campo aditivo para el pre-chequeo
-    // del frontend. El `invoices[0]` del include sigue siendo la última
-    // factura de CUALQUIER tipo (lo necesita la tarjeta del detalle); este
-    // campo responde otra pregunta: ¿hay una `sales_invoice` vigente?
-    const activeSalesInvoice = await this.findActiveSalesInvoice(id);
     // Mirrors `findBlockingSalesInvoiceForPaymentCancel`'s exact semantics
     // (`OrderFlowService`, order-flow.service.ts) — a `draft` sales invoice
     // was never transmitted, so it does not block a local payment cancel.
+    // Scoped to `sales_invoice` ONLY — see `findActiveSalesInvoice`'s
+    // docblock; do not widen this one.
+    const activeSalesInvoice = await this.findActiveSalesInvoice(id);
     const hasIssuedSalesInvoice =
       !!activeSalesInvoice && activeSalesInvoice.status !== 'draft';
+
+    // Release-854 follow-up paso 2 (ampliado — titular en cualquier
+    // estado) — campo aditivo para el pre-chequeo del frontend. El
+    // `invoices[0]` del include sigue siendo la última factura de
+    // CUALQUIER tipo (lo necesita la tarjeta del detalle); este campo
+    // responde otra pregunta: ¿hay un documento electrónico
+    // (`sales_invoice`/`export_invoice`/`pos_equivalent_document`) vigente
+    // que bloquee el cambio de titular? Deliberadamente una consulta aparte
+    // de `activeSalesInvoice` de arriba — comparten forma pero no filtro,
+    // y mezclarlas cambiaría silenciosamente `hasIssuedSalesInvoice`.
+    const activeTitularInvoice = await this.findActiveTitularInvoice(id);
 
     // order-truth-and-invoice-tz plan — Step 2: additive `available_actions`
     // (order-level) + `items[].available_actions` (item-level). Both are
@@ -1645,6 +1678,7 @@ export class OrdersService {
         product_type: item.products?.product_type,
         skip_kds: item.skip_kds,
         delivered_at: item.delivered_at,
+        cancelled_at: item.cancelled_at,
         latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
         orderHasSettledPayment,
       }),
@@ -1654,8 +1688,8 @@ export class OrdersService {
       ...order,
       order_items: orderItemsWithActions,
       cancellation_policy: getOrderCancellationPolicy(order),
-      active_sales_invoice: activeSalesInvoice
-        ? { id: activeSalesInvoice.id, status: activeSalesInvoice.status }
+      active_sales_invoice: activeTitularInvoice
+        ? { id: activeTitularInvoice.id, status: activeTitularInvoice.status }
         : null,
       available_actions,
     };
@@ -2034,26 +2068,14 @@ export class OrdersService {
     const economicFields = ['items', 'subtotal', 'total_amount', 'tax_amount', 'discount_amount', 'shipping_cost', 'customer_id', 'customer_alias', 'currency'];
     if (economicFields.some((key) => Object.prototype.hasOwnProperty.call(updateOrderDto, key))) assertNoActiveFinancialSplit(order);
 
-    // Contrato PATCH titular: el cambio de titular (customer_id/customer_alias)
-    // se permite mientras la orden no haya salido ni esté cerrada
-    // (created/draft/pending_payment/processing/pending_delivery). Una vez
-    // enviada, entregada, finalizada, cancelada o reembolsada el titular es
-    // inmutable y se responde 409 ORD_EDIT_NOT_ALLOWED_001.
-    // Más laxo que `updateOrderFromEditor` (sigue en created/draft) porque el
-    // titular no recotiza ni mueve stock; el editor sí.
-    const TITULAR_LOCKED_STATES = [
-      'shipped',
-      'delivered',
-      'finished',
-      'cancelled',
-      'refunded',
-    ];
-    const touchesTitular =
-      Object.prototype.hasOwnProperty.call(updateOrderDto, 'customer_id') ||
-      Object.prototype.hasOwnProperty.call(updateOrderDto, 'customer_alias');
-    if (touchesTitular && TITULAR_LOCKED_STATES.includes(order.state)) {
-      throw new VendixHttpException(ErrorCodes.ORD_EDIT_NOT_ALLOWED_001);
-    }
+    // Contrato PATCH titular (regla vigente): el cambio de titular
+    // (customer_id/customer_alias) se permite en CUALQUIER estado de la
+    // orden — incluidos shipped/delivered/finished/cancelled/refunded. El
+    // único bloqueo por estado del documento vive en la guarda de factura de
+    // abajo (`ORD_TITULAR_INVOICED_001`), que corre exclusivamente cuando el
+    // DTO trae `customer_id` (ver `titularCustomerChanged`). Un cambio de
+    // SOLO `customer_alias` (etiqueta de display, no viaja al
+    // `titular_snapshot` de la factura) nunca se bloquea.
     // Titular del store: un customer_id de otra tienda se rechaza con 403
     // antes de tocar la fila, igual que el editor.
     if (
@@ -2100,15 +2122,34 @@ export class OrdersService {
     ) {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_LOCKED_001);
     }
-    // Release-853 paso 10 — titular vs factura. Si la orden tiene una
-    // `sales_invoice` vigente (cualquier estado fuera de draft/voided/
-    // cancelled), el adquiriente es inmutable y el cambio responde 409
-    // ORD_TITULAR_INVOICED_001. Si la factura es un borrador, se guarda para
-    // propagarle el titular justo antes del write de la orden: si la
-    // propagación falla, la orden no se toca. Solo cubre `customer_id` (el
-    // `customer_alias` es etiqueta de display y no viaja al
-    // `titular_snapshot` de la factura). El filtro espeja
-    // `assertNotAlreadyInvoiced` de `InvoicingService`.
+    // Regla vigente — titular vs factura electrónica. El titular es
+    // inmutable SOLO cuando la orden tiene un documento electrónico
+    // TRANSMITIDO y vigente (`sales_invoice` / `export_invoice` /
+    // `pos_equivalent_document` en `sent`/`accepted`): 409
+    // ORD_TITULAR_INVOICED_001, "ya tiene factura electrónica emitida".
+    //
+    // `validated`/`rejected` NO están transmitidos a la DIAN, pero
+    // `InvoicingService.update()` (apps/backend/src/domains/store/invoicing/
+    // invoicing.service.ts ~3996) solo acepta cambiar `customer_id` cuando
+    // `invoice.status === 'draft'` — para cualquier otro estado lanza
+    // `INVOICING_STATUS_002` si el titular difiere. No se modifica ese
+    // servicio (otro agente trabaja en `invoicing/`), así que
+    // `validated`/`rejected` también bloquean con el MISMO código
+    // (`ORD_TITULAR_INVOICED_001`) pero un mensaje distinto ("factura en
+    // proceso") en vez de intentar una propagación que el propio
+    // `InvoicingService` rechazaría.
+    //
+    // `draft` sí propaga (sin cambios): se guarda para propagarle el
+    // titular justo antes del write de la orden; si la propagación falla,
+    // la orden no se toca. `voided`/`cancelled` no aparecen aquí — el
+    // filtro `status: { notIn: ['voided', 'cancelled'] } ya los excluye, así
+    // que no bloquean ni se propagan (documento anulado, irrelevante para
+    // el titular).
+    //
+    // Solo cubre `customer_id` (el `customer_alias` es etiqueta de display
+    // y no viaja al `titular_snapshot` de la factura). El filtro espeja
+    // `assertNotAlreadyInvoiced` de `InvoicingService`, ampliado a los tres
+    // tipos de documento con CUFE/CUDE electrónico.
     const titularCustomerChanged =
       Object.prototype.hasOwnProperty.call(updateOrderDto, 'customer_id') &&
       updateOrderDto.customer_id !== order.customer_id;
@@ -2118,11 +2159,34 @@ export class OrdersService {
       customer_id: number | null;
     } | null = null;
     if (titularCustomerChanged) {
-      const titularInvoice = await this.findActiveSalesInvoice(id);
+      // Cartera abierta de la orden: la CxC guarda su propio customer_id y
+      // quedaría a nombre del titular anterior.
+      const openReceivable = await this.prisma.accounts_receivable.findFirst({
+        where: {
+          source_type: { in: ['credit_sale', 'order'] },
+          source_id: id,
+          balance: { gt: 0 },
+          status: { notIn: ['paid', 'cancelled', 'written_off'] },
+        },
+        select: { id: true },
+      });
+      if (openReceivable) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_TITULAR_OPEN_RECEIVABLE_001,
+          undefined,
+          { accounts_receivable_id: openReceivable.id },
+        );
+      }
+      const titularInvoice = await this.findActiveTitularInvoice(id);
       if (titularInvoice && titularInvoice.status !== 'draft') {
+        const isTransmitted =
+          titularInvoice.status === 'sent' ||
+          titularInvoice.status === 'accepted';
         throw new VendixHttpException(
           ErrorCodes.ORD_TITULAR_INVOICED_001,
-          undefined,
+          isTransmitted
+            ? undefined
+            : `La factura #${titularInvoice.id} de esta orden está en proceso (${titularInvoice.status}, aún no transmitida a la DIAN); espera a que se resuelva o anúlala antes de cambiar el titular.`,
           {
             invoice_id: titularInvoice.id,
             invoice_status: titularInvoice.status,
@@ -2402,14 +2466,16 @@ export class OrdersService {
   }
 
   /**
-   * Release-854 follow-up paso 2 — factura de venta vigente de la orden.
-   *
-   * El filtro es el de la guarda de titular de `update()` (espejo de
-   * `assertNotAlreadyInvoiced` de `InvoicingService`): `sales_invoice` no
-   * anulada ni cancelada, la más reciente. Se comparte entre la guarda y
-   * `findOne()` para que la regla viva en un solo lugar. `customer_id`
-   * viaja solo para la compensación del paso 1; el campo público
-   * `active_sales_invoice` proyecta únicamente `{ id, status }`.
+   * Release-854 follow-up paso 2 — `sales_invoice` vigente de la orden,
+   * exclusivamente. Alimenta `hasIssuedSalesInvoice` en `findOne()`, que
+   * mantiene la MISMA semántica de `OrderFlowService
+   * .findBlockingSalesInvoiceForPaymentCancel` (mirror exacto, documentado
+   * en `buildOrderAvailableActions`). NO ampliar este filtro a otros
+   * `invoice_type`: eso divergiría de ese mirror y de
+   * `available_actions`/pago-cancelación, fuera del alcance de la regla de
+   * titular. La guarda de titular y la proyección `active_sales_invoice`
+   * usan `findActiveTitularInvoice` (más abajo), que sí cubre los tres
+   * tipos de documento electrónico.
    */
   private async findActiveSalesInvoice(orderId: number): Promise<{
     id: number;
@@ -2420,6 +2486,38 @@ export class OrdersService {
       where: {
         order_id: orderId,
         invoice_type: 'sales_invoice',
+        status: { notIn: ['voided', 'cancelled'] },
+      },
+      select: { id: true, status: true, customer_id: true },
+      orderBy: { id: 'desc' },
+    });
+  }
+
+  /**
+   * Guarda de titular (regla vigente) — a diferencia de
+   * `findActiveSalesInvoice` (solo `sales_invoice`, ver arriba), este
+   * helper cubre los TRES tipos de documento que pueden llevar un CUFE/CUDE
+   * transmitido a la DIAN: `sales_invoice`, `export_invoice` y
+   * `pos_equivalent_document`. La más reciente, sin anular/cancelar. Se
+   * comparte entre la guarda de `update()` y la proyección
+   * `active_sales_invoice` de `findOne()` para que la regla viva en un solo
+   * lugar. `customer_id` viaja solo para la compensación del borrador; el
+   * campo público `active_sales_invoice` proyecta únicamente
+   * `{ id, status }` — el frontend decide `sent`/`accepted` (transmitido,
+   * bloqueo firme) vs `validated`/`rejected` (en proceso) a partir del
+   * `status`.
+   */
+  private async findActiveTitularInvoice(orderId: number): Promise<{
+    id: number;
+    status: string;
+    customer_id: number | null;
+  } | null> {
+    return this.prisma.invoices.findFirst({
+      where: {
+        order_id: orderId,
+        invoice_type: {
+          in: ['sales_invoice', 'export_invoice', 'pos_equivalent_document'],
+        },
         status: { notIn: ['voided', 'cancelled'] },
       },
       select: { id: true, status: true, customer_id: true },
@@ -3098,6 +3196,7 @@ export class OrdersService {
       // (`vendix-shipping-distance-pricing`).
       let shippingAddressForCalc: {
         country_code: string;
+        address_line1?: string;
         state_province?: string;
         city?: string;
         postal_code?: string;
@@ -3123,6 +3222,7 @@ export class OrdersService {
           },
           select: {
             country_code: true,
+            address_line1: true,
             state_province: true,
             city: true,
             postal_code: true,
@@ -3139,6 +3239,7 @@ export class OrdersService {
         if (address?.country_code) {
           shippingAddressForCalc = {
             country_code: address.country_code,
+            address_line1: address.address_line1 || undefined,
             state_province: address.state_province || undefined,
             city: address.city || undefined,
             postal_code: address.postal_code || undefined,
@@ -4727,14 +4828,27 @@ export class OrdersService {
       }
     }
 
+    // Paso 2 (checkout-whatsapp-location-fallback) — una orden con pagos ya
+    // aplicados no puede cambiar su costo de envío aquí: el pago ya se
+    // aplicó sobre el grand_total anterior, y cambiar el costo ahora
+    // desincroniza total_paid/remaining_balance sin tocar el pago.
+    // Reasignar método/tarifa SIN que cambie el costo sigue permitido.
+    const hasAppliedPayments = Number(order.total_paid ?? 0) > 0;
+    const shippingCostChanged = differsByAtLeastCents(
+      shippingCost,
+      Number(order.shipping_cost ?? 0),
+      1,
+    );
+    if (hasAppliedPayments && shippingCostChanged) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_SHIP_CHARGED_COST_CHANGE_001,
+      );
+    }
+
     // Paso 5 (B1+B2) — regla única: sin cambio ⇒ copia intacta; tarifa
     // con su costo ⇒ snapshot; costo manual ⇒ copia vacía.
     const shippingUnchanged =
-      !differsByAtLeastCents(
-        shippingCost,
-        Number(order.shipping_cost ?? 0),
-        1,
-      ) &&
+      !shippingCostChanged &&
       method.id === (order.shipping_method_id ?? null) &&
       (resolvedRateId ?? null) === (order.shipping_rate_id ?? null);
     const shippingTax = await this.resolveShippingTaxChange({
@@ -4920,6 +5034,7 @@ export class OrdersService {
         items,
         {
           country_code: address.country_code,
+          address_line1: address.address_line1 || undefined,
           state_province: address.state_province || undefined,
           city: address.city || undefined,
           postal_code: address.postal_code || undefined,

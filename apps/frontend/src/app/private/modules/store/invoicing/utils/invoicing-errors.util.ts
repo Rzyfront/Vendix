@@ -17,6 +17,11 @@ import type { Invoice } from '../interfaces/invoice.interface';
  * modulo concentra las tres lecturas que la facturacion necesita hacer de ese
  * cuerpo, para que ningun effect ni componente vuelva a improvisarlas:
  *
+ *  0. `describeKnownInvoicingFailure` — copy curado para los codigos que
+ *     `ERROR_MESSAGES` no cubre y cuyo `message` de backend no es apto para
+ *     mostrar tal cual (`INVOICING_CREDIT_NOTE_001`,
+ *     `NOTE_TAX_TYPE_UNRESOLVABLE_001`). `describeApiFailure` lo consulta
+ *     primero.
  *  1. `describeApiFailure`  — mensaje UX + codigo + details, en un objeto plano
  *     que puede viajar dentro de una accion NgRx.
  *  2. `readDianRejection`   — los motivos REALES del rechazo de la DIAN que
@@ -77,6 +82,16 @@ const MAX_VALIDATION_MESSAGES_IN_TOAST = 2;
  */
 export function describeApiFailure(error: unknown): ApiFailure {
   const parsed = parseApiError(error);
+
+  // Gana ANTES que el resto de la cascada: los dos codigos de nota
+  // credito/debito que curamos aca tienen un `message` de backend que SI pasa
+  // la aduana de `parseApiError` (es espanol presentable) pero no es apto
+  // para el usuario final — ver docblock de `describeKnownInvoicingFailure`.
+  const curated = describeKnownInvoicingFailure(parsed.errorCode, parsed.details);
+  if (curated) {
+    return { message: curated, errorCode: parsed.errorCode, details: parsed.details };
+  }
+
   const validationMessages = extractValidationMessages(parsed.details);
 
   if (validationMessages.length > 0) {
@@ -95,6 +110,109 @@ export function describeApiFailure(error: unknown): ApiFailure {
     errorCode: parsed.errorCode,
     details: parsed.details,
   };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 0. Copy curado para codigos que ERROR_MESSAGES no cubre
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Copy curado para los dos codigos de notas credito/debito que el catalogo
+ * general (`ERROR_MESSAGES`) no tiene mapeados y cuyo `message` de backend NO
+ * es apto para mostrarle al operador tal cual:
+ *
+ *  - `INVOICING_CREDIT_NOTE_001` — `assertWithinCreditableBalance`
+ *    (`credit-notes.service.ts`) arma un `message` en espanol que SI pasa la
+ *    aduana de `parseApiError` (`isPresentableApiMessage`), pero concatena
+ *    `Prisma.Decimal.toString()` crudo: sin separador de miles y con un
+ *    numero de decimales que varia segun cuantos traia la operacion
+ *    (`"1220"`, `"1203.7"`...). Mostrar eso es el mismo defecto que un float
+ *    sin redondear, con otro disfraz. Se reconstruye el mensaje leyendo
+ *    `details` — que SIEMPRE viaja con los mismos campos — y formateando
+ *    cada cifra.
+ *  - `NOTE_TAX_TYPE_UNRESOLVABLE_001` — el `message` del backend tambien es
+ *    espanol presentable, pero esta redactado para quien INTEGRA la API
+ *    («Envia `tax_type`... o un `tax_rate_id`...»), no para quien opera la
+ *    pantalla de notas. Se sustituye por una instruccion accionable desde la
+ *    UI.
+ *
+ * Devuelve `null` para cualquier otro codigo, o cuando el propio codigo
+ * curado no trae las cifras minimas para construir su mensaje: el llamador
+ * sigue con la cascada normal de `parseApiError` en vez de mostrar nada a
+ * medias.
+ */
+function describeKnownInvoicingFailure(
+  errorCode: string | null,
+  details: unknown,
+): string | null {
+  if (errorCode === 'INVOICING_CREDIT_NOTE_001') {
+    return describeCreditNoteBalanceExceeded(details);
+  }
+  if (errorCode === 'NOTE_TAX_TYPE_UNRESOLVABLE_001') {
+    return describeNoteTaxTypeUnresolvable(details);
+  }
+  return null;
+}
+
+/** `details` de `INVOICING_CREDIT_NOTE_001`, ver `assertWithinCreditableBalance`. */
+function describeCreditNoteBalanceExceeded(details: unknown): string | null {
+  const record = asRecord(details);
+  const attempted = formatMoneyDetail(record?.['attempted']);
+  const remaining = formatMoneyDetail(record?.['remaining']);
+  // Sin las dos cifras centrales no hay mensaje mejor que el generico: mejor
+  // caer al copy enlatado que construir una frase coja.
+  if (!attempted || !remaining) return null;
+
+  const parent_total = formatMoneyDetail(record?.['parent_total']);
+  const already_credited = formatMoneyDetail(record?.['already_credited']);
+  const invoice_number = readString(record?.['related_invoice_number']);
+
+  const head = invoice_number
+    ? `La nota por ${attempted} supera el saldo acreditable de la factura ${invoice_number}.`
+    : `La nota por ${attempted} supera el saldo acreditable de la factura.`;
+
+  const breakdown =
+    parent_total && already_credited
+      ? ` De ${parent_total} facturados ya hay ${already_credited} acreditados: quedan ${remaining} disponibles.`
+      : ` Quedan ${remaining} disponibles.`;
+
+  return `${head}${breakdown} Emitela por ese saldo o menos.`;
+}
+
+/** `details` de `NOTE_TAX_TYPE_UNRESOLVABLE_001`, ver `resolveNoteTaxTypes`. */
+function describeNoteTaxTypeUnresolvable(details: unknown): string {
+  const tax_name = readString(asRecord(details)?.['tax_name']);
+  const subject = tax_name ? `El impuesto «${tax_name}»` : 'Uno de los impuestos';
+  return (
+    `${subject} de la nota no se pudo clasificar: no trae tipo fiscal y no hay ` +
+    'una tarifa configurada en esta tienda de la cual deducirlo. Revisa la ' +
+    'tarifa de impuesto de esa linea (o el `tax_rate_id` que envia) antes de ' +
+    'continuar.'
+  );
+}
+
+/**
+ * Formatea una cifra monetaria que viaja como texto
+ * (`Prisma.Decimal.toString()`) o numero, SIEMPRE con separador de miles y
+ * dos decimales — nunca el string crudo del backend, que trunca decimales de
+ * forma inconsistente. NO antepone simbolo de moneda: esta funcion es un
+ * util plano sin contexto de inyeccion, no conoce la moneda del tenant
+ * (`CurrencyFormatService` sí, pero requiere `inject()`), y anteponer `$` a
+ * ciegas violaria `vendix-currency-formatting`. `null` cuando el valor no es
+ * una cifra legible — el llamador decide el fallback.
+ */
+function formatMoneyDetail(value: unknown): string | null {
+  const num =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim() && Number.isFinite(Number(value))
+        ? Number(value)
+        : null;
+  if (num === null) return null;
+  return num.toLocaleString('es-CO', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────

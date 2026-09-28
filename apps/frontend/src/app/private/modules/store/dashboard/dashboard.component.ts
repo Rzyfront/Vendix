@@ -11,7 +11,7 @@ import { EmptyStateComponent } from '../../../../shared/components/empty-state/e
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { OptionsDropdownComponent } from '../../../../shared/components/options-dropdown/options-dropdown.component';
-import { FilterConfig, FilterValues } from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { FilterConfig, FilterValues, HeaderPinConfig } from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 
 import { toLocalDateString, getDefaultEndDate, formatChartPeriod } from '../../../../shared/utils/date.util';
 import { AnalyticsService, ProfitLossSummary } from '../analytics/services/analytics.service';
@@ -50,7 +50,7 @@ const QUICK_LINKS: QuickLink[] = [
   { icon: 'shopping-bag', label: 'Compras', route: '/admin/inventory/pop' },
 ];
 
-/** Key del checkbox "fijar este período" dentro de `FilterValues`. */
+/** Key del pin "Fijar" dentro de `FilterValues`. */
 const FIXED_PERIOD_FILTER_KEY = 'fix_period';
 
 /** Prefijo de la key de localStorage donde se recuerda el período fijado. */
@@ -159,10 +159,12 @@ interface FixedPeriodState {
             <app-options-dropdown
               [filters]="dateFilters()"
               [filterValues]="dateFilterValues()"
+              [headerPin]="periodPin"
               title="Período"
               triggerLabel="Período"
               [debounceMs]="300"
               (filterChange)="onDateFilterChange($event)"
+              (clearAllFilters)="onClearDateFilters()"
             />
           </div>
           <div class="p-4 flex-1">
@@ -330,6 +332,11 @@ export class DashboardComponent {
   // Quick links config
   readonly quickLinks = QUICK_LINKS;
 
+  // Pin de header del dropdown de período. Referencia ESTABLE (no un literal
+  // en el template): un objeto fresco por ciclo ensucia el input signal en
+  // cada pasada y encadena ticks infinitos en Zoneless.
+  readonly periodPin: HeaderPinConfig = { key: FIXED_PERIOD_FILTER_KEY, label: 'Fijar' };
+
   // Preset options for the date filter
   private readonly presetOptions = [
     { value: 'today', label: 'Hoy' },
@@ -370,8 +377,8 @@ export class DashboardComponent {
   // → shallowEqual pasa → no overwrite); `debounceMs=300` da tiempo real al
   // sync effect para correr antes que el emit.
   //
-  // QUI-847: el dashboard abría SIEMPRE en "Hoy". Se agrega un checkbox
-  // "fijar este período" (bajo el selector de período) que persiste el preset
+  // QUI-847: el dashboard abría SIEMPRE en "Hoy". Se agrega un pin "Fijar"
+  // (en el header del dropdown, junto a "Limpiar") que persiste el preset
   // elegido en localStorage por tienda, y el bootstrap lo hidrata ANTES del
   // primer fetch para no mostrar un flash del rango default ni duplicar GET.
 
@@ -390,10 +397,6 @@ export class DashboardComponent {
         type: 'select',
         options: this.presetOptions,
         placeholder: 'Seleccionar período',
-        checkbox: {
-          key: FIXED_PERIOD_FILTER_KEY,
-          label: 'Fijar este período',
-        },
       },
     ];
     if ((this.selectedPreset() as string) === 'custom') {
@@ -521,7 +524,7 @@ export class DashboardComponent {
 
     this.selectedPreset.set(preset);
 
-    // El checkbox viaja en las MISMAS FilterValues que el preset. Se replica
+    // El pin viaja en las MISMAS FilterValues que el preset. Se replica
     // su key en el round-trip aunque el preset no sea custom: el sync effect
     // del dropdown compara por cantidad de keys (QUI-744), así que omitirla
     // haría que el dropdown pisara el local y perdiera el "fijar".
@@ -546,6 +549,22 @@ export class DashboardComponent {
 
     this._dateFilterValues.set(next);
     this.persistFixedPeriod(fixed);
+  }
+
+  /**
+   * Reset total desde "Limpiar": vuelve al preset default `today`, desmarca
+   * el pin y borra el storage QUI-847. La forma del round-trip es EXACTA
+   * (`preset` + pin `null`, sin keys extra) para no romper el `shallowEqual`
+   * del sync effect del dropdown (QUI-744). La recarga de datos la dispara
+   * el effect de `rangeSignature` al cambiar el preset.
+   */
+  onClearDateFilters(): void {
+    this.selectedPreset.set('today');
+    this._dateFilterValues.set({
+      preset: 'today',
+      [FIXED_PERIOD_FILTER_KEY]: null,
+    });
+    this.persistFixedPeriod(false);
   }
 
   // ── Período fijado (QUI-847) ─────────────────────────────
@@ -592,7 +611,7 @@ export class DashboardComponent {
   }
 
   /**
-   * Persiste el período actual solo si el checkbox "fijar" está marcado. Al
+   * Persiste el período actual solo si el pin "Fijar" está marcado. Al
    * desmarcarlo se borra la key: la próxima apertura vuelve al default "Hoy".
    * Un rango custom incompleto no se persiste porque no es restaurable.
    */

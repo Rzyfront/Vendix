@@ -19,6 +19,8 @@ const METHOD = process.env.QA_SHIPPING_METHOD_NAME || 'Entrega Rápida Local';
 const ADDITIVE = process.env.QA_ADDITIVE_RATE_LABEL || 'E2E-SHIPPING Agregada 10k';
 const INCLUSIVE = process.env.QA_INCLUSIVE_RATE_LABEL || 'E2E-SHIPPING Incluida 15k';
 const PRODUCT = process.env.QA_PRODUCT_NAME || 'Coca-Cola 400ml';
+const ONLY = process.env.QA_SHIPPING_ONLY || '';
+const PREVIEW_ONLY = process.env.QA_SHIPPING_PREVIEW_ONLY === '1';
 const RESULTS = [];
 
 function alias(suffix) {
@@ -26,6 +28,7 @@ function alias(suffix) {
 }
 
 async function scenario(name, scheme, fn) {
+  if (ONLY && !name.toLowerCase().includes(ONLY.toLowerCase())) return;
   const started = Date.now();
   try {
     const evidence = await fn();
@@ -41,17 +44,18 @@ async function scenario(name, scheme, fn) {
   }
 }
 
-async function openView(page, url, ready) {
-  for (let attempt = 0; attempt < 3; attempt++) {
+async function openView(page, url, ready, attempts = 8) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
       await page.goto(url, { waitUntil: 'commit', timeout: 30_000 });
       await ready.waitFor({ timeout: 12_000 });
       return;
     } catch {
       // A local watch rebuild can commit an unhydrated Angular shell.
+      await page.goto('about:blank', { waitUntil: 'commit', timeout: 5_000 }).catch(() => {});
     }
   }
-  throw new Error(`UI did not render ${url}; current URL=${page.url()}`);
+  throw new Error(`UI did not render ${url} after ${attempts} attempts; current URL=${page.url()}`);
 }
 
 async function login(page) {
@@ -141,10 +145,28 @@ async function selectRate(shipping, name) {
 
 async function expectShipping(shipping, gross, tax, mode) {
   const costCard = shipping.locator('.cost-card');
-  await costCard.locator('.cost-row').filter({ hasText: 'Costo de envío' })
-    .getByText(gross).waitFor({ timeout: 20_000 });
-  await costCard.locator('.cost-row').filter({ hasText: `Impuesto (${mode})` })
-    .getByText(tax).waitFor();
+  try {
+    await costCard.locator('.cost-row').filter({ hasText: 'Costo de envío' })
+      .getByText(gross).waitFor({ timeout: 20_000 });
+    await costCard.locator('.cost-row').filter({ hasText: `Impuesto (${mode})` })
+      .getByText(tax).waitFor();
+  } catch (error) {
+    const componentState = await shipping.evaluate((host) => {
+      const component = globalThis.ng?.getComponent?.(host);
+      return component ? {
+        shippingCost: component.shippingCost?.(),
+        manualShippingPrice: component.manualShippingPrice?.(),
+        manualQuote: component.manualQuotedShippingTax?.(),
+        quoteError: component.quoteError?.(),
+        calculating: component.isCalculatingShipping?.(),
+        quoteGeneration: component.quoteGeneration,
+      } : null;
+    }).catch(() => null);
+    throw new Error(`${error.message}\nRendered shipping cost card: ${await costCard.innerText().catch(() => '<missing>')}\n` +
+      `Manual input: ${await shipping.locator('.manual-cost-input input').inputValue().catch(() => '<missing>')}\n` +
+      `Component state: ${JSON.stringify(componentState)}\n` +
+      `Shipping UI: ${(await shipping.innerText().catch(() => '<missing>')).slice(0, 1800)}`);
+  }
   assert.match(await costCard.locator('.cost-row').filter({ hasText: 'Base envío' }).innerText(),
     /\$[\d.,]+/, 'The fiscal shipping base was not visible in the POS preview.');
 }
@@ -157,7 +179,7 @@ async function editShipping(shipping, typedAmount) {
   await input.blur();
 }
 
-async function finishCashSale(page, shell, expectedTotal) {
+async function finishCashSale(page, shell, expectedTotal, saleAlias) {
   await next(shell);
   await shell.getByText('Paso 4 de 4: Cobro').waitFor();
   await shell.getByRole('button', { name: /Contado/ }).click();
@@ -177,7 +199,32 @@ async function finishCashSale(page, shell, expectedTotal) {
   assert(number, `Receipt lacked an order number: ${receipt.slice(0, 300)}`);
   assert(receipt.includes(expectedTotal), `Receipt did not contain ${expectedTotal}.`);
   await page.getByRole('button', { name: 'Ver detalle' }).click();
-  await page.getByRole('heading', { name: `Orden #${number}` }).waitFor();
+  const detailHeading = page.getByRole('heading', { name: `Orden #${number}` });
+  try {
+    await detailHeading.waitFor({ timeout: 8_000 });
+  } catch {
+    // If HMR left a blank Angular bootstrap after the receipt's navigation,
+    // retry only the detail URL already chosen by the visible UI. Never pay or
+    // create the sale a second time to recover a read-only navigation.
+    const detailUrl = page.url();
+    if (/\/admin\/orders\/\d+$/.test(new URL(detailUrl).pathname)) {
+      await openView(page, detailUrl, detailHeading, 8);
+    } else {
+      // The receipt is authoritative that this sale already succeeded. Recover
+      // through the visible order list, searching the unique alias and opening
+      // that row; never submit or pay the sale again.
+      await openView(page, `${BASE}/admin/orders/sales`,
+        page.locator('input[placeholder="Buscar órdenes..."]'), 8);
+      await page.locator('input[placeholder="Buscar órdenes..."]').fill(saleAlias);
+      const row = page.getByRole('table').getByRole('row').filter({ hasText: saleAlias });
+      await row.first().waitFor({ timeout: 20_000 });
+      assert.equal(await row.count(), 1, 'UI recovery found a duplicate alias order.');
+      assert((await row.first().innerText()).includes(number),
+        'UI recovery alias row did not match the receipt order number.');
+      await row.first().click();
+      await detailHeading.waitFor({ timeout: 20_000 });
+    }
+  }
   const detailUrl = page.url();
   await page.reload({ waitUntil: 'commit' });
   await page.getByRole('heading', { name: `Orden #${number}` }).waitFor();
@@ -218,6 +265,13 @@ async function main() {
   const page = await context.newPage();
   page.setDefaultTimeout(15_000);
   const consoleErrorNames = new Set();
+  const manualQuoteEvidence = [];
+  page.on('requestfinished', async (request) => {
+    if (!request.url().includes('/shipping/manual-quote')) return;
+    const response = await request.response().catch(() => null);
+    manualQuoteEvidence.push({ request: request.postData(), status: response?.status(),
+      response: await response?.text().catch(() => null) });
+  });
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
     consoleErrorNames.add(message.text().match(/(?:NG\d+|[A-Za-z]+Error)/)?.[0] || 'OtherConsoleError');
@@ -244,7 +298,7 @@ async function main() {
         await expectShipping(shipping, '$14.280', '$2.280', 'Agregado');
         assert((await shipping.getByRole('note').innerText()).includes('es la base'),
           'The manual amount did not explain additive tax treatment.');
-        const { number } = await finishCashSale(page, shell, '$52.280');
+        const { number } = await finishCashSale(page, shell, '$52.280', saleAlias);
         await verifyDetail(page, '$14.280', '$2.280', '$52.280', 'Agregado');
         await verifyUniqueAlias(page, saleAlias, number);
         return `${number}: alias + Riohacha auto-rate 11.900, manual base 12.000 → freight 14.280/IVA 2.280, detail after reload 52.280; unique alias order.`;
@@ -263,7 +317,11 @@ async function main() {
         await expectShipping(shipping, '$18.000', '$2.874', 'Incluido');
         assert((await shipping.getByRole('note').innerText()).includes('incluye el impuesto'),
           'The manual amount did not explain inclusive tax treatment.');
-        const { number } = await finishCashSale(page, shell, '$56.000');
+        if (PREVIEW_ONLY) {
+          await shell.locator('button.btn-cancel').click();
+          return 'UI-only preview: selected inclusive rate 15.000; manual gross 18.000 and IVA 2.874 updated before finalizing; sale intentionally not created.';
+        }
+        const { number } = await finishCashSale(page, shell, '$56.000', saleAlias);
         await verifyDetail(page, '$18.000', '$2.874', '$56.000', 'Incluido');
         await verifyUniqueAlias(page, saleAlias, number);
         return `${number}: inclusive rate 15.000, manual gross 18.000/IVA 2.874, detail after reload 56.000; unique alias order.`;
@@ -287,8 +345,9 @@ async function main() {
   } finally {
     await browser.close();
     process.stdout.write(`REVIEW_SHIPPING_RESULT ${JSON.stringify({
-      results: RESULTS, consoleErrorNames: [...consoleErrorNames],
-      allPassed: RESULTS.length === 3 && RESULTS.every((item) => item.status === 'passed'),
+      results: RESULTS, consoleErrorNames: [...consoleErrorNames], manualQuoteEvidence,
+      allPassed: RESULTS.length === (ONLY ? 1 : 3)
+        && RESULTS.every((item) => item.status === 'passed'),
     })}\n`);
   }
 }

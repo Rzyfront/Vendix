@@ -13,6 +13,7 @@ import { StoreOrdersService } from '../../../orders/services/store-orders.servic
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { PaymentCollectorComponent } from '../../../../../../shared/components/payment-collector/payment-collector.component';
 import { PaymentMethodsCatalogService } from '../../../../../../shared/services/payment-methods-catalog.service';
 import type { PaymentMethod } from '../../../../../../shared/models/payment-method.model';
@@ -160,6 +161,7 @@ class CustomerSelectorStub {
   readonly selectedCustomer = input<unknown>(null);
   readonly allowAnonymous = input(true);
   readonly minimalInvoiceMode = input(false);
+  readonly requiresElectronicInvoicing = input(false);
   readonly showTopSuggestions = input(false);
   readonly searchLimit = input(3);
   readonly customerSelected = output<unknown>();
@@ -304,6 +306,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     TestBed.configureTestingModule({
       imports: [PosCheckoutShellComponent],
       providers: [
+        { provide: AuthFacade, useValue: { activeFiscalAreas: signal([]) } },
         { provide: StoreSettingsFacade, useValue: settingsMock },
         { provide: PosCartService, useValue: {} },
         { provide: PosPaymentService, useValue: {} },

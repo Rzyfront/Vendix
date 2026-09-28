@@ -17,6 +17,8 @@ import {
   canDirectDeliver,
   canCollectViaShip,
   hasKitchenLinesAwaitingHandoff,
+  kitchenHandoffBlocker,
+  describeKitchenHandoffBlocker,
   canDeliverItem,
   canCancelItem,
   canReverseDeliveredItem,
@@ -359,6 +361,12 @@ describe('order-action-policy — canCancelItem', () => {
 });
 
 describe('order-action-policy — canReverseDeliveredItem', () => {
+  it('does not offer a second reversal after a delivered item was cancelled', () => {
+    expect(canReverseDeliveredItem(item({
+      delivered_at: new Date(), cancelled_at: new Date(),
+    }))).toEqual({ enabled: false, reason: 'TABLE_SESSION_ITEM_NOT_REMOVABLE' });
+  });
+
   it.each(['cancelled', 'refunded', 'finished'])('rejects on order state %s', (order_state) =>
     expect(canReverseDeliveredItem(item({ order_state, delivered_at: new Date() }))).toEqual({
       enabled: false,
@@ -703,6 +711,81 @@ describe('order-action-policy — kitchen hand-off', () => {
       kitchen_ticket_items: [{ status: 'pending' }],
     }])).toBe(true);
     expect(hasKitchenLinesAwaitingHandoff([{ ...prepared('pending'), cancelled_at: new Date() }])).toBe(false);
+  });
+
+  // H3 fix (regression): a store that dropped the `restaurant` industry but
+  // kept legacy `prepared`/`skip_kds:false` catalog rows must not get stuck
+  // unable to ship/deliver/finish/remisionar those orders — a never-fired
+  // line only blocks when the store IS a restaurant. Once a real kitchen
+  // ticket exists the flag is irrelevant (a real ticket already happened).
+  it('gates the never-fired branch on isRestaurant, but a real ticket always blocks regardless', () => {
+    const neverFired = prepared(undefined, false);
+    expect(hasKitchenLinesAwaitingHandoff([neverFired], { isRestaurant: false })).toBe(false);
+    expect(hasKitchenLinesAwaitingHandoff([neverFired], { isRestaurant: true })).toBe(true);
+    // Default (no ctx) preserves historic behavior — same as isRestaurant: true.
+    expect(hasKitchenLinesAwaitingHandoff([neverFired])).toBe(true);
+
+    const stillPending = prepared('pending', false);
+    expect(hasKitchenLinesAwaitingHandoff([stillPending], { isRestaurant: false })).toBe(true);
+    expect(hasKitchenLinesAwaitingHandoff([stillPending], { isRestaurant: true })).toBe(true);
+
+    const delivered = prepared('delivered', false);
+    expect(hasKitchenLinesAwaitingHandoff([delivered], { isRestaurant: false })).toBe(false);
+    expect(hasKitchenLinesAwaitingHandoff([delivered], { isRestaurant: true })).toBe(false);
+  });
+
+  it('reports a distinct cancelled_ticket reason with the item name, separate from a merely pending one', () => {
+    const cancelledTicket = { ...prepared('cancelled', false), product_name: 'Bandeja Paisa' };
+    const blocker = kitchenHandoffBlocker([cancelledTicket], { isRestaurant: true });
+    expect(blocker).toEqual({ reason: 'cancelled_ticket', itemName: 'Bandeja Paisa' });
+    expect(describeKitchenHandoffBlocker(blocker!)).toBe(
+      'El plato "Bandeja Paisa" tiene su comanda cancelada en cocina: reenvíala a cocina o cancela el ítem antes de despachar.',
+    );
+
+    const pendingTicket = { ...prepared('pending', false), product_name: 'Bandeja Paisa' };
+    const pendingBlocker = kitchenHandoffBlocker([pendingTicket], { isRestaurant: true });
+    expect(pendingBlocker).toEqual({ reason: 'pending', itemName: 'Bandeja Paisa' });
+    // `pending` keeps the entry's own generic devMessage — no override.
+    expect(describeKitchenHandoffBlocker(pendingBlocker!)).toBeUndefined();
+  });
+
+  it('returns null (no blocker) once nothing in the order blocks', () => {
+    expect(kitchenHandoffBlocker([prepared('delivered')], { isRestaurant: true })).toBeNull();
+    expect(kitchenHandoffBlocker([prepared(undefined, false)], { isRestaurant: false })).toBeNull();
+  });
+});
+
+describe('order-action-policy — canDeliverItem restaurant gate (H3 fix)', () => {
+  const baseItem = {
+    order_state: 'processing',
+    delivered_at: null,
+    item_type: 'physical',
+    product_type: 'prepared',
+    skip_kds: false,
+  };
+
+  it('blocks a never-fired prepared line when the store is a restaurant', () => {
+    expect(canDeliverItem({ ...baseItem, isRestaurant: true })).toEqual({
+      enabled: false,
+      reason: ITEM_NOT_DELIVERABLE,
+    });
+  });
+
+  it('allows a never-fired prepared line when the store is NOT a restaurant', () => {
+    expect(canDeliverItem({ ...baseItem, isRestaurant: false })).toEqual({ enabled: true });
+  });
+
+  it('defaults to the historic (restaurant) behavior when isRestaurant is unresolved', () => {
+    expect(canDeliverItem(baseItem).enabled).toBe(false);
+  });
+
+  it('still requires reaching ready once a real ticket exists, regardless of isRestaurant', () => {
+    expect(
+      canDeliverItem({ ...baseItem, isRestaurant: false, latestKitchenStatus: 'pending' }),
+    ).toEqual({ enabled: false, reason: ITEM_NOT_DELIVERABLE });
+    expect(
+      canDeliverItem({ ...baseItem, isRestaurant: false, latestKitchenStatus: 'ready' }),
+    ).toEqual({ enabled: true });
   });
 });
 

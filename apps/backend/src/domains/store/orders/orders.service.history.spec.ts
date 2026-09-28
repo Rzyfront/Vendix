@@ -42,6 +42,7 @@ describe('OrdersService.update — customer_changed', () => {
       },
       store_users: { findFirst: jest.fn().mockResolvedValue({ id: 7 }) },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      accounts_receivable: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     const orderHistoryService = { record: jest.fn().mockResolvedValue(null) };
     const service = new OrdersService(

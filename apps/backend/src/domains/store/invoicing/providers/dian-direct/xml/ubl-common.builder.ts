@@ -32,6 +32,7 @@ import {
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { resolveFiscalResponsibilityFlags } from 'src/common/helpers/vat-responsibility.helper';
 import { DIAN_FINAL_CONSUMER_NAME } from '../../../validators/customer-fiscal-identity.validator';
+import { normalizeAcquirerDocumentType } from '../../../utils/acquirer-identity.resolver';
 import { createHash } from 'crypto';
 import {
   DianNumericInput,
@@ -861,10 +862,17 @@ export class UblCommonBuilder {
       'AccountingCustomerParty',
     );
 
-    // Structural branch selector — see method JSDoc for the rule.
+    // Structural branch selector — see method JSDoc for the rule. Deriva del
+    // CÓDIGO DIAN del documento (31 ⇒ jurídica), no sólo del literal 'NIT':
+    // `customer.document_type` puede llegar como código sin normalizar, y
+    // compararlo contra el literal lo hacía caer siempre a 'NATURAL' — la
+    // mitad del incidente Óptica Panorama SAS / Pollo Árabe (NIT de persona
+    // jurídica transmitido como persona natural).
     const resolved_person_type: 'NATURAL' | 'JURIDICA' =
       customer.person_type ??
-      (customer.document_type === 'NIT' ? 'JURIDICA' : 'NATURAL');
+      (normalizeAcquirerDocumentType(customer.document_type).code === '31'
+        ? 'JURIDICA'
+        : 'NATURAL');
 
     const dian_scheme_id =
       DIAN_ID_TYPES[customer.document_type] || customer.document_type;
@@ -1002,7 +1010,18 @@ export class UblCommonBuilder {
 
     // `cac:TaxScheme` del adquirente: 01 (IVA) si es responsable, ZZ (No aplica)
     // para consumidor final o adquirente no responsable.
-    const is_customer_responsible = customer.tax_regime === '48';
+    //
+    // Antes comparaba `customer.tax_regime === '48'` — pero `tax_regime` en
+    // este objeto lo produce `DianDirectProvider.normalizePartyAccountType`,
+    // que SÓLO devuelve '1' o '2' (persona jurídica/natural), nunca '48'. La
+    // comparación era estructuralmente imposible: TODO adquiriente resolvía
+    // `ZZ`, sin importar su responsabilidad real de IVA. Se deriva ahora de
+    // `customer.tax_responsibilities` (RUT casilla 53 real del cliente, ya
+    // disponible en este mismo método para `cbc:TaxLevelCode` unas líneas
+    // arriba) con la misma jerarquía de evidencia que usa el emisor.
+    const is_customer_responsible = resolveFiscalResponsibilityFlags({
+      tax_responsibilities: responsibilities,
+    }).vat_responsible;
     const customer_scheme = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
     customer_scheme
       .ele(UBL_NAMESPACES.CBC, 'ID')

@@ -2804,6 +2804,10 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
     inventory_committed: true,
     delivered_at: new Date('2026-09-10T12:00:00.000Z'),
     cancelled_at: null,
+    // H2/H4 — `cancelDeliveredOrderItem` now selects this to resolve the
+    // ticket the item was fired under; default to "no ticket resolvable"
+    // (legacy/untracked row) unless a test overrides it.
+    kitchen_ticket_items: [],
     ...overrides,
   });
 
@@ -3420,6 +3424,9 @@ describe('D.4 — recálculo de propina al cancelar (F-001)', () => {
           quantity: 1,
           delivered_at: new Date('2026-09-10T12:00:00.000Z'),
           cancelled_at: null,
+          // H2/H4 — `cancelDeliveredOrderItem` selects this to resolve the
+          // ticket the item was fired under; empty ⇒ no ticket resolvable.
+          kitchen_ticket_items: [],
         }),
       },
       $transaction: jest.fn((cb: any) => cb(txMock)),
@@ -5885,6 +5892,26 @@ describe('OrderFlowService.shipOrder — allowExemptDeliveryTypes (Task B, solo 
 
   it('con allowExemptDeliveryTypes: home_delivery sin método SIGUE rechazando — fuera del exempt set', async () => {
     const { service } = buildService(baseOrder('home_delivery'));
+    const error: any = await service
+      .shipOrder(1, {} as any, false, { allowExemptDeliveryTypes: true })
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_SHIP_REQUIRED_001');
+  });
+
+  // checkout-whatsapp-location-fallback (Paso 2): 'other' es el delivery_type
+  // de las órdenes con pending_shipping_assignment (envío por asignar). No
+  // está en SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES a propósito — sin método
+  // asignado, sigue sin poder despacharse, con o sin allowExemptDeliveryTypes.
+  it("'other' sin método sigue rechazando ORD_SHIP_REQUIRED_001 (delivery_type del flujo pending_shipping_assignment)", async () => {
+    const { service } = buildService(baseOrder('other'));
+    const error: any = await service.shipOrder(1, {} as any).catch((e) => e);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_SHIP_REQUIRED_001');
+  });
+
+  it("con allowExemptDeliveryTypes: 'other' sin método SIGUE rechazando — fuera del exempt set", async () => {
+    const { service } = buildService(baseOrder('other'));
     const error: any = await service
       .shipOrder(1, {} as any, false, { allowExemptDeliveryTypes: true })
       .catch((e) => e);

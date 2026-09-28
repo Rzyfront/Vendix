@@ -60,6 +60,7 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
 
     const prisma = createPrismaMock({
       invoices: ['findFirst', 'findMany', 'create'],
+      invoice_taxes: ['createMany'],
       products: ['findMany'],
       product_variants: ['findMany'],
       store_settings: ['findFirst'],
@@ -67,26 +68,62 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
     });
     // `resolveNoteTaxTypes` consulta el catálogo con `withoutScope()` (la
     // tarifa puede ser global, `store_id IS NULL`, y el scope automático la
-    // dejaría invisible). El doble devuelve el mismo mock para que el test
-    // asierte sobre los mismos handles.
+    // dejaría invisible). F-INC6 (fase 2 del create) también escribe
+    // `invoice_taxes` por `withoutScope()`. El doble devuelve el mismo mock
+    // para que el test asierte sobre los mismos handles.
     (prisma as unknown as { withoutScope: () => unknown }).withoutScope = () =>
       prisma;
 
-    prisma.invoices.findFirst.mockResolvedValue(parent);
+    const NOTE_ID = 8001;
+    const created: Array<Record<string, any>> = [];
+    const created_taxes: Array<Record<string, any>> = [];
+    let next_item_id = 1;
+
+    // F-INC6 — el create real de la nota queda en dos fases: `invoices.create`
+    // sólo con `invoice_items`, y luego `invoice_taxes.createMany` con
+    // `invoice_item_id` resuelto. El servicio RE-LEE la nota tras esa segunda
+    // fase (`findFirst({ where: { id: note.id } })`), así que el mock tiene que
+    // distinguir la búsqueda de la factura PADRE (`PARENT_ID`) de la
+    // re-lectura de la nota recién creada (`NOTE_ID`).
+    prisma.invoices.findFirst.mockImplementation(async ({ where }: any) => {
+      if (where?.id === PARENT_ID) return parent;
+      if (where?.id === NOTE_ID) {
+        return {
+          id: NOTE_ID,
+          invoice_number: 'NC1',
+          invoice_type: 'credit_note',
+          status: 'draft',
+          invoice_taxes: created_taxes,
+        };
+      }
+      return null;
+    });
     prisma.invoices.findMany.mockResolvedValue([]);
     prisma.store_settings.findFirst.mockResolvedValue(null);
     prisma.tax_rates.findMany.mockResolvedValue([]);
 
-    const created: Array<Record<string, any>> = [];
     prisma.invoices.create.mockImplementation(
       async ({ data }: { data: Record<string, any> }) => {
         created.push(data);
+        const invoice_items = (data.invoice_items?.create ?? []).map(
+          (item: Record<string, unknown>) => ({
+            id: next_item_id++,
+            ...item,
+          }),
+        );
         return {
-          id: 8001,
+          id: NOTE_ID,
           invoice_number: data.invoice_number,
           invoice_type: data.invoice_type,
           status: data.status,
+          invoice_items,
         };
+      },
+    );
+    prisma.invoice_taxes.createMany.mockImplementation(
+      async ({ data }: { data: Array<Record<string, any>> }) => {
+        created_taxes.push(...data);
+        return { count: data.length };
       },
     );
 
@@ -110,7 +147,7 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
       {} as never,
     );
 
-    return { service, prisma, created, invoice_number_generator };
+    return { service, prisma, created, created_taxes, invoice_number_generator };
   }
 
   /** Nota TOTAL: sin `items` ni `taxes`, copia el documento que corrige. */
@@ -131,11 +168,11 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
   });
 
   it('la nota que copia una factura INC acredita INC, no IVA', async () => {
-    const { service, created } = setup([incParentTax()]);
+    const { service, created_taxes } = setup([incParentTax()]);
 
     await service.createCreditNote(totalNote());
 
-    const taxRow = created[0].invoice_taxes.create[0];
+    const taxRow = created_taxes[0];
     expect(taxRow).toMatchObject({
       tax_rate_id: 68,
       tax_name: 'INC',
@@ -148,7 +185,7 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
     // Éste es el camino ALCANZABLE por API: `CreateInvoiceTaxDto.tax_type` es
     // opcional, así que un llamador que envía el desglose sin clasificarlo
     // hacía que la nota de un restaurante INC se acreditara como IVA.
-    const { service, created, prisma } = setup([incParentTax()]);
+    const { service, created_taxes, prisma } = setup([incParentTax()]);
     prisma.tax_rates.findMany.mockResolvedValue([
       { id: 68, tax_categories: { tax_type: 'inc' } },
     ]);
@@ -176,7 +213,7 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
         }),
       }),
     );
-    const taxRow = created[0].invoice_taxes.create[0];
+    const taxRow = created_taxes[0];
     expect(taxRow.tax_type).toBe('inc');
     expect(taxRow.tax_type).not.toBe('iva');
   });
@@ -197,7 +234,7 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
   });
 
   it('el tipo declarado en el desglose manda y no dispara lookup de catálogo', async () => {
-    const { service, created, prisma } = setup([incParentTax()]);
+    const { service, created_taxes, prisma } = setup([incParentTax()]);
 
     await service.createCreditNote({
       related_invoice_id: PARENT_ID,
@@ -215,6 +252,6 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
     } as CreateCreditNoteDto);
 
     expect(prisma.tax_rates.findMany).not.toHaveBeenCalled();
-    expect(created[0].invoice_taxes.create[0].tax_type).toBe('inc');
+    expect(created_taxes[0].tax_type).toBe('inc');
   });
 });

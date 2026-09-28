@@ -119,6 +119,19 @@ describe('DispatchNotesService — createFromOrder prorratea el impuesto de lín
     expect(txCreate).not.toHaveBeenCalled();
   });
 
+  it('rechaza remisionar una orden con envío por asignar (other sin método) con ORD_SHIP_REQUIRED_001', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue({
+      ...orderWith([orderItem({ products: { product_type: 'physical' }, kitchen_ticket_items: [] })]),
+      state: 'pending_payment',
+      delivery_type: 'other',
+      shipping_method_id: null,
+    });
+    await expect(service.createFromOrder(ORDER_ID, { items: [] } as any)).rejects.toMatchObject({
+      errorCode: 'ORD_SHIP_REQUIRED_001',
+    });
+    expect(txCreate).not.toHaveBeenCalled();
+  });
+
   it('still permits an explicit direct-product line while a different dish waits in KDS', async () => {
     prismaMock.orders.findFirst.mockResolvedValue(orderWith([
       orderItem({ id: 12, product_id: 353, products: { product_type: 'prepared' }, kitchen_ticket_items: [{ status: 'pending' }] }),

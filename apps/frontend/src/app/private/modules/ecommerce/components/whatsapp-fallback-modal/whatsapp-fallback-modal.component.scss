@@ -1,0 +1,147 @@
+:host {
+  display: contents;
+
+  /* Scope the "success" button variant to the WhatsApp brand green just for
+     this component's own subtree (custom properties cascade through the
+     light DOM under Angular's default emulated encapsulation, so this never
+     leaks into the rest of the app's theme). */
+  --color-success: #25d366;
+  --color-success-rgb: 37, 211, 102;
+}
+
+.wa-shell {
+  display: flex;
+  flex-direction: column;
+  /* Bleed the hero to the modal edges. These must mirror app-modal's body
+     padding exactly (px-3 py-2.5 / md:px-5 md:py-4): a larger negative margin
+     overflows the body and renders a horizontal scrollbar under the hero. */
+  margin: -0.625rem -0.75rem;
+
+  @media (min-width: 768px) {
+    margin: -1rem -1.25rem;
+  }
+}
+
+/* ---------- HERO ---------- */
+.wa-hero {
+  position: relative;
+  padding: 1.75rem 1.5rem 1.5rem;
+  text-align: center;
+  color: #fff;
+  overflow: hidden;
+}
+
+.wa-hero-bg {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #075e54 0%, #128c7e 55%, #25d366 100%);
+  z-index: 0;
+}
+
+.wa-hero-pattern {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.18) 0, transparent 40%),
+    radial-gradient(circle at 80% 0%, rgba(255, 255, 255, 0.12) 0, transparent 35%),
+    radial-gradient(circle at 50% 110%, rgba(255, 255, 255, 0.1) 0, transparent 45%);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.wa-hero-icon {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  margin: 0 auto 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow:
+    0 8px 20px rgba(7, 94, 84, 0.35),
+    0 0 0 4px rgba(255, 255, 255, 0.25);
+  z-index: 2;
+  animation: wa-icon-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.wa-hero-halo {
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  animation: wa-halo 2.4s ease-in-out infinite;
+}
+
+.wa-hero-logo {
+  position: relative;
+  z-index: 2;
+  width: 44px;
+  height: 44px;
+  color: #25d366;
+}
+
+.wa-hero-title {
+  position: relative;
+  z-index: 2;
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 0.25rem;
+  letter-spacing: -0.01em;
+}
+
+.wa-hero-subtitle {
+  position: relative;
+  z-index: 2;
+  font-size: 0.875rem;
+  margin: 0;
+  opacity: 0.92;
+  line-height: 1.4;
+}
+
+/* ---------- FOOTER ---------- */
+/* Stacked full-width buttons: the shared app-button forces `white-space:
+   nowrap`, so side-by-side buttons in a small modal clipped their labels.
+   Stacking gives each label the full modal width. Primary action first. */
+.wa-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.wa-footer app-button {
+  width: 100%;
+}
+
+/* ---------- ANIMATIONS ---------- */
+@keyframes wa-icon-in {
+  0% {
+    transform: scale(0.5) rotate(-12deg);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1) rotate(0);
+    opacity: 1;
+  }
+}
+
+@keyframes wa-halo {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wa-hero-icon,
+  .wa-hero-halo {
+    animation: none !important;
+  }
+}

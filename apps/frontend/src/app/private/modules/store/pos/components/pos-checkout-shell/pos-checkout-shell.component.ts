@@ -52,6 +52,7 @@ import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
 import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
 
 export type CheckoutIntent = 'pickup' | 'delivery';
@@ -151,6 +152,7 @@ export class PosCheckoutShellComponent {
 
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
+  private readonly authFacade = inject(AuthFacade);
   private readonly cartService = inject(PosCartService);
   private readonly paymentService = inject(PosPaymentService);
   private readonly integration = inject(PosRestaurantIntegrationService);
@@ -509,6 +511,12 @@ export class PosCheckoutShellComponent {
   private wasOpen = false;
   private openedOrderId: number | null = null;
 
+  /** La venta sale con factura electrónica automática (misma regla que la confirmación POS). */
+  readonly requiresElectronicInvoicing = computed<boolean>(() => {
+    const areas = (this.authFacade.activeFiscalAreas() || []) as string[];
+    if (!areas.includes('invoicing')) return false;
+    return Boolean(this.settingsFacade.settings()?.invoicing?.pos?.auto_emit ?? true);
+  });
   readonly allowAnonymousSales = computed(
     () => this.settingsFacade.pos()?.allow_anonymous_sales ?? false,
   );

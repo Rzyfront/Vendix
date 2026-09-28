@@ -98,7 +98,12 @@ export interface CheckoutRequest {
   shipping_address?: CheckoutShippingAddress;
   shipping_method_id?: number;
   shipping_rate_id?: number;
-  payment_method_id: number;
+  /**
+   * Requerido en el checkout normal. Se omite por completo (undefined) en el
+   * fallback WhatsApp (`pending_shipping_assignment:true`): la orden nace sin
+   * pago porque el total real todavía no incluye el envío.
+   */
+  payment_method_id?: number;
   notes?: string;
   bookings?: BookingSelection[];
   items?: Array<{
@@ -137,6 +142,17 @@ export interface CheckoutRequest {
    * post-éxito del frontend cambia (resumen + `wa.me` con automensaje).
    */
   channel?: 'ecommerce' | 'whatsapp';
+  /**
+   * checkout-whatsapp-location-fallback: `true` cuando el comprador no pudo
+   * ubicarse en el mapa (permiso de geolocalización denegado/no soportado, o
+   * el GPS falló) y confirma enviar su pedido al WhatsApp de la tienda en
+   * vez de seguir intentando. Requiere `channel:'whatsapp'`; el backend
+   * fuerza `delivery_type='other'`, omite `shipping_method_id` /
+   * `shipping_rate_id` / `payment_method_id` (no se crea fila de pago ni se
+   * emite factura), y la tienda completa el envío después con
+   * `PATCH /store/orders/:id/shipping`.
+   */
+  pending_shipping_assignment?: boolean;
 }
 
 export interface CheckoutResponse {

@@ -803,12 +803,76 @@ describe('ShippingCalculatorService', () => {
         expect(cost).toBe(6000);
       });
 
-      // Adaptado: contrato fail-open de `vendix-shipping-distance-pricing` —
-      // sin coords del comprador la cotización degrada al precio de zona,
-      // NUNCA a `null` directo (eso solo ocurre si la tarifa no aparece del
-      // todo entre las opciones, p.ej. sin cobertura de zona). Se documenta
-      // la desviación del enunciado literal en el reporte final.
-      it('adaptado — tarifa por distancia sin lat/lng del comprador ⇒ degrada al precio de zona (fail-open), no null', async () => {
+      // Cambio de negocio 2026-09-27: sin coords del comprador Y sin poder
+      // geocodificar su dirección, la tarifa YA NO degrada a precio de zona
+      // — se EXCLUYE de las opciones (igual que "fuera de todos los
+      // tramos"), así que `quoteRateGross` devuelve `null` (la tarifa no
+      // aparece entre las opciones calculadas). Reemplaza el test
+      // "adaptado" anterior, que documentaba el fail-open ahora revertido.
+      it('sin lat/lng del comprador y sin poder geocodificar ⇒ se EXCLUYE (null), YA NO degrada a zona', async () => {
+        mockPrisma.shipping_zones.findMany.mockResolvedValue([riohachaZone]);
+        mockPrisma.shipping_rates.findMany.mockResolvedValue([
+          distanceRate(),
+        ]);
+        // La tarifa (única opción) queda excluida ⇒ `calculateRates` cae al
+        // fallback de retiro en tienda, que consulta direcciones pickup.
+        mockPrisma.addresses.findMany.mockResolvedValue([]);
+
+        const cost = await service.quoteRateGross(
+          1,
+          103,
+          [{ product_id: 1, quantity: 1, price: 10000 }],
+          address, // sin latitude/longitude ni address_line1 ⇒ resolveBuyerCoords no puede
+        );
+
+        expect(cost).toBeNull();
+      });
+
+      it('con GeocodingService disponible pero el forward geocode falla ⇒ también se excluye (null)', async () => {
+        const geocoding = {
+          forward: jest.fn().mockRejectedValue(new Error('provider down')),
+        } as any;
+        const distanceWithGeocoding = new ShippingDistanceService(
+          undefined,
+          geocoding,
+        );
+        const module: TestingModule = await Test.createTestingModule({
+          providers: [
+            ShippingCalculatorService,
+            { provide: StorePrismaService, useValue: mockPrisma },
+            { provide: SettingsService, useValue: mockSettings },
+            { provide: ShippingTaxService, useValue: mockShippingTax },
+            {
+              provide: ShippingDistanceService,
+              useValue: distanceWithGeocoding,
+            },
+          ],
+        }).compile();
+        const serviceWithGeocoding = module.get<ShippingCalculatorService>(
+          ShippingCalculatorService,
+        );
+
+        mockPrisma.shipping_zones.findMany.mockResolvedValue([riohachaZone]);
+        mockPrisma.shipping_rates.findMany.mockResolvedValue([
+          distanceRate(),
+        ]);
+        mockPrisma.addresses.findMany.mockResolvedValue([]);
+
+        const cost = await serviceWithGeocoding.quoteRateGross(
+          1,
+          103,
+          [{ product_id: 1, quantity: 1, price: 10000 }],
+          { ...address, address_line1: 'Cra 7 # 1-2' },
+        );
+
+        expect(cost).toBeNull();
+        expect(geocoding.forward).toHaveBeenCalled();
+      });
+
+      it('motor de ruteo caído (buyer SÍ resuelto) ⇒ sigue degradando a precio de zona (infraestructura, sin cambio)', async () => {
+        jest
+          .spyOn(distanceService, 'resolveDistanceKm')
+          .mockRejectedValue(new Error('routing down'));
         mockPrisma.shipping_zones.findMany.mockResolvedValue([riohachaZone]);
         mockPrisma.shipping_rates.findMany.mockResolvedValue([
           distanceRate(),
@@ -818,10 +882,37 @@ describe('ShippingCalculatorService', () => {
           1,
           103,
           [{ product_id: 1, quantity: 1, price: 10000 }],
-          address, // sin latitude/longitude
+          { ...address, latitude: 4.711, longitude: -74.0721 },
         );
 
-        expect(cost).toBe(8000);
+        expect(cost).toBe(8000); // base_cost de la tarifa (zona)
+      });
+
+      it('sin ORIGEN del método (infraestructura) ⇒ sigue degradando a precio de zona, sin cambio', async () => {
+        mockPrisma.shipping_zones.findMany.mockResolvedValue([riohachaZone]);
+        mockPrisma.shipping_rates.findMany.mockResolvedValue([
+          distanceRate({
+            shipping_method: {
+              id: 5,
+              name: 'Envío por distancia',
+              type: 'own_fleet',
+              is_active: true,
+              display_order: 1,
+              distance_pricing_enabled: true,
+              origin_latitude: null,
+              origin_longitude: null,
+            },
+          }),
+        ]);
+
+        const cost = await service.quoteRateGross(
+          1,
+          103,
+          [{ product_id: 1, quantity: 1, price: 10000 }],
+          { ...address, latitude: 4.711, longitude: -74.0721 },
+        );
+
+        expect(cost).toBe(8000); // base_cost de la tarifa (zona)
       });
     });
   });

@@ -229,12 +229,16 @@
 // Content
 .checkout-content {
     display: grid;
-    grid-template-columns: 1fr 360px;
+    // minmax(0, 1fr), not 1fr: a bare 1fr track never shrinks below its
+    // content's min-content width, and the MapLibre canvas has a fixed pixel
+    // width — once it measures wider than the viewport the track grows with it
+    // and the whole checkout scrolls sideways on mobile.
+    grid-template-columns: minmax(0, 1fr) 360px;
     gap: 2rem;
     align-items: start;
 
     @media (max-width: 992px) {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 
@@ -583,23 +587,298 @@
 }
 
 // Direccion escrita no localizable en el mapa (forward-geocode null/error):
-// aviso NO bloqueante bajo el mapa. El pin se puede mover a mano; si no, se
-// cotiza por tarifa estandar de zona (ver forwardGeocodeFromForm).
+// aviso bajo el mapa + CTA para usar la ubicacion automatica (GPS). Nunca
+// bloquea la escritura del formulario, pero mientras no haya coords
+// resueltas el boton Continuar SI queda deshabilitado (ver
+// `hasResolvedCoords`/`checkout-block-reason` mas abajo — owner directive).
 .address-map-warning {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
     gap: 0.5rem;
-    margin: 0.5rem 0 0;
+    // Owner directive (2026-09-27): el margen ya no lo pone cada indicador —
+    // `.map-column` (ver mas abajo) da un gap uniforme y simetrico entre
+    // aviso/chip/badge y el mapa.
+    margin: 0;
     padding: 0.5rem 0.75rem;
     background: var(--color-warning-light, rgba(245, 158, 11, 0.1));
     border: 1px solid var(--color-warning, #f59e0b);
     border-radius: var(--radius-md);
     color: var(--color-text-secondary);
     font-size: var(--fs-sm);
+    animation: map-indicator-in 180ms ease-out;
+
+    &__text {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0;
+
+        app-icon {
+            color: var(--color-warning, #f59e0b);
+            flex-shrink: 0;
+        }
+    }
+
+    &__action {
+        align-self: flex-start;
+    }
+}
+
+// Owner directive (change #2): razon visible ENCIMA de la botonera
+// Volver/Continuar mientras el domicilio no tiene coords + tarifa resuelta.
+// Nunca aparece para recoger en tienda ni carritos solo-servicio.
+// Visual (2026-09-27): caja de aviso informativo coherente con
+// `.address-map-warning` (mismo fondo suave + borde + icono).
+// Compacta (2026-09-27, owner): ritmo tomado de `.amp-hint` del
+// address-map-picker — fuente chica, padding ajustado, 1 sola linea,
+// max 40px de alto — pero con tokens de warning/tema (no colores fijos),
+// ahora VIVE DENTRO de `.checkout-actions--summary` (ver mas abajo), arriba
+// de `.checkout-actions__row`. Mismo nodo en desktop y en la barra fija de
+// mobile: no hay logica ni markup duplicados.
+.checkout-block-reason {
+    display: flex;
+    // Bug reportado por el dueño (2026-09-27): sin `box-sizing: border-box`,
+    // el padding/borde se sumaban AL ANCHO ya estirado al 100% del
+    // contenedor (`align-items: stretch` en `.checkout-actions--summary`),
+    // desbordando la fila. `max-width`/`min-width: 0` evitan que el flex-item
+    // (icono + texto) crezca mas alla del contenedor, y `overflow-wrap` +
+    // `white-space: normal` fuerzan el salto de linea en vez de desbordar.
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 0.375rem;
+    margin: 0 0 0.5rem;
+    padding: 0.3125rem 0.625rem;
+    max-height: 40px;
+    background: var(--color-warning-light, rgba(245, 158, 11, 0.1));
+    border: 1px solid var(--color-warning, #f59e0b);
+    border-radius: var(--radius-md);
+    color: var(--color-warning-800, #92400e);
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.3;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    overflow: hidden;
+    animation: checkout-block-reason-in 180ms ease-out;
 
     app-icon {
-        color: var(--color-warning, #f59e0b);
         flex-shrink: 0;
+        color: var(--color-warning, #f59e0b);
+        // Icono junto a la primera linea del texto, no centrado en el bloque
+        // completo si el texto llega a ocupar 2 lineas (`align-items` pasó de
+        // `center` a `flex-start` arriba).
+        margin-top: 0.0625rem;
+    }
+}
+
+@keyframes checkout-block-reason-in {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .checkout-block-reason {
+        animation: none;
+    }
+}
+
+// Chip de carga (2026-09-27) — mientras un forward-geocode del punto nuevo
+// (`forwardGeocodeFromForm`) o de una direccion guardada sin coords
+// (`ensureSavedAddressCoords`) esta en vuelo (`isLocatingAddress()`), este
+// chip ocupa el MISMO slot que `.address-map-warning`/`.address-precision-badge`
+// arriba del mapa — nunca conviven dos chips a la vez (ver los `@else if` en
+// el template). Tono neutral (todavia no sabemos si el resultado sera bueno o
+// malo), mismos tokens de tema que el resto de estos avisos.
+.address-locating-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    // Owner directive (2026-09-27): gap uniforme via `.map-column`, ver abajo.
+    margin: 0;
+    padding: 0.4rem 0.75rem;
+    background: var(--color-surface-alt, rgba(99, 102, 241, 0.08));
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    font-size: var(--fs-sm);
+    animation: map-indicator-in 180ms ease-out;
+
+    &__spinner {
+        flex-shrink: 0;
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--color-border);
+        border-top-color: var(--color-primary);
+        border-radius: 50%;
+        animation: address-locating-chip-spin 0.8s linear infinite;
+    }
+}
+
+@keyframes address-locating-chip-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+// Accesibilidad: sin movimiento, pero el texto ("Ubicando tu direccion...")
+// se queda igual — sigue siendo el unico chip visible en el slot.
+@media (prefers-reduced-motion: reduce) {
+    .address-locating-chip__spinner {
+        animation: none;
+    }
+}
+
+// Paso 8 — badge de precision del pin/geocode. Nunca bloquea Continuar; solo
+// informa que tan confiable es el punto que se va a cobrar por distancia.
+.address-precision-badge {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    // Owner directive (2026-09-27): gap uniforme via `.map-column`, ver abajo.
+    margin: 0;
+    padding: 0.4rem 0.75rem;
+    border-radius: var(--radius-md);
+    font-size: var(--fs-sm);
+    line-height: 1.35;
+    animation: map-indicator-in 180ms ease-out;
+
+    app-icon {
+        flex-shrink: 0;
+        margin-top: 0.125rem;
+    }
+
+    &__label {
+        display: block;
+        margin-top: 0.125rem;
+        color: var(--color-text-muted);
+        font-size: var(--fs-xs, 0.75rem);
+    }
+
+    &--success {
+        background: var(--color-success-light, rgba(16, 185, 129, 0.1));
+        border: 1px solid var(--color-success, #10b981);
+        color: var(--color-text-secondary);
+
+        app-icon {
+            color: var(--color-success, #10b981);
+        }
+    }
+
+    &--info {
+        background: var(--color-surface-alt, rgba(99, 102, 241, 0.08));
+        border: 1px solid var(--color-border);
+        color: var(--color-text-secondary);
+
+        app-icon {
+            color: var(--color-text-muted);
+        }
+    }
+
+    &--warning {
+        background: var(--color-warning-light, rgba(245, 158, 11, 0.1));
+        border: 1px solid var(--color-warning, #f59e0b);
+        color: var(--color-text-secondary);
+
+        app-icon {
+            color: var(--color-warning, #f59e0b);
+        }
+    }
+}
+
+// Entrada compartida (2026-09-27, owner): fade + leve desplazamiento hacia
+// abajo para los 3 indicadores que se turnan el mismo slot
+// (`.address-locating-chip` / `.address-map-warning` / `.address-precision-badge`)
+// y para el hint del picker (`.amp-hint`, ver address-map-picker.component.scss)
+// cuando aparecen o cambian de variante.
+@keyframes map-indicator-in {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+// Columna del mapa (2026-09-27, owner): envuelve, en las 4 ubicaciones del
+// checkout (dirección nueva/guardada × entrega/reserva), el indicador
+// (aviso/chip/badge), el hint (`hintPosition="top"` dentro del picker) y el
+// mapa en un solo flex column con un gap uniforme y simétrico — reemplaza los
+// `margin-top` sueltos y desiguales que cada indicador ponía por su cuenta.
+.map-column {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+// Slot del indicador mutuamente-exclusivo (chip ⟷ aviso ⟷ badge). Cuando
+// ninguno de los tres aplica (`--collapsed`, solo en dirección nueva: el
+// slot puede legítimamente no mostrar nada) colapsa su alto a 0 con una
+// transición suave en vez de saltar — mismo truco que un `height: auto`
+// animable (grid-template-rows 0fr → 1fr). En dirección guardada el slot
+// siempre muestra algo (chip, badge o el aviso de fallback) así que nunca
+// lleva el modificador `--collapsed`.
+.map-indicator {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows 220ms ease;
+
+    &--collapsed {
+        grid-template-rows: 0fr;
+    }
+}
+
+.map-indicator__inner {
+    overflow: hidden;
+    min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .address-map-warning,
+    .address-locating-chip,
+    .address-precision-badge {
+        animation: none;
+    }
+
+    .map-indicator {
+        transition: none;
+    }
+}
+
+// Paso 8 — nudge no bloqueante cuando la precision es street/area: el marco
+// del mapa pulsa brevemente para que el comprador note que debe confirmar
+// el pin. Puramente visual, nunca bloquea el flujo. NOTA: el anillo vive en
+// este wrapper (no en `.map-phone-frame`, que tiene `overflow: hidden` y
+// recortaria el box-shadow).
+.address-map-anchor {
+    scroll-margin: 1rem;
+    border-radius: var(--radius-lg);
+
+    &--highlight {
+        animation: address-map-anchor-pulse 2s ease-out 1;
+    }
+}
+
+@keyframes address-map-anchor-pulse {
+    0%,
+    100% {
+        box-shadow: none;
+    }
+    20%,
+    60% {
+        box-shadow: 0 0 0 3px var(--color-warning, #f59e0b);
     }
 }
 
@@ -968,19 +1247,36 @@
 // Botonera debajo de la card de resumen: vive en la columna sticky de 360px.
 // Volver/Anterior y Continuar/Confirmar reparten 50/50 a lo ancho, en tamaño
 // grande (size lg + fullWidth en el template) para quedar simétricos.
+// Contenedor en columna: fila 1 (opcional) el aviso compacto
+// `.checkout-block-reason`, fila 2 siempre `.checkout-actions__row` con los
+// botones Volver/Continuar 50/50. Antes el aviso vivia FUERA de este div; el
+// cambio a `column` es lo que permite que ambos convivan sin que el `flex:1`
+// de los botones lo estire como si fuera un tercer boton.
 .checkout-actions--summary {
+    display: flex;
+    flex-direction: column;
     margin-top: 1rem;
     padding: 1rem;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
-    flex-direction: row;
     align-items: stretch;
-    gap: 12px;
 
-    > * {
-        flex: 1 1 0;
-        min-width: 0;
+    .checkout-actions__row {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: stretch;
+        gap: 12px;
+
+        // Base 150px + wrap: cuando la columna del resumen no alcanza para
+        // dos botones lg (1024-1440px), Continuar baja a su propia fila en
+        // vez de desbordar el contenedor.
+        > * {
+            flex: 1 1 150px;
+            min-width: 0;
+            max-width: 100%;
+        }
     }
 
     .checkout-actions__left {
@@ -1215,9 +1511,7 @@
     margin-top: 1.5rem;
 }
 
-// C.3: mapa enmarcado tipo teléfono + formulario. En escritorio el marco
-// estira a lo alto de la fila y el mapa llena el espacio disponible; en
-// ≤992px (una columna) conserva alto fijo.
+// C.3: mapa cuadrado (1:1, ver `.map-phone-frame` mas abajo) + formulario.
 .delivery-address-grid {
     display: grid;
     grid-template-columns: 6fr 5fr;
@@ -1234,64 +1528,39 @@
     }
 }
 
+// Owner directive (2026-09-27): mapa cuadrado (1:1) en las 4 ubicaciones del
+// checkout (direccion nueva/guardada × entrega/reserva). Reemplaza el marco
+// tipo "telefono" (9:16 / 16:10) anterior. El cuadrado lo impone el propio
+// `.amp-map` del picker via las variables CSS `--amp-map-height`/
+// `--amp-map-aspect-ratio` (ver address-map-picker.component.scss) — NO un
+// `aspect-ratio` en este frame ni en `.amp-map`/`.address-map-picker`
+// directamente, porque el picker usa `ViewEncapsulation.None` y estos
+// selectores de clase escritos aqui no calzan con el atributo de scope del
+// checkout (las variables CSS si heredan, cruzando ese limite sin problema).
+// El frame ya no fuerza su propio alto: se achica/agranda con su contenido
+// (el mapa cuadrado adentro), a cualquier ancho de viewport.
 .map-phone-frame {
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     overflow: hidden;
-    aspect-ratio: 9 / 16;
-    max-height: 560px;
     width: 100%;
     background: var(--color-surface);
 
-    // El picker llena el marco; el mapa nunca empuja el formulario.
     app-address-map-picker {
         display: block;
-        height: 100%;
     }
+}
 
-    @media (max-width: 992px) {
-        aspect-ratio: 16 / 10;
-        max-height: 320px;
-    }
-
-    // Escritorio: el marco ocupa todo el alto disponible de la fila y el
-    // mapa (flex: 1) crece con él; el hint queda fijo abajo. Scoped al
-    // checkout para no afectar otros usos del picker.
-    @media (min-width: 993px) {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-        min-height: 480px;
-        aspect-ratio: auto;
-        max-height: none;
-
-        app-address-map-picker {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
-        }
-
-        .address-map-picker {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            min-height: 0;
-            margin-bottom: 0;
-        }
-
-        .amp-map {
-            flex: 1;
-            height: auto;
-            min-height: 320px;
-        }
-
-        .amp-skeleton,
-        .amp-error {
-            height: 100%;
-        }
-    }
+// Aplica a las 4 ubicaciones (dos con `.map-phone-frame`, dos de reserva sin
+// marco — ver `.address-map-anchor` en el template): una sola regla plana
+// porque el valor no cambia entre ellas. Al estar en el stylesheet del
+// checkout (`ViewEncapsulation.Emulated`), solo alcanza a los 4 usos propios
+// de este componente; los demas consumidores del picker (POS, customer-modal,
+// dispatch-note editor) nunca declaran estas variables y conservan su alto
+// fijo de siempre (240px desktop / 40dvh movil).
+app-address-map-picker {
+    --amp-map-height: auto;
+    --amp-map-aspect-ratio: 1 / 1;
 }
 
 // Formulario primero (izquierda / arriba en mobile), mapa de apoyo después.

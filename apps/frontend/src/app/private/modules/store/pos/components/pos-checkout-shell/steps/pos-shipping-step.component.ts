@@ -42,6 +42,10 @@ import {
   AddressPayload,
 } from '../../../../../../../shared/components/address-form-fields/address-form-fields.component';
 import { CountryService } from '../../../../../../../core/services/country.service';
+import {
+  GeocodingService,
+  type GeocodePrecision,
+} from '../../../../../ecommerce/services/geocoding.service';
 
 import { PosPaymentService } from '../../../services/pos-payment.service';
 import { PosShippingService } from '../../../services/pos-shipping.service';
@@ -161,6 +165,44 @@ export class PosShippingStepComponent {
   readonly showAddressErrors = signal<boolean>(false);
   readonly addressId = signal<number | null>(null);
   private readonly addressCustomerId = signal<number | null>(null);
+  /**
+   * Geocode precision + pin-confirmation state for the address currently in
+   * view, mirroring `app-address-form-fields`' own signals (its emitted
+   * `geocode_precision`/`pin_confirmed` for a freshly-typed address, or the
+   * result of {@link ensureSavedAddressCoords} for a saved address that had
+   * no coordinates yet). Non-blocking — only feeds `addressPrecisionBadge`.
+   */
+  readonly addressGeocodePrecision = signal<GeocodePrecision | null>(null);
+  readonly addressPinConfirmed = signal<boolean>(false);
+  readonly addressPrecisionBadge = computed<
+    { text: string; tone: 'success' | 'warning'; icon: string } | null
+  >(() => {
+    if (this.addressPinConfirmed()) {
+      return { text: 'Punto confirmado en el mapa', tone: 'success', icon: 'check-circle' };
+    }
+    switch (this.addressGeocodePrecision()) {
+      case 'exact':
+        return { text: 'Ubicación exacta', tone: 'success', icon: 'check-circle' };
+      case 'interpolated':
+        return { text: 'Ubicación aproximada a la placa', tone: 'success', icon: 'map-pin' };
+      case 'intersection':
+        return { text: 'Ubicada en la esquina', tone: 'success', icon: 'map-pin' };
+      case 'street':
+        return {
+          text: 'Solo encontramos la calle — confirma el punto en el mapa',
+          tone: 'warning',
+          icon: 'alert-triangle',
+        };
+      case 'area':
+        return {
+          text: 'Solo encontramos el barrio o sector — confirma el punto en el mapa',
+          tone: 'warning',
+          icon: 'alert-triangle',
+        };
+      default:
+        return null;
+    }
+  });
 
   /** Stable form seed; emitted form values must never feed their own input. */
   readonly initialAddress = signal<AddressPayload | null>(null);
@@ -169,6 +211,8 @@ export class PosShippingStepComponent {
   private readonly shippingEdited = signal(false);
   private readonly freeAddressEdited = signal(false);
   private quoteGeneration = 0;
+  /** Manual tax quotes depend on amount/rate, not on address requotes. */
+  private manualQuoteGeneration = 0;
   private walletMultiAttemptKey: string | null = null;
   private walletMultiAttemptSignature: string | null = null;
   readonly shippingRateId = signal<number | null>(null);
@@ -227,6 +271,21 @@ export class PosShippingStepComponent {
     return !!m && m.type !== 'pickup';
   });
 
+  /**
+   * Coordinator directive (requirement 3, 2026-09): a delivery method may
+   * NEVER quote/charge a default rate for an address that has no resolved
+   * point — neither a forward-geocode hit nor a confirmed map pin. This is
+   * the single source of truth `getFirstValidationError`/`calculateShippingCost`
+   * key off. The cashier's own device sits at the store, so the POS never
+   * offers GPS (`[allowGeolocation]="false"` on both `app-address-form-fields`
+   * usages below) — marking the pin on the map is the only path to a location
+   * once geocoding fails.
+   */
+  readonly hasResolvedLocation = computed<boolean>(() => {
+    const a = this.address();
+    return !!a && Number.isFinite(a.latitude) && Number.isFinite(a.longitude);
+  });
+
   /** Keep the missing-method reason visible for a delivery address, not only
    * during the short validation flash shown after an attempted charge. */
   readonly missingShippingMethodReason = computed<string | null>(() =>
@@ -241,6 +300,20 @@ export class PosShippingStepComponent {
     return [a.address_line1, a.city].filter(Boolean).join(', ') || 'Sin dirección';
   });
 
+  /**
+   * H6 — nombra los campos nullable de `addresses` (Prisma: `state_province`,
+   * `phone_number`) que faltan en la dirección guardada actual, para el aviso
+   * que precede el formulario precargado en `#clientDeliveryDetails`.
+   */
+  readonly missingAddressFieldsLabel = computed<string>(() => {
+    const a = this.address();
+    if (!a) return '';
+    const missing: string[] = [];
+    if (!a.state_province) missing.push('el departamento');
+    if (!a.phone_number) missing.push('el teléfono');
+    return missing.join(' y ');
+  });
+
   // ── Outputs ───────────────────────────────────────────────────────────────
   readonly shippingCompleted = output<any>();
 
@@ -251,6 +324,9 @@ export class PosShippingStepComponent {
   private readonly toastService = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly countryService = inject(CountryService);
+  private readonly geocodingService = inject(GeocodingService);
+  /** Addresses currently being backfilled by {@link ensureSavedAddressCoords}. */
+  private readonly savedAddressGeocodeInFlight = new Set<number>();
 
   readonly currencySymbol = this.currencyService.currencySymbol;
 
@@ -574,8 +650,16 @@ export class PosShippingStepComponent {
   private loadDefaultAddress(): void {
     const addresses = this.cartState()?.customer?.addresses;
     const address = addresses?.find((a) => a.is_primary) ?? addresses?.[0];
-    this.setAddress(address ? this.toAddressPayload(address) : null, address?.id ?? null);
-    if (!address) {
+    if (address) {
+      const payload = this.toAddressPayload(address);
+      this.setAddress(payload, address.id);
+      this.ensureSavedAddressCoords(address.id, payload);
+      // H6 — la dirección principal guardada puede tener `state_province` o
+      // `phone_number` nulos (columnas nullable en Prisma): abrir el
+      // formulario precargado en vez de solo un resumen sin vía de completarla.
+      this.addressEditing.set(!this.addressValid());
+    } else {
+      this.setAddress(null, null);
       // Prefill contact once, without making a blank address look valid.
       this.initialAddress.set({
         address_line1: null, address_line2: null, city: null,
@@ -593,6 +677,69 @@ export class PosShippingStepComponent {
     this.addressCustomerId.set(id ? this.cartState()?.customer?.id ?? null : null);
     this.addressValid.set(!!(address?.address_line1 && address.city &&
       address.state_province && address.country_code && address.phone_number));
+    this.addressGeocodePrecision.set(address?.geocode_precision ?? null);
+    this.addressPinConfirmed.set(!!address?.pin_confirmed);
+  }
+
+  /**
+   * Backfills coordinates for a saved address that has none, so a
+   * distance-priced shipping method quotes against a real point instead of
+   * silently bailing (`calculateShippingCost` requires `a?.city` and only
+   * sends lat/lng when finite — an address book entry saved before this
+   * feature existed has neither). Mirrors the ecommerce checkout's own
+   * `ensureSavedAddressCoords`: forward-geocodes through the backend proxy
+   * (never Nominatim/Google directly) using the address's own city/state,
+   * then best-effort persists the result back to the address book so the
+   * next load skips this call entirely. Failures are silent — the address
+   * simply stays without coords, exactly as it already could before this
+   * feature existed; this never blocks the quote or the sale.
+   */
+  private ensureSavedAddressCoords(id: number, address: AddressPayload): void {
+    if (address.latitude != null && address.longitude != null &&
+      Number.isFinite(address.latitude) && Number.isFinite(address.longitude)) return;
+    if (!address.address_line1 || !address.city) return;
+    if (this.savedAddressGeocodeInFlight.has(id)) return;
+    this.savedAddressGeocodeInFlight.add(id);
+    const country = (address.country_code ?? '').trim().toUpperCase();
+    const query = !country || country === 'CO'
+      ? [address.address_line1, address.city, 'Colombia'].filter(Boolean).join(', ')
+      : [address.address_line1, address.city, address.state_province].filter(Boolean).join(', ');
+    this.geocodingService.forward(query, {
+      city: address.city || undefined,
+      state: address.state_province || undefined,
+    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (res) => {
+        this.savedAddressGeocodeInFlight.delete(id);
+        if (res?.lat == null || res?.lng == null) return;
+        // 'area' = city/neighbourhood centroid — NOT a resolved point (GAP 1,
+        // 2026-09-27, mirrors the ecommerce checkout's own
+        // `ensureSavedAddressCoords` and commit 28947e899). Never persisted:
+        // writing a centroid into the customer's saved address would poison
+        // it permanently. Leaving `latitude`/`longitude` untouched keeps
+        // `hasResolvedLocation()` false, so the cashier marks the map
+        // instead of silently charging/shipping from a city centroid.
+        if (res.precision === 'area') return;
+        // The cashier may have switched to a different address while the
+        // request was in flight — never apply a stale geocode result.
+        if (this.addressId() !== id) return;
+        const updated: AddressPayload = { ...address, latitude: res.lat, longitude: res.lng };
+        this.address.set(updated);
+        this.initialAddress.set(updated);
+        this.addressGeocodePrecision.set(res.precision ?? null);
+        this.invalidateQuote();
+        if (!this.manualCostOverride() && !this.isPickupMethod()) this.isCalculatingShipping.set(true);
+        // Best-effort: a failed PATCH just means the next load re-geocodes.
+        this.customersService.updateCustomerAddress(id, {
+          latitude: String(res.lat),
+          longitude: String(res.lng),
+        }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+          error: (err) => console.error('updateCustomerAddress (coords backfill) failed', err),
+        });
+      },
+      error: () => {
+        this.savedAddressGeocodeInFlight.delete(id);
+      },
+    });
   }
 
   private toAddressPayload(address: PosCustomerAddress): AddressPayload {
@@ -622,7 +769,12 @@ export class PosShippingStepComponent {
     this.shippingEdited.set(true);
     this.freeAddressEdited.set(false);
     this.addressEditing.set(false);
-    this.setAddress(this.toAddressPayload(address), id);
+    const payload = this.toAddressPayload(address);
+    this.setAddress(payload, id);
+    this.ensureSavedAddressCoords(id, payload);
+    // H6 — una dirección guardada distinta puede resultar igual de incompleta;
+    // reabre el formulario precargado en vez de dejar el resumen sin salida.
+    this.addressEditing.set(!this.addressValid());
   }
 
   onAddressChange(payload: AddressPayload, formDirty = this.addressForm()?.form.dirty ?? true): void {
@@ -633,6 +785,8 @@ export class PosShippingStepComponent {
     if (!formDirty) return;
     this.invalidateQuote();
     this.address.set(payload);
+    this.addressGeocodePrecision.set(payload.geocode_precision ?? null);
+    this.addressPinConfirmed.set(!!payload.pin_confirmed);
     if (!this.manualCostOverride() && !this.isPickupMethod()) this.isCalculatingShipping.set(true);
     if (formDirty) {
       this.shippingEdited.set(true);
@@ -640,13 +794,23 @@ export class PosShippingStepComponent {
     }
   }
 
+  /**
+   * Includes lat/lng so a coords-only change (pin moved, or a re-geocode
+   * that resolved a new point without touching any text field) counts as an
+   * edit against an existing order's original address — otherwise
+   * `hasShippingChanges()` would stay false and the shipping-cost recompute
+   * effect (gated by `!original || edited`) would never re-quote a
+   * distance-priced method after the coordinates changed.
+   */
   private addressKey(address: AddressPayload | null): string {
     const norm = (value: unknown) => String(value ?? '').trim().toLocaleLowerCase();
+    const coord = (value: number | null | undefined) =>
+      value != null && Number.isFinite(value) ? value.toFixed(6) : '';
     return JSON.stringify([
       address?.address_line1, address?.address_line2, address?.city,
       address?.state_province, address?.country_code ?? 'CO', address?.postal_code,
       address?.phone_number,
-    ].map(norm));
+    ].map(norm).concat([coord(address?.latitude), coord(address?.longitude)]));
   }
 
   private invalidateQuote(preserveBreakdown = false): void {
@@ -781,6 +945,22 @@ export class PosShippingStepComponent {
     if (!method || !this.cartState()?.items?.length || method.type === 'pickup') return;
     const a = this.address();
     if (!a?.city) return;
+    // Requirement 3 (coordinator, 2026-09): a delivery method must NEVER
+    // quote/auto-select a default rate for an address with no resolved
+    // point. Skip the network call entirely rather than let the backend
+    // return a flat/zone rate that ignores the missing coordinate —
+    // `getFirstValidationError` blocks the confirm gate on
+    // `!hasResolvedLocation()` regardless, but not calling here also means
+    // no rate is ever auto-selected/shown while the location is unresolved.
+    if (!this.hasResolvedLocation()) {
+      this.calculatedShippingCost.set(null);
+      this.shippingRateId.set(null);
+      // Never leave a stale amount (from a previous method/address) sitting
+      // in the totals while the location is unresolved — the confirm gate
+      // already blocks on this, but the displayed total must not lie either.
+      if (!this.manualCostOverride()) this.shippingCost.set(0);
+      return;
+    }
     this.isCalculatingShipping.set(true);
     const items = this.cartState()!.items.filter((item) => item.itemType !== 'custom')
       .map((item) => ({
@@ -815,7 +995,7 @@ export class PosShippingStepComponent {
         } else {
           this.calculatedShippingCost.set(null);
           this.shippingRateId.set(null);
-          this.quoteError.set('No hay tarifa para el método y la dirección elegidos. Selecciona otra opción o ingresa un costo válido.');
+          this.quoteError.set('No hay tarifa de envío para esta ubicación');
         }
       },
       error: (error) => {
@@ -873,7 +1053,7 @@ export class PosShippingStepComponent {
   private quoteManualCost(): void {
     this.invalidateQuote(true);
     this.manualQuotedShippingTax.set(null);
-    const generation = this.quoteGeneration;
+    const generation = ++this.manualQuoteGeneration;
     const amount = this.manualShippingPrice();
     const rateId = this.shippingRateId();
     const methodId = this.selectedShippingMethod()?.id;
@@ -892,13 +1072,13 @@ export class PosShippingStepComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (quote) => {
-          if (generation !== this.quoteGeneration || !this.manualCostOverride()) return;
+          if (generation !== this.manualQuoteGeneration || !this.manualCostOverride()) return;
           this.isCalculatingShipping.set(false);
           this.shippingCost.set(quote.shipping_cost);
           this.manualQuotedShippingTax.set(toQuotedShippingTax(quote));
         },
         error: (error) => {
-          if (generation !== this.quoteGeneration || !this.manualCostOverride()) return;
+          if (generation !== this.manualQuoteGeneration || !this.manualCostOverride()) return;
           this.isCalculatingShipping.set(false);
           this.quoteError.set(parseApiError(error).userMessage ||
             'No se pudo calcular el impuesto del envío. Inténtalo nuevamente.');
@@ -922,6 +1102,25 @@ export class PosShippingStepComponent {
     }
     if (this.quoteError()) {
       return { section: 'shipping-method', message: this.quoteError()! };
+    }
+    // Requirement 3 (coordinator, 2026-09): hard gate, no manual-cost escape
+    // hatch — a delivery method must never confirm/charge a default rate for
+    // an address with no resolved point (neither a forward-geocode hit nor a
+    // confirmed map pin). Placed before the generic shippingCost-finite check
+    // on purpose: a manually typed shipping cost
+    // (`onShippingCostChange`/`quoteManualCost`) sets `shippingCost` to a
+    // finite value regardless of location, which would otherwise slip past
+    // that check and let the cashier confirm a made-up cost for a location
+    // that was never resolved.
+    //
+    // Deliberately keyed on `hasResolvedLocation()`, NOT `shippingRateId()`:
+    // a `null` `shippingRateId` also covers the pre-existing, unrelated
+    // "manual cost, no automated rate table at all" path (alias deliveries,
+    // methods with no configured `shipping_rates`) — see `quoteManualCost`'s
+    // own comment. That path has real coords and is a legitimate cashier
+    // override, not the "no default rate" case this gate targets.
+    if (this.requiresAddress() && !this.hasResolvedLocation()) {
+      return { section: 'address', message: 'Marca la ubicación en el mapa para calcular el envío' };
     }
     if (!Number.isFinite(this.shippingCost()) || this.shippingCost() < 0) {
       return { section: 'shipping-method', message: 'Ingresa un costo de envío válido' };

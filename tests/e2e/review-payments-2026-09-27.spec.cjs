@@ -14,6 +14,7 @@ const { chromium } = require('playwright');
 const BASE = process.env.QA_BASE_URL || 'https://vendix.com';
 const PRODUCT = 'Coca-Cola 400ml';
 const TOTAL = '$38.000';
+const onlyEnter = process.argv.includes('--only-enter');
 const results = [];
 
 function fixtureId() {
@@ -84,6 +85,7 @@ async function openPos(page) {
       return;
     } catch {
       // A rebuilding local vhost can commit an empty Angular bootstrap.
+      await page.goto('about:blank', { waitUntil: 'commit' }).catch(() => {});
     }
   }
   throw new Error('POS product grid did not render through the local UI.');
@@ -192,6 +194,7 @@ async function main() {
   });
   try {
     await login(page);
+    if (!onlyEnter) {
     const alias = fixtureId();
     process.stdout.write(`QA fixture alias: ${alias}\n`);
     const shell = await addProductAndOpenCheckout(page);
@@ -302,6 +305,7 @@ async function main() {
         await verifyOrderDetail(page, number, [TOTAL]);
         return `${number}: cashier entered 40k for 38k sale, UI showed 2k change, order retained one successful 38k payment.`;
       });
+    }
 
     await scenario('Enter accepts every default and submits only after amount confirmation',
       ['R15'], 'happy/brute', async () => {
@@ -331,7 +335,7 @@ async function main() {
     process.stdout.write(`REVIEW_PAYMENTS_RESULT ${JSON.stringify({
       results,
       consoleErrorNames: [...consoleErrorNames],
-      allPassed: results.length === 5 && results.every((result) => result.status === 'passed'),
+      allPassed: results.length === (onlyEnter ? 1 : 5) && results.every((result) => result.status === 'passed'),
     })}\n`);
   }
 }

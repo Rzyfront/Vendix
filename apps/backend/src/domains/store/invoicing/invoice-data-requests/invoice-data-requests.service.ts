@@ -6,7 +6,7 @@ import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { v4 as uuidv4 } from 'uuid';
 import * as crypto from 'crypto';
-import { Prisma } from '@prisma/client';
+import { Prisma, identification_type_enum } from '@prisma/client';
 import { SubmitInvoiceDataDto } from './dto/submit-invoice-data.dto';
 import {
   INVOICE_DATA_REQUEST_STATUSES,
@@ -17,7 +17,6 @@ import { InvoicingService } from '../invoicing.service';
 import { CreditNotesService } from '../credit-notes/credit-notes.service';
 import { InvoiceFlowService } from '../invoice-flow/invoice-flow.service';
 import { CreateCreditNoteDto } from '../credit-notes/dto/create-credit-note.dto';
-import { CreateInvoiceTaxDto } from '../dto/create-invoice.dto';
 import {
   DEFAULT_STORE_TIMEZONE,
   localDateString,
@@ -25,6 +24,8 @@ import {
 // C.7 (CP-pos-exclusive-tax-double-charge, ADR-12) — mismo resolvedor que usan
 // los providers del gateway de impresión para las superficies `@OptionalAuth`.
 import { resolvePrintsVatBreakdownForPrint } from '../../print-formats/services/print-vat-breakdown.resolver';
+import { resolveAcquirerRail } from '../validators/acquirer-rail.resolver';
+import { normalizeAcquirerDocumentType } from '../utils/acquirer-identity.resolver';
 // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
 import { OrderHistoryService } from '../../orders/order-history/order-history.service';
 
@@ -1095,6 +1096,73 @@ export class InvoiceDataRequestsService {
         },
       });
 
+      // P1-B — la ficha existente puede venir de ANTES de que el formulario
+      // pidiera `document_type` (67 fichas prod en esa forma). Si el token
+      // público SÍ lo trae, se completa el hueco; si la ficha YA tiene un tipo
+      // declarado y difiere del que el comprador escribió ahora, NO se
+      // sobrescribe en silencio (inventaría un hecho) ni se reusa la ficha tal
+      // cual (transmitiría el tipo viejo, posiblemente equivocado): se bloquea
+      // para que un humano lo resuelva.
+      if (customer) {
+        const existing_type = customer.document_type ?? null;
+        // `invoice_data_requests.document_type` es texto libre del FORMULARIO
+        // PÚBLICO (`String @db.VarChar(50)`, sin `@IsEnum` en
+        // `SubmitInvoiceDataDto` — ver dto/submit-invoice-data.dto.ts): puede
+        // llegar como literal ('CC'), como código DIAN ('13') o como cualquier
+        // otra cosa que el comprador haya tecleado. `users.document_type` en
+        // cambio es `identification_type_enum` real — escribir el string crudo
+        // ahí no sólo es un error de tipos (TS2322), sería persistir basura no
+        // validada en una columna tipada. Se normaliza con el MISMO resolvedor
+        // que usa el resto de P1-B (`normalizeAcquirerDocumentType`, que ya
+        // resuelve literal↔código DIAN) y sólo se confía si el literal
+        // resultante es uno de los 10 valores reales del enum — 'TE' y
+        // 'NIT_EXTRANJERIA' existen en la tabla DIAN pero NO en el enum de
+        // Vendix, así que quedan fuera a propósito.
+        const submitted_literal = normalizeAcquirerDocumentType(
+          request.document_type,
+        ).literal;
+        const submitted_is_known_enum_value =
+          submitted_literal != null &&
+          (Object.values(identification_type_enum) as string[]).includes(
+            submitted_literal,
+          );
+        const submitted_type = submitted_is_known_enum_value
+          ? (submitted_literal as identification_type_enum)
+          : null;
+
+        if (!existing_type && submitted_type) {
+          customer = await this.prisma.users.update({
+            where: { id: customer.id },
+            data: { document_type: submitted_type },
+          });
+          this.logger.log(
+            `Invoice data request #${requestId}: backfilled document_type='${submitted_type}' onto existing customer #${customer.id} (documento=${request.document_number}), que no lo tenía declarado.`,
+          );
+        } else if (existing_type && submitted_type && existing_type !== submitted_type) {
+          throw new VendixHttpException(
+            ErrorCodes.INVOICING_DATA_REQUEST_005,
+            `El cliente con documento ${request.document_number} ya está registrado con tipo de documento '${existing_type}', y el formulario declaró '${submitted_type}'. Verifica manualmente cuál es el correcto antes de continuar.`,
+            {
+              request_id: requestId,
+              document_number: request.document_number,
+              existing_document_type: existing_type,
+              submitted_document_type: submitted_type,
+            },
+          );
+        } else if (
+          !existing_type &&
+          request.document_type &&
+          !submitted_is_known_enum_value
+        ) {
+          // No inventa un tipo a partir de texto que no normaliza a un código
+          // DIAN conocido: se registra y se deja la ficha como estaba (null),
+          // igual que si el formulario no hubiera traído nada.
+          this.logger.warn(
+            `Invoice data request #${requestId}: document_type='${request.document_type}' del formulario no normaliza a un código DIAN válido para customer #${customer.id}; se deja sin backfill.`,
+          );
+        }
+      }
+
       if (!customer) {
         // Find customer role
         const customerRole = await this.prisma.roles.findFirst({
@@ -1304,6 +1372,38 @@ export class InvoiceDataRequestsService {
         };
 
       case 'accepted': {
+        // P1-B — validar identidad/carril del NUEVO adquiriente ANTES de
+        // emitir la nota crédito espejo. `issueMirrorCreditNote` es
+        // irreversible (transmite a la DIAN en best-effort) y
+        // `issueNominativeInvoice` más abajo YA corre esta misma validación
+        // internamente (vía `createFromOrder` / `invoiceFlowService.validate`)
+        // — pero si falla DESPUÉS de que la NC espejo salió, el cliente queda
+        // sin ninguna factura válida: la original ya fue reversada y la nueva
+        // nunca llegó a existir. Lanzar ACÁ, antes de tocar la DIAN, es
+        // estrictamente mejor que descubrirlo con el reverso ya hecho.
+        const newAcquirer = await this.prisma.users.findUnique({
+          where: { id: customerId },
+          select: {
+            id: true,
+            document_type: true,
+            document_number: true,
+            legal_name: true,
+            first_name: true,
+            last_name: true,
+            person_type: true,
+          },
+        });
+
+        resolveAcquirerRail({
+          document_type: newAcquirer?.document_type,
+          document_number: newAcquirer?.document_number,
+          legal_name: newAcquirer?.legal_name,
+          first_name: newAcquirer?.first_name,
+          last_name: newAcquirer?.last_name,
+          person_type: newAcquirer?.person_type,
+          customer_id: newAcquirer?.id,
+        });
+
         // Accepted by DIAN (has CUFE): immutable. Issue a full mirror credit
         // note and a new nominative invoice.
         const credit_note_id =
@@ -1376,24 +1476,20 @@ export class InvoiceDataRequestsService {
       // emitters, so the emitter's fiscal day is always Bogotá's.
       issue_date: localDateString(new Date(), DEFAULT_STORE_TIMEZONE),
       currency: originalInvoice.currency || undefined,
-      items: (originalInvoice.invoice_items || []).map((item) => ({
-        product_id: item.product_id ?? undefined,
-        product_variant_id: item.product_variant_id ?? undefined,
-        description: item.description,
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        discount_amount: Number(item.discount_amount || 0),
-        tax_amount: Number(item.tax_amount || 0),
-      })),
-      taxes: (originalInvoice.invoice_taxes || []).map((tax) => ({
-        tax_rate_id: tax.tax_rate_id ?? undefined,
-        tax_name: tax.tax_name,
-        tax_rate: Number(tax.tax_rate),
-        taxable_amount: Number(tax.taxable_amount),
-        tax_amount: Number(tax.tax_amount),
-        tax_type: (tax.tax_type ??
-          undefined) as CreateInvoiceTaxDto['tax_type'],
-      })),
+      // P2(c) — sin `items:` NI `taxes:`, a propósito: esta reversión es un
+      // REEMPLAZO TOTAL del documento aceptado (el cliente cambió de
+      // consumidor final a nominativo; nada de la venta original cambió), no
+      // una devolución parcial. Antes se pasaba `items:` con las líneas
+      // copiadas, lo que forzaba el carril PARCIAL-POR-KERNEL
+      // (`derivePartialNoteLinesViaKernel`) — pensado para reembolsos donde
+      // el kernel SÍ necesita recomputar/derivar cada línea. Para un espejo
+      // 100% fiel eso es trabajo de más que puede divergir del original en
+      // el último centavo (fue la causa de `HEADER_LINE_EXTENSION_MISMATCH`
+      // sobre facturas con descuento de cabecera). Dejando `items`/`taxes`
+      // vacíos, `createNote` toma el carril TOTAL: copia VERBATIM cabecera,
+      // líneas Y el vínculo tributo↔línea (`invoice_taxes.invoice_item_id`,
+      // P2(a)) de `related_invoice` — la forma más segura de anular un
+      // documento ya firmado.
     };
 
     const note = await this.creditNotesService.createCreditNote(dto);

@@ -229,6 +229,22 @@ describe('TableSessionPageComponent waiter delivery', () => {
     expect(component.canDeliver({ ...direct, cancelled_at: '2026-09-23T12:05:00Z' })).toBeFalse();
   });
 
+  it('does not count a reversed delivery as still delivered while retaining its historical fact', () => {
+    const reversed = {
+      ...item(104, false),
+      delivered_at: '2026-09-23T12:05:00Z',
+      cancelled_at: '2026-09-23T12:10:00Z',
+      cancellation_type: 'after_fire_reused' as const,
+      kitchen_ticket_items: [{ id: 204, status: 'delivered' as const, kitchen_ticket_id: 50 }],
+    };
+    component.session.set(session([reversed]));
+
+    expect(component.isDelivered(reversed)).toBeTrue();
+    expect(component.deliveredCount()).toBe(0);
+    component.activeFilter.set('delivered');
+    expect(component.filteredItems()).toEqual([]);
+  });
+
   it('resolves the visible waiter name from the session table projection', () => {
     component.session.set({
       ...session([]),

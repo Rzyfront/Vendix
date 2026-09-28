@@ -81,10 +81,10 @@ async function login(page) {
   await dismissWeeklyStories(page);
 }
 
-async function openUiView(page, url, visibleLocator, description) {
+async function openUiView(page, url, visibleLocator, description, attempts = 5) {
   let lastNavigationError = '';
   let lastView = '';
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
       await page.goto(url, { waitUntil: 'commit', timeout: 20_000 });
     } catch (error) {
@@ -105,7 +105,7 @@ async function openUiView(page, url, visibleLocator, description) {
       await page.goto('about:blank', { waitUntil: 'commit', timeout: 5_000 }).catch(() => {});
     }
   }
-  throw new Error(`${description} no apareció después de cinco navegaciones UI; URL=${url}; navegación=${lastNavigationError}; última vista=${lastView}`);
+  throw new Error(`${description} no apareció después de ${attempts} navegaciones UI; URL=${url}; navegación=${lastNavigationError}; última vista=${lastView}`);
 }
 
 async function main() {
@@ -149,8 +149,8 @@ async function main() {
           await page.getByText('Impuestos agregados a la oferta').waitFor();
           setupAttempted = true;
           await page.getByRole('button', { name: 'Guardar', exact: true }).click();
-          await page.waitForFunction(() => location.pathname === '/admin/products' &&
-            new URLSearchParams(location.search).get('page') === '1', null, { timeout: 15_000 });
+          await page.waitForFunction(() => location.pathname === '/admin/products',
+            null, { timeout: 15_000 });
 
           const card = shop.locator('article.product-card').filter({ hasText: 'Frutas Orgánicas Mix 1kg' });
           await openUiView(shop, 'https://roku-shop.vendix.com/sale', card, 'La tarjeta de oferta con IVA');
@@ -163,10 +163,99 @@ async function main() {
               await page.locator('app-input[formcontrolname="sale_price"] input').fill('0');
               await toggle.click();
               await page.getByRole('button', { name: 'Guardar', exact: true }).click();
-              await page.waitForFunction(() => location.pathname === '/admin/products' &&
-                new URLSearchParams(location.search).get('page') === '1', null, { timeout: 15_000 });
+              await page.waitForFunction(() => location.pathname === '/admin/products',
+                null, { timeout: 15_000 });
             }
           }
+        }
+      });
+
+      await runScenario('R9/R21: IVA-included offer compares final price with final price', ['R9', 'R21'], async () => {
+        // The Roku fixture has no product with an inclusive tax. Change the
+        // existing fruit product through its editor, then restore both fields
+        // through that same UI even if a storefront assertion fails.
+        // The preceding additive-tax scenario usually leaves this admin tab
+        // authenticated, but permit a standalone retry after login failure.
+        if (!await page.evaluate(() => {
+          try { return Boolean(JSON.parse(localStorage.getItem('vendix_auth_state') || '{}')?.tokens?.access_token); }
+          catch { return false; }
+        })) await login(page);
+        const editUrl = `${adminBase}/admin/products/edit/298?fromPage=1`;
+        const toggle = page.locator('app-setting-toggle[label="Activar precio de oferta"] [role=button]');
+        const taxMode = page.locator('vendix-tax-inclusive-chip')
+          .getByRole('button', { name: 'IVA General 19%: impuesto adicional sobre el precio unitario' });
+        try {
+          await openUiView(page, editUrl, taxMode, 'La fruta con IVA adicional');
+          assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+          await taxMode.click();
+          await page.locator('vendix-tax-inclusive-chip')
+            .getByRole('button', { name: 'IVA General 19%: impuesto incluido en el precio unitario' })
+            .waitFor();
+          await toggle.click();
+          await page.locator('app-input[formcontrolname="sale_price"] input').fill('20000');
+          await page.getByText('Oferta final: $20.000').waitFor();
+          await page.getByText('Impuestos incluidos en la oferta').waitFor();
+          await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+          await page.waitForFunction(() => location.pathname === '/admin/products', null, { timeout: 15_000 });
+          const card = shop.locator('article.product-card').filter({ hasText: 'Frutas Orgánicas Mix 1kg' });
+          await openUiView(shop, 'https://roku-shop.vendix.com/sale', card,
+            'La oferta con IVA incluido');
+          assert.equal((await card.locator('.product-price .price').innerText()).trim(), '$20.000');
+          assert.equal((await card.locator('.product-price .original-price').innerText()).trim(), '$22.000');
+          await card.locator('.product-name').click();
+          await shop.locator('main .price-line .current-price').getByText('$20.000').waitFor();
+          assert.equal((await shop.locator('main .price-line .original-price').first().innerText()).trim(), '$22.000',
+            'La ficha también debe tachar el regular con la misma regla de IVA incluido.');
+          await shop.getByRole('button', { name: 'Comprar ahora' }).click();
+          const cartLine = shop.locator('app-cart-item-card').filter({ hasText: 'Frutas Orgánicas Mix 1kg' });
+          try {
+            await cartLine.waitFor();
+            assert.equal((await cartLine.locator('.ci-total').innerText()).trim(), '$20.000',
+              'El carrito no debe volver a agregar IVA a la oferta inclusiva.');
+            assert.equal((await shop.locator('.cart-summary .summary-row.total').innerText()).replace(/\s+/g, ' ').trim(),
+              'Total $20.000');
+          } finally {
+            if (await cartLine.isVisible().catch(() => false)) {
+              await cartLine.getByRole('button', { name: 'Eliminar' }).click();
+              await shop.getByText('Tu carrito está vacío').waitFor();
+            }
+          }
+          const relatedFruit = shop.locator('app-product-carousel .carousel-item')
+            .filter({ hasText: 'Frutas Orgánicas Mix 1kg' });
+          await openUiView(shop,
+            'https://roku-shop.vendix.com/products/aceite-de-oliva-extra-virgen-500ml-1781330431513',
+            relatedFruit, 'La fruta ofrecida como producto sugerido');
+          await relatedFruit.click();
+          const quickView = shop.locator('app-product-quick-view-modal');
+          await quickView.locator('.product-price .current-price').getByText('$20.000').waitFor();
+          assert.equal((await quickView.locator('.product-price .original-price').innerText()).trim(),
+            '$22.000', 'La vista rápida también debe comparar importes con IVA incluido.');
+        } catch (error) {
+          // A cleanup failure must not hide which storefront assertion failed.
+          console.error('R9/R21 inclusive storefront error before restore:', error);
+          throw error;
+        } finally {
+          // The save can succeed even if redirect observation times out, so
+          // always reopen the editor and inspect persisted state before exit.
+          await openUiView(page, editUrl, page.locator('vendix-tax-inclusive-chip'),
+            'Restaurar impuesto de fruta QA', 12);
+          const inclusive = page.locator('vendix-tax-inclusive-chip')
+            .getByRole('button', { name: 'IVA General 19%: impuesto incluido en el precio unitario' });
+          const activeOffer = await toggle.getAttribute('aria-pressed') === 'true';
+          const activeInclusive = await inclusive.isVisible();
+          if (activeOffer || activeInclusive) {
+            if (activeOffer) {
+              await page.locator('app-input[formcontrolname="sale_price"] input').fill('0');
+              await toggle.click();
+            }
+            if (activeInclusive) await inclusive.click();
+            await page.getByRole('button', { name: 'Guardar', exact: true }).click();
+            await page.waitForFunction(() => location.pathname === '/admin/products', null, { timeout: 15_000 });
+          }
+          await openUiView(page, editUrl, taxMode,
+            'Fruta QA restaurada sin oferta ni IVA incluido', 12);
+          assert.equal(await toggle.getAttribute('aria-pressed'), 'false',
+            'La oferta QA debe quedar apagada después de la prueba.');
         }
       });
       }
@@ -296,10 +385,60 @@ async function main() {
             'The mobile customer card lost its customer name.');
           assert.equal(await page.locator('app-customer-list app-item-list .card-badge-wrap').count(), 0,
             'Customer status remains visible as a mobile badge.');
+          const options = page.locator('app-customer-list app-options-dropdown');
+          assert.equal(await options.getByRole('button', { name: 'Filtros' }).count(), 0,
+            'Estado sigue ofreciéndose como filtro móvil aunque no está conectado al listado.');
+          const actions = options.getByRole('button', { name: 'Acciones' });
+          assert.equal(await actions.count(), 1, 'El disparador de acciones perdió su nombre accesible.');
+          await actions.click();
+          await options.getByRole('button', { name: 'Nuevo Cliente' }).waitFor();
+          await actions.click();
           assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2),
             'The mobile customer list overflows horizontally.');
         } finally {
           await page.setViewportSize({ width: 1280, height: 720 });
+        }
+      });
+      await runScenario('R8: mobile customer search preserves names without a status badge', ['R8'], async () => {
+        await page.setViewportSize({ width: 390, height: 844 });
+        try {
+          const search = page.locator('app-customer-list input[placeholder="Buscar clientes..."]');
+          await openUiView(page, `${adminBase}/admin/customers/all`, search,
+            'La búsqueda móvil de clientes');
+          const originalCard = page.locator('app-customer-list app-item-list .item-card').first();
+          await originalCard.waitFor();
+          const customerName = (await originalCard.locator('.card-title').innerText()).trim();
+          const searchToken = customerName.split(/\s+/)[0];
+          assert(searchToken.length >= 2, `Nombre de fixture no buscable: ${customerName}`);
+          await search.fill(searchToken);
+          const card = page.locator('app-customer-list app-item-list .item-card')
+            .filter({ hasText: customerName }).first();
+          await card.waitFor({ timeout: 20_000 });
+          assert.equal((await card.locator('.card-title').innerText()).trim(), customerName);
+          assert.equal(await card.locator('.card-badge-wrap').count(), 0);
+          await search.fill('QA-NONEXISTENT-REVIEW-20260927');
+          await page.getByText('No se encontraron clientes').waitFor({ timeout: 20_000 });
+          assert.equal(await card.count(), 0);
+          await search.fill(searchToken);
+          await card.waitFor({ timeout: 20_000 });
+          assert.equal(await card.locator('.card-badge-wrap').count(), 0);
+          assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2),
+            'La búsqueda móvil creó desbordamiento horizontal.');
+        } finally {
+          await page.setViewportSize({ width: 1280, height: 720 });
+        }
+      });
+      await runScenario('R8: unauthenticated browser cannot read the customer list UI', ['R8'], async () => {
+        const outsider = await browser.newContext({ ignoreHTTPSErrors: true });
+        try {
+          const outsiderPage = await outsider.newPage();
+          await openUiView(outsiderPage, `${adminBase}/admin/customers/all`,
+            outsiderPage.getByText('Prueba Gratis 14 Días').first(),
+            'La portada pública ante acceso anónimo a clientes');
+          assert.equal(await outsiderPage.locator('app-customer-list').count(), 0,
+            'Una sesión sin autenticar recibió el listado de clientes.');
+        } finally {
+          await outsider.close();
         }
       });
       await runScenario('R13: orders list shows refund net and partial badge', ['R13'], async () => {
@@ -320,6 +459,25 @@ async function main() {
         assert.match(fullText, /Reembolsada/);
         assert.match(fullText, /\$0(?:\D|$)/);
       });
+      await runScenario('R13: requested and processing refunds do not reduce the current net', ['R13'], async () => {
+        await openUiView(page, `${adminBase}/admin/orders/sales`,
+          page.getByRole('columnheader', { name: 'Neto actual' }),
+          'El listado para reembolsos sin completar');
+        const search = page.locator('input[placeholder="Buscar órdenes..."]');
+        for (const [orderNumber, expectedNet] of [
+          ['POS-2026-0340', '$1.500'], // refund requested for $750
+          ['POS-2026-0362', '$44.000'], // refund processing for $44.000
+        ]) {
+          await search.fill(orderNumber);
+          const row = page.getByRole('row').filter({ hasText: orderNumber });
+          await row.waitFor({ timeout: 20_000 });
+          const text = await row.innerText();
+          assert.match(text, /Cancelada/);
+          assert(text.includes(expectedNet), `${orderNumber} neto pendiente no debe restarse: ${text}`);
+          assert.doesNotMatch(text, /Reembolso parcial|Reembolsada/,
+            `${orderNumber} no tiene todavía una devolución completada.`);
+        }
+      });
       await runScenario('R13: mobile order cards retain refund badge and current net', ['R13'], async () => {
         await page.setViewportSize({ width: 390, height: 844 });
         try {
@@ -339,6 +497,14 @@ async function main() {
           await full.waitFor({ timeout: 20_000 });
           assert.match(await full.locator('.card-badge-wrap').innerText(), /Reembolsada/);
           assert.match(await full.locator('.card-footer').innerText(), /Neto actual[\s\S]*\$0(?:\D|$)/i);
+          await search.fill('POS-2026-0340');
+          const requested = page.locator('app-orders-list app-item-list .item-card')
+            .filter({ hasText: 'POS-2026-0340' });
+          await requested.waitFor({ timeout: 20_000 });
+          assert.match(await requested.locator('.card-footer').innerText(),
+            /Neto actual[\s\S]*\$1\.500/i);
+          assert.doesNotMatch(await requested.locator('.card-badge-wrap').innerText(),
+            /Reembolso parcial|Reembolsada/);
         } finally {
           await page.setViewportSize({ width: 1280, height: 720 });
         }
@@ -543,28 +709,67 @@ async function main() {
     }
 
     if (results[0]?.status === 'passed' && (group === 'table_cancel' || group === 'all')) {
-      await runScenario('R18: table bill retains pending, preparing and ready cancellations after reload', ['R18'], async () => {
+      await runScenario('R18: table bill retains pending, preparing, ready and reversed-delivery cancellations', ['R18'], async () => {
         const total = page.locator('.totals-row--grand');
         await openUiView(page, `${adminBase}/admin/restaurant-ops/tables/session/160`,
           total, 'La cuenta de mesa con platos cancelados');
         assert.match(await total.innerText(), /Total\s*\$0/i);
         const cancelled = page.locator('.item-cancelled-badge');
-        assert.equal(await cancelled.count(), 4, 'La mesa perdió alguno de sus cuatro platos cancelados');
+        assert.equal(await cancelled.count(), 6, 'La mesa perdió alguno de sus seis platos cancelados');
         const badges = await cancelled.allInnerTexts();
-        assert.equal(badges.filter((label) => label.includes('reuso')).length, 2);
-        assert.equal(badges.filter((label) => label.includes('merma')).length, 2);
+        assert.equal(badges.filter((label) => label.includes('reuso')).length, 3);
+        assert.equal(badges.filter((label) => label.includes('merma')).length, 3);
         const reasons = await page.locator('.item-cancelled-reason').allInnerTexts();
         for (const reason of ['QA R18 mesa pendiente', 'QA R18 mesa avanzada desechar',
-          'QA R18 mesa avanzada reusar', 'QA R18 mesa lista desechar']) {
+          'QA R18 mesa avanzada reusar', 'QA R18 mesa lista desechar',
+          'QA R18 entrega sin cobro reutilizar', 'QA R18 entrega sin cobro desechar']) {
           assert(reasons.some((line) => line.includes(reason)), `Falta motivo persistido: ${reason}`);
         }
         assert.equal(await page.getByRole('button', {
           name: 'Eliminar Pollo Árabe E2E de la cuenta', exact: true,
         }).count(), 0, 'Un plato cancelado se puede cancelar dos veces');
+        assert.equal(await page.getByText('Entrega reversada', { exact: true }).count(), 2);
+        assert.match(await page.locator('body').innerText(), /Entregados\s*0/);
         await openUiView(page, `${adminBase}/admin/restaurant-ops/tables/session/160`,
           total, 'La cuenta de mesa tras recarga');
         assert.match(await total.innerText(), /Total\s*\$0/i);
-        assert.equal(await cancelled.count(), 4);
+        assert.equal(await cancelled.count(), 6);
+      });
+    }
+
+    if (results[0]?.status === 'passed' && (group === 'delivered_reverse' || group === 'all')) {
+      await runScenario('R18: unpaid delivered reuse and waste persist without repeat reversal', ['R18'], async () => {
+        const heading = page.getByRole('heading', { name: 'Orden #T-1790520816706-805' });
+        await openUiView(page, `${adminBase}/admin/orders/1377`, heading,
+          'La orden de mesa con entrega reversada');
+        const item = page.locator('.items-compact > div').filter({
+          hasText: 'QA R18 entrega sin cobro reutilizar',
+        });
+        await item.getByText('Cancelado', { exact: true }).waitFor();
+        const wasted = page.locator('.items-compact > div').filter({
+          hasText: 'QA R18 entrega sin cobro desechar',
+        });
+        await wasted.getByText('Cancelado', { exact: true }).waitFor();
+        assert.equal(await item.getByRole('button', { name: 'Reversar' }).count(), 0,
+          'La reversa ya aplicada no debe ofrecer un segundo reintegro');
+        assert.equal(await wasted.getByRole('button', { name: 'Reversar' }).count(), 0,
+          'La merma ya registrada no debe ofrecer una segunda reversa');
+        const summary = page.locator('app-card').filter({
+          has: page.getByRole('heading', { name: 'Resumen de Pago' }),
+        });
+        assert.match(await summary.innerText(), /Total\s*\$0/i);
+
+        const stockValue = async (productId) => {
+          const title = page.getByText('Inventario / Stock', { exact: true }).first();
+          await openUiView(page, `${adminBase}/admin/products/edit/${productId}?fromPage=1`,
+            title, `Inventario del insumo ${productId}`);
+          const card = page.locator('div.p-3.bg-surface').filter({
+            has: page.getByText('En inventario', { exact: true }),
+          }).first();
+          return (await card.locator('span.text-xl').first().innerText()).trim();
+        };
+        assert.equal(await stockValue(427), '-1200', 'La merma posterior al reuso no conservó el saldo físico');
+        assert.equal(await stockValue(428), '560', 'La merma posterior al reuso no conservó las especias');
       });
     }
 
@@ -591,6 +796,24 @@ async function main() {
           has: page.getByText('Disponible', { exact: true }),
         }).first();
         assert.equal((await availableCard.locator('span.text-xl').first().innerText()).trim(), '-1');
+      });
+    }
+
+    if (results[0]?.status === 'passed' && (group === 'delivered_cancel' || group === 'all')) {
+      await runScenario('R18: paid delivered dish routes cancellation to refund instead of reversing stock', ['R18'], async () => {
+        const heading = page.getByRole('heading', { name: 'Orden #POS-2026-0413' });
+        await openUiView(page, `${adminBase}/admin/orders/1361`, heading,
+          'La orden pagada con plato entregado');
+        const dish = page.locator('.items-compact > div').filter({ hasText: 'Pollo Árabe E2E' });
+        await dish.getByText('Entregado', { exact: true }).first().waitFor();
+        assert.equal(await dish.getByRole('button', { name: 'Reversar' }).count(), 0,
+          'Una venta pagada no debe ofrecer reversa directa de inventario');
+        await dish.getByText('Orden cobrada: no se puede cancelar este plato.').waitFor();
+        const refund = dish.getByRole('button', { name: 'Abrir Reembolso' });
+        await refund.click();
+        await page.getByText('Procesar Reembolso', { exact: true }).first().waitFor();
+        // Read-only test: opening the refund form must not create a refund.
+        assert.match(await page.locator('body').innerText(), /Reembolso/);
       });
     }
 

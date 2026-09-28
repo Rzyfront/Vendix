@@ -636,15 +636,17 @@ export interface OrderQuery {
   search?: string;
 
   // Filtros principales
-  status?: OrderState;
-  channel?: OrderChannel;
+  // Paso 4 del plan dashboard-sales-filters-pin-multiselect-sse: aceptan uno
+  // o varios valores (el backend usa igualdad para single e `in` para array).
+  status?: OrderState | OrderState[];
+  channel?: OrderChannel | OrderChannel[];
   customer_id?: number;
   // Carril B - B2: filtra órdenes con table_session apuntando a esta mesa
   // (incluye sesiones cerradas porque la orden pudo migrar entre mesas).
   // Coincide con OrderQueryDto.table_id en backend (orders.service.ts).
   table_id?: number;
   store_id?: number;
-  payment_status?: PaymentStatus;
+  payment_status?: PaymentStatus | PaymentStatus[];
   /** Store payment method ID; matches any settled/captured leg. */
   payment_method_id?: number;
   date_range?: string;

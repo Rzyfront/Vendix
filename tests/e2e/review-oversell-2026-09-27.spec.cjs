@@ -18,6 +18,8 @@ const { chromium } = require('playwright');
 
 const base = process.env.QA_BASE_URL || 'https://vendix.com';
 const productName = 'QA NoOversell A';
+const variantProductName = 'AUDIT-Multitarifa-2026-08-13';
+const emptyVariantSku = 'AUDIT-VAR-002';
 const settingsUrl = `${base}/admin/settings/general/logistica`;
 const posUrl = `${base}/admin/pos`;
 
@@ -141,6 +143,31 @@ async function clearOnlyQaCartLine(page) {
   }
 }
 
+async function openEmptyVariant(page) {
+  await openPos(page, 'POS para variante agotada');
+  await page.getByRole('textbox', { name: 'Buscar productos' }).fill(variantProductName);
+  const product = page.getByRole('list', { name: 'Resultados de productos' })
+    .getByRole('listitem').filter({ hasText: variantProductName }).first();
+  await product.waitFor();
+  await product.click();
+  const selector = page.locator('app-pos-variant-selector');
+  const emptyVariant = selector.getByRole('button', { name: new RegExp(emptyVariantSku) });
+  await emptyVariant.waitFor();
+  return { selector, emptyVariant };
+}
+
+async function clearOnlyQaVariantCartLine(page) {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openPos(page, 'POS para limpieza de variante');
+  const remove = page.getByRole('button', {
+    name: `Eliminar ${variantProductName} del carrito`,
+  });
+  if (await remove.count()) {
+    await remove.click();
+    await remove.waitFor({ state: 'detached' });
+  }
+}
+
 async function main() {
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 900 } });
@@ -160,6 +187,7 @@ async function main() {
   let originalSetting;
   let touchedSetting = false;
   let touchedCart = false;
+  let touchedVariantCart = false;
   const failures = [];
   try {
     await login(page);
@@ -187,6 +215,16 @@ async function main() {
     assert.match(await page.locator('app-pos-cart').innerText(), /0 ítems seleccionados/);
     console.log('PASS R17 OFF: AGOTADO, explicación y carrito intacto');
 
+    let { selector, emptyVariant } = await openEmptyVariant(page);
+    assert.equal(await emptyVariant.isDisabled(), true,
+      'La variante con stock cero debe bloquearse cuando la sobreventa está apagada.');
+    assert.match(await emptyVariant.innerText(), /Agotado/);
+    assert.equal(await selector.getByRole('button', { name: /AUDIT-VAR-001/ }).isDisabled(), false,
+      'La variante hermana con stock no debe bloquearse.');
+    await selector.getByRole('button', { name: 'Cerrar selección de variante' }).click();
+    assert.match(await page.locator('app-pos-cart').innerText(), /0 ítems seleccionados/);
+    console.log('PASS R17 variante OFF: agotada bloqueada, hermana disponible');
+
     await setOversell(settingsPage, true);
     await refreshPos();
     card = await openProduct(page, false);
@@ -208,6 +246,22 @@ async function main() {
 
     await clearOnlyQaCartLine(page);
     touchedCart = false;
+    ({ selector, emptyVariant } = await openEmptyVariant(page));
+    assert.equal(await emptyVariant.isDisabled(), false,
+      'La variante con stock cero debe poder elegirse con sobreventa encendida.');
+    assert.match(await emptyVariant.innerText(), /Sobreventa · 0 disp\./);
+    touchedVariantCart = true;
+    await emptyVariant.click();
+    const variantLine = page.locator('app-pos-cart').filter({ hasText: variantProductName });
+    await variantLine.getByRole('button', {
+      name: `Eliminar ${variantProductName} del carrito`,
+    }).waitFor();
+    assert.match(await variantLine.innerText(), /Sobreventa de AUDIT-Multitarifa-2026-08-13/i);
+    await clearOnlyQaVariantCartLine(page);
+    touchedVariantCart = false;
+    assert.match(await page.locator('app-pos-cart').innerText(), /0 ítems seleccionados/);
+    console.log('PASS R17 variante ON: agotada agregada con alerta y carrito limpio');
+
     await page.setViewportSize({ width: 390, height: 844 });
     card = await openProduct(page, true);
     assert.notEqual(await card.getAttribute('aria-disabled'), 'true');
@@ -227,6 +281,9 @@ async function main() {
     // failure; never print PASS while leaving the shared QA store changed.
     if (touchedCart) {
       try { await clearOnlyQaCartLine(page); } catch (error) { failures.push(error); }
+    }
+    if (touchedVariantCart) {
+      try { await clearOnlyQaVariantCartLine(page); } catch (error) { failures.push(error); }
     }
     if (touchedSetting && originalSetting !== undefined) {
       try {

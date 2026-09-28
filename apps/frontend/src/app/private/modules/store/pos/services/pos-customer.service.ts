@@ -101,6 +101,7 @@ export class PosCustomerService {
     was_created: boolean;
     was_updated: boolean;
     matched_by: 'email' | 'document' | 'name' | null;
+    document_conflict: boolean;
   }> {
     this.loading.set(true);
 
@@ -117,6 +118,8 @@ export class PosCustomerService {
             | 'document'
             | 'name'
             | null,
+          // El documento digitado no coincide con la ficha encontrada por email.
+          document_conflict: !!payload.document_conflict,
         };
       }),
       tap(({ customer }) => {

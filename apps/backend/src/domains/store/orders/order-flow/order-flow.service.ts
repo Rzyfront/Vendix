@@ -27,6 +27,8 @@ import {
   canDirectDeliver,
   canCollectViaShip,
   hasKitchenLinesAwaitingHandoff,
+  describeKitchenHandoffBlocker,
+  kitchenHandoffBlocker,
   OrderActionSnapshot,
 } from './order-action-policy.util';
 import { OrderSseService } from '../services/order-sse.service';
@@ -334,7 +336,17 @@ export class OrderFlowService {
     return undefined;
   }
 
-  /** The fire transaction is the source of truth; never restock the sold dish. */
+  /**
+   * The fire transaction is the source of truth; never restock the sold dish.
+   *
+   * H2 — `ticketId` scopes the `inventory_transactions` lookup to the ONE
+   * kitchen ticket that owns this disposition. A resend/remake reconsumes
+   * the SAME `order_item_id` under a NEW ticket, so an unscoped lookup would
+   * return every fire's consumption, not just this one's. `ticketId` is
+   * `null` only for legacy/edge rows with no resolvable kitchen ticket, in
+   * which case this falls back to the previous (unscoped) behavior — never
+   * worse than before.
+   */
   private async disposeConsumedPreparedLeaves(
     tx: Prisma.TransactionClient,
     orderId: number,
@@ -343,23 +355,37 @@ export class OrderFlowService {
     disposition: 'reuse' | 'waste',
     reason: string,
     afterCommit: Array<() => void>,
+    ticketId: number | null = null,
   ): Promise<ConsumedLeafDisposition[]> {
+    // H2 — idempotency keyed by (order_item_id, ticket_id), NOT
+    // order_item_id alone: a second ticket for the same dish (remake/resend)
+    // must not be swallowed by the first ticket's already-recorded audit row.
     const priorDisposition = await tx.audit_logs.findFirst({
       where: {
         action: 'order_item.prepared_disposition',
         resource_id: orderId,
-        metadata: { path: ['order_item_id'], equals: orderItemId },
+        AND: ticketId != null
+          ? [
+              { metadata: { path: ['order_item_id'], equals: orderItemId } },
+              { metadata: { path: ['ticket_id'], equals: ticketId } },
+            ]
+          : [{ metadata: { path: ['order_item_id'], equals: orderItemId } }],
       },
       select: { id: true },
     });
     if (priorDisposition) return [];
-    const consumed = await tx.inventory_transactions.findMany({
-      where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
-      select: {
-        id: true, product_id: true, product_variant_id: true,
-        quantity_change: true, unit_cost: true, total_cost: true,
-      },
-    });
+    // Defensive: some callers wire a partial/stub `kitchenFireService` (older
+    // test doubles, edge DI paths) that lacks the new method — fall back
+    // instead of throwing, same as the `ticketId == null` case.
+    const consumed = ticketId != null && typeof this.kitchenFireService?.findTicketConsumedLeaves === 'function'
+      ? await this.kitchenFireService.findTicketConsumedLeaves(tx, ticketId, orderItemId)
+      : await tx.inventory_transactions.findMany({
+          where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
+          select: {
+            id: true, product_id: true, product_variant_id: true,
+            quantity_change: true, unit_cost: true, total_cost: true,
+          },
+        });
     const leaves: ConsumedLeafDisposition[] = [];
     for (const ct of consumed) {
       const quantity = Math.abs(ct.quantity_change);
@@ -450,6 +476,12 @@ export class OrderFlowService {
     }
   }
 
+  /**
+   * H4 — `ticketId` is persisted in the metadata so
+   * `KitchenFireService.revertTicket` can recognize (and block reverting) a
+   * cancelled ticket whose order_item already went through this disposition
+   * path. Also feeds H2's (order_item_id, ticket_id) idempotency key.
+   */
   private async auditPreparedDispositionInTx(
     tx: Prisma.TransactionClient,
     orderId: number,
@@ -459,12 +491,18 @@ export class OrderFlowService {
     reason: string,
     disposition: 'reuse' | 'waste',
     leaves: ConsumedLeafDisposition[],
+    ticketId: number | null = null,
   ): Promise<void> {
     const priorDisposition = await tx.audit_logs.findFirst({
       where: {
         action: 'order_item.prepared_disposition',
         resource_id: orderId,
-        metadata: { path: ['order_item_id'], equals: orderItemId },
+        AND: ticketId != null
+          ? [
+              { metadata: { path: ['order_item_id'], equals: orderItemId } },
+              { metadata: { path: ['ticket_id'], equals: ticketId } },
+            ]
+          : [{ metadata: { path: ['order_item_id'], equals: orderItemId } }],
       },
       select: { id: true },
     });
@@ -480,7 +518,7 @@ export class OrderFlowService {
         resource_id: orderId,
         request_id: requestId && requestId.length <= 100 ? requestId : null,
         metadata: {
-          order_id: orderId, order_item_id: orderItemId,
+          order_id: orderId, order_item_id: orderItemId, ticket_id: ticketId,
           reason, destination: disposition, leaves,
           consumed_cost: leaves.reduce((sum, leaf) => sum + leaf.total_cost, 0),
         } as Prisma.InputJsonValue,
@@ -499,7 +537,11 @@ export class OrderFlowService {
     const order = await client.orders.findFirst({
       where: { id: orderId },
       include: {
-        stores: { select: { id: true, name: true, store_code: true, organization_id: true } },
+        // `industries` added for the H3 fix — kitchen hand-off gates
+        // (`assertKitchenReadyForWholeOrder`, `deliverOrderItem`) must know
+        // whether THIS store is currently a restaurant before requiring a
+        // never-fired prepared line to reach the kitchen.
+        stores: { select: { id: true, name: true, store_code: true, organization_id: true, industries: true } },
         payments: {
           include: { store_payment_method: {
             select: { system_payment_method: {
@@ -582,21 +624,37 @@ export class OrderFlowService {
 
   /** Whole-order fulfillment is never allowed to use a retail line as a
    * shortcut around an un-fired or undelivered prepared line. Item-level
-   * delivery has its own guard and remains available for retail lines. */
-  private async assertKitchenReadyForWholeOrder(orderId: number): Promise<void> {
+   * delivery has its own guard and remains available for retail lines.
+   *
+   * H3 fix: `isRestaurant` gates whether a never-fired prepared line blocks
+   * at all (see `kitchenHandoffBlocker`) — a store that dropped the
+   * `restaurant` industry but kept legacy prepared/skip_kds:false catalog
+   * rows must still be able to ship/deliver/finish those orders. A line with
+   * a REAL kitchen ticket keeps blocking regardless of the flag; a
+   * `cancelled` ticket blocks with its own explanatory message instead of the
+   * generic one. */
+  private async assertKitchenReadyForWholeOrder(
+    orderId: number,
+    isRestaurant: boolean,
+  ): Promise<void> {
     const items = await this.prisma.order_items.findMany({
       where: { order_id: orderId },
       select: {
         cancelled_at: true,
         skip_kds: true,
+        product_name: true,
         products: { select: { product_type: true } },
         kitchen_ticket_items: {
           select: { status: true }, orderBy: { id: 'desc' }, take: 1,
         },
       },
     });
-    if (hasKitchenLinesAwaitingHandoff(items)) {
-      throw new VendixHttpException(ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS);
+    const blocker = kitchenHandoffBlocker(items, { isRestaurant });
+    if (blocker) {
+      throw new VendixHttpException(
+        ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
+        describeKitchenHandoffBlocker(blocker),
+      );
     }
   }
 
@@ -3110,6 +3168,7 @@ export class OrderFlowService {
 
     let address: {
       country_code?: string | null;
+      address_line1?: string | null;
       state_province?: string | null;
       city?: string | null;
       postal_code?: string | null;
@@ -3121,6 +3180,7 @@ export class OrderFlowService {
         where: { id: order.shipping_address_id },
         select: {
           country_code: true,
+          address_line1: true,
           state_province: true,
           city: true,
           postal_code: true,
@@ -3162,6 +3222,7 @@ export class OrderFlowService {
         items,
         {
           country_code: address.country_code,
+          address_line1: address.address_line1 || undefined,
           state_province: address.state_province || undefined,
           city: address.city || undefined,
           postal_code: address.postal_code || undefined,
@@ -3225,7 +3286,10 @@ export class OrderFlowService {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
-    await this.assertKitchenReadyForWholeOrder(orderId);
+    await this.assertKitchenReadyForWholeOrder(
+      orderId,
+      storeIsRestaurant((order as any).stores?.industries),
+    );
 
     if (!order.shipping_method_id && dto.shipping_method_id) {
       const method = await this.prisma.shipping_methods.findFirst({
@@ -3457,7 +3521,15 @@ export class OrderFlowService {
       }),
     ]);
     const isKitchenOrder = itemsWithKitchen.some((item) => item.kitchen_ticket_items.length > 0);
-    const hasPendingKitchen = hasKitchenLinesAwaitingHandoff(itemsWithKitchen);
+    // H3 fix: the same restaurant gate `assertKitchenReadyForWholeOrder`
+    // enforces on write must back this READ-ONLY hint — otherwise a
+    // non-restaurant store's legacy prepared/skip_kds:false line would
+    // advertise `dispatch_order`/`ready_for_pickup`/`ship_with_tracking` as
+    // `enabled: true` here while the endpoint kept rejecting it (parity gap
+    // the file header explicitly forbids).
+    const hasPendingKitchen = hasKitchenLinesAwaitingHandoff(itemsWithKitchen, {
+      isRestaurant: storeIsRestaurant((order as any).stores?.industries),
+    });
     const offersDispatchFlow = requiresDispatch || isKitchenOrder;
 
     const snapshot: OrderActionSnapshot & {
@@ -3806,7 +3878,10 @@ export class OrderFlowService {
       );
     }
 
-    await this.assertKitchenReadyForWholeOrder(orderId);
+    await this.assertKitchenReadyForWholeOrder(
+      orderId,
+      storeIsRestaurant((order as any).stores?.industries),
+    );
 
     if (!force) {
       this.validateTransition(order.state as OrderState, 'delivered');
@@ -4014,6 +4089,11 @@ export class OrderFlowService {
         skip_kds: item.skip_kds,
         latestKitchenStatus: kitchenStatus,
         delivered_at: null,
+        // H3 fix: a never-fired prepared line only requires the kitchen
+        // hand-off when the store is CURRENTLY a restaurant (see
+        // `canDeliverItem`/`kitchenHandoffBlocker`). A line with an actual
+        // ticket keeps requiring `ready` either way.
+        isRestaurant: storeIsRestaurant((order as any).stores?.industries),
       });
       if (!kitchenGate.enabled) {
         throw new VendixHttpException(
@@ -4562,11 +4642,11 @@ export class OrderFlowService {
         preparedDisposition = resolvedType === 'after_fire_reused' ? 'reuse' : 'waste';
         preparedLeaves = await this.disposeConsumedPreparedLeaves(
           tx, orderId, orderItemId, preparedOrganizationId,
-          preparedDisposition, reason.trim(), preparedStockAfterCommit,
+          preparedDisposition, reason.trim(), preparedStockAfterCommit, ticketId,
         );
         await this.auditPreparedDispositionInTx(
           tx, orderId, orderItemId, preparedOrganizationId,
-          order.store_id, reason.trim(), preparedDisposition, preparedLeaves,
+          order.store_id, reason.trim(), preparedDisposition, preparedLeaves, ticketId,
         );
       } else if (resolvedType === 'before_fire' && wasFired) {
         // Esto no debería ocurrir (si `wasFired` es true, resolvedType
@@ -4834,6 +4914,13 @@ export class OrderFlowService {
         cancelled_at: true,
         inventory_consumed_at_fire: true,
         products: { select: { product_type: true } },
+        // H2/H4 — needed to scope the ingredient-refund lookup and stamp
+        // ticket_id on the disposition audit (see `disposeConsumedPreparedLeaves`
+        // / `auditPreparedDispositionInTx`). Mirrors the select in `cancelOrderItem`.
+        kitchen_ticket_items: {
+          orderBy: { id: 'desc' },
+          select: { kitchen_ticket_id: true },
+        },
       },
     });
 
@@ -4842,6 +4929,10 @@ export class OrderFlowService {
         `Order item #${orderItemId} not found on order #${orderId}`,
       );
     }
+
+    // H2/H4 — most recent kitchen ticket this order item was fired under
+    // (kitchen_ticket_items comes desc by id, [0] is the latest).
+    const ticketId = orderItem.kitchen_ticket_items[0]?.kitchen_ticket_id ?? null;
 
     // 3. Idempotencia: la primera reversa es la que ocurrió.
     if (orderItem.cancelled_at) {
@@ -4924,11 +5015,11 @@ export class OrderFlowService {
         preparedLeaves = await this.disposeConsumedPreparedLeaves(
           tx, orderId, orderItemId, preparedOrganizationId,
           destination === 'restock' ? 'reuse' : 'waste', trimmedReason,
-          preparedStockAfterCommit,
+          preparedStockAfterCommit, ticketId,
         );
         await this.auditPreparedDispositionInTx(
           tx, orderId, orderItemId, preparedOrganizationId, order.store_id,
-          trimmedReason, destination === 'restock' ? 'reuse' : 'waste', preparedLeaves,
+          trimmedReason, destination === 'restock' ? 'reuse' : 'waste', preparedLeaves, ticketId,
         );
       } else if (orderItem.product_id != null) {
         // docs/plans/no-overselling-stock-guard-plan.md step 7 — you only
@@ -5191,7 +5282,10 @@ export class OrderFlowService {
       );
     }
 
-    await this.assertKitchenReadyForWholeOrder(orderId);
+    await this.assertKitchenReadyForWholeOrder(
+      orderId,
+      storeIsRestaurant((order as any).stores?.industries),
+    );
 
     this.validateTransition(order.state as OrderState, 'finished');
     const updatedOrder = await this.updateOrderState(orderId, 'finished', {
@@ -5975,11 +6069,11 @@ export class OrderFlowService {
             else updatedTicketIds.push(meta.ticketId);
             const leaves = await this.disposeConsumedPreparedLeaves(
               tx, orderId, item.id, Number(freshOrder.stores?.organization_id),
-              'reuse', dto.reason.trim(), preparedStockAfterCommit,
+              'reuse', dto.reason.trim(), preparedStockAfterCommit, meta.ticketId,
             );
             await this.auditPreparedDispositionInTx(
               tx, orderId, item.id, Number(freshOrder.stores?.organization_id),
-              freshOrder.store_id, dto.reason.trim(), 'reuse', leaves,
+              freshOrder.store_id, dto.reason.trim(), 'reuse', leaves, meta.ticketId,
             );
             preparedDispositions.push({ itemId: item.id, disposition: 'reuse', leaves });
             await tx.order_items.update({
@@ -6042,11 +6136,11 @@ export class OrderFlowService {
 
         const leaves = await this.disposeConsumedPreparedLeaves(
           tx, orderId, item.id, Number(freshOrder.stores?.organization_id),
-          disposition, dto.reason.trim(), preparedStockAfterCommit,
+          disposition, dto.reason.trim(), preparedStockAfterCommit, meta.ticketId,
         );
         await this.auditPreparedDispositionInTx(
           tx, orderId, item.id, Number(freshOrder.stores?.organization_id),
-          freshOrder.store_id, dto.reason.trim(), disposition, leaves,
+          freshOrder.store_id, dto.reason.trim(), disposition, leaves, meta.ticketId,
         );
         preparedDispositions.push({ itemId: item.id, disposition, leaves });
 
