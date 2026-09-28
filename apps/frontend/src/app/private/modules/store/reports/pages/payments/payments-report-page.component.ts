@@ -219,7 +219,8 @@ export class PaymentsReportPageComponent {
       priority: 1,
       badge: true,
       badgeConfig: PAYMENT_STATE_BADGE,
-      badgeTransform: (v) => PAYMENT_STATE_LABELS[v as keyof typeof PAYMENT_STATE_LABELS] ?? String(v),
+      // La tabla pinta el texto del badge con `transform`; `badgeTransform` solo lo lee la tarjeta móvil.
+      transform: (v) => PAYMENT_STATE_LABELS[v as keyof typeof PAYMENT_STATE_LABELS] ?? String(v),
     },
     { key: 'amount', label: 'Monto', sortable: true, align: 'right', priority: 1, transform: this.money },
     { key: 'refunded_amount', label: 'Reembolsado', align: 'right', priority: 3, transform: this.money },
