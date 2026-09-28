@@ -17,6 +17,11 @@ export const CASH_METHOD_LABELS: Record<string, string | undefined> = {
   wompi: 'Wompi',
   wallet: 'Wallet',
   paypal: 'PayPal',
+  // Canales de reembolso (`refunds.refund_method`).
+  original_payment: 'Medio de pago original',
+  original: 'Medio de pago original',
+  store_credit: 'Saldo a favor',
+  unknown: 'Sin especificar',
 };
 
 export function cashMethodLabel(method: string): string {
