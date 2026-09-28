@@ -79,7 +79,14 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
         // sabe leer.
         dispatch_notes: {
           where: { status: { notIn: ['draft', 'voided'] } },
-          orderBy: { emission_date: 'desc' },
+          // QUI-889 (rev 868) — la "última" es por instante real de despacho
+          // (`confirmed_at`, nulos al final) y luego creación. `emission_date`
+          // NO sirve: el formulario la guarda como solo-fecha (medianoche
+          // UTC) e imprimiría el día anterior 7 p. m. en Bogotá.
+          orderBy: [
+            { confirmed_at: { sort: 'desc', nulls: 'last' } },
+            { created_at: 'desc' },
+          ],
           take: 1,
           include: {
             dispatch_note_items: true,
@@ -251,6 +258,19 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
   // Mapeo interno
   // ============================================================
 
+  /**
+   * QUI-889 (rev 868) — instante real del despacho de una remisión:
+   * `confirmed_at`, luego su `created_at`. `null` = sin instante usable.
+   * NUNCA `emission_date`: el formulario la guarda como solo-fecha.
+   */
+  private dispatchInstant(note: any | undefined): Date | null {
+    if (!note) return null;
+    const raw = note.confirmed_at ?? note.created_at;
+    if (!raw) return null;
+    const at = new Date(raw);
+    return Number.isNaN(at.getTime()) ? null : at;
+  }
+
   private mapOrderToDispatchTicket(
     order: any,
     signedLogoUrl?: string,
@@ -329,15 +349,19 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
       document: {
         id: order.id,
         number: String(order.order_number),
-        date: order.created_at
-          ? new Date(order.created_at).toISOString()
-          : new Date().toISOString(),
-        date_formatted: order.created_at
-          ? formatStoreDate(new Date(order.created_at), tz)
-          : formatStoreDate(new Date(), tz),
-        time: order.created_at
-          ? formatStoreTime(new Date(order.created_at), tz)
-          : undefined,
+        // QUI-889 (rev 868) — instante real del despacho: `confirmed_at`,
+        // luego creación de la remisión, luego hora de impresión (ahora).
+        // NUNCA `emission_date` (solo-fecha). Siempre en la zona de la
+        // tienda. Solo este formato: los demás providers no se tocan.
+        date: (this.dispatchInstant(latestDispatch) ?? new Date()).toISOString(),
+        date_formatted: formatStoreDate(
+          this.dispatchInstant(latestDispatch) ?? new Date(),
+          tz,
+        ),
+        time: formatStoreTime(
+          this.dispatchInstant(latestDispatch) ?? new Date(),
+          tz,
+        ),
         state: order.state,
         state_label: order.state,
         notes: order.notes || undefined,
