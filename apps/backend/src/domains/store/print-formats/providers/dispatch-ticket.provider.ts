@@ -329,15 +329,26 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
       document: {
         id: order.id,
         number: String(order.order_number),
-        date: order.created_at
-          ? new Date(order.created_at).toISOString()
-          : new Date().toISOString(),
-        date_formatted: order.created_at
-          ? formatStoreDate(new Date(order.created_at), tz)
-          : formatStoreDate(new Date(), tz),
-        time: order.created_at
-          ? formatStoreTime(new Date(order.created_at), tz)
-          : undefined,
+        // QUI-889 — hora efectiva del despacho (última remisión no anulada)
+        // en vez de la creación de la orden; sin despacho, hora de impresión
+        // (ahora). Siempre en la zona de la tienda. Solo este formato: los
+        // demás providers no se tocan.
+        date: (latestDispatch?.emission_date
+          ? new Date(latestDispatch.emission_date)
+          : new Date()
+        ).toISOString(),
+        date_formatted: formatStoreDate(
+          latestDispatch?.emission_date
+            ? new Date(latestDispatch.emission_date)
+            : new Date(),
+          tz,
+        ),
+        time: formatStoreTime(
+          latestDispatch?.emission_date
+            ? new Date(latestDispatch.emission_date)
+            : new Date(),
+          tz,
+        ),
         state: order.state,
         state_label: order.state,
         notes: order.notes || undefined,

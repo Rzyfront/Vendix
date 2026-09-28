@@ -3959,10 +3959,20 @@ export class OrderDetailsPageComponent {
       this.dispatchNotes().find((n) => !!n.courier_name?.trim())
         ?.courier_name?.trim() || undefined;
 
+    // QUI-889 — fecha del tiquete: última remisión no anulada
+    // (emission_date), no la creación de la orden. Sin despacho, la de
+    // creación (el tiquete backend ya resuelve hora de impresión; este
+    // tiquete local no tiene reloj de impresión propio).
+    const latestDispatch = this.dispatchNotes().find(
+      (n) => n.status !== 'draft' && n.status !== 'voided' && !!n.emission_date,
+    );
+
     return {
       orderId: order.id,
       orderNumber: order.order_number,
-      dateFormatted: this.formatDate(order.created_at),
+      dateFormatted: this.formatDate(
+        latestDispatch?.emission_date ?? order.created_at,
+      ),
       storeName,
       customer: {
         name: customerName,
