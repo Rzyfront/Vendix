@@ -597,8 +597,8 @@ export class SessionsService {
     // Un pago dividido entre sesiones toca la misma orden en dos cajas: la
     // orden se atribuye a la sesión de su PRIMER movimiento `sale`.
     const sale_movements = movements.filter((m) => m.type === 'sale');
-    const candidate_ids = [
-      ...new Set(
+    const candidate_ids: number[] = [
+      ...new Set<number>(
         sale_movements.map((m) => m.order_id).filter((v): v is number => !!v),
       ),
     ];
