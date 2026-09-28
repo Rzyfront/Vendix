@@ -192,6 +192,7 @@
       backRoute="/admin/orders"
       [badgeText]="headerBadgeText()"
       [badgeColor]="headerBadgeColor()"
+      [backQueryParams]="listReturnQuery()"
       [actions]="headerActions()"
       (actionClicked)="onHeaderAction($event)"
     ></app-sticky-header>
