@@ -52,6 +52,10 @@ const KITCHEN_TICKET_INCLUDE = {
       order_number: true,
       delivery_type: true,
       customer_alias: true,
+      // QUI-887 — nota global de la orden para el KDS (alergias, entrega,
+      // preparación). Viaja en el snapshot y en todos los SSE porque cada
+      // lectura de ticket usa este include.
+      notes: true,
       users: { select: { first_name: true, last_name: true } },
     },
   },

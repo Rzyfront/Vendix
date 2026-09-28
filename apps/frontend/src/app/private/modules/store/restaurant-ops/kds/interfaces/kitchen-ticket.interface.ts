@@ -175,6 +175,12 @@ export interface KitchenTicket {
     order_number: string;
     delivery_type: KitchenOrderDeliveryType;
     customer_alias?: string | null;
+    /**
+     * QUI-887 — nota global de la orden (`orders.notes`), anidada por
+     * `KITCHEN_TICKET_INCLUDE`. Distinta de las notas por plato
+     * (`items[].notes`): alergias generales, entrega, preparación.
+     */
+    notes?: string | null;
     users?: { first_name: string; last_name: string } | null;
   } | null;
   /**

@@ -2185,9 +2185,18 @@ export class CheckoutService {
         // sin migración) para que la tienda vea en el detalle de la orden
         // por qué no hay método/costo de envío: falta contactar al
         // comprador por WhatsApp y acordarlo.
-        notes: dto.pending_shipping_assignment
-          ? 'Pedido por WhatsApp con envío pendiente de asignar. Contactar al comprador para acordar el método y costo de envío.'
-          : undefined,
+        // QUI-887 — la observación del comprador también va a `notes`
+        // (columna visible): el POS ya la escribe ahí y el KDS la lee de
+        // ahí. Si además hay envío pendiente, se conservan ambos textos.
+        notes:
+          [
+            dto.notes?.trim() || undefined,
+            dto.pending_shipping_assignment
+              ? 'Pedido por WhatsApp con envío pendiente de asignar. Contactar al comprador para acordar el método y costo de envío.'
+              : undefined,
+          ]
+            .filter((part): part is string => !!part)
+            .join('\n\n') || undefined,
         placed_at: new Date(),
         order_items: {
           create: itemsWithTaxes.map((item) => ({
@@ -3058,6 +3067,9 @@ export class CheckoutService {
         shipping_address_snapshot,
         state: 'created',
         internal_notes: dto.notes,
+        // QUI-887 — igual que el checkout normal: la observación del
+        // comprador va a la columna visible `notes` para que el KDS la lea.
+        notes: dto.notes?.trim() || undefined,
         placed_at: new Date(),
         order_items: {
           create: itemsWithTaxes.map((item) => ({
