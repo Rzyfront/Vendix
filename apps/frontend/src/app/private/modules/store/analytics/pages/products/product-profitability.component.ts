@@ -336,7 +336,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:16px">
                   <span>Margen:</span>
-                  <strong>${product.margin}%</strong>
+                  <strong>${product.margin === null || product.margin === undefined ? '—' : `${product.margin}%`}</strong>
                 </div>
                 <div style="display:flex;justify-content:space-between;gap:16px">
                   <span>Ingresos:</span>
