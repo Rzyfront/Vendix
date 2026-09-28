@@ -2992,6 +2992,14 @@
       "sessions": 0,
       "memories": 4,
       "prompts": 0
+    },
+    {
+      "id": "3e44d820",
+      "created_by": "rzy",
+      "created_at": "2026-09-28T15:50:19Z",
+      "sessions": 0,
+      "memories": 2,
+      "prompts": 0
     }
   ]
 }
