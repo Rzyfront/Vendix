@@ -1045,12 +1045,19 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     rate: number;
     base_amount: number;
     tax_amount: number;
+    tax_type?: string;
     base_formatted: string;
     tax_formatted: string;
   }> {
     const grouped = new Map<
       string,
-      { name: string; rate: number; tax_amount: number; base_amount: number }
+      {
+        name: string;
+        rate: number;
+        tax_amount: number;
+        base_amount: number;
+        tax_type?: string;
+      }
     >();
 
     for (const item of orderItems || []) {

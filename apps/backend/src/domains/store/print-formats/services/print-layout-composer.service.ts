@@ -886,7 +886,7 @@ export class PrintLayoutComposerService {
                       sublines += `<br><small class="item-sub item-discount">Desc: -${item.discount_formatted || `$${Number(item.discount_amount).toLocaleString('es-CO')}`}</small>`;
                     }
                     if (showItemTaxes && item.tax_rate !== undefined && Number(item.tax_rate) > 0) {
-                      sublines += `<br><small class="item-sub item-tax">${this.resolveTaxCode((item as any).tax_type, (item as any).tax_name)}: ${item.tax_rate}%</small>`;
+                      sublines += `<br><small class="item-sub item-tax">${this.resolveTaxCode(item.tax_type)}: ${item.tax_rate}%</small>`;
                     }
                     val = `${this.compiler.escapeHtml(item.product_name)}${sublines}`;
                     return `<td data-column-id="${col.id}" data-element-id="col_${col.id}" style="text-align: ${col.align};">${val}</td>`;
@@ -1041,7 +1041,7 @@ export class PrintLayoutComposerService {
             </tr>` : ''}
             ${showTaxRow && (mode === 'tokenized' || Number(totals.tax_total) > 0) ? `
             <tr data-element-id="f_tax" data-section-id="sec_totals" data-token="order.tax_amount">
-              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_tax', isTokenized ? 'Impuestos (IVA)' : this.resolveTaxTotalsLabel((data as any).taxes)))}:</td>
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_tax', isTokenized ? 'Impuestos (IVA)' : this.resolveTaxTotalsLabel(data.taxes)))}:</td>
               <td class="total-val">${taxVal}</td>
             </tr>` : ''}
             ${showReten && Number(totals.withholding_total) > 0 ? `
@@ -1079,7 +1079,7 @@ export class PrintLayoutComposerService {
             </tr>` : ''}
           </table>
         </div>
-        ${showVatNote ? `<div class="vat-included-note" data-element-id="f_vat_note" data-section-id="sec_totals">${this.resolveVatNoteLabel((data as any).taxes)} incluido: ${taxVal}</div>` : ''}
+        ${showVatNote ? `<div class="vat-included-note" data-element-id="f_vat_note" data-section-id="sec_totals">${this.resolveVatNoteLabel(data.taxes)} incluido: ${taxVal}</div>` : ''}
       </div>
     `;
   }
@@ -1197,34 +1197,13 @@ export class PrintLayoutComposerService {
   }
 
   /**
-   * F-102 — el modo `tokenized` (editor de formatos) no fabrica datos: cada
-   * campo pinta un `vendix-token-pill` ligado a un token real, y para filas
-   * repetidas la convención del archivo es UNA fila-plantilla con pills sin
-   * importar cuántas filas reales existan (ver `renderItemsTableSection`,
-   * que en tokenized ignora `data.items` por completo). Esta sección era la
-   * única excepción: inyectaba un tributo concreto —`IVA`, `19%`, base
-   * `$100.000`, cuota `$19.000`— como si fuera un dato real, sobre
-   * documentos (remisión, ticket de cocina, certificados de retención...)
-   * cuyo provider nunca puebla `taxes[]` y cuyo papel real JAMÁS imprime
-   * esta sección (el `return ''` de la línea de abajo se lo come siempre en
-   * modo real). El comerciante diseñaba el formato viendo una tarifa que el
-   * papel no reproduce nunca.
-   *
-   * El render real (`mode !== 'tokenized'`) no cambia: sigue descartando la
-   * sección completa cuando no hay tributos, que es lo correcto para un
-   * documento que estructuralmente no los declara. Lo que cambia es que el
-   * editor deja de afirmar una tarifa y un importe que nadie calculó.
-   */
-  /**
    * QUI-890 — código corto del tributo (IVA/INC/ICA/…): del `tax_type`
-   * tipado; si falta, primera palabra del nombre; si tampoco, 'IVA'
-   * (comportamiento histórico: sin tipo el papel decía IVA).
+   * tipado; sin tipo = 'IVA' por contrato fiscal (sin tipo, IVA). Ya NO se
+   * deriva del nombre: "Impoconsumo 8%" sin tipo imprime "IVA", no
+   * "IMPOCONSUMO".
    */
-  private resolveTaxCode(taxType?: string, taxName?: string): string {
-    const typed = (taxType || '').trim().toUpperCase();
-    if (typed) return typed;
-    const fromName = (taxName || '').trim().split(/\s+/)[0] || '';
-    return fromName.toUpperCase() || 'IVA';
+  private resolveTaxCode(taxType?: string): string {
+    return (taxType || '').trim().toUpperCase() || 'IVA';
   }
 
   /**
@@ -1264,6 +1243,25 @@ export class PrintLayoutComposerService {
     return 'Impuestos';
   }
 
+  /**
+   * F-102 — el modo `tokenized` (editor de formatos) no fabrica datos: cada
+   * campo pinta un `vendix-token-pill` ligado a un token real, y para filas
+   * repetidas la convención del archivo es UNA fila-plantilla con pills sin
+   * importar cuántas filas reales existan (ver `renderItemsTableSection`,
+   * que en tokenized ignora `data.items` por completo). Esta sección era la
+   * única excepción: inyectaba un tributo concreto —`IVA`, `19%`, base
+   * `$100.000`, cuota `$19.000`— como si fuera un dato real, sobre
+   * documentos (remisión, ticket de cocina, certificados de retención...)
+   * cuyo provider nunca puebla `taxes[]` y cuyo papel real JAMÁS imprime
+   * esta sección (el `return ''` de la línea de abajo se lo come siempre en
+   * modo real). El comerciante diseñaba el formato viendo una tarifa que el
+   * papel no reproduce nunca.
+   *
+   * El render real (`mode !== 'tokenized'`) no cambia: sigue descartando la
+   * sección completa cuando no hay tributos, que es lo correcto para un
+   * documento que estructuralmente no los declara. Lo que cambia es que el
+   * editor deja de afirmar una tarifa y un importe que nadie calculó.
+   */
   private renderTaxBreakdownSection(data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const taxes = data.taxes || [];
     if (mode !== 'tokenized' && taxes.length === 0) return '';

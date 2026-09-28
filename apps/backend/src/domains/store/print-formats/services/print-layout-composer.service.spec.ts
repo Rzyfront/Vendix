@@ -320,10 +320,10 @@ describe('PrintLayoutComposerService — etiquetas de tributo (QUI-890)', () => 
     expect(html).not.toContain('IVA incluido:');
   });
 
-  it('resolveTaxCode: tipo tipado gana, luego primera palabra del nombre, luego IVA', () => {
+  it('resolveTaxCode: tipo tipado, si no IVA (nunca deriva del nombre)', () => {
     const svc = service as any;
-    expect(svc.resolveTaxCode('inc', 'Impoconsumo 8%')).toBe('INC');
-    expect(svc.resolveTaxCode(undefined, 'Impoconsumo 8%')).toBe('IMPOCONSUMO');
-    expect(svc.resolveTaxCode(undefined, undefined)).toBe('IVA');
+    expect(svc.resolveTaxCode('inc')).toBe('INC');
+    expect(svc.resolveTaxCode(undefined)).toBe('IVA');
+    expect(svc.resolveTaxCode('')).toBe('IVA');
   });
 });
