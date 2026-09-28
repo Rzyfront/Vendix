@@ -31,6 +31,12 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
  * paso 4): HTTP 409 cuando un cobro exige caja abierta y el usuario no
  * tiene sesión (`require_session_for_sales` activo).
  */
+/** Método + cuenta del pago online manual pendiente que se va a registrar. */
+export interface OrderPendingPaymentPreset {
+  store_payment_method_id: number | null;
+  bank_account_id: number | null;
+}
+
 const CASH_SESSION_REQUIRED_CODE = 'CASH_SESSION_REQUIRED_001';
 const CASH_SESSION_REQUIRED_MESSAGE = 'Abre tu caja para registrar pagos.';
 
@@ -70,10 +76,19 @@ export class OrderPaymentModalComponent {
   readonly isCreditOrder = input<boolean>(false);
   /**
    * Fase 2 (paso 8): cobro manual pendiente (pago `pending` de confirmación
-   * manual o saldo parcial). Habilita monto editable ≤ saldo, preselecciona
-   * efectivo y muestra el saldo restante. Nunca coincide con crédito.
+   * manual o saldo parcial). Habilita monto editable ≤ saldo, preselecciona el
+   * método del pago pendiente (o efectivo) y muestra el saldo restante. Nunca
+   * coincide con crédito.
    */
   readonly manualPaymentPending = input<boolean>(false);
+  /**
+   * Pago online manual `pending` que se registra (p.ej. transferencia con
+   * comprobante): el modal preselecciona ESE método y la cuenta bancaria a la
+   * que el cliente transfirió, en vez de efectivo. El backend confirma esa
+   * misma fila en sitio. `null` → efectivo preseleccionado (contra entrega o
+   * saldo parcial sin pago pendiente).
+   */
+  readonly pendingPayment = input<OrderPendingPaymentPreset | null>(null);
   readonly remainingBalance = input<number>(0);
   readonly installments = input<any[]>([]);
   readonly creditType = input<string>('');
@@ -95,7 +110,8 @@ export class OrderPaymentModalComponent {
   private readonly collector = viewChild<PaymentCollectorComponent>('collector');
 
   constructor() {
-    // Fase 2 (paso 8): efectivo preseleccionado en el cobro manual (mismo
+    // Fase 2 (paso 8): en el cobro manual se preselecciona el método del pago
+    // online pendiente (con su cuenta bancaria) o, sin él, efectivo (mismo
     // patrón que `pos-payment-step`): corre al montar el collector o al
     // resolver los métodos mientras nada está elegido; nunca pisa la
     // elección explícita del operador.
@@ -104,7 +120,19 @@ export class OrderPaymentModalComponent {
       const collector = this.collector();
       const methods = this.collectorMethods();
       if (!collector || methods.length === 0 || collector.selectedMethod()) return;
+      const preset = this.pendingPayment();
       untracked(() => {
+        const original =
+          preset?.store_payment_method_id != null
+            ? methods.find((m) => m.id === String(preset.store_payment_method_id)) ?? null
+            : null;
+        if (original) {
+          collector.selectMethod(original, {
+            advance: false,
+            bankAccountId: preset?.bank_account_id ?? null,
+          });
+          return;
+        }
         const pick = methods.find((m) => m.type === PaymentMethodType.CASH) ?? null;
         if (pick) collector.selectMethod(pick, { advance: false });
       });

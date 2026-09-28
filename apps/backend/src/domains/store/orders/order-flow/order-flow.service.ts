@@ -1849,10 +1849,10 @@ export class OrderFlowService {
       total_paid: paidBalance,
       remaining_balance: 0,
     };
-    // Fase 2 paso 5 — generalización del marcador COD: `flow/pay` sobre una
-    // orden con pago manual pendiente lo anula (`cancelled`) igual que el
-    // marcador contra entrega, para que nunca queden dos pagos que sumen
-    // doble (el `pending` de checkout + el `succeeded` real).
+    // Fase 2 paso 5 — `flow/pay` sobre una orden con pago manual pendiente lo
+    // CONFIRMA en sitio (ver `confirmInPlaceMarker`); el marcador contra
+    // entrega se anula (`cancelled`) y se crea el pago real. En ambos casos
+    // nunca quedan dos pagos que sumen doble.
     const manualPendingPayments = (order.payments ?? []).filter((payment) =>
       isManualConfirmationPending(payment),
     );
@@ -1885,12 +1885,23 @@ export class OrderFlowService {
             bank_account_id: firstManualMarker.bank_account_id ?? null,
           }
         : null;
+    // Registrar pago sobre un pago online MANUAL pendiente (transferencia con
+    // comprobante, voucher…): el primer tramo CONFIRMA esa misma fila en vez
+    // de anularla y crear otra — el pago que el cliente hizo online es el que
+    // se registra. Sólo contra entrega (`ON_DELIVERY`) conserva el
+    // anular+crear histórico: su marcador no es un pago, es una promesa.
+    const confirmInPlaceMarker =
+      !isCodSettlement && firstManualMarker ? firstManualMarker : null;
+    const markerIdsToVoid = confirmInPlaceMarker
+      ? settlementPendingPaymentIds.filter((id) => id !== confirmInPlaceMarker.id)
+      : settlementPendingPaymentIds;
     const paymentHistoryCtx = {
       storeId: order.store_id,
       organizationId: order.stores?.organization_id,
       settlementPendingPaymentIds,
       settlementOrigin,
       settlementReceipt,
+      confirmInPlacePayment: confirmInPlaceMarker,
     };
     // Fase 2 paso 5 — carril "registrar pago": SÓLO aquí `dto.amount` define lo
     // cobrado. Cubre el marcador manual y los parciales siguientes (el primer
@@ -1900,9 +1911,20 @@ export class OrderFlowService {
     // `normalizePaymentLegs`.
     const toChargeCents = (value: number) =>
       Math.round(Number(value || 0) * 100);
+    // Mismo predicado que la acción "Registrar pago" (`requiresPaymentRegistration`):
+    // una orden WhatsApp/contra entrega en `pending_payment` con
+    // `remaining_balance > 0` es carril, así que el parcial que manda el modal
+    // se respeta en vez de cobrar el saldo completo en silencio. Se evalúa con
+    // el estado PREVIO al claim (la orden recargada ya está en `processing`).
     const isManualLane =
       isManualSettlement ||
-      (preClaimState === 'pending_payment' && settledAmount.gt(0));
+      (preClaimState === 'pending_payment' &&
+        (settledAmount.gt(0) ||
+          requiresPaymentRegistration({
+            state: preClaimState,
+            remaining_balance: (order as any).remaining_balance,
+            payments: order.payments,
+          })));
     const isChargeAmountLane =
       isManualLane && dto.payment_type === PaymentType.DIRECT;
     let chargeAmount = amountToCharge;
@@ -2101,7 +2123,7 @@ export class OrderFlowService {
       // El claim movió `pending_payment` → `processing`: devolverla a su
       // estado, donde espera el resto del saldo.
       await this.restorePreClaimState(orderId, preClaimState);
-      await this.voidSettlementPendingMarkers(settlementPendingPaymentIds);
+      await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
       this.logger.log(
         `Order #${orderId} partial payment registered (${partialBalanceMetadata.total_paid} of ${paidBalance}); remaining ${partialBalanceMetadata.remaining_balance}`,
@@ -2156,7 +2178,7 @@ export class OrderFlowService {
       // The claim temporarily moved shipped -> processing. Restore its
       // logistics state and persist the settled balance with the payment.
       await this.updateOrderState(orderId, 'shipped', settledBalanceMetadata, { historyFromState: preClaimState });
-      await this.voidSettlementPendingMarkers(settlementPendingPaymentIds);
+      await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
       // Round 1 MAJOR #13 — cupón en `flow/pay` (shipped):
       // si la orden trae `coupon_id` y no existe `coupon_uses` aún,
@@ -2249,7 +2271,7 @@ export class OrderFlowService {
       // Void the settlement pending marker(s) (COD o manual) so they never
       // count as a second, parallel settlement of the same order
       // (analytics/cash-register dedupe by `payments.state`, not by count).
-      await this.voidSettlementPendingMarkers(settlementPendingPaymentIds);
+      await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
       this.logger.log(
         `Order #${orderId} payment registered while delivered (settled, awaiting finalize)`,
@@ -2322,7 +2344,7 @@ export class OrderFlowService {
       // Void the settlement pending marker(s) (COD o manual) so they never
       // count as a second, parallel settlement of the same order
       // (analytics/cash-register dedupe by `payments.state`, not by count).
-      await this.voidSettlementPendingMarkers(settlementPendingPaymentIds);
+      await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
       this.logger.log(
         `Order #${orderId} payment registered while finished (orphaned/COD) -> finished`,
@@ -2390,7 +2412,7 @@ export class OrderFlowService {
           },
           { historyFromState: preClaimState },
         );
-        await this.voidSettlementPendingMarkers(settlementPendingPaymentIds);
+        await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
         this.logger.log(
           `Order #${orderId} paid directly, moved to processing (requires fulfillment)`,
@@ -2480,7 +2502,7 @@ export class OrderFlowService {
           },
           { historyFromState: preClaimState },
         );
-        await this.voidSettlementPendingMarkers(settlementPendingPaymentIds);
+        await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
         this.logger.log(
           `Order #${orderId} paid directly with pending kitchen items, moved to processing`,
@@ -2529,7 +2551,7 @@ export class OrderFlowService {
           finished_at: new Date(),
           ...settledBalanceMetadata,
         }, { historyFromState: preClaimState });
-        await this.voidSettlementPendingMarkers(settlementPendingPaymentIds);
+        await this.voidSettlementPendingMarkers(markerIdsToVoid);
       } catch (e) {
         if (e instanceof VendixHttpException) {
           await this.cancelLegPayments(
@@ -7802,9 +7824,22 @@ export class OrderFlowService {
         receipt_uploaded_at: Date | string | null;
         bank_account_id: number | null;
       } | null;
+      /**
+       * Pago online manual `pending` (fila completa de `getOrder`) que el
+       * PRIMER tramo confirma en sitio: pasa a `succeeded` con el monto, el
+       * método, la cuenta, la referencia y el vuelto del tramo, conservando su
+       * comprobante y su `transaction_id`. Los tramos siguientes se crean.
+       */
+      confirmInPlacePayment?: any | null;
     },
   ): Promise<
-    Array<{ payment: any; leg: NormalizedLeg; transactionId: string }>
+    Array<{
+      payment: any;
+      leg: NormalizedLeg;
+      transactionId: string;
+      /** Estado previo de la fila confirmada en sitio (para compensar). */
+      confirmedInPlaceOriginal?: any;
+    }>
   > {
     // Fase 2 paso 5 — bloque de liquidación (COD o manual) que viaja en la
     // metadata de cada tramo + `payment_registered`. Sólo campos con valor; el
@@ -7876,43 +7911,125 @@ export class OrderFlowService {
         payment: any;
         leg: NormalizedLeg;
         transactionId: string;
+        confirmedInPlaceOriginal?: any;
       }> = [];
-      for (const leg of legs) {
-        const transactionId = await this.generateTransactionId();
+      const inPlace = historyCtx?.confirmInPlacePayment ?? null;
+      for (const [legIndex, leg] of legs.entries()) {
         // Ausente ⇒ pago exacto (igual que el escalar de hoy); nunca falsy.
         const legReceived = leg.amount_received ?? leg.amount;
-        const payment = await tx.payments.create({
-          data: {
-            order_id: orderId,
-            store_payment_method_id: leg.store_payment_method_id,
-            bank_account_id:
-              resolvedBankAccountIds.get(leg) ?? leg.bank_account_id ?? null,
-            amount: leg.amount,
-            currency,
-            state: 'succeeded',
-            transaction_id: transactionId,
-            gateway_reference: leg.payment_reference ?? null,
-            paid_at: new Date(),
-            gateway_response: {
-              payment_type: 'direct',
-              amount_received: leg.amount_received,
-              change: leg.is_cash ? change : 0,
-              ...(leg.is_cash || settlementIds.length
-                ? { metadata: {
-                    ...(leg.is_cash ? { amount_received: legReceived } : {}),
-                    ...(settlementIds.length
-                      ? {
-                          payment_origin: historyCtx?.settlementOrigin ?? 'cash_on_delivery',
-                          original_pending_payment_ids: settlementIds,
-                          ...settlementReceiptFields,
-                        }
-                      : {}),
-                  } }
-                : {}),
+        let payment: any;
+        let transactionId: string;
+        let confirmedInPlaceOriginal: any;
+        if (inPlace && legIndex === 0) {
+          // Confirmación en sitio del pago online manual. Guardia de estado:
+          // sólo una fila todavía `pending` se confirma; si otro proceso ya la
+          // movió, se rechaza (nunca se cobra dos veces el mismo pago).
+          transactionId =
+            inPlace.transaction_id ?? (await this.generateTransactionId());
+          const previousResponse =
+            inPlace.gateway_response &&
+            typeof inPlace.gateway_response === 'object' &&
+            !Array.isArray(inPlace.gateway_response)
+              ? (inPlace.gateway_response as Record<string, any>)
+              : {};
+          const previousMetadata =
+            previousResponse.metadata &&
+            typeof previousResponse.metadata === 'object'
+              ? previousResponse.metadata
+              : {};
+          const sameMethod =
+            inPlace.store_payment_method_id == null ||
+            inPlace.store_payment_method_id === leg.store_payment_method_id;
+          const confirmed = await tx.payments.updateMany({
+            where: { id: inPlace.id, state: 'pending' },
+            data: {
+              store_payment_method_id: leg.store_payment_method_id,
+              bank_account_id:
+                resolvedBankAccountIds.get(leg) ??
+                leg.bank_account_id ??
+                (sameMethod ? (inPlace.bank_account_id ?? null) : null),
+              amount: leg.amount,
+              state: 'succeeded',
+              transaction_id: transactionId,
+              gateway_reference:
+                leg.payment_reference ?? inPlace.gateway_reference ?? null,
+              paid_at: new Date(),
+              updated_at: new Date(),
+              gateway_response: {
+                ...previousResponse,
+                payment_type: 'direct',
+                amount_received: leg.amount_received,
+                change: leg.is_cash ? change : 0,
+                metadata: {
+                  ...previousMetadata,
+                  ...(leg.is_cash ? { amount_received: legReceived } : {}),
+                  payment_origin:
+                    historyCtx?.settlementOrigin ?? 'manual_confirmation',
+                  confirmed_in_place: true,
+                  original_pending_payment_ids: settlementIds,
+                  original_store_payment_method_id:
+                    inPlace.store_payment_method_id ?? null,
+                  original_amount:
+                    inPlace.amount != null ? Number(inPlace.amount) : null,
+                  ...settlementReceiptFields,
+                },
+              },
             },
-          },
+          });
+          if (!confirmed || confirmed.count !== 1) {
+            throw this.wrapPaymentFailure('manual_payment_not_pending', {
+              order_id: orderId,
+              payment_id: inPlace.id,
+            });
+          }
+          payment = await tx.payments.findFirst({ where: { id: inPlace.id } });
+          if (!payment) {
+            throw this.wrapPaymentFailure('manual_payment_not_pending', {
+              order_id: orderId,
+              payment_id: inPlace.id,
+            });
+          }
+          confirmedInPlaceOriginal = inPlace;
+        } else {
+          transactionId = await this.generateTransactionId();
+          payment = await tx.payments.create({
+            data: {
+              order_id: orderId,
+              store_payment_method_id: leg.store_payment_method_id,
+              bank_account_id:
+                resolvedBankAccountIds.get(leg) ?? leg.bank_account_id ?? null,
+              amount: leg.amount,
+              currency,
+              state: 'succeeded',
+              transaction_id: transactionId,
+              gateway_reference: leg.payment_reference ?? null,
+              paid_at: new Date(),
+              gateway_response: {
+                payment_type: 'direct',
+                amount_received: leg.amount_received,
+                change: leg.is_cash ? change : 0,
+                ...(leg.is_cash || settlementIds.length
+                  ? { metadata: {
+                      ...(leg.is_cash ? { amount_received: legReceived } : {}),
+                      ...(settlementIds.length
+                        ? {
+                            payment_origin: historyCtx?.settlementOrigin ?? 'cash_on_delivery',
+                            original_pending_payment_ids: settlementIds,
+                            ...settlementReceiptFields,
+                          }
+                        : {}),
+                    } }
+                  : {}),
+              },
+            },
+          });
+        }
+        created.push({
+          payment,
+          leg,
+          transactionId,
+          ...(confirmedInPlaceOriginal ? { confirmedInPlaceOriginal } : {}),
         });
-        created.push({ payment, leg, transactionId });
         // Plan order-truth-and-invoice-tz — un `payment_registered` por
         // tramo, con el MISMO `tx` que el `payments.create` de arriba: si la
         // transacción revierte, el evento revierte con ella.
@@ -7931,6 +8048,7 @@ export class OrderFlowService {
                   ...settlementReceiptFields,
                   actual_store_payment_method_id: leg.store_payment_method_id,
                   actual_method: leg.accounting_method,
+                  ...(confirmedInPlaceOriginal ? { confirmed_in_place: true } : {}),
                 } }
               : {}),
           });
@@ -7976,11 +8094,35 @@ export class OrderFlowService {
    * compensación sea todo o nada.
    */
   private async cancelLegPayments(
-    legPayments: Array<{ payment: any; leg: NormalizedLeg }>,
+    legPayments: Array<{
+      payment: any;
+      leg: NormalizedLeg;
+      confirmedInPlaceOriginal?: any;
+    }>,
     cancellationReason: string,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
-      for (const { payment } of legPayments) {
+      for (const { payment, confirmedInPlaceOriginal: original } of legPayments) {
+        if (original) {
+          // La fila confirmada en sitio era el pago online del cliente: no se
+          // anula, vuelve a `pending` tal como estaba (sigue esperando que el
+          // personal lo registre).
+          await tx.payments.update({
+            where: { id: payment.id },
+            data: {
+              state: 'pending',
+              store_payment_method_id: original.store_payment_method_id ?? null,
+              bank_account_id: original.bank_account_id ?? null,
+              amount: original.amount,
+              transaction_id: original.transaction_id ?? payment.transaction_id,
+              gateway_reference: original.gateway_reference ?? null,
+              paid_at: original.paid_at ?? null,
+              updated_at: new Date(),
+              gateway_response: original.gateway_response ?? Prisma.DbNull,
+            },
+          });
+          continue;
+        }
         await tx.payments.update({
           where: { id: payment.id },
           data: {
