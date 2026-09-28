@@ -4358,7 +4358,7 @@ export class OrdersService {
       //
       //      Round 1 MAJOR #10: `coupons.update` (cruzar el contador) se
       //      hace con `updateMany` idempotente y guarda `current_uses:
-      //      { lt: max_uses }` + `state='active'`. count=0 ⇒ otro cargo
+      //      { lt: max_uses }` + `is_active`. count=0 ⇒ otro cargo
       //      consumió el cupón primero y lanzamos `ORD_EDIT_COUPON_COMMIT_001`.
       //      El `decrement` usa el mismo patrón para que un rollback que
       //      ya bajó el contador no se vuelva a bajar.
@@ -4366,14 +4366,14 @@ export class OrdersService {
       //      Round 1 BLOCKER #4: el `tx.coupons.update` corría sobre el
       //      cliente no-scoped; un cupón de OTRA tienda cuya id cayera en
       //      el filtro sería aceptado por la FK y mutaba su contador.
-      //      Ahora el `where` exige `stores: { some: { id: storeId } }`
-      //      para garantizar pertenencia.
+      //      Ahora el `where` exige `store_id` (la relación es `store`,
+      //      singular FK) para garantizar pertenencia.
       if (!isDraft && couponChanged) {
         if (currentCode && existingOrder.coupon_id) {
           const dec = await tx.coupons.updateMany({
             where: {
               id: existingOrder.coupon_id,
-              stores: { some: { id: storeId } },
+              store_id: storeId,
               current_uses: { gt: 0 },
             },
             data: { current_uses: { decrement: 1 } },
@@ -4390,8 +4390,8 @@ export class OrdersService {
           const inc = await tx.coupons.updateMany({
             where: {
               id: couponId,
-              stores: { some: { id: storeId } },
-              state: 'active',
+              store_id: storeId,
+              is_active: true,
             },
             data: { current_uses: { increment: 1 } },
           });

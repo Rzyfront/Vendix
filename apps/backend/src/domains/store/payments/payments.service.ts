@@ -2195,9 +2195,11 @@ export class PaymentsService {
           //   doesn't increment blindly. count===0 throws
           //   `ORD_EDIT_COUPON_COMMIT_001`, the same way the editor
           //   surfaces this race.
-          //   F22: pin the coupon to the current store via
-          //   `stores: { some: { id: storeId } }` so a coupon from a
-          //   DIFFERENT tenant can never sneak through the `id` match.
+          //   F22: pin the coupon to the current store via the scalar
+          //   `store_id` (the relation is `store`, singular FK — `stores:
+          //   { some }` does not exist and threw P500 on every coupon sale)
+          //   so a coupon from a DIFFERENT tenant can never sneak through
+          //   the `id` match. Same for `is_active` (`state` does not exist).
           // We omit the `max_uses > current_uses` clause from the WHERE
           // because Prisma's updateMany lacks row-self-referencing
           // operators; the editor handles that quota guard with a
@@ -2205,8 +2207,8 @@ export class PaymentsService {
           const inc = await tx.coupons.updateMany({
             where: {
               id: couponInfo.coupon_id,
-              stores: { some: { id: createPosPaymentDto.store_id } },
-              state: 'active',
+              store_id: createPosPaymentDto.store_id,
+              is_active: true,
             },
             data: { current_uses: { increment: 1 } },
           });
