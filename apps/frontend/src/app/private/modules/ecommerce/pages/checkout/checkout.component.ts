@@ -86,6 +86,9 @@ import { AddressMapPickerComponent } from '../../components/address-map-picker/a
 import { GeolocationService } from '../../services/geolocation.service';
 import { GeocodingService, GeocodePrecision } from '../../services/geocoding.service';
 
+const UNLOCATED_ADDRESS_WARNING =
+  'No pudimos ubicar tu dirección automáticamente. Marca tu ubicación en el mapa para calcular la tarifa de envío.';
+
 @Component({
   selector: 'app-checkout',
   standalone: true,
@@ -581,6 +584,8 @@ export class CheckoutComponent implements OnInit {
    * Plain field, not a signal — nothing in the template reads it.
    */
   private autoMapFocusDone = false;
+  /** A geocode miss whose warning waits for the first auto-focus to show. */
+  private pendingAddressWarning = false;
 
   constructor(
     private cart_service: CartService,
@@ -1032,6 +1037,7 @@ export class CheckoutComponent implements OnInit {
     // "no pudimos ubicar" warning while the buyer was still filling the form.
     if (!countryCode || !cityName || !stateName) {
       this.addressWarning.set(null);
+      this.pendingAddressWarning = false;
       return;
     }
 
@@ -1076,6 +1082,7 @@ export class CheckoutComponent implements OnInit {
           }
           this.map_center.set(coords);
           this.addressWarning.set(null);
+          this.pendingAddressWarning = false;
           this.geocodePrecision.set(res.precision ?? null);
           this.geocodeLabel.set(res.label ?? null);
           // Persist the point silently (never shown as text).
@@ -1115,9 +1122,14 @@ export class CheckoutComponent implements OnInit {
    */
   private handleUnresolvedGeocode(): void {
     this.clearGeocodedCoords();
-    this.addressWarning.set(
-      'No pudimos ubicar tu dirección automáticamente. Marca tu ubicación en el mapa para calcular la tarifa de envío.',
-    );
+    // The warning slot sits above the address fields on mobile, so inserting
+    // it mid-typing shifted the field under the buyer's thumb: until the
+    // first auto-focus fires it is held back and shown together with it.
+    if (this.autoMapFocusDone) {
+      this.addressWarning.set(UNLOCATED_ADDRESS_WARNING);
+    } else {
+      this.pendingAddressWarning = true;
+    }
     this.focusMapHint('auto');
   }
 
@@ -1159,6 +1171,12 @@ export class CheckoutComponent implements OnInit {
     if (mode === 'auto') {
       this.requestAutoMapFocus();
     } else {
+      // A click is not a race with typing: surface any held-back warning
+      // (it carries the "Usar mi ubicación automática" CTA) right away.
+      if (this.pendingAddressWarning) {
+        this.addressWarning.set(UNLOCATED_ADDRESS_WARNING);
+        this.pendingAddressWarning = false;
+      }
       this.scrollToMapAnchor();
     }
     setTimeout(() => this.mapHighlight.set(false), 2000);
@@ -1214,6 +1232,10 @@ export class CheckoutComponent implements OnInit {
       active.addEventListener('blur', onBlur, { once: true });
       this.autoMapFocusBlurCleanup = () => active.removeEventListener('blur', onBlur);
       return;
+    }
+    if (this.pendingAddressWarning) {
+      this.addressWarning.set(UNLOCATED_ADDRESS_WARNING);
+      this.pendingAddressWarning = false;
     }
     this.scrollToMapAnchor();
     this.autoMapFocusDone = true; // Rule 4 — never again for this instance.
@@ -1502,6 +1524,7 @@ export class CheckoutComponent implements OnInit {
     this.address_form.get('latitude')?.setValue(coords.lat);
     this.address_form.get('longitude')?.setValue(coords.lng);
     this.addressWarning.set(null);
+    this.pendingAddressWarning = false;
     this.pinConfirmed.set(true);
     this.geocodeLabel.set(null);
     // H2: mover el pin / aceptar GPS invalida la cotización sellada (las

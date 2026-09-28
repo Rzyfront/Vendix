@@ -104,6 +104,9 @@ export interface AddressPayload {
   has_location?: boolean;
 }
 
+const UNLOCATED_ADDRESS_WARNING =
+  'No pudimos ubicar tu dirección. Marca el punto en el mapa para calcular la tarifa de envío.';
+
 /**
  * Reusable shipping/delivery address form with optional collapsible map.
  *
@@ -326,6 +329,8 @@ export class AddressFormFieldsComponent {
    * vendix-zoneless-signals: signals are for template-observed state only).
    */
   private autoMapFocusDone = false;
+  /** A geocode miss whose warning waits for the first auto-focus to show. */
+  private pendingAddressWarning = false;
 
   /**
    * Catálogo de países como opciones del selector: la etiqueta es el nombre y
@@ -739,6 +744,7 @@ export class AddressFormFieldsComponent {
     this.precision.set(null);
     this.geocodeLabel.set(null);
     this.addressWarning.set(null);
+    this.pendingAddressWarning = false;
     this.form.get('latitude')?.setValue(coords.lat);
     this.form.get('longitude')?.setValue(coords.lng);
     this.coordsSignal.set(coords);
@@ -806,6 +812,7 @@ export class AddressFormFieldsComponent {
     const line1 = ((this.form.get('address_line1')?.value as string | null) ?? '').trim();
     if (line1.length < 5) {
       this.addressWarning.set(null);
+      this.pendingAddressWarning = false;
       this.precision.set(null);
       this.geocodeLabel.set(null);
       return;
@@ -820,6 +827,7 @@ export class AddressFormFieldsComponent {
     // warning and force-opened the map while the operator was still typing.
     if (!country || !city || !state) {
       this.addressWarning.set(null);
+      this.pendingAddressWarning = false;
       this.precision.set(null);
       this.geocodeLabel.set(null);
       return;
@@ -849,9 +857,6 @@ export class AddressFormFieldsComponent {
           if (generation !== this.geocodeGeneration || this.pinConfirmed()) return;
           if (res?.lat == null || res?.lng == null) {
             this.clearCoords();
-            this.addressWarning.set(
-              'No pudimos ubicar tu dirección. Marca el punto en el mapa para calcular la tarifa de envío.',
-            );
             this.focusMapForWarning();
             return;
           }
@@ -863,13 +868,11 @@ export class AddressFormFieldsComponent {
             // focus path as a null/error result.
             this.mapCenterHint.set({ lat: res.lat, lng: res.lng });
             this.clearCoords();
-            this.addressWarning.set(
-              'No pudimos ubicar tu dirección. Marca el punto en el mapa para calcular la tarifa de envío.',
-            );
             this.focusMapForWarning();
             return;
           }
           this.addressWarning.set(null);
+          this.pendingAddressWarning = false;
           this.form.get('latitude')?.setValue(res.lat, { emitEvent: false });
           this.form.get('longitude')?.setValue(res.lng, { emitEvent: false });
           this.coordsSignal.set({ lat: res.lat, lng: res.lng });
@@ -889,9 +892,6 @@ export class AddressFormFieldsComponent {
         error: () => {
           if (generation !== this.geocodeGeneration || this.pinConfirmed()) return;
           this.clearCoords();
-          this.addressWarning.set(
-            'No pudimos ubicar tu dirección. Marca el punto en el mapa para calcular la tarifa de envío.',
-          );
           this.focusMapForWarning();
         },
       });
@@ -925,6 +925,14 @@ export class AddressFormFieldsComponent {
    * Every call-site is an AUTOMATIC focus (a geocode result, never a click).
    */
   private focusMapForWarning(): void {
+    // The warning box also renders ABOVE the address line, so inserting it
+    // mid-typing shifted the field too: until the first auto-focus fires it
+    // is held back and shown together with the map.
+    if (this.autoMapFocusDone) {
+      this.addressWarning.set(UNLOCATED_ADDRESS_WARNING);
+      return;
+    }
+    this.pendingAddressWarning = true;
     this.requestAutoMapFocus();
   }
 
@@ -982,6 +990,10 @@ export class AddressFormFieldsComponent {
       active.addEventListener('blur', onBlur, { once: true });
       this.autoMapFocusBlurCleanup = () => active.removeEventListener('blur', onBlur);
       return;
+    }
+    if (this.pendingAddressWarning) {
+      this.addressWarning.set(UNLOCATED_ADDRESS_WARNING);
+      this.pendingAddressWarning = false;
     }
     this.showMap.set(true);
     this.advancedOverride.set(true);
