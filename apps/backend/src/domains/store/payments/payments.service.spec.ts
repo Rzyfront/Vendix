@@ -309,7 +309,10 @@ describe('PaymentsService', () => {
         { provide: CouponsService, useValue: mockCouponsService },
         {
           provide: SessionsService,
-          useValue: { getActiveSession: jest.fn() },
+          useValue: {
+            getActiveSession: jest.fn(),
+            assertSessionForSales: jest.fn(),
+          },
         },
         {
           provide: MovementsService,
@@ -1427,6 +1430,123 @@ describe('PaymentsService', () => {
       // `coupon_uses` / `coupons.current_uses` sólo se tocan dentro de la
       // transacción de cobro; el draft no llega allí y no registra uso.
       expect((couponsService as any).registerUse).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Gate único de caja en `processPosPayment`: guardar un borrador
+   * (`is_draft=true`, `requires_payment!==true`) no recibe dinero y no exige
+   * caja; ventas, crédito y envío sí. La lógica del helper
+   * (`enabled && require_session_for_sales` + sesión propia) se prueba en
+   * `sessions.service.spec.ts`; aquí se prueba CUÁNDO se invoca.
+   */
+  describe('processPosPayment — borrador sin caja vs venta con gate (CASH_SESSION_REQUIRED_001)', () => {
+    const STOP_AFTER_GATE = 'stop-after-cash-gate';
+    const CONTEXT_STORE_ID = 1;
+
+    let contextSpy: jest.SpyInstance;
+
+    const posUser: any = {
+      id: 7,
+      email: 'auxiliar@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+
+    const buildDto = (overrides: any = {}): any => ({
+      store_id: CONTEXT_STORE_ID,
+      currency: 'COP',
+      items: [{ product_id: 1, quantity: 1, unit_price: 1000 }],
+      payments: [],
+      total_amount: 1000,
+      ...overrides,
+    });
+
+    const arrange = () => {
+      contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({
+          store_id: CONTEXT_STORE_ID,
+          organization_id: 1,
+        } as any);
+
+      // Si el gate deja pasar, la transacción se abre: el sentinel hace
+      // visible ese cruce sin ejecutar el cobro real.
+      (prisma as any).$transaction = jest.fn(async () => {
+        throw new Error(STOP_AFTER_GATE);
+      });
+    };
+
+    afterEach(() => {
+      contextSpy?.mockRestore();
+    });
+
+    it('borrador puro sin caja: NO invoca el gate y llega a la transacción', async () => {
+      arrange();
+
+      await expect(
+        service.processPosPayment(buildDto({ is_draft: true }), posUser),
+      ).rejects.toThrow(STOP_AFTER_GATE);
+
+      expect((prisma as any).$transaction).toHaveBeenCalledTimes(1);
+      expect(sessionsService.assertSessionForSales).not.toHaveBeenCalled();
+    });
+
+    it('venta sin caja: invoca el gate con user.id y propaga CASH_SESSION_REQUIRED_001 sin abrir transacción', async () => {
+      arrange();
+      (sessionsService.assertSessionForSales as jest.Mock).mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+      );
+
+      const error = await service
+        .processPosPayment(buildDto({}), posUser)
+        .catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe(
+        ErrorCodes.CASH_SESSION_REQUIRED_001.code,
+      );
+      expect(sessionsService.assertSessionForSales).toHaveBeenCalledWith(
+        posUser.id,
+      );
+      expect(sessionsService.assertSessionForSales).toHaveBeenCalledTimes(1);
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
+    });
+
+    it('venta con caja: el gate resuelve y el cobro continúa a la transacción', async () => {
+      arrange();
+
+      await expect(
+        service.processPosPayment(buildDto({}), posUser),
+      ).rejects.toThrow(STOP_AFTER_GATE);
+
+      expect(sessionsService.assertSessionForSales).toHaveBeenCalledWith(
+        posUser.id,
+      );
+      expect((prisma as any).$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('borrador + requires_payment mantiene POS_DRAFT_REQUIRES_PAYMENT_001 aunque falte la caja', async () => {
+      arrange();
+      // El gate rechazaría, pero el invariante B.2 corre primero: el payload
+      // contradictorio es un bug del cliente, no un problema de caja.
+      (sessionsService.assertSessionForSales as jest.Mock).mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+      );
+
+      const error = await service
+        .processPosPayment(
+          buildDto({ is_draft: true, requires_payment: true }),
+          posUser,
+        )
+        .catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe(
+        ErrorCodes.POS_DRAFT_REQUIRES_PAYMENT_001.code,
+      );
+      expect(sessionsService.assertSessionForSales).not.toHaveBeenCalled();
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
     });
   });
 

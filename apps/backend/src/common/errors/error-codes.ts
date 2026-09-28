@@ -6083,6 +6083,17 @@ export const ErrorCodes = {
       'The expected cash amount changed after the client read it; refresh the summary before closing',
   },
 
+  // Caja registradora — cobro sin sesión del operador
+  // (`assertSessionForSales`). 409 y no 403: el usuario SÍ tiene permiso para
+  // cobrar; lo que falta es que tenga su caja abierta. No es "no puedes", es
+  // "abre tu caja primero". Guardar un borrador POS no pasa por este gate
+  // (guardar ≠ cobrar).
+  CASH_SESSION_REQUIRED_001: {
+    code: 'CASH_SESSION_REQUIRED_001',
+    httpStatus: 409,
+    devMessage: 'Abre tu caja para registrar pagos.',
+  },
+
   // Reporte "Stock Bajo por Proveedor" (CP-low-stock-by-supplier).
   // 400 y no 404: el proveedor no existe o pertenece a otra tienda; la
   // petición nunca llegó a ser una búsqueda real contra el row del

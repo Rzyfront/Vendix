@@ -45,6 +45,12 @@
     }
   }
 
+  @if (cashGateMessage() && !isProcessing()) {
+    <p class="credit-cap-error" role="alert">
+      {{ cashGateMessage() }}
+    </p>
+  }
+
   <div slot="footer" class="payment-footer">
     <app-button
       variant="primary"

@@ -20,6 +20,15 @@ import {
 } from '../../../../../../shared/models/payment-method.model';
 import { Order } from '../../interfaces/order.interface';
 import { StorePaymentMethod } from '../../../settings/payments/interfaces/payment-methods.interface';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+
+/**
+ * Contrato congelado con el backend (plan pos-draft-without-cash-session,
+ * paso 4): HTTP 409 cuando un cobro exige caja abierta y el usuario no
+ * tiene sesión (`require_session_for_sales` activo).
+ */
+const CASH_SESSION_REQUIRED_CODE = 'CASH_SESSION_REQUIRED_001';
+const CASH_SESSION_REQUIRED_MESSAGE = 'Abre tu caja para registrar pagos.';
 
 /**
  * Order payment / abono modal around the shared payment collector.
@@ -60,6 +69,12 @@ export class OrderPaymentModalComponent {
   readonly creditType = input<string>('');
   readonly preSelectedInstallment = input<any>(null);
   readonly isProcessing = input<boolean>(false);
+  /**
+   * Último error del cobro, fijado por la página en el `error` del
+   * `flow/pay` / `flow/credit-payment`. La página NO cierra el modal ante
+   * un fallo, así el cajero lee el motivo sin perder el cobro.
+   */
+  readonly paymentError = input<unknown>(null);
 
   // ── Signal Outputs ──────────────────────────────────────────
   readonly isOpenChange = output<boolean>();
@@ -102,6 +117,26 @@ export class OrderPaymentModalComponent {
   readonly collectorMethods = computed<PaymentMethod[]>(() =>
     (this.paymentMethods() ?? []).map((m) => fromStorePaymentMethod(m)),
   );
+
+  /**
+   * Mensaje inline solo cuando el cobro fue rechazado por falta de caja
+   * (`CASH_SESSION_REQUIRED_001`, leído vía `parseApiError`). Cualquier
+   * otro error sigue por el toast de la página (retorna `null`).
+   * Tolera el wrapper `buildApiError` (`errorCode` + crudo en `cause`)
+   * igual que el handler de `order-details-page`.
+   */
+  readonly cashGateMessage = computed<string | null>(() => {
+    const error = this.paymentError();
+    if (!error) return null;
+    const wrapped = error as { errorCode?: unknown; cause?: unknown } | null;
+    const directCode =
+      typeof wrapped?.errorCode === 'string' ? wrapped.errorCode : null;
+    const code =
+      directCode ?? parseApiError(wrapped?.cause ?? error).errorCode;
+    return code === CASH_SESSION_REQUIRED_CODE
+      ? CASH_SESSION_REQUIRED_MESSAGE
+      : null;
+  });
 
   /** Compare at money precision; cash received can exceed this and return
    * change, but the abono itself must not exceed the debt. */
