@@ -213,6 +213,12 @@ export class PaymentsService {
     try {
       await this.validateUserAccess(user, createPaymentDto.storeId);
 
+      // Gate único de caja: ningún pago con el switch activo nace sin caja
+      // de quien cobra. Antes del gateway para no crear pago ni movimientos.
+      await this.sessionsService.assertSessionForSales(
+        RequestContextService.getUserId(),
+      );
+
       const result = await this.paymentGateway.processPayment({
         orderId: createPaymentDto.orderId,
         customerId: createPaymentDto.customerId,
@@ -941,17 +947,7 @@ export class PaymentsService {
         );
       }
 
-      // Enforce require_session_for_sales setting
       const settings = await this.settingsService.getSettings();
-      const cr_settings = (settings as any)?.pos?.cash_register;
-      if (cr_settings?.enabled && cr_settings?.require_session_for_sales) {
-        const session = await this.sessionsService.getActiveSession(user.id);
-        if (!session) {
-          throw new BadRequestException(
-            'Se requiere una caja registradora abierta para procesar ventas.',
-          );
-        }
-      }
 
       // ----------------------------------------------------------------
       // CP-POS-CREAR-EDITAR-COBRAR-001 — B.2 draft/payment invariant.
@@ -970,6 +966,18 @@ export class PaymentsService {
           ErrorCodes.POS_DRAFT_REQUIRES_PAYMENT_001,
           'A draft (is_draft=true) cannot be combined with requires_payment=true; save the order first, then charge it via flow/pay',
         );
+      }
+
+      // Gate único de caja (`assertSessionForSales`): guardar un borrador no
+      // recibe dinero y no exige caja; ventas, crédito y envío sí. Corre
+      // DESPUÉS del invariante B.2 a propósito: un payload contradictorio
+      // (`is_draft + requires_payment`) es un bug del cliente y responde
+      // POS_DRAFT_REQUIRES_PAYMENT_001 tenga o no caja el operador.
+      const isPureDraft =
+        createPosPaymentDto.is_draft === true &&
+        createPosPaymentDto.requires_payment !== true;
+      if (!isPureDraft) {
+        await this.sessionsService.assertSessionForSales(user.id);
       }
 
       // ----------------------------------------------------------------

@@ -137,7 +137,8 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     };
     const audit: any = { logCustom: jest.fn(async () => undefined) };
     const service = new OrderFlowService(
-      prismaMock, {} as any, {} as any, {} as any, {} as any, stock,
+      prismaMock, {} as any, {} as any,
+      { assertSessionForSales: jest.fn() } as any, {} as any, stock,
       {} as any, {} as any, audit,
     );
     jest.spyOn(service as any, 'getOrder').mockImplementation(async () => ({
@@ -992,7 +993,7 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
       prismaMock as unknown as StorePrismaService,
       {} as any,
       {} as any,
-      {} as any,
+      { assertSessionForSales: jest.fn() } as any,
       {} as any,
       {} as any,
       {} as any,
@@ -2277,7 +2278,7 @@ describe('OrderFlowService — charge-time shipping gate (A.2 CP-facturacion-fix
       prismaMock as unknown as StorePrismaService,
       {} as any,
       {} as any,
-      {} as any,
+      { assertSessionForSales: jest.fn() } as any,
       {} as any,
       {} as any,
       {} as any,
@@ -3534,7 +3535,7 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
       prismaMock as unknown as StorePrismaService,
       emitter as any,
       {} as any,
-      {} as any,
+      { assertSessionForSales: jest.fn() } as any,
       {} as any,
       {} as any,
       {} as any,
@@ -4827,7 +4828,8 @@ describe('OrderFlowService.registerCreditPayment — table projection (B.2/T5)',
     };
     const eventEmitter: any = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
     const service = new OrderFlowService(
-      prismaMock, eventEmitter, {} as any, {} as any, {} as any,
+      prismaMock, eventEmitter, {} as any,
+      { assertSessionForSales: jest.fn() } as any, {} as any,
       {} as any, {} as any, {} as any, {} as any,
     );
     jest.spyOn(service as any, 'hasPendingKitchenItems').mockResolvedValue(false);
@@ -4901,6 +4903,176 @@ describe('OrderFlowService.registerCreditPayment — table projection (B.2/T5)',
     expect(h.updateOrderState).not.toHaveBeenCalled();
     expect(result.finished).toBe(false);
     expect(result.payment_recorded).toBe(true);
+  });
+});
+
+describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_001)', () => {
+  const USER_B = 42;
+  const SESSION_B = 900;
+  const CREDIT_DTO: any = { store_payment_method_id: 5, amount: 60 };
+
+  // Sin restore a propósito (misma convención del harness vecino): el
+  // contexto simulado coincide con el que ya ven los describes posteriores.
+  const gateRejecting = () => ({
+    assertSessionForSales: jest.fn().mockRejectedValue(
+      new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+    ),
+    getActiveSession: jest.fn(),
+  });
+
+  it('payOrder sin caja: rechaza CASH_SESSION_REQUIRED_001 antes del claim de estado', async () => {
+    mockRequestContext({ store_id: 4, organization_id: 1, user_id: USER_B });
+    const prismaMock: any = {
+      orders: {
+        findFirst: jest.fn(async () => null),
+        updateMany: jest.fn(async () => ({ count: 1 })),
+      },
+      payments: { create: jest.fn() },
+      $transaction: jest.fn(),
+    };
+    const sessions = gateRejecting();
+    const service = new OrderFlowService(
+      prismaMock,
+      { emit: jest.fn() } as any,
+      {} as any,
+      sessions as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const error = await service
+      .payOrder(1, { store_payment_method_id: 1 } as any)
+      .catch((failure) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('CASH_SESSION_REQUIRED_001');
+    expect(sessions.assertSessionForSales).toHaveBeenCalledWith(USER_B);
+    // El gate es lo primero: ni el probe de envío, ni el claim (la orden no
+    // queda varada en `processing`), ni pagos, ni transacciones.
+    expect(prismaMock.orders.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('registerCreditPayment sin caja: rechaza CASH_SESSION_REQUIRED_001 sin crear el pago', async () => {
+    mockRequestContext({ store_id: 4, organization_id: 1, user_id: USER_B });
+    const prismaMock: any = {
+      orders: { findFirst: jest.fn(async () => null) },
+      payments: { create: jest.fn() },
+    };
+    const sessions = gateRejecting();
+    const service = new OrderFlowService(
+      prismaMock,
+      { emit: jest.fn() } as any,
+      {} as any,
+      sessions as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const error = await service
+      .registerCreditPayment(1, CREDIT_DTO)
+      .catch((failure) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('CASH_SESSION_REQUIRED_001');
+    expect(sessions.assertSessionForSales).toHaveBeenCalledWith(USER_B);
+    expect(prismaMock.orders.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.payments.create).not.toHaveBeenCalled();
+  });
+
+  it('registerCreditPayment con caja de B: el movimiento sale cae en la sesión de B', async () => {
+    mockRequestContext({ store_id: 4, organization_id: 1, user_id: USER_B });
+    const orderRow: any = {
+      id: 1,
+      order_number: 'CR-B',
+      state: 'processing',
+      store_id: 4,
+      organization_id: 1,
+      customer_id: 44,
+      currency: 'COP',
+      payment_form: '2',
+      credit_type: 'libre',
+      grand_total: 100,
+      total_paid: 0,
+      remaining_balance: 100,
+      payments: [],
+      order_installments: [],
+    };
+    const prismaMock: any = {
+      orders: {
+        findFirst: jest.fn(async () => orderRow),
+        update: jest.fn(async () => ({ id: 1 })),
+      },
+      store_payment_methods: {
+        findFirst: jest.fn(async () => ({
+          id: 5,
+          system_payment_method: { type: 'cash' },
+        })),
+      },
+      payments: {
+        create: jest.fn(async () => ({ id: 501 })),
+      },
+      order_installments: {
+        findFirst: jest.fn(async () => null),
+        findMany: jest.fn(async () => []),
+        update: jest.fn(async () => ({})),
+      },
+    };
+    const settingsService = {
+      getSettings: jest.fn(async () => ({
+        pos: { cash_register: { enabled: true } },
+      })),
+    };
+    const sessions = {
+      assertSessionForSales: jest.fn(async () => undefined),
+      getActiveSession: jest.fn(async () => ({ id: SESSION_B })),
+    };
+    const movements = { recordSaleMovement: jest.fn(async () => ({})) };
+    const service = new OrderFlowService(
+      prismaMock,
+      { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
+      settingsService as any,
+      sessions as any,
+      movements as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    jest.spyOn(service as any, 'hasPendingKitchenItems').mockResolvedValue(false);
+    jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: 1, state: 'finished' });
+    jest
+      .spyOn(service as any, 'projectPaidOrderToTable')
+      .mockResolvedValue(undefined);
+
+    // Abono parcial (60 de 100): registra pago y movimiento sin finish.
+    const result = await service.registerCreditPayment(1, CREDIT_DTO);
+    // `recordPayOrderCashMovement` es fire-and-forget: vaciar microtareas.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(result.payment_recorded).toBe(true);
+    expect(result.finished).toBe(false);
+    expect(sessions.assertSessionForSales).toHaveBeenCalledWith(USER_B);
+    expect(sessions.getActiveSession).toHaveBeenCalledWith(USER_B);
+    expect(movements.recordSaleMovement).toHaveBeenCalledWith(
+      SESSION_B,
+      expect.objectContaining({
+        order_id: 1,
+        amount: 60,
+        payment_method: 'cash',
+        user_id: USER_B,
+      }),
+    );
   });
 });
 
@@ -5050,7 +5222,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       prismaMock as unknown as StorePrismaService,
       emitter as any,
       {} as any,
-      {} as any,
+      { assertSessionForSales: jest.fn() } as any,
       {} as any,
       {} as any,
       {} as any,
@@ -5720,7 +5892,7 @@ describe('OrderFlowService.payOrder — B4/B8 delivered/finished sin pago liquid
     const service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
       { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
-      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, { assertSessionForSales: jest.fn() } as any, {} as any, {} as any, {} as any, {} as any,
       { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
     );
 

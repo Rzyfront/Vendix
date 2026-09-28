@@ -858,6 +858,8 @@ export class OrderDetailsPageComponent {
 
   // Flow modal visibility signals
   showPayModal = signal(false);
+  /** Último error del cobro del modal; el modal lo mapea a mensaje inline. */
+  payModalError = signal<unknown>(null);
   showShipModal = signal(false);
   showDeliverModal = signal(false);
   showCancelModal = signal(false);
@@ -1108,6 +1110,13 @@ export class OrderDetailsPageComponent {
 
   // Fast-track
   showFastTrackModal = signal(false);
+  /**
+   * QUI-885 — apertura explícita de la configuración de cuenta dividida. El
+   * panel `app-split-accounts-panel` ya NO se renderiza desplegado solo por
+   * ser la orden elegible: solo aparece con reparto activo o cuando el
+   * operador pulsa "Dividir cuenta". Se resetea al cambiar de orden.
+   */
+  readonly showSplitConfig = signal(false);
   fastTrackEnabled = signal(false);
   fastTrackForm!: FormGroup;
 
@@ -1629,7 +1638,21 @@ export class OrderDetailsPageComponent {
       } as OrderActionConfig);
     }
 
-    return [...alerts, ...buildOrderActionButtons(order)];
+    const buttons = [...buildOrderActionButtons(order)];
+
+    // QUI-885 — "Dividir cuenta" explícito: solo cuando la orden NO tiene
+    // reparto activo pero sí es elegible. El panel ya no se abre solo.
+    if (!order.active_financial_split_id && this.canCreateFinancialSplit()) {
+      buttons.push({
+        id: 'split-account',
+        label: 'Dividir cuenta',
+        icon: 'split',
+        variant: 'secondary',
+        enabled: true,
+      } as OrderActionConfig);
+    }
+
+    return [...alerts, ...buttons];
   });
 
   /**
@@ -2165,6 +2188,8 @@ export class OrderDetailsPageComponent {
 
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       this.orderId = params.get('id');
+      // QUI-885: al cambiar de orden se cierra la configuración de reparto.
+      this.showSplitConfig.set(false);
       if (this.orderId) {
         // Carril B - B3: abre el SSE del detalle filtrado por esta orden.
         // Idempotente: si navegamos a otra orden, connect() cierra la
@@ -2433,6 +2458,10 @@ export class OrderDetailsPageComponent {
       case 'credit-payment':
         this.openPayModal();
         break;
+      case 'split-account':
+        // QUI-885: abre la configuración de reparto bajo demanda.
+        this.showSplitConfig.set(true);
+        break;
       case 'generate-dispatch':
         this.openDispatchModal();
         break;
@@ -2453,6 +2482,7 @@ export class OrderDetailsPageComponent {
       this.loadPaymentMethods();
     }
     this.preSelectedInstallment.set(null);
+    this.payModalError.set(null);
     this.showPayModal.set(true);
   }
 
@@ -2562,6 +2592,7 @@ export class OrderDetailsPageComponent {
         },
         error: (err: unknown) => {
           this.isProcessingAction.set(false);
+          this.payModalError.set(err);
           // `flowPayOrder`/`flowCreditPayment` lanzan `buildApiError`
           // (store-orders.service): un `Error` con el `errorCode` de
           // superficie en camelCase y el `HttpErrorResponse` crudo en
@@ -4205,6 +4236,7 @@ export class OrderDetailsPageComponent {
       this.loadPaymentMethods();
     }
     this.preSelectedInstallment.set(installment);
+    this.payModalError.set(null);
     this.showPayModal.set(true);
   }
 

@@ -1328,6 +1328,13 @@ export class OrderFlowService {
     dto: PayOrderDto,
     options?: { strictKitchenPending?: boolean },
   ) {
+    // Gate único de caja: con el switch activo, quien cobra debe tener SU
+    // sesión abierta. Primero que todo — antes del claim de estado — para no
+    // dejar la orden varada en `processing` cuando se rechaza.
+    await this.sessionsService.assertSessionForSales(
+      RequestContextService.getUserId(),
+    );
+
     // A.2 CP-facturacion-fixes — charge-time shipping gate (ADR-02). Creation stays
     // open (whatsapp/assisted orders choose the method later), but a physical order
     // that needs dispatch cannot be CHARGED without a shipping method: assign it
@@ -6852,6 +6859,12 @@ export class OrderFlowService {
    * Supports partial payments and installment-based credit
    */
   async registerCreditPayment(orderId: number, dto: PayOrderDto) {
+    // Gate único de caja: el abono es un cobro y exige sesión de quien cobra.
+    // Antes de cualquier lectura/escritura para no crear el pago.
+    await this.sessionsService.assertSessionForSales(
+      RequestContextService.getUserId(),
+    );
+
     const order = await this.prisma.orders.findFirst({
       where: { id: orderId },
       include: {
