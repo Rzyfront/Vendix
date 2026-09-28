@@ -192,11 +192,12 @@
       backRoute="/admin/orders"
       [badgeText]="headerBadgeText()"
       [badgeColor]="headerBadgeColor()"
+      [backQueryParams]="listReturnQuery()"
       [actions]="headerActions()"
       (actionClicked)="onHeaderAction($event)"
     ></app-sticky-header>
 
-    @if (orderData.active_financial_split_id || canCreateFinancialSplit()) {
+    @if (orderData.active_financial_split_id || (showSplitConfig() && canCreateFinancialSplit())) {
       <div class="max-w-[1600px] mx-auto mb-4">
         <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="canCreateFinancialSplit()" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" />
       </div>
@@ -2779,13 +2780,15 @@
         <app-order-payment-modal
           [isOpen]="showPayModal()"
           [order]="orderData"
-          [paymentMethods]="isCodPending() ? codActualMethods() : paymentMethods()"
+          [paymentMethods]="isCodPending() || isManualPayPending() ? codActualMethods() : paymentMethods()"
+          [manualPaymentPending]="isManualPayPending()"
           [isCreditOrder]="isCreditOrder()"
           [remainingBalance]="remainingBalance()"
           [installments]="orderData.order_installments || []"
           [creditType]="orderData.credit_type || ''"
           [preSelectedInstallment]="preSelectedInstallment()"
           [isProcessing]="isProcessingAction()"
+          [paymentError]="payModalError()"
           (isOpenChange)="showPayModal.set($event)"
           (closed)="showPayModal.set(false)"
           (paymentSubmitted)="onPaymentSubmitted($event)"

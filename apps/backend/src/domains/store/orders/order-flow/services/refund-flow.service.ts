@@ -704,9 +704,10 @@ export class RefundFlowService {
         // Paso 6 — dish lines (`product_type='prepared'`, stock-mode
         // `skip_kds` excluded) take the KDS-aware branch below; every other
         // line keeps the retail path byte-identical. The fire flag is
-        // re-read fresh here, under the order lock: a fire concurrent with
-        // this refund must not slip a restock past the fired⇒write_off
-        // validation (TOCTOU).
+        // re-read fresh here, under the order lock, so the audit trail
+        // (`fired` in the disposition metadata) reflects the line's real
+        // state even when a fire races this refund. Any of the three
+        // actions is valid for fired and non-fired dishes alike.
         const dishItemIds = calculation.items
           .filter((item) => {
             if (item.inventory_action === 'no_return') return false;
@@ -740,9 +741,10 @@ export class RefundFlowService {
           );
           if (!orderItem?.products) continue;
 
-          // Paso 6 — dish branch: state-guided disposition (fired⇒write_off
-          // only), leaf-level reversal at historical cost (never the sold
-          // dish), KDS item cancel in-tx, audit + COGS reclass post-commit.
+          // Paso 6 — dish branch: restock / write_off / no_return for fired
+          // and non-fired dishes alike (no_return is skipped above);
+          // leaf-level reversal at historical cost (never the sold dish),
+          // KDS item cancel in-tx, audit + COGS reclass post-commit.
           // Retail lines (incl. stock-mode `skip_kds` dishes, whose own
           // stock the payment consumed as a regular sale) fall through
           // untouched.
@@ -1199,22 +1201,29 @@ export class RefundFlowService {
   /**
    * CP-REFUND-FLOW-REDESIGN paso 6 — dish branch of `createRefund`, in-tx.
    *
-   * State-guided disposition for one `prepared` line (stock-mode `skip_kds`
-   * lines never reach here — the retail path owns them):
-   *   - fired (`inventory_consumed_at_fire=true`) ⇒ `write_off` ONLY, with
-   *     motivo. The cooked ingredients are gone: no stock movement at all
-   *     (a leaf `damage` move would subtract twice — the fire already
-   *     consumed them); the booked COGS is reclassed to loss post-commit
+   * Disposition for one `prepared` line (stock-mode `skip_kds` lines never
+   * reach here — the retail path owns them). Owner rule (2026-09-28): a
+   * dish admits ANY of the three inventory actions whether or not it was
+   * already fired to the kitchen (`inventory_consumed_at_fire`) — e.g. two
+   * identical orders entered by mistake, one refunded, its ingredients go
+   * back to stock:
+   *   - `restock` ⇒ reverses EXACTLY the recorded consumption transactions
+   *     for this line (sign +, historical unit cost, cost layer recreated,
+   *     COGS reclass reuse DR 1435 / CR 6135). For a fired dish those
+   *     transactions are the fire's BOM leaves; for a non-fired one, the
+   *     payment/delivery consumption. The recorded transaction is the
+   *     source of truth (same canon as
+   *     `OrderFlowService.disposeConsumedPreparedLeaves`: never restock the
+   *     sold dish). Re-exploding the CURRENT recipe here would restock
+   *     QUI-655 exclusions and post-fire recipe edits as phantom stock, and
+   *     would fabricate leaves for recipe-less fires, so the reversal is
+   *     sourcing-ledger, not re-derivation.
+   *   - `write_off` (motivo required) ⇒ no stock movement at all (a leaf
+   *     `damage` move would subtract twice — the consumption already
+   *     happened); the booked COGS is reclassed to loss post-commit
    *     (DR 5295 / CR 6135) with full traceability in `audit_logs`.
-   *   - not fired ⇒ `restock` reverses EXACTLY the recorded consumption
-   *     transactions for this line (sign +, historical unit cost, cost
-   *     layer recreated) — the fire/payment transaction is the source of
-   *     truth (same canon as `OrderFlowService.disposeConsumedPreparedLeaves`:
-   *     never restock the sold dish). Re-exploding the CURRENT recipe here
-   *     would restock QUI-655 exclusions and post-fire recipe edits as
-   *     phantom stock, and would fabricate leaves for recipe-less fires, so
-   *     the reversal is sourcing-ledger, not re-derivation. `write_off` on a
-   *     non-fired line keeps the consumption standing (waste reclass).
+   *   - `no_return` ⇒ skipped by the caller, never reaches here.
+   *   `fired` is kept in the audit metadata for traceability only.
    *   - partial quantities converge exactly across cumulative partials: this
    *     refund reverses `round(consumed × cumAfter/sold) − round(consumed ×
    *     cumBefore/sold)` per leaf, where the cumulative counts come from the
@@ -1256,15 +1265,9 @@ export class RefundFlowService {
     const disposition: 'reuse' | 'waste' =
       item.inventory_action === 'restock' ? 'reuse' : 'waste';
 
-    // 1. State-guided validation (authoritative flags: read in-tx under the
-    // order lock by the caller). Plain BadRequest messages — no new error
-    // codes (step 6 owns no error-code surface).
-    if (fired && disposition === 'reuse') {
-      throw new BadRequestException(
-        `Order item #${orderItemId} is a dish already fired to the kitchen: ` +
-          `it only admits write_off (the cooked ingredients cannot return to stock).`,
-      );
-    }
+    // 1. Validation. Fired dishes admit restock too (owner rule 2026-09-28):
+    // the reuse branch reverses the fire's recorded BOM leaves. Plain
+    // BadRequest messages — no new error codes.
     const motivo = (item.reason?.trim() || input.orderReason?.trim() || '');
     if (disposition === 'waste' && !motivo) {
       throw new BadRequestException(

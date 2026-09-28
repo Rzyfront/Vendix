@@ -352,6 +352,38 @@ export class CheckoutService {
       );
   }
 
+  /**
+   * Vista previa del descuento de un cupón (QUI-883). Solo lectura: el
+   * backend corre la misma validación que el confirm. `items` salen del
+   * carrito (los precios los resuelve el servidor, nunca el cliente).
+   */
+  previewCouponDiscount(body: {
+    coupon_code: string;
+    items: Array<{ product_id: number; product_variant_id?: number; quantity: number }>;
+  }): Observable<{
+    success: boolean;
+    data: {
+      valid: boolean;
+      coupon_id: number | null;
+      code: string;
+      discount_amount: number;
+      subtotal: number;
+      reason?: string;
+    };
+  }> {
+    return this.http.post<{
+      success: boolean;
+      data: {
+        valid: boolean;
+        coupon_id: number | null;
+        code: string;
+        discount_amount: number;
+        subtotal: number;
+        reason?: string;
+      };
+    }>(`${this.api_url}/coupon-preview`, body, { headers: this.getHeaders() });
+  }
+
   checkout(
     request: CheckoutRequest,
     file?: File | null,

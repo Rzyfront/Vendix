@@ -104,6 +104,9 @@ export interface AddressPayload {
   has_location?: boolean;
 }
 
+const UNLOCATED_ADDRESS_WARNING =
+  'No pudimos ubicar tu dirección. Marca el punto en el mapa para calcular la tarifa de envío.';
+
 /**
  * Reusable shipping/delivery address form with optional collapsible map.
  *
@@ -307,6 +310,27 @@ export class AddressFormFieldsComponent {
   private readonly municipalities = inject(DianMunicipalityLookupService);
   private readonly countryService = inject(CountryService);
   private readonly destroyRef = inject(DestroyRef);
+  /** Host element — used to tell "the operator is still typing in THIS
+   *  form" apart from focus elsewhere on the page (see
+   *  {@link isTextEntryInsideHost}, rule 3 of the auto-scroll gate). */
+  private readonly hostRef = inject(ElementRef<HTMLElement>);
+
+  /**
+   * Pending timer for an AUTOMATIC map-scroll request (owner decision
+   * 2026-09-27, see {@link requestAutoMapFocus}). Restarted per request,
+   * cancelled the moment the operator edits the address again.
+   */
+  private autoMapFocusTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Detaches the one-shot `blur` listener from the "not while typing" rule. */
+  private autoMapFocusBlurCleanup: (() => void) | null = null;
+  /**
+   * Rule 4: an AUTOMATIC scroll happens at most once per component instance.
+   * Plain field, not a signal — nothing in the template reads it (see
+   * vendix-zoneless-signals: signals are for template-observed state only).
+   */
+  private autoMapFocusDone = false;
+  /** A geocode miss whose warning waits for the first auto-focus to show. */
+  private pendingAddressWarning = false;
 
   /**
    * Catálogo de países como opciones del selector: la etiqueta es el nombre y
@@ -607,6 +631,26 @@ export class AddressFormFieldsComponent {
         // está siempre visible.
         if (this.compact()) this.resolveMunicipalityFromText();
       });
+
+    // Rule 2 of the auto-scroll gate (owner, 2026-09-27): cancel a pending
+    // AUTOMATIC map-scroll timer the instant any address field changes — it
+    // was waiting on the address as it stood before, not on whatever gets
+    // typed next. Deliberately NOT debounced (unlike the geocode trigger
+    // above): it must react on every keystroke, not just after a typing
+    // pause, or a scroll could still slip out mid-edit.
+    merge(
+      this.form.get('address_line1')!.valueChanges,
+      this.form.get('city')!.valueChanges,
+      this.form.get('state_province')!.valueChanges,
+      this.form.get('municipality_code')!.valueChanges,
+    )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.clearPendingAutoMapFocus());
+
+    // Belt-and-suspenders: `takeUntilDestroyed` above stops future emissions,
+    // but an already-scheduled `setTimeout` isn't an rxjs subscription and
+    // survives destroy on its own — clear it explicitly.
+    this.destroyRef.onDestroy(() => this.clearPendingAutoMapFocus());
   }
 
   /**
@@ -700,6 +744,7 @@ export class AddressFormFieldsComponent {
     this.precision.set(null);
     this.geocodeLabel.set(null);
     this.addressWarning.set(null);
+    this.pendingAddressWarning = false;
     this.form.get('latitude')?.setValue(coords.lat);
     this.form.get('longitude')?.setValue(coords.lng);
     this.coordsSignal.set(coords);
@@ -767,6 +812,7 @@ export class AddressFormFieldsComponent {
     const line1 = ((this.form.get('address_line1')?.value as string | null) ?? '').trim();
     if (line1.length < 5) {
       this.addressWarning.set(null);
+      this.pendingAddressWarning = false;
       this.precision.set(null);
       this.geocodeLabel.set(null);
       return;
@@ -776,6 +822,16 @@ export class AddressFormFieldsComponent {
     const country = ((this.form.get('country_code')?.value as string | null) ?? '')
       .trim()
       .toUpperCase();
+    // Owner decision 2026-09-27: never geocode a partial address — the street
+    // line alone almost never matches, and a premature miss only flashed the
+    // warning and force-opened the map while the operator was still typing.
+    if (!country || !city || !state) {
+      this.addressWarning.set(null);
+      this.pendingAddressWarning = false;
+      this.precision.set(null);
+      this.geocodeLabel.set(null);
+      return;
+    }
     // "Colombia" is only a helpful hint for CO (or an unset) country — biasing
     // a foreign address toward Colombia would send the query to the wrong
     // place entirely.
@@ -801,9 +857,6 @@ export class AddressFormFieldsComponent {
           if (generation !== this.geocodeGeneration || this.pinConfirmed()) return;
           if (res?.lat == null || res?.lng == null) {
             this.clearCoords();
-            this.addressWarning.set(
-              'No pudimos ubicar tu dirección. Marca el punto en el mapa para calcular la tarifa de envío.',
-            );
             this.focusMapForWarning();
             return;
           }
@@ -815,13 +868,11 @@ export class AddressFormFieldsComponent {
             // focus path as a null/error result.
             this.mapCenterHint.set({ lat: res.lat, lng: res.lng });
             this.clearCoords();
-            this.addressWarning.set(
-              'No pudimos ubicar tu dirección. Marca el punto en el mapa para calcular la tarifa de envío.',
-            );
             this.focusMapForWarning();
             return;
           }
           this.addressWarning.set(null);
+          this.pendingAddressWarning = false;
           this.form.get('latitude')?.setValue(res.lat, { emitEvent: false });
           this.form.get('longitude')?.setValue(res.lng, { emitEvent: false });
           this.coordsSignal.set({ lat: res.lat, lng: res.lng });
@@ -831,17 +882,16 @@ export class AddressFormFieldsComponent {
           // Low-precision hit: open the map — even in compact mode — so the
           // operator can confirm or drag the pin. Non-blocking: nothing here
           // gates `validChange`/submit.
+          // Opening goes through the same gate as the scroll: in the POS the
+          // map sits ABOVE the fields, so force-opening it mid-typing shoves
+          // the field being edited ~570px down the sheet.
           if (res.precision === 'street') {
-            this.showMap.set(true);
-            this.advancedOverride.set(true);
+            this.requestAutoMapFocus();
           }
         },
         error: () => {
           if (generation !== this.geocodeGeneration || this.pinConfirmed()) return;
           this.clearCoords();
-          this.addressWarning.set(
-            'No pudimos ubicar tu dirección. Marca el punto en el mapa para calcular la tarifa de envío.',
-          );
           this.focusMapForWarning();
         },
       });
@@ -866,20 +916,128 @@ export class AddressFormFieldsComponent {
    * outright (null result or HTTP error), the map must open — even in
    * `compact` mode — AND grab the operator's attention, since there is no
    * other way left to get a coordinate for that address. Force-opens the map
-   * section, scrolls it into view, and pulses a highlight class for a couple
-   * seconds (`mapHighlight`, see the stylesheet's `.map-wrapper--highlight`).
-   *
-   * `setTimeout(0)` (not a synchronous scroll) because `showMap.set(true)`
-   * only schedules the `@if (showMap())` block to render; the wrapper element
-   * does not exist in the DOM yet on this same synchronous tick.
+   * section, scrolls to it and pulses a highlight class for a couple seconds
+   * (`mapHighlight`, see the stylesheet's `.map-wrapper--highlight`). All of
+   * it — opening included — is gated through {@link requestAutoMapFocus}
+   * (owner, 2026-09-27): the map renders ABOVE the fields, so opening it
+   * while the operator types pushes the field out from under their thumb,
+   * just like the scroll did. The warning text still shows immediately.
+   * Every call-site is an AUTOMATIC focus (a geocode result, never a click).
    */
   private focusMapForWarning(): void {
+    // The warning box also renders ABOVE the address line, so inserting it
+    // mid-typing shifted the field too: until the first auto-focus fires it
+    // is held back and shown together with the map.
+    if (this.autoMapFocusDone) {
+      this.addressWarning.set(UNLOCATED_ADDRESS_WARNING);
+      return;
+    }
+    this.pendingAddressWarning = true;
+    this.requestAutoMapFocus();
+  }
+
+  /**
+   * Gate for an AUTOMATIC map scroll (owner decision 2026-09-27). A debounced
+   * forward-geocode fires after every typing pause; a partial address that
+   * fails used to scroll the page right out from under the operator's thumb
+   * mid-keystroke — worse on mobile with the keyboard open. This method never
+   * scrolls synchronously; it only ever schedules {@link runAutoMapFocus}.
+   *
+   * Rule 2: 500ms debounce, restarted on every new request (a fresh call
+   * always wins over whatever timer was already pending).
+   */
+  private requestAutoMapFocus(): void {
+    if (this.autoMapFocusDone) return;
+    this.clearPendingAutoMapFocus();
+    this.autoMapFocusTimer = setTimeout(() => {
+      this.autoMapFocusTimer = null;
+      this.runAutoMapFocus();
+    }, 500);
+  }
+
+  /**
+   * Rule 1 — required-fields gate: department, municipality and a real
+   * address line must ALL be filled before an automatic scroll is allowed.
+   * Re-checked both when the timer fires and again on `blur` (see
+   * {@link runAutoMapFocus}), since the address can still be incomplete at
+   * either point.
+   */
+  private autoMapFocusGateOpen(): boolean {
+    const state = ((this.form.get('state_province')?.value as string | null) ?? '').trim();
+    const city = ((this.form.get('city')?.value as string | null) ?? '').trim();
+    const line1 = ((this.form.get('address_line1')?.value as string | null) ?? '').trim();
+    return state.length > 0 && city.length > 0 && line1.length >= 5;
+  }
+
+  /**
+   * Runs when the 500ms timer elapses, and again from the one-shot `blur`
+   * listener it may attach (rule 3). If the operator is still typing in a
+   * text field inside THIS component when the timer fires, the scroll is
+   * deferred to that field's `blur` instead of firing on top of them.
+   */
+  private runAutoMapFocus(): void {
+    if (this.autoMapFocusDone || !this.autoMapFocusGateOpen()) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && this.isTextEntryInsideHost(active)) {
+      this.clearPendingAutoMapFocus();
+      const onBlur = () => {
+        active.removeEventListener('blur', onBlur);
+        this.autoMapFocusBlurCleanup = null;
+        // Next tick: `activeElement` is still <body> during `blur`. If focus
+        // just moved to another field of this form, keep waiting on that one.
+        setTimeout(() => this.runAutoMapFocus(), 0);
+      };
+      active.addEventListener('blur', onBlur, { once: true });
+      this.autoMapFocusBlurCleanup = () => active.removeEventListener('blur', onBlur);
+      return;
+    }
+    if (this.pendingAddressWarning) {
+      this.addressWarning.set(UNLOCATED_ADDRESS_WARNING);
+      this.pendingAddressWarning = false;
+    }
     this.showMap.set(true);
     this.advancedOverride.set(true);
     this.mapHighlight.set(true);
+    setTimeout(() => this.mapHighlight.set(false), 2000);
+    this.scrollMapIntoView();
+    this.autoMapFocusDone = true; // Rule 4 — never again for this instance.
+  }
+
+  /**
+   * Text-entry elements the "not while typing" rule waits out: text-like
+   * `<input>` types (or no `type` attribute, which defaults to `text`),
+   * `<textarea>`, and `contenteditable` — but only inside THIS component's
+   * host, so focus elsewhere on the page (another modal, the page chrome)
+   * never blocks the scroll.
+   */
+  private isTextEntryInsideHost(el: HTMLElement): boolean {
+    if (!this.hostRef.nativeElement.contains(el)) return false;
+    if (el.isContentEditable) return true;
+    if (el.tagName === 'TEXTAREA') return true;
+    if (el.tagName !== 'INPUT') return false;
+    const type = (el.getAttribute('type') || 'text').toLowerCase();
+    return ['text', 'search', 'tel', 'email', 'number'].includes(type);
+  }
+
+  /**
+   * The actual scroll. `setTimeout(0)` (not synchronous) because
+   * `showMap.set(true)` only schedules the `@if (showMap())` block to
+   * render; the wrapper element does not exist in the DOM yet on this same
+   * synchronous tick.
+   */
+  private scrollMapIntoView(): void {
     setTimeout(() => {
       this.mapWrapperRef()?.nativeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 0);
-    setTimeout(() => this.mapHighlight.set(false), 2000);
+  }
+
+  /** Cancels the pending timer and/or detaches the `blur` listener, if any. */
+  private clearPendingAutoMapFocus(): void {
+    if (this.autoMapFocusTimer != null) {
+      clearTimeout(this.autoMapFocusTimer);
+      this.autoMapFocusTimer = null;
+    }
+    this.autoMapFocusBlurCleanup?.();
+    this.autoMapFocusBlurCleanup = null;
   }
 }

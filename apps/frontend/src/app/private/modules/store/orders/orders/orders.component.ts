@@ -187,7 +187,11 @@ export class OrdersComponent {
   viewOrderDetails(orderId: string | Event): void {
     // Handle Event case (when called from template)
     const id = typeof orderId === 'string' ? orderId : (orderId as any);
-    this.router.navigate(['/admin/orders', id]);
+    // QUI-886: se preservan los query params del listado (página + filtros)
+    // en la URL del detalle para que "Volver" retorne al mismo punto.
+    this.router.navigate(['/admin/orders', id], {
+      queryParamsHandling: 'preserve',
+    });
   }
 
   // Refresh orders and stats. Bug 2 (Fase K): also tick the list
