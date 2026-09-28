@@ -306,6 +306,7 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
     <app-invoice-scanner-modal
       [isOpen]="showInvoiceScanner()"
       [orderType]="scannerOrderType()"
+      [currentSupplierId]="cartState()?.supplierId ?? null"
       (isOpenChange)="showInvoiceScanner.set($event)"
       (confirmed)="onInvoiceScanConfirmed($event)"
     ></app-invoice-scanner-modal>
