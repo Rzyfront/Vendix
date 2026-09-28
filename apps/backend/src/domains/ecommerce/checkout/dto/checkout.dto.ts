@@ -234,6 +234,32 @@ export class CheckoutDto {
   pending_shipping_assignment?: boolean;
 }
 
+export class CouponPreviewItemDto {
+  @IsInt()
+  @Min(1)
+  product_id: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  product_variant_id?: number;
+
+  @IsInt()
+  @Min(1)
+  quantity: number;
+}
+
+export class CouponPreviewDto {
+  @IsString()
+  @Transform(({ value }) => value?.toUpperCase().trim())
+  coupon_code: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CouponPreviewItemDto)
+  items: CouponPreviewItemDto[];
+}
+
 class CheckoutBookingDto {
   @IsInt()
   @Min(1)

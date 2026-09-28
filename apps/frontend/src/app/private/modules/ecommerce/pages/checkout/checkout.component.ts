@@ -648,6 +648,62 @@ export class CheckoutComponent implements OnInit {
         }, 600);
       });
     });
+
+    // QUI-883: vista previa del descuento del cupón con debounce. Lee como
+    // deps solo signals (código + líneas del carrito); el fetch corre
+    // untracked y revalida vigencia al disparar.
+    effect(() => {
+      const code = this.coupon_code().trim().toUpperCase();
+      const items = this.cart()?.items ?? [];
+      untracked(() => {
+        if (this.coupon_preview_timer) clearTimeout(this.coupon_preview_timer);
+        if (code.length < 3 || items.length === 0) {
+          this.couponPreviewAmount.set(0);
+          this.couponPreviewLoading.set(false);
+          this.couponPreviewReason.set(null);
+          return;
+        }
+        const payloadItems = items.map((i) => ({
+          product_id: i.product_id,
+          ...(i.product_variant_id != null
+            ? { product_variant_id: i.product_variant_id }
+            : {}),
+          quantity: i.quantity,
+        }));
+        this.coupon_preview_timer = setTimeout(() => {
+          if (this.coupon_code().trim().toUpperCase() !== code) return;
+          this.couponPreviewLoading.set(true);
+          this.checkout_service
+            .previewCouponDiscount({ coupon_code: code, items: payloadItems })
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: (res) => {
+                if (res?.data?.valid) {
+                  this.couponPreviewAmount.set(
+                    Number(res.data.discount_amount) || 0,
+                  );
+                  this.couponPreviewReason.set(null);
+                } else {
+                  this.couponPreviewAmount.set(0);
+                  const reasonCode = res?.data?.reason;
+                  this.couponPreviewReason.set(
+                    (reasonCode && ERROR_MESSAGES[reasonCode]) ||
+                      'Este cupón no aplica a tu compra.',
+                  );
+                }
+                this.couponPreviewLoading.set(false);
+              },
+              error: () => {
+                this.couponPreviewAmount.set(0);
+                this.couponPreviewReason.set(
+                  'No se pudo validar el cupón. Inténtalo de nuevo.',
+                );
+                this.couponPreviewLoading.set(false);
+              },
+            });
+        }, 600);
+      });
+    });
   }
 
   ngOnInit(): void {
@@ -1798,12 +1854,18 @@ export class CheckoutComponent implements OnInit {
   });
 
   /**
-   * Monto del cupón actual. El backend todavía lo calcula al confirmar la
-   * compra (no en el summary), así que aquí reportamos 0 hasta entonces.
-   * El resumen del checkout sigue mostrando el descuento promocional
-   * automático en `cart.promotion_discount`, que es reactivo y fiable.
+   * Vista previa del descuento del cupón (QUI-883). Antes se reportaba 0
+   * hasta confirmar y el comprador creía que el cupón no funcionaba. Ahora
+   * se consulta al backend (misma validación del confirm) con debounce;
+   * el confirm recalcula de todos modos, así que la cifra final manda.
    */
-  readonly couponDiscount = computed(() => 0);
+  readonly couponPreviewAmount = signal(0);
+  readonly couponPreviewLoading = signal(false);
+  /** Motivo en español cuando el cupón no aplica (ver `ERROR_MESSAGES`). */
+  readonly couponPreviewReason = signal<string | null>(null);
+  private coupon_preview_timer: ReturnType<typeof setTimeout> | null = null;
+
+  readonly couponDiscount = computed(() => this.couponPreviewAmount());
 
   /** Promociones aplicadas con scope preservado para el breakdown. */
   readonly appliedPromotionsWithScope = computed(
