@@ -879,9 +879,11 @@ export class AddressFormFieldsComponent {
           // Low-precision hit: open the map — even in compact mode — so the
           // operator can confirm or drag the pin. Non-blocking: nothing here
           // gates `validChange`/submit.
+          // Opening goes through the same gate as the scroll: in the POS the
+          // map sits ABOVE the fields, so force-opening it mid-typing shoves
+          // the field being edited ~570px down the sheet.
           if (res.precision === 'street') {
-            this.showMap.set(true);
-            this.advancedOverride.set(true);
+            this.requestAutoMapFocus();
           }
         },
         error: () => {
@@ -914,20 +916,16 @@ export class AddressFormFieldsComponent {
    * outright (null result or HTTP error), the map must open — even in
    * `compact` mode — AND grab the operator's attention, since there is no
    * other way left to get a coordinate for that address. Force-opens the map
-   * section and pulses a highlight class for a couple seconds (`mapHighlight`,
-   * see the stylesheet's `.map-wrapper--highlight`). These visuals always run
-   * immediately — only the scroll is gated, via {@link requestAutoMapFocus}
-   * (owner, 2026-09-27: scrolling the page under an operator still typing on
-   * a phone was the reported bug). Every call-site of this method is an
-   * AUTOMATIC focus (triggered by a geocode result, never a click), so it
-   * always goes through the gated path.
+   * section, scrolls to it and pulses a highlight class for a couple seconds
+   * (`mapHighlight`, see the stylesheet's `.map-wrapper--highlight`). All of
+   * it — opening included — is gated through {@link requestAutoMapFocus}
+   * (owner, 2026-09-27): the map renders ABOVE the fields, so opening it
+   * while the operator types pushes the field out from under their thumb,
+   * just like the scroll did. The warning text still shows immediately.
+   * Every call-site is an AUTOMATIC focus (a geocode result, never a click).
    */
   private focusMapForWarning(): void {
-    this.showMap.set(true);
-    this.advancedOverride.set(true);
-    this.mapHighlight.set(true);
     this.requestAutoMapFocus();
-    setTimeout(() => this.mapHighlight.set(false), 2000);
   }
 
   /**
@@ -977,12 +975,18 @@ export class AddressFormFieldsComponent {
       const onBlur = () => {
         active.removeEventListener('blur', onBlur);
         this.autoMapFocusBlurCleanup = null;
-        this.runAutoMapFocus();
+        // Next tick: `activeElement` is still <body> during `blur`. If focus
+        // just moved to another field of this form, keep waiting on that one.
+        setTimeout(() => this.runAutoMapFocus(), 0);
       };
       active.addEventListener('blur', onBlur, { once: true });
       this.autoMapFocusBlurCleanup = () => active.removeEventListener('blur', onBlur);
       return;
     }
+    this.showMap.set(true);
+    this.advancedOverride.set(true);
+    this.mapHighlight.set(true);
+    setTimeout(() => this.mapHighlight.set(false), 2000);
     this.scrollMapIntoView();
     this.autoMapFocusDone = true; // Rule 4 — never again for this instance.
   }

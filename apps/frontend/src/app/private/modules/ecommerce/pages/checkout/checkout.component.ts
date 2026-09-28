@@ -1207,7 +1207,9 @@ export class CheckoutComponent implements OnInit {
       const onBlur = () => {
         active.removeEventListener('blur', onBlur);
         this.autoMapFocusBlurCleanup = null;
-        this.runAutoMapFocus();
+        // Next tick: `activeElement` is still <body> during `blur`. If focus
+        // just moved to another field of this form, keep waiting on that one.
+        setTimeout(() => this.runAutoMapFocus(), 0);
       };
       active.addEventListener('blur', onBlur, { once: true });
       this.autoMapFocusBlurCleanup = () => active.removeEventListener('blur', onBlur);
