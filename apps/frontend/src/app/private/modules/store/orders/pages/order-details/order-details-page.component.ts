@@ -104,7 +104,10 @@ import { StoreShippingMethod } from '../../../settings/shipping/interfaces/shipp
 import { ShippingRate } from '../../../settings/shipping/interfaces/shipping-zones.interface';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ItemCancellationModalComponent, previewItemCancellation, type ItemCancellationSubmit } from '../../../../../../shared/components';
-import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
+import {
+  OrderPaymentModalComponent,
+  type OrderPendingPaymentPreset,
+} from '../../components/order-payment-modal/order-payment-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
 // Paso 5: reutiliza el modal canónico de clientes (quick/advanced,
 // NATURAL/JURIDICA) para capturar el nuevo titular de la orden.
@@ -244,6 +247,26 @@ export function isCodAwaitingConfirmation(order: Pick<Order, 'payments'> | null 
     (payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY' ||
       payment.store_payment_method?.system_payment_method?.type === 'cash_on_delivery'),
   );
+}
+
+/**
+ * Fase 2 (paso 8) — espejo de `requiresPaymentRegistration` del backend
+ * (`order-action-policy.util.ts`): `pending_payment` con pago `pending` de
+ * confirmación manual (todo lo que no es wallet/wompi ni ON_DELIVERY) o con
+ * saldo parcial por cobrar. El personal REGISTRA por `flow/pay` (monto +
+ * método), nunca confirma con un clic. UI advisory, API authoritative.
+ */
+export function isManualPaymentPending(
+  order: Pick<Order, 'state' | 'payments' | 'remaining_balance'> | null | undefined,
+): boolean {
+  if (!order || order.state !== 'pending_payment') return false;
+  if (Number(order.remaining_balance ?? 0) > 0) return true;
+  return !!order.payments?.some((payment) => {
+    if (!payment || payment.state !== 'pending') return false;
+    const system = payment.store_payment_method?.system_payment_method;
+    if (!system || system.processing_mode === 'ON_DELIVERY') return false;
+    return !['wallet', 'wompi'].includes(system.type ?? '');
+  });
 }
 
 export function isOrderEligibleForSplitCreation(order: Order | null, hasRefunds = false): boolean {
@@ -705,6 +728,14 @@ export class OrderDetailsPageComponent {
   orderId: string | null = null;
   order = signal<Order | null>(null);
   /**
+   * QUI-886 — query params heredados del listado (página + filtros) para el
+   * botón "Volver": se alimentan al sticky header vía `backQueryParams`.
+   * `undefined` (deep-link sin params) = volver al listado limpio.
+   */
+  readonly listReturnQuery = signal<Record<string, string> | undefined>(
+    undefined,
+  );
+  /**
    * C.9 CP-pos-exclusive-tax-double-charge — entrada del diccionario de alerta
    * fiscal para el `fiscal_alert_code` de la orden; `null` = sin banner. El
    * copy del banner se deriva de aquí, nunca de texto fijo en la plantilla.
@@ -858,6 +889,8 @@ export class OrderDetailsPageComponent {
 
   // Flow modal visibility signals
   showPayModal = signal(false);
+  /** Último error del cobro del modal; el modal lo mapea a mensaje inline. */
+  payModalError = signal<unknown>(null);
   showShipModal = signal(false);
   showDeliverModal = signal(false);
   showCancelModal = signal(false);
@@ -1081,12 +1114,51 @@ export class OrderDetailsPageComponent {
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
   readonly isCodPending = computed(() => isCodAwaitingConfirmation(this.order()));
+  /** Fase 2 (paso 8): cobro manual pendiente → "Registrar pago" por `flow/pay`. */
+  readonly isManualPayPending = computed(() => isManualPaymentPending(this.order()));
   readonly codActualMethods = computed(() => this.paymentMethods().filter((method) => {
     const catalog = method.system_payment_method as { type?: string; processing_mode?: string } | null;
     if (!catalog || catalog.processing_mode === 'ON_DELIVERY') return false;
     return ['cash', 'bank_transfer', 'voucher'].includes(catalog.type ?? '') ||
       (catalog.type === 'card' && catalog.processing_mode === 'DIRECT');
   }));
+  /**
+   * Pago online manual `pending` que "Registrar pago" confirma en sitio (el
+   * backend lo pasa a `succeeded` en vez de anularlo): su método y la cuenta
+   * bancaria a la que el cliente transfirió se preseleccionan en el modal.
+   * Contra entrega no aplica (su marcador se anula y se crea el pago real).
+   */
+  readonly manualPendingPaymentPreset = computed<OrderPendingPaymentPreset | null>(() => {
+    if (!this.isManualPayPending() || this.isCodPending()) return null;
+    const pending = this.order()?.payments?.find((payment) => {
+      if (payment.state !== 'pending') return false;
+      const system = payment.store_payment_method?.system_payment_method as
+        | { type?: string; processing_mode?: string }
+        | null
+        | undefined;
+      if (!system || system.processing_mode === 'ON_DELIVERY') return false;
+      return !['wallet', 'wompi'].includes(system.type ?? '');
+    });
+    if (!pending) return null;
+    const rawMethodId = pending.store_payment_method_id ?? pending.store_payment_method?.id ?? null;
+    const methodId = rawMethodId != null ? Number(rawMethodId) : null;
+    const bankAccountId = (pending as { bank_account_id?: number | null }).bank_account_id ?? null;
+    return { store_payment_method_id: methodId, bank_account_id: bankAccountId };
+  });
+  /**
+   * Métodos del modal de cobro. En contra entrega / registro manual son los
+   * medios realmente recibidos (`codActualMethods`) MÁS el método original del
+   * pago online pendiente, aunque el filtro lo deje fuera, para poder
+   * registrarlo tal como el cliente lo pagó.
+   */
+  readonly payModalMethods = computed<StorePaymentMethod[]>(() => {
+    if (!this.isCodPending() && !this.isManualPayPending()) return this.paymentMethods();
+    const base = this.codActualMethods();
+    const originalId = this.manualPendingPaymentPreset()?.store_payment_method_id;
+    if (originalId == null || base.some((method) => Number(method.id) === originalId)) return base;
+    const original = this.paymentMethods().find((method) => Number(method.id) === originalId);
+    return original ? [...base, original] : base;
+  });
   readonly canCreateFinancialSplit = computed(() => {
     return isOrderEligibleForSplitCreation(this.order(), this.orderRefunds().length > 0) &&
       (this.hasNamedPermission('store:table_sessions:update') ||
@@ -1108,6 +1180,13 @@ export class OrderDetailsPageComponent {
 
   // Fast-track
   showFastTrackModal = signal(false);
+  /**
+   * QUI-885 — apertura explícita de la configuración de cuenta dividida. El
+   * panel `app-split-accounts-panel` ya NO se renderiza desplegado solo por
+   * ser la orden elegible: solo aparece con reparto activo o cuando el
+   * operador pulsa "Dividir cuenta". Se resetea al cambiar de orden.
+   */
+  readonly showSplitConfig = signal(false);
   fastTrackEnabled = signal(false);
   fastTrackForm!: FormGroup;
 
@@ -1629,7 +1708,21 @@ export class OrderDetailsPageComponent {
       } as OrderActionConfig);
     }
 
-    return [...alerts, ...buildOrderActionButtons(order)];
+    const buttons = [...buildOrderActionButtons(order)];
+
+    // QUI-885 — "Dividir cuenta" explícito: solo cuando la orden NO tiene
+    // reparto activo pero sí es elegible. El panel ya no se abre solo.
+    if (!order.active_financial_split_id && this.canCreateFinancialSplit()) {
+      buttons.push({
+        id: 'split-account',
+        label: 'Dividir cuenta',
+        icon: 'split',
+        variant: 'secondary',
+        enabled: true,
+      } as OrderActionConfig);
+    }
+
+    return [...alerts, ...buttons];
   });
 
   /**
@@ -2165,6 +2258,17 @@ export class OrderDetailsPageComponent {
 
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       this.orderId = params.get('id');
+      // QUI-885: al cambiar de orden se cierra la configuración de reparto.
+      this.showSplitConfig.set(false);
+      // QUI-886: se capturan los query params que el listado preservó en la
+      // URL del detalle para devolverlos en "Volver".
+      const qp = this.route.snapshot.queryParamMap;
+      const back: Record<string, string> = {};
+      for (const key of qp.keys) {
+        const value = qp.get(key);
+        if (value != null) back[key] = value;
+      }
+      this.listReturnQuery.set(Object.keys(back).length > 0 ? back : undefined);
       if (this.orderId) {
         // Carril B - B3: abre el SSE del detalle filtrado por esta orden.
         // Idempotente: si navegamos a otra orden, connect() cierra la
@@ -2433,6 +2537,10 @@ export class OrderDetailsPageComponent {
       case 'credit-payment':
         this.openPayModal();
         break;
+      case 'split-account':
+        // QUI-885: abre la configuración de reparto bajo demanda.
+        this.showSplitConfig.set(true);
+        break;
       case 'generate-dispatch':
         this.openDispatchModal();
         break;
@@ -2453,6 +2561,7 @@ export class OrderDetailsPageComponent {
       this.loadPaymentMethods();
     }
     this.preSelectedInstallment.set(null);
+    this.payModalError.set(null);
     this.showPayModal.set(true);
   }
 
@@ -2492,11 +2601,15 @@ export class OrderDetailsPageComponent {
 
     const isCredit = this.isCreditOrder();
 
-    const dto: PayOrderDto = {
+    const dto: PayOrderDto & { bank_account_id?: number } = {
       store_payment_method_id: submit.storePaymentMethodId,
       payment_type: submit.methodType === 'wompi' ? 'online' : 'direct',
       ...(submit.amountReceived != null ? { amount_received: submit.amountReceived } : {}),
       ...(submit.reference ? { payment_reference: submit.reference } : {}),
+      // Cuenta bancaria del cobro escalar (transferencia): el backend la valida
+      // y la persiste; en el registro manual es la cuenta preseleccionada del
+      // pago online (o la que el cajero cambió).
+      ...(submit.bankAccountId != null ? { bank_account_id: submit.bankAccountId } : {}),
     };
 
     // Cobro multimétodo de contado: con 2+ tramos se envía `payments[]` y se
@@ -2522,10 +2635,15 @@ export class OrderDetailsPageComponent {
 
     // Credit abono: carry the amount (override ?? remaining balance) and, when the
     // operator picked one, the target installment. `flow/pay` ignores `amount`
-    // (it charges the full order total), so only attach it for the credit path.
+    // (it charges the full order total), so only attach it for the credit path…
     if (isCredit) {
       dto.amount = submit.amount;
       if (submit.installmentId != null) dto.installment_id = submit.installmentId;
+    } else if (this.isManualPayPending()) {
+      // …and for the Fase 2 (paso 8) manual-registration lane, where `flow/pay`
+      // charges `amount`: partial when below the balance, exact otherwise.
+      // Every other contado lane keeps omitting it (partial not allowed there).
+      dto.amount = submit.amount;
     }
 
     // Propina (T3). El collector la trae ya resuelta a monto en `tip`, mas los
@@ -2562,6 +2680,7 @@ export class OrderDetailsPageComponent {
         },
         error: (err: unknown) => {
           this.isProcessingAction.set(false);
+          this.payModalError.set(err);
           // `flowPayOrder`/`flowCreditPayment` lanzan `buildApiError`
           // (store-orders.service): un `Error` con el `errorCode` de
           // superficie en camelCase y el `HttpErrorResponse` crudo en
@@ -3144,7 +3263,10 @@ export class OrderDetailsPageComponent {
   confirmPayment(): void {
     if (!this.orderId) return;
 
-    if (this.isCodPending()) {
+    // Fase 2 (paso 8): un pago manual nunca se confirma con un clic — se
+    // REGISTRA (monto + método) por el modal de cobro (`flow/pay`). El backend
+    // rechaza al personal en `confirm-payment` con 409 en este caso.
+    if (this.isCodPending() || this.isManualPayPending()) {
       this.openPayModal();
       return;
     }
@@ -4224,6 +4346,7 @@ export class OrderDetailsPageComponent {
       this.loadPaymentMethods();
     }
     this.preSelectedInstallment.set(installment);
+    this.payModalError.set(null);
     this.showPayModal.set(true);
   }
 

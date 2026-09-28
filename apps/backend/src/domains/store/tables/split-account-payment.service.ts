@@ -232,15 +232,10 @@ export class SplitAccountPaymentService {
               ),
           };
         }
-        if (
-          registerSettings?.enabled &&
-          registerSettings?.require_session_for_sales &&
-          !cashSession
-        ) {
-          this.reject(
-            'Se requiere una caja registradora abierta para procesar ventas.',
-          );
-        }
+        // Gate único de caja (`assertSessionForSales`): conserva la posición
+        // original — después del replay por idempotencia, que no crea dinero
+        // y por tanto no exige sesión.
+        await this.sessions.assertSessionForSales(user_id);
         if (cashSession) {
           const open =
             await tx.$queryRaw`SELECT id FROM cash_register_sessions WHERE id = ${cashSession.id} AND store_id = ${store_id} AND status = 'open' FOR UPDATE`;

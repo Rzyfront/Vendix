@@ -1236,13 +1236,18 @@
                 placeholder="Código de cupón"
                 [prefixIcon]="true"
                 customInputClass="uppercase tracking-[0.08em] font-medium"
-                helperText="El descuento se calcula al confirmar la compra."
+                helperText="El descuento se muestra aquí y se confirma al pagar."
                 (inputChange)="
                   coupon_code.set($event.toUpperCase().trim())
                 "
               >
                 <app-icon slot="prefix-icon" name="ticket" [size]="16" />
               </app-input>
+              @if (couponPreviewReason()) {
+                <p class="coupon-preview-reason" role="status">
+                  {{ couponPreviewReason() }}
+                </p>
+              }
             </div>
 
             <app-cart-promotions [cart]="cart()" />
@@ -1282,7 +1287,8 @@
               <span>Total estimado</span>
               <span>{{
                 (cart()!.promotional_subtotal ?? cart()!.subtotal) +
-                  shippingCostForTotal() | currency
+                  shippingCostForTotal() -
+                  couponDiscount() | currency
               }}</span>
             </div>
           }

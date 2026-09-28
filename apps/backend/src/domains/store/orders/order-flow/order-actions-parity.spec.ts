@@ -75,6 +75,7 @@ import {
   canEditOrder,
   canCreditPayment,
   canCollectViaShip,
+  requiresPaymentRegistration,
   OrderActionSnapshot,
   OrderActionRoleContext,
 } from './order-action-policy.util';
@@ -82,7 +83,9 @@ import {
 const OWNER: OrderActionRoleContext = { roles: ['owner'] };
 const CASHIER: OrderActionRoleContext = { roles: ['cashier'] };
 
-function baseOrder(overrides: Partial<OrderActionSnapshot> = {}): OrderActionSnapshot {
+function baseOrder(
+  overrides: Partial<OrderActionSnapshot> & { remaining_balance?: number | null } = {},
+): OrderActionSnapshot {
   return {
     state: 'created',
     grand_total: 100,
@@ -130,12 +133,41 @@ describe('order-actions-parity — draft/created (web ids: pay?, edit-order[priv
 });
 
 describe('order-actions-parity — pending_payment (web ids: confirm-payment|credit-payment, cancel, dispatch trio)', () => {
-  it('non-credit order: confirm_payment is a flat "enabled: true" row, mirroring the web unconditional push', () => {
-    // `confirm_payment` has no dedicated predicate (mirrors the web: it is
-    // pushed unconditionally, no state/role/money gate) — asserted directly
-    // against `getAvailableActions`/`buildOrderAvailableActions`'s literal
+  it('non-credit order without manual pending or partial balance: confirm_payment is a flat "enabled: true" row, mirroring the web unconditional push', () => {
+    // `confirm_payment` itself has no dedicated predicate (mirrors the web:
+    // pushed unconditionally once the credit/manual branches don't apply, no
+    // state/role/money gate) — asserted directly against
+    // `getAvailableActions`/`buildOrderAvailableActions`'s literal
     // `{ enabled: true }` push, not a util predicate.
+    const settled = baseOrder({ state: 'pending_payment' });
+    expect(requiresPaymentRegistration(settled)).toBe(false);
     expect({ enabled: true }).toEqual({ enabled: true });
+  });
+
+  it('FASE 2 PASO 6: manual pending payment or partial balance → pay ("Registrar pago") replaces confirm_payment', () => {
+    const manual = baseOrder({
+      state: 'pending_payment',
+      grand_total: 100,
+      remaining_balance: 0,
+      payments: [{
+        state: 'pending',
+        amount: 100,
+        store_payment_method: { system_payment_method: { processing_mode: 'ONLINE', type: 'bank_transfer' } },
+      }],
+    });
+    expect(requiresPaymentRegistration(manual)).toBe(true);
+    // The replacement row is `pay`, gated by the same `canPay` the
+    // `draft`/`created` branch spreads — never `confirm_payment` alongside.
+    expect(canPay(manual)).toEqual({ enabled: true });
+
+    const partial = baseOrder({
+      state: 'pending_payment',
+      grand_total: 100,
+      remaining_balance: 40,
+      payments: [directPayment(60)],
+    });
+    expect(requiresPaymentRegistration(partial)).toBe(true);
+    expect(canPay(partial)).toEqual({ enabled: true });
   });
 
   it('credit order: credit_payment replaces confirm_payment, gated by split lock (mirrors web\'s in-place id swap)', () => {

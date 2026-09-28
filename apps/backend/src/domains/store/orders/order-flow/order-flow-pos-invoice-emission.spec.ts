@@ -128,7 +128,7 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
       prismaMock as unknown as StorePrismaService,
       eventEmitter as any,
       settingsService as any,
-      {} as any,
+      { assertSessionForSales: jest.fn() } as any,
       {} as any,
       {} as any,
       {} as any,

@@ -398,6 +398,18 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Wallet balance does not cover the wallet legs in this atomic POS payment',
   },
+  // Fase 2 paso 5 (pos-draft-without-cash-session-plan) — carril "registrar
+  // pago": el parcial (`dto.amount` < saldo) sólo se admite sobre una orden en
+  // `pending_payment`. Sobre cualquier otro estado el operador debe cobrar el
+  // saldo completo; se rechaza en voz alta en vez de ignorar el monto y
+  // cobrar de más. 400 como el resto de la familia PAY_ (regla del carril,
+  // mismo criterio que PAY_MULTI_TENDER_METHOD_NOT_ALLOWED), sin envolver.
+  PAY_PARTIAL_NOT_ALLOWED_001: {
+    code: 'PAY_PARTIAL_NOT_ALLOWED_001',
+    httpStatus: 400,
+    devMessage:
+      'Partial registration is only allowed on orders in pending_payment; charge the full outstanding balance instead',
+  },
 
   // Payment Sources (Card-On-File / Wompi recurrent)
   PAYMENT_SOURCE_NOT_FOUND: {
@@ -1535,6 +1547,18 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'La orden es a crédito (payment_form=2); registre el abono por el flujo de crédito, no por cobro de contado.',
+  },
+  // Fase 2 paso 5 (pos-draft-without-cash-session-plan) — lo consume el paso 6
+  // en `confirmPayment`: un pago `pending` de confirmación manual
+  // (`isManualConfirmationPending`) no se confirma con un clic; el personal lo
+  // REGISTRA por `flow/pay` (monto + método recibidos, con vuelto o saldo).
+  // Sólo el webhook (`source: 'webhook'`) sigue confirmando. 409: conflicto
+  // con el carril requerido.
+  ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001: {
+    code: 'ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001',
+    httpStatus: 409,
+    devMessage:
+      'El pago pendiente es de confirmación manual: regístralo por flow/pay con el monto y método recibidos; solo el webhook puede confirmarlo.',
   },
   // CP-POS-MODAL-SCOPE-001 / Phase C.4 — edit→pay sin cliente cuando el escape
   // hatch está apagado. 409: el cashier debe seleccionar cliente (vía
@@ -6081,6 +6105,17 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'The expected cash amount changed after the client read it; refresh the summary before closing',
+  },
+
+  // Caja registradora — cobro sin sesión del operador
+  // (`assertSessionForSales`). 409 y no 403: el usuario SÍ tiene permiso para
+  // cobrar; lo que falta es que tenga su caja abierta. No es "no puedes", es
+  // "abre tu caja primero". Guardar un borrador POS no pasa por este gate
+  // (guardar ≠ cobrar).
+  CASH_SESSION_REQUIRED_001: {
+    code: 'CASH_SESSION_REQUIRED_001',
+    httpStatus: 409,
+    devMessage: 'Abre tu caja para registrar pagos.',
   },
 
   // Reporte "Stock Bajo por Proveedor" (CP-low-stock-by-supplier).

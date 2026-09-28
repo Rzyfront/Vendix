@@ -355,6 +355,43 @@ export function canCreditPayment(
   return { enabled: false };
 }
 
+/** Fase 2 paso 6 (pos-draft-without-cash-session-plan) — en `pending_payment`
+ * no-crédito con pago manual pendiente O saldo parcial (`remaining_balance >
+ * 0`), el personal REGISTRA por `flow/pay` (`code: 'pay'`, la web lo rotula
+ * "Registrar Pago") en vez de `confirm_payment`: `confirmPayment` rechaza al
+ * personal en ese caso (`ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001`) y solo el
+ * webhook confirma. Booleano de enrutamiento, no `OrderActionResult`: la fila
+ * `pay` resultante sigue usando `...canPay(snapshot)` (gate de split y de
+ * ya-pagado), igual que la rama `draft`/`created`.
+ *
+ * La detección manual es espejo byte-por-byte de
+ * `isManualConfirmationPending` (`order-flow.service.ts`) — no se importa
+ * porque el servicio importa este archivo (ciclo). Misma regla fail-closed:
+ * sin método resoluble no clasifica. */
+export interface ManualRegistrationSnapshot {
+  state: string;
+  remaining_balance?: Prisma.Decimal | number | string | null;
+  payments?: ReadonlyArray<{
+    state?: string | null;
+    store_payment_method?: {
+      system_payment_method?: {
+        processing_mode?: string | null;
+        type?: string | null;
+      } | null;
+    } | null;
+  }>;
+}
+export function requiresPaymentRegistration(order: ManualRegistrationSnapshot): boolean {
+  if (order.state !== 'pending_payment') return false;
+  if (Number(order.remaining_balance ?? 0) > 0) return true;
+  return (order.payments ?? []).some((payment) => {
+    if (!payment || payment.state !== 'pending') return false;
+    const system = payment.store_payment_method?.system_payment_method;
+    if (!system || system.processing_mode === 'ON_DELIVERY') return false;
+    return !['wallet', 'wompi'].includes(system.type ?? '');
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch/fulfillment flow — `dispatch_order` / `manual_ship` /
 // `direct_deliver` / the `pending_payment`-side of `ready_for_pickup`.
