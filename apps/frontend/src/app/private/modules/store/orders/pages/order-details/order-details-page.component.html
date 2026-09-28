@@ -2780,8 +2780,9 @@
         <app-order-payment-modal
           [isOpen]="showPayModal()"
           [order]="orderData"
-          [paymentMethods]="isCodPending() || isManualPayPending() ? codActualMethods() : paymentMethods()"
+          [paymentMethods]="payModalMethods()"
           [manualPaymentPending]="isManualPayPending()"
+          [pendingPayment]="manualPendingPaymentPreset()"
           [isCreditOrder]="isCreditOrder()"
           [remainingBalance]="remainingBalance()"
           [installments]="orderData.order_installments || []"
