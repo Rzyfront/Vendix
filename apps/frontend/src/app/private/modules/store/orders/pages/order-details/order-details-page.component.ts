@@ -3959,19 +3959,28 @@ export class OrderDetailsPageComponent {
       this.dispatchNotes().find((n) => !!n.courier_name?.trim())
         ?.courier_name?.trim() || undefined;
 
-    // QUI-889 — fecha del tiquete: última remisión no anulada
-    // (emission_date), no la creación de la orden. Sin despacho, la de
-    // creación (el tiquete backend ya resuelve hora de impresión; este
-    // tiquete local no tiene reloj de impresión propio).
-    const latestDispatch = this.dispatchNotes().find(
-      (n) => n.status !== 'draft' && n.status !== 'voided' && !!n.emission_date,
-    );
+    // QUI-889 (rev 868) — instante real del despacho: última remisión no
+    // anulada por `confirmed_at` (luego su creación). NUNCA `emission_date`
+    // (solo-fecha: imprimiría el día anterior 7 p. m. en Bogotá). Sin
+    // despacho, hora de impresión (ahora), igual que el tiquete backend.
+    const instantOf = (n: { confirmed_at?: string; created_at: string }) =>
+      new Date(n.confirmed_at ?? n.created_at).getTime();
+    const latestDispatch = this.dispatchNotes()
+      .filter((n) => n.status !== 'draft' && n.status !== 'voided')
+      .sort((a, b) => instantOf(b) - instantOf(a))[0];
+    const dispatchAt = latestDispatch
+      ? new Date(
+          latestDispatch.confirmed_at ?? latestDispatch.created_at,
+        )
+      : null;
 
     return {
       orderId: order.id,
       orderNumber: order.order_number,
       dateFormatted: this.formatDate(
-        latestDispatch?.emission_date ?? order.created_at,
+        !dispatchAt || Number.isNaN(dispatchAt.getTime())
+          ? new Date().toISOString()
+          : dispatchAt.toISOString(),
       ),
       storeName,
       customer: {
