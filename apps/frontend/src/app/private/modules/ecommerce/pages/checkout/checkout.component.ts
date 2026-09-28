@@ -568,6 +568,20 @@ export class CheckoutComponent implements OnInit {
    */
   private whatsapp_fallback_pending_guest_data = false;
 
+  /**
+   * Pending timer for an AUTOMATIC map-scroll request (owner decision
+   * 2026-09-27, see {@link focusMapHint}). Restarted per request, cancelled
+   * the moment the buyer edits the address again.
+   */
+  private autoMapFocusTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Detaches the one-shot `blur` listener from the "not while typing" rule. */
+  private autoMapFocusBlurCleanup: (() => void) | null = null;
+  /**
+   * Rule 4: an AUTOMATIC scroll happens at most once per component instance.
+   * Plain field, not a signal — nothing in the template reads it.
+   */
+  private autoMapFocusDone = false;
+
   constructor(
     private cart_service: CartService,
     private checkout_service: CheckoutService,
@@ -580,6 +594,10 @@ export class CheckoutComponent implements OnInit {
     this.destroyRef.onDestroy(() => {
       if (this.shipping_fetch_timer) clearTimeout(this.shipping_fetch_timer);
       if (this.order_success_timer) clearTimeout(this.order_success_timer);
+      // Rule 3 cleanup (owner, 2026-09-27): an already-scheduled setTimeout
+      // and a `blur` listener are not rxjs subscriptions and survive destroy
+      // on their own — clear them explicitly.
+      this.clearPendingAutoMapFocus();
     });
     this.initForm();
 
@@ -953,6 +971,19 @@ export class CheckoutComponent implements OnInit {
         );
     }
 
+    // Rule 2 of the auto-scroll gate (owner, 2026-09-27): cancel a pending
+    // AUTOMATIC map-scroll timer the instant address_line1/city/department
+    // change — it was waiting on the address as it stood before, not on
+    // whatever gets typed next. Deliberately NOT debounced: it must react on
+    // every keystroke, unlike the geocode triggers above.
+    merge(
+      this.address_form.get('address_line1')!.valueChanges,
+      cityControl!.valueChanges,
+      depControl!.valueChanges,
+    )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.clearPendingAutoMapFocus());
+
     // Load departments for default country
     this.loadDepartments();
   }
@@ -1052,7 +1083,7 @@ export class CheckoutComponent implements OnInit {
           // Low-precision hit and no manual confirmation yet: nudge the
           // buyer to check the pin — non-blocking, never stops Continuar.
           if (res.precision === 'street') {
-            this.focusMapHint();
+            this.focusMapHint('auto');
           }
         },
         error: () => {
@@ -1079,7 +1110,7 @@ export class CheckoutComponent implements OnInit {
     this.addressWarning.set(
       'No pudimos ubicar tu dirección automáticamente. Marca tu ubicación en el mapa para calcular la tarifa de envío.',
     );
-    this.focusMapHint();
+    this.focusMapHint('auto');
   }
 
   /**
@@ -1104,15 +1135,113 @@ export class CheckoutComponent implements OnInit {
    * (`handleUnresolvedGeocode`, where Continuar IS blocked until a point is
    * confirmed). Purely visual: never itself blocks or unblocks anything.
    * A no-op when no map is mounted (e.g. saved-address view).
+   *
+   * `mode` (owner decision 2026-09-27): a debounced forward-geocode fires
+   * after every typing pause, and a partial address that fails used to
+   * scroll the page out from under the buyer's thumb mid-keystroke — worse
+   * on mobile with the keyboard open. `'auto'` (a geocode result — never a
+   * click) goes through {@link requestAutoMapFocus}'s gate/debounce/typing
+   * check/once-only rules; `'user'` (a click: "Usar mi ubicación
+   * automática", Continuar, or declining the WhatsApp fallback) scrolls
+   * immediately, exactly like before. The highlight pulse always runs
+   * immediately either way.
    */
-  private focusMapHint(): void {
+  private focusMapHint(mode: 'auto' | 'user' = 'user'): void {
     this.mapHighlight.set(true);
+    if (mode === 'auto') {
+      this.requestAutoMapFocus();
+    } else {
+      this.scrollToMapAnchor();
+    }
+    setTimeout(() => this.mapHighlight.set(false), 2000);
+  }
+
+  /** Rule 2: 500ms debounce, restarted on every new AUTOMATIC request. Never
+   *  scrolls synchronously; only ever schedules {@link runAutoMapFocus}. */
+  private requestAutoMapFocus(): void {
+    if (this.autoMapFocusDone) return;
+    this.clearPendingAutoMapFocus();
+    this.autoMapFocusTimer = setTimeout(() => {
+      this.autoMapFocusTimer = null;
+      this.runAutoMapFocus();
+    }, 500);
+  }
+
+  /**
+   * Rule 1 — required-fields gate: department, city and a real address line
+   * must ALL be filled before an automatic scroll is allowed. Re-checked
+   * both when the timer fires and again on `blur` (see
+   * {@link runAutoMapFocus}), since the address can still be incomplete at
+   * either point.
+   */
+  private autoMapFocusGateOpen(): boolean {
+    const state = String(
+      this.address_form.get('state_province')?.value ?? '',
+    ).trim();
+    const city = String(this.address_form.get('city')?.value ?? '').trim();
+    const line1 = String(
+      this.address_form.get('address_line1')?.value ?? '',
+    ).trim();
+    return state.length > 0 && city.length > 0 && line1.length >= 5;
+  }
+
+  /**
+   * Runs when the 500ms timer elapses, and again from the one-shot `blur`
+   * listener it may attach (rule 3). If the buyer is still typing in a text
+   * field inside THIS component when the timer fires, the scroll is
+   * deferred to that field's `blur` instead of firing on top of them.
+   */
+  private runAutoMapFocus(): void {
+    if (this.autoMapFocusDone || !this.autoMapFocusGateOpen()) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && this.isTextEntryInsideHost(active)) {
+      this.clearPendingAutoMapFocus();
+      const onBlur = () => {
+        active.removeEventListener('blur', onBlur);
+        this.autoMapFocusBlurCleanup = null;
+        this.runAutoMapFocus();
+      };
+      active.addEventListener('blur', onBlur, { once: true });
+      this.autoMapFocusBlurCleanup = () => active.removeEventListener('blur', onBlur);
+      return;
+    }
+    this.scrollToMapAnchor();
+    this.autoMapFocusDone = true; // Rule 4 — never again for this instance.
+  }
+
+  /**
+   * Text-entry elements the "not while typing" rule waits out: text-like
+   * `<input>` types (or no `type` attribute, which defaults to `text`),
+   * `<textarea>`, and `contenteditable` — but only inside THIS component's
+   * host, so focus elsewhere on the page never blocks the scroll.
+   */
+  private isTextEntryInsideHost(el: HTMLElement): boolean {
+    if (!this.host.nativeElement.contains(el)) return false;
+    if (el.isContentEditable) return true;
+    if (el.tagName === 'TEXTAREA') return true;
+    if (el.tagName !== 'INPUT') return false;
+    const type = (el.getAttribute('type') || 'text').toLowerCase();
+    return ['text', 'search', 'tel', 'email', 'number'].includes(type);
+  }
+
+  /** The actual scroll, shared by the automatic (gated) and user-initiated
+   *  paths. `setTimeout(0)` because the map wrapper renders on the next tick. */
+  private scrollToMapAnchor(): void {
     setTimeout(() => {
       this.host.nativeElement
         .querySelector('.address-map-anchor')
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 0);
-    setTimeout(() => this.mapHighlight.set(false), 2000);
+  }
+
+  /** Cancels the pending timer and/or detaches the `blur` listener, if any. */
+  private clearPendingAutoMapFocus(): void {
+    if (this.autoMapFocusTimer != null) {
+      clearTimeout(this.autoMapFocusTimer);
+      this.autoMapFocusTimer = null;
+    }
+    this.autoMapFocusBlurCleanup?.();
+    this.autoMapFocusBlurCleanup = null;
   }
 
   /**
@@ -1122,7 +1251,7 @@ export class CheckoutComponent implements OnInit {
    * (`onLocateRequested` → `show_location_modal` → `requestGeolocation`).
    */
   useAutoLocation(): void {
-    this.focusMapHint();
+    this.focusMapHint('user');
     void this.onLocateRequested();
   }
 
@@ -2582,7 +2711,7 @@ export class CheckoutComponent implements OnInit {
         this.error_message.set(
           'Necesitamos tu ubicación exacta para calcular el envío. Marca el punto en el mapa o usa tu ubicación automática.',
         );
-        this.focusMapHint();
+        this.focusMapHint('user');
         return;
       }
 
@@ -3246,7 +3375,7 @@ export class CheckoutComponent implements OnInit {
   /** Buyer declined the fallback: close the modal and re-focus the map. */
   onWhatsappFallbackDecline(): void {
     this.show_whatsapp_fallback_modal.set(false);
-    this.focusMapHint();
+    this.focusMapHint('user');
   }
 
   /**
