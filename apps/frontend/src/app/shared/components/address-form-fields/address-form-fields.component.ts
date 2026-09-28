@@ -815,6 +815,15 @@ export class AddressFormFieldsComponent {
     const country = ((this.form.get('country_code')?.value as string | null) ?? '')
       .trim()
       .toUpperCase();
+    // Owner decision 2026-09-27: never geocode a partial address — the street
+    // line alone almost never matches, and a premature miss only flashed the
+    // warning and force-opened the map while the operator was still typing.
+    if (!country || !city || !state) {
+      this.addressWarning.set(null);
+      this.precision.set(null);
+      this.geocodeLabel.set(null);
+      return;
+    }
     // "Colombia" is only a helpful hint for CO (or an unset) country — biasing
     // a foreign address toward Colombia would send the query to the wrong
     // place entirely.

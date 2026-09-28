@@ -1027,8 +1027,16 @@ export class CheckoutComponent implements OnInit {
         '')
       : String(stateValue ?? '').trim();
 
+    // Owner decision 2026-09-27: never geocode a partial address. The street
+    // line alone almost never matches, and a premature miss only flashed the
+    // "no pudimos ubicar" warning while the buyer was still filling the form.
+    if (!countryCode || !cityName || !stateName) {
+      this.addressWarning.set(null);
+      return;
+    }
+
     const parts = [base, cityName, stateName].filter(Boolean);
-    if (!countryCode || countryCode === 'CO') parts.push('Colombia');
+    if (countryCode === 'CO') parts.push('Colombia');
     const query = parts.join(', ');
 
     // Pass city/state as separate params (when resolved) instead of relying
