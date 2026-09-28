@@ -92,6 +92,9 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
 
     const settingsServiceMock = {
       getStoreCurrency: jest.fn().mockResolvedValue('COP'),
+      getSettings: jest.fn().mockResolvedValue({
+        pos: { cash_register: { enabled: false } },
+      }),
     };
 
     service = new SessionsService(
@@ -420,6 +423,92 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       const report = await service.getSessionReport(SESSION_ID);
 
       expect(report.currency).toEqual({ code: 'USD', symbol: '$' });
+    });
+  });
+
+  /**
+   * Gate único de caja para cobros (`assertSessionForSales`): con
+   * `pos.cash_register.enabled && require_session_for_sales`, quien cobra
+   * debe tener SU sesión abierta. Lo consumen `processPosPayment` (ventas, no
+   * borradores), `processPayment`, `payOrder`, `registerCreditPayment` y el
+   * cobro de cuentas divididas.
+   */
+  describe('assertSessionForSales — gate único de caja para cobros', () => {
+    const withCashSettings = (cash_register: Record<string, unknown>) => {
+      (service as any).settingsService.getSettings.mockResolvedValue({
+        pos: { cash_register },
+      });
+    };
+
+    it('switch apagado (módulo deshabilitado): no lanza ni busca sesión', async () => {
+      withCashSettings({ enabled: false, require_session_for_sales: true });
+
+      await expect(service.assertSessionForSales(USER_ID)).resolves.toBeUndefined();
+      expect(
+        prismaMock.cash_register_sessions.findFirst,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('switch apagado (flag require_session_for_sales en false): no lanza', async () => {
+      withCashSettings({ enabled: true, require_session_for_sales: false });
+
+      await expect(service.assertSessionForSales(USER_ID)).resolves.toBeUndefined();
+      expect(
+        prismaMock.cash_register_sessions.findFirst,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('switch encendido + sesión propia: no lanza', async () => {
+      withCashSettings({ enabled: true, require_session_for_sales: true });
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue({
+        id: SESSION_ID,
+        opened_by: USER_ID,
+      });
+
+      await expect(service.assertSessionForSales(USER_ID)).resolves.toBeUndefined();
+      expect(
+        prismaMock.cash_register_sessions.findFirst,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            store_id: STORE_ID,
+            status: 'open',
+            opened_by: USER_ID,
+          }),
+        }),
+      );
+    });
+
+    it('switch encendido + sin sesión: lanza CASH_SESSION_REQUIRED_001 (409)', async () => {
+      withCashSettings({ enabled: true, require_session_for_sales: true });
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue(null);
+
+      const promise = service.assertSessionForSales(USER_ID);
+
+      await expect(promise).rejects.toThrow(VendixHttpException);
+      await expect(promise).rejects.toMatchObject({
+        errorCode: 'CASH_SESSION_REQUIRED_001',
+      });
+      await promise.catch((error: VendixHttpException) => {
+        expect(error.getStatus()).toBe(409);
+        expect(error.getResponse()).toMatchObject({
+          error_code: 'CASH_SESSION_REQUIRED_001',
+          message: 'Abre tu caja para registrar pagos.',
+        });
+      });
+      expect.assertions(4);
+    });
+
+    it('fail-closed: sin userId rechaza aunque haya sesiones abiertas en la tienda', async () => {
+      withCashSettings({ enabled: true, require_session_for_sales: true });
+
+      await expect(service.assertSessionForSales(undefined)).rejects.toMatchObject({
+        errorCode: 'CASH_SESSION_REQUIRED_001',
+      });
+      // No cae al lookup de tienda de `getActiveSession` (sin `opened_by`).
+      expect(
+        prismaMock.cash_register_sessions.findFirst,
+      ).not.toHaveBeenCalled();
     });
   });
 });

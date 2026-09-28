@@ -99,6 +99,26 @@ export class SessionsService {
   }
 
   /**
+   * Gate único de caja para cobros: con `pos.cash_register.enabled &&
+   * require_session_for_sales`, quien cobra debe tener SU sesión abierta
+   * (`getActiveSession` filtra por `opened_by`). Guardar un borrador POS no
+   * pasa por aquí (guardar ≠ cobrar). Fail-closed: sin `userId` no hay sesión
+   * propia que encontrar, así que se rechaza en vez de caer al lookup de
+   * tienda de `getActiveSession`.
+   */
+  async assertSessionForSales(userId?: number): Promise<void> {
+    const settings = await this.settingsService.getSettings();
+    const cashRegister = (settings as any)?.pos?.cash_register;
+    if (!cashRegister?.enabled || !cashRegister?.require_session_for_sales) {
+      return;
+    }
+    const session = userId ? await this.getActiveSession(userId) : null;
+    if (!session) {
+      throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    }
+  }
+
+  /**
    * QUI-560 — sesiones abiertas a nivel de TIENDA, no de usuario.
    *
    * `getActiveSession` filtra por `opened_by`, así que devuelve `null` cuando la

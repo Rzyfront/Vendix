@@ -858,6 +858,8 @@ export class OrderDetailsPageComponent {
 
   // Flow modal visibility signals
   showPayModal = signal(false);
+  /** Último error del cobro del modal; el modal lo mapea a mensaje inline. */
+  payModalError = signal<unknown>(null);
   showShipModal = signal(false);
   showDeliverModal = signal(false);
   showCancelModal = signal(false);
@@ -2453,6 +2455,7 @@ export class OrderDetailsPageComponent {
       this.loadPaymentMethods();
     }
     this.preSelectedInstallment.set(null);
+    this.payModalError.set(null);
     this.showPayModal.set(true);
   }
 
@@ -2562,6 +2565,7 @@ export class OrderDetailsPageComponent {
         },
         error: (err: unknown) => {
           this.isProcessingAction.set(false);
+          this.payModalError.set(err);
           // `flowPayOrder`/`flowCreditPayment` lanzan `buildApiError`
           // (store-orders.service): un `Error` con el `errorCode` de
           // superficie en camelCase y el `HttpErrorResponse` crudo en
@@ -4205,6 +4209,7 @@ export class OrderDetailsPageComponent {
       this.loadPaymentMethods();
     }
     this.preSelectedInstallment.set(installment);
+    this.payModalError.set(null);
     this.showPayModal.set(true);
   }
 
