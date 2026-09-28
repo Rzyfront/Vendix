@@ -485,12 +485,19 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     rate: number;
     base_amount: number;
     tax_amount: number;
+    tax_type?: string;
     base_formatted: string;
     tax_formatted: string;
   }> {
     const grouped = new Map<
       string,
-      { name: string; rate: number; tax_amount: number; base_amount: number }
+      {
+        name: string;
+        rate: number;
+        tax_amount: number;
+        base_amount: number;
+        tax_type?: string;
+      }
     >();
 
     for (const t of invoiceTaxes || []) {
@@ -510,6 +517,8 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           rate,
           tax_amount: taxAmount,
           base_amount: baseAmount,
+          // QUI-890 — mismo arrastre que `aggregateTaxes`.
+          tax_type: (t as any).tax_type || undefined,
         });
       }
     }
@@ -519,6 +528,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       rate: g.rate,
       base_amount: g.base_amount,
       tax_amount: g.tax_amount,
+      tax_type: g.tax_type,
       base_formatted: formatFiscalMoney(g.base_amount),
       tax_formatted: formatFiscalMoney(g.tax_amount),
     }));
@@ -870,6 +880,11 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         it.tax_rate !== null && it.tax_rate !== undefined
           ? Math.round(Number(it.tax_rate) * 10000) / 100
           : undefined,
+      // QUI-890 — tributo real de la línea (primera fila, misma convención
+      // que la base en `aggregateTaxes`) para pintar "INC: 8%" en vez de
+      // inventar "IVA". Solo este provider lo declara.
+      tax_name: it.order_item_taxes?.[0]?.tax_name || undefined,
+      tax_type: it.order_item_taxes?.[0]?.tax_type || undefined,
       tax_amount: lineTax > 0 ? lineTax : undefined,
       total_price: gross_total_price,
       total_price_formatted: `$${gross_total_price.toLocaleString('es-CO')}`,
@@ -890,6 +905,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     if (shippingTaxRow) {
       taxes.push({
         name: `${shippingTaxRow.tax_type.toUpperCase()} (incl. envío)`,
+        tax_type: shippingTaxRow.tax_type,
         // La copia guarda fracción (`Decimal(6,5)` ⇒ 0.08); la fila se pinta
         // como `(${rate}%)`, igual que en `aggregateTaxes`.
         rate: Math.round(shippingTaxRow.tax_rate * 10000) / 100,
@@ -1065,6 +1081,9 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             rate,
             tax_amount: taxAmount,
             base_amount: rowBase,
+            // QUI-890 — se arrastra el tipo de la primera fila del grupo
+            // (sin tipo = IVA por contrato fiscal, lo resuelve el lector).
+            tax_type: (t as any).tax_type || undefined,
           });
         }
       });
@@ -1075,6 +1094,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       rate: g.rate,
       base_amount: g.base_amount,
       tax_amount: g.tax_amount,
+      tax_type: g.tax_type,
       base_formatted: `$${g.base_amount.toLocaleString('es-CO')}`,
       tax_formatted: `$${g.tax_amount.toLocaleString('es-CO')}`,
     }));

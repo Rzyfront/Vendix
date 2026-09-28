@@ -241,3 +241,89 @@ describe('PrintLayoutComposerService — renderTaxBreakdownSection (F-102)', () 
     expect(html).not.toContain('104310');
   });
 });
+
+/**
+ * QUI-890 — el tiquete pinta el nombre real del tributo (INC/IVA/…) en vez
+ * de inventar "IVA". Reglas: un solo tipo → "Impuestos (INC)" + "INC
+ * incluido:"; mixto → "Impuestos" + "IVA incluido:"; sin filas → defaults
+ * históricos. Fila sin `tax_type` cuenta como IVA (contrato fiscal).
+ */
+describe('PrintLayoutComposerService — etiquetas de tributo (QUI-890)', () => {
+  const service = new PrintLayoutComposerService({
+    escapeHtml: (v: any) => String(v ?? ''),
+  } as any);
+
+  const sectionNoFields: any = { id: 'sec_totals' };
+
+  function dataWithTaxes(taxes: any[], over: any = {}): any {
+    return {
+      totals: {
+        subtotal: 100000,
+        discount_total: 0,
+        tax_total: 8000,
+        withholding_total: 0,
+        tip_amount: 0,
+        shipping_total: 0,
+        grand_total: 108000,
+        amount_received: 108000,
+        change_due: 0,
+      },
+      document: {},
+      taxes,
+      ...over,
+    };
+  }
+
+  function render(data: any, mode: 'dummy' | 'tokenized' = 'dummy'): string {
+    return (service as any).renderTotalsSection(sectionNoFields, data, mode);
+  }
+
+  const incRow = {
+    name: 'Impoconsumo 8%',
+    rate: 8,
+    base_amount: 100000,
+    tax_amount: 8000,
+    tax_type: 'inc',
+  };
+
+  it('un solo tipo INC titula "Impuestos (INC):"', () => {
+    const html = render(
+      dataWithTaxes([incRow], {
+        money_basis: 'taxable_base',
+        prints_vat_breakdown: true,
+      }),
+    );
+    expect(html).toContain('Impuestos (INC):');
+    expect(html).not.toContain('Impuestos (IVA):');
+  });
+
+  it('tributos mixtos titulan "Impuestos:" genérico', () => {
+    const html = render(
+      dataWithTaxes(
+        [incRow, { name: 'IVA', rate: 19, base_amount: 0, tax_amount: 0 }],
+        { money_basis: 'taxable_base', prints_vat_breakdown: true },
+      ),
+    );
+    expect(html).toContain('Impuestos:');
+    expect(html).not.toContain('Impuestos (INC):');
+    expect(html).not.toContain('Impuestos (IVA):');
+  });
+
+  it('precio bruto con INC deja "INC incluido:" (no "IVA incluido:")', () => {
+    const html = render(
+      dataWithTaxes([incRow], {
+        money_basis: 'gross',
+        prints_vat_breakdown: true,
+      }),
+    );
+    expect(html).toContain('INC incluido:');
+    expect(html).not.toContain('IVA incluido:');
+  });
+
+  it('resolveTaxCode: tipo tipado gana, luego primera palabra del nombre, luego IVA', () => {
+    const svc = service as any;
+    expect(svc.resolveTaxCode('inc', 'Impoconsumo 8%')).toBe('INC');
+    expect(svc.resolveTaxCode(undefined, 'Impoconsumo 8%')).toBe('IMPOCONSUMO');
+    expect(svc.resolveTaxCode(undefined, undefined)).toBe('IVA');
+  });
+});

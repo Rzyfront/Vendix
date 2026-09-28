@@ -886,7 +886,7 @@ export class PrintLayoutComposerService {
                       sublines += `<br><small class="item-sub item-discount">Desc: -${item.discount_formatted || `$${Number(item.discount_amount).toLocaleString('es-CO')}`}</small>`;
                     }
                     if (showItemTaxes && item.tax_rate !== undefined && Number(item.tax_rate) > 0) {
-                      sublines += `<br><small class="item-sub item-tax">IVA: ${item.tax_rate}%</small>`;
+                      sublines += `<br><small class="item-sub item-tax">${this.resolveTaxCode((item as any).tax_type, (item as any).tax_name)}: ${item.tax_rate}%</small>`;
                     }
                     val = `${this.compiler.escapeHtml(item.product_name)}${sublines}`;
                     return `<td data-column-id="${col.id}" data-element-id="col_${col.id}" style="text-align: ${col.align};">${val}</td>`;
@@ -1041,7 +1041,7 @@ export class PrintLayoutComposerService {
             </tr>` : ''}
             ${showTaxRow && (mode === 'tokenized' || Number(totals.tax_total) > 0) ? `
             <tr data-element-id="f_tax" data-section-id="sec_totals" data-token="order.tax_amount">
-              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_tax', 'Impuestos (IVA)'))}:</td>
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_tax', isTokenized ? 'Impuestos (IVA)' : this.resolveTaxTotalsLabel((data as any).taxes)))}:</td>
               <td class="total-val">${taxVal}</td>
             </tr>` : ''}
             ${showReten && Number(totals.withholding_total) > 0 ? `
@@ -1079,7 +1079,7 @@ export class PrintLayoutComposerService {
             </tr>` : ''}
           </table>
         </div>
-        ${showVatNote ? `<div class="vat-included-note" data-element-id="f_vat_note" data-section-id="sec_totals">IVA incluido: ${taxVal}</div>` : ''}
+        ${showVatNote ? `<div class="vat-included-note" data-element-id="f_vat_note" data-section-id="sec_totals">${this.resolveVatNoteLabel((data as any).taxes)} incluido: ${taxVal}</div>` : ''}
       </div>
     `;
   }
@@ -1215,6 +1215,55 @@ export class PrintLayoutComposerService {
    * documento que estructuralmente no los declara. Lo que cambia es que el
    * editor deja de afirmar una tarifa y un importe que nadie calculó.
    */
+  /**
+   * QUI-890 — código corto del tributo (IVA/INC/ICA/…): del `tax_type`
+   * tipado; si falta, primera palabra del nombre; si tampoco, 'IVA'
+   * (comportamiento histórico: sin tipo el papel decía IVA).
+   */
+  private resolveTaxCode(taxType?: string, taxName?: string): string {
+    const typed = (taxType || '').trim().toUpperCase();
+    if (typed) return typed;
+    const fromName = (taxName || '').trim().split(/\s+/)[0] || '';
+    return fromName.toUpperCase() || 'IVA';
+  }
+
+  /**
+   * QUI-890 — códigos distintos presentes en el desglose `taxes`. Fila sin
+   * tipo = IVA por contrato fiscal (sin tipo, IVA). Vacío = sin filas.
+   */
+  private resolveTaxCodes(
+    taxes: Array<{ tax_type?: string }> | undefined,
+  ): string[] {
+    const codes = new Set(
+      (taxes || []).map((t) => (t?.tax_type || 'iva').trim().toUpperCase()),
+    );
+    return [...codes];
+  }
+
+  /**
+   * QUI-890 — etiqueta de la nota de precio bruto ("X incluido"): el código
+   * único del desglose o 'IVA' (mixto, vacío o histórico).
+   */
+  private resolveVatNoteLabel(
+    taxes: Array<{ tax_type?: string }> | undefined,
+  ): string {
+    const codes = this.resolveTaxCodes(taxes);
+    return codes.length === 1 ? codes[0] : 'IVA';
+  }
+
+  /**
+   * QUI-890 — título de la fila de totales: un solo tipo → "Impuestos (INC)";
+   * mixto → "Impuestos"; sin filas → default histórico "Impuestos (IVA)".
+   */
+  private resolveTaxTotalsLabel(
+    taxes: Array<{ tax_type?: string }> | undefined,
+  ): string {
+    if (!taxes || taxes.length === 0) return 'Impuestos (IVA)';
+    const codes = this.resolveTaxCodes(taxes);
+    if (codes.length === 1) return `Impuestos (${codes[0]})`;
+    return 'Impuestos';
+  }
+
   private renderTaxBreakdownSection(data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const taxes = data.taxes || [];
     if (mode !== 'tokenized' && taxes.length === 0) return '';
