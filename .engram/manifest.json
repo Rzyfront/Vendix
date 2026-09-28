@@ -2960,6 +2960,14 @@
       "sessions": 2,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "aa54bfd0",
+      "created_by": "dmin",
+      "created_at": "2026-09-28T08:49:11Z",
+      "sessions": 0,
+      "memories": 5,
+      "prompts": 0
     }
   ]
 }
