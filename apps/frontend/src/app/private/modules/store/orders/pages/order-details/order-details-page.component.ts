@@ -705,6 +705,14 @@ export class OrderDetailsPageComponent {
   orderId: string | null = null;
   order = signal<Order | null>(null);
   /**
+   * QUI-886 — query params heredados del listado (página + filtros) para el
+   * botón "Volver": se alimentan al sticky header vía `backQueryParams`.
+   * `undefined` (deep-link sin params) = volver al listado limpio.
+   */
+  readonly listReturnQuery = signal<Record<string, string> | undefined>(
+    undefined,
+  );
+  /**
    * C.9 CP-pos-exclusive-tax-double-charge — entrada del diccionario de alerta
    * fiscal para el `fiscal_alert_code` de la orden; `null` = sin banner. El
    * copy del banner se deriva de aquí, nunca de texto fijo en la plantilla.
@@ -2190,6 +2198,15 @@ export class OrderDetailsPageComponent {
       this.orderId = params.get('id');
       // QUI-885: al cambiar de orden se cierra la configuración de reparto.
       this.showSplitConfig.set(false);
+      // QUI-886: se capturan los query params que el listado preservó en la
+      // URL del detalle para devolverlos en "Volver".
+      const qp = this.route.snapshot.queryParamMap;
+      const back: Record<string, string> = {};
+      for (const key of qp.keys) {
+        const value = qp.get(key);
+        if (value != null) back[key] = value;
+      }
+      this.listReturnQuery.set(Object.keys(back).length > 0 ? back : undefined);
       if (this.orderId) {
         // Carril B - B3: abre el SSE del detalle filtrado por esta orden.
         // Idempotente: si navegamos a otra orden, connect() cierra la
