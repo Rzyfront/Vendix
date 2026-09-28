@@ -2180,15 +2180,13 @@ export class CheckoutService {
         shipping_address_id,
         shipping_address_snapshot,
         state: 'pending_payment',
-        internal_notes: dto.notes,
-        // Nota staff-only (nunca expuesta al cliente, columna existente —
-        // sin migración) para que la tienda vea en el detalle de la orden
-        // por qué no hay método/costo de envío: falta contactar al
-        // comprador por WhatsApp y acordarlo.
-        // QUI-887 — la observación del comprador también va a `notes`
-        // (columna visible): el POS ya la escribe ahí y el KDS la lee de
-        // ahí. Si además hay envío pendiente, se conservan ambos textos.
-        notes:
+        // QUI-887 (rev 867) — la observación del comprador va a `notes`
+        // (columna visible: el POS ya la escribe ahí y el KDS la lee de
+        // ahí). El aviso operativo de envío pendiente vive SOLO en
+        // `internal_notes`: antes iba en `notes` y cocina lo veía como "Nota
+        // de la orden". El detalle oculta Staff cuando iguala a Nota.
+        notes: dto.notes?.trim() || undefined,
+        internal_notes:
           [
             dto.notes?.trim() || undefined,
             dto.pending_shipping_assignment
