@@ -125,6 +125,7 @@ export interface CashSessionCloseReport {
     subtotal: number;
     discounts: number;
     taxes: number;
+    shipping: number;
     tips: number;
     grand_total: number;
     average_ticket: number;

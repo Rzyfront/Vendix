@@ -120,6 +120,7 @@ export function cashMethodLabel(method: string): string {
         <div class="csr-row"><span>Subtotal</span><span class="csr-num">{{ r.sales.subtotal | currency }}</span></div>
         <div class="csr-row"><span>Descuentos</span><span class="csr-num">{{ r.sales.discounts | currency }}</span></div>
         <div class="csr-row"><span>Impuestos</span><span class="csr-num">{{ r.sales.taxes | currency }}</span></div>
+        <div class="csr-row"><span>Envíos</span><span class="csr-num">{{ r.sales.shipping | currency }}</span></div>
         <div class="csr-row"><span>Propinas</span><span class="csr-num">{{ r.sales.tips | currency }}</span></div>
         <div class="csr-row csr-strong"><span>Total</span><span class="csr-num">{{ r.sales.grand_total | currency }}</span></div>
         <div class="csr-row"><span>Ticket promedio</span><span class="csr-num">{{ r.sales.average_ticket | currency }}</span></div>

@@ -628,6 +628,7 @@ export class SessionsService {
             subtotal_amount: true,
             discount_amount: true,
             tax_amount: true,
+            shipping_cost: true,
             tip_amount: true,
             grand_total: true,
             coupon_code: true,
@@ -638,12 +639,14 @@ export class SessionsService {
     let subtotal = 0;
     let discounts = 0;
     let taxes = 0;
+    let shipping = 0;
     let tips = 0;
     let grand_total = 0;
     for (const o of orders) {
       subtotal += Number(o.subtotal_amount);
       discounts += Number(o.discount_amount);
       taxes += Number(o.tax_amount);
+      shipping += Number(o.shipping_cost ?? 0);
       tips += Number(o.tip_amount ?? 0);
       grand_total += Number(o.grand_total);
     }
@@ -818,6 +821,7 @@ export class SessionsService {
         subtotal: r2(subtotal),
         discounts: r2(discounts),
         taxes: r2(taxes),
+        shipping: r2(shipping),
         tips: r2(tips),
         grand_total: r2(grand_total),
         average_ticket: orders.length ? r2(grand_total / orders.length) : 0,

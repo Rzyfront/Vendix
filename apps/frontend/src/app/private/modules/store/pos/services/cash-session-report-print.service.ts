@@ -103,6 +103,7 @@ export class CashSessionReportPrintService {
         row('Subtotal', fmt(r.sales.subtotal)) +
         row('Descuentos', fmt(r.sales.discounts)) +
         row('Impuestos', fmt(r.sales.taxes)) +
+        row('Envíos', fmt(r.sales.shipping)) +
         row('Propinas', fmt(r.sales.tips)) +
         row('Total', fmt(r.sales.grand_total), 'strong') +
         row('Ticket promedio', fmt(r.sales.average_ticket)),
