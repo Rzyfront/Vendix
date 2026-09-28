@@ -55,13 +55,22 @@ export interface ProductProfitability {
   revenue: number;
   total_cost: number;
   profit: number;
-  margin: number;
-  markup: number;
+  margin: number | null;
+  markup: number | null;
   units_sold: number;
+  units_without_cost: number;
   avg_selling_price: number;
+  unit_cost: number;
+  recipe_unit_cost: number | null;
   catalog_base_price: number;
   catalog_cost_price: number;
   catalog_margin: number | null;
+}
+
+export interface CostCoverageSummary {
+  units_total: number;
+  units_without_cost: number;
+  coverage_ratio: number;
 }
 
 export interface ProfitabilitySummary {
@@ -69,7 +78,8 @@ export interface ProfitabilitySummary {
   total_revenue: number;
   total_cost: number;
   total_profit: number;
-  overall_margin: number;
+  overall_margin: number | null;
+  cost_coverage: CostCoverageSummary | null;
 }
 
 export interface ProfitabilityResponse {

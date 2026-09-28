@@ -21,6 +21,7 @@ import {
   canReactivateAsRole,
   canFastTrack,
   canCreditPayment,
+  requiresPaymentRegistration,
   canDispatchOrder,
   canManualShip,
   canReadyForPickupBeforePayment,
@@ -225,6 +226,37 @@ export function isActualCodTender(method: { type?: string | null; processing_mod
   if (!method || method.processing_mode === 'ON_DELIVERY') return false;
   return ['cash', 'bank_transfer', 'voucher'].includes(method.type ?? '') ||
     (method.type === 'card' && method.processing_mode === 'DIRECT');
+}
+
+/**
+ * Fase 2 paso 5 — pago `pending` de confirmación MANUAL: todo lo que NO es
+ * `wallet`/`wompi` ni contra entrega (`ON_DELIVERY`). Es el pago que el
+ * checkout online deja pendiente (`bank_transfer`, `voucher`, tarjeta manual…)
+ * y que el personal REGISTRA por `flow/pay` en vez de confirmar con un clic
+ * (el paso 6 lo rechaza en `confirmPayment` con
+ * `ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001`; el webhook sigue confirmando).
+ *
+ * Fail-closed: sin método resoluble no se clasifica (nunca se anula lo que no
+ * se puede verificar). Criterio hermano de `MANUAL_METHODS` en
+ * `table-sessions.service.ts` (confirmación de mesa que sí escribe en caja),
+ * pero inclusivo por tipo: lo que no es billetera/pasarela/contraentrega es
+ * manual.
+ */
+export function isManualConfirmationPending(
+  payment: {
+    state?: string | null;
+    store_payment_method?: {
+      system_payment_method?: {
+        type?: string | null;
+        processing_mode?: string | null;
+      } | null;
+    } | null;
+  } | null | undefined,
+): boolean {
+  if (!payment || payment.state !== 'pending') return false;
+  const system = payment.store_payment_method?.system_payment_method;
+  if (!system || system.processing_mode === 'ON_DELIVERY') return false;
+  return !['wallet', 'wompi'].includes(system.type ?? '');
 }
 
 @Injectable()
@@ -1328,6 +1360,13 @@ export class OrderFlowService {
     dto: PayOrderDto,
     options?: { strictKitchenPending?: boolean },
   ) {
+    // Gate único de caja: con el switch activo, quien cobra debe tener SU
+    // sesión abierta. Primero que todo — antes del claim de estado — para no
+    // dejar la orden varada en `processing` cuando se rechaza.
+    await this.sessionsService.assertSessionForSales(
+      RequestContextService.getUserId(),
+    );
+
     // A.2 CP-facturacion-fixes — charge-time shipping gate (ADR-02). Creation stays
     // open (whatsapp/assisted orders choose the method later), but a physical order
     // that needs dispatch cannot be CHARGED without a shipping method: assign it
@@ -1810,17 +1849,126 @@ export class OrderFlowService {
       total_paid: paidBalance,
       remaining_balance: 0,
     };
-    const codPendingPaymentIds = (order.payments ?? [])
+    // Fase 2 paso 5 — `flow/pay` sobre una orden con pago manual pendiente lo
+    // CONFIRMA en sitio (ver `confirmInPlaceMarker`); el marcador contra
+    // entrega se anula (`cancelled`) y se crea el pago real. En ambos casos
+    // nunca quedan dos pagos que sumen doble.
+    const manualPendingPayments = (order.payments ?? []).filter((payment) =>
+      isManualConfirmationPending(payment),
+    );
+    const isManualSettlement = manualPendingPayments.length > 0;
+    const settlementPendingPaymentIds = (order.payments ?? [])
       .filter((payment) =>
-        payment.state === 'pending' &&
-        payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY',
+        (payment.state === 'pending' &&
+          payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY') ||
+        isManualConfirmationPending(payment),
       )
       .map((payment) => payment.id);
+    // Origen para `gateway_response.metadata`/`payment_registered`: COD manda
+    // (compatibilidad histórica) cuando hay ambos marcadores; sin COD, manual.
+    // Sin marcadores no se usa (el bloque de metadata no se escribe).
+    const settlementOrigin = isCodSettlement
+      ? 'cash_on_delivery'
+      : 'manual_confirmation';
+    // Comprobante del pago manual anulado → metadata del pago real. Gana el
+    // primer marcador (el checkout crea uno por orden); sólo viaja si al menos
+    // un campo trae valor.
+    const firstManualMarker = manualPendingPayments[0];
+    const settlementReceipt =
+      firstManualMarker &&
+      (firstManualMarker.receipt_s3_key != null ||
+        firstManualMarker.receipt_uploaded_at != null ||
+        firstManualMarker.bank_account_id != null)
+        ? {
+            receipt_s3_key: firstManualMarker.receipt_s3_key ?? null,
+            receipt_uploaded_at: firstManualMarker.receipt_uploaded_at ?? null,
+            bank_account_id: firstManualMarker.bank_account_id ?? null,
+          }
+        : null;
+    // Registrar pago sobre un pago online MANUAL pendiente (transferencia con
+    // comprobante, voucher…): el primer tramo CONFIRMA esa misma fila en vez
+    // de anularla y crear otra — el pago que el cliente hizo online es el que
+    // se registra. Sólo contra entrega (`ON_DELIVERY`) conserva el
+    // anular+crear histórico: su marcador no es un pago, es una promesa.
+    const confirmInPlaceMarker =
+      !isCodSettlement && firstManualMarker ? firstManualMarker : null;
+    const markerIdsToVoid = confirmInPlaceMarker
+      ? settlementPendingPaymentIds.filter((id) => id !== confirmInPlaceMarker.id)
+      : settlementPendingPaymentIds;
     const paymentHistoryCtx = {
       storeId: order.store_id,
       organizationId: order.stores?.organization_id,
-      codPendingPaymentIds,
+      settlementPendingPaymentIds,
+      settlementOrigin,
+      settlementReceipt,
+      confirmInPlacePayment: confirmInPlaceMarker,
     };
+    // Fase 2 paso 5 — carril "registrar pago": SÓLO aquí `dto.amount` define lo
+    // cobrado. Cubre el marcador manual y los parciales siguientes (el primer
+    // registro ya anuló el marcador, así que `pending_payment` + abonos
+    // `succeeded` también es carril). Fuera del carril `amount` se ignora como
+    // siempre. Comparación en centavos enteros, igual que
+    // `normalizePaymentLegs`.
+    const toChargeCents = (value: number) =>
+      Math.round(Number(value || 0) * 100);
+    // Mismo predicado que la acción "Registrar pago" (`requiresPaymentRegistration`):
+    // una orden WhatsApp/contra entrega en `pending_payment` con
+    // `remaining_balance > 0` es carril, así que el parcial que manda el modal
+    // se respeta en vez de cobrar el saldo completo en silencio. Se evalúa con
+    // el estado PREVIO al claim (la orden recargada ya está en `processing`).
+    const isManualLane =
+      isManualSettlement ||
+      (preClaimState === 'pending_payment' &&
+        (settledAmount.gt(0) ||
+          requiresPaymentRegistration({
+            state: preClaimState,
+            remaining_balance: (order as any).remaining_balance,
+            payments: order.payments,
+          })));
+    const isChargeAmountLane =
+      isManualLane && dto.payment_type === PaymentType.DIRECT;
+    let chargeAmount = amountToCharge;
+    if (isChargeAmountLane && dto.amount != null) {
+      chargeAmount = Number(dto.amount);
+      if (!Number.isFinite(chargeAmount) || toChargeCents(chargeAmount) <= 0) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_INVALID_AMOUNT_001,
+          'El monto a cobrar debe ser mayor a cero.',
+          { amount: dto.amount },
+        );
+      }
+      // Lo cobrado nunca supera el saldo, en ningún método: el "de más" en
+      // efectivo entra por `amount_received` y sale como vuelto (`change`).
+      if (toChargeCents(chargeAmount) > toChargeCents(amountToCharge)) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_INVALID_AMOUNT_001,
+          'El monto a cobrar no puede superar el saldo pendiente.',
+          { amount: dto.amount, outstanding_balance: amountToCharge },
+        );
+      }
+    }
+    // Parcial = monto explícito menor al saldo. Sólo vive en `pending_payment`
+    // (la orden "permanece" ahí); en cualquier otro estado se rechaza en voz
+    // alta en vez de cobrar de más en silencio.
+    const wantsPartialAmount =
+      isChargeAmountLane &&
+      dto.amount != null &&
+      toChargeCents(chargeAmount) < toChargeCents(amountToCharge);
+    if (wantsPartialAmount && preClaimState !== 'pending_payment') {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_PARTIAL_NOT_ALLOWED_001,
+        undefined,
+        {
+          order_id: orderId,
+          pre_claim_state: preClaimState,
+          amount: dto.amount,
+        },
+      );
+    }
+    const isPartialCharge = wantsPartialAmount;
+    // Lo que el normalizador debe cuadrar: el parcial, o el saldo exacto (sin
+    // polvo flotante de `dto.amount`) cuando se salda.
+    const payableAmount = isPartialCharge ? chargeAmount : amountToCharge;
 
     // Cobro multimétodo de contado — normalización única (escalar → 1 tramo).
     // Sólo en los carriles que cobran de inmediato (shipped/direct): el carril
@@ -1911,7 +2059,7 @@ export class OrderFlowService {
       try {
         const normalized = normalizePaymentLegs(
           dto,
-          amountToCharge,
+          payableAmount,
           methodsById,
         );
         legs = normalized.legs;
@@ -1933,6 +2081,86 @@ export class OrderFlowService {
       }
     }
 
+    // Fase 2 paso 5 — pago PARCIAL del carril manual (`amount` < saldo, orden
+    // en `pending_payment`): registra los pagos `succeeded`, actualiza
+    // `total_paid`/`remaining_balance` y restaura el claim, SIN transición de
+    // estado (nada de `updateOrderState`: sin consumo de stock, sin factura,
+    // sin ETA, sin proyección a mesa; el cupón se consume al saldar). La acción
+    // "Registrar pago" sigue disponible para el saldo (paso 6).
+    if (isPartialCharge) {
+      const legPayments = await this.createLegPayments(
+        orderId,
+        order.currency,
+        legs,
+        change,
+        paymentHistoryCtx,
+      );
+      paymentPersisted = true;
+
+      const partialBalanceMetadata = {
+        total_paid: settledAmount.plus(chargeAmount).toNumber(),
+        remaining_balance: new Prisma.Decimal(amountToCharge)
+          .minus(chargeAmount)
+          .toNumber(),
+      };
+      try {
+        await this.prisma.orders.update({
+          where: { id: orderId },
+          data: { ...partialBalanceMetadata, updated_at: new Date() },
+        });
+      } catch (e) {
+        // Mismo contrato que las demás ramas: si el saldo no persiste, los
+        // tramos se compensan y la orden vuelve a su estado previo.
+        await this.cancelLegPayments(legPayments, 'partial_balance_blocked');
+        paymentCompensated = true;
+        await this.restorePreClaimState(orderId, preClaimState);
+        throw this.wrapPaymentFailure(
+          'partial_balance_blocked',
+          { order_id: orderId },
+          (e as any)?.errorCode ?? 'n/a',
+        );
+      }
+      // El claim movió `pending_payment` → `processing`: devolverla a su
+      // estado, donde espera el resto del saldo.
+      await this.restorePreClaimState(orderId, preClaimState);
+      await this.voidSettlementPendingMarkers(markerIdsToVoid);
+
+      this.logger.log(
+        `Order #${orderId} partial payment registered (${partialBalanceMetadata.total_paid} of ${paidBalance}); remaining ${partialBalanceMetadata.remaining_balance}`,
+      );
+
+      // Movimiento de caja por tramo, neto de vuelto (`leg.amount`).
+      for (const { payment, leg } of legPayments) {
+        this.recordPayOrderCashMovement(
+          order.store_id,
+          orderId,
+          leg.amount,
+          legMethodTypes[leg.store_payment_method_id] ?? '',
+          payment.id,
+        ).catch(() => {});
+      }
+
+      // Un `payment.received` por tramo (el asiento resuelve su rama
+      // con/sin factura; la retención se prorratea a la porción de este
+      // cobro). Sin `emitPosSaleCompletedIfFullyPaid`: un abono no cierra
+      // la venta.
+      await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
+
+      const updatedOrder = await this.prisma.orders.findFirst({
+        where: { id: orderId },
+        include: {
+          stores: { select: { id: true, name: true, store_code: true } },
+          order_items: { include: { products: true, product_variants: true } },
+          payments: true,
+        },
+      });
+
+      return {
+        order: updatedOrder,
+        ...this.buildLeggedPaymentResponse(legPayments, change),
+      };
+    }
+
     // Shipped orders: register payment without changing state
     if (preClaimState === 'shipped') {
       // Multimétodo: una fila `succeeded` por tramo (el escalar es 1 tramo).
@@ -1950,7 +2178,7 @@ export class OrderFlowService {
       // The claim temporarily moved shipped -> processing. Restore its
       // logistics state and persist the settled balance with the payment.
       await this.updateOrderState(orderId, 'shipped', settledBalanceMetadata, { historyFromState: preClaimState });
-      await this.voidCodPendingMarkers(codPendingPaymentIds);
+      await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
       // Round 1 MAJOR #13 — cupón en `flow/pay` (shipped):
       // si la orden trae `coupon_id` y no existe `coupon_uses` aún,
@@ -2040,10 +2268,10 @@ export class OrderFlowService {
         );
       }
 
-      // Void the COD pending marker(s) so they never count as a second,
-      // parallel settlement of the same order (analytics/cash-register
-      // dedupe by `payments.state`, not by count).
-      await this.voidCodPendingMarkers(codPendingPaymentIds);
+      // Void the settlement pending marker(s) (COD o manual) so they never
+      // count as a second, parallel settlement of the same order
+      // (analytics/cash-register dedupe by `payments.state`, not by count).
+      await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
       this.logger.log(
         `Order #${orderId} payment registered while delivered (settled, awaiting finalize)`,
@@ -2113,10 +2341,10 @@ export class OrderFlowService {
         );
       }
 
-      // Void the COD pending marker(s) so they never count as a second,
-      // parallel settlement of the same order (analytics/cash-register
-      // dedupe by `payments.state`, not by count).
-      await this.voidCodPendingMarkers(codPendingPaymentIds);
+      // Void the settlement pending marker(s) (COD o manual) so they never
+      // count as a second, parallel settlement of the same order
+      // (analytics/cash-register dedupe by `payments.state`, not by count).
+      await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
       this.logger.log(
         `Order #${orderId} payment registered while finished (orphaned/COD) -> finished`,
@@ -2184,7 +2412,7 @@ export class OrderFlowService {
           },
           { historyFromState: preClaimState },
         );
-        await this.voidCodPendingMarkers(codPendingPaymentIds);
+        await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
         this.logger.log(
           `Order #${orderId} paid directly, moved to processing (requires fulfillment)`,
@@ -2274,7 +2502,7 @@ export class OrderFlowService {
           },
           { historyFromState: preClaimState },
         );
-        await this.voidCodPendingMarkers(codPendingPaymentIds);
+        await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
         this.logger.log(
           `Order #${orderId} paid directly with pending kitchen items, moved to processing`,
@@ -2323,7 +2551,7 @@ export class OrderFlowService {
           finished_at: new Date(),
           ...settledBalanceMetadata,
         }, { historyFromState: preClaimState });
-        await this.voidCodPendingMarkers(codPendingPaymentIds);
+        await this.voidSettlementPendingMarkers(markerIdsToVoid);
       } catch (e) {
         if (e instanceof VendixHttpException) {
           await this.cancelLegPayments(
@@ -2602,6 +2830,16 @@ export class OrderFlowService {
         throw new BadRequestException(
           'Este cobro digital está pendiente de confirmación del monedero o la pasarela.',
         );
+      }
+      // Fase 2 paso 6 — un pago `pending` de confirmación manual no se
+      // confirma con un clic: el personal lo REGISTRA por `flow/pay` (monto +
+      // método recibidos, con vuelto o saldo). Solo el webhook confirma.
+      // Después de los guards de ON_DELIVERY/digital: no cambia su precedencia.
+      if (
+        opts?.source !== 'webhook' &&
+        order.payments.some((payment) => isManualConfirmationPending(payment))
+      ) {
+        throw new VendixHttpException(ErrorCodes.ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001);
       }
       if (pendingPayment) {
         await tx.payments.updateMany({
@@ -3575,6 +3813,10 @@ export class OrderFlowService {
           label_key: 'ORD_ACTION_CREDIT_PAYMENT',
           ...canCreditPayment(snapshot),
         });
+      } else if (requiresPaymentRegistration(snapshot)) {
+        // Fase 2 paso 6 — pago manual pendiente o saldo parcial: el personal
+        // REGISTRA por `flow/pay`, no confirma con un clic.
+        actions.push({ code: 'pay', label_key: 'ORD_ACTION_PAY', ...canPay(snapshot) });
       } else {
         actions.push({
           code: 'confirm_payment',
@@ -6852,6 +7094,12 @@ export class OrderFlowService {
    * Supports partial payments and installment-based credit
    */
   async registerCreditPayment(orderId: number, dto: PayOrderDto) {
+    // Gate único de caja: el abono es un cobro y exige sesión de quien cobra.
+    // Antes de cualquier lectura/escritura para no crear el pago.
+    await this.sessionsService.assertSessionForSales(
+      RequestContextService.getUserId(),
+    );
+
     const order = await this.prisma.orders.findFirst({
       where: { id: orderId },
       include: {
@@ -7551,7 +7799,7 @@ export class OrderFlowService {
    * los tramos no-efectivo no la traen para que el lector ("primer pago con
    * recibido") nunca tome el recibido de una tarjeta.
    */
-  private async voidCodPendingMarkers(paymentIds: number[]): Promise<void> {
+  private async voidSettlementPendingMarkers(paymentIds: number[]): Promise<void> {
     if (paymentIds.length === 0) return;
     await this.prisma.payments.updateMany({
       where: { id: { in: paymentIds }, state: 'pending' },
@@ -7567,11 +7815,44 @@ export class OrderFlowService {
     historyCtx?: {
       storeId: number;
       organizationId?: number | null;
-      codPendingPaymentIds?: number[];
+      settlementPendingPaymentIds?: number[];
+      /** Fase 2 paso 5 — `'cash_on_delivery'` (COD, histórico) o `'manual_confirmation'`. */
+      settlementOrigin?: string;
+      /** Comprobante del marcador manual anulado → metadata del pago real. */
+      settlementReceipt?: {
+        receipt_s3_key: string | null;
+        receipt_uploaded_at: Date | string | null;
+        bank_account_id: number | null;
+      } | null;
+      /**
+       * Pago online manual `pending` (fila completa de `getOrder`) que el
+       * PRIMER tramo confirma en sitio: pasa a `succeeded` con el monto, el
+       * método, la cuenta, la referencia y el vuelto del tramo, conservando su
+       * comprobante y su `transaction_id`. Los tramos siguientes se crean.
+       */
+      confirmInPlacePayment?: any | null;
     },
   ): Promise<
-    Array<{ payment: any; leg: NormalizedLeg; transactionId: string }>
+    Array<{
+      payment: any;
+      leg: NormalizedLeg;
+      transactionId: string;
+      /** Estado previo de la fila confirmada en sitio (para compensar). */
+      confirmedInPlaceOriginal?: any;
+    }>
   > {
+    // Fase 2 paso 5 — bloque de liquidación (COD o manual) que viaja en la
+    // metadata de cada tramo + `payment_registered`. Sólo campos con valor; el
+    // camino COD queda byte a byte (`payment_origin` + ids, sin comprobante).
+    const settlementIds = historyCtx?.settlementPendingPaymentIds ?? [];
+    const settlementReceiptFields = Object.fromEntries(
+      Object.entries({
+        receipt_s3_key: historyCtx?.settlementReceipt?.receipt_s3_key ?? null,
+        receipt_uploaded_at:
+          historyCtx?.settlementReceipt?.receipt_uploaded_at ?? null,
+        bank_account_id: historyCtx?.settlementReceipt?.bank_account_id ?? null,
+      }).filter(([, value]) => value != null),
+    );
     // Plan PLAN-pago-multimetodo-fixes paso 1 — objetivo 4: la cuenta
     // bancaria de cada tramo se resuelve y valida ANTES de abrir la
     // transacción (mismo gateway que ya usa el POS,
@@ -7630,42 +7911,125 @@ export class OrderFlowService {
         payment: any;
         leg: NormalizedLeg;
         transactionId: string;
+        confirmedInPlaceOriginal?: any;
       }> = [];
-      for (const leg of legs) {
-        const transactionId = await this.generateTransactionId();
+      const inPlace = historyCtx?.confirmInPlacePayment ?? null;
+      for (const [legIndex, leg] of legs.entries()) {
         // Ausente ⇒ pago exacto (igual que el escalar de hoy); nunca falsy.
         const legReceived = leg.amount_received ?? leg.amount;
-        const payment = await tx.payments.create({
-          data: {
-            order_id: orderId,
-            store_payment_method_id: leg.store_payment_method_id,
-            bank_account_id:
-              resolvedBankAccountIds.get(leg) ?? leg.bank_account_id ?? null,
-            amount: leg.amount,
-            currency,
-            state: 'succeeded',
-            transaction_id: transactionId,
-            gateway_reference: leg.payment_reference ?? null,
-            paid_at: new Date(),
-            gateway_response: {
-              payment_type: 'direct',
-              amount_received: leg.amount_received,
-              change: leg.is_cash ? change : 0,
-              ...(leg.is_cash || historyCtx?.codPendingPaymentIds?.length
-                ? { metadata: {
-                    ...(leg.is_cash ? { amount_received: legReceived } : {}),
-                    ...(historyCtx?.codPendingPaymentIds?.length
-                      ? {
-                          payment_origin: 'cash_on_delivery',
-                          original_pending_payment_ids: historyCtx.codPendingPaymentIds,
-                        }
-                      : {}),
-                  } }
-                : {}),
+        let payment: any;
+        let transactionId: string;
+        let confirmedInPlaceOriginal: any;
+        if (inPlace && legIndex === 0) {
+          // Confirmación en sitio del pago online manual. Guardia de estado:
+          // sólo una fila todavía `pending` se confirma; si otro proceso ya la
+          // movió, se rechaza (nunca se cobra dos veces el mismo pago).
+          transactionId =
+            inPlace.transaction_id ?? (await this.generateTransactionId());
+          const previousResponse =
+            inPlace.gateway_response &&
+            typeof inPlace.gateway_response === 'object' &&
+            !Array.isArray(inPlace.gateway_response)
+              ? (inPlace.gateway_response as Record<string, any>)
+              : {};
+          const previousMetadata =
+            previousResponse.metadata &&
+            typeof previousResponse.metadata === 'object'
+              ? previousResponse.metadata
+              : {};
+          const sameMethod =
+            inPlace.store_payment_method_id == null ||
+            inPlace.store_payment_method_id === leg.store_payment_method_id;
+          const confirmed = await tx.payments.updateMany({
+            where: { id: inPlace.id, state: 'pending' },
+            data: {
+              store_payment_method_id: leg.store_payment_method_id,
+              bank_account_id:
+                resolvedBankAccountIds.get(leg) ??
+                leg.bank_account_id ??
+                (sameMethod ? (inPlace.bank_account_id ?? null) : null),
+              amount: leg.amount,
+              state: 'succeeded',
+              transaction_id: transactionId,
+              gateway_reference:
+                leg.payment_reference ?? inPlace.gateway_reference ?? null,
+              paid_at: new Date(),
+              updated_at: new Date(),
+              gateway_response: {
+                ...previousResponse,
+                payment_type: 'direct',
+                amount_received: leg.amount_received,
+                change: leg.is_cash ? change : 0,
+                metadata: {
+                  ...previousMetadata,
+                  ...(leg.is_cash ? { amount_received: legReceived } : {}),
+                  payment_origin:
+                    historyCtx?.settlementOrigin ?? 'manual_confirmation',
+                  confirmed_in_place: true,
+                  original_pending_payment_ids: settlementIds,
+                  original_store_payment_method_id:
+                    inPlace.store_payment_method_id ?? null,
+                  original_amount:
+                    inPlace.amount != null ? Number(inPlace.amount) : null,
+                  ...settlementReceiptFields,
+                },
+              },
             },
-          },
+          });
+          if (!confirmed || confirmed.count !== 1) {
+            throw this.wrapPaymentFailure('manual_payment_not_pending', {
+              order_id: orderId,
+              payment_id: inPlace.id,
+            });
+          }
+          payment = await tx.payments.findFirst({ where: { id: inPlace.id } });
+          if (!payment) {
+            throw this.wrapPaymentFailure('manual_payment_not_pending', {
+              order_id: orderId,
+              payment_id: inPlace.id,
+            });
+          }
+          confirmedInPlaceOriginal = inPlace;
+        } else {
+          transactionId = await this.generateTransactionId();
+          payment = await tx.payments.create({
+            data: {
+              order_id: orderId,
+              store_payment_method_id: leg.store_payment_method_id,
+              bank_account_id:
+                resolvedBankAccountIds.get(leg) ?? leg.bank_account_id ?? null,
+              amount: leg.amount,
+              currency,
+              state: 'succeeded',
+              transaction_id: transactionId,
+              gateway_reference: leg.payment_reference ?? null,
+              paid_at: new Date(),
+              gateway_response: {
+                payment_type: 'direct',
+                amount_received: leg.amount_received,
+                change: leg.is_cash ? change : 0,
+                ...(leg.is_cash || settlementIds.length
+                  ? { metadata: {
+                      ...(leg.is_cash ? { amount_received: legReceived } : {}),
+                      ...(settlementIds.length
+                        ? {
+                            payment_origin: historyCtx?.settlementOrigin ?? 'cash_on_delivery',
+                            original_pending_payment_ids: settlementIds,
+                            ...settlementReceiptFields,
+                          }
+                        : {}),
+                    } }
+                  : {}),
+              },
+            },
+          });
+        }
+        created.push({
+          payment,
+          leg,
+          transactionId,
+          ...(confirmedInPlaceOriginal ? { confirmedInPlaceOriginal } : {}),
         });
-        created.push({ payment, leg, transactionId });
         // Plan order-truth-and-invoice-tz — un `payment_registered` por
         // tramo, con el MISMO `tx` que el `payments.create` de arriba: si la
         // transacción revierte, el evento revierte con ella.
@@ -7677,12 +8041,14 @@ export class OrderFlowService {
             type: 'payment_registered',
             paymentId: payment.id,
             amount: leg.amount,
-            ...(historyCtx.codPendingPaymentIds?.length
+            ...(settlementIds.length
               ? { payload: {
-                  payment_origin: 'cash_on_delivery',
-                  original_pending_payment_ids: historyCtx.codPendingPaymentIds,
+                  payment_origin: historyCtx.settlementOrigin ?? 'cash_on_delivery',
+                  original_pending_payment_ids: settlementIds,
+                  ...settlementReceiptFields,
                   actual_store_payment_method_id: leg.store_payment_method_id,
                   actual_method: leg.accounting_method,
+                  ...(confirmedInPlaceOriginal ? { confirmed_in_place: true } : {}),
                 } }
               : {}),
           });
@@ -7728,11 +8094,35 @@ export class OrderFlowService {
    * compensación sea todo o nada.
    */
   private async cancelLegPayments(
-    legPayments: Array<{ payment: any; leg: NormalizedLeg }>,
+    legPayments: Array<{
+      payment: any;
+      leg: NormalizedLeg;
+      confirmedInPlaceOriginal?: any;
+    }>,
     cancellationReason: string,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
-      for (const { payment } of legPayments) {
+      for (const { payment, confirmedInPlaceOriginal: original } of legPayments) {
+        if (original) {
+          // La fila confirmada en sitio era el pago online del cliente: no se
+          // anula, vuelve a `pending` tal como estaba (sigue esperando que el
+          // personal lo registre).
+          await tx.payments.update({
+            where: { id: payment.id },
+            data: {
+              state: 'pending',
+              store_payment_method_id: original.store_payment_method_id ?? null,
+              bank_account_id: original.bank_account_id ?? null,
+              amount: original.amount,
+              transaction_id: original.transaction_id ?? payment.transaction_id,
+              gateway_reference: original.gateway_reference ?? null,
+              paid_at: original.paid_at ?? null,
+              updated_at: new Date(),
+              gateway_response: original.gateway_response ?? Prisma.DbNull,
+            },
+          });
+          continue;
+        }
         await tx.payments.update({
           where: { id: payment.id },
           data: {
