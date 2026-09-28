@@ -14,7 +14,7 @@ import {
   resolveLineTotals,
   type InclusiveRateBasis,
 } from '../../store/taxes/utils/tax-inclusive-math.util';
-import { CheckoutDto } from './dto/checkout.dto';
+import { CheckoutDto, CouponPreviewDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import {
@@ -1293,6 +1293,109 @@ export class CheckoutService {
       coupon_discount,
       total_discount,
     };
+  }
+
+  /**
+   * Vista previa del descuento de un cupón para el storefront (QUI-883).
+   * El checkout mostraba `-$0.00` hasta confirmar y el comprador creía que
+   * el cupón no funcionaba. Este preview corre EXACTAMENTE la misma
+   * validación (`resolveCheckoutDiscounts`) que el confirm, con precios
+   * resueltos en servidor (nunca los del cliente) y Prisma scoped al tenant.
+   * Solo lectura: no crea `coupon_uses`, no toca contadores. El confirm
+   * recalcula de todos modos, así que la cifra final siempre manda.
+   * Un cupón inválido devuelve `valid: false` con el motivo en vez de 500.
+   */
+  async previewCouponDiscount(dto: CouponPreviewDto): Promise<{
+    valid: boolean;
+    coupon_id: number | null;
+    code: string;
+    discount_amount: number;
+    subtotal: number;
+    reason?: string;
+  }> {
+    const code = dto.coupon_code?.trim().toUpperCase();
+    if (!code || !dto.items?.length) {
+      return { valid: false, coupon_id: null, code: code ?? '', discount_amount: 0, subtotal: 0 };
+    }
+    const customerId = RequestContextService.getUserId() ?? null;
+
+    const lines: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      quantity: number;
+      net_price: number;
+    }> = [];
+    for (const item of dto.items) {
+      const product = await this.prisma.products.findFirst({
+        where: {
+          id: item.product_id,
+          state: 'active',
+          available_for_ecommerce: true,
+        },
+      });
+      if (!product || product.is_sellable !== true) {
+        throw new VendixHttpException(ErrorCodes.ECOM_PRODUCT_002);
+      }
+      let variant: any = null;
+      if (item.product_variant_id) {
+        variant = await this.prisma.product_variants.findUnique({
+          where: { id: item.product_variant_id },
+        });
+        if (!variant || variant.product_id !== item.product_id) {
+          throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
+        }
+      }
+      // `sale_price = 0` significa "sin oferta" (columna NOT NULL con
+      // default 0): `??` no salta el 0 y el preview cotizaba la línea en 0,
+      // lo que hacía fallar la validación con CPN_APPLY_001 ("no aplica a
+      // los productos") aunque el cupón sí aplicaba. Se cae al siguiente
+      // candidato cuando el valor es 0.
+      const priceCandidates = [
+        variant?.price_override,
+        variant?.sale_price,
+        product.sale_price,
+        product.base_price,
+      ];
+      const net =
+        priceCandidates.map((c) => Number(c ?? 0)).find((n) => n > 0) ?? 0;
+      lines.push({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id ?? null,
+        quantity: item.quantity,
+        net_price: net,
+      });
+    }
+
+    try {
+      const res = await this.resolveCheckoutDiscounts({
+        items: lines,
+        customerId,
+        couponCode: code,
+      });
+      return {
+        valid: true,
+        coupon_id: res.coupon?.coupon_id ?? null,
+        code,
+        discount_amount: res.coupon_discount,
+        subtotal: res.quote.promotional_subtotal,
+      };
+    } catch (err) {
+      // Cupón inválido (vencido, mínimo, usos, no aplica): respuesta honesta
+      // con motivo, sin romper el checkout.
+      if (err instanceof VendixHttpException) {
+        const body = err.getResponse() as any;
+        return {
+          valid: false,
+          coupon_id: null,
+          code,
+          discount_amount: 0,
+          subtotal: 0,
+          reason:
+            body?.error_code ?? body?.message ?? 'Cupón no válido',
+        };
+      }
+      throw err;
+    }
   }
 
   /**
