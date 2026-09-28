@@ -422,6 +422,34 @@ El bloqueo de Continuar en checkout tiene UNA salida, y solo si la tienda la hab
   "Envío: por definir con la tienda" y "Total (sin envío)". Contrato backend y compuertas en
   `vendix-shipping-distance-pricing` regla 7.
 
+### Auto-foco del mapa — humano vs UI (owner, 2026-09-27)
+
+En teléfono, llevar al comprador/cajero al mapa mientras aún teclea es una carrera que siempre pierde
+el humano. Reglas vigentes en `app-address-form-fields` (POS, customer-modal, editor de remisión) y
+en `checkout.component.ts` (tienda):
+
+1. **Sin forward-geocode incompleto:** `forwardGeocodeFromForm` hace return (y limpia aviso/precisión)
+   hasta tener país + departamento + ciudad + `address_line1` (≥5). La línea sola casi nunca
+   matchea — no se pide.
+2. **Compuerta del auto-foco:** departamento + ciudad + línea llenos. Luego debounce de 500 ms
+   (`requestAutoMapFocus`), que se cancela con CUALQUIER cambio de campo de dirección (suscripción
+   sin debounce).
+3. **No mientras escribe:** si `document.activeElement` es un input/textarea/select dentro del host,
+   se espera a un `blur` de un solo uso; el blur re-evalúa en `setTimeout(0)` para que saltar a otro
+   campo del mismo form siga esperando.
+4. **Una sola vez:** `autoMapFocusDone` — tras el primer auto-foco nunca más scroll automático.
+5. **Retenidos hasta el disparo:** abrir el mapa (`showMap`/`advancedOverride`) y el aviso "No
+   pudimos ubicar…" (`pendingAddressWarning`) solo se aplican cuando el auto-foco dispara. En el POS
+   el mapa se renderiza ENCIMA de los campos: abrirlo o insertar el aviso a mitad de tecleo empuja el
+   input fuera de la vista.
+6. **Acciones del usuario siempre hacen scroll** (`focusMapHint('user')`: "Usar mi ubicación",
+   Continuar sin coords, rechazar WhatsApp) y vacían el aviso pendiente.
+7. El pulso `mapHighlight` puede correr siempre; no mueve layout.
+
+Timers/listeners como campos privados planos (no signals: el template no los lee) + limpieza en
+`DestroyRef.onDestroy`. Residual conocido: el chip "Ubicando tu dirección…" aún reserva alto durante
+el geocode.
+
 ## Shared — `app-address-form-fields`
 
 `apps/frontend/src/app/shared/components/address-form-fields/address-form-fields.component.ts`:
