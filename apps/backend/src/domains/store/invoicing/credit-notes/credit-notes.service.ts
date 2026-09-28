@@ -715,13 +715,18 @@ export class CreditNotesService {
             // F-INC6 — nota TOTAL: copia VERBATIM de la línea gemela de la
             // factura — `items` en este camino ES
             // `related_invoice.invoice_items` en el mismo orden (ver arriba).
-            // `unit_price` queda en la forma BASE que la factura ya persiste
-            // desde `8f8427f4b` (o, para una factura legada, la forma base
-            // que arrastra pese al `is_inclusive` histórico): no hay nada que
-            // recalcular, y `is_inclusive` se fuerza a `false` para no
-            // duplicar el despeje en un lector posterior.
+            // `unit_price` se copia tal cual, y con él la inclusividad REAL de
+            // la gemela. Forzar `false` sólo es correcto cuando el precio ya
+            // está en forma base (`8f8427f4b` en adelante, o el legado con el
+            // flag mentiroso). Una factura manual anterior guardó el BRUTO
+            // con `is_inclusive=true` (PAVS36: $24.500 bruto, base $22.685,19):
+            // copiarla como no inclusiva emite LineExtension = bruto contra una
+            // cabecera en base y el prevalidador la frena
+            // (HEADER_LINE_EXTENSION_MISMATCH). `twinIsGenuinelyInclusive`
+            // separa los dos casos igual que en la rama parcial.
             if (is_total_copy) {
               const twin = related_invoice.invoice_items[index];
+              const twin_divisor = Number(twin.price_unit_quantity ?? 1);
               return {
                 product_id: twin.product_id,
                 product_variant_id: twin.product_variant_id,
@@ -731,7 +736,12 @@ export class CreditNotesService {
                 discount_amount: twin.discount_amount,
                 tax_amount: twin.tax_amount,
                 total_amount: twin.total_amount,
-                is_inclusive: false,
+                is_inclusive: twinIsGenuinelyInclusive(
+                  twin,
+                  Number.isFinite(twin_divisor) && twin_divisor >= 1
+                    ? Math.floor(twin_divisor)
+                    : 1,
+                ),
                 unit_code: twin.unit_code,
                 price_unit_quantity: twin.price_unit_quantity,
                 stock_units_consumed: twin.stock_units_consumed,
