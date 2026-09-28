@@ -17,7 +17,7 @@
     [installments]="installments()"
     [preSelectedInstallment]="preSelectedInstallment()"
     [isProcessing]="isProcessing()"
-    [allowAmountOverride]="isCreditOrder()"
+    [allowAmountOverride]="isCreditOrder() || manualPaymentPending()"
     [allowTip]="!isCreditOrder()"
     [allowMultiTender]="!isCreditOrder()"
     [allowCredit]="false"
@@ -45,6 +45,20 @@
     }
   }
 
+  @if (manualPaymentPending() && !isCreditOrder()) {
+    @if (manualAmountExceedsBalance(collector.effectiveBase())) {
+      <p class="credit-cap-error" role="alert">
+        El cobro de {{ collector.effectiveBase() | currency }} supera el saldo
+        pendiente de {{ chargeAmount() | currency }}. Reduce el importe en
+        {{ collector.effectiveBase() - chargeAmount() | currency }} para continuar.
+      </p>
+    } @else if (manualRemainingAfter(collector.effectiveBase()) > 0) {
+      <p class="credit-cap" role="status">
+        Saldo pendiente: <strong>{{ manualRemainingAfter(collector.effectiveBase()) | currency }}</strong>
+      </p>
+    }
+  }
+
   @if (cashGateMessage() && !isProcessing()) {
     <p class="credit-cap-error" role="alert">
       {{ cashGateMessage() }}
@@ -56,7 +70,7 @@
       variant="primary"
       [fullWidth]="true"
       [loading]="isProcessing()"
-      [disabled]="isProcessing() || !collector.canSubmit() || creditAmountExceedsBalance(collector.effectiveTotal()) || (isCreditOrder() && remainingBalance() <= 0)"
+      [disabled]="isProcessing() || !collector.canSubmit() || creditAmountExceedsBalance(collector.effectiveTotal()) || manualAmountExceedsBalance(collector.effectiveBase()) || (isCreditOrder() && remainingBalance() <= 0)"
       (clicked)="collector.triggerSubmit()"
     >
       <app-icon slot="icon" name="check-circle" [size]="18" />

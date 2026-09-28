@@ -246,6 +246,26 @@ export function isCodAwaitingConfirmation(order: Pick<Order, 'payments'> | null 
   );
 }
 
+/**
+ * Fase 2 (paso 8) — espejo de `requiresPaymentRegistration` del backend
+ * (`order-action-policy.util.ts`): `pending_payment` con pago `pending` de
+ * confirmación manual (todo lo que no es wallet/wompi ni ON_DELIVERY) o con
+ * saldo parcial por cobrar. El personal REGISTRA por `flow/pay` (monto +
+ * método), nunca confirma con un clic. UI advisory, API authoritative.
+ */
+export function isManualPaymentPending(
+  order: Pick<Order, 'state' | 'payments' | 'remaining_balance'> | null | undefined,
+): boolean {
+  if (!order || order.state !== 'pending_payment') return false;
+  if (Number(order.remaining_balance ?? 0) > 0) return true;
+  return !!order.payments?.some((payment) => {
+    if (!payment || payment.state !== 'pending') return false;
+    const system = payment.store_payment_method?.system_payment_method;
+    if (!system || system.processing_mode === 'ON_DELIVERY') return false;
+    return !['wallet', 'wompi'].includes(system.type ?? '');
+  });
+}
+
 export function isOrderEligibleForSplitCreation(order: Order | null, hasRefunds = false): boolean {
   if (!order || order.active_financial_split_id) return false;
   if (['cancelled', 'refunded'].includes(order.state)) return false;
@@ -1091,6 +1111,8 @@ export class OrderDetailsPageComponent {
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
   readonly isCodPending = computed(() => isCodAwaitingConfirmation(this.order()));
+  /** Fase 2 (paso 8): cobro manual pendiente → "Registrar pago" por `flow/pay`. */
+  readonly isManualPayPending = computed(() => isManualPaymentPending(this.order()));
   readonly codActualMethods = computed(() => this.paymentMethods().filter((method) => {
     const catalog = method.system_payment_method as { type?: string; processing_mode?: string } | null;
     if (!catalog || catalog.processing_mode === 'ON_DELIVERY') return false;
@@ -2569,10 +2591,15 @@ export class OrderDetailsPageComponent {
 
     // Credit abono: carry the amount (override ?? remaining balance) and, when the
     // operator picked one, the target installment. `flow/pay` ignores `amount`
-    // (it charges the full order total), so only attach it for the credit path.
+    // (it charges the full order total), so only attach it for the credit path…
     if (isCredit) {
       dto.amount = submit.amount;
       if (submit.installmentId != null) dto.installment_id = submit.installmentId;
+    } else if (this.isManualPayPending()) {
+      // …and for the Fase 2 (paso 8) manual-registration lane, where `flow/pay`
+      // charges `amount`: partial when below the balance, exact otherwise.
+      // Every other contado lane keeps omitting it (partial not allowed there).
+      dto.amount = submit.amount;
     }
 
     // Propina (T3). El collector la trae ya resuelta a monto en `tip`, mas los
@@ -3192,7 +3219,10 @@ export class OrderDetailsPageComponent {
   confirmPayment(): void {
     if (!this.orderId) return;
 
-    if (this.isCodPending()) {
+    // Fase 2 (paso 8): un pago manual nunca se confirma con un clic — se
+    // REGISTRA (monto + método) por el modal de cobro (`flow/pay`). El backend
+    // rechaza al personal en `confirm-payment` con 409 en este caso.
+    if (this.isCodPending() || this.isManualPayPending()) {
       this.openPayModal();
       return;
     }

@@ -4392,6 +4392,103 @@ describe('PaymentsService', () => {
     });
   });
 
+  describe('recordCashRegisterMovement — el POS no registra en caja cobros digitales pending (paso 7)', () => {
+    // Casos directos sobre el helper privado: el fan-out post-commit le pasa
+    // la proyección (`status`, no `state`) y el `store_payment_method_id` del
+    // tramo en el DTO. Caja habilitada con rastreo de no-efectivo para que
+    // solo los guards bajo prueba puedan omitir el movimiento.
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+    };
+
+    const arrangeCashRegister = (methodType: string) => {
+      (settingsService.getSettings as jest.Mock).mockResolvedValue({
+        checkout: { require_customer_data: false },
+        pos: { cash_register: { enabled: true, track_non_cash_payments: true } },
+      });
+      (sessionsService.getActiveSession as jest.Mock).mockResolvedValue({
+        id: 5,
+      });
+      (prisma as any).store_payment_methods = {
+        findFirst: jest.fn(async () => ({
+          id: 9,
+          system_payment_method: {
+            type: methodType,
+            processing_mode: payment_processing_mode_enum.DIRECT,
+          },
+        })),
+      };
+    };
+
+    const recordSaleMovement = () =>
+      movementsService.recordSaleMovement as jest.Mock;
+
+    it('POS wompi pendiente → recordSaleMovement no se llama', async () => {
+      arrangeCashRegister('wompi');
+
+      await (service as any).recordCashRegisterMovement(
+        { store_id: 1, store_payment_method_id: 9 },
+        { id: 4242 },
+        { id: 7, amount: 100000, status: 'pending' },
+        posUser,
+      );
+
+      expect(recordSaleMovement()).not.toHaveBeenCalled();
+    });
+
+    it('wallet succeeded → tampoco escribe: la pasarela queda fuera de caja', async () => {
+      // Fila cruda (`state`, no `status`): p. ej. el débito wallet de un
+      // cobro multimétodo que sí liquidó en banda.
+      arrangeCashRegister('wallet');
+
+      await (service as any).recordCashRegisterMovement(
+        { store_id: 1, store_payment_method_id: 11 },
+        { id: 4242 },
+        { id: 8, amount: 80000, state: 'succeeded' },
+        posUser,
+      );
+
+      expect(recordSaleMovement()).not.toHaveBeenCalled();
+    });
+
+    it('efectivo pendiente → no escribe: la promesa no es dinero en caja', async () => {
+      arrangeCashRegister('cash');
+
+      await (service as any).recordCashRegisterMovement(
+        { store_id: 1, store_payment_method_id: 9 },
+        { id: 4242 },
+        { id: 7, amount: 100000, status: 'pending' },
+        posUser,
+      );
+
+      expect(recordSaleMovement()).not.toHaveBeenCalled();
+    });
+
+    it('POS efectivo succeeded → sí escribe el sale (no-regresión)', async () => {
+      arrangeCashRegister('cash');
+
+      await (service as any).recordCashRegisterMovement(
+        { store_id: 1, store_payment_method_id: 9 },
+        { id: 4242 },
+        { id: 7, amount: 100000, status: 'succeeded' },
+        posUser,
+      );
+
+      expect(recordSaleMovement()).toHaveBeenCalledTimes(1);
+      expect(recordSaleMovement()).toHaveBeenCalledWith(
+        5,
+        expect.objectContaining({
+          amount: 100000,
+          payment_method: 'cash',
+          order_id: 4242,
+          payment_id: 7,
+        }),
+      );
+    });
+  });
+
   /**
    * Cobro multimétodo de contado en el POS (paso 2 del plan de pago
    * multimétodo): `payments[]` con 2 tramos crea 2 filas `succeeded` en la

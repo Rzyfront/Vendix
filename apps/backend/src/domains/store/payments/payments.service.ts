@@ -6554,6 +6554,18 @@ export class PaymentsService {
       );
       if (!order_id || amount <= 0) return;
 
+      // Paso 7 (Fase 2): una promesa de cobro no es dinero en caja — el
+      // cajero nunca lo tuvo. Solo los pagos `succeeded` directos escriben
+      // `sale`. La proyección post-commit expone el estado como `status`
+      // (`p.state ?? p.status`); las filas crudas lo traen como `state`.
+      const paymentState = payment?.state ?? payment?.status;
+      if (paymentState !== 'succeeded') {
+        this.logger.debug(
+          `[CashRegister] Skipping movement for payment ${payment_id ?? 'unknown'} (order ${order_id}): state is '${paymentState ?? 'unknown'}', not 'succeeded'`,
+        );
+        return;
+      }
+
       // Resolve the actual system payment method type (cash, card, etc.)
       // payment.payment_method contains the display_name, not the system type
       let payment_method = 'cash';
@@ -6577,6 +6589,17 @@ export class PaymentsService {
           return;
         }
         payment_method = method?.system_payment_method?.type || 'cash';
+      }
+
+      // Paso 7 (Fase 2): Wompi/wallet quedan fuera de caja por decisión del
+      // dueño — el dinero vive en la pasarela, sin cajero que lo cuadre.
+      // Aplica aunque el pago ya esté `succeeded` (p. ej. débito wallet
+      // multimétodo liquidado en banda).
+      if (payment_method === 'wompi' || payment_method === 'wallet') {
+        this.logger.debug(
+          `[CashRegister] Skipping ${payment_method} movement (order ${order_id}): la pasarela queda fuera de caja`,
+        );
+        return;
       }
 
       this.logger.debug(

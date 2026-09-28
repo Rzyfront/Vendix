@@ -31,6 +31,18 @@ export class PayOrderDto {
   amount_received?: number;
 
   // Credit payment fields
+  /**
+   * Fase 2 paso 5 — carril "registrar pago": SÓLO `flow/pay` sobre una orden
+   * con pago `pending` de confirmación manual (`isManualConfirmationPending`)
+   * —o con un parcial ya registrado (`pending_payment` + abonos `succeeded`)—
+   * lee este campo, y entonces define LO COBRADO (no el total de la orden):
+   * `amount` < saldo → pago parcial (la orden sigue en `pending_payment` con
+   * `remaining_balance` actualizado, sin transición, sin stock ni factura);
+   * `amount` = saldo → flujo actual. En efectivo, `amount_received` > `amount`
+   * produce vuelto (`change`); lo no-efectivo nunca supera el saldo
+   * (`PAY_MULTI_TENDER_SUM_MISMATCH` / `PAY_INVALID_AMOUNT_001`). Fuera del
+   * carril manual este campo se ignora como siempre.
+   */
   @IsOptional()
   @IsNumber()
   @Min(0.01)

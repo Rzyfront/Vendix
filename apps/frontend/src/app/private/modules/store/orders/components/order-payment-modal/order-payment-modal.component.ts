@@ -2,8 +2,11 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   input,
   output,
+  untracked,
+  viewChild,
 } from '@angular/core';
 
 import {
@@ -16,6 +19,7 @@ import {
 import { CurrencyPipe } from '../../../../../../shared/pipes';
 import {
   fromStorePaymentMethod,
+  PaymentMethodType,
   type PaymentMethod,
 } from '../../../../../../shared/models/payment-method.model';
 import { Order } from '../../interfaces/order.interface';
@@ -64,6 +68,12 @@ export class OrderPaymentModalComponent {
   readonly order = input<Order | null>(null);
   readonly paymentMethods = input<StorePaymentMethod[]>([]);
   readonly isCreditOrder = input<boolean>(false);
+  /**
+   * Fase 2 (paso 8): cobro manual pendiente (pago `pending` de confirmación
+   * manual o saldo parcial). Habilita monto editable ≤ saldo, preselecciona
+   * efectivo y muestra el saldo restante. Nunca coincide con crédito.
+   */
+  readonly manualPaymentPending = input<boolean>(false);
   readonly remainingBalance = input<number>(0);
   readonly installments = input<any[]>([]);
   readonly creditType = input<string>('');
@@ -82,23 +92,51 @@ export class OrderPaymentModalComponent {
   /** Normalized submit forwarded up; the page maps it to `PayOrderDto`. */
   readonly paymentSubmitted = output<PaymentSubmit>();
 
+  private readonly collector = viewChild<PaymentCollectorComponent>('collector');
+
+  constructor() {
+    // Fase 2 (paso 8): efectivo preseleccionado en el cobro manual (mismo
+    // patrón que `pos-payment-step`): corre al montar el collector o al
+    // resolver los métodos mientras nada está elegido; nunca pisa la
+    // elección explícita del operador.
+    effect(() => {
+      if (!this.manualPaymentPending()) return;
+      const collector = this.collector();
+      const methods = this.collectorMethods();
+      if (!collector || methods.length === 0 || collector.selectedMethod()) return;
+      untracked(() => {
+        const pick = methods.find((m) => m.type === PaymentMethodType.CASH) ?? null;
+        if (pick) collector.selectMethod(pick, { advance: false });
+      });
+    });
+  }
+
   // ── Derived ─────────────────────────────────────────────────
   /**
    * Suggested charge: the full order total for a regular order, the remaining
    * balance for a credit abono (the collector still lets the operator override it
-   * when `allowAmountOverride` is on).
+   * when `allowAmountOverride` is on). Fase 2 (paso 8): the manual lane also
+   * suggests the outstanding balance, falling back to the grand total when the
+   * order carries a manual `pending` payment but no computed balance yet.
    */
   readonly chargeAmount = computed<number>(() => {
     if (this.isCreditOrder()) {
+      return this.remainingBalance();
+    }
+    if (this.manualPaymentPending() && this.remainingBalance() > 0) {
       return this.remainingBalance();
     }
     return Number(this.order()?.grand_total) || 0;
   });
 
   /** Only feed a remaining balance to the collector for credit abonos. */
-  readonly collectorRemaining = computed<number | undefined>(() =>
-    this.isCreditOrder() ? this.remainingBalance() : undefined,
-  );
+  readonly collectorRemaining = computed<number | undefined>(() => {
+    if (this.isCreditOrder()) return this.remainingBalance();
+    // Fase 2 (paso 8): el cobro manual también parte del saldo (con fallback
+    // a `chargeAmount`, nunca 0 por un balance aún sin computar).
+    if (this.manualPaymentPending()) return this.chargeAmount();
+    return undefined;
+  });
 
   readonly modalSubtitle = computed<string>(() => {
     const num = this.order()?.order_number;
@@ -106,7 +144,8 @@ export class OrderPaymentModalComponent {
   });
 
   readonly submitLabel = computed<string>(() =>
-    this.isCreditOrder() ? 'Registrar Abono' : 'Confirmar Pago',
+    // Fase 2 (paso 8): el cobro manual REGISTRA (monto + método), no confirma.
+    this.isCreditOrder() ? 'Registrar Abono' : this.manualPaymentPending() ? 'Registrar Pago' : 'Confirmar Pago',
   );
 
   readonly modalTitle = computed<string>(() =>
@@ -145,8 +184,28 @@ export class OrderPaymentModalComponent {
       Math.round(Number(amount) * 100) > Math.round(this.remainingBalance() * 100);
   }
 
+  /**
+   * Fase 2 (paso 8): el cobro manual tampoco supera el saldo (`amount` ≤
+   * saldo; el vuelto sale de `amount_received`, no del monto). Misma
+   * precisión monetaria que el tope del abono.
+   */
+  manualAmountExceedsBalance(amount: number): boolean {
+    return !this.isCreditOrder() &&
+      this.manualPaymentPending() &&
+      Math.round(Number(amount) * 100) > Math.round(this.chargeAmount() * 100);
+  }
+
+  /** Saldo que queda pendiente después de cobrar `amount` (≥ 0). */
+  manualRemainingAfter(amount: number): number {
+    return Math.max(0, Math.round((this.chargeAmount() - Number(amount || 0)) * 100) / 100);
+  }
+
   submitPayment(submit: PaymentSubmit): void {
-    if (this.isProcessing() || this.creditAmountExceedsBalance(submit.amount)) return;
+    if (
+      this.isProcessing() ||
+      this.creditAmountExceedsBalance(submit.amount) ||
+      this.manualAmountExceedsBalance(submit.amount)
+    ) return;
     this.paymentSubmitted.emit(submit);
   }
 

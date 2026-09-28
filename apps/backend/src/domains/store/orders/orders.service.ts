@@ -72,6 +72,7 @@ import {
   canReactivateAsRole,
   canFastTrack,
   canCreditPayment,
+  requiresPaymentRegistration,
   canEditOrder,
   canDispatchOrder,
   canManualShip,
@@ -1787,6 +1788,10 @@ export class OrdersService {
           label_key: 'ORD_ACTION_CREDIT_PAYMENT',
           ...canCreditPayment(snapshot),
         });
+      } else if (requiresPaymentRegistration(snapshot)) {
+        // Fase 2 paso 6 — espejo de `getAvailableActions`: pago manual
+        // pendiente o saldo parcial → el personal REGISTRA por `flow/pay`.
+        actions.push({ code: 'pay', label_key: 'ORD_ACTION_PAY', ...canPay(snapshot) });
       } else {
         actions.push({
           code: 'confirm_payment',

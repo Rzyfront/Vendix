@@ -11,6 +11,7 @@ import {
   canReactivateAsRole,
   canFastTrack,
   canCreditPayment,
+  requiresPaymentRegistration,
   canDispatchOrder,
   canManualShip,
   canReadyForPickupBeforePayment,
@@ -37,7 +38,9 @@ const INVOICED = 'ORD_PAYMENT_CANCEL_INVOICED_001';
 const SPLIT_LOCKED = 'SPLIT_ACCOUNT_LOCKED';
 const ITEM_NOT_DELIVERABLE = 'ORDER_ITEM_NOT_DELIVERABLE';
 
-function order(overrides: Partial<OrderActionSnapshot> = {}): OrderActionSnapshot {
+function order(
+  overrides: Partial<OrderActionSnapshot> & { remaining_balance?: number | null } = {},
+): OrderActionSnapshot {
   return {
     state: 'created',
     grand_total: 100,
@@ -959,5 +962,52 @@ describe('D — canCancelPayment: el stock comprometido NO bloquea cancelar el p
     expect(
       canCancelPayment(order({ state: 'finished', order_items: committed, payments: [directPayment(100)] })),
     ).toEqual({ enabled: false, reason: CANCEL_FINISHED });
+  });
+});
+
+describe('order-action-policy — requiresPaymentRegistration (Fase 2 paso 6)', () => {
+  const manualPending = (type = 'bank_transfer', processing_mode = 'ONLINE') => ({
+    state: 'pending',
+    amount: 100,
+    store_payment_method: { system_payment_method: { processing_mode, type } },
+  });
+
+  it.each([
+    ['bank_transfer pendiente', manualPending('bank_transfer', 'ONLINE')],
+    ['voucher pendiente', manualPending('voucher', 'ONLINE')],
+    ['card DIRECT pendiente', manualPending('card', 'DIRECT')],
+  ])('pago manual pendiente → registra (%s)', (_label, payment) => {
+    expect(
+      requiresPaymentRegistration(order({ state: 'pending_payment', remaining_balance: 0, payments: [payment] })),
+    ).toBe(true);
+  });
+
+  it('saldo parcial sin marcador pendiente → registra (remaining_balance > 0)', () => {
+    expect(
+      requiresPaymentRegistration(order({
+        state: 'pending_payment',
+        grand_total: 100,
+        remaining_balance: 40,
+        payments: [directPayment(60)],
+      })),
+    ).toBe(true);
+  });
+
+  it.each([
+    ['wompi pendiente saldado', { remaining_balance: 0, payments: [{ state: 'pending', amount: 100, store_payment_method: { system_payment_method: { processing_mode: 'ONLINE', type: 'wompi' } } }] }],
+    ['wallet pendiente saldado', { remaining_balance: 0, payments: [{ state: 'pending', amount: 100, store_payment_method: { system_payment_method: { processing_mode: 'DIRECT', type: 'wallet' } } }] }],
+    ['contra entrega saldada', { remaining_balance: 0, payments: [{ state: 'pending', amount: 100, store_payment_method: { system_payment_method: { processing_mode: 'ON_DELIVERY', type: 'cash_on_delivery' } } }] }],
+    ['pending sin método resoluble saldado (fail-closed)', { remaining_balance: 0, payments: [{ state: 'pending', amount: 100, store_payment_method: null }] }],
+    ['sin pagos y sin saldo', { remaining_balance: 0, payments: [] }],
+  ])('%s → no registra (sigue confirm_payment)', (_label, snapshot) => {
+    expect(requiresPaymentRegistration(order({ state: 'pending_payment', ...snapshot }))).toBe(false);
+  });
+
+  it('fuera de pending_payment nunca registra aunque haya saldo', () => {
+    for (const state of ['created', 'processing', 'shipped', 'delivered', 'finished']) {
+      expect(
+        requiresPaymentRegistration(order({ state, remaining_balance: 40, payments: [manualPending()] })),
+      ).toBe(false);
+    }
   });
 });
