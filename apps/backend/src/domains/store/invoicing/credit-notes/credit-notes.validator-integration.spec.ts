@@ -235,6 +235,70 @@ describe('CreditNotesService.createCreditNote — integración con FiscalDocumen
     expectNoArithmeticMismatch(report);
   });
 
+  describe('NC TOTAL — inclusividad de la gemela legada', () => {
+    const legacyParent = (unit_price: number) =>
+      baseParent({
+        id: 8150,
+        subtotal_amount: money(22685.19),
+        discount_amount: money(0),
+        tax_amount: money(1814.81),
+        total_amount: money(24500),
+        invoice_items: [
+          {
+            id: 651,
+            product_id: null,
+            product_variant_id: null,
+            description: '1 EJECUTIVO',
+            quantity: money(1),
+            unit_price: money(unit_price),
+            discount_amount: money(0),
+            tax_amount: money(1814.81),
+            total_amount: money(24500),
+            is_inclusive: true,
+            unit_code: 'NIU',
+            price_unit_quantity: null,
+            stock_units_consumed: null,
+            serial_numbers_snapshot: null,
+          },
+        ],
+        invoice_taxes: [
+          {
+            tax_rate_id: 70,
+            tax_name: 'INC',
+            tax_rate: money(8),
+            tax_type: 'inc',
+            taxable_amount: money(22685.19),
+            tax_amount: money(1814.81),
+          },
+        ],
+      });
+
+    it('factura manual anterior con el BRUTO persistido (PAVS36: 24500, is_inclusive=true) conserva is_inclusive=true', async () => {
+      const { service } = setup(legacyParent(24500));
+      const note = await service.createCreditNote({
+        related_invoice_id: 8150,
+        reason: 'Anulación total',
+      } as unknown as CreateCreditNoteDto);
+
+      const line = (note.invoice_items as Array<Record<string, any>>)[0];
+      expect(line.is_inclusive).toBe(true);
+      expect(String(line.unit_price)).toBe('24500');
+      expect(String(note.subtotal_amount)).toBe('22685.19');
+    });
+
+    it('flag legado mentiroso (unit_price YA base con is_inclusive=true) se copia como no inclusivo', async () => {
+      const { service } = setup(legacyParent(22685.19));
+      const note = await service.createCreditNote({
+        related_invoice_id: 8150,
+        reason: 'Anulación total',
+      } as unknown as CreateCreditNoteDto);
+
+      const line = (note.invoice_items as Array<Record<string, any>>)[0];
+      expect(line.is_inclusive).toBe(false);
+      expectNoArithmeticMismatch(validateNote(note));
+    });
+  });
+
   it('1×24500 INC 8% inclusivo (base 22685.19, cuota 1814.81) — NC PARCIAL (misma línea completa vía kernel)', async () => {
     const parent = baseParent({
       id: 8101,

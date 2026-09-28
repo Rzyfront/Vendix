@@ -36,6 +36,7 @@ import {
 } from '../pos/services/pos-cash-register.service';
 import { PosSessionDetailModalComponent } from '../pos/components/pos-session-detail-modal.component';
 import { PosSessionCloseModalComponent } from '../pos/components/pos-session-close-modal.component';
+import { CashSessionReportPrintService } from '../pos/services/cash-session-report-print.service';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { LocationsService } from '../inventory/services/locations.service';
 import { InventoryLocation } from '../inventory/interfaces';
@@ -416,6 +417,7 @@ export class CashRegistersComponent {
   private readonly locations_service = inject(LocationsService);
   private readonly toast_service = inject(ToastService);
   private readonly dialog_service = inject(DialogService);
+  private readonly report_print_service = inject(CashSessionReportPrintService);
 
   // Tabs configuration
   readonly tabs: ScrollableTab[] = [
@@ -778,7 +780,40 @@ export class CashRegistersComponent {
       show: (row: CashRegisterSession) => row.status === 'open',
       action: (row: CashRegisterSession) => this.onCloseSession(row),
     },
+    {
+      label: 'Imprimir',
+      icon: 'printer',
+      variant: 'info',
+      tooltip: 'Imprimir el resumen consolidado de la sesión',
+      action: (row: CashRegisterSession) => this.onPrintSession(row),
+    },
   ];
+
+  /** Mismo ticket que el cierre y el detalle: pide el reporte y lo imprime. */
+  private readonly printing_session_id = signal<number | null>(null);
+
+  private onPrintSession(row: CashRegisterSession): void {
+    if (this.printing_session_id() !== null) return;
+    this.printing_session_id.set(row.id);
+    this.cash_register_service
+      .getCloseReport(row.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: async (report) => {
+          try {
+            await this.report_print_service.print(report);
+          } catch {
+            this.toast_service.error('No se pudo imprimir el resumen de la sesión');
+          } finally {
+            this.printing_session_id.set(null);
+          }
+        },
+        error: (err) => {
+          this.printing_session_id.set(null);
+          this.toast_service.error(extractApiErrorMessage(err));
+        },
+      });
+  }
 
   constructor() {
     const fb = inject(FormBuilder);
