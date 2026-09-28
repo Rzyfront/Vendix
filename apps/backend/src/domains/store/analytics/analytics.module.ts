@@ -9,13 +9,15 @@ import { FinancialAnalyticsService } from './services/financial-analytics.servic
 import { PurchasesAnalyticsService } from './services/purchases-analytics.service';
 import { ReviewsAnalyticsService } from './services/reviews-analytics.service';
 import { DispatchAnalyticsService } from './services/dispatch-analytics.service';
+import { PaymentsAnalyticsService } from './services/payments-analytics.service';
+import { PaymentsAnalyticsController } from './payments-analytics.controller';
 import { FinancialAnalyticsCacheInvalidationListener } from './listeners/financial-analytics-cache-invalidation.listener';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 
 @Module({
   imports: [ResponseModule, PrismaModule],
-  controllers: [AnalyticsController],
+  controllers: [AnalyticsController, PaymentsAnalyticsController],
   providers: [
     SalesAnalyticsService,
     InventoryAnalyticsService,
@@ -26,6 +28,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
     PurchasesAnalyticsService,
     ReviewsAnalyticsService,
     DispatchAnalyticsService,
+    PaymentsAnalyticsService,
     FinancialAnalyticsCacheInvalidationListener,
   ],
   exports: [
