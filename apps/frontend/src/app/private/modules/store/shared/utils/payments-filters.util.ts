@@ -301,6 +301,25 @@ export function stateToQueryParams(
   return params;
 }
 
+/**
+ * Patch para `router.navigate(..., { queryParamsHandling: 'merge' })`: igual que
+ * {@link stateToQueryParams} pero con `null` en las claves vacías, porque con
+ * `merge` una clave omitida CONSERVA su valor viejo (quitar el último estado no
+ * limpiaría `?state=`). `null` es lo que Angular interpreta como "borrar".
+ */
+export function stateToUrlPatch(
+  state: PaymentsFilterState,
+): Record<string, string | null> {
+  return {
+    preset: null,
+    state: null,
+    payment_method_id: null,
+    granularity: null,
+    search: null,
+    ...stateToQueryParams(state),
+  };
+}
+
 /** Los params que cuentan como "la URL trae filtros" (para decidir restaurar el pin). */
 const URL_FILTER_KEYS = [
   'start_date',

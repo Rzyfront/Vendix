@@ -59,6 +59,7 @@ import {
   stateToFilterValues,
   stateToQuery,
   stateToQueryParams,
+  stateToUrlPatch,
 } from '../../../shared/utils/payments-filters.util';
 import {
   buildPinnedFiltersKey,
@@ -377,7 +378,7 @@ export class PaymentsReportPageComponent {
   private updateUrl(state: PaymentsFilterState): void {
     void this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: stateToQueryParams(state),
+      queryParams: stateToUrlPatch(state),
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
