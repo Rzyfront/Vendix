@@ -724,7 +724,9 @@ export class SessionsService {
     const window_end = session.closed_at ?? new Date();
     const refunds_rows = await this.prisma.refunds.findMany({
       where: {
-        state: { notIn: ['failed', 'cancelled'] },
+        // Solo reembolsos con salida de dinero en curso o hecha: una solicitud
+        // pendiente de aprobación aún no sale de la caja ni del medio de pago.
+        state: { in: ['approved', 'processing', 'completed'] },
         OR: [
           ...(linked_ids.length ? [{ id: { in: linked_ids } }] : []),
           {
