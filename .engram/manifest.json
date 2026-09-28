@@ -2968,6 +2968,46 @@
       "sessions": 0,
       "memories": 5,
       "prompts": 0
+    },
+    {
+      "id": "1b8c465e",
+      "created_by": "rzy",
+      "created_at": "2026-09-28T14:16:29Z",
+      "sessions": 3,
+      "memories": 3,
+      "prompts": 0
+    },
+    {
+      "id": "9ee95d6b",
+      "created_by": "dmin",
+      "created_at": "2026-09-28T08:07:31Z",
+      "sessions": 0,
+      "memories": 3,
+      "prompts": 0
+    },
+    {
+      "id": "6f89d6a6",
+      "created_by": "dmin",
+      "created_at": "2026-09-28T06:33:24Z",
+      "sessions": 0,
+      "memories": 2,
+      "prompts": 0
+    },
+    {
+      "id": "1aeb76ba",
+      "created_by": "dmin",
+      "created_at": "2026-09-28T08:25:07Z",
+      "sessions": 0,
+      "memories": 4,
+      "prompts": 0
+    },
+    {
+      "id": "3e44d820",
+      "created_by": "rzy",
+      "created_at": "2026-09-28T15:50:19Z",
+      "sessions": 0,
+      "memories": 2,
+      "prompts": 0
     }
   ]
 }

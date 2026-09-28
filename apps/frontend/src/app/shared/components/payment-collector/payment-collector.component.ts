@@ -878,7 +878,15 @@ export class PaymentCollectorComponent implements OnInit {
     else this.flashValidation();
   }
 
-  selectMethod(method: PaymentMethod, opts?: { advance?: boolean }): void {
+  /**
+   * `opts.bankAccountId` preselecciona una cuenta bancaria del método (p.ej. la
+   * cuenta a la que el cliente transfirió online al registrar ese pago). Si el
+   * id no está entre las cuentas del método se ignora y el cajero elige.
+   */
+  selectMethod(
+    method: PaymentMethod,
+    opts?: { advance?: boolean; bankAccountId?: number | null },
+  ): void {
     const advance = opts?.advance !== false;
     this.amountCollapsed.set(false);
     // Reset per-method slices so a previous method never leaks state.
@@ -888,7 +896,15 @@ export class PaymentCollectorComponent implements OnInit {
     // de método se limpia y se recarga desde el `custom_config.accounts` del nuevo.
     this.selectedBankAccountKey.set(null);
     this.selectedBankAccountId.set(null);
-    this.bankAccounts.set(this.bankAccountsFor(method));
+    const methodAccounts = this.bankAccountsFor(method);
+    this.bankAccounts.set(methodAccounts);
+    if (opts?.bankAccountId != null) {
+      const preset = methodAccounts.find((a) => a.id === opts.bankAccountId);
+      if (preset) {
+        this.selectedBankAccountKey.set(preset.key);
+        this.selectedBankAccountId.set(preset.id);
+      }
+    }
     // A method switch clears any prior manual cash override.
     this.manuallyEditedCash.set(false);
 

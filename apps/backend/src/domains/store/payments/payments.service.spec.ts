@@ -309,7 +309,10 @@ describe('PaymentsService', () => {
         { provide: CouponsService, useValue: mockCouponsService },
         {
           provide: SessionsService,
-          useValue: { getActiveSession: jest.fn() },
+          useValue: {
+            getActiveSession: jest.fn(),
+            assertSessionForSales: jest.fn(),
+          },
         },
         {
           provide: MovementsService,
@@ -1427,6 +1430,123 @@ describe('PaymentsService', () => {
       // `coupon_uses` / `coupons.current_uses` sólo se tocan dentro de la
       // transacción de cobro; el draft no llega allí y no registra uso.
       expect((couponsService as any).registerUse).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Gate único de caja en `processPosPayment`: guardar un borrador
+   * (`is_draft=true`, `requires_payment!==true`) no recibe dinero y no exige
+   * caja; ventas, crédito y envío sí. La lógica del helper
+   * (`enabled && require_session_for_sales` + sesión propia) se prueba en
+   * `sessions.service.spec.ts`; aquí se prueba CUÁNDO se invoca.
+   */
+  describe('processPosPayment — borrador sin caja vs venta con gate (CASH_SESSION_REQUIRED_001)', () => {
+    const STOP_AFTER_GATE = 'stop-after-cash-gate';
+    const CONTEXT_STORE_ID = 1;
+
+    let contextSpy: jest.SpyInstance;
+
+    const posUser: any = {
+      id: 7,
+      email: 'auxiliar@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+
+    const buildDto = (overrides: any = {}): any => ({
+      store_id: CONTEXT_STORE_ID,
+      currency: 'COP',
+      items: [{ product_id: 1, quantity: 1, unit_price: 1000 }],
+      payments: [],
+      total_amount: 1000,
+      ...overrides,
+    });
+
+    const arrange = () => {
+      contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({
+          store_id: CONTEXT_STORE_ID,
+          organization_id: 1,
+        } as any);
+
+      // Si el gate deja pasar, la transacción se abre: el sentinel hace
+      // visible ese cruce sin ejecutar el cobro real.
+      (prisma as any).$transaction = jest.fn(async () => {
+        throw new Error(STOP_AFTER_GATE);
+      });
+    };
+
+    afterEach(() => {
+      contextSpy?.mockRestore();
+    });
+
+    it('borrador puro sin caja: NO invoca el gate y llega a la transacción', async () => {
+      arrange();
+
+      await expect(
+        service.processPosPayment(buildDto({ is_draft: true }), posUser),
+      ).rejects.toThrow(STOP_AFTER_GATE);
+
+      expect((prisma as any).$transaction).toHaveBeenCalledTimes(1);
+      expect(sessionsService.assertSessionForSales).not.toHaveBeenCalled();
+    });
+
+    it('venta sin caja: invoca el gate con user.id y propaga CASH_SESSION_REQUIRED_001 sin abrir transacción', async () => {
+      arrange();
+      (sessionsService.assertSessionForSales as jest.Mock).mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+      );
+
+      const error = await service
+        .processPosPayment(buildDto({}), posUser)
+        .catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe(
+        ErrorCodes.CASH_SESSION_REQUIRED_001.code,
+      );
+      expect(sessionsService.assertSessionForSales).toHaveBeenCalledWith(
+        posUser.id,
+      );
+      expect(sessionsService.assertSessionForSales).toHaveBeenCalledTimes(1);
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
+    });
+
+    it('venta con caja: el gate resuelve y el cobro continúa a la transacción', async () => {
+      arrange();
+
+      await expect(
+        service.processPosPayment(buildDto({}), posUser),
+      ).rejects.toThrow(STOP_AFTER_GATE);
+
+      expect(sessionsService.assertSessionForSales).toHaveBeenCalledWith(
+        posUser.id,
+      );
+      expect((prisma as any).$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('borrador + requires_payment mantiene POS_DRAFT_REQUIRES_PAYMENT_001 aunque falte la caja', async () => {
+      arrange();
+      // El gate rechazaría, pero el invariante B.2 corre primero: el payload
+      // contradictorio es un bug del cliente, no un problema de caja.
+      (sessionsService.assertSessionForSales as jest.Mock).mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+      );
+
+      const error = await service
+        .processPosPayment(
+          buildDto({ is_draft: true, requires_payment: true }),
+          posUser,
+        )
+        .catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe(
+        ErrorCodes.POS_DRAFT_REQUIRES_PAYMENT_001.code,
+      );
+      expect(sessionsService.assertSessionForSales).not.toHaveBeenCalled();
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
     });
   });
 
@@ -4268,6 +4388,103 @@ describe('PaymentsService', () => {
       );
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('processing_mode'),
+      );
+    });
+  });
+
+  describe('recordCashRegisterMovement — el POS no registra en caja cobros digitales pending (paso 7)', () => {
+    // Casos directos sobre el helper privado: el fan-out post-commit le pasa
+    // la proyección (`status`, no `state`) y el `store_payment_method_id` del
+    // tramo en el DTO. Caja habilitada con rastreo de no-efectivo para que
+    // solo los guards bajo prueba puedan omitir el movimiento.
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+    };
+
+    const arrangeCashRegister = (methodType: string) => {
+      (settingsService.getSettings as jest.Mock).mockResolvedValue({
+        checkout: { require_customer_data: false },
+        pos: { cash_register: { enabled: true, track_non_cash_payments: true } },
+      });
+      (sessionsService.getActiveSession as jest.Mock).mockResolvedValue({
+        id: 5,
+      });
+      (prisma as any).store_payment_methods = {
+        findFirst: jest.fn(async () => ({
+          id: 9,
+          system_payment_method: {
+            type: methodType,
+            processing_mode: payment_processing_mode_enum.DIRECT,
+          },
+        })),
+      };
+    };
+
+    const recordSaleMovement = () =>
+      movementsService.recordSaleMovement as jest.Mock;
+
+    it('POS wompi pendiente → recordSaleMovement no se llama', async () => {
+      arrangeCashRegister('wompi');
+
+      await (service as any).recordCashRegisterMovement(
+        { store_id: 1, store_payment_method_id: 9 },
+        { id: 4242 },
+        { id: 7, amount: 100000, status: 'pending' },
+        posUser,
+      );
+
+      expect(recordSaleMovement()).not.toHaveBeenCalled();
+    });
+
+    it('wallet succeeded → tampoco escribe: la pasarela queda fuera de caja', async () => {
+      // Fila cruda (`state`, no `status`): p. ej. el débito wallet de un
+      // cobro multimétodo que sí liquidó en banda.
+      arrangeCashRegister('wallet');
+
+      await (service as any).recordCashRegisterMovement(
+        { store_id: 1, store_payment_method_id: 11 },
+        { id: 4242 },
+        { id: 8, amount: 80000, state: 'succeeded' },
+        posUser,
+      );
+
+      expect(recordSaleMovement()).not.toHaveBeenCalled();
+    });
+
+    it('efectivo pendiente → no escribe: la promesa no es dinero en caja', async () => {
+      arrangeCashRegister('cash');
+
+      await (service as any).recordCashRegisterMovement(
+        { store_id: 1, store_payment_method_id: 9 },
+        { id: 4242 },
+        { id: 7, amount: 100000, status: 'pending' },
+        posUser,
+      );
+
+      expect(recordSaleMovement()).not.toHaveBeenCalled();
+    });
+
+    it('POS efectivo succeeded → sí escribe el sale (no-regresión)', async () => {
+      arrangeCashRegister('cash');
+
+      await (service as any).recordCashRegisterMovement(
+        { store_id: 1, store_payment_method_id: 9 },
+        { id: 4242 },
+        { id: 7, amount: 100000, status: 'succeeded' },
+        posUser,
+      );
+
+      expect(recordSaleMovement()).toHaveBeenCalledTimes(1);
+      expect(recordSaleMovement()).toHaveBeenCalledWith(
+        5,
+        expect.objectContaining({
+          amount: 100000,
+          payment_method: 'cash',
+          order_id: 4242,
+          payment_id: 7,
+        }),
       );
     });
   });

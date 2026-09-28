@@ -233,7 +233,7 @@ describe('OrderFlowService.payOrder — payment_registered / state_changed', () 
     const service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
       { emit: jest.fn() } as any,
-      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, { assertSessionForSales: jest.fn() } as any, {} as any, {} as any, {} as any, {} as any,
       { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
       undefined, undefined, undefined, undefined, undefined, undefined,
       orderHistoryService as any,
@@ -334,7 +334,7 @@ describe('OrderFlowService.payOrder — payment_registered / state_changed', () 
     const service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
       { emit: jest.fn() } as any,
-      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, { assertSessionForSales: jest.fn() } as any, {} as any, {} as any, {} as any, {} as any,
       { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
       undefined, undefined, undefined, undefined, undefined, undefined,
       orderHistoryService as any,
@@ -421,7 +421,7 @@ describe('OrderFlowService.payOrder — payment_registered / state_changed', () 
     const service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
       { emit: jest.fn() } as any,
-      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, { assertSessionForSales: jest.fn() } as any, {} as any, {} as any, {} as any, {} as any,
       { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
       undefined, undefined, undefined, undefined, undefined, undefined,
       orderHistoryService as any,

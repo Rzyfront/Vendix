@@ -6,6 +6,7 @@ import {
   orderStateLabel, orderEventLabel, orderEventActorLabel, isRefundOrderEvent,
   cancelPaymentCopy,
   isCodAwaitingConfirmation, isOrderEligibleForSplitCreation,
+  isManualPaymentPending,
 } from './order-details-page.component';
 import { Order, OrderItem, OrderEvent } from '../../interfaces/order.interface';
 import {
@@ -42,6 +43,52 @@ describe('OrderDetailsPageComponent — contra entrega y cuentas', () => {
     expect(isOrderEligibleForSplitCreation({ ...order, payments: [{ state: 'pending' }] } as Order)).toBeFalse();
     expect(isOrderEligibleForSplitCreation({ ...order, state: 'cancelled' })).toBeFalse();
     expect(isOrderEligibleForSplitCreation({ ...order, payments: [{ state: 'succeeded', amount: 100 }] } as Order)).toBeFalse();
+  });
+});
+
+describe('Fase 2 (paso 8) — isManualPaymentPending', () => {
+  const manual = (over: Record<string, unknown> = {}) => ({
+    state: 'pending',
+    store_payment_method: {
+      system_payment_method: { type: 'bank_transfer', processing_mode: 'DIRECT' },
+    },
+    ...over,
+  });
+  const order = (over: Record<string, unknown> = {}) => ({
+    state: 'pending_payment',
+    remaining_balance: 0,
+    payments: [],
+    ...over,
+  });
+
+  it('es true con pago manual pendiente o con saldo parcial', () => {
+    expect(isManualPaymentPending(order({ payments: [manual()] }) as any)).toBeTrue();
+    expect(isManualPaymentPending(order({ payments: [manual({ store_payment_method: { system_payment_method: { type: 'voucher', processing_mode: 'DIRECT' } } })] }) as any)).toBeTrue();
+    expect(isManualPaymentPending(order({ remaining_balance: 40000 }) as any)).toBeTrue();
+  });
+
+  it('es false para wallet/wompi/contraentrega, otros estados y orden saldada', () => {
+    const wompi = manual({ store_payment_method: { system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' } } });
+    const wallet = manual({ store_payment_method: { system_payment_method: { type: 'wallet', processing_mode: 'DIRECT' } } });
+    const cod = manual({ store_payment_method: { system_payment_method: { type: 'cash_on_delivery', processing_mode: 'ON_DELIVERY' } } });
+    expect(isManualPaymentPending(order({ payments: [wompi] }) as any)).toBeFalse();
+    expect(isManualPaymentPending(order({ payments: [wallet] }) as any)).toBeFalse();
+    expect(isManualPaymentPending(order({ payments: [cod] }) as any)).toBeFalse();
+    expect(isManualPaymentPending(order({ payments: [{ ...manual(), state: 'cancelled' }] }) as any)).toBeFalse();
+    expect(isManualPaymentPending(order({ payments: [{ state: 'pending' }] }) as any)).toBeFalse();
+    expect(isManualPaymentPending(order({ state: 'processing', payments: [manual()] }) as any)).toBeFalse();
+    expect(isManualPaymentPending(order() as any)).toBeFalse();
+    expect(isManualPaymentPending(null)).toBeFalse();
+  });
+
+  it('rotula "Registrar Pago" la acción pay de una orden manual pendiente', () => {
+    const buttons = buildOrderActionButtons(
+      order({
+        payments: [manual()],
+        available_actions: [{ code: 'pay', enabled: true }],
+      }) as any,
+    );
+    expect(buttons.map((b) => b.label)).toEqual(['Registrar Pago']);
   });
 });
 
