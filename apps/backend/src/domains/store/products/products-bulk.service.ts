@@ -10,6 +10,8 @@ import {
   BulkProductUploadDto,
   BulkProductItemDto,
   BulkUploadResultDto,
+  BulkUploadSessionResultDto,
+  MAX_BULK_UPLOAD_PAGE,
   BulkUploadItemResultDto,
   BulkValidationResultDto,
   BulkUploadTemplateDto,
@@ -1105,7 +1107,8 @@ export class ProductsBulkService {
     sessionId: string,
     storeId: number,
     user: any,
-  ): Promise<BulkUploadResultDto> {
+    page?: { offset?: number; limit?: number },
+  ): Promise<BulkUploadResultDto | BulkUploadSessionResultDto> {
     const s3Key = `tmp/bulk-products/${storeId}/${sessionId}.xlsx`;
 
     let fileBuffer: Buffer;
@@ -1113,6 +1116,40 @@ export class ProductsBulkService {
       fileBuffer = await this.s3Service.downloadImage(s3Key);
     } catch (error) {
       throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+    }
+
+    // Modo paginado: el cliente recorre el archivo en páginas de <=100 filas.
+    // El S3 temporal se borra solo cuando la última página terminó (done=true);
+    // ante una excepción se conserva para poder reintentar la página.
+    if (page && (page.offset !== undefined || page.limit !== undefined)) {
+      const offset = page.offset ?? 0;
+      const limit = Math.min(page.limit ?? MAX_BULK_UPLOAD_PAGE, MAX_BULK_UPLOAD_PAGE);
+
+      const all = this.parseFile(fileBuffer);
+      const total = all.length;
+      if (total > this.MAX_BATCH_SIZE) {
+        throw new VendixHttpException(ErrorCodes.BULK_PROD_LIMIT_EXCEEDED);
+      }
+      if (offset >= total) {
+        throw new BadRequestException(
+          `El offset (${offset}) está fuera del archivo: contiene ${total} filas de datos`,
+        );
+      }
+
+      const result = await this.uploadProducts(
+        { products: all.slice(offset, offset + limit) },
+        user,
+        { rowOffset: offset },
+      );
+      const done = offset + limit >= total;
+      if (done) {
+        try {
+          await this.s3Service.deleteFile(s3Key);
+        } catch (e) {
+          // Silent cleanup failure
+        }
+      }
+      return { ...result, total, offset, limit, done };
     }
 
     try {
@@ -1738,8 +1775,10 @@ export class ProductsBulkService {
   async uploadProducts(
     bulkUploadDto: BulkProductUploadDto,
     user: any,
+    options: { rowOffset?: number } = {},
   ): Promise<BulkUploadResultDto> {
     const { products } = bulkUploadDto;
+    const rowOffset = options.rowOffset ?? 0;
 
     if (products.length > this.MAX_BATCH_SIZE) {
       throw new BadRequestException(
@@ -1765,7 +1804,7 @@ export class ProductsBulkService {
 
     for (let rowIndex = 0; rowIndex < products.length; rowIndex++) {
       const productData = products[rowIndex];
-      const rowNumber = rowIndex + 2; // header = fila 1
+      const rowNumber = rowOffset + rowIndex + 2; // header = fila 1; rowOffset = página de la sesión
       try {
         // Celda de código de barras inválida (notación científica / >64):
         // se rechaza la fila en vez de crearla sin el código.

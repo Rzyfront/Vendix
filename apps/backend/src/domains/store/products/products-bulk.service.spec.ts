@@ -1165,4 +1165,122 @@ describe('ProductsBulkService', () => {
       });
     });
   });
+
+  describe('uploadProductsFromSession — commit paginado', () => {
+    let s3: { downloadImage: jest.Mock; deleteFile: jest.Mock };
+
+    const fileWithRows = (n: number) =>
+      Buffer.from(
+        [
+          'Nombre,SKU,Precio Venta',
+          ...Array.from({ length: n }, (_, i) => `P${i + 1},SKU-${i + 1},1000`),
+        ].join('\n'),
+      );
+
+    beforeEach(() => {
+      s3 = (service as any).s3Service;
+      s3.downloadImage.mockResolvedValue(fileWithRows(200));
+      s3.deleteFile.mockClear();
+      mockPrismaService.products.findFirst.mockResolvedValue(null);
+      mockProductsService.create.mockReset();
+      mockProductsService.create.mockImplementation(async (dto: any) => ({
+        id: 1,
+        name: dto.name,
+        sku: dto.sku,
+      }));
+    });
+
+    it('dos páginas 100/100 sobre 200 filas: done false/true y S3 borrado solo al final', async () => {
+      const p1: any = await service.uploadProductsFromSession('sid', 1, mockUser, {
+        offset: 0,
+        limit: 100,
+      });
+      expect(p1).toMatchObject({
+        total: 200,
+        offset: 0,
+        limit: 100,
+        done: false,
+        successful: 100,
+        failed: 0,
+        total_processed: 100,
+      });
+      expect(p1.results).toHaveLength(100);
+      expect(s3.deleteFile).not.toHaveBeenCalled();
+
+      const p2: any = await service.uploadProductsFromSession('sid', 1, mockUser, {
+        offset: 100,
+        limit: 100,
+      });
+      expect(p2).toMatchObject({ total: 200, offset: 100, done: true, successful: 100 });
+      expect(s3.deleteFile).toHaveBeenCalledTimes(1);
+      expect(s3.deleteFile).toHaveBeenCalledWith('tmp/bulk-products/1/sid.xlsx');
+      expect(mockProductsService.create).toHaveBeenCalledTimes(200);
+    });
+
+    it('row_number de la página 2 empieza en 102 y una fila inválida no aborta la página', async () => {
+      mockProductsService.create.mockImplementation(async (dto: any) => {
+        if (dto.sku === 'SKU-101') throw new BadRequestException('boom');
+        return { id: 1, name: dto.name, sku: dto.sku };
+      });
+      const p2: any = await service.uploadProductsFromSession('sid', 1, mockUser, {
+        offset: 100,
+        limit: 100,
+      });
+      expect(p2.failed).toBe(1);
+      expect(p2.successful).toBe(99);
+      const err = p2.results.find((r: any) => r.status === 'error');
+      expect(err.row_number).toBe(102);
+      expect(err.sku).toBe('SKU-101');
+      expect(p2.done).toBe(true);
+    });
+
+    it('una excepción en una página intermedia no borra el S3', async () => {
+      mockAccessValidationService.validateStoreAccess.mockRejectedValueOnce(
+        new Error('fallo'),
+      );
+      await expect(
+        service.uploadProductsFromSession('sid', 1, mockUser, { offset: 0, limit: 100 }),
+      ).rejects.toThrow('fallo');
+      expect(s3.deleteFile).not.toHaveBeenCalled();
+    });
+
+    it('offset >= total responde 400 y no borra el S3', async () => {
+      await expect(
+        service.uploadProductsFromSession('sid', 1, mockUser, { offset: 200, limit: 100 }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(s3.deleteFile).not.toHaveBeenCalled();
+    });
+
+    it('sin offset/limit conserva el comportamiento legacy: procesa todo y borra el S3', async () => {
+      const r: any = await service.uploadProductsFromSession('sid', 1, mockUser);
+      expect(r.total_processed).toBe(200);
+      expect(r.done).toBeUndefined();
+      expect(s3.deleteFile).toHaveBeenCalledTimes(1);
+    });
+
+    it('sesión inexistente sigue devolviendo BULK_PROD_SESSION_EXPIRED', async () => {
+      s3.downloadImage.mockRejectedValueOnce(new Error('nope'));
+      await expect(
+        service.uploadProductsFromSession('sid', 1, mockUser, { offset: 0, limit: 100 }),
+      ).rejects.toMatchObject({ errorCode: 'BULK_PROD_SESSION_EXPIRED' });
+    });
+
+    it('BulkUploadSessionDto valida limit<=100 y offset>=0', async () => {
+      const { plainToInstance } = await import('class-transformer');
+      const { validate } = await import('class-validator');
+      const { BulkUploadSessionDto } = await import('./dto');
+      const bad = await validate(
+        plainToInstance(BulkUploadSessionDto, { session_id: 'x', limit: 101 }),
+      );
+      expect(bad.map((e) => e.property)).toContain('limit');
+      const neg = await validate(
+        plainToInstance(BulkUploadSessionDto, { session_id: 'x', offset: -1 }),
+      );
+      expect(neg.map((e) => e.property)).toContain('offset');
+      const ok = await validate(
+        plainToInstance(BulkUploadSessionDto, { session_id: 'x', offset: '100', limit: '100' }),
+      );
+      expect(ok).toHaveLength(0);
+    });
+  });
 });
