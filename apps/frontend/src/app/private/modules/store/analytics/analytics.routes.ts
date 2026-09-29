@@ -335,6 +335,13 @@ export const analyticsRoutes: Routes = [
                 (c) => c.ReviewSummaryComponent,
               ),
           },
+          {
+            path: 'by-product',
+            loadComponent: () =>
+              import('./pages/reviews/review-by-product.component').then(
+                (c) => c.ReviewByProductComponent,
+              ),
+          },
         ],
       },
       // Financial Analytics (shell)

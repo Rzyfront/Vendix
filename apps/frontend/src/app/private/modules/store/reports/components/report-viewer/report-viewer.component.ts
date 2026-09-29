@@ -466,6 +466,10 @@ export class ReportViewerComponent {
           return isNaN(v) ? acc : acc + v;
         }, 0);
         value = formatStatValue(sum, s.type);
+      } else if (data) {
+        // Dataset cargado pero vacío: el stat es 0, no '-'. `data`
+        // undefined (cargando) conserva '-' para no mentir con un cero.
+        value = formatStatValue(0, s.type);
       }
 
       return {

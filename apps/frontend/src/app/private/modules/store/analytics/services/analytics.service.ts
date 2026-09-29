@@ -144,6 +144,23 @@ export interface ReviewsSummary {
   total_helpful_votes: number;
 }
 
+// Reviews por producto (misma fila que el export backend: pantalla == archivo)
+export interface ReviewsByProductRow {
+  product_id: number;
+  product_name: string;
+  sku: string;
+  total_reviews: number;
+  average_rating: number;
+  stars_5: number;
+  stars_4: number;
+  stars_3: number;
+  stars_2: number;
+  stars_1: number;
+  verified_count: number;
+  pending_count: number;
+  last_review_date: string | null;
+}
+
 // Financial interfaces
 export interface ProfitLossSummary {
   period: { start_date: string; end_date: string };
@@ -1093,6 +1110,24 @@ export class AnalyticsService {
         params: this.buildParams(query),
       }),
     );
+  }
+
+  getReviewsByProduct(
+    query: any = {},
+  ): Observable<ApiResponse<ReviewsByProductRow[]>> {
+    const cacheKey = `reviews-by-product-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ReviewsByProductRow[]>>(this.getApiUrl('reviews/by-product'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  exportReviewsByProduct(query: any = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('reviews/by-product/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
   }
 
   // ==================== FINANCIAL ANALYTICS ====================
