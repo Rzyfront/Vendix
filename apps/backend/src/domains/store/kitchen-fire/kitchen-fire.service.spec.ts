@@ -864,6 +864,56 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     expect(eventEmitter.emit).not.toHaveBeenCalled();
   });
 
+  // Orden #8513: una linea cancelada (`cancelled_at`) se disparo igual y
+  // consumio insumos. El fire debe excluirla en el where de Prisma.
+  it('excluye lineas canceladas: solo dispara y consume la linea viva', async () => {
+    const live = makeVariantOrderItem(10, 50);
+    const cancelled = { ...makeVariantOrderItem(11, 51), cancelled_at: new Date() };
+    setupFireableContext([live]);
+    // Mock fiel al where real: aplica `cancelled_at: null` sobre las lineas.
+    prismaMock.orders.findFirst.mockImplementation(async (args: any) => {
+      const w = args.select.order_items.where;
+      const rows = [live, { ...cancelled }].filter(
+        (i: any) =>
+          w.id.in.includes(i.id) &&
+          (w.cancelled_at === null ? !i.cancelled_at : true),
+      );
+      return { id: 100, store_id: 1, order_number: 'ORD-8513', order_items: rows };
+    });
+    const ticketCreate = setupFireTransaction(10);
+
+    await service.fireOrderItems({ order_id: 100, order_item_ids: [10, 11] });
+
+    const where = prismaMock.orders.findFirst.mock.calls[0][0].select.order_items.where;
+    expect(where.cancelled_at).toBeNull();
+    const created = ticketCreate.mock.calls[0][0].data.items.create;
+    expect(created).toHaveLength(1);
+    expect(created[0].order_item_id).toBe(10);
+    // Solo la linea viva consume insumos.
+    expect(recipesService.explodeBom).toHaveBeenCalledTimes(1);
+    expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(1);
+  });
+
+  it('un fire solo de lineas canceladas cae en KITCHEN_FIRE_ITEM_NOT_FOUND sin consumir', async () => {
+    // El where filtra la linea cancelada: la orden llega sin order_items.
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 100,
+      store_id: 1,
+      order_number: 'ORD-8513',
+      order_items: [],
+    });
+
+    await expect(
+      service.fireOrderItems({ order_id: 100, order_item_ids: [11] }),
+    ).rejects.toMatchObject({ errorCode: 'KITCHEN_FIRE_ITEM_NOT_FOUND' });
+
+    const where = prismaMock.orders.findFirst.mock.calls[0][0].select.order_items.where;
+    expect(where.cancelled_at).toBeNull();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
   // --------------------------------------------------------------------------
   // CP-POLLO-ARABE-727 A.6 — la variante vendida viaja a `kitchen_ticket_items`.
   // Matriz: producto variantizado, producto simple, línea partida por exclusión

@@ -450,7 +450,11 @@ export class KitchenFireService {
           select: { id: true, table_id: true },
         },
         order_items: {
-          where: { id: { in: effectiveItemIds } },
+          // Una linea cancelada (`cancelled_at`) nunca se dispara: ni consume
+          // insumos ni llega a cocina (orden #8513, item 26421 cancelado
+          // before_fire y disparado igual). Si todas estan canceladas, queda
+          // vacio y aplica KITCHEN_FIRE_ITEM_NOT_FOUND.
+          where: { id: { in: effectiveItemIds }, cancelled_at: null },
           include: {
             products: {
               select: {
@@ -2283,7 +2287,9 @@ export class KitchenFireService {
           select: { id: true, table_id: true },
         },
         order_items: {
-          where: { id: { in: candidateOrderItemIds } },
+          // Ver nota en `fireOrderItems`: las lineas canceladas no se disparan
+          // ni se previsualizan.
+          where: { id: { in: candidateOrderItemIds }, cancelled_at: null },
           include: {
             products: {
               select: {
@@ -3910,7 +3916,11 @@ export class KitchenFireService {
     }
 
     const originals = await this.prisma.order_items.findMany({
-      where: { id: { in: partial.map((e) => e.order_item_id) } },
+      // Una linea cancelada no se parte: no se dispara (ver `fireOrderItems`).
+      where: {
+        id: { in: partial.map((e) => e.order_item_id) },
+        cancelled_at: null,
+      },
       // F-048 — el desglose (`order_item_taxes`, ADR-08) tiene que viajar a
       // la línea nueva; sin incluirlo acá no hay nada que proporcionar.
       include: { order_item_taxes: true },
