@@ -41,6 +41,18 @@
         </div>
       </div>
 
+      <!-- QUI-887 — nota global de la orden en los metadatos. Solo con nota
+           no vacía: sin bloque residual. -->
+      @if (t.order?.notes?.trim()) {
+        <div class="flex items-start gap-2 px-3 py-2 rounded-lg border-l-[3px] border-l-[var(--color-info,#0284c7)] bg-[rgba(2,132,199,0.08)]" role="note">
+          <app-icon name="sticky-note" [size]="14" class="mt-0.5 shrink-0 text-[var(--color-info,#0284c7)]" />
+          <div class="min-w-0">
+            <p class="text-[10px] uppercase tracking-wide text-[var(--color-info,#0284c7)] font-semibold">Nota de la orden</p>
+            <p class="text-[13px] font-medium text-[var(--color-text-primary)] whitespace-pre-wrap">{{ t.order!.notes!.trim() }}</p>
+          </div>
+        </div>
+      }
+
       <!-- Items + recipes -->
       <div class="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
         @for (item of t.items; track item.id) {
