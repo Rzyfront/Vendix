@@ -2439,12 +2439,12 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     }
     const document_type_literal = declared_type;
 
-    // CASCADA DE RESPALDO — dirección fiscal → otra del cliente → tienda.
+    // CASCADA DE RESPALDO — dirección fiscal del cliente → otra suya. Task B
+    // (2026-09-28): ya NO hay escalón «tienda» (ver `acquirer-address.resolver.ts`).
     const resolved_address = await this.resolveAcquirerAddressForDocument({
       declared_address: address,
       declared_number,
       invoice_number: invoice_data.invoice_number,
-      sale_rail: invoice_data.sale_rail,
       fallback,
     });
 
@@ -2511,34 +2511,13 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     declared_address: AcquirerAddressCandidate | undefined;
     declared_number: string;
     invoice_number: string;
-    sale_rail?: 'on_demand' | 'advanced';
     fallback?: { issuer: DianIssuerData; config: DianConfigDecrypted };
   }): Promise<ResolvedAcquirerAddress | null> {
-    const {
-      declared_address,
-      declared_number,
-      invoice_number,
-      sale_rail,
-      fallback,
-    } = params;
-
-    const store_address = fallback
-      ? {
-          address_line: fallback.issuer.address_line,
-          city_code: fallback.issuer.city_code,
-          city_name: fallback.issuer.city_name,
-          department_code: fallback.issuer.department_code,
-          department_name: fallback.issuer.department_name,
-          country_code: fallback.issuer.country_code,
-          postal_code: fallback.issuer.postal_code,
-        }
-      : null;
+    const { declared_address, declared_number, invoice_number, fallback } =
+      params;
 
     const declared_candidates = declared_address ? [declared_address] : [];
-    let resolved = resolveAcquirerAddress({
-      candidates: declared_candidates,
-      store_address,
-    });
+    let resolved = resolveAcquirerAddress({ candidates: declared_candidates });
 
     if (resolved?.source !== 'fiscal' && fallback) {
       const stored = await this.loadCustomerAddressCandidates(
@@ -2551,64 +2530,36 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
             // La declarada va PRIMERO: si el llamador compuso una dirección
             // para este documento en concreto (DTO), manda sobre la ficha.
             candidates: [...declared_candidates, ...stored],
-            store_address,
           }) ?? resolved;
       }
     }
 
     if (!resolved) {
-      // Sin respaldo habilitado (documento soporte) se conserva el
-      // comportamiento actual: el grupo de dirección simplemente no se emite.
-      // No hay nada que reprocharle al usuario porque no se intentó ninguna
-      // cascada.
+      // Task B (2026-09-28) — DIAN Res. 000165/2023 art. 69: la dirección NO
+      // es un dato que el emisor pueda exigirle al adquiriente, así que su
+      // ausencia NUNCA bloquea la emisión — ni en venta bajo demanda ni en
+      // factura manual. El grupo de dirección del adquiriente es OMISIBLE:
+      // FAK09-FAK12 declaran los cuatro elementos Divipola `0..1`, y
+      // `buildCustomerParty` ya no emite `cac:PhysicalLocation` cuando no hay
+      // `city_code`. Es el mismo XML que sale hoy en cada documento a
+      // Consumidor Final, que la DIAN acepta. Tampoco hay respaldo con la
+      // dirección de la TIENDA: declararla como si fuera la del comprador es
+      // un dato falso, no un dato optativo (ver `acquirer-address.resolver.ts`).
+      //
+      // Antes de este cambio, el carril «avanzado» (factura manual) SÍ
+      // lanzaba aquí — justo DESPUÉS de `generateNextNumber`, es decir, con el
+      // consecutivo autorizado ya quemado y sin forma de explicarle a la DIAN
+      // el hueco. Eso es lo que se elimina: sin log cuando no hubo `fallback`
+      // (documento soporte: no se intentó ninguna cascada, no hay nada que
+      // avisar) y con log cuando sí lo hubo, para cualquier carril.
       if (!fallback) return null;
 
-      // EXENCIÓN DEL CARRIL RÁPIDO — una venta bajo demanda no se cae por una
-      // dirección.
-      //
-      // El grupo de dirección del adquiriente es OMISIBLE: FAK09-FAK12
-      // declaran los cuatro elementos Divipola `0..1`, y `buildCustomerParty`
-      // ya no emite `cac:PhysicalLocation` cuando no hay `city_code`. Es el
-      // mismo XML que sale hoy en cada documento a Consumidor Final, que la
-      // DIAN acepta. Así que aquí no se está evitando un rechazo: se está
-      // convirtiendo un campo opcional ausente en una emisión fallida.
-      //
-      // Y falla en el peor sitio posible. Este punto es POSTERIOR a
-      // `generateNextNumber`: el consecutivo autorizado ya se tomó, y Vendix no
-      // tiene forma de explicarle a la DIAN un hueco de numeración —no existe
-      // tabla, columna ni reporte de anulación—. Un mostrador que capturó lo
-      // que se le pide capturar (tipo, número, nombres, apellidos, correo; sin
-      // dirección, por diseño) quedaría con la venta cobrada, el consecutivo
-      // gastado y ninguna factura.
-      //
-      // El carril avanzado CONSERVA la caída: ahí el cliente se crea completo
-      // en el módulo de clientes, el operador tiene dónde corregir, y la
-      // prevalidación se lo dice antes de numerar. La exigencia fuerte sigue
-      // existiendo; lo que cambia es que deja de cobrarse contra un consecutivo
-      // ya quemado.
-      if (sale_rail === 'on_demand') {
-        this.logger.warn(
-          `[DIAN] Documento ${invoice_number}: venta bajo demanda sin ninguna dirección declarable para el adquiriente. ` +
-            'Se emite SIN el grupo de dirección (FAK09-FAK12 son 0..1). ' +
-            'Si esta tienda debe declarar municipio del comprador, complétalo en la ficha del cliente.',
-        );
-        return null;
-      }
-
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_VALIDATE_001,
-        'No se puede emitir: el documento no tiene ninguna dirección que declarar para el adquiriente. ' +
-          'Se buscó, en orden, la dirección de facturación del cliente, cualquier otra dirección suya ' +
-          '(envío, casa, trabajo) y la dirección fiscal de la tienda que emite, y ninguna tiene municipio ' +
-          'de la lista DANE. Carga el municipio en Clientes → ficha del cliente → «Direcciones», o —si el ' +
-          'cliente no tiene ninguna— en Configuración → Direcciones → la dirección de tipo «Facturación» ' +
-          'de la tienda u organización que emite.',
-        {
-          document_number: invoice_number,
-          has_declared_address: !!declared_address,
-          store_address_usable: false,
-        },
+      this.logger.warn(
+        `[DIAN] Documento ${invoice_number}: el adquiriente no declaró ninguna dirección utilizable. ` +
+          'Se emite SIN el grupo de dirección (FAK09-FAK12 son 0..1; la DIAN no exige domicilio del ' +
+          'comprador — Res. 000165/2023 art. 69). Si el cliente la da voluntariamente, cárgala en su ficha.',
       );
+      return null;
     }
 
     if (resolved.source !== 'fiscal') {

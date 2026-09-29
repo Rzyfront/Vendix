@@ -654,6 +654,39 @@ export class OrderFlowService {
     return pendingCount > 0;
   }
 
+  /**
+   * Devuelve el nombre de la primera línea NO cancelada cuya última fila
+   * `kitchen_ticket_items` no está `delivered`/`cancelled`, o `null` si ninguna
+   * bloquea. Las líneas sin filas de cocina (retail / skip_kds) no bloquean.
+   */
+  private async findLineAwaitingKitchenDelivery(
+    orderId: number,
+    client: any = this.prisma,
+  ): Promise<string | null> {
+    const lines = await client.order_items.findMany({
+      where: {
+        order_id: orderId,
+        cancelled_at: null,
+        kitchen_ticket_items: { some: {} },
+      },
+      select: {
+        product_name: true,
+        kitchen_ticket_items: {
+          orderBy: { id: 'desc' },
+          take: 1,
+          select: { status: true },
+        },
+      },
+    });
+    for (const line of lines ?? []) {
+      const status = line.kitchen_ticket_items?.[0]?.status;
+      if (status != null && status !== 'delivered' && status !== 'cancelled') {
+        return line.product_name || 'este producto';
+      }
+    }
+    return null;
+  }
+
   /** Whole-order fulfillment is never allowed to use a retail line as a
    * shortcut around an un-fired or undelivered prepared line. Item-level
    * delivery has its own guard and remains available for retail lines.
@@ -846,6 +879,21 @@ export class OrderFlowService {
     });
     const previousOrganizationId = previous_order?.stores?.organization_id ?? null;
     const historySource = this.mapUpdateStateSource(opts?.source);
+
+    // R4 — una orden NUNCA pasa a `finished` con una línea viva (no cancelada)
+    // cuya última fila de cocina no esté `delivered`/`cancelled`. Cubre todos
+    // los caminos (finish explícito, forceOrderState, fast-track, cobro,
+    // reconciliación). Los cierres automáticos ya lo pre-chequean y saltan en
+    // silencio; acá se falla fuerte para el resto.
+    if (newState === 'finished') {
+      const blockedLine = await this.findLineAwaitingKitchenDelivery(orderId);
+      if (blockedLine) {
+        throw new VendixHttpException(
+          ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
+          `La orden tiene platos sin entregar en cocina ("${blockedLine}"). Entrégalos o cancélalos antes de finalizar.`,
+        );
+      }
+    }
 
     if (
       previous_order?.state === 'delivered' &&
@@ -4878,6 +4926,15 @@ export class OrderFlowService {
         else updatedTicketId = ticketId;
       }
 
+      // Sincronía cancelado orden↔cocina: cualquier fila viva restante
+      // (línea no `prepared`, ticket `delivered`, estado avanzado sin
+      // disposición) queda `cancelled` en la misma tx.
+      const kdsSync = await this.cancelLatestKitchenItemInTx(tx, orderId, orderItemId);
+      if (kdsSync) {
+        if (kdsSync.result === 'cancelled') cancelledTicketId ??= kdsSync.ticketId;
+        else updatedTicketId ??= kdsSync.ticketId;
+      }
+
       // Reversión de stock SOLO en before_fire (no fired). En
       // after_fire_waste NO se revierte — queda como merma.
       if (preparedFired) {
@@ -4983,63 +5040,7 @@ export class OrderFlowService {
       // fiable: cada fila ya es el total de impuesto de esa línea tal como
       // se persistió al crear/cobrar la orden (`checkout.service.ts:1653`,
       // el carril POS), así que sumarla no requiere adivinar unidad.
-      const activeItems = await tx.order_items.findMany({
-        where: { order_id: orderId, cancelled_at: null },
-        select: {
-          total_price: true,
-          order_item_taxes: { select: { tax_amount: true } },
-        },
-      });
-      const subtotal = activeItems.reduce(
-        (acc, it) => acc + Number(it.total_price),
-        0,
-      );
-      const tax = activeItems.reduce(
-        (acc, it) =>
-          acc +
-          // ADR-06 — nunca asumir la relación poblada: una fila sin
-          // desglose fiscal persistido (`order_item_taxes` vacío) no debe
-          // tronar el recálculo, sólo aportar cero impuesto.
-          (it.order_item_taxes ?? []).reduce(
-            (s, t) => s + Number(t.tax_amount ?? 0),
-            0,
-          ),
-        0,
-      );
-      // F-082 (blocker, C.8): el recálculo anterior descartaba envío,
-      // propina y descuento del `grand_total` — una orden con domicilio y
-      // propina quedaba SIN esos montos apenas se cancelaba un ítem, aunque
-      // la orden siguiera teniendo ambos cargos. Esta cancelación no los
-      // recalcula (no hay línea de envío/propina que tocar aquí), sólo deja
-      // de perderlos. Clamp a 0 por paridad con el resto de carriles.
-      const shippingCost = Number((order as any).shipping_cost ?? 0);
-      // D.4 (F-001): la porcentual se re-deriva sobre la base viva; la
-      // fija se respeta. `tip_amount` solo se persiste cuando se re-deriva.
-      const rederivedTip = this.rederivePercentageTip(
-        order as any,
-        subtotal,
-        tax,
-      );
-      const tipAmount =
-        rederivedTip ?? Number((order as any).tip_amount ?? 0);
-      const discountAmount = Number((order as any).discount_amount ?? 0);
-      const grandTotal = Math.max(
-        0,
-        subtotal + tax + shippingCost + tipAmount - discountAmount,
-      );
-      await tx.orders.update({
-        where: { id: orderId },
-        data: {
-          subtotal_amount: new Prisma.Decimal(subtotal),
-          tax_amount: new Prisma.Decimal(tax),
-          grand_total: new Prisma.Decimal(grandTotal),
-          ...(rederivedTip != null
-            ? { tip_amount: new Prisma.Decimal(rederivedTip) }
-            : {}),
-          updated_at: new Date(),
-        },
-      });
-      await this.syncPendingCodAmountInTx(tx, orderId, order.payments ?? [], grandTotal);
+      await this.recalcOrderTotalsAfterItemCancelInTx(tx, order, orderId);
     });
 
     if (alreadyCancelledInTx) return this.getOrder(orderId);
@@ -5075,6 +5076,219 @@ export class OrderFlowService {
     // 6. Devolver la vista de la orden actualizada (forma `getOrder`,
     //    igual que `deliverOrderItem`).
     return this.getOrder(orderId);
+  }
+
+  /**
+   * Recálculo de totales de la orden EXCLUYENDO ítems cancelados
+   * (`cancelled_at IS NULL`). Compartido por `cancelOrderItem`,
+   * `cancelDeliveredOrderItem` y `cancelItemsFromKitchenInTx`.
+   *
+   * F-082: suma `order_item_taxes.tax_amount` (fiable por línea), conserva
+   * envío/propina/descuento y aplica clamp a 0. D.4 (F-001): la propina
+   * porcentual se re-deriva sobre la base viva; la fija se respeta.
+   */
+  private async recalcOrderTotalsAfterItemCancelInTx(
+    tx: Prisma.TransactionClient,
+    order: any,
+    orderId: number,
+  ): Promise<void> {
+    const activeItems = await tx.order_items.findMany({
+      where: { order_id: orderId, cancelled_at: null },
+      select: {
+        total_price: true,
+        order_item_taxes: { select: { tax_amount: true } },
+      },
+    });
+    const subtotal = activeItems.reduce(
+      (acc, it) => acc + Number(it.total_price),
+      0,
+    );
+    const tax = activeItems.reduce(
+      (acc, it) =>
+        acc +
+        // ADR-06 — nunca asumir la relación poblada: una fila sin desglose
+        // fiscal persistido aporta cero impuesto en vez de tronar.
+        (it.order_item_taxes ?? []).reduce(
+          (s, t) => s + Number(t.tax_amount ?? 0),
+          0,
+        ),
+      0,
+    );
+    const shippingCost = Number(order?.shipping_cost ?? 0);
+    const rederivedTip = this.rederivePercentageTip(order, subtotal, tax);
+    const tipAmount = rederivedTip ?? Number(order?.tip_amount ?? 0);
+    const discountAmount = Number(order?.discount_amount ?? 0);
+    const grandTotal = Math.max(
+      0,
+      subtotal + tax + shippingCost + tipAmount - discountAmount,
+    );
+    await tx.orders.update({
+      where: { id: orderId },
+      data: {
+        subtotal_amount: new Prisma.Decimal(subtotal),
+        tax_amount: new Prisma.Decimal(tax),
+        grand_total: new Prisma.Decimal(grandTotal),
+        ...(rederivedTip != null
+          ? { tip_amount: new Prisma.Decimal(rederivedTip) }
+          : {}),
+        updated_at: new Date(),
+      },
+    });
+    await this.syncPendingCodAmountInTx(tx, orderId, order?.payments ?? [], grandTotal);
+  }
+
+  /**
+   * Sincronía cancelado orden↔cocina (regla del dueño): toda cancelación de
+   * una línea del lado orden deja su ÚLTIMA fila `kitchen_ticket_items` en
+   * `cancelled`, sea cual sea su estado (pending, in_preparation, ready y
+   * también `delivered`), dentro de la misma tx del llamador.
+   *
+   * `KitchenFireService.cancelTicketItemInTx` rechaza `delivered`, así que
+   * acá se escribe directo la fila por PK y se recalcula el encabezado con la
+   * misma regla: todas las filas `cancelled` → ticket `cancelled`; todas
+   * terminales con al menos una `delivered` → ticket `delivered`; en otro
+   * caso el ticket no cambia (SSE `updated`). Idempotente: si la fila ya
+   * está `cancelled` (p. ej. la rama pending/avanzada ya la canceló) no hace
+   * nada. NO toca inventario (la disposición reuse/waste vive en el llamador)
+   * ni emite SSE (el llamador emite post-commit).
+   */
+  private async cancelLatestKitchenItemInTx(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    orderItemId: number,
+  ): Promise<{ ticketId: number; result: 'cancelled' | 'updated' } | null> {
+    const latest = await tx.kitchen_ticket_items.findFirst({
+      where: { order_item_id: orderItemId, kitchen_ticket: { order_id: orderId } },
+      orderBy: { id: 'desc' },
+      select: { id: true, status: true, kitchen_ticket_id: true },
+    });
+    if (!latest || latest.status === 'cancelled') return null;
+    await tx.kitchen_ticket_items.update({
+      where: { id: latest.id },
+      data: { status: 'cancelled', updated_at: new Date() },
+    });
+    const rows = await tx.kitchen_ticket_items.findMany({
+      where: { kitchen_ticket_id: latest.kitchen_ticket_id },
+      select: { status: true },
+    });
+    const allCancelled = rows.every((r) => r.status === 'cancelled');
+    if (allCancelled) {
+      await tx.kitchen_tickets.update({
+        where: { id: latest.kitchen_ticket_id },
+        data: { status: 'cancelled', updated_at: new Date() },
+      });
+      return { ticketId: latest.kitchen_ticket_id, result: 'cancelled' };
+    }
+    const allTerminal = rows.every(
+      (r) => r.status === 'cancelled' || r.status === 'delivered',
+    );
+    if (allTerminal) {
+      await tx.kitchen_tickets.update({
+        where: { id: latest.kitchen_ticket_id },
+        data: { status: 'delivered', updated_at: new Date() },
+      });
+    }
+    return { ticketId: latest.kitchen_ticket_id, result: 'updated' };
+  }
+
+  /**
+   * Predicado "orden cobrada" para cancelar ítems desde cocina: existe un pago
+   * registrado (no cancelado/fallido), la misma regla (`SETTLED_PAYMENT_STATES`)
+   * que usa `cancelOrderItem` dentro y fuera de la tx.
+   */
+  async isOrderPaidForKitchenCancel(
+    orderId: number,
+    client?: any,
+  ): Promise<boolean> {
+    const db: any = client ?? this.prisma;
+    const settled = await db.payments.findFirst({
+      where: {
+        order_id: orderId,
+        state: { in: [...SETTLED_PAYMENT_STATES] as payments_state_enum[] },
+      },
+      select: { id: true },
+    });
+    return settled != null;
+  }
+
+  /**
+   * Seam para KitchenFireService (cancelación iniciada en cocina): dentro de
+   * la tx del llamador marca las líneas como canceladas del lado orden
+   * (`after_fire_reused` si `disposition='reuse'`, `after_fire_waste` si
+   * `'waste'`), recalcula totales igual que `cancelOrderItem` y registra el
+   * `item_cancelled` con `source: 'kitchen'`. NO toca inventario ni tickets:
+   * cocina ya hizo ambas cosas. Lanza el mismo error de `cancelOrderItem` si
+   * la orden ya está cobrada o en estado terminal.
+   */
+  async cancelItemsFromKitchenInTx(
+    tx: Prisma.TransactionClient,
+    params: {
+      orderId: number;
+      orderItemIds: number[];
+      disposition: 'reuse' | 'waste';
+      reason: string;
+      ticketId: number;
+      wasPending: boolean;
+    },
+  ): Promise<void> {
+    const { orderId, disposition, ticketId, wasPending } = params;
+    const reason = (params.reason ?? '').trim();
+    const ids = [...new Set(params.orderItemIds.filter((id) => Number.isInteger(id)))];
+    if (ids.length === 0) return;
+    if (reason.length < 3) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'Debes proporcionar un motivo de cancelación (mínimo 3 caracteres)',
+      );
+    }
+    const order = await this.getOrder(orderId, tx);
+    assertNoActiveFinancialSplit(order);
+    if (['finished', 'cancelled', 'refunded'].includes(order.state)) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        `No se puede cancelar un ítem en estado '${order.state}'`,
+      );
+    }
+    if (await this.isOrderPaidForKitchenCancel(orderId, tx)) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        'No se puede cancelar un ítem de una orden ya cobrada',
+      );
+    }
+    const cancellationType: 'after_fire_reused' | 'after_fire_waste' =
+      disposition === 'reuse' ? 'after_fire_reused' : 'after_fire_waste';
+    const active = await tx.order_items.findMany({
+      where: { id: { in: ids }, order_id: orderId, cancelled_at: null },
+      select: { id: true },
+    });
+    if (active.length === 0) return;
+    const now = new Date();
+    await tx.order_items.updateMany({
+      where: { id: { in: active.map((i) => i.id) }, order_id: orderId },
+      data: {
+        cancelled_at: now,
+        cancellation_reason: reason,
+        cancellation_type: cancellationType,
+        updated_at: now,
+      },
+    });
+    for (const item of active) {
+      await this.orderHistoryService?.record(tx, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: order.stores?.organization_id,
+        type: 'item_cancelled',
+        orderItemId: item.id,
+        payload: {
+          reason,
+          cancellation_type: cancellationType,
+          source: 'kitchen',
+          ticket_id: ticketId,
+          was_pending: wasPending,
+        },
+      });
+    }
+    await this.recalcOrderTotalsAfterItemCancelInTx(tx, order, orderId);
   }
 
   /**
@@ -5218,6 +5432,7 @@ export class OrderFlowService {
     let preparedLeaves: ConsumedLeafDisposition[] = [];
     const preparedStockAfterCommit: Array<() => void> = [];
     let alreadyCancelledInTx = false;
+    let kdsCancelled: { ticketId: number; result: 'cancelled' | 'updated' } | null = null;
 
     await this.prisma.$transaction(async (tx) => {
       const lockedOrder = await this.assertUnsplitOrderAfterLock(tx, orderId, order.store_id);
@@ -5315,6 +5530,11 @@ export class OrderFlowService {
         }
       }
 
+      // Sincronía cancelado orden↔cocina: la fila KDS (incluso `delivered`)
+      // queda `cancelled` en la misma tx. La disposición de inventario
+      // (restock/waste) ya se resolvió arriba y no se duplica.
+      kdsCancelled = await this.cancelLatestKitchenItemInTx(tx, orderId, orderItemId);
+
       // Soft cancel: el ítem queda VISIBLE marcado como cancelado, pero
       // EXCLUIDO de los totales. Motivo + destino persistidos para
       // auditoría y para que el detalle de orden los muestre.
@@ -5340,54 +5560,7 @@ export class OrderFlowService {
 
       // Recálculo excluyendo cancelados (`cancelled_at IS NULL`) — mismo
       // patrón F-082 del seam (conserva envío/propina/descuento, clamp 0).
-      const activeItems = await tx.order_items.findMany({
-        where: { order_id: orderId, cancelled_at: null },
-        select: {
-          total_price: true,
-          order_item_taxes: { select: { tax_amount: true } },
-        },
-      });
-      const subtotal = activeItems.reduce(
-        (acc, it) => acc + Number(it.total_price),
-        0,
-      );
-      const tax = activeItems.reduce(
-        (acc, it) =>
-          acc +
-          (it.order_item_taxes ?? []).reduce(
-            (s, t) => s + Number(t.tax_amount ?? 0),
-            0,
-          ),
-        0,
-      );
-      const shippingCost = Number((order as any).shipping_cost ?? 0);
-      // D.4 (F-001): la porcentual se re-deriva sobre la base viva; la
-      // fija se respeta. `tip_amount` solo se persiste cuando se re-deriva.
-      const rederivedTip = this.rederivePercentageTip(
-        order as any,
-        subtotal,
-        tax,
-      );
-      const tipAmount =
-        rederivedTip ?? Number((order as any).tip_amount ?? 0);
-      const discountAmount = Number((order as any).discount_amount ?? 0);
-      const grandTotal = Math.max(
-        0,
-        subtotal + tax + shippingCost + tipAmount - discountAmount,
-      );
-      await tx.orders.update({
-        where: { id: orderId },
-        data: {
-          subtotal_amount: new Prisma.Decimal(subtotal),
-          tax_amount: new Prisma.Decimal(tax),
-          grand_total: new Prisma.Decimal(grandTotal),
-          ...(rederivedTip != null
-            ? { tip_amount: new Prisma.Decimal(rederivedTip) }
-            : {}),
-          updated_at: new Date(),
-        },
-      });
-      await this.syncPendingCodAmountInTx(tx, orderId, order.payments ?? [], grandTotal);
+      await this.recalcOrderTotalsAfterItemCancelInTx(tx, order, orderId);
     });
 
     if (alreadyCancelledInTx) return this.getOrder(orderId);
@@ -5397,6 +5570,22 @@ export class OrderFlowService {
         orderId, orderItemId, preparedOrganizationId, order.store_id,
         destination === 'restock' ? 'reuse' : 'waste', preparedLeaves,
       );
+    }
+    // SSE post-commit del ticket afectado (cancelled si todo el ticket quedó
+    // cancelado, updated en otro caso). Best-effort.
+    const kdsSync = kdsCancelled as { ticketId: number; result: 'cancelled' | 'updated' } | null;
+    if (kdsSync && this.kitchenFireService) {
+      try {
+        if (kdsSync.result === 'cancelled') {
+          await this.kitchenFireService.emitTicketCancelledEvent(kdsSync.ticketId);
+        } else {
+          await this.kitchenFireService.emitTicketUpdatedEvent(kdsSync.ticketId);
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Failed to emit KDS event for ticket #${kdsSync.ticketId}: ${(err as Error).message}`,
+        );
+      }
     }
     // 7. Auditoría post-commit (best-effort, nunca revierte la reversa).
     if (!preparedDish) try {
@@ -6407,6 +6596,32 @@ export class OrderFlowService {
             cascade: true,
           },
         });
+      }
+
+      // Sincronía cancelado orden↔cocina: con la orden cancelada NINGUNA fila
+      // KDS puede seguir viva ni `delivered` (líneas no `prepared`, tickets ya
+      // entregados y cualquier fila que las ramas de arriba no cubrieran).
+      // Los tickets con filas vivas pasan a `cancelled` y se emiten post-commit.
+      const liveKdsRows = await tx.kitchen_ticket_items.findMany({
+        where: {
+          kitchen_ticket: { order_id: orderId },
+          status: { not: 'cancelled' },
+        },
+        select: { kitchen_ticket_id: true },
+      });
+      if (liveKdsRows.length > 0) {
+        const sweepTicketIds: number[] = [...new Set<number>(liveKdsRows.map((r) => r.kitchen_ticket_id as number))];
+        await tx.kitchen_ticket_items.updateMany({
+          where: { kitchen_ticket_id: { in: sweepTicketIds }, status: { not: 'cancelled' } },
+          data: { status: 'cancelled', updated_at: new Date() },
+        });
+        await tx.kitchen_tickets.updateMany({
+          where: { id: { in: sweepTicketIds }, status: { not: 'cancelled' } },
+          data: { status: 'cancelled', updated_at: new Date() },
+        });
+        for (const id of sweepTicketIds) {
+          if (!cancelledTicketIds.includes(id)) cancelledTicketIds.push(id);
+        }
       }
 
       // Persist cancel metadata (state/updated_at were already set by the
@@ -8775,6 +8990,7 @@ export class OrderFlowService {
         where: { order_id: orderId, cancelled_at: null },
         select: {
           total_price: true,
+          discount_amount: true,
           quantity: true,
           tax_amount_item: true,
           weight: true,

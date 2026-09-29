@@ -63,6 +63,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 import {
   formatDateOnlyUTC,
   formatStoreDate,
@@ -1574,11 +1575,7 @@ export class InvoiceDetailComponent {
     const inv = this.detail();
     const snapshot = (inv?.customer_name ?? '').trim();
     if (snapshot) return snapshot;
-    const live = [inv?.customer?.first_name, inv?.customer?.last_name]
-      .map((part) => (part ?? '').trim())
-      .filter(Boolean)
-      .join(' ');
-    return live || '';
+    return customerDisplayName(inv?.customer, '');
   });
 
   readonly acquirerDocument = computed(() => {

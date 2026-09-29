@@ -45,6 +45,7 @@ import {
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { formatStoreDate, formatStoreDateTime } from '../../../../../../shared/utils/date.util';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
 /**
@@ -216,7 +217,7 @@ export class InvoiceListComponent {
       label: 'Cliente',
       sortable: true,
       priority: 1,
-      defaultValue: 'Sin cliente',
+      transform: (_val: any, row?: any) => this.resolveInvoiceCustomerName(row),
     },
     {
       key: 'total_amount',
@@ -267,7 +268,7 @@ export class InvoiceListComponent {
   // Card Config for mobile
   cardConfig: ItemListCardConfig = {
     titleKey: 'invoice_number',
-    subtitleTransform: (item: any) => item?.customer_name || 'Sin cliente',
+    subtitleTransform: (item: any) => this.resolveInvoiceCustomerName(item),
     badgeKey: 'status',
     badgeConfig: {
       type: 'custom',
@@ -347,6 +348,22 @@ export class InvoiceListComponent {
   }
 
   // Helpers
+
+  /**
+   * Nombre de cliente a mostrar en la lista, con cascada de fallback.
+   *
+   * `customer_name` es el SNAPSHOT congelado al emitir; queda en NULL cuando
+   * la factura se creó por `customer_id` sin escribir el nombre a mano (bug
+   * de persistencia en `invoicing.service.ts`, en corrección aparte). Sin
+   * este fallback la columna mostraba "Sin cliente" para facturas que sí
+   * tienen un cliente vinculado y emitido correctamente.
+   */
+  resolveInvoiceCustomerName(invoice: Invoice | null | undefined): string {
+    const snapshot = invoice?.customer_name?.trim();
+    if (snapshot) return snapshot;
+    return customerDisplayName(invoice?.customer, 'Sin cliente');
+  }
+
   getStatusLabel(status: string): string {
     const labels: Record<string, string> = {
       draft: 'Borrador',

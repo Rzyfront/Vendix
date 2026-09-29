@@ -838,6 +838,27 @@ describe('InventoryAnalyticsService', () => {
       expect(result.meta.group_by).toBe('ingredient');
     });
 
+    it('descuenta en el SQL las devoluciones por reuso (REUSO-INSUMO) del mismo ítem', async () => {
+      const queryRawMock = jest.fn().mockResolvedValue(rawConsumptionRows);
+      prisma.withoutScope.mockReturnValue({
+        $queryRaw: queryRawMock,
+      });
+
+      await service.getIngredientConsumption({
+        date_from: '2026-09-01',
+        date_to: '2026-09-14',
+      } as any);
+
+      const sqlArg = queryRawMock.mock.calls[0][0];
+      const sqlText: string = sqlArg.strings
+        ? sqlArg.strings.join('?')
+        : String(sqlArg.sql ?? sqlArg);
+      expect(sqlText).toContain('REUSO-INSUMO:%');
+      expect(sqlText).toContain('IS NOT DISTINCT FROM');
+      expect(sqlText).toContain('n.factor > 0');
+      expect(sqlText).toContain('MAX(oi.quantity)');
+    });
+
     it('supports grouping by dish (group_by: "dish")', async () => {
       const queryRawMock = jest.fn().mockResolvedValue(rawConsumptionRows);
       prisma.withoutScope.mockReturnValue({

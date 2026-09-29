@@ -2824,11 +2824,14 @@ export class PosCartService {
     discounts: CartDiscount[],
   ): CartSummary {
     const grossTotal = this.calculateSubtotal(items); // Gross Total (with tax)
-    const discountAmount = discounts.reduce(
-      (total, discount) => total + discount.amount,
-      0,
+    const grossDiscount = Math.min(
+      grossTotal,
+      Math.max(
+        0,
+        discounts.reduce((total, discount) => total + discount.amount, 0),
+      ),
     );
-    const taxAmount = items.reduce((sum, item) => sum + item.taxAmount, 0);
+    const preDiscountTax = items.reduce((sum, item) => sum + item.taxAmount, 0);
 
     // C.6 (R-4) — el subtotal es la base NETA recibida (`unitPrice` neto ×
     // `lineUnits`), nunca `grossTotal − taxAmount`: con truncado DIAN la
@@ -2837,8 +2840,18 @@ export class PosCartService {
       items.reduce((sum, item) => sum + item.unitPrice * resolveLineUnits(item), 0),
     );
 
-    // Total is based on Gross Total minus Discounts
-    const total = grossTotal - discountAmount;
+    // Regla del dueño (2026-09-28): el cupón/promoción descuenta sobre la base
+    // SIN impuesto y el impuesto se recalcula sobre esa base. Reducir el bruto
+    // en la fracción f equivale a reducir la base y el impuesto en esa misma
+    // f (bruto = base × (1 + tarifa)), así que el descuento en bruto que
+    // producen promos/cupón se convierte a base-only y el impuesto sale
+    // post-descuento. Cupón 100% => impuesto 0 y total 0.
+    const fraction = grossTotal > 0 ? grossDiscount / grossTotal : 0;
+    const discountAmount = this.roundMoney(subtotal * fraction);
+    const taxAmount = this.roundMoney(preDiscountTax * (1 - fraction));
+
+    // Total = bruto − descuento en bruto (== subtotal − descuento base + impuesto).
+    const total = this.roundMoney(grossTotal - grossDiscount);
     const itemCount = items.length;
     const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
 

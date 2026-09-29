@@ -1131,8 +1131,8 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
       orders: ['updateMany', 'update'],
       order_items: ['findMany', 'update'],
       inventory_transactions: ['findMany'],
-      kitchen_tickets: ['findFirst'],
-      kitchen_ticket_items: ['findFirst'],
+      kitchen_tickets: ['findFirst', 'updateMany'],
+      kitchen_ticket_items: ['findFirst', 'findMany', 'updateMany'],
       invoices: ['findMany', 'findFirst'],
       accounts_receivable: ['findMany', 'update'],
       order_installments: ['updateMany'],
@@ -1152,6 +1152,7 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     prismaMock.inventory_cost_layers.create.mockResolvedValue({ id: 1 });
     prismaMock.kitchen_tickets.findFirst.mockResolvedValue({ status });
     prismaMock.kitchen_ticket_items.findFirst.mockResolvedValue(null);
+    prismaMock.kitchen_ticket_items.findMany.mockResolvedValue([]);
 
     const stock = {
       getDefaultLocationForProduct: jest.fn().mockImplementation(
@@ -1304,6 +1305,30 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledTimes(1);
     expect(stock.updateStock).not.toHaveBeenCalled();
     expect(emitter.emit).toHaveBeenCalledWith('order.status_changed', expect.anything());
+  });
+
+  it('R2: filas KDS vivas (incluso delivered) de la orden quedan cancelled y su ticket se emite post-commit', async () => {
+    const { service, prismaMock, kds } = buildKitchenHarness('ready', []);
+    // Barrido final: quedan filas no canceladas (p. ej. una `delivered` que
+    // la rama avanzada no cubre) en el ticket TICKET_ID.
+    prismaMock.kitchen_ticket_items.findMany.mockResolvedValue([
+      { kitchen_ticket_id: TICKET_ID },
+      { kitchen_ticket_id: TICKET_ID },
+    ]);
+    prismaMock.kitchen_tickets.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.kitchen_ticket_items.updateMany.mockResolvedValue({ count: 2 });
+
+    await service.cancelOrder(ORDER_ID, { reason, kitchenDisposition: 'reuse' });
+
+    expect(prismaMock.kitchen_ticket_items.updateMany).toHaveBeenCalledWith({
+      where: { kitchen_ticket_id: { in: [TICKET_ID] }, status: { not: 'cancelled' } },
+      data: expect.objectContaining({ status: 'cancelled' }),
+    });
+    expect(prismaMock.kitchen_tickets.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [TICKET_ID] }, status: { not: 'cancelled' } },
+      data: expect.objectContaining({ status: 'cancelled' }),
+    });
+    expect(kds.emitTicketCancelledEvent).toHaveBeenCalledWith(TICKET_ID);
   });
 
   it('kitchenDisposition reuse sin consumo registrado: cancela la línea sin devoluciones ni excepción', async () => {
@@ -1899,6 +1924,11 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
   }) => {
     const txMock: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
+      // Sincronía cancelado orden↔cocina: sin fila KDS viva por defecto.
+      kitchen_ticket_items: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       kitchen_tickets: {
         findFirst: jest.fn().mockResolvedValue(
           opts.freshTicketStatus == null
@@ -2822,6 +2852,11 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
   }) => {
     const txMock: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
+      // Sincronía cancelado orden↔cocina: sin fila KDS viva por defecto.
+      kitchen_ticket_items: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       payments: {
         findFirst: jest.fn().mockResolvedValue(null),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -3212,6 +3247,11 @@ describe('D.2 — cancelación de una línea prepared ya consumida', () => {
     };
     const tx: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: orderId, state: 'created' }]),
+      // Sincronía cancelado orden↔cocina: sin fila KDS viva por defecto.
+      kitchen_ticket_items: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       orders: { findFirst: jest.fn().mockResolvedValue({ active_financial_split_id: null }), update: jest.fn() },
       payments: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: {
@@ -3404,6 +3444,11 @@ describe('D.4 — recálculo de propina al cancelar (F-001)', () => {
   const buildService = (orderTip: Record<string, unknown>) => {
     const txMock: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
+      // Sincronía cancelado orden↔cocina: sin fila KDS viva por defecto.
+      kitchen_ticket_items: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       payments: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: {
         update: jest.fn().mockResolvedValue({}),
@@ -3699,6 +3744,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       order_items: ['findMany'],
       payments: ['findMany', 'update'],
       table_sessions: ['findFirst'],
+      kitchen_ticket_items: ['findMany'],
       invoices: ['findMany', 'findFirst'],
       accounts_receivable: ['findMany', 'update'],
       order_installments: ['updateMany'],
@@ -3706,6 +3752,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     prismaMock.invoices.findMany.mockResolvedValue([]);
     prismaMock.accounts_receivable.findMany.mockResolvedValue([]);
     prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'processing' }]);
+    prismaMock.kitchen_ticket_items.findMany.mockResolvedValue([]);
     // Sin ítems de cocina: la rama KDS de `cancelOrder` no participa aquí.
     prismaMock.order_items.findMany.mockResolvedValue([]);
     // El claim atómico gana (count=1) → corre la cadena de efectos.
