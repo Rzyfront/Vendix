@@ -1,4 +1,6 @@
 import { HttpException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { order_state_enum } from '@prisma/client';
 import { generateSlug } from '@common/utils/slug.util';
 import {
@@ -29,6 +31,7 @@ import {
   VALID_TRANSITIONS,
 } from '../../../domains/store/orders/order-flow/order-flow.service';
 import { DispatchNotesService } from '../../../domains/store/dispatch-notes/dispatch-notes.service';
+import { CreateFromOrderDto } from '../../../domains/store/dispatch-notes/dto/create-from-order.dto';
 
 /**
  * Las escrituras TIPADAS de Vexi: los seis dominios donde vale la pena una
@@ -173,6 +176,35 @@ function toolError(message: string, nextStep?: string): string {
     error: message,
     ...(nextStep && { next_step: nextStep }),
   });
+}
+
+/**
+ * Valida un DTO ya construido como lo haría el `ValidationPipe` global del
+ * HTTP (`whitelist` + `forbidNonWhitelisted`): las tools llaman a los
+ * servicios directo, sin pasar por el pipe, así que sin esto un payload
+ * inválido llegaba hasta Prisma y volvía como un error opaco post-aprobación.
+ * Devuelve la instancia transformada —la misma que recibiría el servicio por
+ * HTTP— o el mensaje en español para el `{error, next_step}`.
+ */
+function toValidatedDto<T extends object>(
+  DtoClass: new () => T,
+  plain: Record<string, unknown>,
+): { ok: true; dto: T } | { ok: false; message: string } {
+  const dto = plainToInstance(DtoClass, plain, {
+    enableImplicitConversion: true,
+  });
+  const errors = validateSync(dto, {
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  });
+  if (!errors.length) return { ok: true, dto };
+  const details = errors
+    .flatMap((entry) => Object.values(entry.constraints ?? {}))
+    .join('; ');
+  return {
+    ok: false,
+    message: `Los datos no pasaron la validación: ${details || 'revisa los campos enviados'}.`,
+  };
 }
 
 /**
@@ -515,6 +547,7 @@ export function createInventoryWriteTools(
   return [
     {
       name: 'adjust_stock',
+      version: '1',
       domain: 'inventory',
       requiresConfirmation: true,
       description:
@@ -631,7 +664,20 @@ export function createInventoryWriteTools(
               cleanString(args.reason) ?? 'Ajuste registrado desde Vexi',
           };
 
-          const adjustment = await adjustmentsService.createAdjustment(dto);
+          const checked = toValidatedDto(
+            CreateAdjustmentDto,
+            dto as unknown as Record<string, unknown>,
+          );
+          if (!checked.ok) {
+            return toolError(
+              checked.message,
+              'Verifica con get_stock_levels que la bodega y la variante sean las correctas.',
+            );
+          }
+
+          const adjustment = await adjustmentsService.createAdjustment(
+            checked.dto,
+          );
 
           return JSON.stringify({
             summary: `${target.label}: ${adjustment.quantity_before} → ${adjustment.quantity_after} unidades en ${target.locationName}.`,
@@ -1097,9 +1143,18 @@ export function createProductWriteTools(
       ...(initialStock > 0 && { stock_quantity: initialStock }),
     };
 
+    // En el resolver para que el `preview` tampoco proponga lo inválido.
+    const checked = toValidatedDto(
+      CreateProductDto,
+      dto as unknown as Record<string, unknown>,
+    );
+    if (!checked.ok) {
+      return failure(name, checked.message);
+    }
+
     return {
       ok: true,
-      value: { dto, label: name, initialStock, costPrice },
+      value: { dto: checked.dto, label: name, initialStock, costPrice },
     };
   }
 
@@ -1107,6 +1162,7 @@ export function createProductWriteTools(
     // ─── Tool 2: update_product_price ────────────────────────────────
     {
       name: 'update_product_price',
+      version: '1',
       domain: 'products',
       requiresConfirmation: true,
       description:
@@ -1223,13 +1279,29 @@ export function createProductWriteTools(
               target.field === 'sale_price'
                 ? { sale_price: target.newPrice, is_on_sale: true }
                 : { price_override: target.newPrice };
-            await productsService.updateVariant(target.variantId, dto);
+            const checked = toValidatedDto(
+              UpdateProductVariantDto,
+              dto as unknown as Record<string, unknown>,
+            );
+            if (!checked.ok) {
+              return toolError(checked.message);
+            }
+            await productsService.updateVariant(target.variantId, checked.dto);
           } else {
             const dto: UpdateProductDto =
               target.field === 'sale_price'
                 ? { sale_price: target.newPrice, is_on_sale: true }
                 : { base_price: target.newPrice };
-            await productsService.update(target.productId, dto, { lean: true });
+            const checked = toValidatedDto(
+              UpdateProductDto,
+              dto as unknown as Record<string, unknown>,
+            );
+            if (!checked.ok) {
+              return toolError(checked.message);
+            }
+            await productsService.update(target.productId, checked.dto, {
+              lean: true,
+            });
           }
 
           return JSON.stringify({
@@ -1258,6 +1330,7 @@ export function createProductWriteTools(
     // ─── Tool 5: create_product ──────────────────────────────────────
     {
       name: 'create_product',
+      version: '1',
       domain: 'products',
       requiresConfirmation: true,
       description:
@@ -1652,13 +1725,19 @@ export function createCustomerWriteTools(
         }),
       );
 
+      // En el resolver para que el `preview` tampoco proponga lo inválido.
+      const checkedCreate = toValidatedDto(CreateCustomerDto, payload);
+      if (!checkedCreate.ok) {
+        return failure(newLabel, checkedCreate.message);
+      }
+
       return {
         ok: true,
         value: {
           mode: 'create',
           customerId: null,
           label: newLabel,
-          payload,
+          payload: checkedCreate.dto as unknown as Record<string, unknown>,
           changes,
         },
       };
@@ -1759,13 +1838,19 @@ export function createCustomerWriteTools(
       }
     }
 
+    // En el resolver para que el `preview` tampoco proponga lo inválido.
+    const checkedUpdate = toValidatedDto(UpdateCustomerDto, payload);
+    if (!checkedUpdate.ok) {
+      return failure(currentLabel, checkedUpdate.message);
+    }
+
     return {
       ok: true,
       value: {
         mode: 'update',
         customerId,
         label: currentLabel,
-        payload,
+        payload: checkedUpdate.dto as unknown as Record<string, unknown>,
         changes,
       },
     };
@@ -1774,6 +1859,7 @@ export function createCustomerWriteTools(
   return [
     {
       name: 'upsert_customer',
+      version: '1',
       domain: 'customers',
       requiresConfirmation: true,
       description:
@@ -2239,6 +2325,7 @@ export function createOrderWriteTools(
     // ─── Tool 4: update_order_status ─────────────────────────────────
     {
       name: 'update_order_status',
+      version: '1',
       domain: 'orders',
       requiresConfirmation: true,
       description:
@@ -2351,6 +2438,7 @@ export function createOrderWriteTools(
     // ─── Tool 6: create_dispatch_note ────────────────────────────────
     {
       name: 'create_dispatch_note',
+      version: '1',
       domain: 'orders',
       requiresConfirmation: true,
       description:
@@ -2440,15 +2528,26 @@ export function createOrderWriteTools(
 
           // `items: []` activa el carril "quick-accept" del servicio: despacha
           // todo lo pendiente calculado por él mismo, con su propia lectura.
+          const dispatchDto = {
+            items: [],
+            target_status: plan.targetStatus,
+            ...(cleanString(args.notes) && {
+              notes: cleanString(args.notes),
+            }),
+          };
+          const checkedDispatch = toValidatedDto(
+            CreateFromOrderDto,
+            dispatchDto as unknown as Record<string, unknown>,
+          );
+          if (!checkedDispatch.ok) {
+            return toolError(
+              checkedDispatch.message,
+              'Consulta get_dispatch_status para ver el estado real del despacho de esa orden.',
+            );
+          }
           const note: any = await dispatchNotesService.createFromOrder(
             plan.orderId,
-            {
-              items: [],
-              target_status: plan.targetStatus,
-              ...(cleanString(args.notes) && {
-                notes: cleanString(args.notes),
-              }),
-            },
+            checkedDispatch.dto,
           );
 
           return JSON.stringify({

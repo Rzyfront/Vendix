@@ -6,6 +6,8 @@ export interface McpToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, any>;
+  /** T2: versión del contrato del tool (`RegisteredTool.version`). */
+  version: string;
 }
 
 export interface McpToolResult {
@@ -27,6 +29,7 @@ export class McpToolProvider {
       name: d.function.name,
       description: d.function.description,
       inputSchema: d.function.parameters,
+      version: this.toolRegistry.getToolVersion(d.function.name),
     }));
   }
 

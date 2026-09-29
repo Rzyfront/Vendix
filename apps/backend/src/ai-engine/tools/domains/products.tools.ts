@@ -2,19 +2,12 @@ import { RegisteredTool } from '../interfaces/tool.interface';
 import { ProductsService } from '../../../domains/store/products/products.service';
 import { PriceResolverService } from '../../../domains/store/products/services/price-resolver.service';
 import { SettingsService } from '../../../domains/store/settings/settings.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { resolvePricedUnits } from '../../../domains/store/products/services/tier-margin.util';
 
 export interface ProductToolDeps {
   productsService: ProductsService;
   priceResolver: PriceResolverService;
   settingsService: SettingsService;
-  /**
-   * Always `StorePrismaService`, never `GlobalPrismaService`: `products` and
-   * `product_variants` are tenant data and the scoped client injects the
-   * store filter (variants relationally, through `products.store_id`).
-   */
-  prisma: StorePrismaService;
 }
 
 /**
@@ -56,21 +49,6 @@ function toNumber(value: unknown): number {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-/**
- * Same summation `ProductsService.calculateFinalPrice` performs: every rate of
- * every assigned tax category. Kept identical on purpose — the assistant must
- * quote the number the catalog screen shows, not a second opinion.
- */
-function totalTaxRate(assignments: any[] | undefined | null): number {
-  let rate = 0;
-  for (const assignment of assignments ?? []) {
-    for (const tax of assignment?.tax_categories?.tax_rates ?? []) {
-      rate += toNumber(tax.rate);
-    }
-  }
-  return rate;
 }
 
 function taxBreakdown(
@@ -126,7 +104,7 @@ const PRODUCT_STATES = ['active', 'inactive', 'archived'] as const;
 const PRODUCT_TYPES = ['physical', 'service', 'prepared'] as const;
 
 export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
-  const { productsService, priceResolver, settingsService, prisma } = deps;
+  const { productsService, priceResolver, settingsService } = deps;
 
   async function storeCurrency(): Promise<string | undefined> {
     try {
@@ -146,52 +124,11 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
   async function hydrateProductCards(orderedIds: number[]) {
     if (!orderedIds.length) return [];
 
-    const rows: any[] = await prisma.products.findMany({
-      where: { id: { in: orderedIds } },
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        barcode: true,
-        state: true,
-        product_type: true,
-        track_inventory: true,
-        is_sellable: true,
-        base_price: true,
-        sale_price: true,
-        is_on_sale: true,
-        stock_unit: true,
-        requires_booking: true,
-        has_multiple_price_tiers: true,
-        brands: { select: { name: true } },
-        product_tax_assignments: {
-          select: {
-            tax_categories: {
-              select: { tax_rates: { select: { rate: true, name: true } } },
-            },
-          },
-        },
-        product_variants: {
-          orderBy: { id: 'asc' },
-          take: MAX_VARIANTS_INLINE,
-          select: {
-            id: true,
-            name: true,
-            sku: true,
-            barcode: true,
-            price_override: true,
-            sale_price: true,
-            is_on_sale: true,
-            track_inventory_override: true,
-            attributes: true,
-          },
-        },
-        _count: { select: { product_variants: true } },
-        stock_levels: {
-          select: { product_variant_id: true, quantity_available: true },
-        },
-      },
-    });
+    const rows: any[] =
+      await productsService.findProductCardsForAgent(
+        orderedIds,
+        MAX_VARIANTS_INLINE,
+      );
 
     const byId = new Map<number, any>(rows.map((row) => [row.id, row]));
 
@@ -199,7 +136,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
       .map((id) => byId.get(id))
       .filter(Boolean)
       .map((product) => {
-        const taxRate = totalTaxRate(product.product_tax_assignments);
+        const taxRate = productsService.getEffectiveTaxRate(product);
         const variantCount = product._count?.product_variants ?? 0;
         const hasVariants = variantCount > 0;
 
@@ -279,7 +216,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           requires_booking: product.requires_booking === true,
           stock_unit: product.stock_unit ?? null,
           net_price: round2(netPrice),
-          unit_price: round2(netPrice * (1 + taxRate)),
+          unit_price: round2(productsService.calculateFinalPrice(product)),
           tax_rate_pct: round2(taxRate * 100),
           inventory_tracked: product.track_inventory === true,
           available_stock:
@@ -298,6 +235,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     // ─── Tool 1: find_product ────────────────────────────────────────
     {
       name: 'find_product',
+      version: '1',
       domain: 'products',
       readOnly: true,
       description:
@@ -416,12 +354,10 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
         let matches: any[] = [];
 
         for (const attempt of attempts) {
-          const found: any[] = await prisma.products.findMany({
-            where: attempt.where,
-            select: { id: true },
-            orderBy: { name: 'asc' },
-            take: limit + 1,
-          });
+          const found: any[] = await productsService.findProductIdsForAgent(
+            attempt.where,
+            limit + 1,
+          );
           if (found.length) {
             matchedBy = attempt.matchedBy;
             matches = found;
@@ -434,12 +370,10 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
 
         if (!matches.length) {
           usedFuzzyPass = true;
-          const pool: any[] = await prisma.products.findMany({
-            where: base,
-            select: { id: true, name: true, sku: true, barcode: true },
-            orderBy: { name: 'asc' },
-            take: FUZZY_SCAN_CAP,
-          });
+          const pool: any[] = await productsService.findProductFuzzyPoolForAgent(
+            base,
+            FUZZY_SCAN_CAP,
+          );
           scanCapReached = pool.length === FUZZY_SCAN_CAP;
 
           const normalizedTokens = normalize(rawQuery)
@@ -504,6 +438,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     // ─── Tool 2: get_product ─────────────────────────────────────────
     {
       name: 'get_product',
+      version: '1',
       domain: 'products',
       readOnly: true,
       description:
@@ -546,7 +481,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           });
         }
 
-        const taxRate = totalTaxRate(product.product_tax_assignments);
+        const taxRate = productsService.getEffectiveTaxRate(product);
         const allVariants = product.product_variants ?? [];
         const hasVariants = allVariants.length > 0;
 
@@ -693,6 +628,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     // ─── Tool 3: list_products ───────────────────────────────────────
     {
       name: 'list_products',
+      version: '1',
       domain: 'products',
       readOnly: true,
       description:
@@ -831,6 +767,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     // ─── Tool 4: get_product_pricing ─────────────────────────────────
     {
       name: 'get_product_pricing',
+      version: '1',
       domain: 'products',
       readOnly: true,
       description:
@@ -871,49 +808,8 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           ? Number(args.product_variant_id)
           : null;
 
-        const product: any = await prisma.products.findFirst({
-          where: { id: productId },
-          select: {
-            id: true,
-            name: true,
-            sku: true,
-            state: true,
-            base_price: true,
-            cost_price: true,
-            profit_margin: true,
-            // QUI-648 — a cuántas unidades de stock corresponde `base_price`.
-            // Sin ella el margen que se le reporta a Vexi mezcla escalas.
-            price_unit_quantity: true,
-            is_on_sale: true,
-            sale_price: true,
-            track_inventory: true,
-            has_multiple_price_tiers: true,
-            product_tax_assignments: {
-              select: {
-                tax_categories: {
-                  select: { tax_rates: { select: { rate: true, name: true } } },
-                },
-              },
-            },
-            product_variants: {
-              orderBy: { id: 'asc' },
-              take: MAX_VARIANTS_INLINE,
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                price_override: true,
-                cost_price: true,
-                profit_margin: true,
-                is_on_sale: true,
-                sale_price: true,
-                track_inventory_override: true,
-                attributes: true,
-              },
-            },
-            _count: { select: { product_variants: true } },
-          },
-        });
+        const product: any =
+          await productsService.findProductPricingForAgent(productId);
 
         if (!product) {
           return JSON.stringify({
@@ -939,7 +835,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           });
         }
 
-        const taxRate = totalTaxRate(product.product_tax_assignments);
+        const taxRate = productsService.getEffectiveTaxRate(product);
         const productInput = {
           base_price: toNumber(product.base_price),
           is_on_sale: product.is_on_sale === true,
@@ -1031,37 +927,10 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
         // ── Price tiers (multi-tarifa / venta por empaque) ────────────
         let tiers: any[] | undefined;
         if (product.has_multiple_price_tiers) {
-          const assignments: any[] =
-            await prisma.product_price_tier_assignments.findMany({
-              where: { product_id: productId },
-              select: { price_tier_id: true },
-            });
-          const tierIds = assignments.map((row) => row.price_tier_id);
+          const { tiers: tierRows, overrides: overrideRows } =
+            await productsService.findProductPriceTiersForAgent(productId);
 
-          if (tierIds.length) {
-            const [tierRows, overrideRows] = await Promise.all([
-              prisma.price_tiers.findMany({
-                where: { id: { in: tierIds }, is_active: true },
-                orderBy: { sort_order: 'asc' },
-                select: {
-                  id: true,
-                  name: true,
-                  discount_percentage: true,
-                  is_package_unit: true,
-                  units_per_package: true,
-                },
-              }) as Promise<any[]>,
-              prisma.product_price_tier_overrides.findMany({
-                where: { product_id: productId },
-                select: {
-                  price_tier_id: true,
-                  variant_id: true,
-                  override_price: true,
-                  override_units_per_package: true,
-                },
-              }) as Promise<any[]>,
-            ]);
-
+          if (tierRows.length) {
             tiers = tierRows.map((tier) => {
               // Filtrado por tarifa. `resolveWithTier` ya compara el
               // `variant_id` real contra `variant.id`, así que el pre-filtro por

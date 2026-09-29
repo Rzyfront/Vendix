@@ -120,7 +120,6 @@ export class OrdersModule implements OnModuleInit {
         ordersService: this.ordersService,
         dispatchNotesService: this.dispatchNotesService,
         sessionsService: this.sessionsService,
-        prisma: this.prisma,
       }),
     );
 

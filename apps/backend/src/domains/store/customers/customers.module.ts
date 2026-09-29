@@ -62,7 +62,6 @@ export class CustomersModule implements OnModuleInit {
     this.toolRegistry.registerMany(
       createCustomerTools({
         customersService: this.customersService,
-        prisma: this.prisma,
       }),
     );
 

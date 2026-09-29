@@ -1,16 +1,8 @@
 import { RegisteredTool } from '../interfaces/tool.interface';
 import { CustomersService } from '../../../domains/store/customers/customers.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 
 export interface CustomerToolDeps {
   customersService: CustomersService;
-  /**
-   * `StorePrismaService` and never `GlobalPrismaService`: every read here is
-   * tenant data. Note that its `users` getter returns the **unscoped** base
-   * client (see `vendix-prisma-scopes`), so every `users` query in this file
-   * carries the store filter explicitly via `customerScope()`.
-   */
-  prisma: StorePrismaService;
 }
 
 /**
@@ -93,18 +85,6 @@ function customerScope(storeId: number, includeArchived: boolean) {
   };
 }
 
-const CUSTOMER_CARD_SELECT = {
-  id: true,
-  first_name: true,
-  last_name: true,
-  email: true,
-  phone: true,
-  document_type: true,
-  document_number: true,
-  state: true,
-  created_at: true,
-} as const;
-
 /**
  * Quintile score (1..5) of `value` inside an ascending sorted population.
  * Degrades gracefully when the population is tiny (everyone lands mid-scale
@@ -172,7 +152,7 @@ interface CustomerAggregate {
 }
 
 export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
-  const { customersService, prisma } = deps;
+  const { customersService } = deps;
 
   /**
    * Purchase aggregates for a bounded set of customers. Only `finished`
@@ -186,13 +166,7 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
     const stats = new Map<number, CustomerAggregate>();
     if (!customerIds.length) return stats;
 
-    const grouped = await prisma.orders.groupBy({
-      by: ['customer_id'],
-      where: { customer_id: { in: customerIds }, state: 'finished' },
-      _count: { _all: true },
-      _sum: { grand_total: true },
-      _max: { created_at: true },
-    });
+    const grouped = await customersService.getPurchaseStatsForAgent(customerIds);
 
     for (const row of grouped as any[]) {
       if (row.customer_id == null) continue;
@@ -213,18 +187,14 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
    * amounts in this response were actually recorded in.
    */
   async function resolveCurrencyFromOrders(): Promise<string | null> {
-    const latest = await prisma.orders.findFirst({
-      where: { currency: { not: null } },
-      orderBy: { created_at: 'desc' },
-      select: { currency: true },
-    });
-    return latest?.currency ?? null;
+    return customersService.resolveCurrencyFromOrdersForAgent();
   }
 
   return [
     // ─── Tool 1: find_customer ───────────────────────────────────────
     {
       name: 'find_customer',
+      version: '1',
       domain: 'customers',
       readOnly: true,
       description:
@@ -327,12 +297,10 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
           where = { ...scope, AND: conditions };
         }
 
-        let rows: any[] = await prisma.users.findMany({
+        let rows: any[] = await customersService.searchCustomerCardsForAgent(
           where,
-          select: CUSTOMER_CARD_SELECT,
-          orderBy: { created_at: 'desc' },
-          take: limit + 1,
-        });
+          limit + 1,
+        );
 
         let usedFuzzyPass = false;
         let scanCapReached = false;
@@ -341,12 +309,10 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
           // Accent-insensitive / phone-format-insensitive second pass. Bounded
           // scan, deliberately cheap: only the identifying columns.
           usedFuzzyPass = true;
-          const pool: any[] = await prisma.users.findMany({
-            where: scope,
-            select: CUSTOMER_CARD_SELECT,
-            orderBy: { created_at: 'desc' },
-            take: FUZZY_SCAN_CAP,
-          });
+          const pool: any[] = await customersService.searchCustomerCardsForAgent(
+            scope,
+            FUZZY_SCAN_CAP,
+          );
           scanCapReached = pool.length === FUZZY_SCAN_CAP;
 
           const normalizedTokens = normalize(rawQuery)
@@ -404,18 +370,7 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
         // which the scope filter would silently drop.
         const [stats, withAddresses, currency] = await Promise.all([
           loadPurchaseStats(ids),
-          prisma.users.findMany({
-            where: { id: { in: ids } },
-            select: {
-              id: true,
-              addresses: {
-                where: { type: 'shipping' },
-                orderBy: { is_primary: 'desc' },
-                take: 1,
-                select: { city: true },
-              },
-            },
-          }) as Promise<any[]>,
+          customersService.findCustomerCitiesForAgent(ids),
           resolveCurrencyFromOrders(),
         ]);
 
@@ -466,6 +421,7 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
     // ─── Tool 2: get_customer_history ────────────────────────────────
     {
       name: 'get_customer_history',
+      version: '1',
       domain: 'customers',
       readOnly: true,
       description:
@@ -524,51 +480,17 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
 
         const [recentOrders, finishedAggregate, openBalance, bookingsCount] =
           await Promise.all([
-            prisma.orders.findMany({
-              where: { customer_id: customerId },
-              orderBy: { created_at: 'desc' },
-              take: limit,
-              select: {
-                id: true,
-                order_number: true,
-                state: true,
-                channel: true,
-                grand_total: true,
-                total_paid: true,
-                remaining_balance: true,
-                currency: true,
-                created_at: true,
-                completed_at: true,
-              },
-            }) as Promise<any[]>,
-            prisma.orders.aggregate({
-              where: { customer_id: customerId, state: 'finished' },
-              _count: { _all: true },
-              _sum: { grand_total: true },
-              _max: { created_at: true },
-              _min: { created_at: true },
-            }) as Promise<any>,
-            prisma.orders.aggregate({
-              where: {
-                customer_id: customerId,
-                state: { notIn: ['cancelled', 'refunded', 'draft'] },
-                remaining_balance: { gt: 0 },
-              },
-              _count: { _all: true },
-              _sum: { remaining_balance: true },
-            }) as Promise<any>,
-            prisma.bookings.count({ where: { customer_id: customerId } }),
+            customersService.getRecentOrdersForAgent(customerId, limit),
+            customersService.getFinishedAggregateForAgent(customerId),
+            customersService.getOpenBalanceForAgent(customerId),
+            customersService.getBookingsCountForAgent(customerId),
           ]);
 
         let topProducts: any[] = [];
         if (includeTopProducts) {
-          const grouped = (await prisma.order_items.groupBy({
-            by: ['product_name'],
-            where: { orders: { customer_id: customerId, state: 'finished' } },
-            _sum: { quantity: true, total_price: true },
-            orderBy: { _sum: { quantity: 'desc' } },
-            take: 5,
-          })) as any[];
+          const grouped = (await customersService.getTopProductsForAgent(
+            customerId,
+          )) as any[];
 
           topProducts = grouped.map((row) => ({
             product: row.product_name,
@@ -640,6 +562,7 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
     // ─── Tool 3: get_customer_segments ───────────────────────────────
     {
       name: 'get_customer_segments',
+      version: '1',
       domain: 'customers',
       readOnly: true,
       description:
@@ -694,19 +617,9 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
         const now = new Date();
         const since = new Date(now.getTime() - periodDays * 86_400_000);
 
-        const grouped = (await prisma.orders.groupBy({
-          by: ['customer_id'],
-          where: {
-            state: 'finished',
-            customer_id: { not: null },
-            created_at: { gte: since },
-          },
-          _count: { _all: true },
-          _sum: { grand_total: true },
-          _max: { created_at: true },
-          orderBy: { _sum: { grand_total: 'desc' } },
-          take: 5000,
-        })) as any[];
+        const grouped = (await customersService.getSegmentPopulationForAgent(
+          since,
+        )) as any[];
 
         const population: CustomerAggregate[] = grouped
           .filter((row) => row.customer_id != null)
@@ -785,13 +698,10 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
 
         const nameById = new Map<number, string>();
         if (exampleIds.length) {
-          const users: any[] = await prisma.users.findMany({
-            where: {
-              id: { in: exampleIds },
-              ...customerScope(storeId, true),
-            },
-            select: { id: true, first_name: true, last_name: true },
-          });
+          const users: any[] = await customersService.findCustomerNamesForAgent(
+            storeId,
+            exampleIds,
+          );
           for (const user of users) nameById.set(user.id, fullName(user));
         }
 

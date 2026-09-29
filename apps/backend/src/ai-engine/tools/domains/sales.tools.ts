@@ -126,6 +126,7 @@ export function createSalesTools(deps: SalesToolDeps): RegisteredTool[] {
     // ─── get_sales_report ────────────────────────────────────────────
     {
       name: 'get_sales_report',
+      version: '1',
       domain: 'sales',
       readOnly: true,
       description:
@@ -224,6 +225,7 @@ export function createSalesTools(deps: SalesToolDeps): RegisteredTool[] {
     // ─── get_top_products ────────────────────────────────────────────
     {
       name: 'get_top_products',
+      version: '1',
       domain: 'sales',
       readOnly: true,
       description:

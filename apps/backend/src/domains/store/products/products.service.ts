@@ -6030,8 +6030,10 @@ export class ProductsService {
 
   /**
    * Calculates the final price of a product including taxes and active offers.
+   * Public: single fiscal source of truth for Vexi tools (T1) — tools never
+   * sum tax rates locally.
    */
-  private calculateFinalPrice(product: any): number {
+  calculateFinalPrice(product: any): number {
     const basePrice =
       product.is_on_sale && product.sale_price
         ? Number(product.sale_price)
@@ -6042,6 +6044,183 @@ export class ProductsService {
     // asignaciones, resolveLineTotals devuelve el precio intacto (cero
     // regresión histórica).
     return resolveLineTotals(basePrice, extractTypedRates(product)).total;
+  }
+
+  /**
+   * Additive tax rate derived from `calculateFinalPrice` (T1): `rate =
+   * (final - base) / base`. `PriceResolverService` multiplies `unitPrice *
+   * (1 + rate)`, so feeding it this rate reproduces exactly the final price
+   * above — inclusive taxes yield 0 (no growth) instead of overcharging.
+   * Tools call this instead of summing `tax_rates` locally.
+   */
+  getEffectiveTaxRate(product: any): number {
+    const base =
+      product?.is_on_sale && product?.sale_price
+        ? Number(product.sale_price)
+        : Number(product?.base_price ?? 0);
+    if (!Number.isFinite(base) || base <= 0) return 0;
+    const final = this.calculateFinalPrice(product);
+    if (!Number.isFinite(final) || final <= base) return 0;
+    return (final - base) / base;
+  }
+
+  /**
+   * T1 agent reads: narrow projections owned by this service so Vexi tools
+   * never touch Prisma directly. Tenant scope comes from the injected
+   * `StorePrismaService` (same as `findAll`/`findOne`).
+   */
+
+  /** `find_product` id pass: selects only `{id}`, ordered by name. */
+  async findProductIdsForAgent(where: any, take: number) {
+    return this.prisma.products.findMany({
+      where,
+      select: { id: true },
+      orderBy: { name: 'asc' },
+      take,
+    });
+  }
+
+  /** `find_product` accent-insensitive fallback pool (bounded scan). */
+  async findProductFuzzyPoolForAgent(where: any, take: number) {
+    return this.prisma.products.findMany({
+      where,
+      select: { id: true, name: true, sku: true, barcode: true },
+      orderBy: { name: 'asc' },
+      take,
+    });
+  }
+
+  /** Full cards for a bounded id set (tax, variants, counts, stock levels). */
+  async findProductCardsForAgent(
+    orderedIds: number[],
+    maxVariantsInline = 25,
+  ) {
+    if (!orderedIds.length) return [];
+    return this.prisma.products.findMany({
+      where: { id: { in: orderedIds } },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        barcode: true,
+        state: true,
+        product_type: true,
+        track_inventory: true,
+        is_sellable: true,
+        base_price: true,
+        sale_price: true,
+        is_on_sale: true,
+        stock_unit: true,
+        requires_booking: true,
+        has_multiple_price_tiers: true,
+        brands: { select: { name: true } },
+        product_tax_assignments: {
+          select: {
+            tax_categories: {
+              select: { tax_rates: { select: { rate: true, name: true } } },
+            },
+          },
+        },
+        product_variants: {
+          orderBy: { id: 'asc' },
+          take: maxVariantsInline,
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            barcode: true,
+            price_override: true,
+            sale_price: true,
+            is_on_sale: true,
+            track_inventory_override: true,
+            attributes: true,
+          },
+        },
+        _count: { select: { product_variants: true } },
+        stock_levels: {
+          select: { product_variant_id: true, quantity_available: true },
+        },
+      },
+    }) as Promise<any[]>;
+  }
+
+  /** `get_product_pricing` detail projection (pricing + variants + taxes). */
+  async findProductPricingForAgent(productId: number) {
+    return this.prisma.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        state: true,
+        base_price: true,
+        cost_price: true,
+        profit_margin: true,
+        price_unit_quantity: true,
+        is_on_sale: true,
+        sale_price: true,
+        track_inventory: true,
+        has_multiple_price_tiers: true,
+        product_tax_assignments: {
+          select: {
+            tax_categories: {
+              select: { tax_rates: { select: { rate: true, name: true } } },
+            },
+          },
+        },
+        product_variants: {
+          orderBy: { id: 'asc' },
+          take: 25,
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            price_override: true,
+            cost_price: true,
+            profit_margin: true,
+            is_on_sale: true,
+            sale_price: true,
+            track_inventory_override: true,
+            attributes: true,
+          },
+        },
+        _count: { select: { product_variants: true } },
+      },
+    }) as Promise<any | null>;
+  }
+
+  /** Active price tiers + overrides for a multi-tarifa product. */
+  async findProductPriceTiersForAgent(productId: number) {
+    const assignments: any[] =
+      await this.prisma.product_price_tier_assignments.findMany({
+        where: { product_id: productId },
+        select: { price_tier_id: true },
+      });
+    const tierIds = assignments.map((row) => row.price_tier_id);
+    if (!tierIds.length) return { tiers: [], overrides: [] };
+    const [tiers, overrides] = await Promise.all([
+      this.prisma.price_tiers.findMany({
+        where: { id: { in: tierIds }, is_active: true },
+        orderBy: { sort_order: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          discount_percentage: true,
+          is_package_unit: true,
+          units_per_package: true,
+        },
+      }) as Promise<any[]>,
+      this.prisma.product_price_tier_overrides.findMany({
+        where: { product_id: productId },
+        select: {
+          price_tier_id: true,
+          variant_id: true,
+          override_price: true,
+          override_units_per_package: true,
+        },
+      }) as Promise<any[]>,
+    ]);
+    return { tiers, overrides };
   }
 
   private async resolvePosScope(

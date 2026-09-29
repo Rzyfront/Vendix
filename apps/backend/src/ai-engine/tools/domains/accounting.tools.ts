@@ -269,6 +269,7 @@ export function createAccountingTools(
     // ─── 1. list_fiscal_periods ──────────────────────────────────────
     {
       name: 'list_fiscal_periods',
+      version: '1',
       domain: 'accounting',
       readOnly: true,
       description:
@@ -314,6 +315,7 @@ export function createAccountingTools(
     // ─── 2. get_income_statement ─────────────────────────────────────
     {
       name: 'get_income_statement',
+      version: '1',
       domain: 'accounting',
       readOnly: true,
       description:
@@ -387,6 +389,7 @@ export function createAccountingTools(
     // ─── 3. get_balance_sheet ────────────────────────────────────────
     {
       name: 'get_balance_sheet',
+      version: '1',
       domain: 'accounting',
       readOnly: true,
       description:
@@ -459,6 +462,7 @@ export function createAccountingTools(
     // ─── 4. get_trial_balance ────────────────────────────────────────
     {
       name: 'get_trial_balance',
+      version: '1',
       domain: 'accounting',
       readOnly: true,
       description:
@@ -565,6 +569,7 @@ export function createAccountingTools(
     // ─── 5. get_account_ledger ───────────────────────────────────────
     {
       name: 'get_account_ledger',
+      version: '1',
       domain: 'accounting',
       readOnly: true,
       description:
@@ -659,6 +664,7 @@ export function createAccountingTools(
     // ─── 6. get_vat_summary ──────────────────────────────────────────
     {
       name: 'get_vat_summary',
+      version: '1',
       domain: 'accounting',
       readOnly: true,
       description:
@@ -745,6 +751,7 @@ export function createAccountingTools(
     // ─── 7. get_recent_journal_entries ───────────────────────────────
     {
       name: 'get_recent_journal_entries',
+      version: '1',
       domain: 'accounting',
       readOnly: true,
       description:
@@ -857,6 +864,7 @@ export function createAccountingTools(
     // ─── 8. find_puc_account ─────────────────────────────────────────
     {
       name: 'find_puc_account',
+      version: '1',
       domain: 'accounting',
       readOnly: true,
       description:

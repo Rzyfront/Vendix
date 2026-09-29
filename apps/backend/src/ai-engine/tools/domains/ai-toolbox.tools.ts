@@ -53,6 +53,7 @@ export function createAiToolboxTools({
   return [
     {
       name: 'ai_extract_document',
+      version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
       description: `Lee un documento que la persona adjuntó y devuelve sus datos estructurados. Ejecuta un modelo de visión especializado por tipo de documento — tú no ves la imagen, recibes el resultado ya extraído. Tipos que puedo leer: ${documentKinds
@@ -104,6 +105,7 @@ export function createAiToolboxTools({
     },
     {
       name: 'validate_extraction',
+      version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
       description:
@@ -197,6 +199,7 @@ export function createAiToolboxTools({
     },
     {
       name: 'ai_summarize',
+      version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
       description: `Prepara un resumen especializado con un modelo aparte. Tipos disponibles: ${Object.keys(
@@ -230,6 +233,7 @@ export function createAiToolboxTools({
     },
     {
       name: 'ai_write_copy',
+      version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
       description: `Redacta textos de marketing con un modelo especializado. Tipos: ${Object.keys(
@@ -259,6 +263,7 @@ export function createAiToolboxTools({
     },
     {
       name: 'ai_generate_image',
+      version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
       description: `Genera o mejora una imagen con un modelo de imagen. Tipos: ${Object.keys(
@@ -327,6 +332,7 @@ export function createAiToolboxTools({
     },
     {
       name: 'list_attachments',
+      version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
       description:

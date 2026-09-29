@@ -23,6 +23,7 @@ export function createCapabilityTools({
   return [
     {
       name: 'list_capabilities',
+      version: '1',
       domain: 'capabilities',
       readOnly: true,
       description:
@@ -87,6 +88,7 @@ export function createCapabilityTools({
     },
     {
       name: 'explain_capability',
+      version: '1',
       domain: 'capabilities',
       readOnly: true,
       description:

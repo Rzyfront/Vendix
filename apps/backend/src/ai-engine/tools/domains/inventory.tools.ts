@@ -50,6 +50,7 @@ export function createInventoryTools(
     // ─── Tool 1: get_stock_levels ───────────────────────────────────
     {
       name: 'get_stock_levels',
+      version: '1',
       domain: 'inventory',
       readOnly: true,
       description:
@@ -107,6 +108,7 @@ export function createInventoryTools(
     // ─── Tool 2: get_low_stock_alerts ────────────────────────────────
     {
       name: 'get_low_stock_alerts',
+      version: '1',
       domain: 'inventory',
       readOnly: true,
       description:
@@ -164,6 +166,7 @@ export function createInventoryTools(
     // ─── Tool 3: check_stock_availability ────────────────────────────
     {
       name: 'check_stock_availability',
+      version: '1',
       domain: 'inventory',
       readOnly: true,
       description:
@@ -221,6 +224,7 @@ export function createInventoryTools(
     // ─── Tool 4: get_stock_movements ─────────────────────────────────
     {
       name: 'get_stock_movements',
+      version: '1',
       domain: 'inventory',
       readOnly: true,
       description:
@@ -300,6 +304,7 @@ export function createInventoryTools(
     // ─── Tool 5: get_inventory_locations ─────────────────────────────
     {
       name: 'get_inventory_locations',
+      version: '1',
       domain: 'inventory',
       readOnly: true,
       description:
@@ -344,6 +349,7 @@ export function createInventoryTools(
     // ─── Tool 6: get_stock_adjustments ───────────────────────────────
     {
       name: 'get_stock_adjustments',
+      version: '1',
       domain: 'inventory',
       readOnly: true,
       description:
@@ -431,6 +437,7 @@ export function createInventoryTools(
     // ─── Tool 7: create_stock_adjustment (WRITE) ─────────────────────
     {
       name: 'create_stock_adjustment',
+      version: '1',
       domain: 'inventory',
       description:
         'Create an inventory stock adjustment for damage, loss, theft, expiration, count variance, or manual correction. This changes the stock quantity at a specific location.',

@@ -97,7 +97,6 @@ export class ProductsModule implements OnModuleInit {
         productsService: this.productsService,
         priceResolver: this.priceResolver,
         settingsService: this.settingsService,
-        prisma: this.prisma,
       }),
     );
 

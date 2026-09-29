@@ -1,17 +1,26 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AIToolDefinition } from '../interfaces/ai-provider.interface';
 import {
+  DEFAULT_TOOL_VERSION,
   RegisteredTool,
   ToolExecutionContext,
 } from './interfaces/tool.interface';
 import { VendixHttpException, ErrorCodes } from '../../common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VexiConfirmationService } from '../../domains/store/vexi/vexi-confirmation.service';
+import { validateToolArgs } from './tool-args.validator';
 
 @Injectable()
 export class AIToolRegistry {
   private readonly logger = new Logger(AIToolRegistry.name);
   private tools = new Map<string, RegisteredTool>();
+  /**
+   * T2: `oldName → newName`. Todo breaking crea una versión nueva del tool y
+   * registra aquí el nombre viejo durante el sunset, para que los turnos
+   * persistidos en `ai_messages.tool_calls` sigan resolviendo. El alias
+   * sobrevive a la remoción del handler (T5).
+   */
+  private aliases = new Map<string, string>();
 
   constructor(private readonly confirmations: VexiConfirmationService) {}
 
@@ -19,8 +28,26 @@ export class AIToolRegistry {
     if (this.tools.has(tool.name)) {
       this.logger.warn(`Tool "${tool.name}" is being overwritten`);
     }
+    tool.version ??= DEFAULT_TOOL_VERSION;
     this.tools.set(tool.name, tool);
-    this.logger.log(`Registered tool: ${tool.name} (${tool.domain})`);
+    this.logger.log(
+      `Registered tool: ${tool.name} (${tool.domain}) v${tool.version}`,
+    );
+  }
+
+  /**
+   * Registra `oldName` como alias de `newName` durante una ventana de sunset.
+   * No valida que el destino exista todavía: el alias puede registrarse antes
+   * que la versión nueva, y un destino ausente cae al camino de nombre
+   * desconocido con sugerencias (`suggestToolNames`) en vez de resolver mal.
+   */
+  registerAlias(oldName: string, newName: string): void {
+    if (oldName === newName) {
+      this.logger.warn(`Alias "${oldName}" points to itself; ignored`);
+      return;
+    }
+    this.aliases.set(oldName, newName);
+    this.logger.log(`Registered tool alias: ${oldName} → ${newName}`);
   }
 
   /**
@@ -128,6 +155,18 @@ export class AIToolRegistry {
     return this.resolveToolName(name) ?? name;
   }
 
+  /**
+   * Versión del contrato del tool ya resuelto, para el catálogo MCP y el
+   * envelope de salida. Fuera del registry para no contaminar el schema
+   * `AIToolDefinition` que viaja a los proveedores con una clave extra que
+   * sus APIs estrictas rechazarían.
+   */
+  getToolVersion(name: string): string {
+    const resolved = this.resolveToolName(name);
+    const tool = resolved ? this.tools.get(resolved) : undefined;
+    return tool?.version ?? DEFAULT_TOOL_VERSION;
+  }
+
   private resolveToolName(name: string): string | null {
     if (this.tools.has(name)) return name;
 
@@ -135,9 +174,27 @@ export class AIToolRegistry {
       ? name.slice(name.lastIndexOf('.') + 1)
       : null;
 
-    return withoutNamespace && this.tools.has(withoutNamespace)
-      ? withoutNamespace
-      : null;
+    if (withoutNamespace && this.tools.has(withoutNamespace)) {
+      return withoutNamespace;
+    }
+
+    // T2: alias explícitos `oldName → newName`, con guarda anti-ciclos. Solo
+    // los alias registrados redirigen: una resolución difusa aquí (reusar
+    // `suggestToolNames` para adivinar) ejecutaría un tool que el modelo no
+    // nombró, así que lo desconocido sigue lanzando AI_AGENT_003 con
+    // sugerencias para que el loop se corrija en el turno siguiente.
+    const seen = new Set<string>([name]);
+    let candidate: string | undefined = this.aliases.get(
+      withoutNamespace ?? name,
+    );
+    while (candidate) {
+      if (this.tools.has(candidate)) return candidate;
+      if (seen.has(candidate)) return null;
+      seen.add(candidate);
+      candidate = this.aliases.get(candidate);
+    }
+
+    return null;
   }
 
   /**
@@ -229,6 +286,23 @@ export class AIToolRegistry {
           `Insufficient permissions for tool "${name}"`,
         );
       }
+    }
+
+    // Validación en el borde (T3): ningún `preview` ni `handler` ejecuta con
+    // args inválidos. Va DESPUÉS del permiso para no filtrar el schema a quien
+    // no puede usar el tool, y ANTES de la confirmación para no acuñar un
+    // token sobre basura. El fallo NO lanza: devuelve `{error, next_step}` en
+    // español, la misma doctrina de los handlers — un `AI_AGENT_003` opaco no
+    // le dice al modelo qué corregir.
+    const edgeValidation = validateToolArgs(tool.name, tool.parameters, args);
+    if (!edgeValidation.ok) {
+      this.logger.warn(
+        `Tool "${name}" rejected at the edge: ${edgeValidation.error}`,
+      );
+      return JSON.stringify({
+        error: edgeValidation.error,
+        next_step: edgeValidation.next_step,
+      });
     }
 
     if (tool.requiresConfirmation) {

@@ -23,6 +23,7 @@ import { RegisteredTool } from '../interfaces/tool.interface';
 export const uiTools: RegisteredTool[] = [
   {
     name: 'ui_list_modules',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -41,6 +42,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_explain_module',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -59,6 +61,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_why_hidden',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -76,6 +79,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_navigate',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -94,6 +98,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_pos_add_item',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -116,6 +121,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_pos_remove_item',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -133,6 +139,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_pos_set_customer',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -150,6 +157,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_pos_read_cart',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -158,6 +166,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_pos_checkout',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -166,6 +175,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_refresh',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -192,6 +202,7 @@ export const uiTools: RegisteredTool[] = [
   // impide armar estados que la propia pantalla rechazaría después.
   {
     name: 'ui_read_screen',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -200,6 +211,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_list_actions',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -208,6 +220,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_fill_form',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -226,6 +239,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_set_filter',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -244,6 +258,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_click_action',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -265,6 +280,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_open_modal',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:
@@ -286,6 +302,7 @@ export const uiTools: RegisteredTool[] = [
   },
   {
     name: 'ui_wait_for',
+    version: '1',
     domain: 'ui',
     clientSide: true,
     description:

@@ -1,45 +1,26 @@
 import { RegisteredTool } from '../interfaces/tool.interface';
-import { OrdersService } from '../../../domains/store/orders/orders.service';
+import {
+  OrdersService,
+  SORTABLE_COLUMNS,
+} from '../../../domains/store/orders/orders.service';
 import { OrderQueryDto } from '../../../domains/store/orders/dto/order-query.dto';
 import { DispatchNotesService } from '../../../domains/store/dispatch-notes/dispatch-notes.service';
 import { SessionsService } from '../../../domains/store/cash-registers/sessions/sessions.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { order_channel_enum, order_state_enum } from '@prisma/client';
 
 export interface OrdersToolDeps {
   ordersService: OrdersService;
   dispatchNotesService: DispatchNotesService;
   sessionsService: SessionsService;
-  prisma: StorePrismaService;
 }
 
-const ORDER_STATES = [
-  'draft',
-  'created',
-  'pending_payment',
-  'processing',
-  'shipped',
-  'delivered',
-  'cancelled',
-  'refunded',
-  'finished',
-] as const;
-
-const ORDER_CHANNELS = [
-  'pos',
-  'ecommerce',
-  'agent',
-  'whatsapp',
-  'marketplace',
-] as const;
-
-/** Columnas por las que `OrdersService.findAll` puede ordenar sin romper Prisma. */
-const SORTABLE_COLUMNS = [
-  'created_at',
-  'updated_at',
-  'order_number',
-  'grand_total',
-  'state',
-] as const;
+// Derivados de los enums Prisma generados — nunca copias a mano: si el schema
+// gana un estado (como `pending_delivery`), el filtro lo acepta solo.
+const ORDER_STATES: readonly order_state_enum[] =
+  Object.values(order_state_enum);
+const ORDER_CHANNELS: readonly order_channel_enum[] = Object.values(
+  order_channel_enum,
+);
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -107,19 +88,25 @@ function compactOrder(order: any) {
   };
 }
 
-function validateEnum(
+/**
+ * Valida contra la lista permitida y devuelve el valor ya tipado: el
+ * genérico propaga el tipo del enum Prisma (o de `SORTABLE_COLUMNS`), así el
+ * llamante arma el `OrderQueryDto` sin casts.
+ */
+function validateEnum<const T extends string>(
   value: any,
-  allowed: readonly string[],
+  allowed: readonly T[],
   field: string,
-): string | undefined | { error: string } {
+): T | undefined | { error: string } {
   if (value === undefined || value === null || value === '') return undefined;
   const parsed = String(value);
-  if (!allowed.includes(parsed)) {
+  const match = allowed.find((option) => option === parsed);
+  if (match === undefined) {
     return {
       error: `${field} "${parsed}" no existe. Valores válidos: ${allowed.join(', ')}.`,
     };
   }
-  return parsed;
+  return match;
 }
 
 function isError(value: any): value is { error: string } {
@@ -127,7 +114,7 @@ function isError(value: any): value is { error: string } {
 }
 
 export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
-  const { ordersService, dispatchNotesService, sessionsService, prisma } = deps;
+  const { ordersService, dispatchNotesService, sessionsService } = deps;
 
   const noStore = (what: string) =>
     JSON.stringify({
@@ -138,6 +125,7 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
     // ─── find_order ──────────────────────────────────────────────────
     {
       name: 'find_order',
+      version: '1',
       domain: 'orders',
       readOnly: true,
       description:
@@ -181,12 +169,13 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
         const limit = clamp(args.limit, 5, 20);
 
         try {
-          const result = await ordersService.findAll({
+          const query: OrderQueryDto = {
             page: 1,
             limit,
             search,
-            ...(state && { status: state as any }),
-          } as OrderQueryDto);
+            ...(state && { status: state }),
+          };
+          const result = await ordersService.findAll(query);
 
           const candidatas = result.data.map((o: any) => compactOrder(o));
 
@@ -194,15 +183,8 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
           // compara contra order_number y contra los datos del cliente. Sin este
           // rescate el flujo se corta justo en el paso de entrada.
           if (/^\d+$/.test(search)) {
-            const byId = await prisma.orders.findFirst({
-              where: { id: Number(search) },
-              include: {
-                users: {
-                  select: { id: true, first_name: true, last_name: true, email: true },
-                },
-                order_items: { select: { id: true } },
-              },
-            });
+            const byId =
+              await ordersService.findOrderByIdForAgent(Number(search));
             if (byId && !candidatas.some((c) => c.order_id === byId.id)) {
               candidatas.unshift(compactOrder(byId));
             }
@@ -239,6 +221,7 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
     // ─── list_orders ─────────────────────────────────────────────────
     {
       name: 'list_orders',
+      version: '1',
       domain: 'orders',
       readOnly: true,
       description:
@@ -336,11 +319,11 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
         const limit = clamp(args.limit, 10, 50);
 
         try {
-          const result = await ordersService.findAll({
+          const query: OrderQueryDto = {
             page,
             limit,
-            ...(state && { status: state as any }),
-            ...(channel && { channel: channel as any }),
+            ...(state && { status: state }),
+            ...(channel && { channel }),
             ...(args.customer_id && { customer_id: Number(args.customer_id) }),
             ...(args.search && { search: String(args.search) }),
             ...(from && to && { date_from: from, date_to: to }),
@@ -349,10 +332,11 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
               missing_shipping_method: true,
             }),
             ...(sortBy && {
-              sort_by: sortBy as string,
+              sort_by: sortBy,
               sort_order: args.sort_order === 'asc' ? 'asc' : 'desc',
             }),
-          } as OrderQueryDto);
+          };
+          const result = await ordersService.findAll(query);
 
           const data = result.data.map((o: any) => compactOrder(o));
           const { total, totalPages } = result.pagination;
@@ -390,6 +374,7 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
     // ─── get_order ───────────────────────────────────────────────────
     {
       name: 'get_order',
+      version: '1',
       domain: 'orders',
       readOnly: true,
       description:
@@ -514,6 +499,7 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
     // ─── get_cash_session_status ─────────────────────────────────────
     {
       name: 'get_cash_session_status',
+      version: '1',
       domain: 'orders',
       readOnly: true,
       description:
@@ -662,6 +648,7 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
     // ─── get_dispatch_status ─────────────────────────────────────────
     {
       name: 'get_dispatch_status',
+      version: '1',
       domain: 'orders',
       readOnly: true,
       description:
@@ -689,20 +676,7 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
         }
 
         try {
-          const order = await prisma.orders.findFirst({
-            where: { id: orderId },
-            select: {
-              id: true,
-              order_number: true,
-              state: true,
-              delivery_type: true,
-              dispatch_fulfillment: true,
-              created_at: true,
-              order_items: {
-                select: { id: true, product_name: true, quantity: true },
-              },
-            },
-          });
+          const order = await ordersService.findDispatchStatusForAgent(orderId);
 
           if (!order) {
             return JSON.stringify({

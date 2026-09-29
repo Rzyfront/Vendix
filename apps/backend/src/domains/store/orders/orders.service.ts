@@ -214,6 +214,22 @@ export function splitTaxSnapshotAcrossRates(
   return cents.map((c) => c / 100);
 }
 
+/**
+ * Columnas por las que `OrdersService.findAll` puede ordenar sin romper
+ * Prisma. Vive en el servicio —el dueño del query— y no en cada llamante:
+ * las tools de Vexi (`orders.tools.ts`) la importan para validar `sort_by`
+ * en vez de mantener su propia copia.
+ */
+export const SORTABLE_COLUMNS = [
+  'created_at',
+  'updated_at',
+  'order_number',
+  'grand_total',
+  'state',
+] as const;
+
+export type SortableOrderColumn = (typeof SORTABLE_COLUMNS)[number];
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -1699,6 +1715,54 @@ export class OrdersService {
         : null,
       available_actions,
     };
+  }
+
+  /**
+   * T1 agent reads: narrow projections owned by this service so Vexi tools
+   * never touch Prisma directly. Tenant scope comes from the injected
+   * `StorePrismaService` plus the explicit `store_id` anchor below (same
+   * defense-in-depth as `findOne`).
+   */
+
+  private agentStoreAnchor() {
+    const context = RequestContextService.getContext();
+    return context?.store_id ? { store_id: context.store_id } : {};
+  }
+
+  /**
+   * `find_order` numeric rescue: "la orden 412" is the internal id, which
+   * `findAll({search})` never matches (it only looks at `order_number` and
+   * customer data). Lightweight projection for `compactOrder`, null when
+   * missing — never throws, unlike `findOne`.
+   */
+  async findOrderByIdForAgent(orderId: number) {
+    return this.prisma.orders.findFirst({
+      where: { id: orderId, ...this.agentStoreAnchor() },
+      include: {
+        users: {
+          select: { id: true, first_name: true, last_name: true, email: true },
+        },
+        order_items: { select: { id: true } },
+      },
+    }) as Promise<any | null>;
+  }
+
+  /** `get_dispatch_status` header projection (lines + fulfillment flag). */
+  async findDispatchStatusForAgent(orderId: number) {
+    return this.prisma.orders.findFirst({
+      where: { id: orderId, ...this.agentStoreAnchor() },
+      select: {
+        id: true,
+        order_number: true,
+        state: true,
+        delivery_type: true,
+        dispatch_fulfillment: true,
+        created_at: true,
+        order_items: {
+          select: { id: true, product_name: true, quantity: true },
+        },
+      },
+    }) as Promise<any | null>;
   }
 
   /**
