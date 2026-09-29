@@ -125,6 +125,7 @@ describe('InvoiceFlowService support documents', () => {
       }),
       sendInvoice: jest.fn(),
       sendCreditNote: jest.fn(),
+      checkStatus: jest.fn(),
     };
     const resolver = {
       resolve: jest.fn().mockResolvedValue(provider),
@@ -141,6 +142,7 @@ describe('InvoiceFlowService support documents', () => {
     const fiscalLedger = {
       ensureInvoiceTransmission: jest.fn().mockResolvedValue({ id: 800 }),
       markSubmitted: jest.fn().mockResolvedValue(undefined),
+      claimSubmission: jest.fn().mockResolvedValue(undefined),
       markAccepted: jest.fn().mockResolvedValue(undefined),
       markRejected: jest.fn(),
       markError: jest.fn(),
@@ -301,6 +303,146 @@ describe('InvoiceFlowService support documents', () => {
       'invoice.accepted',
       expect.anything(),
     );
+  });
+
+  describe('reserva atómica y resolución por GetStatus', () => {
+    const rule90 = {
+      code: '90',
+      text: 'Regla 90: Documento procesado anteriormente',
+      severity: 'rechazo',
+    };
+
+    it('dos send() concurrentes: el proveedor se llama 1 vez y el segundo recibe FISCAL_SEND_IN_PROGRESS', async () => {
+      const { VendixHttpException, ErrorCodes } = await import(
+        'src/common/errors'
+      );
+      let claimed = false;
+      const claimSubmission = jest.fn().mockImplementation(async () => {
+        if (claimed) {
+          throw new VendixHttpException(ErrorCodes.FISCAL_SEND_IN_PROGRESS);
+        }
+        claimed = true;
+      });
+      const { service, provider, fiscalLedger } = createService({
+        fiscalLedger: { claimSubmission },
+      });
+
+      const results = await Promise.allSettled([
+        RequestContextService.run(requestContext, () => service.send(100)),
+        RequestContextService.run(requestContext, () => service.send(100)),
+      ]);
+
+      expect(provider.sendSupportDocument).toHaveBeenCalledTimes(1);
+      const rejected = results.filter((r) => r.status === 'rejected') as any[];
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].reason.errorCode).toBe('FISCAL_SEND_IN_PROGRESS');
+      // Sin markError ni contingencia para el llamador que perdio la reserva.
+      expect(fiscalLedger.markError).not.toHaveBeenCalled();
+    });
+
+    it('Regla 90 + GetStatus accepted: acepta la factura y emite el evento de aceptación', async () => {
+      const { service, provider, prisma, eventEmitter, fiscalLedger } =
+        createService();
+      provider.sendSupportDocument.mockResolvedValue({
+        success: false,
+        tracking_id: 'track-1',
+        cuds: 'cuds-1',
+        message: 'rechazado',
+        provider_data: {
+          already_processed: true,
+          timed_out: false,
+          rule_messages: [rule90],
+        },
+      });
+      provider.checkStatus.mockResolvedValue({
+        tracking_id: 'track-1',
+        status: 'accepted',
+        cufe: undefined,
+        message: 'ok',
+        provider_data: { application_response_xml: '<ar/>' },
+      });
+
+      await RequestContextService.run(requestContext, () => service.send(100));
+
+      expect(provider.checkStatus).toHaveBeenCalledWith('cuds-1');
+      expect(fiscalLedger.markRejected).not.toHaveBeenCalled();
+      expect(fiscalLedger.markAccepted).toHaveBeenCalledTimes(1);
+      const accepted = prisma.invoices.update.mock.calls
+        .map(([args]: any[]) => args)
+        .find((args: any) => args.data?.status === 'accepted');
+      expect(accepted).toBeDefined();
+      expect(accepted.data.provider_response.provider_data.resolved_via).toBe(
+        'get_status_regla_90',
+      );
+      expect(accepted.data.provider_response.message).toContain(
+        'confirmado válido vía GetStatus',
+      );
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'support_document.accepted',
+        expect.objectContaining({ invoice_id: 100 }),
+      );
+    });
+
+    it('Regla 90 + GetStatus rejected: sigue el camino de rechazo con la Regla 90 en el mensaje', async () => {
+      const { service, provider, fiscalLedger, prisma } = createService();
+      provider.sendSupportDocument.mockResolvedValue({
+        success: false,
+        tracking_id: 'track-1',
+        cuds: 'cuds-1',
+        provider_data: { already_processed: true, rule_messages: [rule90] },
+      });
+      provider.checkStatus.mockResolvedValue({ tracking_id: 'track-1', status: 'rejected' });
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.send(100)),
+      ).rejects.toMatchObject({ errorCode: 'INVOICING_PROVIDER_004' });
+
+      expect(fiscalLedger.markRejected).toHaveBeenCalledTimes(1);
+      expect(fiscalLedger.markAccepted).not.toHaveBeenCalled();
+      const rejectedUpdate = prisma.invoices.update.mock.calls
+        .map(([args]: any[]) => args)
+        .find((args: any) => args.data?.status === 'rejected');
+      expect(rejectedUpdate.data.provider_response.errors).toEqual([
+        { code: '90', text: rule90.text },
+      ]);
+    });
+
+    it('timeout + GetStatus no accepted: sin contingencia 04, error reintentable', async () => {
+      const declareContingency = jest.fn();
+      const enqueue = jest.fn().mockResolvedValue(undefined);
+      const { service, provider, fiscalLedger, prisma } = createService({
+        retryQueue: { declareContingency, enqueue },
+      });
+      provider.sendSupportDocument.mockResolvedValue({
+        success: false,
+        tracking_id: '',
+        cuds: 'cuds-1',
+        message: 'timeout',
+        contingency_eligible: true,
+        failure_class: 'timeout',
+        provider_data: { timed_out: true },
+      });
+      provider.checkStatus.mockResolvedValue({ tracking_id: 't', status: 'pending' });
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.send(100)),
+      ).rejects.toMatchObject({ errorCode: 'INVOICING_PROVIDER_001' });
+
+      expect(provider.checkStatus).toHaveBeenCalledWith('cuds-1');
+      expect(declareContingency).not.toHaveBeenCalled();
+      expect(fiscalLedger.markError).toHaveBeenCalledTimes(1);
+      expect(enqueue).toHaveBeenCalledTimes(1);
+      const updates = prisma.invoices.update.mock.calls.map(
+        ([args]: any[]) => args.data,
+      );
+      expect(
+        updates.some(
+          (d: any) =>
+            d.contingency_type === '04' ||
+            d.transmission_status === 'contingency',
+        ),
+      ).toBe(false);
+    });
   });
 
   it('rejects support document send when supplier has no tax id', async () => {
