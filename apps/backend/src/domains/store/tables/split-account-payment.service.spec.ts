@@ -212,7 +212,10 @@ describe('SplitAccountPaymentService', () => {
         pos: { cash_register: { enabled: false } },
       })),
     };
-    sessions = { getActiveSession: jest.fn(async () => null) };
+    sessions = {
+      getActiveSession: jest.fn(async () => null),
+      assertSessionForSales: jest.fn(async () => undefined),
+    };
     emitAfterCommit = jest.fn(() => {
       expect(transactionOpen).toBe(false);
     });
@@ -397,7 +400,16 @@ describe('SplitAccountPaymentService', () => {
         cash_register: { enabled: true, require_session_for_sales: true },
       },
     });
-    await expect(service.pay(100, 11, makeRequest())).rejects.toThrow('caja');
+    // El gate migró al helper: la sesión ausente la reporta
+    // `assertSessionForSales` con el código único de caja.
+    sessions.assertSessionForSales.mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+    );
+    const gateError = await service
+      .pay(100, 11, makeRequest())
+      .catch((failure) => failure);
+    expect(gateError).toBeInstanceOf(VendixHttpException);
+    expect(gateError.errorCode).toBe('CASH_SESSION_REQUIRED_001');
     expect(db.payments.create).not.toHaveBeenCalled();
   });
 

@@ -26,7 +26,8 @@ export type AnalyticsCategoryId =
   | 'customers'
   | 'reviews'
   | 'financial'
-  | 'dispatch';
+  | 'dispatch'
+  | 'payments';
 
 export interface AnalyticsCategory {
   id: AnalyticsCategoryId;
@@ -34,7 +35,8 @@ export interface AnalyticsCategory {
   description: string;
   icon: string;
   color: string;
-  panelUiKey: string;
+  /** Opcional: la categoría Pagos no tiene clave de panel_ui propia (no se filtra por módulo). */
+  panelUiKey?: string;
 }
 
 export interface AnalyticsView {
@@ -49,7 +51,7 @@ export interface AnalyticsView {
 }
 
 // ─────────────────────────────────────────────
-// Categories (9 total)
+// Categories (10 total)
 // ─────────────────────────────────────────────
 
 export const ANALYTICS_CATEGORIES: AnalyticsCategory[] = [
@@ -125,10 +127,17 @@ export const ANALYTICS_CATEGORIES: AnalyticsCategory[] = [
     color: 'var(--color-warning)',
     panelUiKey: 'analytics_dispatch',
   },
+  {
+    id: 'payments',
+    label: 'Pagos',
+    description: 'Recaudo, estados y participación por método de pago',
+    icon: 'credit-card',
+    color: 'var(--color-success)',
+  },
 ];
 
 // ─────────────────────────────────────────────
-// Views (28 total)
+// Views (34 total)
 // ─────────────────────────────────────────────
 
 export const ANALYTICS_VIEWS: AnalyticsView[] = [
@@ -451,6 +460,26 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     category: 'dispatch',
     icon: 'wallet',
   },
+
+  // Payments (2)
+  {
+    key: 'payments_overview',
+    title: 'Resumen de Pagos',
+    description: 'Recaudo, cantidad de pagos, tendencia y estados del periodo',
+    detailedDescription: 'Visualiza cuánto se recaudó, el ticket promedio, lo reembolsado, la tendencia por periodo y el desglose por estado de pago.',
+    route: '/admin/analytics/payments/overview',
+    category: 'payments',
+    icon: 'credit-card',
+  },
+  {
+    key: 'payments_by_method',
+    title: 'Por Método de Pago',
+    description: 'Participación del recaudo por método de pago',
+    detailedDescription: 'Compara cuánto recauda cada método de pago y qué porcentaje aporta al total recaudado del periodo.',
+    route: '/admin/analytics/payments/by-method',
+    category: 'payments',
+    icon: 'pie-chart',
+  },
 ];
 
 // ─────────────────────────────────────────────
@@ -477,7 +506,7 @@ export function getSidebarEntries(): {
   label: string;
   route: string;
   icon: string;
-  panelUiKey: string;
+  panelUiKey: string | undefined;
   viewCount: number;
 }[] {
   return ANALYTICS_CATEGORIES.map((cat) => ({

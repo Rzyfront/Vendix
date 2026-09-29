@@ -27,6 +27,7 @@ import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.i
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   BulkProductUploadDto,
+  BulkUploadSessionDto,
   BulkValidationResultDto,
   BulkUploadResultDto,
   BulkUploadTemplateDto,
@@ -246,7 +247,7 @@ export class ProductsBulkController {
   @Post('upload-session')
   @Permissions('store:products:create')
   async uploadFromSession(
-    @Body() body: { session_id: string },
+    @Body() body: BulkUploadSessionDto,
     @Req() req: AuthenticatedRequest,
   ) {
     const context = RequestContextService.getContext();
@@ -263,6 +264,7 @@ export class ProductsBulkController {
         body.session_id,
         storeId,
         req.user,
+        { offset: body.offset, limit: body.limit },
       );
 
       if (result.failed > 0) {

@@ -783,4 +783,50 @@ describe('InvoicingService.createFromOrder — descuento de orden e impuesto de 
       });
     });
   });
+  describe('P1-1 — descuento de BASE por línea (order_items.discount_amount)', () => {
+    it('1M al 19 % + 1M exento con cupón 50 %: la factura declara IVA 95.000 y total 1.095.000', async () => {
+      const gravado = buildOrderItem({
+        id: 1,
+        product_id: 11,
+        product_name: 'Gravado',
+        quantity: 1,
+        unit_price: money('1000000'),
+        total_price: money('1000000'),
+        discount_amount: money('500000'),
+        tax_rate: money('0.19'),
+        tax_amount_item: money('95000'),
+        order_item_taxes: [row(1, 'IVA 19%', '0.19', '95000', 'iva', false)],
+      });
+      const exento = buildOrderItem({
+        id: 2,
+        product_id: 12,
+        product_name: 'Exento',
+        quantity: 1,
+        unit_price: money('1000000'),
+        total_price: money('1000000'),
+        discount_amount: money('500000'),
+        tax_rate: money('0'),
+        tax_amount_item: money('0'),
+        order_item_taxes: [],
+      });
+      const { data, line_tax_rows } = await createDraft({
+        subtotal_amount: money('2000000'),
+        tax_amount: money('95000'),
+        discount_amount: money('1000000'),
+        grand_total: money('1095000'),
+        order_items: [gravado, exento],
+      });
+      const [a, b] = data.invoice_items.create;
+      expect(a.discount_amount.toString()).toBe('500000');
+      expect(a.tax_amount.toString()).toBe('95000');
+      expect(a.total_amount.toString()).toBe('595000');
+      expect(b.discount_amount.toString()).toBe('500000');
+      expect(b.tax_amount.toString()).toBe('0');
+      expect(b.total_amount.toString()).toBe('500000');
+      expect(data.tax_amount.toString()).toBe('95000');
+      expect(data.total_amount.toString()).toBe('1095000');
+      expect(sumCents(line_tax_rows, 'tax_amount')).toBe(9500000);
+      expect(line_tax_rows[0].taxable_amount.toString()).toBe('500000');
+    });
+  });
 });

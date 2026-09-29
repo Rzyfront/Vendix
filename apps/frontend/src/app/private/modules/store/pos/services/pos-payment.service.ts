@@ -141,6 +141,14 @@ function rethrowApiError<T = never>(error: unknown): Observable<T> {
   return throwError(() => wrapped);
 }
 
+/**
+ * Contrato congelado con el backend (plan pos-draft-without-cash-session,
+ * paso 4): HTTP 409 cuando un cobro exige caja abierta y el usuario no
+ * tiene sesión (`require_session_for_sales` activo). Mensaje UX:
+ * "Abre tu caja para registrar pagos."
+ */
+const CASH_SESSION_REQUIRED_CODE = 'CASH_SESSION_REQUIRED_001';
+
 @Injectable({
   providedIn: 'root',
 })
@@ -176,6 +184,36 @@ export class PosPaymentService {
     return throwError(
       () => new Error('Debes abrir una caja registradora para procesar ventas.'),
     );
+  }
+
+  /**
+   * Paso 4 del plan: cuando el backend rechaza un cobro con
+   * `CASH_SESSION_REQUIRED_001`, se reutiliza la UX de la validación local
+   * (emitir `_sessionRequired` para que `pos.component.ts` abra el modal de
+   * apertura de caja) y se relanza el error normalizado para que el
+   * llamador siga ramificando por `errorCode`.
+   */
+  private rethrowChargeError(error: unknown): Observable<never> {
+    this.emitSessionRequiredIfCashGate(error);
+    return rethrowApiError(error);
+  }
+
+  /**
+   * Emite `_sessionRequired` solo ante el gate de caja del backend.
+   * Tolera el `HttpErrorResponse` crudo (llamadas `http.post` directas) y
+   * el wrapper `buildApiError` (`StoreOrdersService.flowPayOrder`, que trae
+   * `errorCode` en camelCase y el crudo en `cause`): pasarle el wrapper tal
+   * cual a `parseApiError` siempre daría `errorCode: null`.
+   */
+  private emitSessionRequiredIfCashGate(error: unknown): void {
+    const wrapped = error as { errorCode?: unknown; cause?: unknown } | null;
+    const directCode =
+      typeof wrapped?.errorCode === 'string' ? wrapped.errorCode : null;
+    const code =
+      directCode ?? parseApiError(wrapped?.cause ?? error).errorCode;
+    if (code === CASH_SESSION_REQUIRED_CODE) {
+      this._sessionRequired.next();
+    }
   }
 
   private transactions: Transaction[] = [];
@@ -440,7 +478,7 @@ export class PosPaymentService {
           };
         }
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -657,7 +695,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al procesar la venta');
         }
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -846,7 +884,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al procesar el envío');
         }
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -928,7 +966,7 @@ export class PosPaymentService {
           );
         }
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -1023,7 +1061,7 @@ export class PosPaymentService {
           );
         }
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -1130,7 +1168,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al guardar el borrador');
         }
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -1327,6 +1365,13 @@ export class PosPaymentService {
               nextAction: payment?.nextAction ?? data.nextAction,
             };
           }),
+          // Sin gate de caja el `flow/pay` rechaza con
+          // `CASH_SESSION_REQUIRED_001`: se abre el modal de apertura pero el
+          // error se relanza intacto (el llamador ya lee el wrapper).
+          catchError((error) => {
+            this.emitSessionRequiredIfCashGate(error);
+            return throwError(() => error);
+          }),
         );
     }
 
@@ -1371,6 +1416,12 @@ export class PosPaymentService {
         payment: response?.payment,
         message: response?.message ?? 'Pago aplicado a la orden',
         change: response?.change ?? response?.payment?.change,
+      }),
+      // Igual que la rama multimétodo: abrir caja ante
+      // `CASH_SESSION_REQUIRED_001` sin alterar el error.
+      catchError((error) => {
+        this.emitSessionRequiredIfCashGate(error);
+        return throwError(() => error);
       })));
     }
 
@@ -1462,7 +1513,7 @@ export class PosPaymentService {
           nextAction: payment?.nextAction ?? data?.nextAction,
         };
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -1506,6 +1557,7 @@ export class PosPaymentService {
       // flow/pay returns the existing payment id in its typed conflict; resume
       // that same server-owned reservation with the same payment method.
       catchError((error: any) => {
+        this.emitSessionRequiredIfCashGate(error);
         const details = error?.details as Record<string, unknown> | undefined;
         const existingId = Number(details?.['payment_id']);
         if (details?.['stage'] === 'digital_payment_pending' &&

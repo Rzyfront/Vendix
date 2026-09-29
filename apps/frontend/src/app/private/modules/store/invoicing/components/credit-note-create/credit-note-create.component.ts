@@ -22,6 +22,7 @@ import { Store } from '@ngrx/store';
 import { Subscription, startWith, take } from 'rxjs';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Invoice } from '../../interfaces/invoice.interface';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 import {
   createCreditNote,
   createCreditNoteFailure,
@@ -146,7 +147,7 @@ const REASON_LIMIT = 500;
             </div>
             <div class="text-[var(--color-info)]">
               {{ sourceInvoice()!.invoice_number }} -
-              {{ sourceInvoice()!.customer_name || 'Sin cliente' }}
+              {{ sourceInvoiceCustomerName() }}
               ({{ formatAmount(sourceInvoice()!.total_amount) }})
             </div>
           </div>
@@ -260,6 +261,18 @@ export class CreditNoteCreateComponent {
       this.formStatus() === 'VALID' &&
       this.sourceInvoice() != null,
   );
+
+  /**
+   * Nombre del cliente de la factura de referencia, con la misma cascada de
+   * `invoice-list`/`invoice-detail`: snapshot congelado primero, ficha viva
+   * (con `legal_name` para persona JURIDICA) después.
+   */
+  readonly sourceInvoiceCustomerName = computed(() => {
+    const inv = this.sourceInvoice();
+    const snapshot = inv?.customer_name?.trim();
+    if (snapshot) return snapshot;
+    return customerDisplayName(inv?.customer, 'Sin cliente');
+  });
 
   private backendErrorSubs = new Subscription();
   private erroredControls: { path: string; control: AbstractControl }[] = [];

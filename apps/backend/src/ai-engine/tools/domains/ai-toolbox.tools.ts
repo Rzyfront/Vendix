@@ -10,14 +10,12 @@ import {
   IMAGE_KIND_TO_APP,
 } from '../../toolbox/ai-toolbox.service';
 import { VexiAttachmentsService } from '../../../domains/store/vexi/vexi-attachments.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { S3Service } from '../../../common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
 export interface AiToolboxToolDeps {
   toolbox: AiToolboxService;
   attachments: VexiAttachmentsService;
-  prisma: StorePrismaService;
   s3: S3Service;
 }
 
@@ -25,9 +23,6 @@ const logger = new Logger('ai-toolbox.tools');
 
 /** Beyond this an extraction result crowds the conversation out of the window. */
 const MAX_EXTRACTION_CHARS = 6000;
-
-/** How many candidate matches are worth showing per unmatched line. */
-const MAX_CANDIDATES = 3;
 
 /**
  * The document and media specialists, as tools.
@@ -45,7 +40,6 @@ const MAX_CANDIDATES = 3;
 export function createAiToolboxTools({
   toolbox,
   attachments,
-  prisma,
   s3,
 }: AiToolboxToolDeps): RegisteredTool[] {
   const documentKinds = Object.keys(DOCUMENT_KIND_TO_APP);
@@ -53,6 +47,7 @@ export function createAiToolboxTools({
   return [
     {
       name: 'ai_extract_document',
+      version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
       description: `Lee un documento que la persona adjuntó y devuelve sus datos estructurados. Ejecuta un modelo de visión especializado por tipo de documento — tú no ves la imagen, recibes el resultado ya extraído. Tipos que puedo leer: ${documentKinds
@@ -104,6 +99,7 @@ export function createAiToolboxTools({
     },
     {
       name: 'validate_extraction',
+      version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
       description:
@@ -153,28 +149,33 @@ export function createAiToolboxTools({
         const result: Record<string, unknown> = { domain };
 
         if (args.supplier_name || args.supplier_tax_id) {
-          result.supplier = await matchSupplier(
-            prisma,
-            context.organization_id,
-            args.supplier_name ? String(args.supplier_name) : undefined,
-            args.supplier_tax_id ? String(args.supplier_tax_id) : undefined,
-          );
+          result.supplier = await toolbox.matchExtractionSupplier({
+            organizationId: context.organization_id,
+            name: args.supplier_name
+              ? String(args.supplier_name)
+              : undefined,
+            taxId: args.supplier_tax_id
+              ? String(args.supplier_tax_id)
+              : undefined,
+          });
         }
 
         if (Array.isArray(args.items) && args.items.length) {
-          result.items = await matchItems(prisma, args.items as any[]);
+          result.items = await toolbox.matchExtractionItems(
+            args.items as any[],
+          );
         }
 
         if (Array.isArray(args.documents) && args.documents.length) {
-          result.people = await matchPeople(
-            prisma,
+          result.people = await toolbox.matchExtractionPeople(
             args.documents as any[],
             context.store_id,
           );
         }
 
         if (domain === 'gastos') {
-          result.expense_categories = await listExpenseCategories(prisma);
+          result.expense_categories =
+            await toolbox.listExpenseCategoriesForExtraction();
         }
 
         const unmatched = countUnmatched(result);
@@ -197,6 +198,7 @@ export function createAiToolboxTools({
     },
     {
       name: 'ai_summarize',
+      version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
       description: `Prepara un resumen especializado con un modelo aparte. Tipos disponibles: ${Object.keys(
@@ -230,6 +232,7 @@ export function createAiToolboxTools({
     },
     {
       name: 'ai_write_copy',
+      version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
       description: `Redacta textos de marketing con un modelo especializado. Tipos: ${Object.keys(
@@ -259,6 +262,7 @@ export function createAiToolboxTools({
     },
     {
       name: 'ai_generate_image',
+      version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
       description: `Genera o mejora una imagen con un modelo de imagen. Tipos: ${Object.keys(
@@ -327,6 +331,7 @@ export function createAiToolboxTools({
     },
     {
       name: 'list_attachments',
+      version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
       description:
@@ -342,23 +347,11 @@ export function createAiToolboxTools({
         required: [],
       },
       handler: async (args, context) => {
-        const rows = await prisma.ai_attachments.findMany({
-          where: {
-            ...(args.conversation_id
-              ? { conversation_id: Number(args.conversation_id) }
-              : {}),
-            ...(context.user_id ? { user_id: context.user_id } : {}),
-          },
-          select: {
-            id: true,
-            original_name: true,
-            mime_type: true,
-            created_at: true,
-            linked_entity_type: true,
-            linked_entity_id: true,
-          },
-          orderBy: { id: 'desc' },
-          take: 10,
+        const rows = await attachments.listRecentAttachments({
+          conversationId: args.conversation_id
+            ? Number(args.conversation_id)
+            : null,
+          userId: context.user_id ?? null,
         });
 
         return JSON.stringify({
@@ -392,190 +385,12 @@ export function createAiToolboxTools({
 
 // ── Cross-checking against real records ───────────────────────────────────
 //
-// Implemented with direct scoped Prisma reads rather than by importing
-// `InvoiceScannerService.matchProducts`: that service lives in the
-// purchase-orders module and this file is registered from the `@Global()`
-// ai-engine module, so the import would close a dependency cycle. The matching
-// here is deliberately simpler — exact and prefix matches, no fuzzy scoring —
-// because its job is to tell the truth about what exists, and a fuzzy guess
-// presented as a match is the failure mode worth avoiding.
-
-async function matchSupplier(
-  prisma: StorePrismaService,
-  organizationId: number | undefined,
-  name?: string,
-  taxId?: string,
-) {
-  if (!organizationId) {
-    return { matched: false, reason: 'Sin organización en contexto.' };
-  }
-
-  // `state: { not: 'archived' }` on every branch, same rule
-  // `InvoiceScannerService.matchSupplier` applies: suggesting a supplier the
-  // owner took out of circulation would have them open a purchase order against
-  // it. Inactive ones are still suggested — matching only proposes.
-  if (taxId) {
-    const byTaxId = await prisma.suppliers.findFirst({
-      where: {
-        tax_id: { equals: taxId, mode: 'insensitive' },
-        state: { not: 'archived' },
-      },
-      select: { id: true, name: true, tax_id: true },
-    });
-    if (byTaxId) return { matched: true, ...byTaxId, matched_by: 'tax_id' };
-  }
-
-  if (!name) return { matched: false };
-
-  const exact = await prisma.suppliers.findFirst({
-    where: {
-      name: { equals: name, mode: 'insensitive' },
-      state: { not: 'archived' },
-    },
-    select: { id: true, name: true, tax_id: true },
-  });
-  if (exact) return { matched: true, ...exact, matched_by: 'name' };
-
-  const candidates = await prisma.suppliers.findMany({
-    where: {
-      name: { contains: firstWord(name), mode: 'insensitive' },
-      state: { not: 'archived' },
-    },
-    select: { id: true, name: true, tax_id: true },
-    take: MAX_CANDIDATES,
-  });
-
-  return {
-    matched: false,
-    read_as: name,
-    candidates,
-    note: candidates.length
-      ? 'Ninguno coincide exactamente. Pregúntale a la persona si es uno de estos.'
-      : 'Ese proveedor no existe en el sistema.',
-  };
-}
-
-async function matchItems(prisma: StorePrismaService, items: any[]) {
-  const results: unknown[] = [];
-
-  for (const item of items.slice(0, 60)) {
-    const description = String(item?.description ?? '').trim();
-    const code = item?.code ? String(item.code).trim() : '';
-
-    if (code) {
-      const byCode = await prisma.products.findFirst({
-        where: {
-          OR: [{ sku: code }, { barcode: code }],
-          state: { not: 'archived' },
-        },
-        select: { id: true, name: true, sku: true },
-      });
-      if (byCode) {
-        results.push({
-          read_as: description || code,
-          matched: true,
-          ...byCode,
-          matched_by: 'code',
-        });
-        continue;
-      }
-    }
-
-    if (!description) {
-      results.push({ read_as: code, matched: false });
-      continue;
-    }
-
-    const exact = await prisma.products.findFirst({
-      where: {
-        name: { equals: description, mode: 'insensitive' },
-        state: { not: 'archived' },
-      },
-      select: { id: true, name: true, sku: true },
-    });
-    if (exact) {
-      results.push({
-        read_as: description,
-        matched: true,
-        ...exact,
-        matched_by: 'name',
-      });
-      continue;
-    }
-
-    const candidates = await prisma.products.findMany({
-      where: {
-        name: { contains: firstWord(description), mode: 'insensitive' },
-        state: { not: 'archived' },
-      },
-      select: { id: true, name: true, sku: true },
-      take: MAX_CANDIDATES,
-    });
-
-    results.push({ read_as: description, matched: false, candidates });
-  }
-
-  return results;
-}
-
-/**
- * Cross-checks identity documents against people who already belong to THIS
- * store.
- *
- * The store predicate is not optional decoration: `StorePrismaService.users`
- * returns the **unscoped** delegate (it is documented as an organization-level
- * model), so a bare `findFirst` on `document_number` would answer with a person
- * from another tenant — leaking that the document exists and their name. Same
- * predicate `customers.tools.ts:88` spreads into every customer query, and for
- * the same reason.
- */
-async function matchPeople(
-  prisma: StorePrismaService,
-  documents: any[],
-  storeId: number | undefined,
-) {
-  const results: unknown[] = [];
-
-  if (!storeId) {
-    return [{ matched: false, reason: 'Sin tienda en contexto.' }];
-  }
-
-  for (const raw of documents.slice(0, 60)) {
-    const document = String(raw ?? '').trim();
-    if (!document) continue;
-
-    const found = await prisma.users.findFirst({
-      where: {
-        document_number: document,
-        store_users: { some: { store_id: storeId } },
-      },
-      select: { id: true, first_name: true, last_name: true },
-    });
-
-    results.push(
-      found
-        ? {
-            document,
-            matched: true,
-            id: found.id,
-            name: `${found.first_name} ${found.last_name ?? ''}`.trim(),
-          }
-        : { document, matched: false },
-    );
-  }
-
-  return results;
-}
-
-async function listExpenseCategories(prisma: StorePrismaService) {
-  const rows = await prisma.expense_categories.findMany({
-    select: { id: true, name: true },
-    orderBy: { name: 'asc' },
-    take: 40,
-  });
-
-  return rows;
-}
+// Vivía aquí como lecturas directas con `prisma` inyectado; en el paso 15 se
+// mudó a `AiToolboxService` (`matchExtractionSupplier`, `matchExtractionItems`,
+// `matchExtractionPeople`, `listExpenseCategoriesForExtraction`) y el listado
+// de adjuntos a `VexiAttachmentsService.listRecentAttachments`. La razón del
+// hogar —registrar desde el `@Global()` ai-engine module sin importar dominios
+// que cerrarían un ciclo— sigue valiendo: ambos servicios resuelven standalone.
 
 function countUnmatched(result: Record<string, unknown>): number {
   let unmatched = 0;
@@ -591,15 +406,4 @@ function countUnmatched(result: Record<string, unknown>): number {
   }
 
   return unmatched;
-}
-
-/**
- * The longest leading token of a name, used as the `contains` needle.
- *
- * Beats using the whole string: OCR routinely mangles the tail of a product
- * name ("Coca Cola 1.5L x12" → "Coca Cola 1.5Lx12"), while the head survives.
- */
-function firstWord(value: string): string {
-  const parts = value.split(/\s+/).filter((part) => part.length > 2);
-  return (parts[0] ?? value).slice(0, 24);
 }

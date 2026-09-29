@@ -21,6 +21,7 @@ import {
   canReactivateAsRole,
   canFastTrack,
   canCreditPayment,
+  requiresPaymentRegistration,
   canDispatchOrder,
   canManualShip,
   canReadyForPickupBeforePayment,
@@ -173,6 +174,14 @@ export const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
 const CANCELABLE_STATES: OrderState[] = [...CANCELABLE_ORDER_STATES];
 const REFUNDABLE_STATES: OrderState[] = ['delivered', 'finished'];
 
+/**
+ * Estados desde los que `confirmDelivery` cierra la orden (`delivered` y el
+ * `processing` de restaurante pagado en cocina). Antes era un literal local
+ * del método y `orders.tools.ts` lo espejaba para el preview de O-23; ahora
+ * vive aquí —única fuente— y la tool lo importa (paso 15).
+ */
+export const FINISHABLE_STATES: OrderState[] = ['delivered', 'processing'];
+
 // Una mesa se consume en el local: dine_in, pickup y direct_delivery no
 // requieren despacho. Mantener esta lista alineada con la del detalle de orden.
 const SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES = new Set<order_delivery_type_enum>([
@@ -225,6 +234,37 @@ export function isActualCodTender(method: { type?: string | null; processing_mod
   if (!method || method.processing_mode === 'ON_DELIVERY') return false;
   return ['cash', 'bank_transfer', 'voucher'].includes(method.type ?? '') ||
     (method.type === 'card' && method.processing_mode === 'DIRECT');
+}
+
+/**
+ * Fase 2 paso 5 — pago `pending` de confirmación MANUAL: todo lo que NO es
+ * `wallet`/`wompi` ni contra entrega (`ON_DELIVERY`). Es el pago que el
+ * checkout online deja pendiente (`bank_transfer`, `voucher`, tarjeta manual…)
+ * y que el personal REGISTRA por `flow/pay` en vez de confirmar con un clic
+ * (el paso 6 lo rechaza en `confirmPayment` con
+ * `ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001`; el webhook sigue confirmando).
+ *
+ * Fail-closed: sin método resoluble no se clasifica (nunca se anula lo que no
+ * se puede verificar). Criterio hermano de `MANUAL_METHODS` en
+ * `table-sessions.service.ts` (confirmación de mesa que sí escribe en caja),
+ * pero inclusivo por tipo: lo que no es billetera/pasarela/contraentrega es
+ * manual.
+ */
+export function isManualConfirmationPending(
+  payment: {
+    state?: string | null;
+    store_payment_method?: {
+      system_payment_method?: {
+        type?: string | null;
+        processing_mode?: string | null;
+      } | null;
+    } | null;
+  } | null | undefined,
+): boolean {
+  if (!payment || payment.state !== 'pending') return false;
+  const system = payment.store_payment_method?.system_payment_method;
+  if (!system || system.processing_mode === 'ON_DELIVERY') return false;
+  return !['wallet', 'wompi'].includes(system.type ?? '');
 }
 
 @Injectable()
@@ -560,6 +600,28 @@ export class OrderFlowService {
     return order;
   }
 
+  /**
+   * Contexto de `update_order_status`: la proyección mínima para resolver la
+   * transición (número, estado, saldo, cumplimiento). Devuelve `null` en vez
+   * de lanzar para que la tool conteste `{error, next_step}` en español.
+   * Misma proyección que la tool leía directa (paso 15). Lectura pura,
+   * scopeada por tienda.
+   */
+  async findOrderForStatusTransitionForAgent(
+    orderId: number,
+  ): Promise<any> {
+    return this.prisma.orders.findFirst({
+      where: { id: orderId },
+      select: {
+        id: true,
+        order_number: true,
+        state: true,
+        remaining_balance: true,
+        dispatch_fulfillment: true,
+      },
+    });
+  }
+
   private async assertUnsplitOrderAfterLock(
     tx: Prisma.TransactionClient,
     orderId: number,
@@ -620,6 +682,39 @@ export class OrderFlowService {
       },
     });
     return pendingCount > 0;
+  }
+
+  /**
+   * Devuelve el nombre de la primera línea NO cancelada cuya última fila
+   * `kitchen_ticket_items` no está `delivered`/`cancelled`, o `null` si ninguna
+   * bloquea. Las líneas sin filas de cocina (retail / skip_kds) no bloquean.
+   */
+  private async findLineAwaitingKitchenDelivery(
+    orderId: number,
+    client: any = this.prisma,
+  ): Promise<string | null> {
+    const lines = await client.order_items.findMany({
+      where: {
+        order_id: orderId,
+        cancelled_at: null,
+        kitchen_ticket_items: { some: {} },
+      },
+      select: {
+        product_name: true,
+        kitchen_ticket_items: {
+          orderBy: { id: 'desc' },
+          take: 1,
+          select: { status: true },
+        },
+      },
+    });
+    for (const line of lines ?? []) {
+      const status = line.kitchen_ticket_items?.[0]?.status;
+      if (status != null && status !== 'delivered' && status !== 'cancelled') {
+        return line.product_name || 'este producto';
+      }
+    }
+    return null;
   }
 
   /** Whole-order fulfillment is never allowed to use a retail line as a
@@ -814,6 +909,21 @@ export class OrderFlowService {
     });
     const previousOrganizationId = previous_order?.stores?.organization_id ?? null;
     const historySource = this.mapUpdateStateSource(opts?.source);
+
+    // R4 — una orden NUNCA pasa a `finished` con una línea viva (no cancelada)
+    // cuya última fila de cocina no esté `delivered`/`cancelled`. Cubre todos
+    // los caminos (finish explícito, forceOrderState, fast-track, cobro,
+    // reconciliación). Los cierres automáticos ya lo pre-chequean y saltan en
+    // silencio; acá se falla fuerte para el resto.
+    if (newState === 'finished') {
+      const blockedLine = await this.findLineAwaitingKitchenDelivery(orderId);
+      if (blockedLine) {
+        throw new VendixHttpException(
+          ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
+          `La orden tiene platos sin entregar en cocina ("${blockedLine}"). Entrégalos o cancélalos antes de finalizar.`,
+        );
+      }
+    }
 
     if (
       previous_order?.state === 'delivered' &&
@@ -1328,6 +1438,13 @@ export class OrderFlowService {
     dto: PayOrderDto,
     options?: { strictKitchenPending?: boolean },
   ) {
+    // Gate único de caja: con el switch activo, quien cobra debe tener SU
+    // sesión abierta. Primero que todo — antes del claim de estado — para no
+    // dejar la orden varada en `processing` cuando se rechaza.
+    await this.sessionsService.assertSessionForSales(
+      RequestContextService.getUserId(),
+    );
+
     // A.2 CP-facturacion-fixes — charge-time shipping gate (ADR-02). Creation stays
     // open (whatsapp/assisted orders choose the method later), but a physical order
     // that needs dispatch cannot be CHARGED without a shipping method: assign it
@@ -1810,17 +1927,131 @@ export class OrderFlowService {
       total_paid: paidBalance,
       remaining_balance: 0,
     };
-    const codPendingPaymentIds = (order.payments ?? [])
+    // Fase 2 paso 5 — `flow/pay` sobre una orden con pago manual pendiente lo
+    // CONFIRMA en sitio (ver `confirmInPlaceMarker`); el marcador contra
+    // entrega se anula (`cancelled`) y se crea el pago real. En ambos casos
+    // nunca quedan dos pagos que sumen doble.
+    const manualPendingPayments = (order.payments ?? []).filter((payment) =>
+      isManualConfirmationPending(payment),
+    );
+    const isManualSettlement = manualPendingPayments.length > 0;
+    const settlementPendingPaymentIds = (order.payments ?? [])
       .filter((payment) =>
-        payment.state === 'pending' &&
-        payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY',
+        (payment.state === 'pending' &&
+          payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY') ||
+        isManualConfirmationPending(payment),
       )
       .map((payment) => payment.id);
+    // Origen para `gateway_response.metadata`/`payment_registered`: COD manda
+    // (compatibilidad histórica) cuando hay ambos marcadores; sin COD, manual.
+    // Sin marcadores no se usa (el bloque de metadata no se escribe).
+    const settlementOrigin = isCodSettlement
+      ? 'cash_on_delivery'
+      : 'manual_confirmation';
+    // Comprobante del pago manual anulado → metadata del pago real. Gana el
+    // primer marcador (el checkout crea uno por orden); sólo viaja si al menos
+    // un campo trae valor.
+    const firstManualMarker = manualPendingPayments[0];
+    const settlementReceipt =
+      firstManualMarker &&
+      (firstManualMarker.receipt_s3_key != null ||
+        firstManualMarker.receipt_uploaded_at != null ||
+        firstManualMarker.bank_account_id != null)
+        ? {
+            receipt_s3_key: firstManualMarker.receipt_s3_key ?? null,
+            receipt_uploaded_at: firstManualMarker.receipt_uploaded_at ?? null,
+            bank_account_id: firstManualMarker.bank_account_id ?? null,
+          }
+        : null;
+    // Registrar pago sobre un pago online MANUAL pendiente (transferencia con
+    // comprobante, voucher…): el primer tramo CONFIRMA esa misma fila en vez
+    // de anularla y crear otra — el pago que el cliente hizo online es el que
+    // se registra. Sólo contra entrega (`ON_DELIVERY`) conserva el
+    // anular+crear histórico: su marcador no es un pago, es una promesa.
+    const confirmInPlaceMarker =
+      !isCodSettlement && firstManualMarker ? firstManualMarker : null;
+    const markerIdsToVoid = confirmInPlaceMarker
+      ? settlementPendingPaymentIds.filter((id) => id !== confirmInPlaceMarker.id)
+      : settlementPendingPaymentIds;
     const paymentHistoryCtx = {
       storeId: order.store_id,
       organizationId: order.stores?.organization_id,
-      codPendingPaymentIds,
+      settlementPendingPaymentIds,
+      settlementOrigin,
+      settlementReceipt,
+      confirmInPlacePayment: confirmInPlaceMarker,
     };
+    // Fase 2 paso 5 — carril "registrar pago": SÓLO aquí `dto.amount` define lo
+    // cobrado. Cubre el marcador manual y los parciales siguientes (el primer
+    // registro ya anuló el marcador, así que `pending_payment` + abonos
+    // `succeeded` también es carril). Fuera del carril `amount` se ignora como
+    // siempre. Comparación en centavos enteros, igual que
+    // `normalizePaymentLegs`.
+    const toChargeCents = (value: number) =>
+      Math.round(Number(value || 0) * 100);
+    // Mismo predicado que la acción "Registrar pago" (`requiresPaymentRegistration`):
+    // una orden WhatsApp/contra entrega en `pending_payment` con
+    // `remaining_balance > 0` es carril, así que el parcial que manda el modal
+    // se respeta en vez de cobrar el saldo completo en silencio. Se evalúa con
+    // el estado PREVIO al claim (la orden recargada ya está en `processing`).
+    const isManualLane =
+      isManualSettlement ||
+      (preClaimState === 'pending_payment' &&
+        (settledAmount.gt(0) ||
+          requiresPaymentRegistration({
+            state: preClaimState,
+            remaining_balance: (order as any).remaining_balance,
+            payments: order.payments,
+          })));
+    const isChargeAmountLane =
+      isManualLane && dto.payment_type === PaymentType.DIRECT;
+    let chargeAmount = amountToCharge;
+    if (isChargeAmountLane && dto.amount != null) {
+      chargeAmount = Number(dto.amount);
+      // Total $0 (cupón 100 %): registrar 0 sobre saldo 0 es válido.
+      if (
+        !Number.isFinite(chargeAmount) ||
+        toChargeCents(chargeAmount) < 0 ||
+        (toChargeCents(chargeAmount) === 0 && toChargeCents(amountToCharge) > 0)
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_INVALID_AMOUNT_001,
+          'El monto a cobrar debe ser mayor a cero.',
+          { amount: dto.amount },
+        );
+      }
+      // Lo cobrado nunca supera el saldo, en ningún método: el "de más" en
+      // efectivo entra por `amount_received` y sale como vuelto (`change`).
+      if (toChargeCents(chargeAmount) > toChargeCents(amountToCharge)) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_INVALID_AMOUNT_001,
+          'El monto a cobrar no puede superar el saldo pendiente.',
+          { amount: dto.amount, outstanding_balance: amountToCharge },
+        );
+      }
+    }
+    // Parcial = monto explícito menor al saldo. Sólo vive en `pending_payment`
+    // (la orden "permanece" ahí); en cualquier otro estado se rechaza en voz
+    // alta en vez de cobrar de más en silencio.
+    const wantsPartialAmount =
+      isChargeAmountLane &&
+      dto.amount != null &&
+      toChargeCents(chargeAmount) < toChargeCents(amountToCharge);
+    if (wantsPartialAmount && preClaimState !== 'pending_payment') {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_PARTIAL_NOT_ALLOWED_001,
+        undefined,
+        {
+          order_id: orderId,
+          pre_claim_state: preClaimState,
+          amount: dto.amount,
+        },
+      );
+    }
+    const isPartialCharge = wantsPartialAmount;
+    // Lo que el normalizador debe cuadrar: el parcial, o el saldo exacto (sin
+    // polvo flotante de `dto.amount`) cuando se salda.
+    const payableAmount = isPartialCharge ? chargeAmount : amountToCharge;
 
     // Cobro multimétodo de contado — normalización única (escalar → 1 tramo).
     // Sólo en los carriles que cobran de inmediato (shipped/direct): el carril
@@ -1911,7 +2142,7 @@ export class OrderFlowService {
       try {
         const normalized = normalizePaymentLegs(
           dto,
-          amountToCharge,
+          payableAmount,
           methodsById,
         );
         legs = normalized.legs;
@@ -1933,6 +2164,86 @@ export class OrderFlowService {
       }
     }
 
+    // Fase 2 paso 5 — pago PARCIAL del carril manual (`amount` < saldo, orden
+    // en `pending_payment`): registra los pagos `succeeded`, actualiza
+    // `total_paid`/`remaining_balance` y restaura el claim, SIN transición de
+    // estado (nada de `updateOrderState`: sin consumo de stock, sin factura,
+    // sin ETA, sin proyección a mesa; el cupón se consume al saldar). La acción
+    // "Registrar pago" sigue disponible para el saldo (paso 6).
+    if (isPartialCharge) {
+      const legPayments = await this.createLegPayments(
+        orderId,
+        order.currency,
+        legs,
+        change,
+        paymentHistoryCtx,
+      );
+      paymentPersisted = true;
+
+      const partialBalanceMetadata = {
+        total_paid: settledAmount.plus(chargeAmount).toNumber(),
+        remaining_balance: new Prisma.Decimal(amountToCharge)
+          .minus(chargeAmount)
+          .toNumber(),
+      };
+      try {
+        await this.prisma.orders.update({
+          where: { id: orderId },
+          data: { ...partialBalanceMetadata, updated_at: new Date() },
+        });
+      } catch (e) {
+        // Mismo contrato que las demás ramas: si el saldo no persiste, los
+        // tramos se compensan y la orden vuelve a su estado previo.
+        await this.cancelLegPayments(legPayments, 'partial_balance_blocked');
+        paymentCompensated = true;
+        await this.restorePreClaimState(orderId, preClaimState);
+        throw this.wrapPaymentFailure(
+          'partial_balance_blocked',
+          { order_id: orderId },
+          (e as any)?.errorCode ?? 'n/a',
+        );
+      }
+      // El claim movió `pending_payment` → `processing`: devolverla a su
+      // estado, donde espera el resto del saldo.
+      await this.restorePreClaimState(orderId, preClaimState);
+      await this.voidSettlementPendingMarkers(markerIdsToVoid);
+
+      this.logger.log(
+        `Order #${orderId} partial payment registered (${partialBalanceMetadata.total_paid} of ${paidBalance}); remaining ${partialBalanceMetadata.remaining_balance}`,
+      );
+
+      // Movimiento de caja por tramo, neto de vuelto (`leg.amount`).
+      for (const { payment, leg } of legPayments) {
+        this.recordPayOrderCashMovement(
+          order.store_id,
+          orderId,
+          leg.amount,
+          legMethodTypes[leg.store_payment_method_id] ?? '',
+          payment.id,
+        ).catch(() => {});
+      }
+
+      // Un `payment.received` por tramo (el asiento resuelve su rama
+      // con/sin factura; la retención se prorratea a la porción de este
+      // cobro). Sin `emitPosSaleCompletedIfFullyPaid`: un abono no cierra
+      // la venta.
+      await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
+
+      const updatedOrder = await this.prisma.orders.findFirst({
+        where: { id: orderId },
+        include: {
+          stores: { select: { id: true, name: true, store_code: true } },
+          order_items: { include: { products: true, product_variants: true } },
+          payments: true,
+        },
+      });
+
+      return {
+        order: updatedOrder,
+        ...this.buildLeggedPaymentResponse(legPayments, change),
+      };
+    }
+
     // Shipped orders: register payment without changing state
     if (preClaimState === 'shipped') {
       // Multimétodo: una fila `succeeded` por tramo (el escalar es 1 tramo).
@@ -1950,7 +2261,7 @@ export class OrderFlowService {
       // The claim temporarily moved shipped -> processing. Restore its
       // logistics state and persist the settled balance with the payment.
       await this.updateOrderState(orderId, 'shipped', settledBalanceMetadata, { historyFromState: preClaimState });
-      await this.voidCodPendingMarkers(codPendingPaymentIds);
+      await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
       // Round 1 MAJOR #13 — cupón en `flow/pay` (shipped):
       // si la orden trae `coupon_id` y no existe `coupon_uses` aún,
@@ -2040,10 +2351,10 @@ export class OrderFlowService {
         );
       }
 
-      // Void the COD pending marker(s) so they never count as a second,
-      // parallel settlement of the same order (analytics/cash-register
-      // dedupe by `payments.state`, not by count).
-      await this.voidCodPendingMarkers(codPendingPaymentIds);
+      // Void the settlement pending marker(s) (COD o manual) so they never
+      // count as a second, parallel settlement of the same order
+      // (analytics/cash-register dedupe by `payments.state`, not by count).
+      await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
       this.logger.log(
         `Order #${orderId} payment registered while delivered (settled, awaiting finalize)`,
@@ -2113,10 +2424,10 @@ export class OrderFlowService {
         );
       }
 
-      // Void the COD pending marker(s) so they never count as a second,
-      // parallel settlement of the same order (analytics/cash-register
-      // dedupe by `payments.state`, not by count).
-      await this.voidCodPendingMarkers(codPendingPaymentIds);
+      // Void the settlement pending marker(s) (COD o manual) so they never
+      // count as a second, parallel settlement of the same order
+      // (analytics/cash-register dedupe by `payments.state`, not by count).
+      await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
       this.logger.log(
         `Order #${orderId} payment registered while finished (orphaned/COD) -> finished`,
@@ -2184,7 +2495,7 @@ export class OrderFlowService {
           },
           { historyFromState: preClaimState },
         );
-        await this.voidCodPendingMarkers(codPendingPaymentIds);
+        await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
         this.logger.log(
           `Order #${orderId} paid directly, moved to processing (requires fulfillment)`,
@@ -2274,7 +2585,7 @@ export class OrderFlowService {
           },
           { historyFromState: preClaimState },
         );
-        await this.voidCodPendingMarkers(codPendingPaymentIds);
+        await this.voidSettlementPendingMarkers(markerIdsToVoid);
 
         this.logger.log(
           `Order #${orderId} paid directly with pending kitchen items, moved to processing`,
@@ -2323,7 +2634,7 @@ export class OrderFlowService {
           finished_at: new Date(),
           ...settledBalanceMetadata,
         }, { historyFromState: preClaimState });
-        await this.voidCodPendingMarkers(codPendingPaymentIds);
+        await this.voidSettlementPendingMarkers(markerIdsToVoid);
       } catch (e) {
         if (e instanceof VendixHttpException) {
           await this.cancelLegPayments(
@@ -2602,6 +2913,16 @@ export class OrderFlowService {
         throw new BadRequestException(
           'Este cobro digital está pendiente de confirmación del monedero o la pasarela.',
         );
+      }
+      // Fase 2 paso 6 — un pago `pending` de confirmación manual no se
+      // confirma con un clic: el personal lo REGISTRA por `flow/pay` (monto +
+      // método recibidos, con vuelto o saldo). Solo el webhook confirma.
+      // Después de los guards de ON_DELIVERY/digital: no cambia su precedencia.
+      if (
+        opts?.source !== 'webhook' &&
+        order.payments.some((payment) => isManualConfirmationPending(payment))
+      ) {
+        throw new VendixHttpException(ErrorCodes.ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001);
       }
       if (pendingPayment) {
         await tx.payments.updateMany({
@@ -3575,6 +3896,10 @@ export class OrderFlowService {
           label_key: 'ORD_ACTION_CREDIT_PAYMENT',
           ...canCreditPayment(snapshot),
         });
+      } else if (requiresPaymentRegistration(snapshot)) {
+        // Fase 2 paso 6 — pago manual pendiente o saldo parcial: el personal
+        // REGISTRA por `flow/pay`, no confirma con un clic.
+        actions.push({ code: 'pay', label_key: 'ORD_ACTION_PAY', ...canPay(snapshot) });
       } else {
         actions.push({
           code: 'confirm_payment',
@@ -4636,6 +4961,15 @@ export class OrderFlowService {
         else updatedTicketId = ticketId;
       }
 
+      // Sincronía cancelado orden↔cocina: cualquier fila viva restante
+      // (línea no `prepared`, ticket `delivered`, estado avanzado sin
+      // disposición) queda `cancelled` en la misma tx.
+      const kdsSync = await this.cancelLatestKitchenItemInTx(tx, orderId, orderItemId);
+      if (kdsSync) {
+        if (kdsSync.result === 'cancelled') cancelledTicketId ??= kdsSync.ticketId;
+        else updatedTicketId ??= kdsSync.ticketId;
+      }
+
       // Reversión de stock SOLO en before_fire (no fired). En
       // after_fire_waste NO se revierte — queda como merma.
       if (preparedFired) {
@@ -4741,63 +5075,7 @@ export class OrderFlowService {
       // fiable: cada fila ya es el total de impuesto de esa línea tal como
       // se persistió al crear/cobrar la orden (`checkout.service.ts:1653`,
       // el carril POS), así que sumarla no requiere adivinar unidad.
-      const activeItems = await tx.order_items.findMany({
-        where: { order_id: orderId, cancelled_at: null },
-        select: {
-          total_price: true,
-          order_item_taxes: { select: { tax_amount: true } },
-        },
-      });
-      const subtotal = activeItems.reduce(
-        (acc, it) => acc + Number(it.total_price),
-        0,
-      );
-      const tax = activeItems.reduce(
-        (acc, it) =>
-          acc +
-          // ADR-06 — nunca asumir la relación poblada: una fila sin
-          // desglose fiscal persistido (`order_item_taxes` vacío) no debe
-          // tronar el recálculo, sólo aportar cero impuesto.
-          (it.order_item_taxes ?? []).reduce(
-            (s, t) => s + Number(t.tax_amount ?? 0),
-            0,
-          ),
-        0,
-      );
-      // F-082 (blocker, C.8): el recálculo anterior descartaba envío,
-      // propina y descuento del `grand_total` — una orden con domicilio y
-      // propina quedaba SIN esos montos apenas se cancelaba un ítem, aunque
-      // la orden siguiera teniendo ambos cargos. Esta cancelación no los
-      // recalcula (no hay línea de envío/propina que tocar aquí), sólo deja
-      // de perderlos. Clamp a 0 por paridad con el resto de carriles.
-      const shippingCost = Number((order as any).shipping_cost ?? 0);
-      // D.4 (F-001): la porcentual se re-deriva sobre la base viva; la
-      // fija se respeta. `tip_amount` solo se persiste cuando se re-deriva.
-      const rederivedTip = this.rederivePercentageTip(
-        order as any,
-        subtotal,
-        tax,
-      );
-      const tipAmount =
-        rederivedTip ?? Number((order as any).tip_amount ?? 0);
-      const discountAmount = Number((order as any).discount_amount ?? 0);
-      const grandTotal = Math.max(
-        0,
-        subtotal + tax + shippingCost + tipAmount - discountAmount,
-      );
-      await tx.orders.update({
-        where: { id: orderId },
-        data: {
-          subtotal_amount: new Prisma.Decimal(subtotal),
-          tax_amount: new Prisma.Decimal(tax),
-          grand_total: new Prisma.Decimal(grandTotal),
-          ...(rederivedTip != null
-            ? { tip_amount: new Prisma.Decimal(rederivedTip) }
-            : {}),
-          updated_at: new Date(),
-        },
-      });
-      await this.syncPendingCodAmountInTx(tx, orderId, order.payments ?? [], grandTotal);
+      await this.recalcOrderTotalsAfterItemCancelInTx(tx, order, orderId);
     });
 
     if (alreadyCancelledInTx) return this.getOrder(orderId);
@@ -4833,6 +5111,219 @@ export class OrderFlowService {
     // 6. Devolver la vista de la orden actualizada (forma `getOrder`,
     //    igual que `deliverOrderItem`).
     return this.getOrder(orderId);
+  }
+
+  /**
+   * Recálculo de totales de la orden EXCLUYENDO ítems cancelados
+   * (`cancelled_at IS NULL`). Compartido por `cancelOrderItem`,
+   * `cancelDeliveredOrderItem` y `cancelItemsFromKitchenInTx`.
+   *
+   * F-082: suma `order_item_taxes.tax_amount` (fiable por línea), conserva
+   * envío/propina/descuento y aplica clamp a 0. D.4 (F-001): la propina
+   * porcentual se re-deriva sobre la base viva; la fija se respeta.
+   */
+  private async recalcOrderTotalsAfterItemCancelInTx(
+    tx: Prisma.TransactionClient,
+    order: any,
+    orderId: number,
+  ): Promise<void> {
+    const activeItems = await tx.order_items.findMany({
+      where: { order_id: orderId, cancelled_at: null },
+      select: {
+        total_price: true,
+        order_item_taxes: { select: { tax_amount: true } },
+      },
+    });
+    const subtotal = activeItems.reduce(
+      (acc, it) => acc + Number(it.total_price),
+      0,
+    );
+    const tax = activeItems.reduce(
+      (acc, it) =>
+        acc +
+        // ADR-06 — nunca asumir la relación poblada: una fila sin desglose
+        // fiscal persistido aporta cero impuesto en vez de tronar.
+        (it.order_item_taxes ?? []).reduce(
+          (s, t) => s + Number(t.tax_amount ?? 0),
+          0,
+        ),
+      0,
+    );
+    const shippingCost = Number(order?.shipping_cost ?? 0);
+    const rederivedTip = this.rederivePercentageTip(order, subtotal, tax);
+    const tipAmount = rederivedTip ?? Number(order?.tip_amount ?? 0);
+    const discountAmount = Number(order?.discount_amount ?? 0);
+    const grandTotal = Math.max(
+      0,
+      subtotal + tax + shippingCost + tipAmount - discountAmount,
+    );
+    await tx.orders.update({
+      where: { id: orderId },
+      data: {
+        subtotal_amount: new Prisma.Decimal(subtotal),
+        tax_amount: new Prisma.Decimal(tax),
+        grand_total: new Prisma.Decimal(grandTotal),
+        ...(rederivedTip != null
+          ? { tip_amount: new Prisma.Decimal(rederivedTip) }
+          : {}),
+        updated_at: new Date(),
+      },
+    });
+    await this.syncPendingCodAmountInTx(tx, orderId, order?.payments ?? [], grandTotal);
+  }
+
+  /**
+   * Sincronía cancelado orden↔cocina (regla del dueño): toda cancelación de
+   * una línea del lado orden deja su ÚLTIMA fila `kitchen_ticket_items` en
+   * `cancelled`, sea cual sea su estado (pending, in_preparation, ready y
+   * también `delivered`), dentro de la misma tx del llamador.
+   *
+   * `KitchenFireService.cancelTicketItemInTx` rechaza `delivered`, así que
+   * acá se escribe directo la fila por PK y se recalcula el encabezado con la
+   * misma regla: todas las filas `cancelled` → ticket `cancelled`; todas
+   * terminales con al menos una `delivered` → ticket `delivered`; en otro
+   * caso el ticket no cambia (SSE `updated`). Idempotente: si la fila ya
+   * está `cancelled` (p. ej. la rama pending/avanzada ya la canceló) no hace
+   * nada. NO toca inventario (la disposición reuse/waste vive en el llamador)
+   * ni emite SSE (el llamador emite post-commit).
+   */
+  private async cancelLatestKitchenItemInTx(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    orderItemId: number,
+  ): Promise<{ ticketId: number; result: 'cancelled' | 'updated' } | null> {
+    const latest = await tx.kitchen_ticket_items.findFirst({
+      where: { order_item_id: orderItemId, kitchen_ticket: { order_id: orderId } },
+      orderBy: { id: 'desc' },
+      select: { id: true, status: true, kitchen_ticket_id: true },
+    });
+    if (!latest || latest.status === 'cancelled') return null;
+    await tx.kitchen_ticket_items.update({
+      where: { id: latest.id },
+      data: { status: 'cancelled', updated_at: new Date() },
+    });
+    const rows = await tx.kitchen_ticket_items.findMany({
+      where: { kitchen_ticket_id: latest.kitchen_ticket_id },
+      select: { status: true },
+    });
+    const allCancelled = rows.every((r) => r.status === 'cancelled');
+    if (allCancelled) {
+      await tx.kitchen_tickets.update({
+        where: { id: latest.kitchen_ticket_id },
+        data: { status: 'cancelled', updated_at: new Date() },
+      });
+      return { ticketId: latest.kitchen_ticket_id, result: 'cancelled' };
+    }
+    const allTerminal = rows.every(
+      (r) => r.status === 'cancelled' || r.status === 'delivered',
+    );
+    if (allTerminal) {
+      await tx.kitchen_tickets.update({
+        where: { id: latest.kitchen_ticket_id },
+        data: { status: 'delivered', updated_at: new Date() },
+      });
+    }
+    return { ticketId: latest.kitchen_ticket_id, result: 'updated' };
+  }
+
+  /**
+   * Predicado "orden cobrada" para cancelar ítems desde cocina: existe un pago
+   * registrado (no cancelado/fallido), la misma regla (`SETTLED_PAYMENT_STATES`)
+   * que usa `cancelOrderItem` dentro y fuera de la tx.
+   */
+  async isOrderPaidForKitchenCancel(
+    orderId: number,
+    client?: any,
+  ): Promise<boolean> {
+    const db: any = client ?? this.prisma;
+    const settled = await db.payments.findFirst({
+      where: {
+        order_id: orderId,
+        state: { in: [...SETTLED_PAYMENT_STATES] as payments_state_enum[] },
+      },
+      select: { id: true },
+    });
+    return settled != null;
+  }
+
+  /**
+   * Seam para KitchenFireService (cancelación iniciada en cocina): dentro de
+   * la tx del llamador marca las líneas como canceladas del lado orden
+   * (`after_fire_reused` si `disposition='reuse'`, `after_fire_waste` si
+   * `'waste'`), recalcula totales igual que `cancelOrderItem` y registra el
+   * `item_cancelled` con `source: 'kitchen'`. NO toca inventario ni tickets:
+   * cocina ya hizo ambas cosas. Lanza el mismo error de `cancelOrderItem` si
+   * la orden ya está cobrada o en estado terminal.
+   */
+  async cancelItemsFromKitchenInTx(
+    tx: Prisma.TransactionClient,
+    params: {
+      orderId: number;
+      orderItemIds: number[];
+      disposition: 'reuse' | 'waste';
+      reason: string;
+      ticketId: number;
+      wasPending: boolean;
+    },
+  ): Promise<void> {
+    const { orderId, disposition, ticketId, wasPending } = params;
+    const reason = (params.reason ?? '').trim();
+    const ids = [...new Set(params.orderItemIds.filter((id) => Number.isInteger(id)))];
+    if (ids.length === 0) return;
+    if (reason.length < 3) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'Debes proporcionar un motivo de cancelación (mínimo 3 caracteres)',
+      );
+    }
+    const order = await this.getOrder(orderId, tx);
+    assertNoActiveFinancialSplit(order);
+    if (['finished', 'cancelled', 'refunded'].includes(order.state)) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        `No se puede cancelar un ítem en estado '${order.state}'`,
+      );
+    }
+    if (await this.isOrderPaidForKitchenCancel(orderId, tx)) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        'No se puede cancelar un ítem de una orden ya cobrada',
+      );
+    }
+    const cancellationType: 'after_fire_reused' | 'after_fire_waste' =
+      disposition === 'reuse' ? 'after_fire_reused' : 'after_fire_waste';
+    const active = await tx.order_items.findMany({
+      where: { id: { in: ids }, order_id: orderId, cancelled_at: null },
+      select: { id: true },
+    });
+    if (active.length === 0) return;
+    const now = new Date();
+    await tx.order_items.updateMany({
+      where: { id: { in: active.map((i) => i.id) }, order_id: orderId },
+      data: {
+        cancelled_at: now,
+        cancellation_reason: reason,
+        cancellation_type: cancellationType,
+        updated_at: now,
+      },
+    });
+    for (const item of active) {
+      await this.orderHistoryService?.record(tx, {
+        orderId,
+        storeId: order.store_id,
+        organizationId: order.stores?.organization_id,
+        type: 'item_cancelled',
+        orderItemId: item.id,
+        payload: {
+          reason,
+          cancellation_type: cancellationType,
+          source: 'kitchen',
+          ticket_id: ticketId,
+          was_pending: wasPending,
+        },
+      });
+    }
+    await this.recalcOrderTotalsAfterItemCancelInTx(tx, order, orderId);
   }
 
   /**
@@ -4976,6 +5467,7 @@ export class OrderFlowService {
     let preparedLeaves: ConsumedLeafDisposition[] = [];
     const preparedStockAfterCommit: Array<() => void> = [];
     let alreadyCancelledInTx = false;
+    let kdsCancelled: { ticketId: number; result: 'cancelled' | 'updated' } | null = null;
 
     await this.prisma.$transaction(async (tx) => {
       const lockedOrder = await this.assertUnsplitOrderAfterLock(tx, orderId, order.store_id);
@@ -5073,6 +5565,11 @@ export class OrderFlowService {
         }
       }
 
+      // Sincronía cancelado orden↔cocina: la fila KDS (incluso `delivered`)
+      // queda `cancelled` en la misma tx. La disposición de inventario
+      // (restock/waste) ya se resolvió arriba y no se duplica.
+      kdsCancelled = await this.cancelLatestKitchenItemInTx(tx, orderId, orderItemId);
+
       // Soft cancel: el ítem queda VISIBLE marcado como cancelado, pero
       // EXCLUIDO de los totales. Motivo + destino persistidos para
       // auditoría y para que el detalle de orden los muestre.
@@ -5098,54 +5595,7 @@ export class OrderFlowService {
 
       // Recálculo excluyendo cancelados (`cancelled_at IS NULL`) — mismo
       // patrón F-082 del seam (conserva envío/propina/descuento, clamp 0).
-      const activeItems = await tx.order_items.findMany({
-        where: { order_id: orderId, cancelled_at: null },
-        select: {
-          total_price: true,
-          order_item_taxes: { select: { tax_amount: true } },
-        },
-      });
-      const subtotal = activeItems.reduce(
-        (acc, it) => acc + Number(it.total_price),
-        0,
-      );
-      const tax = activeItems.reduce(
-        (acc, it) =>
-          acc +
-          (it.order_item_taxes ?? []).reduce(
-            (s, t) => s + Number(t.tax_amount ?? 0),
-            0,
-          ),
-        0,
-      );
-      const shippingCost = Number((order as any).shipping_cost ?? 0);
-      // D.4 (F-001): la porcentual se re-deriva sobre la base viva; la
-      // fija se respeta. `tip_amount` solo se persiste cuando se re-deriva.
-      const rederivedTip = this.rederivePercentageTip(
-        order as any,
-        subtotal,
-        tax,
-      );
-      const tipAmount =
-        rederivedTip ?? Number((order as any).tip_amount ?? 0);
-      const discountAmount = Number((order as any).discount_amount ?? 0);
-      const grandTotal = Math.max(
-        0,
-        subtotal + tax + shippingCost + tipAmount - discountAmount,
-      );
-      await tx.orders.update({
-        where: { id: orderId },
-        data: {
-          subtotal_amount: new Prisma.Decimal(subtotal),
-          tax_amount: new Prisma.Decimal(tax),
-          grand_total: new Prisma.Decimal(grandTotal),
-          ...(rederivedTip != null
-            ? { tip_amount: new Prisma.Decimal(rederivedTip) }
-            : {}),
-          updated_at: new Date(),
-        },
-      });
-      await this.syncPendingCodAmountInTx(tx, orderId, order.payments ?? [], grandTotal);
+      await this.recalcOrderTotalsAfterItemCancelInTx(tx, order, orderId);
     });
 
     if (alreadyCancelledInTx) return this.getOrder(orderId);
@@ -5155,6 +5605,22 @@ export class OrderFlowService {
         orderId, orderItemId, preparedOrganizationId, order.store_id,
         destination === 'restock' ? 'reuse' : 'waste', preparedLeaves,
       );
+    }
+    // SSE post-commit del ticket afectado (cancelled si todo el ticket quedó
+    // cancelado, updated en otro caso). Best-effort.
+    const kdsSync = kdsCancelled as { ticketId: number; result: 'cancelled' | 'updated' } | null;
+    if (kdsSync && this.kitchenFireService) {
+      try {
+        if (kdsSync.result === 'cancelled') {
+          await this.kitchenFireService.emitTicketCancelledEvent(kdsSync.ticketId);
+        } else {
+          await this.kitchenFireService.emitTicketUpdatedEvent(kdsSync.ticketId);
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Failed to emit KDS event for ticket #${kdsSync.ticketId}: ${(err as Error).message}`,
+        );
+      }
     }
     // 7. Auditoría post-commit (best-effort, nunca revierte la reversa).
     if (!preparedDish) try {
@@ -5239,7 +5705,6 @@ export class OrderFlowService {
   async confirmDelivery(orderId: number) {
     const order = await this.getOrder(orderId);
 
-    const FINISHABLE_STATES: OrderState[] = ['delivered', 'processing'];
     if (!FINISHABLE_STATES.includes(order.state as OrderState)) {
       throw new BadRequestException(
         `Cannot confirm delivery for order in state '${order.state}'. ` +
@@ -6167,6 +6632,32 @@ export class OrderFlowService {
         });
       }
 
+      // Sincronía cancelado orden↔cocina: con la orden cancelada NINGUNA fila
+      // KDS puede seguir viva ni `delivered` (líneas no `prepared`, tickets ya
+      // entregados y cualquier fila que las ramas de arriba no cubrieran).
+      // Los tickets con filas vivas pasan a `cancelled` y se emiten post-commit.
+      const liveKdsRows = await tx.kitchen_ticket_items.findMany({
+        where: {
+          kitchen_ticket: { order_id: orderId },
+          status: { not: 'cancelled' },
+        },
+        select: { kitchen_ticket_id: true },
+      });
+      if (liveKdsRows.length > 0) {
+        const sweepTicketIds: number[] = [...new Set<number>(liveKdsRows.map((r) => r.kitchen_ticket_id as number))];
+        await tx.kitchen_ticket_items.updateMany({
+          where: { kitchen_ticket_id: { in: sweepTicketIds }, status: { not: 'cancelled' } },
+          data: { status: 'cancelled', updated_at: new Date() },
+        });
+        await tx.kitchen_tickets.updateMany({
+          where: { id: { in: sweepTicketIds }, status: { not: 'cancelled' } },
+          data: { status: 'cancelled', updated_at: new Date() },
+        });
+        for (const id of sweepTicketIds) {
+          if (!cancelledTicketIds.includes(id)) cancelledTicketIds.push(id);
+        }
+      }
+
       // Persist cancel metadata (state/updated_at were already set by the
       // claim) and return the fully-included order (same shape updateOrderState
       // returned).
@@ -6852,6 +7343,12 @@ export class OrderFlowService {
    * Supports partial payments and installment-based credit
    */
   async registerCreditPayment(orderId: number, dto: PayOrderDto) {
+    // Gate único de caja: el abono es un cobro y exige sesión de quien cobra.
+    // Antes de cualquier lectura/escritura para no crear el pago.
+    await this.sessionsService.assertSessionForSales(
+      RequestContextService.getUserId(),
+    );
+
     const order = await this.prisma.orders.findFirst({
       where: { id: orderId },
       include: {
@@ -7551,7 +8048,7 @@ export class OrderFlowService {
    * los tramos no-efectivo no la traen para que el lector ("primer pago con
    * recibido") nunca tome el recibido de una tarjeta.
    */
-  private async voidCodPendingMarkers(paymentIds: number[]): Promise<void> {
+  private async voidSettlementPendingMarkers(paymentIds: number[]): Promise<void> {
     if (paymentIds.length === 0) return;
     await this.prisma.payments.updateMany({
       where: { id: { in: paymentIds }, state: 'pending' },
@@ -7567,11 +8064,44 @@ export class OrderFlowService {
     historyCtx?: {
       storeId: number;
       organizationId?: number | null;
-      codPendingPaymentIds?: number[];
+      settlementPendingPaymentIds?: number[];
+      /** Fase 2 paso 5 — `'cash_on_delivery'` (COD, histórico) o `'manual_confirmation'`. */
+      settlementOrigin?: string;
+      /** Comprobante del marcador manual anulado → metadata del pago real. */
+      settlementReceipt?: {
+        receipt_s3_key: string | null;
+        receipt_uploaded_at: Date | string | null;
+        bank_account_id: number | null;
+      } | null;
+      /**
+       * Pago online manual `pending` (fila completa de `getOrder`) que el
+       * PRIMER tramo confirma en sitio: pasa a `succeeded` con el monto, el
+       * método, la cuenta, la referencia y el vuelto del tramo, conservando su
+       * comprobante y su `transaction_id`. Los tramos siguientes se crean.
+       */
+      confirmInPlacePayment?: any | null;
     },
   ): Promise<
-    Array<{ payment: any; leg: NormalizedLeg; transactionId: string }>
+    Array<{
+      payment: any;
+      leg: NormalizedLeg;
+      transactionId: string;
+      /** Estado previo de la fila confirmada en sitio (para compensar). */
+      confirmedInPlaceOriginal?: any;
+    }>
   > {
+    // Fase 2 paso 5 — bloque de liquidación (COD o manual) que viaja en la
+    // metadata de cada tramo + `payment_registered`. Sólo campos con valor; el
+    // camino COD queda byte a byte (`payment_origin` + ids, sin comprobante).
+    const settlementIds = historyCtx?.settlementPendingPaymentIds ?? [];
+    const settlementReceiptFields = Object.fromEntries(
+      Object.entries({
+        receipt_s3_key: historyCtx?.settlementReceipt?.receipt_s3_key ?? null,
+        receipt_uploaded_at:
+          historyCtx?.settlementReceipt?.receipt_uploaded_at ?? null,
+        bank_account_id: historyCtx?.settlementReceipt?.bank_account_id ?? null,
+      }).filter(([, value]) => value != null),
+    );
     // Plan PLAN-pago-multimetodo-fixes paso 1 — objetivo 4: la cuenta
     // bancaria de cada tramo se resuelve y valida ANTES de abrir la
     // transacción (mismo gateway que ya usa el POS,
@@ -7630,42 +8160,125 @@ export class OrderFlowService {
         payment: any;
         leg: NormalizedLeg;
         transactionId: string;
+        confirmedInPlaceOriginal?: any;
       }> = [];
-      for (const leg of legs) {
-        const transactionId = await this.generateTransactionId();
+      const inPlace = historyCtx?.confirmInPlacePayment ?? null;
+      for (const [legIndex, leg] of legs.entries()) {
         // Ausente ⇒ pago exacto (igual que el escalar de hoy); nunca falsy.
         const legReceived = leg.amount_received ?? leg.amount;
-        const payment = await tx.payments.create({
-          data: {
-            order_id: orderId,
-            store_payment_method_id: leg.store_payment_method_id,
-            bank_account_id:
-              resolvedBankAccountIds.get(leg) ?? leg.bank_account_id ?? null,
-            amount: leg.amount,
-            currency,
-            state: 'succeeded',
-            transaction_id: transactionId,
-            gateway_reference: leg.payment_reference ?? null,
-            paid_at: new Date(),
-            gateway_response: {
-              payment_type: 'direct',
-              amount_received: leg.amount_received,
-              change: leg.is_cash ? change : 0,
-              ...(leg.is_cash || historyCtx?.codPendingPaymentIds?.length
-                ? { metadata: {
-                    ...(leg.is_cash ? { amount_received: legReceived } : {}),
-                    ...(historyCtx?.codPendingPaymentIds?.length
-                      ? {
-                          payment_origin: 'cash_on_delivery',
-                          original_pending_payment_ids: historyCtx.codPendingPaymentIds,
-                        }
-                      : {}),
-                  } }
-                : {}),
+        let payment: any;
+        let transactionId: string;
+        let confirmedInPlaceOriginal: any;
+        if (inPlace && legIndex === 0) {
+          // Confirmación en sitio del pago online manual. Guardia de estado:
+          // sólo una fila todavía `pending` se confirma; si otro proceso ya la
+          // movió, se rechaza (nunca se cobra dos veces el mismo pago).
+          transactionId =
+            inPlace.transaction_id ?? (await this.generateTransactionId());
+          const previousResponse =
+            inPlace.gateway_response &&
+            typeof inPlace.gateway_response === 'object' &&
+            !Array.isArray(inPlace.gateway_response)
+              ? (inPlace.gateway_response as Record<string, any>)
+              : {};
+          const previousMetadata =
+            previousResponse.metadata &&
+            typeof previousResponse.metadata === 'object'
+              ? previousResponse.metadata
+              : {};
+          const sameMethod =
+            inPlace.store_payment_method_id == null ||
+            inPlace.store_payment_method_id === leg.store_payment_method_id;
+          const confirmed = await tx.payments.updateMany({
+            where: { id: inPlace.id, state: 'pending' },
+            data: {
+              store_payment_method_id: leg.store_payment_method_id,
+              bank_account_id:
+                resolvedBankAccountIds.get(leg) ??
+                leg.bank_account_id ??
+                (sameMethod ? (inPlace.bank_account_id ?? null) : null),
+              amount: leg.amount,
+              state: 'succeeded',
+              transaction_id: transactionId,
+              gateway_reference:
+                leg.payment_reference ?? inPlace.gateway_reference ?? null,
+              paid_at: new Date(),
+              updated_at: new Date(),
+              gateway_response: {
+                ...previousResponse,
+                payment_type: 'direct',
+                amount_received: leg.amount_received,
+                change: leg.is_cash ? change : 0,
+                metadata: {
+                  ...previousMetadata,
+                  ...(leg.is_cash ? { amount_received: legReceived } : {}),
+                  payment_origin:
+                    historyCtx?.settlementOrigin ?? 'manual_confirmation',
+                  confirmed_in_place: true,
+                  original_pending_payment_ids: settlementIds,
+                  original_store_payment_method_id:
+                    inPlace.store_payment_method_id ?? null,
+                  original_amount:
+                    inPlace.amount != null ? Number(inPlace.amount) : null,
+                  ...settlementReceiptFields,
+                },
+              },
             },
-          },
+          });
+          if (!confirmed || confirmed.count !== 1) {
+            throw this.wrapPaymentFailure('manual_payment_not_pending', {
+              order_id: orderId,
+              payment_id: inPlace.id,
+            });
+          }
+          payment = await tx.payments.findFirst({ where: { id: inPlace.id } });
+          if (!payment) {
+            throw this.wrapPaymentFailure('manual_payment_not_pending', {
+              order_id: orderId,
+              payment_id: inPlace.id,
+            });
+          }
+          confirmedInPlaceOriginal = inPlace;
+        } else {
+          transactionId = await this.generateTransactionId();
+          payment = await tx.payments.create({
+            data: {
+              order_id: orderId,
+              store_payment_method_id: leg.store_payment_method_id,
+              bank_account_id:
+                resolvedBankAccountIds.get(leg) ?? leg.bank_account_id ?? null,
+              amount: leg.amount,
+              currency,
+              state: 'succeeded',
+              transaction_id: transactionId,
+              gateway_reference: leg.payment_reference ?? null,
+              paid_at: new Date(),
+              gateway_response: {
+                payment_type: 'direct',
+                amount_received: leg.amount_received,
+                change: leg.is_cash ? change : 0,
+                ...(leg.is_cash || settlementIds.length
+                  ? { metadata: {
+                      ...(leg.is_cash ? { amount_received: legReceived } : {}),
+                      ...(settlementIds.length
+                        ? {
+                            payment_origin: historyCtx?.settlementOrigin ?? 'cash_on_delivery',
+                            original_pending_payment_ids: settlementIds,
+                            ...settlementReceiptFields,
+                          }
+                        : {}),
+                    } }
+                  : {}),
+              },
+            },
+          });
+        }
+        created.push({
+          payment,
+          leg,
+          transactionId,
+          ...(confirmedInPlaceOriginal ? { confirmedInPlaceOriginal } : {}),
         });
-        created.push({ payment, leg, transactionId });
         // Plan order-truth-and-invoice-tz — un `payment_registered` por
         // tramo, con el MISMO `tx` que el `payments.create` de arriba: si la
         // transacción revierte, el evento revierte con ella.
@@ -7677,12 +8290,14 @@ export class OrderFlowService {
             type: 'payment_registered',
             paymentId: payment.id,
             amount: leg.amount,
-            ...(historyCtx.codPendingPaymentIds?.length
+            ...(settlementIds.length
               ? { payload: {
-                  payment_origin: 'cash_on_delivery',
-                  original_pending_payment_ids: historyCtx.codPendingPaymentIds,
+                  payment_origin: historyCtx.settlementOrigin ?? 'cash_on_delivery',
+                  original_pending_payment_ids: settlementIds,
+                  ...settlementReceiptFields,
                   actual_store_payment_method_id: leg.store_payment_method_id,
                   actual_method: leg.accounting_method,
+                  ...(confirmedInPlaceOriginal ? { confirmed_in_place: true } : {}),
                 } }
               : {}),
           });
@@ -7728,11 +8343,35 @@ export class OrderFlowService {
    * compensación sea todo o nada.
    */
   private async cancelLegPayments(
-    legPayments: Array<{ payment: any; leg: NormalizedLeg }>,
+    legPayments: Array<{
+      payment: any;
+      leg: NormalizedLeg;
+      confirmedInPlaceOriginal?: any;
+    }>,
     cancellationReason: string,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
-      for (const { payment } of legPayments) {
+      for (const { payment, confirmedInPlaceOriginal: original } of legPayments) {
+        if (original) {
+          // La fila confirmada en sitio era el pago online del cliente: no se
+          // anula, vuelve a `pending` tal como estaba (sigue esperando que el
+          // personal lo registre).
+          await tx.payments.update({
+            where: { id: payment.id },
+            data: {
+              state: 'pending',
+              store_payment_method_id: original.store_payment_method_id ?? null,
+              bank_account_id: original.bank_account_id ?? null,
+              amount: original.amount,
+              transaction_id: original.transaction_id ?? payment.transaction_id,
+              gateway_reference: original.gateway_reference ?? null,
+              paid_at: original.paid_at ?? null,
+              updated_at: new Date(),
+              gateway_response: original.gateway_response ?? Prisma.DbNull,
+            },
+          });
+          continue;
+        }
         await tx.payments.update({
           where: { id: payment.id },
           data: {
@@ -7802,6 +8441,8 @@ export class OrderFlowService {
     paymentId?: number,
   ): Promise<void> {
     try {
+      // Venta de total $0 (cupón 100 %): no hay dinero que mover en caja.
+      if (!(Number(amount) > 0)) return;
       const settings = await this.settingsService.getSettings();
       const cr_settings = (settings as any)?.pos?.cash_register;
       if (!cr_settings?.enabled) return;
@@ -8385,6 +9026,7 @@ export class OrderFlowService {
         where: { order_id: orderId, cancelled_at: null },
         select: {
           total_price: true,
+          discount_amount: true,
           quantity: true,
           tax_amount_item: true,
           weight: true,

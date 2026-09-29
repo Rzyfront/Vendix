@@ -20,6 +20,7 @@ export function createSearchTools({
   return [
     {
       name: 'semantic_search',
+      version: '1',
       domain: 'search',
       readOnly: true,
       description:

@@ -1967,6 +1967,30 @@ export class DispatchNotesService {
   }
 
   /**
+   * Contexto de `create_dispatch_note`: orden + renglones para replicar en el
+   * preview las precondiciones de `createFromOrder` (estado, entrega
+   * inmediata, dirección). Devuelve `null` en vez de lanzar para que la tool
+   * conteste `{error, next_step}`. Misma proyección que la tool leía directa
+   * (paso 15). Lectura pura, scopeada por tienda.
+   */
+  async findOrderForDispatchPlanForAgent(orderId: number): Promise<any> {
+    return this.prisma.orders.findFirst({
+      where: { id: orderId },
+      select: {
+        id: true,
+        order_number: true,
+        state: true,
+        delivery_type: true,
+        shipping_address_snapshot: true,
+        shipping_address_id: true,
+        order_items: {
+          select: { id: true, product_name: true, quantity: true },
+        },
+      },
+    });
+  }
+
+  /**
    * Create a dispatch note (remisión) straight from an order, optionally
    * confirming it and/or attaching it to a route — all in ONE atomic
    * transaction. This is the "atajo de despacho COD" shortcut: a single call

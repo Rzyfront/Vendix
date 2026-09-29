@@ -31,6 +31,12 @@ export interface ActivityEntry {
   /** What the person asked for, in the words the tool recorded. */
   operation: string;
   applied: boolean;
+  /** `ui` for interface commands, `write` for data changes (default). */
+  kind?: 'write' | 'ui';
+  /** Screen the UI command ran on, when the result carried it. */
+  module_key?: string;
+  /** Outcome of a UI command (`ok`, `no_host`, `needs_user_input`, …). */
+  status?: string;
   /** The document that justified it, when one did. */
   document?: {
     attachment_id: string;
@@ -38,6 +44,78 @@ export interface ActivityEntry {
   };
   linked_entity_type?: string;
   linked_entity_id?: number;
+}
+
+/**
+ * Whether a traced call is an interface command (G12).
+ *
+ * UI commands never mutate data — they drive the browser — so they are not
+ * "applied writes", but "what Vexi changed on the screen for the user" still
+ * belongs in the review trail next to the writes, correlated by turn.
+ */
+export function isUiAuditEntry(toolName: unknown): boolean {
+  return typeof toolName === 'string' && toolName.startsWith('ui_');
+}
+
+/** Argument keys whose values are PII and never land in the audit trail. */
+const UI_AUDIT_SENSITIVE_KEYS = [
+  'document',
+  'documento',
+  'cedula',
+  'cédula',
+  'nit',
+  'phone',
+  'telefono',
+  'teléfono',
+  'celular',
+  'mobile',
+  'email',
+  'correo',
+  'address',
+  'direccion',
+  'dirección',
+];
+
+/**
+ * Redacts one audit value (G12).
+ *
+ * Record names travel ("Orden 1046 de Acme") because the trail is useless
+ * without them; documents and phones do not. Keyed by argument name rather
+ * than by shape, so a new sensitive field is one list entry, not a regex.
+ */
+export function redactUiAuditValue(key: string, value: unknown): unknown {
+  const lower = key.toLowerCase();
+  if (UI_AUDIT_SENSITIVE_KEYS.some((sensitive) => lower.includes(sensitive))) {
+    return '[redactado]';
+  }
+  return value;
+}
+
+/** Redacts a whole arguments map, preserving the record names. */
+export function redactUiAuditArgs(
+  args: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!args || typeof args !== 'object') return {};
+  const redacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    redacted[key] = redactUiAuditDeep(key, value);
+  }
+  return redacted;
+}
+
+/** Recurses into plain objects AND arrays so PII nested in lists is redacted too. */
+function redactUiAuditDeep(key: string, value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      item !== null && typeof item === 'object' && !Array.isArray(item)
+        ? redactUiAuditArgs(item as Record<string, unknown>)
+        : redactUiAuditValue(key, item),
+    );
+  }
+  if (value !== null && typeof value === 'object') {
+    return redactUiAuditArgs(value as Record<string, unknown>);
+  }
+  return redactUiAuditValue(key, value);
 }
 
 /**
@@ -203,6 +281,16 @@ export class VexiActivityService {
         : [];
 
       for (const call of calls) {
+        // UI commands (G12): recorded next to the writes, correlated by
+        // conversation (= turn), with PII redacted. They never carry
+        // `applied: true` — driving a screen is not changing the business —
+        // so they enter through their own branch instead of `wasApplied`.
+        if (isUiAuditEntry(call?.name)) {
+          entries.push(this.describeUiCommand(message, call));
+          if (entries.length >= capped) return entries;
+          continue;
+        }
+
         const applied = this.wasApplied(call?.result);
         // Reads are the overwhelming majority of the trace and they are not what
         // this view is for: an owner reviewing the agent wants the changes.
@@ -286,6 +374,63 @@ export class VexiActivityService {
     const digits = raw.startsWith('att_') ? raw.slice(4) : raw;
     const id = Number(digits);
     return Number.isInteger(id) && id > 0 ? id : null;
+  }
+
+  /**
+   * One UI command as an audit entry (G12).
+   *
+   * The envelope is `{turno, module_key, acción, resultado}`: the turn is
+   * `conversation_id`, the screen comes from the result the browser reported
+   * (`module`, `screen.module_key` or `target`), the action is the command
+   * with its redacted arguments, and the result is the `status` the screen
+   * answered. `applied` stays false — navigating and filtering are reviewable
+   * activity, not changes to the business.
+   */
+  private describeUiCommand(
+    message: { conversation_id: number; created_at: Date },
+    call: Record<string, any>,
+  ): ActivityEntry {
+    const result = this.parseUiResult(call?.result);
+    const args = redactUiAuditArgs(call?.arguments);
+    const argSummary = Object.entries(args)
+      .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+      .join(' ')
+      .slice(0, 200);
+
+    return {
+      at: message.created_at,
+      conversation_id: message.conversation_id,
+      tool: String(call?.name ?? 'desconocida'),
+      operation: argSummary
+        ? `${String(call?.name)} ${argSummary}`
+        : String(call?.name ?? 'operación'),
+      applied: false,
+      kind: 'ui',
+      module_key: result.moduleKey,
+      status: result.status,
+    };
+  }
+
+  /** Best-effort read of the screen outcome the browser reported. */
+  private parseUiResult(result: unknown): {
+    moduleKey?: string;
+    status?: string;
+  } {
+    if (typeof result !== 'string') return {};
+    try {
+      const parsed = JSON.parse(result) as Record<string, any>;
+      const screen = parsed?.screen as Record<string, any> | undefined;
+      const moduleKey =
+        (typeof parsed?.module === 'string' && parsed.module) ||
+        (typeof screen?.module_key === 'string' && screen.module_key) ||
+        (typeof parsed?.target === 'string' && parsed.target) ||
+        undefined;
+      const status =
+        typeof parsed?.status === 'string' ? parsed.status : undefined;
+      return { moduleKey, status };
+    } catch {
+      return {};
+    }
   }
 
   /** The operation in the words the arguments carry, never a raw route. */

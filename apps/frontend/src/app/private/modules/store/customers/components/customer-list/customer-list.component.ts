@@ -23,6 +23,7 @@ import {
 import { Customer } from '../../models/customer.model';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { getDocumentTypeLabel } from '../../../../../../shared/constants/document-types';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 
 @Component({
   selector: 'app-customer-list',
@@ -174,10 +175,7 @@ export class CustomerListComponent {
       label: 'Cliente',
       sortable: true,
       priority: 1,
-      transform: (_val: any, row?: any) => {
-        const parts = [row?.first_name, row?.last_name].filter(Boolean);
-        return parts.length > 0 ? parts.join(' ') : '-';
-      },
+      transform: (_val: any, row?: any) => customerDisplayName(row, '-'),
     },
     {
       key: 'document_number',
@@ -222,10 +220,7 @@ export class CustomerListComponent {
 
   cardConfig: ItemListCardConfig = {
     titleKey: 'first_name',
-    titleTransform: (item: any) => {
-      const parts = [item?.first_name, item?.last_name].filter(Boolean);
-      return parts.length > 0 ? parts.join(' ') : '-';
-    },
+    titleTransform: (item: any) => customerDisplayName(item, '-'),
     subtitleKey: 'email',
     subtitleTransform: (item: any) => item?.email || 'Sin correo',
     avatarFallbackIcon: 'user',

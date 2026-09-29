@@ -4,6 +4,7 @@ import { AIEngineService } from '../ai-engine.service';
 import { AIMessage } from '../interfaces/ai-provider.interface';
 import { parseAiJson } from '../utils/ai-json.util';
 import { VexiAttachmentsService } from '../../domains/store/vexi/vexi-attachments.service';
+import { StorePrismaService } from '../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../common/errors';
 
 /**
@@ -98,6 +99,7 @@ export class AiToolboxService {
   constructor(
     private readonly aiEngine: AIEngineService,
     private readonly attachments: VexiAttachmentsService,
+    private readonly prisma: StorePrismaService,
   ) {}
 
   /**
@@ -350,4 +352,203 @@ export class AiToolboxService {
       return dataUri;
     }
   }
+
+  // ── Cross-checking against real records ─────────────────────────────────
+  //
+  // Mudados desde `ai-toolbox.tools.ts` en el paso 15 (cero `prisma.` en
+  // tools). Viven aquí y no en los servicios de dominio porque la familia se
+  // registra desde el `@Global()` ai-engine module: importar
+  // `InvoiceScannerService` (purchase-orders) cerraría un ciclo de
+  // dependencias. El matching es deliberadamente simple —exacto y por
+  // prefijo, sin fuzzy scoring— porque su trabajo es decir la verdad sobre
+  // lo que existe, y un fuzzy presentado como match es el modo de fallo que
+  // hay que evitar. Lecturas puras, scopeadas por tienda/organización.
+
+  /**
+   * Cruza el proveedor leído contra `suppliers` (por NIT, luego nombre
+   * exacto, luego candidatos por primera palabra). `state: { not: archived }`
+   * en cada rama, igual que `InvoiceScannerService.matchSupplier`: sugerir un
+   * proveedor archivado llevaría a abrirle una orden de compra.
+   */
+  async matchExtractionSupplier(params: {
+    organizationId: number | undefined;
+    name?: string;
+    taxId?: string;
+  }) {
+    const { organizationId, name, taxId } = params;
+    if (!organizationId) {
+      return { matched: false, reason: 'Sin organización en contexto.' };
+    }
+
+    if (taxId) {
+      const byTaxId = await this.prisma.suppliers.findFirst({
+        where: {
+          tax_id: { equals: taxId, mode: 'insensitive' },
+          state: { not: 'archived' },
+        },
+        select: { id: true, name: true, tax_id: true },
+      });
+      if (byTaxId) return { matched: true, ...byTaxId, matched_by: 'tax_id' };
+    }
+
+    if (!name) return { matched: false };
+
+    const exact = await this.prisma.suppliers.findFirst({
+      where: {
+        name: { equals: name, mode: 'insensitive' },
+        state: { not: 'archived' },
+      },
+      select: { id: true, name: true, tax_id: true },
+    });
+    if (exact) return { matched: true, ...exact, matched_by: 'name' };
+
+    const candidates = await this.prisma.suppliers.findMany({
+      where: {
+        name: { contains: firstWord(name), mode: 'insensitive' },
+        state: { not: 'archived' },
+      },
+      select: { id: true, name: true, tax_id: true },
+      take: MAX_EXTRACTION_CANDIDATES,
+    });
+
+    return {
+      matched: false,
+      read_as: name,
+      candidates,
+      note: candidates.length
+        ? 'Ninguno coincide exactamente. Pregúntale a la persona si es uno de estos.'
+        : 'Ese proveedor no existe en el sistema.',
+    };
+  }
+
+  /** Cruza líneas del documento contra `products` (código, nombre, candidatos). */
+  async matchExtractionItems(items: any[]) {
+    const results: unknown[] = [];
+
+    for (const item of items.slice(0, 60)) {
+      const description = String(item?.description ?? '').trim();
+      const code = item?.code ? String(item.code).trim() : '';
+
+      if (code) {
+        const byCode = await this.prisma.products.findFirst({
+          where: {
+            OR: [{ sku: code }, { barcode: code }],
+            state: { not: 'archived' },
+          },
+          select: { id: true, name: true, sku: true },
+        });
+        if (byCode) {
+          results.push({
+            read_as: description || code,
+            matched: true,
+            ...byCode,
+            matched_by: 'code',
+          });
+          continue;
+        }
+      }
+
+      if (!description) {
+        results.push({ read_as: code, matched: false });
+        continue;
+      }
+
+      const exact = await this.prisma.products.findFirst({
+        where: {
+          name: { equals: description, mode: 'insensitive' },
+          state: { not: 'archived' },
+        },
+        select: { id: true, name: true, sku: true },
+      });
+      if (exact) {
+        results.push({
+          read_as: description,
+          matched: true,
+          ...exact,
+          matched_by: 'name',
+        });
+        continue;
+      }
+
+      const candidates = await this.prisma.products.findMany({
+        where: {
+          name: { contains: firstWord(description), mode: 'insensitive' },
+          state: { not: 'archived' },
+        },
+        select: { id: true, name: true, sku: true },
+        take: MAX_EXTRACTION_CANDIDATES,
+      });
+
+      results.push({ read_as: description, matched: false, candidates });
+    }
+
+    return results;
+  }
+
+  /**
+   * Cruza documentos de identidad contra personas de ESTA tienda.
+   *
+   * El predicado de tienda no es decoración: `StorePrismaService.users`
+   * devuelve el delegado SIN scope (modelo de organización), así que un
+   * `findFirst` pelado sobre `document_number` contestaría con una persona de
+   * otro tenant —filtrando que el documento existe y su nombre. Mismo
+   * predicado que `customers.tools.ts` propaga en cada consulta, por la misma
+   * razón.
+   */
+  async matchExtractionPeople(documents: any[], storeId: number | undefined) {
+    const results: unknown[] = [];
+
+    if (!storeId) {
+      return [{ matched: false, reason: 'Sin tienda en contexto.' }];
+    }
+
+    for (const raw of documents.slice(0, 60)) {
+      const document = String(raw ?? '').trim();
+      if (!document) continue;
+
+      const found = await this.prisma.users.findFirst({
+        where: {
+          document_number: document,
+          store_users: { some: { store_id: storeId } },
+        },
+        select: { id: true, first_name: true, last_name: true },
+      });
+
+      results.push(
+        found
+          ? {
+              document,
+              matched: true,
+              id: found.id,
+              name: `${found.first_name} ${found.last_name ?? ''}`.trim(),
+            }
+          : { document, matched: false },
+      );
+    }
+
+    return results;
+  }
+
+  /** Categorías de gasto para cruzar extracciones del dominio `gastos`. */
+  async listExpenseCategoriesForExtraction() {
+    return this.prisma.expense_categories.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+      take: 40,
+    });
+  }
+}
+
+/** How many candidate matches are worth showing per unmatched line. */
+const MAX_EXTRACTION_CANDIDATES = 3;
+
+/**
+ * The longest leading token of a name, used as the `contains` needle.
+ *
+ * Beats using the whole string: OCR routinely mangles the tail of a product
+ * name ("Coca Cola 1.5L x12" → "Coca Cola 1.5Lx12"), while the head survives.
+ */
+function firstWord(value: string): string {
+  const parts = value.split(/\s+/).filter((part) => part.length > 2);
+  return (parts[0] ?? value).slice(0, 24);
 }

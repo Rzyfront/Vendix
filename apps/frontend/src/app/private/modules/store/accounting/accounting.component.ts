@@ -1,6 +1,10 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, DestroyRef, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
+import {
+  VexiUiHost,
+  VexiUiHostRegistry,
+} from '../../../../core/services/vexi-ui-host.registry';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map, startWith } from 'rxjs/operators';
 import { Store } from '@ngrx/store';
@@ -71,6 +75,8 @@ import {
 export class AccountingComponent {
   private readonly store = inject(Store);
   private readonly router = inject(Router);
+  private readonly vexiHosts = inject(VexiUiHostRegistry);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly tabs = computed<StickyHeaderTab[]>(() => TAB_DEFINITIONS);
 
@@ -93,9 +99,46 @@ export class AccountingComponent {
   });
 
   constructor() {
+    this.vexiHosts.register(this.vexiHostAdapter);
+    this.destroyRef.onDestroy(() =>
+      this.vexiHosts.unregister(this.vexiHostAdapter),
+    );
+
     this.store.dispatch(loadAccounts());
     this.store.dispatch(loadFiscalPeriods());
   }
+
+  // ── Host de Vexi (G8) ─────────────────────────────────────────────────
+  //
+  // Read-only by design: accounting entries, mappings and periods are
+  // created through validated flows and agent write tools with previews —
+  // never by driving this shell. `readScreen` names the active tab so Vexi
+  // can say where the person stands; `refresh` reloads the shell's own
+  // reference data.
+  private readonly vexiHostAdapter: VexiUiHost = {
+    vexiModuleKey: 'accounting',
+    readScreen: () => {
+      const active =
+        TAB_DEFINITIONS.find((tab) => tab.id === this.activeTabId()) ??
+        TAB_DEFINITIONS[0];
+      return {
+        module_key: 'accounting',
+        title: 'Contabilidad',
+        filters: { tab: this.activeTabId() },
+        notes: active
+          ? `La persona está en la pestaña "${active.label}" de Contabilidad. Esta pantalla es de solo lectura para Vexi: los asientos y mapeos se hacen por sus propios flujos.`
+          : 'La persona está en Contabilidad.',
+      };
+    },
+    refresh: () => {
+      this.store.dispatch(loadAccounts());
+      this.store.dispatch(loadFiscalPeriods());
+      return {
+        status: 'ok' as const,
+        message: 'Recargué las cuentas y los períodos.',
+      };
+    },
+  };
 
   onTabChanged(tabId: string): void {
     const target = TAB_DEFINITIONS.find((tab) => tab.id === tabId);

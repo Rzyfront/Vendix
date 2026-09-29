@@ -381,6 +381,36 @@ export const analyticsRoutes: Routes = [
           },
         ],
       },
+      // Payments Analytics (shell) — Paso 4 PLAN-reporte-analitica-pagos-2026-09-28
+      {
+        path: 'payments',
+        loadComponent: () =>
+          import('./components/analytics-shell/analytics-shell.component').then(
+            (c) => c.AnalyticsShellComponent,
+          ),
+        data: { categoryId: 'payments' as AnalyticsCategoryId },
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'overview',
+          },
+          {
+            path: 'overview',
+            loadComponent: () =>
+              import('./pages/payments/payments-overview.component').then(
+                (c) => c.PaymentsOverviewComponent,
+              ),
+          },
+          {
+            path: 'by-method',
+            loadComponent: () =>
+              import('./pages/payments/payments-by-method.component').then(
+                (c) => c.PaymentsByMethodComponent,
+              ),
+          },
+        ],
+      },
       // Dispatch Analytics (shell) — PLAN-analytics-despachos-2026-09-12
       {
         path: 'dispatch',

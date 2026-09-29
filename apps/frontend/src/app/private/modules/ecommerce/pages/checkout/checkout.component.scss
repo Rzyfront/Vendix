@@ -636,6 +636,13 @@
 // ahora VIVE DENTRO de `.checkout-actions--summary` (ver mas abajo), arriba
 // de `.checkout-actions__row`. Mismo nodo en desktop y en la barra fija de
 // mobile: no hay logica ni markup duplicados.
+.coupon-preview-reason {
+    margin: 0.375rem 0 0;
+    font-size: 0.75rem;
+    line-height: 1.35;
+    color: var(--color-warning-800, #92400e);
+}
+
 .checkout-block-reason {
     display: flex;
     // Bug reportado por el dueño (2026-09-27): sin `box-sizing: border-box`,

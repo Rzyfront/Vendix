@@ -22,9 +22,9 @@ import { AutoEntryService } from '../../../accounting/auto-entries/auto-entry.se
 /**
  * CP-REFUND-FLOW-REDESIGN paso 10 — gate de platos (paso 6).
  *
- * Disposición guiada por estado: disparado ⇒ solo write_off con motivo
- * (sin movimiento de stock — el fire ya consumió), no disparado ⇒ restock
- * con reversa sourcing-ledger a costo histórico; KDS cancela en-tx con
+ * Disposición: disparado o no, el plato admite restock (reversa
+ * sourcing-ledger a costo histórico de las hojas consumidas), write_off con
+ * motivo (sin movimiento de stock) o no_return; KDS cancela en-tx con
  * SSE post-commit; reclass COGS solo al cubrir la línea completa.
  *
  * Invariante anti-doble-descuento: la rama plato no toca
@@ -123,11 +123,41 @@ describe('RefundFlowService — gate de platos (paso 6, CP-REFUND-FLOW-REDESIGN)
     (service as any).processDishRefundLine(t, i);
 
   describe('validación guiada por estado', () => {
-    it('disparado + restock ⇒ 400 (el insumo cocinado no vuelve a stock)', async () => {
-      await expect(run(tx(), input({ fired: true }))).rejects.toThrow(
-        /only admits write_off/,
+    it('disparado + restock ⇒ revierte las hojas BOM del disparo (regla dueño 2026-09-28)', async () => {
+      const t = tx({
+        inventory_transactions: { findMany: jest.fn().mockResolvedValue([consumedLeaf()]) },
+        refund_items: { findMany: jest.fn().mockResolvedValue([{ quantity: 2 }]) },
+      });
+      const i = input({ fired: true });
+
+      await run(t, i);
+
+      expect(stockLevelManager.updateStock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          product_id: 7,
+          location_id: 5,
+          quantity_change: 200,
+          movement_type: 'return',
+          movement_unit_cost: 50,
+          source_module: 'dish_refund',
+        }),
+        t,
       );
-      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(t.inventory_cost_layers.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          product_id: 7,
+          quantity_remaining: 200,
+          unit_cost: new Prisma.Decimal(50),
+        }),
+      });
+      expect(t.audit_logs.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({ destination: 'reuse', fired: true }),
+        }),
+      });
+      expect(i.postCommit.reclassJobs).toEqual([
+        expect.objectContaining({ order_item_id: 11, disposition: 'reuse', total_cost: 10000 }),
+      ]);
     });
 
     it('write_off sin motivo ⇒ 400 (ni línea ni orden aportan razón)', async () => {

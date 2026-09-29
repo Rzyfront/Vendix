@@ -6,6 +6,7 @@ import { loadInvoices } from '../../../private/modules/store/invoicing/state/act
 import { loadEntries } from '../../../private/modules/store/accounting/state/actions/accounting.actions';
 import { loadEmployees } from '../../../private/modules/store/payroll/state/actions/payroll.actions';
 import { loadLayaways } from '../../../private/modules/store/layaway/state/actions/layaway.actions';
+import { ReportsActions } from '../../../private/modules/store/reports/state/reports.actions';
 
 /**
  * One reload path: which action to dispatch, and where it only makes sense.
@@ -61,4 +62,8 @@ export const VEXI_REFRESH_ACTIONS: Record<string, VexiRefreshTarget> = {
   accounting: { action: loadEntries, routeFragment: '/admin/accounting' },
   payroll: { action: loadEmployees, routeFragment: '/admin/payroll' },
   layaway: { action: loadLayaways, routeFragment: '/admin/orders/layaway' },
+  reports: {
+    action: ReportsActions.loadReportData,
+    routeFragment: '/admin/reports',
+  },
 };

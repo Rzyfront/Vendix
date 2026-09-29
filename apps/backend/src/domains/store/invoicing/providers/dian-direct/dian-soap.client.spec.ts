@@ -203,3 +203,41 @@ Sin observaciones.</b:StatusMessage>
     });
   });
 });
+
+describe('DianSoapClient · timeout', () => {
+  const original_fetch = global.fetch;
+  afterEach(() => {
+    global.fetch = original_fetch;
+  });
+
+  const run = (client: DianSoapClient) =>
+    (
+      client as unknown as {
+        executeWithRetry: (
+          e: string,
+          a: string,
+          b: string,
+        ) => Promise<DianSendBillResponse & { timed_out: boolean }>;
+      }
+    ).executeWithRetry('http://dian.invalid', 'action', '<soap:Body/>');
+
+  it('un AbortError devuelve timed_out true y conserva contingency_eligible', async () => {
+    const abort = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    global.fetch = jest.fn().mockRejectedValue(abort) as any;
+    const result = await run(new DianSoapClient());
+    expect(result.timed_out).toBe(true);
+    expect(result.failure_class).toBe('timeout');
+    expect(result.contingency_eligible).toBe(true);
+  });
+
+  it('una respuesta normal lleva timed_out false', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      status: 200,
+      text: async () =>
+        '<s:Envelope><b:IsValid>true</b:IsValid><b:StatusCode>00</b:StatusCode></s:Envelope>',
+    }) as any;
+    const result = await run(new DianSoapClient());
+    expect(result.timed_out).toBe(false);
+    expect(result.success).toBe(true);
+  });
+});
