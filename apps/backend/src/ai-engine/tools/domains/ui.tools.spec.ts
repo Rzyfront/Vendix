@@ -2,6 +2,7 @@ import { uiTools } from './ui.tools';
 import { RegisteredTool } from '../interfaces/tool.interface';
 import {
   isUiAuditEntry,
+  redactUiAuditArgs,
   redactUiAuditValue,
 } from '../../../domains/store/vexi/vexi-activity.service';
 
@@ -404,6 +405,26 @@ describe('ui.tools · ui_audit (G12)', () => {
     expect(redactUiAuditValue('phone', '+57 300 123 4567')).toBe('[redactado]');
     expect(redactUiAuditValue('nit', '900123456-7')).toBe('[redactado]');
     expect(redactUiAuditValue('search', 'Orden 1046')).toBe('Orden 1046');
+  });
+
+  it('redacta PII dentro de arrays (F4 review PR #874)', () => {
+    expect(
+      redactUiAuditArgs({
+        items: [
+          { document: '1234567890', name: 'Juan' },
+          { phone: '3001234567', name: 'Ana' },
+        ],
+        phones: ['3001111111', '3002222222'],
+        note: 'llamar mañana',
+      }),
+    ).toEqual({
+      items: [
+        { document: '[redactado]', name: 'Juan' },
+        { phone: '[redactado]', name: 'Ana' },
+      ],
+      phones: ['[redactado]', '[redactado]'],
+      note: 'llamar mañana',
+    });
   });
 });
 

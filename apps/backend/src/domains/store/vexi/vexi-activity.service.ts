@@ -98,12 +98,24 @@ export function redactUiAuditArgs(
   if (!args || typeof args !== 'object') return {};
   const redacted: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(args)) {
-    redacted[key] =
-      value !== null && typeof value === 'object' && !Array.isArray(value)
-        ? redactUiAuditArgs(value as Record<string, unknown>)
-        : redactUiAuditValue(key, value);
+    redacted[key] = redactUiAuditDeep(key, value);
   }
   return redacted;
+}
+
+/** Recurses into plain objects AND arrays so PII nested in lists is redacted too. */
+function redactUiAuditDeep(key: string, value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      item !== null && typeof item === 'object' && !Array.isArray(item)
+        ? redactUiAuditArgs(item as Record<string, unknown>)
+        : redactUiAuditValue(key, item),
+    );
+  }
+  if (value !== null && typeof value === 'object') {
+    return redactUiAuditArgs(value as Record<string, unknown>);
+  }
+  return redactUiAuditValue(key, value);
 }
 
 /**

@@ -1464,6 +1464,7 @@ export interface CustomerWriteToolDeps {
 const CUSTOMER_FIELD_LABELS: Record<string, string> = {
   first_name: 'Nombres',
   last_name: 'Apellidos',
+  legal_name: 'Razón social',
   email: 'Correo',
   phone: 'Teléfono',
   document_type: 'Tipo de documento',
@@ -1524,6 +1525,7 @@ export function createCustomerWriteTools(
 
     const firstName = cleanString(args.first_name);
     const lastName = cleanString(args.last_name);
+    const legalName = cleanString(args.legal_name);
     const email = cleanString(args.email);
     const phone = cleanString(args.phone);
     const documentType = cleanString(args.document_type)?.toUpperCase();
@@ -1585,15 +1587,36 @@ export function createCustomerWriteTools(
 
     // ── Alta ────────────────────────────────────────────────────────────────
     if (!customerId) {
-      if (!firstName || !lastName) {
-        return failure(
-          label,
-          'Para crear un cliente hacen falta al menos los nombres y los apellidos.',
-          'Pídeselos al usuario. El correo es opcional; el documento es necesario si se le va a facturar.',
-        );
+      // JURIDICA usa razón social EN VEZ DE nombres (regla DIAN JuridicaNameRule:
+      // legal_name presente + first/last vacíos). Sin esta rama el alta B2B era
+      // un dead-end: el DTO rechaza lo que la tool exigía.
+      let newLabel: string;
+      if (personType === 'JURIDICA') {
+        if (!legalName) {
+          return failure(
+            label,
+            'Para crear una empresa (persona jurídica) hace falta la razón social.',
+            'Pide la razón social y pásala como legal_name, sin first_name ni last_name.',
+          );
+        }
+        if (firstName || lastName) {
+          return failure(
+            label,
+            'Una persona jurídica se crea solo con razón social: los nombres pertenecen a persona natural.',
+            'Reintenta pasando únicamente legal_name (o quita person_type si en realidad es persona natural).',
+          );
+        }
+        newLabel = legalName;
+      } else {
+        if (!firstName || !lastName) {
+          return failure(
+            label,
+            'Para crear un cliente hacen falta al menos los nombres y los apellidos.',
+            'Pídeselos al usuario. El correo es opcional; el documento es necesario si se le va a facturar.',
+          );
+        }
+        newLabel = `${firstName} ${lastName}`.trim();
       }
-
-      const newLabel = `${firstName} ${lastName}`.trim();
 
       if (email) {
         const emailConflict: any =
@@ -1629,6 +1652,7 @@ export function createCustomerWriteTools(
       const payload: Record<string, unknown> = {
         first_name: firstName,
         last_name: lastName,
+        ...(legalName && { legal_name: legalName }),
         ...(email && { email }),
         ...(phone && { phone }),
         ...(documentType && { document_type: documentType }),
@@ -1652,7 +1676,11 @@ export function createCustomerWriteTools(
       // En el resolver para que el `preview` tampoco proponga lo inválido.
       const checkedCreate = toValidatedDto(CreateCustomerDto, payload);
       if (!checkedCreate.ok) {
-        return failure(newLabel, checkedCreate.message);
+        return failure(
+          newLabel,
+          checkedCreate.message,
+          'Corrige el dato que indica el mensaje y reintenta; si es empresa usa legal_name sin first_name ni last_name.',
+        );
       }
 
       return {
@@ -1684,6 +1712,7 @@ export function createCustomerWriteTools(
     const candidate: Record<string, unknown> = {
       ...(firstName !== undefined && { first_name: firstName }),
       ...(lastName !== undefined && { last_name: lastName }),
+      ...(legalName !== undefined && { legal_name: legalName }),
       ...(email !== undefined && { email }),
       ...(phone !== undefined && { phone }),
       ...(documentType !== undefined && { document_type: documentType }),
@@ -1785,7 +1814,7 @@ export function createCustomerWriteTools(
       domain: 'customers',
       requiresConfirmation: true,
       description:
-        'Crea un cliente nuevo o corrige los datos de uno existente. Sin customer_id crea (hacen falta nombres y apellidos); con customer_id edita solo los campos que le pases. Antes de crear, busca siempre con find_customer: si el cliente ya existe hay que editarlo, porque un cliente duplicado parte su historial de compras y su cartera en dos. El documento (tipo + número) es lo que permite facturarle y no se puede repetir en la organización. No borra clientes ni cambia contraseñas.',
+        'Crea un cliente nuevo o corrige los datos de uno existente. Sin customer_id crea: persona natural con nombres y apellidos, empresa (JURIDICA) con razón social (legal_name) sin nombres. Con customer_id edita solo los campos que le pases. Antes de crear, busca siempre con find_customer: si el cliente ya existe hay que editarlo, porque un cliente duplicado parte su historial de compras y su cartera en dos. El documento (tipo + número) es lo que permite facturarle y no se puede repetir en la organización. No borra clientes ni cambia contraseñas.',
       parameters: {
         type: 'object',
         properties: {
@@ -1796,11 +1825,18 @@ export function createCustomerWriteTools(
           },
           first_name: {
             type: 'string',
-            description: 'Nombres. Obligatorio al crear.',
+            description:
+              'Nombres. Obligatorio al crear persona natural; prohibido con person_type JURIDICA.',
           },
           last_name: {
             type: 'string',
-            description: 'Apellidos. Obligatorio al crear.',
+            description:
+              'Apellidos. Obligatorio al crear persona natural; prohibido con person_type JURIDICA.',
+          },
+          legal_name: {
+            type: 'string',
+            description:
+              'Razón social. Obligatoria al crear persona jurídica (JURIDICA), en vez de nombres y apellidos.',
           },
           email: {
             type: 'string',
@@ -1825,7 +1861,7 @@ export function createCustomerWriteTools(
             type: 'string',
             enum: ['NATURAL', 'JURIDICA'],
             description:
-              'Persona natural o jurídica. Determina cómo se le aplican las retenciones.',
+              'Persona natural o jurídica. Determina cómo se le aplican las retenciones. Con JURIDICA usa legal_name y omite first_name/last_name.',
           },
           tax_regime: {
             type: 'string',

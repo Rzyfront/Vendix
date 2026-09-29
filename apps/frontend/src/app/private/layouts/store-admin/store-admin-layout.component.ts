@@ -1100,8 +1100,6 @@ export class StoreAdminLayoutComponent {
     { initialValue: [] as MenuItem[] },
   );
 
-  readonly posTourConfig = POS_TOUR_CONFIG;
-
   /**
    * The tour the modal shows (U-3).
    *
