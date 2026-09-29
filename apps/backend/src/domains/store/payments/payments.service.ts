@@ -2126,6 +2126,20 @@ export class PaymentsService {
           if (!createPosPaymentDto.requires_payment) {
             const creditSaleOrderId = order.id;
             const creditSaleOrderNumber = order.order_number;
+            // QUI-540: `createOrderInstallments` corre post-commit sin `await`,
+            // así que al emitir el evento las filas de `order_installments`
+            // aún pueden no existir y el listener de CxC caía al +30 días.
+            // Se envía el vencimiento de la 1ª cuota en el payload (mismo
+            // parseo que `createOrderInstallments`) para no depender de esa
+            // carrera; sin cuotas queda `undefined` y el listener usa su fallback.
+            const creditSaleDueDate =
+              (createPosPaymentDto.credit_type || 'installments') ===
+                'installments' &&
+              createPosPaymentDto.installment_terms?.first_installment_date
+                ? new Date(
+                    createPosPaymentDto.installment_terms.first_installment_date,
+                  )
+                : undefined;
             emitCreditSaleAfterCommit = () =>
               this.eventEmitter.emit('credit_sale.created', {
                 order_id: creditSaleOrderId,
@@ -2151,6 +2165,7 @@ export class PaymentsService {
                 // Propina incluida en grand_total: el asiento la acredita a su
                 // pasivo custodio (sin ella el DR 1305 no cuadra).
                 tip_amount: Number(order.tip_amount || 0),
+                due_date: creditSaleDueDate,
                 user_id: user.id,
               });
 
