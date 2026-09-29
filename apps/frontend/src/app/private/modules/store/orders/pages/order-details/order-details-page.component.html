@@ -618,8 +618,11 @@
                   </div>
                 }
 
-                <!-- Nota interna de Staff -->
-                @if (cleanInternalNotes() && !flowMetadata().internal_notes_as_json) {
+                <!-- Nota interna de Staff. QUI-887 (rev 867): se oculta
+                     cuando iguala a la Nota pública (ecommerce guarda la
+                     observación del comprador en ambas columnas) para no
+                     pintar el mismo texto dos veces. -->
+                @if (cleanInternalNotes() && !flowMetadata().internal_notes_as_json && cleanInternalNotes() !== cleanOrderNotes()) {
                   <div class="flex items-start gap-2 text-xs">
                     <span
                       class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-800 font-semibold uppercase text-[10px] shrink-0 mt-0.5"
@@ -3047,13 +3050,14 @@
       [isOpen]="showTitularSearchModal()"
       (closed)="closeTitularSearch()"
       (selected)="onTitularSearchSelected($event)"
-      (createNew)="onTitularSearchCreateNew()"
+      (createNew)="onTitularSearchCreateNew($event)"
     ></app-change-titular-search-modal>
 
     <!-- Paso 5: CAMBIO DE TITULAR (reutiliza app-customer-modal en crear-mode) -->
     <app-customer-modal
       [isOpen]="showChangeCustomerModal()"
       [customer]="null"
+      [initialValues]="changeCustomerInitialValues()"
       [loading]="changingCustomer()"
       (closed)="closeChangeCustomer()"
       (save)="onChangeCustomerSave($event)"

@@ -63,3 +63,19 @@ export const selectLastTurn = createSelector(
   selectVexiState,
   (state) => state.lastTurn,
 );
+
+export const selectPlanContinuePending = createSelector(
+  selectVexiState,
+  (state) => state.planContinuePending,
+);
+
+export const selectAutoContinuations = createSelector(
+  selectVexiState,
+  (state) => state.autoContinuations,
+);
+
+/** Read by the rejection effect: the reducer clears the proposal first. */
+export const selectRejectedPlanActive = createSelector(
+  selectVexiState,
+  (state) => state.rejectedPlanActive,
+);

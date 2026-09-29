@@ -46,12 +46,20 @@ import {
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 import { CustomerModalComponent } from '../../customers/components/customer-modal/customer-modal.component';
 import { CustomersService } from '../../customers/services/customers.service';
-import { CreateCustomerRequest } from '../../customers/models/customer.model';
+import {
+  CreateCustomerRequest,
+  ExternalCustomerLookupResult,
+} from '../../customers/models/customer.model';
+import {
+  RuesIdentityCardComponent,
+  ruesIdentityToPrefill,
+} from '../../customers/components/rues-identity-card/rues-identity-card.component';
 
 @Component({
   selector: 'app-pos-customer-modal',
   standalone: true,
   imports: [
+    RuesIdentityCardComponent,
     FormsModule,
     NgClass,
     ReactiveFormsModule,
@@ -229,7 +237,7 @@ import { CreateCustomerRequest } from '../../customers/models/customer.model';
                 <div class="flex-1">
                   <app-input
                     [ngModel]="lookupQuery()"
-                    (ngModelChange)="lookupQuery.set($event)"
+                    (ngModelChange)="onLookupQueryChange($event)"
                     placeholder="Ingrese cédula o NIT..."
                     type="text"
                     [size]="'md'"
@@ -268,15 +276,37 @@ import { CreateCustomerRequest } from '../../customers/models/customer.model';
               }
               <!-- Lookup Result: Not Found -->
               @if (lookupPerformed() && !lookupResult() && !lookupLoading()) {
-                <div class="mt-3 text-center">
-                  <p class="text-sm text-[var(--color-neutral-600)] mb-2">
-                    No se encontró cliente con este documento
-                  </p>
-                  <app-button variant="outline" size="sm" customClasses="min-h-[44px]" (clicked)="createFromLookup()">
-                    <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
-                    Crear con este documento
-                  </app-button>
-                </div>
+                @if (externalLoading()) {
+                  <div class="mt-3 flex items-center justify-center gap-2 text-sm text-[var(--color-neutral-600)]">
+                    <app-icon name="loader-2" [size]="16" class="animate-spin"></app-icon>
+                    Consultando fuentes públicas…
+                  </div>
+                } @else if (externalResult()?.found && externalResult()?.identity) {
+                  <app-rues-identity-card
+                    [identity]="externalResult()!.identity!"
+                    (createWithData)="createFromExternal()"
+                    (createManual)="createFromLookup()"
+                  ></app-rues-identity-card>
+                } @else {
+                  <div class="mt-3 text-center">
+                    <p class="text-sm text-[var(--color-neutral-600)] mb-2">
+                      No se encontró cliente con este documento
+                    </p>
+                    @if (externalResult()?.unavailable) {
+                      <p class="text-xs text-[var(--color-neutral-500)] mb-2">
+                        Fuentes públicas no disponibles en este momento
+                      </p>
+                    } @else if (externalResult()) {
+                      <p class="text-xs text-[var(--color-neutral-500)] mb-2">
+                        Tampoco aparece en fuentes públicas
+                      </p>
+                    }
+                    <app-button variant="outline" size="sm" customClasses="min-h-[44px]" (clicked)="createFromLookup()">
+                      <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
+                      Crear con este documento
+                    </app-button>
+                  </div>
+                }
               }
             </div>
           </div>
@@ -732,6 +762,9 @@ export class PosCustomerModalComponent {
   readonly lookupResult = signal<PosCustomer | null>(null);
   readonly lookupPerformed = signal(false);
   readonly lookupLoading = signal(false);
+  /** Consulta en fuentes públicas (RUES, SECOP, RNT; sólo tras un no-encontrado local). */
+  readonly externalResult = signal<ExternalCustomerLookupResult | null>(null);
+  readonly externalLoading = signal(false);
 
   /** Salto a creación completa (app-customer-modal canónico). */
   readonly showFullCreate = signal(false);
@@ -980,6 +1013,8 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
     this.lookupLoading.set(true);
     this.lookupPerformed.set(false);
     this.lookupResult.set(null);
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
 
     this.customerService
       .lookupByDocument(doc)
@@ -989,12 +1024,50 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
           this.lookupResult.set(result);
           this.lookupPerformed.set(true);
           this.lookupLoading.set(false);
+          if (!result) this.lookupExternal(doc);
         },
         error: () => {
           this.lookupResult.set(null);
           this.lookupPerformed.set(true);
           this.lookupLoading.set(false);
+          this.lookupExternal(doc);
         } });
+  }
+
+  onLookupQueryChange(value: string): void {
+    this.lookupQuery.set(value);
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
+  }
+
+  /** Una sola consulta a fuentes públicas por búsqueda; el service nunca lanza. */
+  private lookupExternal(doc: string): void {
+    this.externalLoading.set(true);
+    this.customersService
+      .lookupExternalByDocument(doc)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res) => {
+        // Descarta respuesta rancia si el operador cambió el texto.
+        if (this.lookupQuery().trim() !== doc) return;
+        this.externalResult.set(res);
+        this.externalLoading.set(false);
+      });
+  }
+
+  createFromExternal(): void {
+    const identity = this.externalResult()?.identity;
+    if (!identity) return;
+    const prefill = ruesIdentityToPrefill(identity);
+    const juridica = identity.person_type === 'JURIDICA';
+    this.currentStep.set('create');
+    this.customerForm.patchValue({
+      documentType: prefill.document_type ?? '',
+      documentNumber: prefill.document_number ?? '',
+      personType: identity.person_type,
+      legalName: juridica ? (prefill.legal_name ?? '') : '',
+      firstName: juridica ? '' : (prefill.first_name ?? ''),
+      lastName: juridica ? '' : (prefill.last_name ?? ''),
+    });
   }
 
   createFromLookup(): void {

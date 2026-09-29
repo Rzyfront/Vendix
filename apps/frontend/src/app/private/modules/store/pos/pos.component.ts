@@ -4023,6 +4023,11 @@ export class PosComponent {
                 this.editingOrderNumber.set(order.order_number);
                 this.editingOrder.set(order);
                 this.mode.set('edit');
+                // Modificar una orden de mesa sin cobrar: la orden ya trae su
+                // sesion de mesa abierta. Se hidrata en la integracion para que
+                // el checkout no vuelva a pedir mesa y el cobro use la MISMA
+                // sesion (table_session_id) en vez de abrir otra.
+                this.hydrateTableSessionFromOrder(order);
                 // CP-POS-MODAL-SCOPE-001 / Phase F.12 — Modificar must NOT
                 // auto-open the checkout shell. The cashier expects to
                 // see ONLY the cart with the order's items rehydrated
@@ -4068,7 +4073,32 @@ export class PosComponent {
    * bug by clearing the `editOrder` query param whenever the entry to edit
    * mode aborted.
    */
+  /**
+   * Hidrata `currentTableSession` con la sesion de mesa ABIERTA de la orden que
+   * se edita (`GET /store/orders/:id` incluye `table_sessions`, ultima primero).
+   * Sin sesion abierta limpia cualquier residuo, para no cobrar contra una mesa ajena.
+   */
+  private hydrateTableSessionFromOrder(order: any): void {
+    const open = (order?.table_sessions ?? []).find(
+      (s: any) => s && !s.closed_at,
+    );
+    if (!open) {
+      this.restaurantIntegration.clearTableSession();
+      return;
+    }
+    this.restaurantIntegration.currentTableSession.set({
+      ...open,
+      order_id: order.id,
+      store_id: order.store_id,
+    } as any);
+  }
+
   private resetEditState(): void {
+    const editingId = this.editingOrderId();
+    const cached = this.restaurantIntegration.currentTableSession();
+    if (editingId != null && cached && String(cached.order_id) === String(editingId)) {
+      this.restaurantIntegration.clearTableSession();
+    }
     this.isEditMode.set(false);
     this.editingOrder.set(null);
     this.editingOrderId.set(null);

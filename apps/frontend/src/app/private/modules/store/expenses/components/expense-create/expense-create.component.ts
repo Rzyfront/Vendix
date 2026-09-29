@@ -22,6 +22,20 @@ import {
 import { ExpenseCategoryQuickCreateComponent } from '../expense-category-quick-create.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
+import {
+  VexiFillFormResult,
+  vexiCollectValidationErrors,
+} from '../../../../../../core/services/vexi-ui-host.registry';
+
+/** Field names `ui_fill_form` understands on this form (G1). */
+export const EXPENSE_CREATE_FILLABLE_FIELDS = [
+  'description',
+  'amount',
+  'category_id',
+  'category',
+  'expense_date',
+  'notes',
+] as const;
 
 @Component({
   selector: 'vendix-expense-create',
@@ -493,5 +507,81 @@ export class ExpenseCreateComponent {
 
   onClose() {
     this.isOpenChange.emit(false);
+  }
+
+  // --- Vexi fillForm (G1) ---
+
+  /**
+   * Fills this form on Vexi's behalf. NEVER submits: the person reviews and
+   * saves through the modal's own buttons.
+   *
+   * `category` accepts a category NAME resolved against the module's own
+   * categories (the model speaks names, not ids); `category_id` passes
+   * through for callers that already resolved one.
+   */
+  vexiFillForm(values: Record<string, unknown>): VexiFillFormResult {
+    const applied: string[] = [];
+    const unknown: string[] = [];
+
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined || value === null || value === '') continue;
+      switch (key) {
+        case 'description':
+        case 'expense_date':
+        case 'notes':
+          this.expenseForm.get(key)?.setValue(String(value));
+          this.expenseForm.get(key)?.markAsTouched();
+          applied.push(key);
+          break;
+        case 'amount': {
+          const amount = Number(value);
+          if (!Number.isFinite(amount)) {
+            unknown.push(key);
+            break;
+          }
+          this.expenseForm.get('amount')?.setValue(amount);
+          this.expenseForm.get('amount')?.markAsTouched();
+          applied.push(key);
+          break;
+        }
+        case 'category_id': {
+          const id = Number(value);
+          if (!Number.isFinite(id)) {
+            unknown.push(key);
+            break;
+          }
+          this.expenseForm.get('category_id')?.setValue(id);
+          this.expenseForm.get('category_id')?.markAsTouched();
+          applied.push(key);
+          break;
+        }
+        case 'category': {
+          const match = this.categories().find(
+            (c) => c.name.toLowerCase() === String(value).toLowerCase(),
+          );
+          if (!match) {
+            unknown.push(key);
+            break;
+          }
+          this.expenseForm.get('category_id')?.setValue(match.id);
+          this.expenseForm.get('category_id')?.markAsTouched();
+          applied.push(key);
+          break;
+        }
+        default:
+          unknown.push(key);
+      }
+    }
+
+    this.expenseForm.updateValueAndValidity();
+    const validation_errors = vexiCollectValidationErrors(this.expenseForm, {
+      description: 'La descripción',
+      amount: 'El monto',
+      category_id: 'La categoría',
+      expense_date: 'La fecha',
+      notes: 'Las notas',
+    });
+
+    return { applied, unknown, validation_errors, valid: this.expenseForm.valid };
   }
 }

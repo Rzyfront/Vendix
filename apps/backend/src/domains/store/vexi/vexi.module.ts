@@ -21,6 +21,7 @@ import { VexiStreamIntentService } from './vexi-stream-intent.service';
 import { VexiTaskService } from './vexi-task.service';
 import { VexiActivityService } from './vexi-activity.service';
 import { VexiAttachmentsService } from './vexi-attachments.service';
+import { VexiPlanStateService } from './vexi-plan-state.service';
 import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
 
 /**
@@ -58,6 +59,7 @@ import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
     VexiStreamIntentService,
     VexiTaskService,
     VexiActivityService,
+    VexiPlanStateService,
     VexiEnabledGuard,
   ],
   exports: [
@@ -65,6 +67,7 @@ import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
     VexiContextService,
     VexiStreamIntentService,
     VexiTaskService,
+    VexiPlanStateService,
     // Exported so `AIChatModule` can synthesize the answer segments on the chat
     // stream — the pipeline's whole premise is that a voice turn is a chat turn.
     VexiSpeechService,

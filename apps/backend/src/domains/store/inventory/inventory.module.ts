@@ -3,6 +3,8 @@ import { ResponseModule } from '@common/responses/response.module';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createInventoryTools } from '../../../ai-engine/tools/domains/inventory.tools';
 import { createInventoryWriteTools } from '../../../ai-engine/tools/domains/writes.tools';
+import { StockTransfersModule } from '../orders/stock-transfers/stock-transfers.module';
+import { StockTransfersService } from '../orders/stock-transfers/stock-transfers.service';
 import { StockLevelsService } from './stock-levels/stock-levels.service';
 import { InventoryAdjustmentsService } from './adjustments/inventory-adjustments.service';
 import { MovementsService } from './movements/movements.service';
@@ -34,6 +36,10 @@ import { PrismaModule } from '../../../prisma/prisma.module';
     InventoryAdjustmentsModule,
     InventorySerialNumbersModule,
     PrismaModule,
+    // O-14 `manage_stock_transfers`: el flujo draft→transit→complete/cancel
+    // vive en `StockTransfersService` (que muta vía `StockLevelManager`).
+    // Sin ciclo: StockTransfersModule solo importa Prisma/Settings.
+    StockTransfersModule,
   ],
   controllers: [InventoryController],
   providers: [
@@ -70,7 +76,7 @@ export class InventoryModule implements OnModuleInit {
     private readonly adjustmentsService: InventoryAdjustmentsService,
     private readonly movementsService: MovementsService,
     private readonly locationsService: LocationsService,
-    private readonly prisma: StorePrismaService,
+    private readonly transfersService: StockTransfersService,
   ) {}
 
   /**
@@ -88,6 +94,7 @@ export class InventoryModule implements OnModuleInit {
         adjustmentsService: this.adjustmentsService,
         movementsService: this.movementsService,
         locationsService: this.locationsService,
+        transfersService: this.transfersService,
       }),
     );
 
@@ -97,7 +104,6 @@ export class InventoryModule implements OnModuleInit {
     this.toolRegistry.registerMany(
       createInventoryWriteTools({
         adjustmentsService: this.adjustmentsService,
-        prisma: this.prisma,
       }),
     );
   }

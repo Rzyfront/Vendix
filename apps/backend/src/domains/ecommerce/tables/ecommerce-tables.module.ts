@@ -1,4 +1,6 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createComensalTools } from '../../../ai-engine/tools/domains/tables.tools';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { TablesModule } from '../../store/tables/tables.module';
 import { SettingsModule } from '../../store/settings/settings.module';
@@ -55,4 +57,22 @@ import { EcommerceTablesService } from './ecommerce-tables.service';
   providers: [EcommerceTablesService],
   exports: [EcommerceTablesService],
 })
-export class EcommerceTablesModule {}
+export class EcommerceTablesModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly ecommerceTablesService: EcommerceTablesService,
+  ) {}
+
+  /**
+   * K-10/K-11: registro descentralizado en el módulo dueño del servicio.
+   * Vive aquí (y no en `TablesModule`) porque este módulo ya importa
+   * `TablesModule`: registrar allí reintroduciría el ciclo DI.
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createComensalTools({
+        ecommerceTablesService: this.ecommerceTablesService,
+      }),
+    );
+  }
+}

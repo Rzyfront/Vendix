@@ -8,6 +8,7 @@ import {
   effect,
   signal,
   computed,
+  untracked,
 } from '@angular/core';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
@@ -34,6 +35,10 @@ import {
   FiscalResponsibility,
 } from '../../../../../../shared/constants/fiscal-responsibilities.constants';
 import { nitDvGroupValidator } from '../../../../../../shared/utils/nit.util';
+import {
+  VexiFillFormResult,
+  vexiCollectValidationErrors,
+} from '../../../../../../core/services/vexi-ui-host.registry';
 import { Customer, CreateCustomerRequest } from '../../models/customer.model';
 import { CustomersService } from '../../services/customers.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -50,6 +55,22 @@ const CUSTOMER_NIT_DV_VALIDATOR = nitDvGroupValidator(
   'document_number',
   'verification_digit',
 );
+
+/** Field names `ui_fill_form` understands on this form (G1). */
+export const CUSTOMER_MODAL_FILLABLE_FIELDS = [
+  'email',
+  'first_name',
+  'last_name',
+  'legal_name',
+  'phone',
+  'document_type',
+  'document_number',
+  'document',
+  'verification_digit',
+  'ciiu_code',
+  'tax_regime',
+  'person_type',
+] as const;
 
 // Re-export del traductor centralizado para compatibilidad con consumidores
 // que importaban `translateCustomerError` desde este archivo.
@@ -476,6 +497,11 @@ export class CustomerModalComponent {
 
   readonly isOpen = input(false);
   readonly customer = input<Customer | null>(null);
+  /**
+   * Prellenado para el modo alta (ej. identidad RUES, documento digitado).
+   * Sólo se aplica al abrir con `customer === null`; nunca en edición.
+   */
+  readonly initialValues = input<Partial<CreateCustomerRequest> | null>(null);
   readonly loadingInput = input(false, { alias: 'loading' });
   private readonly internalLoading = signal(false);
   readonly loading = computed(() => this.loadingInput() || this.internalLoading());
@@ -877,6 +903,12 @@ export class CustomerModalComponent {
           is_withholding_agent: false,
           fiscal_responsibilities: [],
         });
+        // Prellenado opcional (sin tracking: cambiar `initialValues` con el
+        // modal abierto no debe pisar lo que el operador ya digitó).
+        const initial = untracked(() => this.initialValues());
+        if (initial) {
+          this.form.patchValue(initial);
+        }
         // Reset de estado de dirección en alta.
         this.existingAddressId.set(null);
         this.addressPayload.set(null);
@@ -1172,5 +1204,60 @@ export class CustomerModalComponent {
 
   onFieldBlur(field: string) {
     this.form.get(field)?.markAsTouched();
+  }
+
+  // --- Vexi fillForm (G1) ---
+
+  /**
+   * Fills this form on Vexi's behalf. NEVER submits: the person reviews and
+   * saves through the modal's own buttons.
+   *
+   * `document` is an alias for `document_number` (the model says "documento",
+   * not "document_number"). Fiscal multi-selects (`fiscal_responsibilities`,
+   * `is_withholding_agent`) are deliberately not fillable: they need a human
+   * decision, not a guess.
+   */
+  vexiFillForm(values: Record<string, unknown>): VexiFillFormResult {
+    const applied: string[] = [];
+    const unknown: string[] = [];
+
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined || value === null || value === '') continue;
+      const target = key === 'document' ? 'document_number' : key;
+      const control = this.form.get(target);
+      if (!control) {
+        unknown.push(key);
+        continue;
+      }
+      control.setValue(String(value));
+      control.markAsTouched();
+      applied.push(key);
+    }
+
+    this.form.updateValueAndValidity();
+    const validation_errors = vexiCollectValidationErrors(this.form, {
+      email: 'El correo',
+      first_name: 'El nombre',
+      last_name: 'El apellido',
+      legal_name: 'La razón social',
+      phone: 'El teléfono',
+      document_type: 'El tipo de documento',
+      document_number: 'El número de documento',
+      verification_digit: 'El dígito de verificación',
+      ciiu_code: 'El código CIIU',
+      tax_regime: 'El régimen fiscal',
+      person_type: 'El tipo de persona',
+    });
+
+    // Group-level validators (NIT↔DV) live on the form, not on a control.
+    const groupErrors = this.form.errors ?? {};
+    for (const key of Object.keys(groupErrors)) {
+      validation_errors.push({
+        field: 'document_number',
+        message: `El documento: ${key === 'nitDv' ? 'el dígito de verificación no coincide con el NIT' : 'es inválido'}`,
+      });
+    }
+
+    return { applied, unknown, validation_errors, valid: this.form.valid };
   }
 }

@@ -617,6 +617,316 @@ export class SubscriptionBillingService {
     });
   }
 
+  /**
+   * Lista paginada de solo lectura de las facturas SaaS de la tienda — la
+   * misma consulta que `GET /store/subscriptions/current/invoices`. Backing de
+   * la tool F-73 `list_subscription_invoices` (las tools son wrappers finos y
+   * nunca consultan Prisma directo).
+   *
+   * Sin suscripción lanza `SUBSCRIPTION_001`, igual que el endpoint. La salida
+   * viaja sanitizada a JSON plano (Date→ISO, Decimal→string).
+   */
+  async listStoreInvoices(
+    storeId: number,
+    query: {
+      page?: number;
+      limit?: number;
+      sort_by?: string;
+      sort_order?: 'asc' | 'desc';
+    },
+  ): Promise<{
+    data: unknown[];
+    meta: { total: number; page: number; limit: number; total_pages: number };
+  }> {
+    const sub = await this.prisma.store_subscriptions.findUnique({
+      where: { store_id: storeId },
+      select: { id: true },
+    });
+    if (!sub) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+    }
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const skip = (page - 1) * limit;
+    const orderBy = {
+      [query.sort_by ?? 'created_at']: query.sort_order ?? 'desc',
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.subscription_invoices.findMany({
+        where: { store_subscription_id: sub.id },
+        skip,
+        take: limit,
+        orderBy,
+      }),
+      this.prisma.subscription_invoices.count({
+        where: { store_subscription_id: sub.id },
+      }),
+    ]);
+
+    return {
+      data: JSON.parse(JSON.stringify(data)),
+      meta: { total, page, limit, total_pages: Math.ceil(total / limit) },
+    };
+  }
+
+  /**
+   * Detalle de una factura SaaS scoped a la tienda. Espejo de servicio de
+   * `GET current/invoices/:invoiceId` (`store-subscriptions.controller.ts`):
+   * la misma lectura existe hoy solo en el controller con Prisma directo, y
+   * la tool F-74 `get_subscription_invoice` la necesita sin tocar Prisma.
+   */
+  async getStoreInvoice(
+    storeId: number,
+    invoiceId: number,
+  ): Promise<Record<string, any>> {
+    const invoice = await this.prisma.subscription_invoices.findFirst({
+      where: {
+        id: invoiceId,
+        store_subscription: { store_id: storeId },
+      },
+      include: {
+        store_subscription: {
+          include: {
+            plan: true,
+            store: { include: { organizations: true } },
+          },
+        },
+        commission: true,
+      },
+    });
+
+    if (!invoice) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_001,
+        'Invoice not found',
+      );
+    }
+
+    return JSON.parse(JSON.stringify(invoice));
+  }
+
+  /**
+   * Precio efectivo de una suscripción nueva SIN persistir nada: valida que
+   * el plan exista, no esté archivado y esté activo, y resuelve el margen
+   * del partner (si hay override) con el mismo `computePricing` del commit.
+   * La tool F-78 `subscribe_plan` lo usa en `preview`; el `handler` vuelve
+   * a resolver vía `createStoreSubscription`, nunca confía en este payload.
+   */
+  async previewNewSubscription(
+    planId: number,
+    partnerOverrideId?: number,
+  ): Promise<{
+    plan: {
+      id: number;
+      code: string;
+      name: string;
+      billing_cycle: string;
+      currency: string;
+      is_free: boolean;
+    };
+    base_price: string;
+    margin_pct: string;
+    margin_amount: string;
+    fixed_surcharge: string;
+    effective_price: string;
+    partner_org_id: number | null;
+  }> {
+    const { plan, pricing } = await this.resolveNewSubscriptionPricing(
+      planId,
+      partnerOverrideId,
+    );
+    return {
+      plan: {
+        id: plan.id,
+        code: plan.code,
+        name: plan.name,
+        billing_cycle: plan.billing_cycle,
+        currency: plan.currency,
+        is_free: plan.is_free,
+      },
+      base_price: this.round2(pricing.base_price).toFixed(2),
+      margin_pct: pricing.margin_pct.toFixed(2),
+      margin_amount: this.round2(pricing.margin_amount).toFixed(2),
+      fixed_surcharge: this.round2(pricing.fixed_surcharge).toFixed(2),
+      effective_price: this.round2(pricing.effective_price).toFixed(2),
+      partner_org_id: pricing.partner_org_id,
+    };
+  }
+
+  /**
+   * Crea la suscripción de una tienda sin suscripción previa. Espejo de
+   * servicio de `POST subscribe` (`store-subscriptions.controller.ts`): las
+   * mismas guardas (ya existe → SUBSCRIPTION_010, plan ausente/archivado/
+   * inactivo → SUBSCRIPTION_001/PLAN_001), el mismo precio efectivo y la
+   * misma transacción (suscripción + evento `state_transition`).
+   *
+   * NO invalida el caché `sub:features:{storeId}`: el llamador (controller
+   * vía resolver o tool vía `SubscriptionAccessService.invalidateCache`)
+   * lo hace post-commit, igual que el HTTP.
+   */
+  async createStoreSubscription(
+    storeId: number,
+    input: { planId: number; partnerOverrideId?: number },
+    triggeredByUserId?: number,
+  ): Promise<Record<string, any>> {
+    const existing = await this.prisma.store_subscriptions.findUnique({
+      where: { store_id: storeId },
+    });
+    if (existing) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_010,
+        'Store already has a subscription',
+      );
+    }
+
+    const { plan, pricing, partnerOverrideId } =
+      await this.resolveNewSubscriptionPricing(
+        input.planId,
+        input.partnerOverrideId,
+      );
+
+    const now = new Date();
+    const cycleMs = this.billingCycleMs(plan.billing_cycle);
+    const periodEnd = new Date(now.getTime() + cycleMs);
+    const initialState = 'active' as const;
+
+    const subscription = await this.prisma.$transaction(async (tx: any) => {
+      const created = await tx.store_subscriptions.create({
+        data: {
+          store_id: storeId,
+          plan_id: plan.id,
+          paid_plan_id: plan.id,
+          partner_override_id: partnerOverrideId,
+          state: initialState,
+          effective_price: pricing.effective_price,
+          vendix_base_price: pricing.base_price,
+          partner_margin_amount: pricing.margin_amount,
+          currency: 'COP',
+          resolved_features:
+            (plan.ai_feature_flags as Prisma.InputJsonValue) ??
+            Prisma.JsonNull,
+          trial_ends_at: null,
+          current_period_start: now,
+          current_period_end: periodEnd,
+          next_billing_at: periodEnd,
+        },
+        include: { plan: true },
+      });
+
+      await tx.subscription_events.create({
+        data: {
+          store_subscription_id: created.id,
+          type: 'state_transition',
+          from_state: 'draft',
+          to_state: initialState,
+          payload: {
+            reason: 'subscription_created',
+            plan_id: plan.id,
+            plan_code: plan.code,
+            ...(input.partnerOverrideId
+              ? { partner_override_id: input.partnerOverrideId }
+              : {}),
+          } as Prisma.InputJsonValue,
+          triggered_by_user_id: triggeredByUserId ?? null,
+        },
+      });
+
+      return created;
+    });
+
+    return JSON.parse(JSON.stringify(subscription));
+  }
+
+  /**
+   * Guarda compartida de `previewNewSubscription` y `createStoreSubscription`:
+   * plan vendible + precio efectivo con margen del partner clampado al cap
+   * vigente. Dinero siempre en `Prisma.Decimal`; el redondeo a 2dp vive en
+   * el borde (preview) o en la columna (create, Decimal(12,2)).
+   */
+  private async resolveNewSubscriptionPricing(
+    planId: number,
+    partnerOverrideId?: number,
+  ): Promise<{
+    plan: {
+      id: number;
+      code: string;
+      name: string;
+      billing_cycle: subscription_billing_cycle_enum;
+      currency: string;
+      is_free: boolean;
+      base_price: Prisma.Decimal;
+      max_partner_margin_pct: Prisma.Decimal | null;
+      ai_feature_flags: unknown;
+    };
+    pricing: ComputedPricing;
+    partnerOverrideId: number | null;
+  }> {
+    const plan = await this.prisma.subscription_plans.findUnique({
+      where: { id: planId },
+    });
+    if (!plan) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_001,
+        'Plan not found',
+      );
+    }
+    if (plan.archived_at) {
+      throw new VendixHttpException(ErrorCodes.PLAN_001);
+    }
+    if (plan.state !== 'active') {
+      throw new VendixHttpException(
+        ErrorCodes.PLAN_001,
+        'Plan is not active for subscriptions',
+      );
+    }
+
+    let overrideId: number | null = null;
+    let overrideInput: {
+      organization_id: number;
+      margin_pct: Prisma.Decimal;
+      fixed_surcharge: Prisma.Decimal | null;
+      is_active: boolean;
+      base_plan: { max_partner_margin_pct: Prisma.Decimal | null };
+    } | null = null;
+
+    if (partnerOverrideId) {
+      const override =
+        await this.prisma.partner_plan_overrides.findUnique({
+          where: { id: partnerOverrideId },
+          include: { base_plan: true },
+        });
+      if (!override || !override.is_active) {
+        throw new VendixHttpException(
+          ErrorCodes.PARTNER_001,
+          'Partner override not found or inactive',
+        );
+      }
+      overrideId = override.id;
+      overrideInput = {
+        organization_id: override.organization_id,
+        margin_pct: override.margin_pct,
+        fixed_surcharge: override.fixed_surcharge,
+        is_active: override.is_active,
+        base_plan: {
+          max_partner_margin_pct: override.base_plan.max_partner_margin_pct,
+        },
+      };
+    }
+
+    const pricing = this.computePricing({
+      plan: {
+        id: plan.id,
+        base_price: plan.base_price,
+        max_partner_margin_pct: plan.max_partner_margin_pct,
+      },
+      partner_override: overrideInput,
+    });
+
+    return { plan, pricing, partnerOverrideId: overrideId };
+  }
+
   // ------------------------------------------------------------------
   // Internals
   // ------------------------------------------------------------------

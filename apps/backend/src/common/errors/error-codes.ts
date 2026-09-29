@@ -3405,6 +3405,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Fiscal retry is not idempotent',
   },
+  FISCAL_SEND_IN_PROGRESS: {
+    code: 'FISCAL_SEND_IN_PROGRESS',
+    httpStatus: 409,
+    devMessage: 'Invoice is already being transmitted to DIAN',
+  },
   FISCAL_ACCOUNTING_BLOCKED: {
     code: 'FISCAL_ACCOUNTING_BLOCKED',
     httpStatus: 412,

@@ -438,6 +438,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | User explicitly asks for a massive, huge, or ultra-detailed plan (plan masivo, plan gigante, plan súper grande) | `how-to-critical-plan` |
 | User explicitly asks for a plan with checklists that tracks execution progress for handoff | `how-to-critical-plan` |
 | User explicitly asks for parallel multi-perspective auditing of a plan or its implementation | `how-to-critical-plan` |
+| User explicitly invokes sopus (big model orchestrates, small model codes) | `sopus` |
 | User explicitly requests business analysis | `vendix-business-analysis` |
 | User explicitly says the work cannot fail (esto no puede fallar, cero margen de error) | `how-to-critical-plan` |
 | User names or links the how-to-critical-plan skill | `how-to-critical-plan` |

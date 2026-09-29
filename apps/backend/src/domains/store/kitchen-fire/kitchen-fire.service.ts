@@ -74,6 +74,10 @@ const KITCHEN_TICKET_INCLUDE = {
       order_number: true,
       delivery_type: true,
       customer_alias: true,
+      // QUI-887 — nota global de la orden para el KDS (alergias, entrega,
+      // preparación). Viaja en el snapshot y en todos los SSE porque cada
+      // lectura de ticket usa este include.
+      notes: true,
       users: { select: { first_name: true, last_name: true } },
     },
   },
@@ -2656,6 +2660,17 @@ export class KitchenFireService {
       throw new VendixHttpException(ErrorCodes.KITCHEN_TICKET_NOT_FOUND);
     }
     return { ticket, store_id };
+  }
+
+  /**
+   * Lectura pública de un ticket por id, con scope de tienda. La usan las
+   * agent tools K-4 (detalle) y K-5 (re-verificación del estado visto antes
+   * de transicionar). Es el mismo `getTicketForStore` privado que usan las
+   * mutaciones, expuesto sin cambiar su guarda de tenant.
+   */
+  async findTicketById(ticketId: number) {
+    const { ticket } = await this.getTicketForStore(ticketId);
+    return ticket;
   }
 
   /**

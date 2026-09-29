@@ -1,87 +1,98 @@
 import { RegisteredTool } from '../interfaces/tool.interface';
+import { AGENT_PLAN_TOOLS } from '../../interfaces/agent-plan.interface';
 
 /** Beyond this, a "plan" is really a project and belongs in a background task. */
-const MAX_STEPS = 12;
+export const MAX_PLAN_STEPS = 12;
+const MAX_STEPS = MAX_PLAN_STEPS;
 
 export const PROPOSE_PLAN_TOOL = 'propose_plan';
 
+const NO_CONVERSATION = JSON.stringify({
+  ok: false,
+  reason: 'sin conversación: el plan no se persiste en esta superficie',
+});
+
 /**
- * Makes a multi-step request explicit before any of it happens.
+ * Task list INTERNO del agente. Nunca se muestra ni se menciona a la persona.
  *
- * The problem this solves is not presentation. A request like "crea el usuario
- * Juan y ponle rol administrador" is four movements — look Juan up, propose
- * creating him, verify he exists, propose the role — and each write ends the turn
- * waiting for approval. Without a declared plan the model re-derives what is left
- * on every turn, and what it re-derives drifts: it would forget the role, or
- * re-propose the user it already created, or claim both were done after one.
- *
- * Declaring the plan gives three things at once: the person sees the whole scope
- * before authorising the first piece, the panel can render it as a checklist, and
- * the agent loop gets a signal to widen its iteration budget for this turn
- * (`ai-agent.service.ts`), because the default ten rounds are sized for a single
- * question, not for a chain.
- *
- * `readOnly: true` is exact: proposing changes nothing. Every step still goes
- * through its own confirmation gate — a plan the user read is not a plan the user
- * pre-approved.
+ * Las definiciones viven aquí; el estado real lo ejecuta el `AgentPlanHook`
+ * (VexiPlanStateService) dentro del loop. Los handlers de este archivo son el
+ * respaldo stateless para superficies sin conversación (cola, MCP): no
+ * persisten nada.
  */
 export function createPlanningTools(): RegisteredTool[] {
-  return [
+  const stepItem = {
+    type: 'object',
+    properties: {
+      title: {
+        type: 'string',
+        description: 'Qué se hace en este paso: "buscar si Juan Pérez ya existe".',
+      },
+      kind: {
+        type: 'string',
+        enum: ['verificacion', 'cambio'],
+        description: 'Si solo consulta o si modifica datos.',
+      },
+      done_when: {
+        type: 'string',
+        description:
+          'Criterio verificable que deja el paso terminado (un dato real del sistema).',
+      },
+    },
+    required: ['title', 'kind', 'done_when'],
+  };
+
+  const tools: RegisteredTool[] = [
     {
       name: PROPOSE_PLAN_TOOL,
+      version: '1',
       domain: 'planning',
       readOnly: true,
       description:
-        'Declara el plan cuando lo que te piden son VARIOS cambios encadenados (por ejemplo "crea el proveedor y regístrale la factura", o "sube estos productos y ponles precio"). Llámala ANTES del primer cambio, con un paso por cada movimiento real, y luego ejecútalos uno por uno: cada uno con su verificación previa y su propia aprobación. No la uses para una sola operación: ahí sobra. Declarar el plan no autoriza nada — la persona sigue aprobando paso por paso.',
+        'Úsala ante peticiones con varios movimientos (por ejemplo "crea el proveedor y regístrale la factura"). Llámala ANTES del primer cambio. Es una lista de tareas INTERNA: nunca la menciones ni la resumas a la persona. Define entregables verificables (lo que debe existir al final) y un done_when por paso. No la uses para una sola operación.',
       parameters: {
         type: 'object',
         properties: {
           goal: {
             type: 'string',
+            description: 'Lo que la persona quiere lograr, en una frase.',
+          },
+          deliverables: {
+            type: 'array',
             description:
-              'Lo que la persona quiere lograr, en una frase y en sus términos.',
+              'Resultados verificables que deben existir al terminar.',
+            items: {
+              type: 'object',
+              properties: { description: { type: 'string' } },
+              required: ['description'],
+            },
           },
           steps: {
             type: 'array',
-            description:
-              'Los movimientos en orden. Un paso por cada verificación o cambio, no uno por cada frase.',
+            description: 'Los movimientos en orden, máximo 12.',
             items: {
-              type: 'object',
+              ...stepItem,
               properties: {
-                title: {
-                  type: 'string',
-                  description:
-                    'Qué se hace en este paso, en lenguaje de negocio: "buscar si Juan Pérez ya existe".',
-                },
-                kind: {
-                  type: 'string',
-                  enum: ['verificacion', 'cambio'],
-                  description:
-                    'Si solo consulta o si modifica datos. Todo cambio pide aprobación aparte.',
-                },
+                ...stepItem.properties,
                 needs_user_decision: {
                   type: 'boolean',
                   description:
-                    'true si en este paso hay algo que solo la persona puede decidir (una variante, un peso, una fecha de reserva).',
+                    'true si hay algo que solo la persona puede decidir.',
                 },
               },
-              required: ['title', 'kind'],
             },
           },
         },
-        required: ['goal', 'steps'],
+        required: ['goal', 'deliverables', 'steps'],
       },
       handler: async (args) => {
         const rawSteps = Array.isArray(args.steps) ? args.steps : [];
-
         const steps = rawSteps.slice(0, MAX_STEPS).map((step: any, index) => ({
           order: index + 1,
           title: String(step?.title ?? '').trim() || `Paso ${index + 1}`,
           kind: step?.kind === 'cambio' ? 'cambio' : 'verificacion',
           needs_user_decision: step?.needs_user_decision === true,
         }));
-
-        const changes = steps.filter((step) => step.kind === 'cambio').length;
 
         return JSON.stringify({
           plan_declared: true,
@@ -90,11 +101,160 @@ export function createPlanningTools(): RegisteredTool[] {
           dropped: Math.max(0, rawSteps.length - steps.length),
           note:
             rawSteps.length > MAX_STEPS
-              ? `Declaraste ${rawSteps.length} pasos y solo se registran ${MAX_STEPS}. Si de verdad son tantos, esto es un trabajo de fondo: propónselo como tal con queue_task.`
+              ? `Declaraste ${rawSteps.length} pasos y solo se registran ${MAX_STEPS}. Si de verdad son tantos, propónselo como trabajo de fondo con queue_task.`
               : undefined,
-          next_step: `Resúmele el plan en una o dos frases —${steps.length} paso(s), ${changes} de ellos cambian datos— y arranca por el primero. Ejecuta un paso por turno: verifica, propone, espera el sí. No juntes cambios en una sola propuesta ni des por hecho un paso que no verificaste.`,
+          next_step:
+            'Encadena lecturas y verificaciones sin detenerte. Detente solo ante una escritura (tarjeta de confirmación) o cuando necesites algo de la persona con ask_user. NUNCA menciones plan, pasos, tareas ni entregables a la persona.',
         });
       },
     },
+    {
+      name: 'update_plan_step',
+      version: '1',
+      domain: 'planning',
+      readOnly: true,
+      description:
+        'Actualiza el estado de un paso de tu lista interna de tareas. Un paso de cambio solo se marca done con evidence (dato real leído del sistema). Nunca lo menciones a la persona.',
+      parameters: {
+        type: 'object',
+        properties: {
+          order: { type: 'number', description: 'Número del paso.' },
+          status: {
+            type: 'string',
+            enum: ['in_progress', 'done', 'failed', 'skipped'],
+          },
+          evidence: {
+            type: 'string',
+            description: 'Valor real (id, número, estado) que prueba el resultado.',
+          },
+          note: { type: 'string' },
+        },
+        required: ['order', 'status'],
+      },
+      handler: async () => NO_CONVERSATION,
+    },
+    {
+      name: 'verify_deliverables',
+      version: '1',
+      domain: 'planning',
+      readOnly: true,
+      description:
+        'Registra qué entregables ya verificaste leyendo el sistema. verified=true exige evidence con datos reales. Cuando todo está verificado, redacta la respuesta final. Nunca lo menciones a la persona.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deliverables: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: 'd1, d2, ...' },
+                verified: { type: 'boolean' },
+                evidence: { type: 'string' },
+              },
+              required: ['id', 'verified'],
+            },
+          },
+        },
+        required: ['deliverables'],
+      },
+      handler: async () => NO_CONVERSATION,
+    },
+    {
+      name: 'ask_user',
+      version: '1',
+      domain: 'planning',
+      readOnly: true,
+      description:
+        'Hazle a la persona UNA pregunta concreta y natural cuando falte algo que solo ella puede decidir. No aludas a pasos ni a planes. Termina el turno: espera su respuesta.',
+      parameters: {
+        type: 'object',
+        properties: {
+          question: { type: 'string', description: 'La pregunta, en tono natural.' },
+          step_order: { type: 'number', description: 'Paso al que corresponde.' },
+        },
+        required: ['question'],
+      },
+      handler: async (args) =>
+        JSON.stringify({ ask: true, question: String(args.question ?? '') }),
+    },
+    {
+      name: 'revise_plan',
+      version: '1',
+      domain: 'planning',
+      readOnly: true,
+      description:
+        'Ajusta tu lista interna cuando la persona cambia la tarea a mitad de camino: agrega, quita o edita pasos pendientes, agrega entregables o cambia el objetivo. No toca pasos ya hechos. Nunca lo menciones a la persona.',
+      parameters: {
+        type: 'object',
+        properties: {
+          add_steps: {
+            type: 'array',
+            items: {
+              ...stepItem,
+              properties: {
+                ...stepItem.properties,
+                after_order: {
+                  type: 'number',
+                  description: 'Insertar después de este paso.',
+                },
+              },
+            },
+          },
+          remove_orders: { type: 'array', items: { type: 'number' } },
+          update_steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                order: { type: 'number' },
+                title: { type: 'string' },
+                done_when: { type: 'string' },
+              },
+              required: ['order'],
+            },
+          },
+          add_deliverables: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { description: { type: 'string' } },
+              required: ['description'],
+            },
+          },
+          goal: { type: 'string' },
+        },
+      },
+      handler: async () => NO_CONVERSATION,
+    },
+    {
+      name: 'pause_plan',
+      version: '1',
+      domain: 'planning',
+      readOnly: true,
+      description:
+        'Pausa tu lista interna cuando la persona cambia de tema o cancela lo que hacías. Nunca lo menciones a la persona.',
+      parameters: {
+        type: 'object',
+        properties: { reason: { type: 'string' } },
+        required: ['reason'],
+      },
+      handler: async () => NO_CONVERSATION,
+    },
+    {
+      name: 'resume_plan',
+      version: '1',
+      domain: 'planning',
+      readOnly: true,
+      description:
+        'Reanuda tu lista interna pausada cuando la persona retoma la tarea. Nunca lo menciones a la persona.',
+      parameters: { type: 'object', properties: {} },
+      handler: async () => NO_CONVERSATION,
+    },
   ];
+
+  return tools;
 }
+
+/** Guard: la lista de tools publicadas debe coincidir con el contrato. */
+export const PLANNING_TOOL_NAMES: readonly string[] = AGENT_PLAN_TOOLS;

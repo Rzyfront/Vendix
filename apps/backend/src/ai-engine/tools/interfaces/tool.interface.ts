@@ -1,5 +1,12 @@
 import { AIToolDefinition } from '../../interfaces/ai-provider.interface';
 
+/**
+ * Versión de contrato que el registry asigna a todo tool que no declare una.
+ * T2: las 70 tools existentes nacen en `'1'` sin cambio de comportamiento; todo
+ * breaking futuro viaja como una versión nueva con alias durante el sunset.
+ */
+export const DEFAULT_TOOL_VERSION = '1';
+
 export interface ToolExecutionContext {
   organization_id?: number;
   store_id?: number;
@@ -12,6 +19,19 @@ export interface RegisteredTool {
   domain: string;
   description: string;
   parameters: Record<string, any>;
+  /**
+   * Versión del contrato (parámetros + forma de salida). Opcional en la
+   * declaración porque el registry la defaultea a `DEFAULT_TOOL_VERSION`;
+   * los factories la escriben explícita para que el catálogo MCP y el
+   * envelope la porten sin depender del default.
+   */
+  version?: string;
+  /**
+   * Marca el tool como deprecado. T2 solo declara el campo; el warning en el
+   * stream, el marcado en el catálogo MCP y el alias post-remoción los
+   * implanta T5.
+   */
+  deprecated?: ToolDeprecation;
   requiredPermissions?: string[];
   requiresConfirmation?: boolean;
   /**
@@ -81,4 +101,61 @@ export interface ToolPreview {
 
 export interface ToolRegistrationFn {
   (registry: any, prisma: any): void;
+}
+
+/**
+ * Ventana de deprecación de un tool. `since` es la versión que lo marcó,
+ * `sunset` la versión en que el nombre viejo deja de resolver (el alias
+ * sobrevive a la remoción del handler porque turnos persistidos en
+ * `ai_messages.tool_calls` referencian nombres viejos) y `replacedBy` el
+ * nombre al que `registerAlias` redirige durante la ventana.
+ */
+export interface ToolDeprecation {
+  since: string;
+  sunset?: string;
+  replacedBy?: string;
+}
+
+/**
+ * Envelope versionado de salida de un tool (T2).
+ *
+ * `{tool, version, data}` en éxito, `{tool, version, error, next_step}` en
+ * fallo recuperable — la misma doctrina `{error, next_step}` en español de
+ * los handlers, con el nombre y la versión del contrato que la produjo.
+ * `executeTool()` sigue devolviendo el string del handler intacto; el
+ * envelope es el contrato que las tools nuevas construyen con los builders
+ * de abajo, no un re-wrap del choke point.
+ */
+export interface ToolSuccessEnvelope<T = unknown> {
+  tool: string;
+  version: string;
+  data: T;
+}
+
+export interface ToolErrorEnvelope {
+  tool: string;
+  version: string;
+  error: string;
+  next_step: string;
+}
+
+export type ToolOutputEnvelope<T = unknown> =
+  | ToolSuccessEnvelope<T>
+  | ToolErrorEnvelope;
+
+export function buildToolSuccessEnvelope<T>(
+  tool: string,
+  data: T,
+  version: string = DEFAULT_TOOL_VERSION,
+): ToolSuccessEnvelope<T> {
+  return { tool, version, data };
+}
+
+export function buildToolErrorEnvelope(
+  tool: string,
+  error: string,
+  nextStep: string,
+  version: string = DEFAULT_TOOL_VERSION,
+): ToolErrorEnvelope {
+  return { tool, version, error, next_step: nextStep };
 }
