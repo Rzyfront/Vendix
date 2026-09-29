@@ -9,6 +9,13 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 
+// El servicio resuelve OrderFlowService con un require perezoso (evita el ciclo
+// de imports). Se sustituye el módulo para desacoplar estos tests de su
+// compilación; el token real no importa porque ModuleRef está mockeado.
+jest.mock('../orders/order-flow/order-flow.service', () => ({
+  OrderFlowService: class OrderFlowService {},
+}));
+
 interface FakeStockLevel {
   id: number;
   product_id: number;
@@ -49,6 +56,7 @@ describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', (
         quantity_change: -2, unit_cost: 5, total_cost: 10,
       }]) },
       inventory_cost_layers: { create: jest.fn().mockResolvedValue({ id: 1 }) },
+      order_items: { findMany: jest.fn().mockResolvedValue([{ id: 77 }]) },
     };
     const prisma: any = {
       kitchen_tickets: {
@@ -62,16 +70,21 @@ describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', (
       updateStock: jest.fn().mockResolvedValue({}),
     };
     const accounting = { onPreparedDishDisposition: jest.fn().mockResolvedValue({ id: 7 }) };
+    const orderSync = {
+      isOrderPaidForKitchenCancel: jest.fn().mockResolvedValue(false),
+      cancelItemsFromKitchenInTx: jest.fn().mockResolvedValue(undefined),
+    };
+    const moduleRef = { get: jest.fn().mockReturnValue(orderSync) };
     const service = new KitchenFireService(
       prisma, {} as any, stock as any, {} as any,
       { emit: jest.fn() } as any, { push: jest.fn() } as any,
       { assertCanMutateStationTicket: jest.fn(), attributeOpenSessionToTicketConsumption: jest.fn() } as any,
-      undefined, accounting as any,
+      undefined, accounting as any, moduleRef as any,
     );
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
       store_id: 1, organization_id: 3, user_id: 9,
     } as any);
-    return { service, tx, stock, accounting };
+    return { service, tx, stock, accounting, orderSync, moduleRef };
   };
 
   afterEach(() => jest.restoreAllMocks());
@@ -87,6 +100,62 @@ describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', (
     expect(accounting.onPreparedDishDisposition).toHaveBeenCalledWith(expect.objectContaining({
       disposition: 'reuse', total_cost: 10,
     }));
+  });
+
+  it('R1 — cancelar ticket con orden sin pagar cancela las líneas vivas de la orden y omite las ya canceladas', async () => {
+    const { service, tx, orderSync } = harness('ready');
+    tx.order_items.findMany.mockResolvedValue([{ id: 77 }]);
+    await service.cancelTicket(55, 'waste');
+    expect(tx.order_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: { in: [77] }, order_id: 100, cancelled_at: null },
+    }));
+    expect(orderSync.cancelItemsFromKitchenInTx).toHaveBeenCalledWith(tx, {
+      orderId: 100, orderItemIds: [77], disposition: 'waste',
+      reason: 'Cancelado en cocina', ticketId: 55, wasPending: false,
+    });
+  });
+
+  it('R1 — si todas las líneas ya estaban canceladas en la orden no se vuelve a cancelar nada', async () => {
+    const { service, tx, orderSync } = harness('pending');
+    tx.order_items.findMany.mockResolvedValue([]);
+    await service.cancelTicket(55);
+    expect(orderSync.cancelItemsFromKitchenInTx).not.toHaveBeenCalled();
+  });
+
+  it('R1 — pending marca wasPending y reuse', async () => {
+    const { service, orderSync } = harness('pending');
+    await service.cancelTicket(55, 'waste');
+    expect(orderSync.cancelItemsFromKitchenInTx).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      disposition: 'reuse', wasPending: true,
+    }));
+  });
+
+  it('R1 — orden pagada: rechaza sin cancelar ni devolver inventario', async () => {
+    const { service, tx, stock, orderSync } = harness('pending');
+    orderSync.isOrderPaidForKitchenCancel.mockResolvedValue(true);
+    await expect(service.cancelTicket(55)).rejects.toMatchObject({ errorCode: 'KITCHEN_TICKET_INVALID_STATE' });
+    expect(tx.kitchen_tickets.updateMany).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(orderSync.cancelItemsFromKitchenInTx).not.toHaveBeenCalled();
+  });
+
+  it('R1 — pago concurrente: el re-chequeo bajo lock aborta la tx sin tocar inventario', async () => {
+    const { service, tx, stock, orderSync } = harness('pending');
+    orderSync.isOrderPaidForKitchenCancel
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    await expect(service.cancelTicket(55)).rejects.toMatchObject({ errorCode: 'KITCHEN_TICKET_INVALID_STATE' });
+    expect(orderSync.isOrderPaidForKitchenCancel).toHaveBeenLastCalledWith(100, tx);
+    expect(tx.kitchen_tickets.updateMany).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('R1 — OrderFlowService no resoluble: falla cerrado sin abrir transacción', async () => {
+    const { service, moduleRef, stock } = harness('pending');
+    moduleRef.get.mockImplementation(() => { throw new Error('not found'); });
+    await expect(service.cancelTicket(55)).rejects.toMatchObject({ errorCode: 'SYS_INTERNAL_001' });
+    expect((service as any).prisma.$transaction).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
   });
 
   it('in preparation requires a choice before any transaction starts', async () => {
@@ -616,6 +685,14 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       eventEmitter as any,
       { push: jest.fn() } as any,
       { attributeOpenSessionToTicketConsumption: jest.fn() } as any,
+      undefined,
+      undefined,
+      {
+        get: jest.fn().mockReturnValue({
+          isOrderPaidForKitchenCancel: jest.fn().mockResolvedValue(false),
+          cancelItemsFromKitchenInTx: jest.fn().mockResolvedValue(undefined),
+        }),
+      } as any,
     );
   });
 
@@ -1531,6 +1608,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
           kitchen_ticket_items: {
             updateMany: jest.fn().mockResolvedValue({}),
           },
+          order_items: { findMany: jest.fn().mockResolvedValue([]) },
         }),
       );
 
@@ -1632,6 +1710,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
             // H2 — no sibling tickets for this order_item_id in this harness.
             findMany: jest.fn().mockResolvedValue([]),
           },
+          order_items: { findMany: jest.fn().mockResolvedValue([]) },
         }),
       );
     };
@@ -2008,6 +2087,29 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       });
     });
 
+    it('revertTicket de un ticket cancelado se bloquea si su línea ya está cancelada en la orden', async () => {
+      (service as any).kdsSessionsService = {
+        assertCanMutateStationTicket: jest.fn().mockResolvedValue(undefined),
+      };
+      prismaMock.kitchen_tickets = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 555, store_id: 1, order_id: 100, kds_id: 1, status: 'cancelled',
+          items: [{ id: 11, order_item_id: 77, status: 'cancelled' }],
+        }),
+      };
+      prismaMock.audit_logs = { findMany: jest.fn().mockResolvedValue([]) };
+      prismaMock.order_items.count = jest.fn().mockResolvedValue(1);
+      prismaMock.$transaction = jest.fn();
+
+      const err = await service.revertTicket(555).catch((e: any) => e);
+
+      expect(err).toMatchObject({ errorCode: 'KITCHEN_TICKET_INVALID_STATE' });
+      expect(prismaMock.order_items.count).toHaveBeenCalledWith({
+        where: { id: { in: [77] }, order_id: 100, cancelled_at: { not: null } },
+      });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
     it('H4 — a disposition tagged with a DIFFERENT ticket_id does not block reverting this ticket', async () => {
       (service as any).kdsSessionsService = {
         assertCanMutateStationTicket: jest.fn().mockResolvedValue(undefined),
@@ -2026,6 +2128,8 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
         ]),
       };
       prismaMock.orders = { findFirst: jest.fn().mockResolvedValue({ state: 'processing' }) };
+      // Ticket legado: ninguna línea cancelada en la orden.
+      prismaMock.order_items.count = jest.fn().mockResolvedValue(0);
       const tx = {
         kitchen_tickets: { update: jest.fn().mockResolvedValue({}) },
         kitchen_ticket_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },

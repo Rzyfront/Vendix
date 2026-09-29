@@ -41,7 +41,8 @@ describe('OrderFlowService.updateOrderState — order_events (plan order-truth-a
   const ORDER_ID = 9001;
 
   it('newState="finished" (rama transaccional): registra state_changed con fromState real y source mapeado', async () => {
-    const prismaMock = createPrismaMock({ orders: ['findUnique', 'update'] });
+    const prismaMock = createPrismaMock({ orders: ['findUnique', 'update'], order_items: ['findMany'] });
+    prismaMock.order_items.findMany.mockResolvedValue([]);
     prismaMock.orders.findUnique.mockImplementation(async (args: any) => {
       if (args?.select?.internal_notes !== undefined) return { internal_notes: null };
       return {
@@ -95,7 +96,8 @@ describe('OrderFlowService.updateOrderState — order_events (plan order-truth-a
   });
 
   it('newState genérico (rama no transaccional): registra state_changed con el previous_order leído', async () => {
-    const prismaMock = createPrismaMock({ orders: ['findUnique', 'update'] });
+    const prismaMock = createPrismaMock({ orders: ['findUnique', 'update'], order_items: ['findMany'] });
+    prismaMock.order_items.findMany.mockResolvedValue([]);
     prismaMock.orders.findUnique.mockResolvedValue({
       state: 'processing',
       store_id: 100,
@@ -137,7 +139,8 @@ describe('OrderFlowService.updateOrderState — order_events (plan order-truth-a
   });
 
   it('opts.historyFromState pisa el estado leído de la fila (fix 5db736e6f)', async () => {
-    const prismaMock = createPrismaMock({ orders: ['findUnique', 'update'] });
+    const prismaMock = createPrismaMock({ orders: ['findUnique', 'update'], order_items: ['findMany'] });
+    prismaMock.order_items.findMany.mockResolvedValue([]);
     // La fila real dice 'processing' (el claim transitorio de payOrder) —
     // el historial debe mostrar el `historyFromState` explícito, NUNCA esto.
     prismaMock.orders.findUnique.mockResolvedValue({
@@ -819,8 +822,10 @@ describe('OrderFlowService.cancelOrder — state_changed →cancelled', () => {
       invoices: ['findMany', 'findFirst'],
       accounts_receivable: ['findMany', 'update'],
       order_installments: ['updateMany'],
+      kitchen_ticket_items: ['findMany'],
     });
     mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
+    prismaMock.kitchen_ticket_items.findMany.mockResolvedValue([]);
     prismaMock.invoices.findMany.mockResolvedValue([]);
     prismaMock.accounts_receivable.findMany.mockResolvedValue([]);
     prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'draft' }]);
@@ -960,6 +965,7 @@ describe('OrderFlowService.cancelOrderItem — item_cancelled', () => {
   it('cancela un ítem no disparado y registra item_cancelled con motivo + tipo', async () => {
     const txMock: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
+      kitchen_ticket_items: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
       kitchen_tickets: { findFirst: jest.fn().mockResolvedValue(null) },
       inventory_transactions: { findMany: jest.fn().mockResolvedValue([]) },
       payments: { findFirst: jest.fn().mockResolvedValue(null) },
@@ -1029,6 +1035,7 @@ describe('OrderFlowService.cancelDeliveredOrderItem — item_delivery_reverted',
   it('reversa una entrega y registra item_delivery_reverted con destino', async () => {
     const txMock: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
+      kitchen_ticket_items: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
       payments: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: {
         update: jest.fn().mockResolvedValue({}),
@@ -1169,7 +1176,8 @@ describe('OrderFlowService.reconcileOrderFromDispatch — source listener', () =
 describe('OrderFlowService.autoFinishDeliveredOrders — source job', () => {
   it('finaliza una orden delivered vencida y registra state_changed con source job', async () => {
     const ORDER_ID = 9001;
-    const prismaMock = createPrismaMock({ orders: ['findMany', 'findUnique', 'update'] });
+    const prismaMock = createPrismaMock({ orders: ['findMany', 'findUnique', 'update'], order_items: ['findMany'] });
+    prismaMock.order_items.findMany.mockResolvedValue([]);
     prismaMock.orders.findMany
       .mockResolvedValueOnce([{ id: ORDER_ID }]) // pass 1 (ecommerce)
       .mockResolvedValueOnce([]); // pass 2 (restaurant)
@@ -1341,7 +1349,7 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
       accounts_receivable: ['findMany', 'update'],
       order_installments: ['updateMany'],
       kitchen_tickets: ['findFirst'],
-      kitchen_ticket_items: ['findFirst'],
+      kitchen_ticket_items: ['findFirst', 'findMany'],
     });
     mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
     prismaMock.invoices.findMany.mockResolvedValue([]);
@@ -1377,6 +1385,7 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
       status: where.id === 55 ? 'pending' : 'ready',
     }));
     prismaMock.kitchen_ticket_items.findFirst.mockResolvedValue({ status: 'ready' });
+    prismaMock.kitchen_ticket_items.findMany.mockResolvedValue([]);
     prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, store_id: 100, state: 'cancelled' });
     prismaMock.payments.update.mockResolvedValue({});
@@ -1463,7 +1472,7 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
       accounts_receivable: ['findMany', 'update'],
       order_installments: ['updateMany'],
       inventory_transactions: ['findMany'],
-      kitchen_ticket_items: ['findFirst'],
+      kitchen_ticket_items: ['findFirst', 'findMany'],
     });
     mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
     prismaMock.invoices.findMany.mockResolvedValue([]);
@@ -1482,6 +1491,7 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
     prismaMock.order_items.update.mockResolvedValue({});
     prismaMock.inventory_transactions.findMany.mockResolvedValue([]);
     prismaMock.kitchen_ticket_items.findFirst.mockResolvedValue({ status: 'in_preparation' });
+    prismaMock.kitchen_ticket_items.findMany.mockResolvedValue([]);
     prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, store_id: 100, state: 'cancelled' });
     prismaMock.payments.findMany.mockResolvedValue([]);

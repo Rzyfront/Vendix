@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -20,6 +21,27 @@ import { OrderHistoryService } from '../orders/order-history/order-history.servi
 import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
 import { AuditResource } from '../../../common/audit/audit.service';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
+
+/**
+ * Puerto mínimo de OrderFlowService que necesita cocina para mantener
+ * sincronizada la cancelación entre KDS y orden. Se define local (y se resuelve
+ * perezosamente con ModuleRef) porque OrderFlowModule ya importa
+ * KitchenFireModule: inyectar OrderFlowService directo crearía un ciclo.
+ */
+export interface KitchenOrderSyncPort {
+  isOrderPaidForKitchenCancel(orderId: number, client?: any): Promise<boolean>;
+  cancelItemsFromKitchenInTx(
+    tx: any,
+    params: {
+      orderId: number;
+      orderItemIds: number[];
+      disposition: 'reuse' | 'waste';
+      reason: string;
+      ticketId: number;
+      wasPending: boolean;
+    },
+  ): Promise<void>;
+}
 
 /** Historical delivered_* values are read-only aliases of the canonical decisions. */
 const POST_CANCEL_REMAKE_TYPES = new Set([
@@ -305,7 +327,27 @@ export class KitchenFireService {
     // specs que construyen el servicio a mano no necesitan cablearlo.
     @Optional() private readonly orderHistoryService?: OrderHistoryService,
     @Optional() private readonly autoEntryService?: AutoEntryService,
+    // Resolución perezosa de OrderFlowService (ver `KitchenOrderSyncPort`).
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
+
+  /**
+   * Resuelve OrderFlowService en tiempo de llamada. El `require` es perezoso a
+   * propósito: order-flow.service importa este archivo, y un import estático
+   * dejaría `KitchenFireService` en `undefined` al emitir el metadata de DI.
+   * Devuelve null si no se puede resolver (el llamador decide fail-closed).
+   */
+  private resolveOrderSync(): KitchenOrderSyncPort | null {
+    if (!this.moduleRef) return null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { OrderFlowService } = require('../orders/order-flow/order-flow.service');
+      return (this.moduleRef.get(OrderFlowService, { strict: false }) as KitchenOrderSyncPort) ?? null;
+    } catch (err) {
+      this.logger.error('No se pudo resolver OrderFlowService desde cocina', err as Error);
+      return null;
+    }
+  }
 
   /**
    * Registra `kitchen_fired` en `order_events` DENTRO del `tx` que creó los
@@ -3276,6 +3318,27 @@ export class KitchenFireService {
       );
     }
 
+    // Entregado y cancelado deben estar SIEMPRE sincronizados entre orden y
+    // cocina: cancelar el ticket cancela también sus líneas de la orden, y eso
+    // no es posible (sin reembolso) cuando la orden ya está pagada. Fail-closed
+    // si OrderFlowService no se puede resolver: jamás cancelar el ticket sin
+    // cancelar la línea (bug orden #7922).
+    const orderSync = ticket.order_id != null ? this.resolveOrderSync() : null;
+    if (ticket.order_id != null) {
+      if (!orderSync) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_INTERNAL_001,
+          'No se pudo sincronizar la cancelación con la orden; intenta de nuevo.',
+        );
+      }
+      if (await orderSync.isOrderPaidForKitchenCancel(ticket.order_id)) {
+        throw new VendixHttpException(
+          ErrorCodes.KITCHEN_TICKET_INVALID_STATE,
+          'La orden ya está pagada: gestiona la cancelación desde la orden (reembolso).',
+        );
+      }
+    }
+
     if (ticket.status !== 'pending' && requestedDisposition !== 'reuse' && requestedDisposition !== 'waste') {
       throw new VendixHttpException(
         ErrorCodes.KITCHEN_TICKET_INVALID_STATE,
@@ -3293,6 +3356,14 @@ export class KitchenFireService {
     await this.prisma.$transaction(async (tx) => {
       if (ticket.order_id != null) {
         await lockOrderLifecycle(tx, ticket.order_id, store_id);
+        // Re-chequeo bajo el lock: un pago pudo commitear entre la lectura
+        // previa y la adquisición del lock del ciclo de vida de la orden.
+        if (await orderSync!.isOrderPaidForKitchenCancel(ticket.order_id, tx)) {
+          throw new VendixHttpException(
+            ErrorCodes.KITCHEN_TICKET_INVALID_STATE,
+            'La orden ya está pagada: gestiona la cancelación desde la orden (reembolso).',
+          );
+        }
       }
       const claim = await tx.kitchen_tickets.updateMany({
         where: { id: ticketId, store_id, status: ticket.status },
@@ -3390,6 +3461,35 @@ export class KitchenFireService {
         where: { kitchen_ticket_id: ticketId, status: { not: 'delivered' } },
         data: { status: 'cancelled', updated_at: new Date() },
       });
+      // Lado orden: cancela las líneas de este ticket que sigan vivas. Se
+      // omiten las ya canceladas en la orden (cancelled_at != null) y las de
+      // platos ya entregados: arriba quedan `delivered` en cocina, así que
+      // cancelar su línea desincronizaría orden y cocina. El inventario ya se
+      // resolvió arriba; esto NO lo toca.
+      if (ticket.order_id != null) {
+        const ticketOrderItemIds = Array.from(new Set<number>(
+          ticket.items
+            .filter((item) => item.status !== 'delivered')
+            .map((item) => Number(item.order_item_id))
+            .filter((id) => Number.isInteger(id) && id > 0),
+        ));
+        const liveLines = ticketOrderItemIds.length > 0
+          ? await tx.order_items.findMany({
+              where: { id: { in: ticketOrderItemIds }, order_id: ticket.order_id, cancelled_at: null },
+              select: { id: true },
+            })
+          : [];
+        if (liveLines.length > 0) {
+          await orderSync!.cancelItemsFromKitchenInTx(tx, {
+            orderId: ticket.order_id,
+            orderItemIds: liveLines.map((l: { id: number }) => l.id),
+            disposition,
+            reason: 'Cancelado en cocina',
+            ticketId,
+            wasPending: ticket.status === 'pending',
+          });
+        }
+      }
     });
 
     for (const publish of afterCommit) publish();
@@ -3734,6 +3834,29 @@ export class KitchenFireService {
           ErrorCodes.KITCHEN_TICKET_CANNOT_REVERT,
           'El ticket cancelado ya devolvió o reclasificó insumos; envía un nuevo ticket a cocina en vez de revertirlo.',
         );
+      }
+    }
+
+    // Cancelado y entregado deben estar sincronizados con la orden: si alguna
+    // línea de este ticket ya está cancelada en la orden, revivir el ticket lo
+    // dejaría vivo en cocina y cancelado en la orden. Tickets legados (ninguna
+    // línea cancelada en la orden) conservan el comportamiento anterior.
+    if (ticket.status === 'cancelled' && ticket.order_id != null) {
+      const lineIds = Array.from(new Set<number>(
+        (ticket.items ?? [])
+          .map((item) => Number(item.order_item_id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ));
+      if (lineIds.length > 0) {
+        const cancelledOnOrder = await this.prisma.order_items.count({
+          where: { id: { in: lineIds }, order_id: ticket.order_id, cancelled_at: { not: null } },
+        });
+        if (cancelledOnOrder > 0) {
+          throw new VendixHttpException(
+            ErrorCodes.KITCHEN_TICKET_INVALID_STATE,
+            'El plato ya se canceló en la orden: vuelve a pedirlo desde la orden.',
+          );
+        }
       }
     }
 
