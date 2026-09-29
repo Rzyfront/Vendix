@@ -2,7 +2,6 @@ import { Module, OnModuleInit } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { S3Module } from '../../../common/services/s3.module';
 import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
@@ -182,7 +181,6 @@ export class AccountingModule implements OnModuleInit {
     private readonly entryFlowService: JournalEntryFlowService,
     private readonly chartOfAccountsService: ChartOfAccountsService,
     private readonly fiscalScopeService: FiscalScopeService,
-    private readonly prisma: StorePrismaService,
     private readonly accountMappingService: AccountMappingService,
     private readonly entryFailureService: AccountingEntryFailureService,
     private readonly fixedAssetsService: FixedAssetsService,
@@ -199,10 +197,9 @@ export class AccountingModule implements OnModuleInit {
    * dentro de un módulo global sería un generador de ciclos.
    *
    * Se inyectan los servicios del dominio (no Prisma crudo) porque son ellos
-   * los que resuelven la entidad contable / `fiscal_scope` correcta. La única
-   * excepción es `StorePrismaService`, usado exclusivamente para leer la fila
-   * de `accounting_entities` con la que se etiqueta cada respuesta — y aun así
-   * pasa por el scoping multi-tenant.
+   * los que resuelven la entidad contable / `fiscal_scope` correcta. Desde el
+   * paso 15 ni siquiera la etiqueta de `accounting_entities` se lee directa:
+   * la resuelve `FiscalScopeService.findAccountingEntityDescription`.
    */
   onModuleInit(): void {
     this.toolRegistry.registerMany(
@@ -213,7 +210,6 @@ export class AccountingModule implements OnModuleInit {
         entryFlowService: this.entryFlowService,
         chartOfAccountsService: this.chartOfAccountsService,
         fiscalScopeService: this.fiscalScopeService,
-        prisma: this.prisma,
         accountMappingService: this.accountMappingService,
         entryFailureService: this.entryFailureService,
       }),

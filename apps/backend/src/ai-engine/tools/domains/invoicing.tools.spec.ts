@@ -28,6 +28,23 @@ describe('invoicing.tools · contrato canónico T4', () => {
       invoiceFlowService: {
         getEmitReadiness: jest.fn(),
         getIssuerEmissionGate: jest.fn(),
+        // Fixture con los valores reales de `VALID_TRANSITIONS` del dueño
+        // (`invoice-flow.service.ts`): la tool ya no espeja la tabla, la
+        // consulta por este método (paso 15).
+        getValidTransitions: jest.fn(
+          (status: string) =>
+            (
+              {
+                draft: ['validated', 'cancelled'],
+                validated: ['sent', 'cancelled'],
+                sent: ['accepted', 'rejected'],
+                accepted: [],
+                rejected: ['sent', 'voided'],
+                cancelled: [],
+                voided: [],
+              } as Record<string, string[]>
+            )[status] ?? [],
+        ),
         validate: jest.fn(),
         send: jest.fn(),
         accept: jest.fn(),
@@ -918,6 +935,10 @@ describe('invoicing.tools · contrato canónico T4', () => {
         note_attached: false,
       });
       expect(deps.invoiceFlowService.accept).toHaveBeenCalledWith(13);
+      // Paso 15: el preview consulta las salidas al dueño, no a un espejo.
+      expect(deps.invoiceFlowService.getValidTransitions).toHaveBeenCalledWith(
+        'sent',
+      );
     });
 
     it('(e) void porta la frase irreversible', async () => {

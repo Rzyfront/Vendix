@@ -29,8 +29,8 @@ export interface InvoicingToolDeps {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Doctrina de lectura F (misma que `writes.tools.ts` para el fallo: los
-// handlers NO lanzan, devuelven `{error, next_step}` en español; cero
-// `prisma.` aquí — toda lectura va al service dueño del scope tenant).
+// handlers NO lanzan, devuelven `{error, next_step}` en español; ninguna
+// lectura directa a la base — todo va al service dueño del scope tenant).
 // ─────────────────────────────────────────────────────────────────────────────
 
 function toPositiveInt(value: unknown): number | null {
@@ -171,19 +171,12 @@ const ACCEPT_INVOICE_LABELS: Record<AcceptInvoiceAction, string> = {
 };
 
 /**
- * Espejo de `VALID_TRANSITIONS` del flow para guiar el preview de F-31. El
- * servicio re-valida (`validateTransition` lanza); esto solo evita proponer
- * una transición que ya se sabe imposible.
+ * Las salidas de cada estado NO se espejan aquí: el preview y el handler de
+ * F-31 preguntan a `invoiceFlowService.getValidTransitions(status)`, que lee
+ * el `VALID_TRANSITIONS` dueño en `invoice-flow.service.ts`. El servicio
+ * re-valida al aplicar (`validateTransition` lanza); la consulta previa solo
+ * evita proponer una transición que ya se sabe imposible.
  */
-const INVOICE_STATUS_EXITS: Record<string, readonly string[]> = {
-  draft: ['validated', 'cancelled'],
-  validated: ['sent', 'cancelled'],
-  sent: ['accepted', 'rejected'],
-  accepted: [],
-  rejected: ['sent', 'voided'],
-  cancelled: [],
-  voided: [],
-};
 
 /** `notes` cabe en `/Invoice/cbc:Note` (FAD13, 1-500). */
 const INVOICE_NOTE_MAX_LENGTH = 500;
@@ -1034,7 +1027,9 @@ export function createInvoicingTools(
           };
         }
         const target = ACCEPT_INVOICE_TARGETS[action];
-        const exits = INVOICE_STATUS_EXITS[invoice?.status ?? ''] ?? [];
+        const exits = invoiceFlowService.getValidTransitions(
+          invoice?.status ?? '',
+        );
         if (!exits.includes(target)) {
           const hint =
             invoice?.status === 'accepted'
@@ -1121,7 +1116,9 @@ export function createInvoicingTools(
           );
         }
         const target = ACCEPT_INVOICE_TARGETS[action];
-        const exits = INVOICE_STATUS_EXITS[invoice?.status ?? ''] ?? [];
+        const exits = invoiceFlowService.getValidTransitions(
+          invoice?.status ?? '',
+        );
         if (!exits.includes(target)) {
           return writeToolError(
             `La factura ${invoiceId} está en '${invoice?.status ?? 'desconocido'}' y ya no admite '${target}'.`,

@@ -11,7 +11,6 @@ import { JournalEntriesService } from '../../../domains/store/accounting/journal
 import { JournalEntryFlowService } from '../../../domains/store/accounting/journal-entries/journal-entry-flow.service';
 import { ChartOfAccountsService } from '../../../domains/store/accounting/chart-of-accounts/chart-of-accounts.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { AccountMappingService } from '../../../domains/store/accounting/account-mappings/account-mapping.service';
 import { AccountingEntryFailureService } from '../../../domains/store/accounting/auto-entries/accounting-entry-failure.service';
 import { CreateJournalEntryDto } from '../../../domains/store/accounting/journal-entries/dto/create-journal-entry.dto';
@@ -29,7 +28,8 @@ import { UpdateAccountDto } from '../../../domains/store/accounting/chart-of-acc
  * `preview` es proyección, no transacción. Toda escritura pasa por el servicio
  * dueño (`JournalEntriesService`, `JournalEntryFlowService`,
  * `FiscalPeriodsService`, `ChartOfAccountsService`, `AccountMappingService`,
- * `AccountingEntryFailureService`): cero `prisma.` nuevo en este archivo.
+ * `AccountingEntryFailureService`): ninguna lectura directa a la base en este
+ * archivo, ni siquiera para la etiqueta de la entidad contable.
  *
  * Contrato fiscal (ver skill `vendix-fiscal-scope`): la contabilidad de Vendix
  * vive por ENTIDAD CONTABLE (`accounting_entity_id`), no por tienda. Aquí no se
@@ -59,7 +59,6 @@ export interface AccountingToolDeps {
   entryFlowService: JournalEntryFlowService;
   chartOfAccountsService: ChartOfAccountsService;
   fiscalScopeService: FiscalScopeService;
-  prisma: StorePrismaService;
   accountMappingService: AccountMappingService;
   entryFailureService: AccountingEntryFailureService;
 }
@@ -238,28 +237,7 @@ export function createAccountingTools(
     );
     if (!entity_id) return null;
 
-    const entity: any = await deps.prisma.accounting_entities.findFirst({
-      where: { id: entity_id },
-      select: {
-        id: true,
-        name: true,
-        legal_name: true,
-        tax_id: true,
-        scope: true,
-        fiscal_scope: true,
-        store_id: true,
-      },
-    });
-    if (!entity) return null;
-
-    return {
-      id: entity.id,
-      name: entity.legal_name || entity.name,
-      tax_id: entity.tax_id,
-      fiscal_scope: entity.fiscal_scope,
-      operating_scope: entity.scope,
-      store_id: entity.store_id,
-    };
+    return deps.fiscalScopeService.findAccountingEntityDescription(entity_id);
   }
 
   function parseAnchorDate(raw: unknown): Date | null {

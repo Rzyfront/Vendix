@@ -39,7 +39,6 @@ import { SalesAnalyticsService } from '../analytics/services/sales-analytics.ser
 import { ProductsAnalyticsService } from '../analytics/services/products-analytics.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 // Carril B - B3: NotificationsSseService es el hub compartido por tienda que
 // el endpoint `@Sse('orders/stream')` consume. OrderSseService lo envuelve
 // con un payload tipado para el dominio `orders`.
@@ -102,7 +101,6 @@ export class OrdersModule implements OnModuleInit {
     private readonly sessionsService: SessionsService,
     private readonly salesAnalyticsService: SalesAnalyticsService,
     private readonly productsAnalyticsService: ProductsAnalyticsService,
-    private readonly prisma: StorePrismaService,
     // Único escritor legítimo de `orders.state` (QUI-557). Viene de
     // `OrderFlowModule`, que este módulo ya importa y reexporta.
     private readonly orderFlowService: OrderFlowService,
@@ -144,7 +142,6 @@ export class OrdersModule implements OnModuleInit {
       createOrderWriteTools({
         orderFlowService: this.orderFlowService,
         dispatchNotesService: this.dispatchNotesService,
-        prisma: this.prisma,
       }),
     );
   }

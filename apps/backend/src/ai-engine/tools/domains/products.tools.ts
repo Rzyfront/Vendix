@@ -12,6 +12,12 @@ import {
 import { PriceResolverService } from '../../../domains/store/products/services/price-resolver.service';
 import { SettingsService } from '../../../domains/store/settings/settings.service';
 import { resolvePricedUnits } from '../../../domains/store/products/services/tier-margin.util';
+import {
+  effectiveTracking,
+  taxBreakdown,
+  variantLabel,
+  parseAttributes,
+} from '../_adapters/product.adapter';
 
 export interface ProductToolDeps {
   productsService: ProductsService;
@@ -60,62 +66,14 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function taxBreakdown(
-  assignments: any[] | undefined | null,
-): Array<{ name: string; rate_pct: number }> {
-  const rows: Array<{ name: string; rate_pct: number }> = [];
-  for (const assignment of assignments ?? []) {
-    for (const tax of assignment?.tax_categories?.tax_rates ?? []) {
-      rows.push({
-        name: tax.name,
-        rate_pct: round2(toNumber(tax.rate) * 100),
-      });
-    }
-  }
-  return rows;
-}
-
-/**
- * Effective inventory tracking for a product/variant pair.
- * `track_inventory_override` is authoritative when set; `null` inherits.
- * See `vendix-product-variants`: this is the ONLY input that decides whether
- * stock is meaningful for a variant. A variant is never hidden or downgraded
- * just because its stock is 0.
- */
-function effectiveTracking(product: any, variant?: any): boolean {
-  const override = variant?.track_inventory_override;
-  return override === null || override === undefined
-    ? product.track_inventory === true
-    : override === true;
-}
-
-function parseAttributes(attributes: unknown): Record<string, string> | null {
-  if (!attributes || typeof attributes !== 'object') return null;
-  const entries = Object.entries(attributes as Record<string, unknown>).map(
-    ([key, value]) => [key, String(value)] as const,
-  );
-  return entries.length ? Object.fromEntries(entries) : null;
-}
-
-/** Human label for a variant when it has no explicit name (falls back to its attributes, then its SKU). */
-function variantLabel(variant: any): string {
-  if (variant.name) return String(variant.name);
-  const attributes = parseAttributes(variant.attributes);
-  if (attributes) {
-    return Object.entries(attributes)
-      .map(([key, value]) => `${key}: ${value}`)
-      .join(', ');
-  }
-  return String(variant.sku ?? `variante ${variant.id}`);
-}
-
 const PRODUCT_STATES = ['active', 'inactive', 'archived'] as const;
 const PRODUCT_TYPES = ['physical', 'service', 'prepared'] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Doctrina de escritura de O-1 `update_product` (misma que `writes.tools.ts`:
 // el `preview` es proyección, no transacción; el `handler` re-verifica; los
-// handlers NO lanzan, devuelven `{error, next_step}`; cero `prisma.` aquí).
+// handlers NO lanzan, devuelven `{error, next_step}`; ninguna lectura directa
+// a la base aquí).
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Resultado uniforme de una resolución previa a escribir. */

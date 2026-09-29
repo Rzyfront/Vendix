@@ -3,6 +3,7 @@ import { AIToolDefinition } from '../interfaces/ai-provider.interface';
 import {
   DEFAULT_TOOL_VERSION,
   RegisteredTool,
+  ToolDeprecation,
   ToolExecutionContext,
 } from './interfaces/tool.interface';
 import { VendixHttpException, ErrorCodes } from '../../common/errors';
@@ -10,6 +11,26 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { VexiConfirmationService } from '../../domains/store/vexi/vexi-confirmation.service';
 import { validateToolArgs } from './tool-args.validator';
 
+/**
+ * Política de remoción de tools (T5).
+ *
+ * Un tool NO se borra: se depreca. El ciclo es:
+ *
+ *  1. Marcar `deprecated: {since, sunset, replacedBy}` en la factory. Desde
+ *     ese momento cada invocación emite `logger.warn` en el servidor y el
+ *     agent loop porta `deprecated_warning` en el frame `tool_call`, para que
+ *     la traza visible lo muestre antes de que el nombre desaparezca.
+ *  2. El catálogo MCP publica el marcador (`deprecated` + línea de sunset en
+ *     la descripción), para que los clientes externos migren a `replacedBy`.
+ *  3. Registrar `registerAlias(oldName, newName)`: durante el sunset el nombre
+ *     viejo resuelve al nuevo y ningún turno en curso se rompe.
+ *  4. Solo cuando el sunset VENCIÓ y `grep` del nombre viejo da CERO usos en
+ *     código, specs y docs, se retira el handler con `removeTool()`.
+ *  5. El alias SOBREVIVE a la remoción: turnos persistidos en
+ *     `ai_messages.tool_calls` referencian nombres viejos, y el alias es lo
+ *     que les permite re-resolver (o fallar con `AI_AGENT_003` + sugerencias
+ *     en vez de con un nombre fantasma). `removeTool()` nunca toca `aliases`.
+ */
 @Injectable()
 export class AIToolRegistry {
   private readonly logger = new Logger(AIToolRegistry.name);
@@ -68,6 +89,33 @@ export class AIToolRegistry {
 
   get(name: string): RegisteredTool | undefined {
     return this.tools.get(name);
+  }
+
+  /**
+   * Retira el handler de un tool SIN borrar sus alias (T5, paso 4-5 de la
+   * política de remoción). Solo se llama con el sunset vencido y `grep` de
+   * uso en cero; el alias sobrevive para que los turnos persistidos en
+   * `ai_messages.tool_calls` sigan resolviendo o fallen con gracia.
+   *
+   * @returns `true` si existía y se retiró, `false` si no estaba registrado.
+   */
+  removeTool(name: string): boolean {
+    if (!this.tools.has(name)) return false;
+    this.tools.delete(name);
+    this.logger.warn(
+      `Tool "${name}" removed; its aliases survive for persisted turns`,
+    );
+    return true;
+  }
+
+  /**
+   * Marcador de deprecación del tool ya resuelto (acepta alias y nombres con
+   * namespace de proveedor), o `undefined` si está vigente. Lo consumen el
+   * agent loop (frame `tool_call`) y el catálogo MCP.
+   */
+  getDeprecation(name: string): ToolDeprecation | undefined {
+    const resolved = this.resolveToolName(name);
+    return resolved ? this.tools.get(resolved)?.deprecated : undefined;
   }
 
   getAll(): RegisteredTool[] {
@@ -250,6 +298,21 @@ export class AIToolRegistry {
         suggestions.length
           ? `La herramienta "${name}" no existe. Las que más se le parecen: ${suggestions.join(', ')}. Vuelve a intentarlo con una de esas.`
           : `La herramienta "${name}" no existe. Revisa el catálogo antes de volver a llamarla.`,
+      );
+    }
+
+    // T5: el deprecado resuelve igual pero avisa en el servidor; el aviso al
+    // modelo viaja en el frame `tool_call` (agent loop), no aquí, para no
+    // contaminar la respuesta del handler que el turno persiste.
+    if (tool.deprecated) {
+      const sunset = tool.deprecated.sunset
+        ? `, se retira en ${tool.deprecated.sunset}`
+        : '';
+      const replacement = tool.deprecated.replacedBy
+        ? `; usa "${tool.deprecated.replacedBy}" en su lugar`
+        : '';
+      this.logger.warn(
+        `Tool "${resolvedName}" está deprecado desde v${tool.deprecated.since}${sunset}${replacement}`,
       );
     }
 

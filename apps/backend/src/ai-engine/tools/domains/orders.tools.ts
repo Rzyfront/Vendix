@@ -18,7 +18,10 @@ import { ShipOrderDto } from '../../../domains/store/orders/order-flow/dto/ship-
 import { CancelOrderDto } from '../../../domains/store/orders/order-flow/dto/cancel-order.dto';
 import { CreateRefundDto } from '../../../domains/store/orders/order-flow/dto/create-refund.dto';
 import { DeliverOrderDto } from '../../../domains/store/orders/order-flow/dto/deliver-order.dto';
-import { OrderFlowService } from '../../../domains/store/orders/order-flow/order-flow.service';
+import {
+  FINISHABLE_STATES,
+  OrderFlowService,
+} from '../../../domains/store/orders/order-flow/order-flow.service';
 import { RefundFlowService } from '../../../domains/store/orders/order-flow/services/refund-flow.service';
 import { OrdersBulkService } from '../../../domains/store/orders/orders-bulk.service';
 import {
@@ -28,9 +31,14 @@ import {
 } from '../../../domains/store/orders/dto/bulk-orders.dto';
 import {
   InsufficientStockItem,
-  StockDemandLine,
   StockValidatorService,
 } from '../../../domains/store/inventory/shared/services/stock-validator.service';
+import {
+  compactOrder,
+  customerName,
+  summarizeItems,
+  toStockLines,
+} from '../_adapters/order.adapter';
 import { DispatchNotesService } from '../../../domains/store/dispatch-notes/dispatch-notes.service';
 import { SessionsService } from '../../../domains/store/cash-registers/sessions/sessions.service';
 import { order_channel_enum, order_state_enum } from '@prisma/client';
@@ -75,49 +83,7 @@ function clamp(value: any, fallback: number, max: number): number {
   return Math.min(Math.floor(parsed), max);
 }
 
-/**
- * Nombre del cliente. Las órdenes de invitado no tienen `users`; el nombre vive
- * en el snapshot de dirección, así que hay que rascarlo de ahí antes de rendirse.
- */
-function customerName(order: any): string {
-  const user = order?.users;
-  if (user) {
-    const full = [user.first_name, user.last_name].filter(Boolean).join(' ');
-    if (full.trim()) return full.trim();
-    if (user.email) return user.email;
-  }
 
-  const snapshot = order?.shipping_address_snapshot;
-  if (snapshot && typeof snapshot === 'object') {
-    const candidate =
-      snapshot.full_name ??
-      snapshot.recipient_name ??
-      snapshot.name ??
-      [snapshot.first_name, snapshot.last_name].filter(Boolean).join(' ');
-    if (candidate && String(candidate).trim()) return String(candidate).trim();
-  }
-
-  return 'Invitado (sin cliente registrado)';
-}
-
-/** Fila compacta para listados. Nunca incluyas los ítems completos aquí. */
-function compactOrder(order: any) {
-  return {
-    order_id: order.id,
-    numero: order.order_number,
-    cliente: customerName(order),
-    customer_id: order.customer_id ?? null,
-    estado: order.state,
-    canal: order.channel,
-    tipo_entrega: order.delivery_type,
-    total: num(order.grand_total),
-    pagado: num(order.total_paid),
-    saldo_pendiente: num(order.remaining_balance),
-    cumplimiento_despacho: order.dispatch_fulfillment,
-    items: Array.isArray(order.order_items) ? order.order_items.length : null,
-    creada: order.created_at,
-  };
-}
 
 /**
  * Valida contra la lista permitida y devuelve el valor ya tipado: el
@@ -175,11 +141,11 @@ const TERMINAL_ORDER_STATES = ['cancelled', 'refunded', 'finished'] as const;
 const DELIVER_ACTIONS = ['deliver', 'deliver_item', 'confirm_delivery'] as const;
 
 /**
- * O-23: estados desde los que `confirmDelivery` cierra la orden
- * (`FINISHABLE_STATES` en `order-flow.service.ts`). Se espeja acá para que el
- * preview anticipe el rechazo en vez de prometer un cierre imposible.
+ * O-23: estados desde los que `confirmDelivery` cierra la orden. Se importan
+ * (`FINISHABLE_STATES`, única fuente en `order-flow.service.ts`), NO se
+ * espejan: el preview anticipa el rechazo sin prometer un cierre imposible y
+ * sin desincronizarse cuando el dueño abra una arista nueva.
  */
-const CONFIRMABLE_DELIVERY_STATES = ['delivered', 'processing'] as const;
 
 /** O-27: máximo de eventos del timeline que se serializan. */
 const MAX_TIMELINE_EVENTS = 50;
@@ -301,36 +267,6 @@ function normalizeOrderItem(
   };
 }
 
-/**
- * Demanda validable por `StockValidatorService`: solo renglones con
- * `product_id`. Los renglones `custom`/servicio sin producto no consumen
- * stock y nunca bloquean.
- */
-function toStockLines(
-  items: Array<{
-    product_id?: unknown;
-    product_variant_id?: unknown;
-    quantity?: unknown;
-    product_name?: unknown;
-  }>,
-): StockDemandLine[] {
-  return items
-    .filter((item) => item.product_id !== undefined && item.product_id !== null)
-    .map((item) => ({
-      product_id: Number(item.product_id),
-      product_variant_id:
-        item.product_variant_id == null ? null : Number(item.product_variant_id),
-      quantity: Number(item.quantity),
-      product_name: item.product_name ? String(item.product_name) : undefined,
-    }))
-    .filter(
-      (line) =>
-        Number.isFinite(line.product_id) &&
-        line.product_id > 0 &&
-        line.quantity > 0,
-    );
-}
-
 function formatShortfalls(short: InsufficientStockItem[]): string {
   return short
     .map(
@@ -338,15 +274,6 @@ function formatShortfalls(short: InsufficientStockItem[]): string {
         `${item.product_name}: pide ${item.requested}, hay ${item.available} disponibles`,
     )
     .join('; ');
-}
-
-/** "2× Coca Cola 1L + 1× Pan": sujeto humano para previews y cambios. */
-function summarizeItems(
-  items: Array<{ quantity?: unknown; product_name?: unknown }>,
-): string {
-  return items
-    .map((item) => `${item.quantity ?? '?'}× ${item.product_name ?? 'ítem'}`)
-    .join(' + ');
 }
 
 /**
@@ -2861,15 +2788,13 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
           };
         }
         if (
-          !(CONFIRMABLE_DELIVERY_STATES as readonly string[]).includes(
-            order.state,
-          )
+          !(FINISHABLE_STATES as readonly string[]).includes(order.state)
         ) {
           return {
             status: 'error',
             target: `Confirmar entrega de ${subject}`,
             changes: [],
-            message: `La orden está en estado '${order.state}': solo se confirma la recepción desde '${CONFIRMABLE_DELIVERY_STATES.join("' o '")}'.`,
+            message: `La orden está en estado '${order.state}': solo se confirma la recepción desde '${FINISHABLE_STATES.join("' o '")}'.`,
           };
         }
         return {
@@ -2975,12 +2900,10 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
             });
           }
           if (
-            !(CONFIRMABLE_DELIVERY_STATES as readonly string[]).includes(
-              fresh.state,
-            )
+            !(FINISHABLE_STATES as readonly string[]).includes(fresh.state)
           ) {
             return JSON.stringify({
-              error: `La orden cambió a estado '${fresh.state}': solo se confirma la recepción desde '${CONFIRMABLE_DELIVERY_STATES.join("' o '")}'.`,
+              error: `La orden cambió a estado '${fresh.state}': solo se confirma la recepción desde '${FINISHABLE_STATES.join("' o '")}'.`,
               next_step: 'Lee la orden con get_order para ver su estado actual.',
             });
           }

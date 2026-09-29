@@ -6504,6 +6504,109 @@ export class ProductsService {
     };
   }
 
+  /**
+   * Precondición de `update_product_price`: con reservas activas el `update`
+   * lanza `INV_STOCK_001`. La tool la consulta para decirlo en la propuesta
+   * en vez de fallar al aplicar. Lectura pura, scopeada por tienda.
+   */
+  async hasActiveStockReservationsForAgent(
+    productId: number,
+    variantId: number | null,
+  ): Promise<boolean> {
+    const found = await this.prisma.stock_reservations.findFirst({
+      where: {
+        product_id: productId,
+        product_variant_id: variantId,
+        status: 'active',
+      },
+      select: { id: true },
+    });
+    return !!found;
+  }
+
+  /**
+   * Contexto de `update_product_price`: producto + asignaciones fiscales +
+   * variantes (precio/override/oferta). Misma proyección que la tool leía
+   * directa; mudada al servicio dueño en el paso 15 (cero `prisma.` en tools).
+   */
+  async findProductForPriceChangeForAgent(productId: number): Promise<any> {
+    return this.prisma.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        state: true,
+        base_price: true,
+        sale_price: true,
+        is_on_sale: true,
+        product_tax_assignments: {
+          select: {
+            tax_categories: {
+              select: { tax_rates: { select: { rate: true } } },
+            },
+          },
+        },
+        product_variants: {
+          orderBy: { id: 'asc' },
+          take: 100,
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            price_override: true,
+            sale_price: true,
+            is_on_sale: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Réplicas de lectura de las precondiciones de `create` (slug, SKU y código
+   * de barras únicos dentro de la tienda — `PROD_DUP_001` /
+   * `PROD_BARCODE_DUP_001`). `create_product` las consulta para proponer con
+   * sujeto humano; el servicio re-valida al aplicar. Cada clave ausente en el
+   * parámetro se devuelve `null` sin consultar.
+   */
+  async findProductUniquenessConflictsForAgent(params: {
+    slug: string;
+    sku?: string | null;
+    barcode?: string | null;
+  }): Promise<{
+    slug: { id: number; name: string } | null;
+    sku: { id: number; name: string } | null;
+    barcodeProduct: { id: number; name: string } | null;
+    barcodeVariant: { id: number } | null;
+  }> {
+    const [slug, sku, barcodeProduct, barcodeVariant] = await Promise.all([
+      this.prisma.products.findFirst({
+        where: { slug: params.slug },
+        select: { id: true, name: true },
+      }),
+      params.sku
+        ? this.prisma.products.findFirst({
+            where: { sku: params.sku },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve(null),
+      params.barcode
+        ? this.prisma.products.findFirst({
+            where: { barcode: params.barcode },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve(null),
+      params.barcode
+        ? this.prisma.product_variants.findFirst({
+            where: { barcode: params.barcode },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
+    ]);
+    return { slug, sku, barcodeProduct, barcodeVariant };
+  }
+
   private async resolvePosScope(
     // B.2 (F-089) — single-flight opcional: `findAll` pasa su promesa de
     // settings para no leer `store_settings` 2 veces por request. Ausente ⇒

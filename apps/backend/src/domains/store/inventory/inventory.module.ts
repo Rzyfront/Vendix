@@ -77,7 +77,6 @@ export class InventoryModule implements OnModuleInit {
     private readonly movementsService: MovementsService,
     private readonly locationsService: LocationsService,
     private readonly transfersService: StockTransfersService,
-    private readonly prisma: StorePrismaService,
   ) {}
 
   /**
@@ -105,7 +104,6 @@ export class InventoryModule implements OnModuleInit {
     this.toolRegistry.registerMany(
       createInventoryWriteTools({
         adjustmentsService: this.adjustmentsService,
-        prisma: this.prisma,
       }),
     );
   }

@@ -22,16 +22,6 @@ import { VendixHttpException } from '../../../common/errors';
 describe('accounting.tools · F-1 get_journal_entry / F-9 list_account_mappings / F-12 list_entry_failures', () => {
   const CONTEXT = { organization_id: 3, store_id: 7, user_id: 11 };
 
-  const ENTITY_ROW = {
-    id: 55,
-    name: 'Tienda Centro',
-    legal_name: 'Tienda Centro SAS',
-    tax_id: '900123456',
-    scope: 'STORE',
-    fiscal_scope: 'STORE',
-    store_id: 7,
-  };
-
   const ENTITY_TAG = {
     id: 55,
     name: 'Tienda Centro SAS',
@@ -65,11 +55,14 @@ describe('accounting.tools · F-1 get_journal_entry / F-9 list_account_mappings 
       },
       fiscalScopeService: {
         findFiscalAccountingEntityId: jest.fn().mockResolvedValue(55),
-      },
-      prisma: {
-        accounting_entities: {
-          findFirst: jest.fn().mockResolvedValue(ENTITY_ROW),
-        },
+        findAccountingEntityDescription: jest.fn().mockResolvedValue({
+          id: 55,
+          name: 'Tienda Centro SAS',
+          tax_id: '900123456',
+          fiscal_scope: 'STORE',
+          operating_scope: 'STORE',
+          store_id: 7,
+        }),
       },
       accountMappingService: {
         getMappings: jest.fn(),

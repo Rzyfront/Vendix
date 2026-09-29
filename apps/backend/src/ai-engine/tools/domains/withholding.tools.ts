@@ -42,8 +42,8 @@ export interface WithholdingToolDeps {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Doctrina de lectura F (misma que `writes.tools.ts` para el fallo: los
-// handlers NO lanzan, devuelven `{error, next_step}` en español; cero
-// `prisma.` aquí — toda lectura va al service dueño del scope tenant).
+// handlers NO lanzan, devuelven `{error, next_step}` en español; ninguna
+// lectura directa a la base — todo va al service dueño del scope tenant).
 //
 // Y la regla fiscal que manda en esta familia: el modelo NUNCA calcula
 // retenciones a mano. Todo número sale del FLOW/resolver determinista —

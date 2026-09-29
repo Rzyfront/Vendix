@@ -107,6 +107,12 @@ export interface AIStreamChunk {
     summary?: string;
     /** Only on `tool_result`: the tool threw and the model was told so. */
     failed?: boolean;
+    /**
+     * Only on `tool_call`, only when the tool is deprecated (T5): warns the
+     * model — and the visible trace — that the name has a sunset. Spanish,
+     * same doctrine as every other model-facing string.
+     */
+    deprecated_warning?: string;
   };
   usage?: {
     promptTokens: number;

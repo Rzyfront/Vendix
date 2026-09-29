@@ -1,5 +1,6 @@
 import { RegisteredTool } from '../interfaces/tool.interface';
 import { CustomersService } from '../../../domains/store/customers/customers.service';
+import { fullName, formatDocument } from '../_adapters/customer.adapter';
 
 export interface CustomerToolDeps {
   customersService: CustomersService;
@@ -43,18 +44,6 @@ function toAmount(value: unknown): number {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-function fullName(user: { first_name?: string; last_name?: string }): string {
-  return [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
-}
-
-function formatDocument(user: {
-  document_type?: string | null;
-  document_number?: string | null;
-}): string | null {
-  if (!user.document_number) return null;
-  return [user.document_type, user.document_number].filter(Boolean).join(' ');
 }
 
 function isoDate(value: unknown): string | null {

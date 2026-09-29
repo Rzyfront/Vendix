@@ -23,7 +23,8 @@ export interface VariantToolDeps {
 // - Un `preview` con `status: 'error'` no acuña token: la ejecución muere ahí.
 // - Los handlers NO lanzan: devuelven `{error, next_step}` en español. Un
 //   `throw` saldría como `AI_AGENT_003` opaco.
-// - Toda escritura pasa por el servicio dueño. Cero `prisma.` en este archivo.
+// - Toda escritura pasa por el servicio dueño. Ninguna lectura directa a la
+//   base en este archivo: todo sale de métodos del servicio.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Resultado uniforme de una resolución previa a escribir. */

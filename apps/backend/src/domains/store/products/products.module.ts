@@ -4,7 +4,6 @@ import { createProductTools } from '../../../ai-engine/tools/domains/products.to
 import { createVariantTools } from '../../../ai-engine/tools/domains/variants.tools';
 import { createPricingTools } from '../../../ai-engine/tools/domains/pricing.tools';
 import { createProductWriteTools } from '../../../ai-engine/tools/domains/writes.tools';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
@@ -89,7 +88,6 @@ export class ProductsModule implements OnModuleInit {
     private readonly priceResolver: PriceResolverService,
     private readonly settingsService: SettingsService,
     private readonly priceTiersService: PriceTiersService,
-    private readonly prisma: StorePrismaService,
   ) {}
 
   /**
@@ -133,7 +131,6 @@ export class ProductsModule implements OnModuleInit {
     this.toolRegistry.registerMany(
       createProductWriteTools({
         productsService: this.productsService,
-        prisma: this.prisma,
       }),
     );
   }

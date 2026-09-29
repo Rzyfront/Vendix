@@ -558,9 +558,31 @@ export class AIAgentService {
             store_id: context?.store_id,
           });
 
+          // T5: el deprecado se ejecuta igual (el sunset aún no vence) pero el
+          // frame lo dice en voz alta, para que la traza visible y el modelo
+          // migren a `replacedBy` antes de que el nombre desaparezca.
+          const deprecation =
+            this.toolRegistry.getDeprecation(toolName);
+          const deprecatedWarning = deprecation
+            ? `La herramienta "${toolName}" está deprecada desde v${deprecation.since}` +
+              (deprecation.sunset
+                ? ` y se retira en ${deprecation.sunset}`
+                : '') +
+              (deprecation.replacedBy
+                ? `. Usa "${deprecation.replacedBy}" en su lugar.`
+                : '.')
+            : undefined;
+
           yield {
             type: 'tool_call',
-            tool: { id: toolCall.id, name: toolName, arguments: toolArgs },
+            tool: {
+              id: toolCall.id,
+              name: toolName,
+              arguments: toolArgs,
+              ...(deprecatedWarning
+                ? { deprecated_warning: deprecatedWarning }
+                : {}),
+            },
           };
 
           // A UI command is dispatched by the browser off the `tool_call`

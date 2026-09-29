@@ -1082,4 +1082,56 @@ export class InventoryAdjustmentsService {
       });
     });
   }
+
+  /**
+   * Contexto de `adjust_stock`: producto + variantes para resolver el objetivo
+   * del ajuste. Vive aquí y no en `ProductsService` porque `ProductsModule`
+   * importa `InventoryModule`: la dirección contraria cerraría un ciclo.
+   * Misma proyección que la tool leía directa (paso 15, cero `prisma.` en
+   * tools). Lectura pura, scopeada por tienda.
+   */
+  async findProductForStockAdjustmentForAgent(
+    productId: number,
+  ): Promise<any> {
+    return this.prisma.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        state: true,
+        track_inventory: true,
+        product_variants: {
+          orderBy: { id: 'asc' },
+          take: 100,
+          select: { id: true, name: true, sku: true },
+        },
+      },
+    });
+  }
+
+  /**
+   * Fichas de existencias candidatas para `adjust_stock` (producto + variante
+   * opcional + bodega opcional), con nombre y estado de la bodega. Misma
+   * proyección que la tool leía directa. Lectura pura, scopeada por tienda.
+   */
+  async findStockLevelsForAdjustmentForAgent(params: {
+    productId: number;
+    variantId: number | null;
+    locationId: number | null;
+  }): Promise<any[]> {
+    return this.prisma.stock_levels.findMany({
+      where: {
+        product_id: params.productId,
+        product_variant_id: params.variantId,
+        ...(params.locationId ? { location_id: params.locationId } : {}),
+      },
+      select: {
+        location_id: true,
+        quantity_on_hand: true,
+        quantity_reserved: true,
+        inventory_locations: { select: { name: true, is_active: true } },
+      },
+    });
+  }
 }

@@ -29,7 +29,8 @@ import { FiscalScopeService } from '@common/services/fiscal-scope.service';
  * `requiresConfirmation` + `preview` con sujeto humano, y cada uno cita su
  * read habilitante del paso 6 (F-16/F-18/F-23/F-26). El `handler` re-verifica
  * sus precondiciones porque el `preview` es proyección, no transacción. Toda
- * escritura pasa por el servicio dueño: cero `prisma.` en este archivo.
+ * escritura pasa por el servicio dueño: ninguna lectura directa a la base
+ * en este archivo.
  * `list_invoices` (F-27) vive en esta familia porque el lote la asignó al
  * track fiscal; se respalda en `InvoicingService`, no en queries propias.
  *

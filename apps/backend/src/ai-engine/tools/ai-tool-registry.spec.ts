@@ -302,3 +302,129 @@ describe('ai-tool-registry · T2 versionado + alias + envelope', () => {
     expect(result).toBe(payload);
   });
 });
+
+/**
+ * T5 — Deprecación con alias post-remoción (paso 15).
+ *
+ * Pinnea (a) que invocar un tool deprecado resuelve igual pero emite
+ * `logger.warn` con since/sunset/replacedBy, (b) `getDeprecation` sobre
+ * nombre directo y alias, y (c) que `removeTool` retira el handler pero el
+ * alias sobrevive: re-registrar el destino revive la resolución del nombre
+ * viejo (los turnos persistidos en `ai_messages.tool_calls` lo necesitan).
+ */
+describe('ai-tool-registry · T5 deprecación + remoción', () => {
+  const confirmations = {
+    issue: jest.fn(),
+    redeem: jest.fn(),
+  };
+
+  function buildRegistry() {
+    const registry = new AIToolRegistry(confirmations as any);
+    const handler = jest
+      .fn()
+      .mockResolvedValue(JSON.stringify({ ok: true }));
+    registry.register({
+      name: 'get_order_v2',
+      domain: 'orders',
+      readOnly: true,
+      description: 'Sonda vigente.',
+      parameters: { type: 'object', properties: {} },
+      version: '1',
+      handler,
+    });
+    registry.register({
+      name: 'get_order',
+      domain: 'orders',
+      readOnly: true,
+      description: 'Sonda deprecada.',
+      parameters: { type: 'object', properties: {} },
+      version: '1',
+      deprecated: { since: '1', sunset: 'v9', replacedBy: 'get_order_v2' },
+      handler,
+    });
+    return { registry, handler };
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('deprecado resuelve igual pero emite warn con since/sunset/replacedBy', async () => {
+    const { registry, handler } = buildRegistry();
+    const warn = jest
+      .spyOn((registry as any).logger, 'warn')
+      .mockImplementation(() => undefined);
+
+    const result = await registry.executeTool('get_order', {});
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(result)).toEqual({ ok: true });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('get_order');
+    expect(warn.mock.calls[0][0]).toContain('v1');
+    expect(warn.mock.calls[0][0]).toContain('v9');
+    expect(warn.mock.calls[0][0]).toContain('get_order_v2');
+  });
+
+  it('vigente no emite warn de deprecación', async () => {
+    const { registry } = buildRegistry();
+    const warn = jest
+      .spyOn((registry as any).logger, 'warn')
+      .mockImplementation(() => undefined);
+
+    await registry.executeTool('get_order_v2', {});
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('getDeprecation resuelve directo, alias y namespace; vigente es undefined', () => {
+    const { registry } = buildRegistry();
+    registry.registerAlias('fetch_order', 'get_order');
+
+    expect(registry.getDeprecation('get_order')).toEqual({
+      since: '1',
+      sunset: 'v9',
+      replacedBy: 'get_order_v2',
+    });
+    expect(registry.getDeprecation('fetch_order')).toEqual({
+      since: '1',
+      sunset: 'v9',
+      replacedBy: 'get_order_v2',
+    });
+    expect(registry.getDeprecation('default_api.get_order')).toEqual({
+      since: '1',
+      sunset: 'v9',
+      replacedBy: 'get_order_v2',
+    });
+    expect(registry.getDeprecation('get_order_v2')).toBeUndefined();
+    expect(registry.getDeprecation('no_existe')).toBeUndefined();
+  });
+
+  it('removeTool retira el handler pero el alias sobrevive a la remoción', async () => {
+    const { registry } = buildRegistry();
+    registry.registerAlias('fetch_order', 'get_order_v2');
+
+    expect(registry.removeTool('get_order_v2')).toBe(true);
+    expect(registry.removeTool('get_order_v2')).toBe(false);
+
+    // Destino ausente: el alias no resuelve mal, cae al camino desconocido.
+    const failure: VendixHttpException = await registry
+      .executeTool('fetch_order', {})
+      .catch((error) => error);
+    expect(failure).toBeInstanceOf(VendixHttpException);
+    expect(failure.errorCode).toBe('AI_AGENT_003');
+
+    // El alias sobrevivió: re-registrar el destino revive el nombre viejo.
+    registry.register({
+      name: 'get_order_v2',
+      domain: 'orders',
+      readOnly: true,
+      description: 'Sonda vigente re-registrada.',
+      parameters: { type: 'object', properties: {} },
+      version: '1',
+      handler: jest.fn().mockResolvedValue(JSON.stringify({ revived: true })),
+    });
+    const result = await registry.executeTool('fetch_order', {});
+    expect(JSON.parse(result)).toEqual({ revived: true });
+  });
+});

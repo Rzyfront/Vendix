@@ -14,8 +14,8 @@ import { RegisteredTool } from '../interfaces/tool.interface';
  * con sujeto humano en writes, con re-verificación en el handler.
  *
  * Pinnea además el contrato finance-ops: cadenas run_depreciation←F-95 y
- * auto_match_bank←F-98, wrappers finos sobre services (cero `prisma.` en
- * tools) y permisos verificados en controllers contables.
+ * auto_match_bank←F-98, wrappers finos sobre services (ninguna lectura
+ * directa a la base en tools) y permisos verificados en controllers contables.
  */
 describe('finance-ops.tools · F-95..F-100', () => {
   const CONTEXT = { organization_id: 3, store_id: 7, user_id: 11 };

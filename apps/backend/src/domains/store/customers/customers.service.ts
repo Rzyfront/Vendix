@@ -1962,6 +1962,42 @@ export class CustomersService {
     });
   }
 
+  /**
+   * Organización de una tienda para `upsert_customer`. `stores` NO está
+   * scopeado: el filtro por id es obligatorio y va escrito a mano, igual que
+   * lo hacía la tool antes del paso 15. Lectura pura.
+   */
+  async findOrganizationIdByStoreForAgent(
+    storeId: number,
+  ): Promise<number | null> {
+    const store = await this.prisma.stores.findFirst({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+    return store?.organization_id ?? null;
+  }
+
+  /**
+   * Conflicto de correo para `upsert_customer` (réplica de lectura de la
+   * unicidad que `update`/`create` exigen). `users` NO está scopeado, así que
+   * el filtro `organization_id` va escrito a mano; `excludeUserId` excluye al
+   * cliente que se está editando. El correo llega ya en minúsculas.
+   */
+  async findUserByEmailInOrganizationForAgent(
+    email: string,
+    organizationId: number,
+    excludeUserId?: number | null,
+  ): Promise<any> {
+    return this.prisma.users.findFirst({
+      where: {
+        email,
+        organization_id: organizationId,
+        ...(excludeUserId ? { NOT: { id: excludeUserId } } : {}),
+      },
+      select: { id: true, first_name: true, last_name: true },
+    });
+  }
+
   async linkCustomerToStore(userId: number, storeId: number): Promise<void> {
     const existing = await this.prisma.store_users.findFirst({
       where: {

@@ -10,7 +10,6 @@ import {
 } from '@common/constants/document-types';
 import { VendixHttpException } from '../../../common/errors';
 import { RegisteredTool, ToolPreview } from '../interfaces/tool.interface';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { InventoryAdjustmentsService } from '../../../domains/store/inventory/adjustments/inventory-adjustments.service';
 import {
   AdjustmentType,
@@ -117,11 +116,13 @@ import { CreateFromOrderDto } from '../../../domains/store/dispatch-notes/dto/cr
  * módulo. `AIToolRegistry` viene del `AIEngineModule` `@Global()`: se inyecta
  * SIN importar ese módulo, que es justo lo que evita el ciclo.
  *
- * ## Doctrina: se reutiliza el servicio de dominio, nunca Prisma crudo
+ * ## Doctrina: se reutiliza el servicio de dominio, nunca la base cruda
  *
- * Prisma aquí es solo para LEER (previsualizar y re-verificar). Toda escritura
- * pasa por el servicio dueño de la regla, porque ahí viven efectos que un
- * `prisma.update` se saltaría en silencio:
+ * Ni siquiera para LEER: previsualizar y re-verificar también pasa por
+ * métodos `*ForAgent` del servicio dueño, que es quien conoce el scope tenant
+ * y la forma del schema. Toda escritura pasa por el servicio dueño de la
+ * regla, porque ahí viven efectos que una escritura directa se saltaría en
+ * silencio:
  *
  *  - `InventoryAdjustmentsService.createAdjustment` → `StockLevelManager`
  *    (costeo CPP/FIFO, `inventory_transactions`, `syncProductStock`) + evento
@@ -137,11 +138,11 @@ import { CreateFromOrderDto } from '../../../domains/store/dispatch-notes/dto/cr
  *
  * ## Multi-tenant
  *
- * Siempre `StorePrismaService`. Dos trampas ya documentadas en el repo:
- * `stores` y `users` devuelven el cliente SIN scope (`vendix-prisma-scopes`),
- * así que toda consulta a esas dos tablas lleva su filtro de tienda escrito a
- * mano. `$transaction` también sale del `baseClient`, pero aquí no abrimos
- * ninguna: las transacciones viven dentro de los servicios de dominio.
+ * El scope tenant lo aplica el servicio dueño en cada método `*ForAgent`.
+ * Dos trampas ya documentadas en el repo (`vendix-prisma-scopes`): `stores`
+ * y `users` devuelven el cliente SIN scope, así que esos métodos llevan su
+ * filtro de tienda/organización escrito a mano. Las transacciones viven
+ * dentro de los servicios de dominio; aquí no se abre ninguna.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -291,11 +292,6 @@ function totalTaxRate(assignments: any[] | undefined | null): number {
 
 export interface InventoryWriteToolDeps {
   adjustmentsService: InventoryAdjustmentsService;
-  /**
-   * Siempre `StorePrismaService`: `products`, `product_variants` y
-   * `stock_levels` son datos de tienda y el cliente scopeado inyecta el filtro.
-   */
-  prisma: StorePrismaService;
 }
 
 const ADJUSTMENT_TYPES: readonly AdjustmentType[] = [
@@ -325,7 +321,7 @@ interface StockTarget {
 export function createInventoryWriteTools(
   deps: InventoryWriteToolDeps,
 ): RegisteredTool[] {
-  const { adjustmentsService, prisma } = deps;
+  const { adjustmentsService } = deps;
 
   /**
    * Resuelve producto + variante + bodega + cantidades contra la base.
@@ -376,21 +372,10 @@ export function createInventoryWriteTools(
     }
     const adjustmentType = rawType as AdjustmentType;
 
-    const product: any = await prisma.products.findFirst({
-      where: { id: productId },
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        state: true,
-        track_inventory: true,
-        product_variants: {
-          orderBy: { id: 'asc' },
-          take: 100,
-          select: { id: true, name: true, sku: true },
-        },
-      },
-    });
+    const product: any =
+      await adjustmentsService.findProductForStockAdjustmentForAgent(
+        productId,
+      );
 
     if (!product) {
       return failure(
@@ -475,19 +460,12 @@ export function createInventoryWriteTools(
       return failure(targetLabel, 'location_id inválido.');
     }
 
-    const levels: any[] = await prisma.stock_levels.findMany({
-      where: {
-        product_id: productId,
-        product_variant_id: variant ? variant.id : null,
-        ...(requestedLocationId ? { location_id: requestedLocationId } : {}),
-      },
-      select: {
-        location_id: true,
-        quantity_on_hand: true,
-        quantity_reserved: true,
-        inventory_locations: { select: { name: true, is_active: true } },
-      },
-    });
+    const levels: any[] =
+      await adjustmentsService.findStockLevelsForAdjustmentForAgent({
+        productId,
+        variantId: variant ? variant.id : null,
+        locationId: requestedLocationId,
+      });
 
     if (!levels.length) {
       return failure(
@@ -712,7 +690,6 @@ export function createInventoryWriteTools(
 
 export interface ProductWriteToolDeps {
   productsService: ProductsService;
-  prisma: StorePrismaService;
 }
 
 /** Qué campo de precio se está tocando. */
@@ -739,7 +716,7 @@ const PRICE_FIELD_LABELS: Record<PriceField, string> = {
 export function createProductWriteTools(
   deps: ProductWriteToolDeps,
 ): RegisteredTool[] {
-  const { productsService, prisma } = deps;
+  const { productsService } = deps;
 
   /**
    * Precondición replicada de `products.service.ts` (`update` y
@@ -750,15 +727,10 @@ export function createProductWriteTools(
     productId: number,
     variantId: number | null,
   ): Promise<boolean> {
-    const found = await prisma.stock_reservations.findFirst({
-      where: {
-        product_id: productId,
-        product_variant_id: variantId,
-        status: 'active',
-      },
-      select: { id: true },
-    });
-    return !!found;
+    return productsService.hasActiveStockReservationsForAgent(
+      productId,
+      variantId,
+    );
   }
 
   async function resolvePriceTarget(
@@ -816,37 +788,8 @@ export function createProductWriteTools(
       );
     }
 
-    const product: any = await prisma.products.findFirst({
-      where: { id: productId },
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        state: true,
-        base_price: true,
-        sale_price: true,
-        is_on_sale: true,
-        product_tax_assignments: {
-          select: {
-            tax_categories: {
-              select: { tax_rates: { select: { rate: true } } },
-            },
-          },
-        },
-        product_variants: {
-          orderBy: { id: 'asc' },
-          take: 100,
-          select: {
-            id: true,
-            name: true,
-            sku: true,
-            price_override: true,
-            sale_price: true,
-            is_on_sale: true,
-          },
-        },
-      },
-    });
+    const product: any =
+      await productsService.findProductForPriceChangeForAgent(productId);
 
     if (!product) {
       return failure(
@@ -1060,14 +1003,17 @@ export function createProductWriteTools(
     const sku = cleanString(args.sku);
     const barcode = cleanString(args.barcode);
 
-    // Réplicas de las precondiciones de `ProductsService.create`: slug, SKU y
-    // código de barras únicos dentro de la tienda (PROD_DUP_001 /
-    // PROD_BARCODE_DUP_001).
+    // Réplicas de lectura de las precondiciones de `ProductsService.create`:
+    // slug, SKU y código de barras únicos dentro de la tienda (PROD_DUP_001 /
+    // PROD_BARCODE_DUP_001). El servicio re-valida al aplicar.
     const slug = generateSlug(name);
-    const slugConflict: any = await prisma.products.findFirst({
-      where: { slug },
-      select: { id: true, name: true },
-    });
+    const conflicts =
+      await productsService.findProductUniquenessConflictsForAgent({
+        slug,
+        sku: sku ?? null,
+        barcode: barcode ?? null,
+      });
+    const slugConflict: any = conflicts.slug;
     if (slugConflict) {
       return failure(
         name,
@@ -1077,10 +1023,7 @@ export function createProductWriteTools(
     }
 
     if (sku) {
-      const skuConflict: any = await prisma.products.findFirst({
-        where: { sku },
-        select: { id: true, name: true },
-      });
+      const skuConflict: any = conflicts.sku;
       if (skuConflict) {
         return failure(
           name,
@@ -1090,20 +1033,14 @@ export function createProductWriteTools(
     }
 
     if (barcode) {
-      const barcodeProduct: any = await prisma.products.findFirst({
-        where: { barcode },
-        select: { id: true, name: true },
-      });
+      const barcodeProduct: any = conflicts.barcodeProduct;
       if (barcodeProduct) {
         return failure(
           name,
           `El código de barras "${barcode}" ya lo usa "${barcodeProduct.name}" (id ${barcodeProduct.id}).`,
         );
       }
-      const barcodeVariant: any = await prisma.product_variants.findFirst({
-        where: { barcode },
-        select: { id: true },
-      });
+      const barcodeVariant: any = conflicts.barcodeVariant;
       if (barcodeVariant) {
         return failure(
           name,
@@ -1521,12 +1458,6 @@ export function createProductWriteTools(
 
 export interface CustomerWriteToolDeps {
   customersService: CustomersService;
-  /**
-   * `StorePrismaService`. Ojo: su getter `users` devuelve el cliente SIN scope
-   * (`vendix-prisma-scopes`), así que toda consulta a `users` de este bloque
-   * lleva el filtro de tienda/organización escrito a mano.
-   */
-  prisma: StorePrismaService;
 }
 
 /** Campos que la herramienta sabe escribir, con su etiqueta para la propuesta. */
@@ -1556,19 +1487,14 @@ interface CustomerUpsert {
 export function createCustomerWriteTools(
   deps: CustomerWriteToolDeps,
 ): RegisteredTool[] {
-  const { customersService, prisma } = deps;
+  const { customersService } = deps;
 
-  /** `stores` NO está scopeado: el filtro por id es obligatorio. */
   async function resolveOrganizationId(
     storeId: number,
     contextOrgId?: number,
   ): Promise<number | null> {
     if (contextOrgId) return contextOrgId;
-    const store: any = await prisma.stores.findFirst({
-      where: { id: storeId },
-      select: { organization_id: true },
-    });
-    return store?.organization_id ?? null;
+    return customersService.findOrganizationIdByStoreForAgent(storeId);
   }
 
   async function resolveUpsert(
@@ -1670,13 +1596,11 @@ export function createCustomerWriteTools(
       const newLabel = `${firstName} ${lastName}`.trim();
 
       if (email) {
-        const emailConflict: any = await prisma.users.findFirst({
-          where: {
-            email: email.toLowerCase(),
-            organization_id: organizationId,
-          },
-          select: { id: true, first_name: true, last_name: true },
-        });
+        const emailConflict: any =
+          await customersService.findUserByEmailInOrganizationForAgent(
+            email.toLowerCase(),
+            organizationId,
+          );
         if (emailConflict) {
           return failure(
             newLabel,
@@ -1822,14 +1746,12 @@ export function createCustomerWriteTools(
     }
 
     if (payload.email && existing.organization_id) {
-      const emailConflict: any = await prisma.users.findFirst({
-        where: {
-          email: String(payload.email).toLowerCase(),
-          organization_id: existing.organization_id,
-          NOT: { id: customerId },
-        },
-        select: { id: true, first_name: true, last_name: true },
-      });
+      const emailConflict: any =
+        await customersService.findUserByEmailInOrganizationForAgent(
+          String(payload.email).toLowerCase(),
+          existing.organization_id,
+          customerId,
+        );
       if (emailConflict) {
         return failure(
           currentLabel,
@@ -2022,13 +1944,12 @@ export function createCustomerWriteTools(
 
 export interface OrderWriteToolDeps {
   /**
-   * `OrderFlowService` y NO `prisma.orders.update`: es el único escritor
+   * `OrderFlowService` y NO una escritura directa: es el único escritor
    * legítimo de `orders.state`. Escribir el estado a mano deja reservas de
    * stock huérfanas y se salta el evento `order.shipped` (QUI-557).
    */
   orderFlowService: OrderFlowService;
   dispatchNotesService: DispatchNotesService;
-  prisma: StorePrismaService;
 }
 
 /**
@@ -2082,7 +2003,7 @@ interface DispatchPlan {
 export function createOrderWriteTools(
   deps: OrderWriteToolDeps,
 ): RegisteredTool[] {
-  const { orderFlowService, dispatchNotesService, prisma } = deps;
+  const { orderFlowService, dispatchNotesService } = deps;
 
   async function resolveTransition(
     args: Record<string, any>,
@@ -2114,16 +2035,8 @@ export function createOrderWriteTools(
       );
     }
 
-    const order: any = await prisma.orders.findFirst({
-      where: { id: orderId },
-      select: {
-        id: true,
-        order_number: true,
-        state: true,
-        remaining_balance: true,
-        dispatch_fulfillment: true,
-      },
-    });
+    const order: any =
+      await orderFlowService.findOrderForStatusTransitionForAgent(orderId);
 
     if (!order) {
       return failure(
@@ -2210,20 +2123,8 @@ export function createOrderWriteTools(
       );
     }
 
-    const order: any = await prisma.orders.findFirst({
-      where: { id: orderId },
-      select: {
-        id: true,
-        order_number: true,
-        state: true,
-        delivery_type: true,
-        shipping_address_snapshot: true,
-        shipping_address_id: true,
-        order_items: {
-          select: { id: true, product_name: true, quantity: true },
-        },
-      },
-    });
+    const order: any =
+      await dispatchNotesService.findOrderForDispatchPlanForAgent(orderId);
 
     if (!order) {
       return failure(
