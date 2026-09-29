@@ -1231,7 +1231,7 @@
             >
             </app-setting-toggle>
 
-            @if (productForm.get('track_inventory')?.value) {
+            @if (productForm.get('track_inventory')?.value && !isService) {
               <div class="pt-2">
                 <app-input
                   formControlName="min_stock_level"
@@ -2370,6 +2370,7 @@
                     >
                   </div>
                 </div>
+                @if (!isService) {
                 <div class="mt-2 p-2.5 bg-surface rounded-lg border border-border flex items-center justify-between text-xs">
                   <div class="flex items-center gap-1.5 text-text-muted">
                     <app-icon name="alert-triangle" size="14" class="text-amber-500"></app-icon>
@@ -2382,6 +2383,7 @@
                     </span>
                   </span>
                 </div>
+                }
               </div>
 
               <!-- Acciones Rápidas -->
@@ -3800,6 +3802,7 @@
           }
         </div>
       </div>
+@if (!isService) {
       <div class="p-4 bg-bg rounded-xl border border-border">
         <p
           class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1"
@@ -3815,6 +3818,7 @@
           </span>
         </div>
       </div>
+}
     </div>
 
     <!-- Desglose del insumo (Modelo B) -->

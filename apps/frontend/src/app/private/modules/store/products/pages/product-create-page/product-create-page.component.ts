@@ -585,7 +585,7 @@ export class ProductCreatePageComponent {
   });
 
   readonly effectiveProductLowStockThreshold = computed<number>(() => {
-    const formVal = this.productForm?.get('min_stock_level')?.value;
+    const formVal = this.minStockFormValue();
     const num = Number(formVal);
     if (
       formVal !== null &&
@@ -596,7 +596,7 @@ export class ProductCreatePageComponent {
     ) {
       return num;
     }
-    const prodVal = Number(this.product?.min_stock_level);
+    const prodVal = Number(this.productMinStockLevel());
     if (Number.isFinite(prodVal) && prodVal > 0) {
       return prodVal;
     }
@@ -604,7 +604,7 @@ export class ProductCreatePageComponent {
   });
 
   readonly isCustomLowStockThreshold = computed<boolean>(() => {
-    const formVal = this.productForm?.get('min_stock_level')?.value;
+    const formVal = this.minStockFormValue();
     const num = Number(formVal);
     if (
       formVal !== null &&
@@ -615,7 +615,7 @@ export class ProductCreatePageComponent {
     ) {
       return true;
     }
-    const prodVal = Number(this.product?.min_stock_level);
+    const prodVal = Number(this.productMinStockLevel());
     return Number.isFinite(prodVal) && prodVal > 0;
   });
   private readonly loginIndustries = toSignal(this.authFacade.userIndustries$, {
@@ -966,6 +966,17 @@ export class ProductCreatePageComponent {
   readonly requiresBookingSig = signal(false);
 
   productForm: FormGroup = this.createForm();
+
+  /** Valor del control `min_stock_level` como señal (los computed no ven FormControl). */
+  private readonly minStockFormValue = toSignal(
+    this.productForm.get('min_stock_level')!.valueChanges.pipe(
+      startWith(this.productForm.get('min_stock_level')!.value),
+    ),
+    { initialValue: this.productForm.get('min_stock_level')!.value },
+  );
+
+  /** `min_stock_level` del producto cargado/guardado, espejo en señal de `product`. */
+  private readonly productMinStockLevel = signal<number | null>(null);
 
   /**
    * Cuenta PUC del producto, leída como señal.
@@ -1870,6 +1881,7 @@ export class ProductCreatePageComponent {
         } as Product;
 
         this.product = updatedProduct;
+        this.productMinStockLevel.set(updatedProduct?.min_stock_level ?? null);
         this.onlinePurchaseProduct.set(updatedProduct);
         this.toastService.success('Link y QR de compra online generados');
         this.isGeneratingOnlinePurchaseLink.set(false);
@@ -2262,6 +2274,7 @@ export class ProductCreatePageComponent {
     this.productsService.getProductById(id).subscribe({
       next: (product: Product) => {
         this.product = product;
+        this.productMinStockLevel.set(product?.min_stock_level ?? null);
         this.onlinePurchaseProduct.set(product);
         this.patchForm(product);
         // Form ya poblado → render con `is_ingredient` resuelto (sin flash).
@@ -4539,6 +4552,7 @@ export class ProductCreatePageComponent {
               // El producto YA existe aunque veníamos de crear: sin promover a
               // modo edición, reintentar guardaría un duplicado del producto.
               this.product = savedProduct;
+              this.productMinStockLevel.set(savedProduct?.min_stock_level ?? null);
               this.productId = savedProduct.id;
               this.isEditMode.set(true);
               this.toastService.error(

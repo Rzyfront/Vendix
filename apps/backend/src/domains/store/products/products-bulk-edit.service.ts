@@ -1136,9 +1136,10 @@ export class ProductsBulkEditService {
    * original — de ahí el clon previo en `preview()`.
    *
    * Solo se replican los campos que existen en `BulkEditableChangesDto`: los de
-   * stock (`stock_quantity`, `min_stock_level`, `reorder_point`, …) y
-   * `requires_batch_tracking` están excluidos del contrato de edición masiva, así
-   * que forzarlos aquí no cambiaría nada.
+   * stock (`stock_quantity`, `reorder_point`, …) y `requires_batch_tracking`
+   * están excluidos del contrato de edición masiva, así que forzarlos aquí no
+   * cambiaría nada. La excepción es `min_stock_level`, que sí es editable y por
+   * eso se descarta explícitamente para servicios.
    */
   private validateByProductType(payload: Record<string, any>): void {
     if (payload.product_type !== ProductType.SERVICE) return;
@@ -1150,11 +1151,12 @@ export class ProductsBulkEditService {
       throw new VendixHttpException(ErrorCodes.PROD_SVC_001);
     }
 
-    // Inventario forzado a off para servicios solo si no se activa explícitamente el control de inventario
-    if (!payload.track_inventory) {
-      payload.track_inventory = false;
-      payload.min_stock_level = undefined;
-    }
+    // Inventario forzado a off para servicios. `track_inventory: false` se
+    // PERSISTE aunque el usuario no lo haya pedido, así que entra al diff.
+    // `min_stock_level` se descarta: el consumo de stock salta los servicios,
+    // así que un umbral nunca dispararía.
+    payload.track_inventory = false;
+    payload.min_stock_level = undefined;
     payload.weight = undefined;
     payload.dimensions = undefined;
     payload.requires_serial_numbers = undefined;

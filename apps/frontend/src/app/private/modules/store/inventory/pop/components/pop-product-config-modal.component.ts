@@ -1599,11 +1599,13 @@ export class PopProductConfigModalComponent {
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
-            if (currentProd) {
-              currentProd.min_stock_level = newMinStock;
-            }
+            this.toastService.success('Umbral de stock actualizado');
           },
-          error: () => {},
+          error: () => {
+            this.toastService.error(
+              'No se pudo actualizar el umbral de stock del producto',
+            );
+          },
         });
     }
 
