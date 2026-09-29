@@ -251,6 +251,13 @@ export const analyticsRoutes: Routes = [
               ),
           },
           {
+            path: 'trends',
+            loadComponent: () =>
+              import('./pages/purchases/purchase-trends.component').then(
+                (c) => c.PurchaseTrendsComponent,
+              ),
+          },
+          {
             path: 'payable-aging',
             loadComponent: () =>
               import('./pages/purchases/payable-aging.component').then(

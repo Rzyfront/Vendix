@@ -126,6 +126,25 @@ export interface PurchasesBySupplier {
   growth: number | null;
 }
 
+export interface PurchaseTrendItem {
+  track_id: string;
+  id: string;
+  period: string;
+  supplier_id: number;
+  supplier_name: string;
+  purchase_count: number;
+  total_amount: number;
+  avg_purchase: number;
+  items_received: number;
+}
+
+export interface PurchaseTrendsSummary {
+  purchase_count: number;
+  total_amount: number;
+  avg_purchase: number;
+  items_received: number;
+}
+
 // Reviews interfaces
 export interface ReviewsSummary {
   total_reviews: number;
@@ -1080,6 +1099,18 @@ export class AnalyticsService {
     );
   }
 
+  getPurchaseTrends(
+    query: any = {},
+  ): Observable<PaginatedResponse<PurchaseTrendItem> & { summary?: PurchaseTrendsSummary }> {
+    const cacheKey = `purchases-trends-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<PaginatedResponse<PurchaseTrendItem> & { summary?: PurchaseTrendsSummary }>(
+        this.getApiUrl('purchases/trends'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
   getPayableAging(
     query: PayableAgingQuery = {},
   ): Observable<PaginatedResponse<PayableAgingRow>> {
@@ -1090,6 +1121,13 @@ export class AnalyticsService {
         { params: this.buildParams(query) },
       ),
     );
+  }
+
+  exportPurchaseTrends(query: any = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('purchases/trends/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
   }
 
   exportPayableAging(query: PayableAgingQuery = {}): Observable<Blob> {
@@ -1193,7 +1231,7 @@ export class AnalyticsService {
   invalidateCache(prefix?: string): void {
     if (prefix) {
       for (const key of analyticsCache.keys()) {
-        if (key.startsWith(prefix)) {
+        if (key.includes(prefix) || key.startsWith(prefix)) {
           analyticsCache.delete(key);
         }
       }
