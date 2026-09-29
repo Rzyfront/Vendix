@@ -20,6 +20,7 @@ describe('dispatch.tools · D-1 list / D-3 transition / D-5 notes', () => {
     dispatchRoutesService?: Record<string, any>;
     routeFlowService?: Record<string, any>;
     dispatchNotesService?: Record<string, any>;
+    vehiclesService?: Record<string, any>;
   } = {}) {
     const deps = {
       dispatchRoutesService: {
@@ -27,6 +28,11 @@ describe('dispatch.tools · D-1 list / D-3 transition / D-5 notes', () => {
         findOne: jest.fn(),
         getStats: jest.fn(),
         getMonitor: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+        remove: jest.fn(),
+        addStops: jest.fn(),
+        getMapStops: jest.fn(),
         ...overrides.dispatchRoutesService,
       } as any,
       routeFlowService: {
@@ -36,16 +42,26 @@ describe('dispatch.tools · D-1 list / D-3 transition / D-5 notes', () => {
         releaseStop: jest.fn(),
         close: jest.fn(),
         void: jest.fn(),
+        generatePdf: jest.fn(),
         ...overrides.routeFlowService,
       } as any,
       dispatchNotesService: {
         findOne: jest.fn(),
+        findAll: jest.fn(),
+        getStats: jest.fn(),
         update: jest.fn(),
         remove: jest.fn(),
         createFromOrder: jest.fn(),
         createFromOrdersBatch: jest.fn(),
         validateFromOrdersBatch: jest.fn(),
         ...overrides.dispatchNotesService,
+      } as any,
+      vehiclesService: {
+        findOne: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+        remove: jest.fn(),
+        ...overrides.vehiclesService,
       } as any,
     } satisfies DispatchToolDeps;
     return { deps, tools: createDispatchTools(deps) };
@@ -116,14 +132,20 @@ describe('dispatch.tools · D-1 list / D-3 transition / D-5 notes', () => {
   };
 
   describe('contrato de familia', () => {
-    it('declara version 1 en las 3 tools', () => {
+    it('declara version 1 en las 7 tools', () => {
       const { tools } = buildTools();
-      for (const name of [
+      expect(tools.map((tool) => tool.name)).toEqual([
         'list_dispatch_routes',
+        'manage_dispatch_route',
         'transition_route_stop',
         'manage_dispatch_notes',
-      ]) {
-        expect(getTool(tools, name).version).toBe('1');
+        'get_route_map',
+        'list_dispatch_notes',
+        'manage_vehicles',
+      ]);
+      for (const tool of tools) {
+        expect(tool.version).toBe('1');
+        expect(tool.domain).toBe('dispatch');
       }
     });
 
@@ -1001,6 +1023,347 @@ describe('dispatch.tools · D-1 list / D-3 transition / D-5 notes', () => {
 
       expect(remove).toHaveBeenCalledWith(101);
       expect(answer.eliminada).toBe(true);
+    });
+  });
+
+  // ─── Paso 13: D-2/D-4/D-6/D-7 ────────────────────────────────────
+  describe('manage_dispatch_route (D-2)', () => {
+    const ARGS_CREATE = {
+      action: 'create',
+      route_code: 'RI02',
+      planned_date: '2026-01-10',
+      vehicle_id: 4,
+      driver_user_id: 11,
+      stops: [{ dispatch_note_id: 101 }, { dispatch_note_id: 102 }],
+    };
+
+    it('contrato: confirmación + preview + permisos CRUD', () => {
+      const { tools } = buildTools();
+      const tool = getTool(tools, 'manage_dispatch_route');
+      expect(tool.requiresConfirmation).toBe(true);
+      expect(typeof tool.preview).toBe('function');
+      expect(tool.requiredPermissions).toEqual([
+        'store:dispatch_routes:create',
+        'store:dispatch_routes:update',
+        'store:dispatch_routes:delete',
+      ]);
+      expect(tool.description).toMatch(/list_dispatch_routes/);
+    });
+
+    it('happy create: preview lista paradas y handler delega (snapshot)', async () => {
+      const create = jest
+        .fn()
+        .mockResolvedValue({ ...ROUTE_DRAFT, id: 10 });
+      const { tools } = buildTools({
+        dispatchRoutesService: { create },
+      });
+      const tool = getTool(tools, 'manage_dispatch_route');
+
+      const preview = await tool.preview!(ARGS_CREATE, CONTEXT as any);
+      expect(preview.status).toBe('ok');
+      expect(preview.target).toMatch(/RI02/);
+      expect(preview.target).toMatch(/2 parada/);
+
+      const answer = JSON.parse(
+        await tool.handler!(ARGS_CREATE, CONTEXT),
+      );
+      expect(create).toHaveBeenCalled();
+      const dto = create.mock.calls[0][0];
+      expect(dto.route_code).toBe('RI02');
+      expect(dto.stops).toHaveLength(2);
+      expect(dto.stops[0]).toMatchObject({
+        dispatch_note_id: 101,
+        stop_sequence: 1,
+      });
+      expect(answer).toEqual({
+        resumen:
+          'Planilla PLN2601010009 creada en borrador con 2 parada(s). Despáchala con transition_route_stop(dispatch).',
+        route_id: 10,
+      });
+    });
+
+    it('sad: editar una ruta despachada se rechaza sin tocar el servicio', async () => {
+      const update = jest.fn();
+      const { tools } = buildTools({
+        dispatchRoutesService: {
+          findOne: jest
+            .fn()
+            .mockResolvedValue({ ...ROUTE_DRAFT, status: 'dispatched' }),
+          update,
+        },
+      });
+      const tool = getTool(tools, 'manage_dispatch_route');
+
+      const preview = await tool.preview!(
+        { action: 'update', route_id: 9, route_code: 'RI03' },
+        CONTEXT as any,
+      );
+      expect(preview.status).toBe('error');
+      expect(preview.message).toMatch(/borrador/);
+
+      const answer = JSON.parse(
+        await tool.handler!(
+          { action: 'update', route_id: 9, route_code: 'RI03' },
+          CONTEXT,
+        ),
+      );
+      expect(answer.error).toMatch(/dispatched/);
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('happy add-stops delega con DTO real', async () => {
+      const addStops = jest
+        .fn()
+        .mockResolvedValue({ ...ROUTE_DRAFT, stops: [{}, {}, {}] });
+      const { tools } = buildTools({
+        dispatchRoutesService: {
+          findOne: jest.fn().mockResolvedValue(ROUTE_DRAFT),
+          addStops,
+        },
+      });
+      const tool = getTool(tools, 'manage_dispatch_route');
+      const answer = JSON.parse(
+        await tool.handler!(
+          {
+            action: 'add-stops',
+            route_id: 9,
+            stops: [{ dispatch_note_id: 103 }],
+          },
+          CONTEXT,
+        ),
+      );
+
+      expect(addStops).toHaveBeenCalledWith(
+        9,
+        expect.objectContaining({
+          stops: [{ dispatch_note_id: 103 }],
+        }),
+      );
+      expect(answer.resumen).toMatch(/1 parada\(s\) agregada/);
+    });
+  });
+
+  describe('get_route_map (D-4)', () => {
+    const MAP = {
+      origin: { lat: 4.71, lng: -74.07 },
+      stops: [
+        {
+          stop_id: 31,
+          stop_sequence: 1,
+          lat: 4.72,
+          lng: -74.08,
+          customer: 'Tienda El Sol',
+        },
+      ],
+      delivered: [{ stop_id: 32 }],
+      unlocated: [
+        { dispatchNoteId: 104, customerAddress: 'Vereda El Hato' },
+      ],
+    };
+
+    it('contrato: readOnly con permiso de lectura', () => {
+      const { tools } = buildTools();
+      const tool = getTool(tools, 'get_route_map');
+      expect(tool.readOnly).toBe(true);
+      expect(tool.requiresConfirmation).toBeUndefined();
+      expect(tool.requiredPermissions).toEqual([
+        'store:dispatch_routes:read',
+      ]);
+    });
+
+    it('happy: mapa con ubicadas y sin-ubicar (snapshot)', async () => {
+      const getMapStops = jest.fn().mockResolvedValue(MAP);
+      const { tools } = buildTools({
+        dispatchRoutesService: { getMapStops },
+      });
+      const tool = getTool(tools, 'get_route_map');
+      const answer = JSON.parse(
+        await tool.handler!({ route_id: 9 }, CONTEXT),
+      );
+
+      expect(getMapStops).toHaveBeenCalledWith(9);
+      expect(answer).toEqual({
+        planilla: 'Planilla #9',
+        origen: { lat: 4.71, lng: -74.07 },
+        paradas: [
+          {
+            stop_id: 31,
+            sequence: 1,
+            lat: 4.72,
+            lng: -74.08,
+            customer: 'Tienda El Sol',
+          },
+        ],
+        entregadas: 1,
+        sin_ubicar: [
+          { dispatch_note_id: 104, customer_address: 'Vereda El Hato' },
+        ],
+        next_step:
+          'Repite con include_pdf=true si necesitas la ficha del PDF imprimible.',
+      });
+    });
+
+    it('happy include_pdf: devuelve la ficha sin el binario', async () => {
+      const getMapStops = jest.fn().mockResolvedValue(MAP);
+      const generatePdf = jest
+        .fn()
+        .mockResolvedValue(Buffer.alloc(12345));
+      const { tools } = buildTools({
+        dispatchRoutesService: { getMapStops },
+        routeFlowService: { generatePdf },
+      });
+      const tool = getTool(tools, 'get_route_map');
+      const answer = JSON.parse(
+        await tool.handler!({ route_id: 9, include_pdf: true }, CONTEXT),
+      );
+
+      expect(generatePdf).toHaveBeenCalledWith(9);
+      expect(answer.pdf).toEqual({
+        filename: 'planilla-9.pdf',
+        bytes: 12345,
+        nota: expect.stringContaining('Descárgalo'),
+      });
+      expect(JSON.stringify(answer)).not.toMatch(/%PDF/);
+    });
+  });
+
+  describe('list_dispatch_notes (D-6)', () => {
+    const NOTE_FULL = {
+      id: 101,
+      dispatch_number: 'REM-0101',
+      status: 'draft',
+      direction: 'outbound',
+      subtype: 'sale',
+      customer_name: 'Tienda El Sol',
+      grand_total: '250000',
+      order_id: 501,
+      emission_date: '2026-01-09',
+      agreed_delivery_date: '2026-01-10',
+      customer_address: { address_line1: 'Calle 8 # 3-20' },
+      dispatch_note_items: [
+        { product_id: 5, product_name: 'Arroz 5kg', dispatched_quantity: '10' },
+      ],
+    };
+
+    it('contrato: readOnly con permiso de lectura', () => {
+      const { tools } = buildTools();
+      const tool = getTool(tools, 'list_dispatch_notes');
+      expect(tool.readOnly).toBe(true);
+      expect(tool.requiredPermissions).toEqual([
+        'store:dispatch_notes:read',
+      ]);
+      expect(tool.description).toMatch(/manage_dispatch_notes/);
+    });
+
+    it('happy detalle: remisión con líneas y dirección (snapshot)', async () => {
+      const findOne = jest.fn().mockResolvedValue(NOTE_FULL);
+      const { tools } = buildTools({
+        dispatchNotesService: { findOne },
+      });
+      const tool = getTool(tools, 'list_dispatch_notes');
+      const answer = JSON.parse(
+        await tool.handler!({ dispatch_note_id: 101 }, CONTEXT),
+      );
+
+      expect(findOne).toHaveBeenCalledWith(101);
+      expect(answer.remision.dispatch_number).toBe('REM-0101');
+      expect(answer.remision.items).toEqual([
+        { product: 'Arroz 5kg', quantity: 10 },
+      ]);
+      expect(answer.next_step).toMatch(/manage_dispatch_route/);
+    });
+
+    it('sad: status inválido no toca el servicio', async () => {
+      const findAll = jest.fn();
+      const { tools } = buildTools({
+        dispatchNotesService: { findAll },
+      });
+      const tool = getTool(tools, 'list_dispatch_notes');
+      const answer = JSON.parse(
+        await tool.handler!({ status: 'volando' }, CONTEXT),
+      );
+
+      expect(answer.error).toMatch(/inválido/);
+      expect(findAll).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('manage_vehicles (D-7)', () => {
+    const VEHICLE = {
+      id: 4,
+      plate: 'ABC123',
+      brand: 'Chevrolet',
+      model_name: 'NPR',
+      capacity_kg: '3500',
+      is_active: true,
+    };
+
+    it('contrato: confirmación + preview + permisos de flota', () => {
+      const { tools } = buildTools();
+      const tool = getTool(tools, 'manage_vehicles');
+      expect(tool.requiresConfirmation).toBe(true);
+      expect(typeof tool.preview).toBe('function');
+      expect(tool.requiredPermissions).toEqual([
+        'store:dispatch_fleet:create',
+        'store:dispatch_fleet:update',
+        'store:dispatch_fleet:delete',
+      ]);
+    });
+
+    it('happy create: preview con placa y handler delega (snapshot)', async () => {
+      const create = jest.fn().mockResolvedValue(VEHICLE);
+      const { tools } = buildTools({
+        vehiclesService: { create },
+      });
+      const tool = getTool(tools, 'manage_vehicles');
+      const args = {
+        action: 'create',
+        plate: 'ABC123',
+        brand: 'Chevrolet',
+        model_name: 'NPR',
+        capacity_kg: 3500,
+        primary_driver_id: 11,
+      };
+
+      const preview = await tool.preview!(args, CONTEXT as any);
+      expect(preview.status).toBe('ok');
+      expect(preview.target).toBe('Alta de vehículo — placa ABC123');
+
+      const answer = JSON.parse(await tool.handler!(args, CONTEXT));
+      expect(create).toHaveBeenCalled();
+      expect(answer).toEqual({
+        resumen: 'Vehículo placa ABC123 dado de alta (#4).',
+        vehicle_id: 4,
+      });
+    });
+
+    it('happy update(is_active=false): retiro seguro con re-verificación', async () => {
+      const update = jest.fn().mockResolvedValue({ ...VEHICLE });
+      const findOne = jest.fn().mockResolvedValue(VEHICLE);
+      const { tools } = buildTools({
+        vehiclesService: { findOne, update },
+      });
+      const tool = getTool(tools, 'manage_vehicles');
+
+      const preview = await tool.preview!(
+        { action: 'update', vehicle_id: 4, is_active: false },
+        CONTEXT as any,
+      );
+      expect(preview.status).toBe('ok');
+      expect(preview.target).toBe('Edición — Vehículo ABC123');
+
+      const answer = JSON.parse(
+        await tool.handler!(
+          { action: 'update', vehicle_id: 4, is_active: false },
+          CONTEXT,
+        ),
+      );
+      expect(findOne).toHaveBeenCalledWith(4);
+      expect(update).toHaveBeenCalledWith(
+        4,
+        expect.objectContaining({ is_active: false }),
+      );
+      expect(answer.resumen).toMatch(/actualizado/);
     });
   });
 });

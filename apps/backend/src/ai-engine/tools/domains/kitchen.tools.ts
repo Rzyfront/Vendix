@@ -9,7 +9,10 @@ import {
   StockDemandLine,
   InsufficientStockItem,
 } from '../../../domains/store/inventory/shared/services/stock-validator.service';
-import { FireOrderItemsDto } from '../../../domains/store/kitchen-fire/dto/fire-order-items.dto';
+import {
+  FireOrderItemsDto,
+  ResendOrderItemsDto,
+} from '../../../domains/store/kitchen-fire/dto/fire-order-items.dto';
 
 export interface KitchenToolDeps {
   kitchenFireService: KitchenFireService;
@@ -77,7 +80,7 @@ function toIdList(value: unknown): number[] | null {
 }
 
 /**
- * K-1/K-2/K-4/K-5 — Cocina y KDS (paso 8, P0).
+ * K-1/K-2/K-3/K-4/K-5 — Cocina y KDS (paso 8 P0 + paso 13 K-3).
  *
  * Cadenas de validación obligatorias, con el mismo mecanismo que
  * `preview_refund` → `refund_order`: la lectura devuelve un testigo que el
@@ -485,6 +488,180 @@ export function createKitchenTools(deps: KitchenToolDeps): RegisteredTool[] {
           return guidedError(
             `No pude enviar a cocina: ${info.message}`,
             'Repite preview_kitchen_fire para ver el estado actual y reintenta.',
+          );
+        }
+      },
+    },
+
+    // ─── K-3: resend_kitchen_items (WRITE, exige K-4) ────────────
+    {
+      name: 'resend_kitchen_items',
+      version: '1',
+      domain: 'kitchen',
+      description:
+        'Reenvía a cocina renglones YA disparados: lost_command (se perdió la comanda: cancela los tickets viejos y dispara de nuevo) o remake_dish (rehacer el plato). EXIGE haber llamado list_kitchen_tickets primero para ver el estado actual de los tickets de la orden. El handler re-verifica que los renglones sigan en un ticket activo antes de reenviar.',
+      parameters: {
+        type: 'object',
+        properties: {
+          order_id: {
+            type: 'number',
+            description: 'ID de la orden con los renglones a reenviar.',
+          },
+          order_item_ids: {
+            type: 'array',
+            minItems: 1,
+            items: { type: 'number' },
+            description: 'Renglones ya disparados a reenviar.',
+          },
+          reason: {
+            type: 'string',
+            enum: ['lost_command', 'remake_dish'],
+            description:
+              'lost_command: se perdió la comanda (cancela tickets viejos y re-dispara). remake_dish: rehacer el plato. Sin valor por defecto a propósito.',
+          },
+        },
+        required: ['order_id', 'order_item_ids', 'reason'],
+      },
+      requiredPermissions: ['store:kitchen_fire:resend'],
+      requiresConfirmation: true,
+      preview: async (args, context) => {
+        if (!context.store_id) {
+          return previewError(
+            'Reenvío a cocina',
+            'Sin tienda en contexto: el KDS siempre vive dentro de una tienda.',
+          );
+        }
+        const orderId = toPositiveInt(args.order_id);
+        const orderItemIds = toIdList(args.order_item_ids);
+        const reason = String(args.reason ?? '');
+        if (!orderId || !orderItemIds) {
+          return previewError(
+            'Reenvío a cocina',
+            'order_id y order_item_ids (al menos 1, enteros positivos) son obligatorios.',
+          );
+        }
+        if (!['lost_command', 'remake_dish'].includes(reason)) {
+          return previewError(
+            'Reenvío a cocina',
+            `reason "${reason || '(vacío)'}" inválido. Usa lost_command (comanda perdida) o remake_dish (rehacer plato). Lee primero los tickets con list_kitchen_tickets.`,
+          );
+        }
+
+        try {
+          const result = await kitchenFireService.findTickets({
+            order_id: orderId,
+            limit: 200,
+          } as any);
+          const tickets = result.data ?? [];
+          const byItem = new Map<number, string>();
+          for (const ticket of tickets) {
+            for (const item of (ticket as any).items ?? []) {
+              const label = `${(item as any).product?.name ?? `#${(item as any).id}`} (ticket #${(ticket as any).id}, ${(item as any).status})`;
+              byItem.set(Number((item as any).order_item_id), label);
+            }
+          }
+          const missing = orderItemIds.filter((id) => !byItem.has(id));
+          if (missing.length) {
+            return previewError(
+              'Reenvío a cocina',
+              `Estos renglones no están en ningún ticket de la orden #${orderId}: ${missing.join(', ')}. Solo se reenvía lo ya disparado; para lo pendiente usa fire_kitchen_order.`,
+            );
+          }
+          const subject = orderItemIds
+            .map((id) => byItem.get(id))
+            .join('; ');
+          return {
+            status: 'warning',
+            target: `Reenvío a cocina — orden #${orderId}: ${subject}`,
+            changes: orderItemIds.map((id) => ({
+              field: `item:${id}`,
+              label: byItem.get(id) ?? `#${id}`,
+              from: 'disparado',
+              to:
+                reason === 'lost_command'
+                  ? 're-disparado (tickets viejos cancelados)'
+                  : 'rehacer plato (nuevo ticket)',
+            })),
+            message:
+              reason === 'lost_command'
+                ? 'Cancela los tickets viejos de esos renglones y dispara de nuevo. Verifica stock de insumos si la tienda lo exige.'
+                : 'Crea un ticket nuevo para rehacer esos platos.',
+            domain: 'kitchen',
+          };
+        } catch (error) {
+          const info = describeError(error);
+          return previewError('Reenvío a cocina', info.message);
+        }
+      },
+      handler: async (args, context) => {
+        if (!context.store_id) return noStore('el reenvío a cocina');
+        const orderId = toPositiveInt(args.order_id);
+        const orderItemIds = toIdList(args.order_item_ids);
+        const reason = String(args.reason ?? '');
+        if (!orderId || !orderItemIds || !reason) {
+          return guidedError(
+            'Todo reenvío exige list_kitchen_tickets primero.',
+            'Llama list_kitchen_tickets con la orden, elige renglones de un ticket activo y pasa order_id, order_item_ids y reason.',
+          );
+        }
+
+        try {
+          // Re-verificación: los tickets pudieron moverse tras el preview.
+          const result = await kitchenFireService.findTickets({
+            order_id: orderId,
+            limit: 200,
+          } as any);
+          const live = new Set<number>();
+          for (const ticket of result.data ?? []) {
+            if ((ticket as any).status === 'cancelled') continue;
+            for (const item of (ticket as any).items ?? []) {
+              live.add(Number((item as any).order_item_id));
+            }
+          }
+          const stale = orderItemIds.filter((id) => !live.has(id));
+          if (stale.length) {
+            return guidedError(
+              `Estos renglones ya no están en un ticket activo: ${stale.join(', ')}. No reenvié nada.`,
+              'Repite list_kitchen_tickets para ver el estado actual y pide la confirmación de nuevo.',
+            );
+          }
+
+          const dto = plainToInstance(
+            ResendOrderItemsDto,
+            {
+              order_id: orderId,
+              order_item_ids: orderItemIds,
+              reason,
+            },
+            { enableImplicitConversion: true },
+          );
+          const violations = validateSync(dto, {
+            whitelist: true,
+            forbidNonWhitelisted: true,
+          });
+          if (violations.length) {
+            const details = violations
+              .flatMap((entry) => Object.values(entry.constraints ?? {}))
+              .join('; ');
+            return guidedError(
+              `Los datos no pasaron la validación: ${details || 'revisa los campos enviados'}.`,
+            );
+          }
+
+          const resent =
+            await kitchenFireService.resendOrderItems(dto);
+          return JSON.stringify({
+            resumen: `Reenviados ${resent.firedItemIds.length} renglón(es) a cocina (ticket #${resent.ticketId}, motivo ${reason})`,
+            ticket_id: resent.ticketId,
+            ticket_ids: resent.ticketIds,
+            fired_item_ids: resent.firedItemIds,
+            cancelled_ticket_ids: resent.cancelledTicketIds,
+          });
+        } catch (error) {
+          const info = describeError(error);
+          return guidedError(
+            `No pude reenviar a cocina: ${info.message}`,
+            'Repite list_kitchen_tickets para ver el estado actual y reintenta.',
           );
         }
       },

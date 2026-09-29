@@ -57,7 +57,7 @@ export class KitchenFireModule implements OnModuleInit {
   ) {}
 
   /**
-   * K-1/K-2/K-4/K-5 — kitchen tools. Registro descentralizado en el módulo
+   * K-1/K-2/K-3/K-4/K-5 — kitchen tools. Registro descentralizado en el módulo
    * dueño (no en `AIEngineModule`, para no reintroducir el ciclo DI).
    * `StockValidatorService` ya lo exporta `InventoryModule`, importado aquí.
    */

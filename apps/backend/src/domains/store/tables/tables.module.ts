@@ -83,7 +83,7 @@ export class TablesModule implements OnModuleInit {
   ) {}
 
   /**
-   * K-8/K-9 — tables tools. Registro descentralizado en el módulo dueño
+   * K-6/K-7/K-8/K-9 — tables tools. Registro descentralizado en el módulo dueño
    * (no en `AIEngineModule`, para no reintroducir el ciclo DI).
    */
   onModuleInit(): void {

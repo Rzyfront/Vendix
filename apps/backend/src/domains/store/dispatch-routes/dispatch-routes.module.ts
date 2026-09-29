@@ -60,10 +60,11 @@ export class DispatchRoutesModule implements OnModuleInit {
     private readonly dispatchRoutesService: DispatchRoutesService,
     private readonly routeFlowService: RouteFlowService,
     private readonly dispatchNotesService: DispatchNotesService,
+    private readonly vehiclesService: VehiclesService,
   ) {}
 
   /**
-   * D-1/D-3/D-5: registro descentralizado en el módulo dueño, no en
+   * D-1..D-7: registro descentralizado en el módulo dueño, no en
    * `AIEngineModule` (ciclo DI). `AIToolRegistry` viene del módulo global.
    */
   onModuleInit(): void {
@@ -72,6 +73,7 @@ export class DispatchRoutesModule implements OnModuleInit {
         dispatchRoutesService: this.dispatchRoutesService,
         routeFlowService: this.routeFlowService,
         dispatchNotesService: this.dispatchNotesService,
+        vehiclesService: this.vehiclesService,
       }),
     );
   }

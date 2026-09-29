@@ -25,9 +25,15 @@ export { createReturnTools } from './domains/returns.tools';
 export { createEcommerceSupportTools } from './domains/ecommerce-support.tools';
 export { createReportingTools } from './domains/reporting.tools';
 export { createKitchenTools } from './domains/kitchen.tools';
-export { createTablesTools } from './domains/tables.tools';
+export { createTablesTools, createComensalTools } from './domains/tables.tools';
+export {
+  createRecipeTools,
+  createMenuTools,
+  createProductionTools,
+} from './domains/menus.tools';
 export { createDispatchTools } from './domains/dispatch.tools';
 export { createShippingTools } from './domains/shipping.tools';
+export { createNotificationTools } from './domains/notifications.tools';
 export { createSearchTools } from './domains/search.tools';
 export { createBusinessTools } from './domains/business.tools';
 export { createApiBridgeTools } from './bridge/api-bridge.tools';

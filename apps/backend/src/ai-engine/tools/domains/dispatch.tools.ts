@@ -1,12 +1,17 @@
 import { HttpException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import { dispatch_route_status_enum } from '@prisma/client';
+import {
+  dispatch_note_status_enum,
+  dispatch_route_status_enum,
+  vehicle_type_enum,
+} from '@prisma/client';
 import { RegisteredTool, ToolPreview } from '../interfaces/tool.interface';
 import { VendixHttpException } from '../../../common/errors';
 import { DispatchRoutesService } from '../../../domains/store/dispatch-routes/dispatch-routes.service';
 import { RouteFlowService } from '../../../domains/store/dispatch-routes/route-flow/route-flow.service';
 import { DispatchNotesService } from '../../../domains/store/dispatch-notes/dispatch-notes.service';
+import { VehiclesService } from '../../../domains/store/dispatch-routes/vehicles.service';
 import { DispatchRouteQueryDto } from '../../../domains/store/dispatch-routes/dto/dispatch-route-query.dto';
 import { SettleStopDto } from '../../../domains/store/dispatch-routes/dto/settle-stop.dto';
 import { ReleaseStopDto } from '../../../domains/store/dispatch-routes/dto/release-stop.dto';
@@ -15,11 +20,17 @@ import { VoidDispatchRouteDto } from '../../../domains/store/dispatch-routes/dto
 import { CreateFromOrderDto } from '../../../domains/store/dispatch-notes/dto/create-from-order.dto';
 import { CreateFromOrdersBatchDto } from '../../../domains/store/dispatch-notes/dto/create-from-orders-batch.dto';
 import { UpdateDispatchNoteDto } from '../../../domains/store/dispatch-notes/dto/update-dispatch-note.dto';
+import { CreateDispatchRouteDto } from '../../../domains/store/dispatch-routes/dto/create-dispatch-route.dto';
+import { UpdateDispatchRouteDto } from '../../../domains/store/dispatch-routes/dto/update-dispatch-route.dto';
+import { AddStopsDto } from '../../../domains/store/dispatch-routes/dto/add-stops.dto';
+import { CreateVehicleDto } from '../../../domains/store/dispatch-routes/dto/create-vehicle.dto';
+import { UpdateVehicleDto } from '../../../domains/store/dispatch-routes/dto/update-vehicle.dto';
 
 export interface DispatchToolDeps {
   dispatchRoutesService: DispatchRoutesService;
   routeFlowService: RouteFlowService;
   dispatchNotesService: DispatchNotesService;
+  vehiclesService: VehiclesService;
 }
 
 const ROUTE_STATUSES = Object.values(dispatch_route_status_enum);
@@ -41,6 +52,10 @@ const NOTE_ACTIONS = [
   'update',
   'remove',
 ];
+const ROUTE_ACTIONS = ['create', 'update', 'add-stops', 'remove'];
+const VEHICLE_ACTIONS = ['create', 'update', 'remove'];
+const NOTE_STATUSES = Object.values(dispatch_note_status_enum);
+const VEHICLE_TYPES = Object.values(vehicle_type_enum);
 
 function toolError(
   message: string,
@@ -189,7 +204,7 @@ function compactNote(n: any) {
 }
 
 /**
- * D-1 / D-3 / D-5 — Dispatch P0 (paso 8 reportes-ops, track B).
+ * D-1..D-7 — Dispatch (paso 8 P0 D-1/D-3/D-5 + paso 13 D-2/D-4/D-6/D-7).
  *
  * La ruta es un AGREGADO que orquesta: los writes delegan en
  * `RouteFlowService` / `DispatchNotesService`, que emiten
@@ -202,8 +217,12 @@ function compactNote(n: any) {
  * borde con DISPATCH_ROUTE_PARTIAL_DISABLED, sin llegar al servicio.
  */
 export function createDispatchTools(deps: DispatchToolDeps): RegisteredTool[] {
-  const { dispatchRoutesService, routeFlowService, dispatchNotesService } =
-    deps;
+  const {
+    dispatchRoutesService,
+    routeFlowService,
+    dispatchNotesService,
+    vehiclesService,
+  } = deps;
 
   async function loadRouteOrPreviewError(
     routeId: number,
@@ -389,6 +408,373 @@ export function createDispatchTools(deps: DispatchToolDeps): RegisteredTool[] {
             next_step:
               'Verifica el route_id con list_dispatch_routes sin filtros: la planilla puede no existir en esta tienda.',
           });
+        }
+      },
+    },
+
+    // ─── D-2: manage_dispatch_route (WRITE, exige D-1) ───────────────
+    {
+      name: 'manage_dispatch_route',
+      version: '1',
+      domain: 'dispatch',
+      description:
+        'Arma y edita planillas en borrador: create (ruta + paradas iniciales con conductor/vehículo), update (cabecera en draft), add-stops (agrega remisiones como paradas) y remove (elimina en draft). Lee PRIMERO con list_dispatch_routes (+ route_id): el preview lista paradas afectadas y el handler re-verifica que la ruta siga en draft antes de mutar. Despachar, liquidar y cerrar van por transition_route_stop.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ROUTE_ACTIONS,
+            description: 'create, update, add-stops o remove.',
+          },
+          route_id: {
+            type: 'number',
+            description:
+              'ID de la planilla (requerido en update, add-stops y remove; resuélvelo con list_dispatch_routes).',
+          },
+          route_code: {
+            type: 'string',
+            description: 'Código externo de la ruta (ej. "RI02").',
+          },
+          planned_date: {
+            type: 'string',
+            description: 'Fecha planeada de despacho (YYYY-MM-DD).',
+          },
+          vehicle_id: { type: 'number', description: 'Vehículo asignado.' },
+          driver_user_id: {
+            type: 'number',
+            description: 'Conductor interno (usuario de la tienda).',
+          },
+          external_driver_name: {
+            type: 'string',
+            description: 'Nombre del conductor externo.',
+          },
+          external_driver_id_number: {
+            type: 'string',
+            description: 'Documento del conductor externo.',
+          },
+          stops: {
+            type: 'array',
+            description:
+              'Paradas: dispatch_note_id + stop_sequence (+ is_extra_route). En create arma la planilla; en add-stops agrega remisiones.',
+            items: {
+              type: 'object',
+              properties: {
+                dispatch_note_id: { type: 'number' },
+                stop_sequence: { type: 'number' },
+                is_extra_route: { type: 'boolean' },
+              },
+              required: ['dispatch_note_id'],
+            },
+          },
+          notes: { type: 'string', description: 'Notas (update).' },
+        },
+        required: ['action'],
+      },
+      requiredPermissions: [
+        'store:dispatch_routes:create',
+        'store:dispatch_routes:update',
+        'store:dispatch_routes:delete',
+      ],
+      requiresConfirmation: true,
+      preview: async (args, context) => {
+        const action = String(args.action ?? '');
+        if (!ROUTE_ACTIONS.includes(action)) {
+          return previewError(
+            'Planilla',
+            `action "${action}" inválida. Usa ${ROUTE_ACTIONS.join(', ')}.`,
+          );
+        }
+        if (!context.store_id && !context.organization_id) {
+          return previewError(
+            'Planilla',
+            'Sin tienda ni organización en contexto.',
+          );
+        }
+
+        try {
+          if (action === 'create') {
+            const stops = Array.isArray(args.stops) ? args.stops : [];
+            return {
+              status: 'ok',
+              target: `Nueva planilla${args.route_code ? ` (${args.route_code})` : ''} — ${stops.length} parada(s)`,
+              changes: [
+                ...(args.planned_date
+                  ? [
+                      {
+                        field: 'planned_date',
+                        label: 'Fecha planeada',
+                        from: null,
+                        to: String(args.planned_date),
+                      },
+                    ]
+                  : []),
+                ...(stops.length
+                  ? [
+                      {
+                        field: 'stops',
+                        label: 'Paradas',
+                        from: null,
+                        to: stops
+                          .map(
+                            (stop: any) =>
+                              `remisión #${stop?.dispatch_note_id ?? '?'}`,
+                          )
+                          .join('; '),
+                      },
+                    ]
+                  : []),
+              ],
+              message:
+                'Crea la planilla en borrador: después se despacha con transition_route_stop(dispatch).',
+              domain: 'dispatch',
+            };
+          }
+
+          const routeId = toPositiveInt(args.route_id);
+          if (!routeId) {
+            return previewError(
+              'Planilla',
+              `${action} exige route_id. Lee la planilla con list_dispatch_routes primero.`,
+            );
+          }
+          const loaded = await loadRouteOrPreviewError(routeId);
+          if (!loaded.ok) return loaded.preview;
+          const route = loaded.route;
+          const label = `Planilla ${(route as any)?.route_number ?? `#${routeId}`}`;
+          if (String((route as any)?.status) !== 'draft') {
+            return previewError(
+              label,
+              `Solo un borrador se edita (está en ${(route as any)?.status}). Despachada en adelante, la planilla se opera con transition_route_stop.`,
+            );
+          }
+
+          if (action === 'remove') {
+            return {
+              status: 'warning',
+              target: `Eliminación — ${label}`,
+              changes: [
+                {
+                  field: 'route',
+                  label: 'Planilla',
+                  from: (route as any)?.route_number ?? `#${routeId}`,
+                  to: 'eliminada',
+                },
+              ],
+              message: 'Eliminar es irreversible.',
+              domain: 'dispatch',
+            };
+          }
+          if (action === 'add-stops') {
+            const stops = Array.isArray(args.stops) ? args.stops : [];
+            if (!stops.length) {
+              return previewError(
+                label,
+                'add-stops exige al menos 1 parada en stops (dispatch_note_id).',
+              );
+            }
+            return {
+              status: 'ok',
+              target: `Agregar ${stops.length} parada(s) — ${label}`,
+              changes: [
+                {
+                  field: 'stops',
+                  label: 'Paradas nuevas',
+                  from: `${((route as any)?.stops ?? []).length} actual(es)`,
+                  to: stops
+                    .map(
+                      (stop: any) =>
+                        `remisión #${stop?.dispatch_note_id ?? '?'}`,
+                    )
+                    .join('; '),
+                },
+              ],
+              domain: 'dispatch',
+            };
+          }
+          const fields = [
+            'route_code',
+            'planned_date',
+            'vehicle_id',
+            'driver_user_id',
+            'external_driver_name',
+            'notes',
+          ].filter((field) => args[field] !== undefined);
+          if (!fields.length) {
+            return previewError(
+              label,
+              'update exige al menos un campo de cabecera.',
+            );
+          }
+          return {
+            status: 'ok',
+            target: `Edición — ${label}`,
+            changes: fields.map((field) => ({
+              field,
+              label: field,
+              from: (route as any)?.[field] ?? null,
+              to: args[field],
+            })),
+            domain: 'dispatch',
+          };
+        } catch (error) {
+          const info = describeError(error);
+          return previewError('Planilla', info.message);
+        }
+      },
+      handler: async (args, context) => {
+        if (!context.store_id && !context.organization_id) {
+          return toolError(
+            'Sin tienda ni organización en contexto: las planillas están acotadas por tenant.',
+          );
+        }
+        const action = String(args.action ?? '');
+
+        try {
+          if (action === 'create') {
+            const checked = toValidatedDto(CreateDispatchRouteDto, {
+              ...(args.route_code
+                ? { route_code: String(args.route_code) }
+                : {}),
+              ...(args.planned_date
+                ? { planned_date: String(args.planned_date) }
+                : {}),
+              ...(args.vehicle_id !== undefined
+                ? { vehicle_id: Number(args.vehicle_id) }
+                : {}),
+              ...(args.driver_user_id !== undefined
+                ? { driver_user_id: Number(args.driver_user_id) }
+                : {}),
+              ...(args.external_driver_name
+                ? {
+                    external_driver_name: String(args.external_driver_name),
+                  }
+                : {}),
+              ...(args.external_driver_id_number
+                ? {
+                    external_driver_id_number: String(
+                      args.external_driver_id_number,
+                    ),
+                  }
+                : {}),
+              ...(Array.isArray(args.stops)
+                ? {
+                    stops: args.stops.map((stop: any, index: number) => ({
+                      dispatch_note_id: Number(stop.dispatch_note_id),
+                      stop_sequence:
+                        stop.stop_sequence !== undefined
+                          ? Number(stop.stop_sequence)
+                          : index + 1,
+                      ...(stop.is_extra_route !== undefined
+                        ? { is_extra_route: Boolean(stop.is_extra_route) }
+                        : {}),
+                    })),
+                  }
+                : {}),
+            });
+            if (!checked.ok) return toolError(checked.message);
+            const created = await dispatchRoutesService.create(checked.dto);
+            return JSON.stringify({
+              resumen: `Planilla ${(created as any)?.route_number ?? `#${(created as any)?.id}`} creada en borrador con ${((created as any)?.stops ?? []).length} parada(s). Despáchala con transition_route_stop(dispatch).`,
+              route_id: (created as any)?.id,
+            });
+          }
+
+          const routeId = toPositiveInt(args.route_id);
+          if (!routeId) {
+            return toolError(
+              `${action} exige route_id.`,
+              'Lee la planilla con list_dispatch_routes y pasa su route_id.',
+            );
+          }
+          // Re-verificación: la ruta pudo despacharse tras el preview.
+          const route = await dispatchRoutesService.findOne(routeId);
+          const label = `Planilla ${(route as any)?.route_number ?? `#${routeId}`}`;
+          if (String((route as any)?.status) !== 'draft') {
+            return toolError(
+              `${label} avanzó a ${(route as any)?.status} después de la confirmación: no la toqué.`,
+              'Una planilla despachada se opera con transition_route_stop.',
+            );
+          }
+
+          if (action === 'remove') {
+            await dispatchRoutesService.remove(routeId);
+            return JSON.stringify({
+              resumen: `${label}: planilla eliminada.`,
+              route_id: routeId,
+            });
+          }
+          if (action === 'add-stops') {
+            const stops = Array.isArray(args.stops) ? args.stops : [];
+            if (!stops.length) {
+              return toolError('add-stops exige al menos 1 parada en stops.');
+            }
+            const checked = toValidatedDto(AddStopsDto, {
+              stops: stops.map((stop: any) => ({
+                dispatch_note_id: Number(stop.dispatch_note_id),
+                ...(stop.stop_sequence !== undefined
+                  ? { stop_sequence: Number(stop.stop_sequence) }
+                  : {}),
+              })),
+            });
+            if (!checked.ok) return toolError(checked.message);
+            const updated = await dispatchRoutesService.addStops(
+              routeId,
+              checked.dto,
+            );
+            return JSON.stringify({
+              resumen: `${label}: ${stops.length} parada(s) agregada(s) (${((updated as any)?.stops ?? []).length} en total).`,
+              route_id: routeId,
+            });
+          }
+          if (action === 'update') {
+            const checked = toValidatedDto(UpdateDispatchRouteDto, {
+              ...(args.route_code !== undefined
+                ? { route_code: String(args.route_code) }
+                : {}),
+              ...(args.planned_date !== undefined
+                ? { planned_date: String(args.planned_date) }
+                : {}),
+              ...(args.vehicle_id !== undefined
+                ? { vehicle_id: Number(args.vehicle_id) }
+                : {}),
+              ...(args.driver_user_id !== undefined
+                ? { driver_user_id: Number(args.driver_user_id) }
+                : {}),
+              ...(args.external_driver_name !== undefined
+                ? {
+                    external_driver_name: String(args.external_driver_name),
+                  }
+                : {}),
+              ...(args.external_driver_id_number !== undefined
+                ? {
+                    external_driver_id_number: String(
+                      args.external_driver_id_number,
+                    ),
+                  }
+                : {}),
+              ...(args.notes !== undefined
+                ? { notes: String(args.notes) }
+                : {}),
+            });
+            if (!checked.ok) return toolError(checked.message);
+            await dispatchRoutesService.update(routeId, checked.dto);
+            return JSON.stringify({
+              resumen: `${label}: cabecera actualizada (sigue en borrador).`,
+              route_id: routeId,
+            });
+          }
+
+          return toolError(
+            `action "${action}" inválida. Usa ${ROUTE_ACTIONS.join(', ')}.`,
+          );
+        } catch (error) {
+          const info = describeError(error);
+          return toolError(
+            `No pude gestionar la planilla: ${info.message}`,
+            'Lee la planilla con list_dispatch_routes para ver su estado actual y reintenta.',
+            info.code,
+          );
         }
       },
     },
@@ -1565,6 +1951,467 @@ export function createDispatchTools(deps: DispatchToolDeps): RegisteredTool[] {
           return toolError(
             `No se pudo ejecutar ${action}: ${info.message}`,
             'Verifica los IDs y el estado borrador de la remisión antes de reintentar.',
+            info.code,
+          );
+        }
+      },
+    },
+
+    // ─── D-4: get_route_map (READ, mapa + PDF) ───────────────────────
+    {
+      name: 'get_route_map',
+      version: '1',
+      domain: 'dispatch',
+      readOnly: true,
+      description:
+        'Lee el mapa de una planilla: origen, paradas ubicadas con coordenadas, entregadas y no-ubicadas (con el motivo para fijarlas en el mapa). Con include_pdf devuelve además la ficha del PDF de la planilla (listo para descargar y su tamaño). Solo lectura: para corregir una parada sin ubicación edita la dirección de su remisión.',
+      parameters: {
+        type: 'object',
+        properties: {
+          route_id: {
+            type: 'number',
+            description:
+              'ID de la planilla (resuélvelo con list_dispatch_routes).',
+          },
+          include_pdf: {
+            type: 'boolean',
+            description:
+              'Genera el PDF y devuelve su ficha (nombre y tamaño). Por defecto false: el mapa solo.',
+          },
+        },
+        required: ['route_id'],
+      },
+      requiredPermissions: ['store:dispatch_routes:read'],
+      handler: async (args, context) => {
+        if (!context.store_id && !context.organization_id) {
+          return toolError(
+            'Sin tienda ni organización en contexto: las planillas están acotadas por tenant.',
+          );
+        }
+        const routeId = toPositiveInt(args.route_id);
+        if (!routeId) {
+          return toolError(
+            'route_id inválido.',
+            'Lee la planilla con list_dispatch_routes y pasa su route_id.',
+          );
+        }
+
+        try {
+          const map = await dispatchRoutesService.getMapStops(routeId);
+          const payload: Record<string, unknown> = {
+            planilla: `Planilla #${routeId}`,
+            origen: (map as any)?.origin ?? null,
+            paradas: ((map as any)?.stops ?? []).map((stop: any) => ({
+              stop_id: stop.stop_id ?? stop.id,
+              sequence: stop.stop_sequence ?? stop.sequence,
+              lat: stop.lat ?? stop.latitude,
+              lng: stop.lng ?? stop.longitude,
+              customer: stop.customer ?? stop.customer_name ?? null,
+            })),
+            entregadas: ((map as any)?.delivered ?? []).length,
+            sin_ubicar: ((map as any)?.unlocated ?? []).map((stop: any) => ({
+              dispatch_note_id:
+                stop.dispatchNoteId ?? stop.dispatch_note_id,
+              customer_address:
+                stop.customerAddress ?? stop.customer_address ?? null,
+            })),
+          };
+          if (args.include_pdf) {
+            const buffer =
+              await routeFlowService.generatePdf(routeId);
+            payload['pdf'] = {
+              filename: `planilla-${routeId}.pdf`,
+              bytes: buffer.length,
+              nota: 'PDF generado en el servidor (encabezado, paradas, totales y firmas). Descárgalo desde el detalle de la planilla en el panel.',
+            };
+          } else {
+            payload['next_step'] =
+              'Repite con include_pdf=true si necesitas la ficha del PDF imprimible.';
+          }
+          return JSON.stringify(payload);
+        } catch (error) {
+          const info = describeError(error);
+          return toolError(
+            `No pude leer el mapa: ${info.message}`,
+            'Verifica el route_id con list_dispatch_routes.',
+            info.code,
+          );
+        }
+      },
+    },
+
+    // ─── D-6: list_dispatch_notes (READ, remisiones) ─────────────────
+    {
+      name: 'list_dispatch_notes',
+      version: '1',
+      domain: 'dispatch',
+      readOnly: true,
+      description:
+        'Lista remisiones (despachos) con filtros por estado o texto, o devuelve el detalle de UNA remisión (líneas, cliente, dirección snapshot, orden vinculada) cuando pasas dispatch_note_id. Con include_stats agrega el conteo por estado. Es la lectura habilitante antes de manage_dispatch_notes y de armar paradas en manage_dispatch_route.',
+      parameters: {
+        type: 'object',
+        properties: {
+          dispatch_note_id: {
+            type: 'number',
+            description:
+              'Detalle de UNA remisión: líneas, cliente, dirección y orden vinculada.',
+          },
+          status: {
+            type: 'string',
+            enum: NOTE_STATUSES,
+            description: 'Filtra el listado por estado de la remisión.',
+          },
+          search: {
+            type: 'string',
+            description:
+              'Texto libre: número de remisión, cliente u orden.',
+          },
+          page: { type: 'number', description: 'Página (por defecto 1).' },
+          limit: {
+            type: 'number',
+            description: 'Filas por página (por defecto 10, máximo 50).',
+          },
+          include_stats: {
+            type: 'boolean',
+            description:
+              'Agrega el conteo de remisiones por estado (por defecto false).',
+          },
+        },
+      },
+      requiredPermissions: ['store:dispatch_notes:read'],
+      handler: async (args, context) => {
+        if (!context.store_id && !context.organization_id) {
+          return toolError(
+            'Sin tienda ni organización en contexto: las remisiones están acotadas por tenant.',
+          );
+        }
+        if (
+          args.status !== undefined &&
+          !NOTE_STATUSES.includes(args.status)
+        ) {
+          return toolError(
+            `status "${args.status}" inválido. Valores válidos: ${NOTE_STATUSES.join(', ')}.`,
+          );
+        }
+
+        try {
+          const noteId = toPositiveInt(args.dispatch_note_id);
+          if (args.dispatch_note_id !== undefined && !noteId) {
+            return toolError('dispatch_note_id inválido.');
+          }
+          if (noteId) {
+            const note = await dispatchNotesService.findOne(noteId);
+            return JSON.stringify({
+              remision: {
+                ...compactNote(note),
+                customer_address:
+                  (note as any)?.customer_address ?? null,
+                items: Array.isArray((note as any)?.dispatch_note_items)
+                  ? (note as any).dispatch_note_items.map((line: any) => ({
+                      product: line.product_name ?? `#${line.product_id}`,
+                      quantity: toNumberOrNull(line.dispatched_quantity),
+                    }))
+                  : undefined,
+              },
+              next_step:
+                'Para mutarla usa manage_dispatch_notes; para subirla a una planilla usa manage_dispatch_route(add-stops).',
+            });
+          }
+
+          const [result, stats] = await Promise.all([
+            dispatchNotesService.findAll({
+              page: Math.max(Number(args.page) || 1, 1),
+              limit: Math.min(Math.max(Number(args.limit) || 10, 1), 50),
+              ...(args.status ? { status: args.status } : {}),
+              ...(args.search ? { search: String(args.search) } : {}),
+            }),
+            args.include_stats
+              ? dispatchNotesService.getStats()
+              : Promise.resolve(null),
+          ]);
+          const rows = (result.data ?? []).map(compactNote);
+          return JSON.stringify({
+            resumen: `${rows.length} remisión(es) de ${result.pagination?.total ?? rows.length} en total`,
+            pagina: result.pagination?.page ?? 1,
+            paginas: result.pagination?.totalPages ?? 1,
+            remisiones: rows,
+            ...(stats ? { stats } : {}),
+          });
+        } catch (error) {
+          const info = describeError(error);
+          return toolError(
+            `No pude leer las remisiones: ${info.message}`,
+            'Verifica el dispatch_note_id con list_dispatch_notes sin filtros.',
+            info.code,
+          );
+        }
+      },
+    },
+
+    // ─── D-7: manage_vehicles (WRITE) ───────────────────────────────
+    {
+      name: 'manage_vehicles',
+      version: '1',
+      domain: 'dispatch',
+      description:
+        'Crea, edita o retira vehículos de la flota: create (placa + marca/modelo + capacidad + conductor principal), update (cambia datos o desactiva con is_active=false) y remove (retira; un vehículo en planilla no cerrada no se elimina: se desactiva). El preview muestra el cambio from→to con la placa como sujeto y el handler re-verifica el vehículo antes de mutar.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: VEHICLE_ACTIONS,
+            description: 'create, update o remove.',
+          },
+          vehicle_id: {
+            type: 'number',
+            description: 'ID del vehículo (requerido en update y remove).',
+          },
+          plate: {
+            type: 'string',
+            description: 'Placa, única por tienda (requerida en create).',
+          },
+          type: {
+            type: 'string',
+            enum: VEHICLE_TYPES,
+            description: 'Tipo de vehículo.',
+          },
+          brand: { type: 'string', description: 'Marca (requerida en create).' },
+          model_name: {
+            type: 'string',
+            description: 'Modelo (requerido en create).',
+          },
+          capacity_kg: {
+            type: 'number',
+            description: 'Capacidad en kg, mayor a 0 (requerida en create).',
+          },
+          capacity_units: {
+            type: 'number',
+            description: 'Capacidad en unidades.',
+          },
+          primary_driver_id: {
+            type: 'number',
+            description:
+              'Conductor principal (usuario de la tienda, requerido en create).',
+          },
+          is_active: {
+            type: 'boolean',
+            description:
+              'Activa/desactiva el vehículo (desactivar es el retiro seguro).',
+          },
+          notes: { type: 'string', description: 'Notas.' },
+        },
+        required: ['action'],
+      },
+      requiredPermissions: [
+        'store:dispatch_fleet:create',
+        'store:dispatch_fleet:update',
+        'store:dispatch_fleet:delete',
+      ],
+      requiresConfirmation: true,
+      preview: async (args, context) => {
+        const action = String(args.action ?? '');
+        if (!VEHICLE_ACTIONS.includes(action)) {
+          return previewError(
+            'Flota',
+            `action "${action}" inválida. Usa ${VEHICLE_ACTIONS.join(', ')}.`,
+          );
+        }
+        if (!context.store_id && !context.organization_id) {
+          return previewError(
+            'Flota',
+            'Sin tienda ni organización en contexto.',
+          );
+        }
+
+        try {
+          if (action === 'create') {
+            const plate = String(args.plate ?? '').trim();
+            if (!plate) {
+              return previewError('Alta de vehículo', 'create exige plate.');
+            }
+            return {
+              status: 'ok',
+              target: `Alta de vehículo — placa ${plate}`,
+              changes: [
+                ...(args.brand
+                  ? [
+                      {
+                        field: 'brand',
+                        label: 'Marca/modelo',
+                        from: null,
+                        to: `${args.brand} ${args.model_name ?? ''}`.trim(),
+                      },
+                    ]
+                  : []),
+                ...(args.capacity_kg !== undefined
+                  ? [
+                      {
+                        field: 'capacity_kg',
+                        label: 'Capacidad',
+                        from: null,
+                        to: `${args.capacity_kg} kg`,
+                      },
+                    ]
+                  : []),
+              ],
+              domain: 'dispatch',
+            };
+          }
+
+          const vehicleId = toPositiveInt(args.vehicle_id);
+          if (!vehicleId) {
+            return previewError('Flota', `${action} exige vehicle_id.`);
+          }
+          const vehicle = await vehiclesService.findOne(vehicleId);
+          const label = `Vehículo ${(vehicle as any)?.plate ?? `#${vehicleId}`}`;
+          if (action === 'remove') {
+            return {
+              status: 'warning',
+              target: `Retiro — ${label}`,
+              changes: [
+                {
+                  field: 'vehicle',
+                  label: 'Vehículo',
+                  from: (vehicle as any)?.plate ?? `#${vehicleId}`,
+                  to: 'retirado',
+                },
+              ],
+              message:
+                'Si el vehículo está en una planilla no cerrada, el retiro se rechaza: desactívalo con update(is_active=false) en su lugar.',
+              domain: 'dispatch',
+            };
+          }
+          const fields = [
+            'plate',
+            'type',
+            'brand',
+            'model_name',
+            'capacity_kg',
+            'capacity_units',
+            'primary_driver_id',
+            'is_active',
+            'notes',
+          ].filter((field) => args[field] !== undefined);
+          if (!fields.length) {
+            return previewError(label, 'update exige al menos un campo.');
+          }
+          return {
+            status: 'ok',
+            target: `Edición — ${label}`,
+            changes: fields.map((field) => ({
+              field,
+              label: field,
+              from: (vehicle as any)?.[field] ?? null,
+              to: args[field],
+            })),
+            domain: 'dispatch',
+          };
+        } catch (error) {
+          const info = describeError(error);
+          return previewError('Flota', info.message);
+        }
+      },
+      handler: async (args, context) => {
+        if (!context.store_id && !context.organization_id) {
+          return toolError(
+            'Sin tienda ni organización en contexto: la flota está acotada por tenant.',
+          );
+        }
+        const action = String(args.action ?? '');
+
+        try {
+          if (action === 'create') {
+            const checked = toValidatedDto(CreateVehicleDto, {
+              ...(args.plate ? { plate: String(args.plate) } : {}),
+              ...(args.type ? { type: String(args.type) } : {}),
+              ...(args.brand ? { brand: String(args.brand) } : {}),
+              ...(args.model_name
+                ? { model_name: String(args.model_name) }
+                : {}),
+              ...(args.capacity_kg !== undefined
+                ? { capacity_kg: Number(args.capacity_kg) }
+                : {}),
+              ...(args.capacity_units !== undefined
+                ? { capacity_units: Number(args.capacity_units) }
+                : {}),
+              ...(args.primary_driver_id !== undefined
+                ? { primary_driver_id: Number(args.primary_driver_id) }
+                : {}),
+              ...(args.is_active !== undefined
+                ? { is_active: Boolean(args.is_active) }
+                : {}),
+              ...(args.notes ? { notes: String(args.notes) } : {}),
+            });
+            if (!checked.ok) return toolError(checked.message);
+            const created = await vehiclesService.create(checked.dto);
+            return JSON.stringify({
+              resumen: `Vehículo placa ${(created as any)?.plate} dado de alta (#${(created as any)?.id}).`,
+              vehicle_id: (created as any)?.id,
+            });
+          }
+
+          const vehicleId = toPositiveInt(args.vehicle_id);
+          if (!vehicleId) {
+            return toolError(`${action} exige vehicle_id.`);
+          }
+          // Re-verificación: el vehículo pudo cambiar tras el preview.
+          const current = await vehiclesService.findOne(vehicleId);
+          const label = `Vehículo ${(current as any)?.plate ?? `#${vehicleId}`}`;
+
+          if (action === 'remove') {
+            await vehiclesService.remove(vehicleId);
+            return JSON.stringify({
+              resumen: `${label}: vehículo retirado de la flota.`,
+              vehicle_id: vehicleId,
+            });
+          }
+          if (action === 'update') {
+            const checked = toValidatedDto(UpdateVehicleDto, {
+              ...(args.plate !== undefined
+                ? { plate: String(args.plate) }
+                : {}),
+              ...(args.type !== undefined
+                ? { type: String(args.type) }
+                : {}),
+              ...(args.brand !== undefined
+                ? { brand: String(args.brand) }
+                : {}),
+              ...(args.model_name !== undefined
+                ? { model_name: String(args.model_name) }
+                : {}),
+              ...(args.capacity_kg !== undefined
+                ? { capacity_kg: Number(args.capacity_kg) }
+                : {}),
+              ...(args.capacity_units !== undefined
+                ? { capacity_units: Number(args.capacity_units) }
+                : {}),
+              ...(args.primary_driver_id !== undefined
+                ? { primary_driver_id: Number(args.primary_driver_id) }
+                : {}),
+              ...(args.is_active !== undefined
+                ? { is_active: Boolean(args.is_active) }
+                : {}),
+              ...(args.notes !== undefined
+                ? { notes: String(args.notes) }
+                : {}),
+            });
+            if (!checked.ok) return toolError(checked.message);
+            await vehiclesService.update(vehicleId, checked.dto);
+            return JSON.stringify({
+              resumen: `${label}: vehículo actualizado.`,
+              vehicle_id: vehicleId,
+            });
+          }
+
+          return toolError(
+            `action "${action}" inválida. Usa ${VEHICLE_ACTIONS.join(', ')}.`,
+          );
+        } catch (error) {
+          const info = describeError(error);
+          return toolError(
+            `No pude gestionar el vehículo: ${info.message}`,
+            'Si está en una planilla no cerrada, desactívalo con update(is_active=false) en vez de retirarlo.',
             info.code,
           );
         }

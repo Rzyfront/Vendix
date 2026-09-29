@@ -75,6 +75,7 @@ describe('kitchen.tools · K-1 preview / K-2 fire / K-4 tickets / K-5 transition
       kitchenFireService: {
         previewFire: jest.fn().mockResolvedValue(structuredClone(PREVIEW_FIRE)),
         fireOrderItems: jest.fn(),
+        resendOrderItems: jest.fn(),
         findTickets: jest.fn(),
         findTicketById: jest.fn(),
         getTicketVerification: jest.fn(),
@@ -110,11 +111,12 @@ describe('kitchen.tools · K-1 preview / K-2 fire / K-4 tickets / K-5 transition
 
   // ─── (d)+(e) Registro ─────────────────────────────────────────────
   describe('registro', () => {
-    it('expone exactamente las 4 tools P0 del dominio kitchen', () => {
+    it('expone exactamente las 5 tools del dominio kitchen (P0 + K-3)', () => {
       const { tools } = buildTools();
       expect(tools.map((tool) => tool.name)).toEqual([
         'preview_kitchen_fire',
         'fire_kitchen_order',
+        'resend_kitchen_items',
         'list_kitchen_tickets',
         'transition_kitchen_ticket',
       ]);
@@ -134,6 +136,9 @@ describe('kitchen.tools · K-1 preview / K-2 fire / K-4 tickets / K-5 transition
       expect(byName.get('fire_kitchen_order')!.requiredPermissions).toEqual([
         'store:kitchen_fire:create',
       ]);
+      expect(byName.get('resend_kitchen_items')!.requiredPermissions).toEqual([
+        'store:kitchen_fire:resend',
+      ]);
       expect(byName.get('list_kitchen_tickets')!.requiredPermissions).toEqual([
         'store:kitchen_fire:read',
       ]);
@@ -142,7 +147,7 @@ describe('kitchen.tools · K-1 preview / K-2 fire / K-4 tickets / K-5 transition
       ).toEqual(['store:kitchen_fire:update']);
     });
 
-    it('K-1/K-4 son readOnly; K-2/K-5 son writes con circuito completo', () => {
+    it('K-1/K-4 son readOnly; K-2/K-3/K-5 son writes con circuito completo', () => {
       const { tools } = buildTools();
       const byName = new Map(tools.map((tool) => [tool.name, tool]));
       for (const name of ['preview_kitchen_fire', 'list_kitchen_tickets']) {
@@ -151,7 +156,11 @@ describe('kitchen.tools · K-1 preview / K-2 fire / K-4 tickets / K-5 transition
         expect(tool.requiresConfirmation ?? false).toBe(false);
         expect(tool.preview).toBeUndefined();
       }
-      for (const name of ['fire_kitchen_order', 'transition_kitchen_ticket']) {
+      for (const name of [
+        'fire_kitchen_order',
+        'resend_kitchen_items',
+        'transition_kitchen_ticket',
+      ]) {
         const tool = byName.get(name)!;
         expect(tool.readOnly ?? false).toBe(false);
         expect(tool.requiresConfirmation).toBe(true);
@@ -744,6 +753,139 @@ describe('kitchen.tools · K-1 preview / K-2 fire / K-4 tickets / K-5 transition
 
       expect(answer.error).toContain('exige list_kitchen_tickets');
       expect(deps.kitchenFireService.startPreparation).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── Paso 13: K-3 resend ──────────────────────────────────────────
+  describe('resend_kitchen_items', () => {
+    const TICKETS = {
+      data: [
+        {
+          id: 77,
+          status: 'pending',
+          order_id: 501,
+          items: [
+            {
+              id: 1,
+              order_item_id: 9001,
+              quantity: 2,
+              status: 'pending',
+              product: { name: 'Bandeja paisa' },
+            },
+          ],
+        },
+      ],
+      total: 1,
+    };
+
+    function resendTools(
+      tickets: unknown = structuredClone(TICKETS),
+      resendResult: unknown = {
+        ticketId: 78,
+        ticketIds: [78],
+        firedItemIds: [9001],
+        cancelledTicketIds: [77],
+        wasteRefiredItemIds: [],
+      },
+    ) {
+      return buildTools({
+        kitchenFireService: {
+          findTickets: jest.fn().mockResolvedValue(tickets),
+          resendOrderItems: jest.fn().mockResolvedValue(resendResult),
+        },
+      });
+    }
+
+    it('cita su read habilitante en la descripción', () => {
+      const { tools } = buildTools();
+      expect(getTool(tools, 'resend_kitchen_items').description).toMatch(
+        /list_kitchen_tickets/,
+      );
+    });
+
+    it('(b) happy: preview nombra el plato y handler delega (snapshot)', async () => {
+      const { deps, tools } = resendTools();
+      const tool = getTool(tools, 'resend_kitchen_items');
+      const args = {
+        order_id: 501,
+        order_item_ids: [9001],
+        reason: 'lost_command',
+      };
+
+      const preview = await tool.preview!(args, CONTEXT as any);
+      expect(preview.status).toBe('warning');
+      expect(preview.target).toContain('Bandeja paisa');
+      expect(preview.target).toContain('orden #501');
+
+      const answer = await run(tools, 'resend_kitchen_items', args);
+      expect(
+        deps.kitchenFireService.resendOrderItems,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          order_id: 501,
+          order_item_ids: [9001],
+          reason: 'lost_command',
+        }),
+      );
+      expect(answer).toEqual({
+        resumen:
+          'Reenviados 1 renglón(es) a cocina (ticket #78, motivo lost_command)',
+        ticket_id: 78,
+        ticket_ids: [78],
+        fired_item_ids: [9001],
+        cancelled_ticket_ids: [77],
+      });
+    });
+
+    it('(a) sad: reason inválido → error y cero llamadas', async () => {
+      const { deps, tools } = resendTools();
+      const tool = getTool(tools, 'resend_kitchen_items');
+
+      const preview = await tool.preview!(
+        { order_id: 501, order_item_ids: [9001], reason: 'porque_si' },
+        CONTEXT as any,
+      );
+      expect(preview.status).toBe('error');
+      expect(deps.kitchenFireService.findTickets).not.toHaveBeenCalled();
+
+      const answer = await run(tools, 'resend_kitchen_items', {
+        order_id: 501,
+        order_item_ids: [9001],
+      });
+      expect(answer.error).toContain('exige list_kitchen_tickets');
+      expect(deps.kitchenFireService.resendOrderItems).not.toHaveBeenCalled();
+    });
+
+    it('(c) sad: renglón fuera del ticket → {error, next_step} sin reenviar', async () => {
+      const { deps, tools } = resendTools();
+      const tool = getTool(tools, 'resend_kitchen_items');
+
+      const preview = await tool.preview!(
+        { order_id: 501, order_item_ids: [4242], reason: 'remake_dish' },
+        CONTEXT as any,
+      );
+      expect(preview.status).toBe('error');
+      expect(preview.message).toContain('4242');
+      expect(deps.kitchenFireService.resendOrderItems).not.toHaveBeenCalled();
+    });
+
+    it('(e) re-verificación: ticket cancelado tras el preview → no reenvía', async () => {
+      const cancelled = {
+        data: [
+          { id: 77, status: 'cancelled', order_id: 501, items: [] },
+        ],
+        total: 1,
+      };
+      const { deps, tools } = resendTools(cancelled);
+      const answer = await run(tools, 'resend_kitchen_items', {
+        order_id: 501,
+        order_item_ids: [9001],
+        reason: 'lost_command',
+      });
+
+      expect(answer.error).toContain('ya no están en un ticket activo');
+      expect(answer.next_step).toContain('list_kitchen_tickets');
+      expect(deps.kitchenFireService.resendOrderItems).not.toHaveBeenCalled();
     });
   });
 });

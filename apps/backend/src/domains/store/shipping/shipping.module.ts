@@ -57,10 +57,12 @@ export class ShippingModule implements OnModuleInit {
     private readonly toolRegistry: AIToolRegistry,
     private readonly shippingCalculatorService: ShippingCalculatorService,
     private readonly shippingDistanceService: ShippingDistanceService,
+    private readonly methodsService: StoreShippingMethodsService,
+    private readonly zonesService: StoreShippingZonesService,
   ) {}
 
   /**
-   * D-8: registro descentralizado en el módulo dueño, no en
+   * D-8..D-11: registro descentralizado en el módulo dueño, no en
    * `AIEngineModule` (ciclo DI). `AIToolRegistry` viene del módulo global.
    */
   onModuleInit(): void {
@@ -68,6 +70,8 @@ export class ShippingModule implements OnModuleInit {
       createShippingTools({
         shippingCalculatorService: this.shippingCalculatorService,
         shippingDistanceService: this.shippingDistanceService,
+        methodsService: this.methodsService,
+        zonesService: this.zonesService,
       }),
     );
   }
