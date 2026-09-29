@@ -26,6 +26,7 @@ import {
 interface AnalyzedItem {
   name: string;
   sku: string;
+  barcode?: string;
   unit_cost: number;
   quantity: number;
   cost_price: number;
@@ -538,6 +539,9 @@ interface AnalysisResult {
                               class="px-3 py-2 text-sm font-mono text-xs text-gray-600"
                             >
                               {{ item.sku || '—' }}
+                              @if (item.barcode) {
+                                <div class="text-gray-400">{{ item.barcode }}</div>
+                              }
                             </td>
                             <td
                               class="px-3 py-2 text-sm text-right text-gray-700"
@@ -652,6 +656,9 @@ interface AnalysisResult {
                       </div>
                       <p class="text-xs text-gray-500 font-mono mb-2">
                         {{ item.sku || '—' }}
+                        @if (item.barcode) {
+                          · {{ item.barcode }}
+                        }
                       </p>
                       <div class="flex gap-3 text-xs text-gray-600">
                         <span>Cant: {{ item.quantity }}</span>
@@ -1032,6 +1039,7 @@ export class PopBulkDataModalComponent {
             'Peso',
             'En Oferta',
             'Precio Oferta',
+            'Código de barras',
           ]
         : [
             'Nombre',
@@ -1043,6 +1051,7 @@ export class PopBulkDataModalComponent {
             'Cantidad Inicial',
             'Controla Inventario',
             'Disponible Ecommerce',
+            'Código de barras',
           ];
 
     const rows =
@@ -1069,6 +1078,7 @@ export class PopBulkDataModalComponent {
               Peso: 0.8,
               'En Oferta': 'no',
               'Precio Oferta': 0,
+              'Código de barras': '7701234567890',
             },
             {
               Nombre: 'Leche Entera 1L',
@@ -1091,6 +1101,7 @@ export class PopBulkDataModalComponent {
               Peso: 1.05,
               'En Oferta': 'no',
               'Precio Oferta': 0,
+              'Código de barras': '0770123456789',
             },
           ]
         : [
@@ -1104,6 +1115,7 @@ export class PopBulkDataModalComponent {
               'Cantidad Inicial': 50,
               'Controla Inventario': 'sí',
               'Disponible Ecommerce': 'sí',
+              'Código de barras': '0770123456789',
             },
           ];
 
@@ -1119,6 +1131,22 @@ export class PopBulkDataModalComponent {
     worksheet['!cols'] = headers.map((header) => ({
       wch: Math.max(14, header.length + 2),
     }));
+
+    // Código de barras como texto ('@') para preservar ceros iniciales.
+    const barcodeCol = headers.indexOf('Código de barras');
+    const lastRow = rows.length;
+    for (let r = 1; r <= Math.max(lastRow, 500); r++) {
+      const addr = xlsx.utils.encode_cell({ r, c: barcodeCol });
+      const cell = worksheet[addr];
+      worksheet[addr] = {
+        t: 's',
+        v: cell?.v !== undefined ? String(cell.v) : '',
+        z: '@',
+      };
+    }
+    const range = xlsx.utils.decode_range(worksheet['!ref'] || 'A1');
+    range.e.r = Math.max(range.e.r, Math.max(lastRow, 500));
+    worksheet['!ref'] = xlsx.utils.encode_range(range);
 
     const workbook = xlsx.utils.book_new();
     xlsx.utils.book_append_sheet(workbook, worksheet, 'Pedido POP');
@@ -1216,6 +1244,33 @@ export class PopBulkDataModalComponent {
   private parseText(value: unknown, fallback = ''): string {
     if (value === undefined || value === null) return fallback;
     return String(value).trim();
+  }
+
+  /**
+   * Coerces a barcode cell to exact text. Returns `{ value }` on success or
+   * `{ error }` when the cell lost precision (scientific notation / unsafe
+   * integer) or exceeds 64 chars.
+   */
+  private parseBarcode(value: unknown): { value?: string; error?: string } {
+    if (value === undefined || value === null) return {};
+    const formatHint = 'formatee la columna como texto';
+    let text: string;
+    if (typeof value === 'number') {
+      if (!Number.isSafeInteger(value)) {
+        return { error: `Código de barras inválido (${formatHint})` };
+      }
+      text = String(value);
+    } else {
+      text = String(value).trim();
+      if (/^[+-]?\d+(\.\d+)?e[+-]?\d+$/i.test(text)) {
+        return { error: `Código de barras en notación científica (${formatHint})` };
+      }
+    }
+    if (!text) return {};
+    if (text.length > 64) {
+      return { error: 'Código de barras excede 64 caracteres' };
+    }
+    return { value: text };
   }
 
   private parseNumber(value: unknown, fallback = 0): number {
@@ -1348,6 +1403,10 @@ export class PopBulkDataModalComponent {
           const read = this.createRowReader(row);
           const name = this.parseText(read('Nombre', 'name', 'producto'));
           const sku = this.parseText(read('SKU', 'sku', 'código', 'codigo'));
+          const barcodeParsed = this.parseBarcode(
+            read('Código de barras', 'codigo de barras', 'barcode', 'ean', 'gtin'),
+          );
+          const barcode = barcodeParsed.value;
           const product_type = this.normalizeProductType(read('Tipo', 'product_type'));
           const state = this.normalizeState(read('Estado', 'state', 'status'));
           const track_inventory = this.parseBoolean(
@@ -1440,6 +1499,9 @@ export class PopBulkDataModalComponent {
           if (name && !sku) {
             warnings.push('Falta el SKU');
           }
+          if (barcodeParsed.error) {
+            warnings.push(`${barcodeParsed.error}; se importa sin código de barras`);
+          }
           if (isNaN(qty) || qty <= 0) {
             warnings.push('Cantidad no especificada o inválida');
           }
@@ -1460,6 +1522,7 @@ export class PopBulkDataModalComponent {
           return {
             name,
             sku,
+            barcode,
             unit_cost: isNaN(cost) ? 0 : cost,
             quantity: isNaN(qty) ? 0 : qty,
             cost_price: isNaN(cost) ? 0 : cost,
