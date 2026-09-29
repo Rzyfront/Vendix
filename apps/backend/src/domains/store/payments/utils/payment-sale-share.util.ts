@@ -304,6 +304,7 @@ export async function resolvePaymentReceivedSaleFields(
         where: { cancelled_at: null },
         select: {
           total_price: true,
+          discount_amount: true,
           quantity: true,
           tax_amount_item: true,
           weight: true,

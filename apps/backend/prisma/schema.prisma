@@ -1380,6 +1380,11 @@ model order_items {
   quantity                         Int
   unit_price                       Decimal                  @db.Decimal(12, 2)
   total_price                      Decimal                  @db.Decimal(12, 2)
+  /// Descuento de BASE (antes de impuesto) ya aplicado a esta línea. `total_price`
+  /// sigue siendo la base ANTES del descuento; `order_item_taxes` ya salió
+  /// post-descuento. `null` = contrato LEGADO: el descuento de la orden es
+  /// BRUTO y se reparte por bruto entre las líneas al proyectar la factura.
+  discount_amount                  Decimal?                 @db.Decimal(12, 2)
   tax_rate                         Decimal?                 @db.Decimal(6, 5)
   tax_amount_item                  Decimal?                 @db.Decimal(12, 2)
   cost_price                       Decimal?                 @db.Decimal(12, 2)

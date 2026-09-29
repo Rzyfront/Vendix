@@ -168,4 +168,18 @@ describe('InvoicingService — contrato titular (BE-2)', () => {
       }),
     );
   });
+  it('PATCH con solo customer_tax_id "27003183-1" escribe número Y DV derivado', async () => {
+    const { service, prisma } = createService();
+    prisma.invoices.findFirst.mockResolvedValue({
+      ...draftInvoice,
+      customer_document_type: '31',
+      customer_verification_digit: null,
+    });
+    await RequestContextService.run(requestContext, () =>
+      service.update(10, { customer_tax_id: '27003183-1' } as any),
+    );
+    const data = prisma.invoices.update.mock.calls[0][0].data;
+    expect(data.customer_tax_id).toBe('27003183');
+    expect(data.customer_verification_digit).toBe('1');
+  });
 });

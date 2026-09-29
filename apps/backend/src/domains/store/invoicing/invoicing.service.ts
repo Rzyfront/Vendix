@@ -4453,9 +4453,24 @@ export class InvoicingService {
       ...(dto.customer_name !== undefined && {
         customer_name: dto.customer_name,
       }),
-      ...(dto.customer_tax_id !== undefined && {
-        customer_tax_id: invoice_nit_split?.document_number ?? dto.customer_tax_id,
-      }),
+      // Si el PATCH toca el documento, número y DV se escriben JUNTOS desde el
+      // split: un `customer_tax_id: "27003183-1"` solo también fija el DV
+      // derivado (1), no depende de que el PATCH traiga `customer_verification_digit`.
+      ...(touches_customer_document && invoice_nit_split
+        ? {
+            ...((dto.customer_tax_id !== undefined ||
+              invoice_nit_split.document_number !== null) && {
+              customer_tax_id:
+                invoice_nit_split.document_number ?? dto.customer_tax_id,
+            }),
+            ...((dto.customer_verification_digit !== undefined ||
+              invoice_nit_split.verification_digit !== null) && {
+              customer_verification_digit:
+                invoice_nit_split.verification_digit ??
+                dto.customer_verification_digit,
+            }),
+          }
+        : {}),
       ...(dto.customer_address !== undefined && {
         customer_address: dto.customer_address,
       }),
@@ -4472,11 +4487,6 @@ export class InvoicingService {
       }),
       ...(dto.customer_document_type !== undefined && {
         customer_document_type: dto.customer_document_type,
-      }),
-      ...(dto.customer_verification_digit !== undefined && {
-        customer_verification_digit:
-          invoice_nit_split?.verification_digit ??
-          dto.customer_verification_digit,
       }),
       ...(dto.customer_tax_regime !== undefined && {
         customer_tax_regime: dto.customer_tax_regime,
