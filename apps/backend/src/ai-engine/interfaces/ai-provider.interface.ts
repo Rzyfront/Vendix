@@ -94,7 +94,7 @@ export interface AIStreamChunk {
    * instead of showing a spinner for 30-40s. They are emitted by the agent
    * loop; a plain completion only ever produces `text` / `done` / `error`.
    */
-  type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'error';
+  type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'error' | 'plan_continue';
   content?: string;
   /** Present on `tool_call` and `tool_result`. */
   tool?: {
