@@ -14,7 +14,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { CustomersService } from './customers.service';
 import { CustomerLookupService } from './customer-lookup.service';
-import { RuesLookupService } from './rues-lookup.service';
+import { ExternalIdentityLookupService } from './external-identity/external-identity-lookup.service';
 import { ExternalCustomerLookupDto } from './dto/external-customer-lookup.dto';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { ResolveCustomerDto } from './dto/resolve-customer.dto';
@@ -31,7 +31,7 @@ export class CustomersController {
   constructor(
     private readonly customersService: CustomersService,
     private readonly customerLookupService: CustomerLookupService,
-    private readonly ruesLookupService: RuesLookupService,
+    private readonly externalIdentityLookupService: ExternalIdentityLookupService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -121,7 +121,8 @@ export class CustomersController {
   }
 
   /**
-   * Consulta en vivo al RUES público cuando el documento no existe en la
+   * Consulta en vivo a fuentes públicas (RUES, SECOP II, SECOP Integrado, RNT)
+   * en paralelo, con prioridad RUES > SECOP II > SECOP contratos > RNT, cuando el documento no existe en la
    * organización. Lectura pura: no crea ni vincula ningún cliente.
    * Nunca responde 5xx por caída de la fuente (`unavailable: true`).
    */
@@ -129,7 +130,7 @@ export class CustomersController {
   @Permissions('store:customers:read')
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async lookupExternal(@Query() query: ExternalCustomerLookupDto) {
-    const result = await this.ruesLookupService.lookup(query.document_number);
+    const result = await this.externalIdentityLookupService.lookup(query.document_number);
     return this.responseService.success(result);
   }
 

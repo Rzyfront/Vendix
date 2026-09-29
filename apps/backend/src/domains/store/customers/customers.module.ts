@@ -4,7 +4,12 @@ import { createCustomerTools } from '../../../ai-engine/tools/domains/customers.
 import { createCustomerWriteTools } from '../../../ai-engine/tools/domains/writes.tools';
 import { CustomersService } from './customers.service';
 import { CustomerLookupService } from './customer-lookup.service';
-import { RuesLookupService } from './rues-lookup.service';
+import { SocrataClient } from './external-identity/socrata.client';
+import { RuesSource } from './external-identity/rues.source';
+import { SecopProveedoresSource } from './external-identity/secop-proveedores.source';
+import { SecopContratosSource } from './external-identity/secop-contratos.source';
+import { RntSource } from './external-identity/rnt.source';
+import { ExternalIdentityLookupService } from './external-identity/external-identity-lookup.service';
 import { CustomersController } from './customers.controller';
 import { CustomersBulkService } from './customers-bulk.service';
 import { CustomersBulkController } from './customers-bulk.controller';
@@ -26,7 +31,12 @@ import { EmailModule } from '../../../email/email.module';
   providers: [
     CustomersService,
     CustomerLookupService,
-    RuesLookupService,
+    SocrataClient,
+    RuesSource,
+    SecopProveedoresSource,
+    SecopContratosSource,
+    RntSource,
+    ExternalIdentityLookupService,
     CustomersBulkService,
     CustomerHistoryService,
     CustomerEmailListener,
