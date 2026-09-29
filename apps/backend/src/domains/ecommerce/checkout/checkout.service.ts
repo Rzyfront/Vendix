@@ -2283,14 +2283,17 @@ export class CheckoutService {
         shipping_address_id,
         shipping_address_snapshot,
         state: 'pending_payment',
-        internal_notes: dto.notes,
-        // Nota staff-only (nunca expuesta al cliente, columna existente —
-        // sin migración) para que la tienda vea en el detalle de la orden
-        // por qué no hay método/costo de envío: falta contactar al
-        // comprador por WhatsApp y acordarlo.
-        notes: dto.pending_shipping_assignment
+        // QUI-887 (rev 867, re-review) — la observación del comprador va a
+        // `notes` (columna visible: el POS ya la escribe ahí y el KDS la lee
+        // de ahí). El aviso operativo de envío pendiente vive SOLO en
+        // `internal_notes`: con envío pendiente es SOLO el aviso — si llevara
+        // también la observación, el detalle mostraría el mismo texto en Nota
+        // y en Staff. Sin envío pendiente conserva la observación y el detalle
+        // oculta Staff cuando iguala a Nota.
+        notes: dto.notes?.trim() || undefined,
+        internal_notes: dto.pending_shipping_assignment
           ? 'Pedido por WhatsApp con envío pendiente de asignar. Contactar al comprador para acordar el método y costo de envío.'
-          : undefined,
+          : dto.notes?.trim() || undefined,
         placed_at: new Date(),
         order_items: {
           create: itemsWithTaxes.map((item) => ({
@@ -3161,6 +3164,9 @@ export class CheckoutService {
         shipping_address_snapshot,
         state: 'created',
         internal_notes: dto.notes,
+        // QUI-887 — igual que el checkout normal: la observación del
+        // comprador va a la columna visible `notes` para que el KDS la lea.
+        notes: dto.notes?.trim() || undefined,
         placed_at: new Date(),
         order_items: {
           create: itemsWithTaxes.map((item) => ({
