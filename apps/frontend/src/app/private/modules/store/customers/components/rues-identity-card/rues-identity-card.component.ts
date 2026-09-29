@@ -11,13 +11,18 @@ export function ruesIdentityToPrefill(
   identity: ExternalCustomerIdentity,
 ): Partial<CreateCustomerRequest> {
   const juridica = identity.person_type === 'JURIDICA';
+  // Persona natural sin nombres separados en RUES: sólo trae razón social
+  // («APELLIDOS NOMBRES», orden no fiable). Va entera al nombre y el operador
+  // la reparte; mejor eso que un formulario vacío.
+  const fullNameOnly =
+    !juridica && !identity.first_name && !identity.last_name ? identity.legal_name : null;
   return {
     document_type: identity.document_type,
     document_number: identity.document_number,
     verification_digit: identity.verification_digit,
     person_type: identity.person_type,
     legal_name: juridica ? identity.legal_name : null,
-    first_name: juridica ? '' : (identity.first_name ?? ''),
+    first_name: juridica ? '' : (identity.first_name ?? fullNameOnly ?? ''),
     last_name: juridica ? '' : (identity.last_name ?? ''),
   };
 }
