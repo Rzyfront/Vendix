@@ -617,6 +617,60 @@ export class SubscriptionBillingService {
     });
   }
 
+  /**
+   * Lista paginada de solo lectura de las facturas SaaS de la tienda — la
+   * misma consulta que `GET /store/subscriptions/current/invoices`. Backing de
+   * la tool F-73 `list_subscription_invoices` (las tools son wrappers finos y
+   * nunca consultan Prisma directo).
+   *
+   * Sin suscripción lanza `SUBSCRIPTION_001`, igual que el endpoint. La salida
+   * viaja sanitizada a JSON plano (Date→ISO, Decimal→string).
+   */
+  async listStoreInvoices(
+    storeId: number,
+    query: {
+      page?: number;
+      limit?: number;
+      sort_by?: string;
+      sort_order?: 'asc' | 'desc';
+    },
+  ): Promise<{
+    data: unknown[];
+    meta: { total: number; page: number; limit: number; total_pages: number };
+  }> {
+    const sub = await this.prisma.store_subscriptions.findUnique({
+      where: { store_id: storeId },
+      select: { id: true },
+    });
+    if (!sub) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+    }
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const skip = (page - 1) * limit;
+    const orderBy = {
+      [query.sort_by ?? 'created_at']: query.sort_order ?? 'desc',
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.subscription_invoices.findMany({
+        where: { store_subscription_id: sub.id },
+        skip,
+        take: limit,
+        orderBy,
+      }),
+      this.prisma.subscription_invoices.count({
+        where: { store_subscription_id: sub.id },
+      }),
+    ]);
+
+    return {
+      data: JSON.parse(JSON.stringify(data)),
+      meta: { total, page, limit, total_pages: Math.ceil(total / limit) },
+    };
+  }
+
   // ------------------------------------------------------------------
   // Internals
   // ------------------------------------------------------------------

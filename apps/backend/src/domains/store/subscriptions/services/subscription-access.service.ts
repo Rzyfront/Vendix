@@ -643,6 +643,90 @@ export class SubscriptionAccessService {
   }
 
   /**
+   * Snapshot de solo lectura de la suscripción actual de la tienda — la misma
+   * composición que `GET /store/subscriptions/current`: fila con planes,
+   * features resueltas, aviso de auto-renovación y factura pagable más
+   * antigua. Backing de la tool F-71 `get_subscription_status` (las tools son
+   * wrappers finos y nunca consultan Prisma directo).
+   *
+   * Sin suscripción devuelve `{ found: false, ... }` (el HTTP responde `null`
+   * con 200, no 404). La salida viaja sanitizada a JSON plano (Date→ISO,
+   * Decimal→string) para que el handler la transporte sin transformar.
+   */
+  async getCurrentSubscriptionSnapshot(storeId: number) {
+    if (!Number.isInteger(storeId) || storeId <= 0) {
+      throw new InternalServerErrorException('Invalid storeId');
+    }
+
+    const sub = await this.prisma.store_subscriptions.findUnique({
+      where: { store_id: storeId },
+      include: {
+        plan: true,
+        paid_plan: true,
+        pending_plan: true,
+        partner_override: { include: { base_plan: true } },
+      },
+    });
+
+    if (!sub) {
+      return {
+        found: false as const,
+        subscription: null,
+        resolved_features: null,
+        auto_renew_warning_type: null,
+        auto_renew_warning_notification_id: null,
+        auto_renew_last_retry_at: null,
+        payable_invoice: null,
+      };
+    }
+
+    const resolved = await this.resolver.resolveSubscription(storeId);
+    const autoRenewWarning = await this.getAutoRenewWarningState(storeId);
+
+    const payableInvoice = await this.prisma.subscription_invoices.findFirst({
+      where: {
+        store_subscription_id: sub.id,
+        state: { in: ['issued', 'overdue'] },
+      },
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        total: true,
+        currency: true,
+        due_at: true,
+        period_start: true,
+        period_end: true,
+        state: true,
+      },
+    });
+
+    const payload = {
+      found: true as const,
+      subscription: sub,
+      resolved_features: resolved.features,
+      ...autoRenewWarning,
+      payable_invoice: payableInvoice
+        ? {
+            id: payableInvoice.id,
+            total: Number(payableInvoice.total),
+            currency: payableInvoice.currency,
+            due_at: payableInvoice.due_at
+              ? payableInvoice.due_at.toISOString()
+              : null,
+            period_start: payableInvoice.period_start
+              ? payableInvoice.period_start.toISOString()
+              : null,
+            period_end: payableInvoice.period_end
+              ? payableInvoice.period_end.toISOString()
+              : null,
+            state: payableInvoice.state,
+          }
+        : null,
+    };
+    return JSON.parse(JSON.stringify(payload));
+  }
+
+  /**
    * DEFECTO 5 — los tres campos `auto_renew_*` que `GET /store/subscriptions/current`
    * añade a la fila de la suscripción, DERIVADOS EN LECTURA. Sin columnas nuevas.
    *

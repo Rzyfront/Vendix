@@ -1,4 +1,10 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createSettingsAdminTools } from '../../../ai-engine/tools/domains/settings-admin.tools';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { StoreRolesModule } from '../roles/store-roles.module';
+import { StoreRolesService } from '../roles/store-roles.service';
 import { SettingsService } from './settings.service';
 import { SettingsController } from './settings.controller';
 import { FiscalStatusController } from './fiscal-status.controller';
@@ -20,7 +26,13 @@ import { CashRegistersModule } from '../cash-registers/cash-registers.module';
   // bloquear el apagado del módulo. forwardRef en ambas direcciones porque
   // QUI-784 agregó la dependencia inversa (sessions→settings vía token) y
   // CashRegistersModule ahora importa SettingsModule para proveer el token.
-  imports: [PrismaModule, AuditModule, EmailModule, forwardRef(() => CashRegistersModule)],
+  imports: [
+    PrismaModule,
+    AuditModule,
+    EmailModule,
+    StoreRolesModule,
+    forwardRef(() => CashRegistersModule),
+  ],
   controllers: [
     SettingsController,
     FiscalStatusController,
@@ -45,4 +57,34 @@ import { CashRegistersModule } from '../cash-registers/cash-registers.module';
     RutScannerService,
   ],
 })
-export class SettingsModule {}
+export class SettingsModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly settingsService: SettingsService,
+    private readonly fiscalStatusService: FiscalStatusService,
+    private readonly rolesService: StoreRolesService,
+    private readonly fiscalScope: FiscalScopeService,
+    private readonly operatingScope: OperatingScopeService,
+  ) {}
+
+  /**
+   * Registra la familia settings-admin de Vexi (F-82, F-83, F-85, F-87,
+   * F-88, F-92) desde el dominio que posee los datos. Vive aquí y no en
+   * `AIEngineModule` porque ese módulo es `@Global()`: importar un dominio
+   * por familia genera ciclos de dependencia. `StoreRolesModule` no importa
+   * a `SettingsModule`, así que esta arista no cierra un ciclo.
+   * `FiscalScopeService`/`OperatingScopeService` llegan vía `PrismaModule`
+   * (ya importado).
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createSettingsAdminTools({
+        settingsService: this.settingsService,
+        fiscalStatusService: this.fiscalStatusService,
+        rolesService: this.rolesService,
+        fiscalScopeService: this.fiscalScope,
+        operatingScopeService: this.operatingScope,
+      }),
+    );
+  }
+}

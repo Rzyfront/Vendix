@@ -1,4 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createPayrollTools } from '../../../ai-engine/tools/domains/payroll.tools';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { S3Module } from '../../../common/services/s3.module';
@@ -86,4 +88,28 @@ import { DaviviendaBatchBuilder } from './bank-export/builders/davivienda-batch.
     PayrollBankExportService,
   ],
 })
-export class PayrollModule {}
+export class PayrollModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly payrollRunsService: PayrollRunsService,
+    private readonly payrollFlowService: PayrollFlowService,
+    private readonly pilaReportService: PilaReportService,
+  ) {}
+
+  /**
+   * Registra la familia payroll (F-50, F-51, F-56, F-68) para el agente. Vive
+   * aquí y no en `AIEngineModule` porque ese módulo es `@Global()`: importar
+   * un dominio por familia genera ciclos de dependencia. `AIToolRegistry` se
+   * exporta global, así que la dependencia apunta del dominio al motor y este
+   * módulo no importa nada extra.
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createPayrollTools({
+        payrollRunsService: this.payrollRunsService,
+        payrollFlowService: this.payrollFlowService,
+        pilaReportService: this.pilaReportService,
+      }),
+    );
+  }
+}

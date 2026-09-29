@@ -1,5 +1,7 @@
-import { Global, Module, forwardRef } from '@nestjs/common';
+import { Global, Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createSubscriptionTools } from '../../../ai-engine/tools/domains/subscriptions.tools';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { SubscriptionResolverService } from './services/subscription-resolver.service';
@@ -132,4 +134,26 @@ import { NotificationsModule } from '../notifications/notifications.module';
     SubscriptionRedemptionService,
   ],
 })
-export class SubscriptionsModule {}
+export class SubscriptionsModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly subscriptionAccessService: SubscriptionAccessService,
+    private readonly subscriptionBillingService: SubscriptionBillingService,
+  ) {}
+
+  /**
+   * Registra la familia subscriptions (F-71, F-72, F-73) para el agente. Vive
+   * aquí y no en `AIEngineModule` porque ese módulo es `@Global()`: importar
+   * un dominio por familia genera ciclos de dependencia. `AIToolRegistry` se
+   * exporta global, así que la dependencia apunta del dominio al motor y este
+   * módulo no importa nada extra.
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createSubscriptionTools({
+        subscriptionAccessService: this.subscriptionAccessService,
+        subscriptionBillingService: this.subscriptionBillingService,
+      }),
+    );
+  }
+}
