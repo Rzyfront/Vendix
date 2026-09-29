@@ -392,7 +392,7 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     icon: 'hand-coins',
   },
 
-  // Reviews (1)
+  // Reviews (2)
   {
     key: 'reviews_summary',
     title: 'Resumen de Reseñas',
@@ -401,6 +401,15 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     route: '/admin/analytics/reviews/summary',
     category: 'reviews',
     icon: 'message-square',
+  },
+  {
+    key: 'reviews_by_product',
+    title: 'Reseñas por Producto',
+    description: 'Promedio y distribución de estrellas por producto',
+    detailedDescription: 'Calificación promedio, distribución 1-5 estrellas, verificadas y pendientes por producto.',
+    route: '/admin/analytics/reviews/by-product',
+    category: 'reviews',
+    icon: 'star',
   },
 
   // Financial (3)

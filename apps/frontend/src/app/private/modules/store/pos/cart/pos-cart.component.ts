@@ -365,10 +365,7 @@ import {
                             Personalizado
                           </span>
                         }
-                        @if (
-                          item.product.product_type === 'service' ||
-                          item.product.product_type === 'prepared'
-                        ) {
+                        @if (item.product.product_type === 'service') {
                           <button
                             type="button"
                             class="shrink-0 w-5 h-5 rounded flex items-center justify-center text-violet-600 hover:bg-violet-50 border border-violet-200 transition-colors cursor-pointer"
@@ -1315,7 +1312,7 @@ import {
 
     <!--
       CP-POS-SVC-PERF-001 / C.2 + C.3 — service scheduler modal. Mounted
-      at the cart root so the calendar icon on a service/prepared item
+      at the cart root so the calendar icon on a service item
       can toggle the schedulerOpen signal with the target cartItem and
       optional existing booking for re-agendamiento.
     -->

@@ -1413,6 +1413,18 @@ export class AnalyticsController {
   /**
    * QUI-548: reseñas agregadas por producto con promedio, distribución
    * de estrellas, conteo de verificadas/pendientes y fecha de la última.
+   * Pantalla (misma fuente que el export: pantalla == archivo).
+   */
+  @Get('reviews/by-product')
+  @Permissions('store:analytics:read')
+  async getReviewsByProduct(@Query() query: AnalyticsQueryDto) {
+    const result = await this.reviews_analytics_service.getReviewsByProduct(query);
+    return this.response_service.success(result);
+  }
+
+  /**
+   * QUI-548: reseñas agregadas por producto con promedio, distribución
+   * de estrellas, conteo de verificadas/pendientes y fecha de la última.
    */
   @Get('reviews/by-product/export')
   @Permissions('store:analytics:read')
