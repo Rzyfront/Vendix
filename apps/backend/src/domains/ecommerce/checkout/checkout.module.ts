@@ -1,11 +1,14 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createEcommerceSupportTools } from '../../../ai-engine/tools/domains/ecommerce-support.tools';
 import { CheckoutController } from './checkout.controller';
 import { CheckoutService } from './checkout.service';
 import { CheckoutIdempotencyService } from './checkout-idempotency.service';
 import { StoreAvailabilityGuard } from './guards/store-availability.guard';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { CartModule } from '../cart/cart.module';
+import { CartService } from '../cart/cart.service';
 import { ShippingModule } from '../../store/shipping/shipping.module';
 import { TaxesModule } from '../../store/taxes/taxes.module';
 import { SettingsModule } from '../../store/settings/settings.module';
@@ -70,4 +73,25 @@ import { StorefrontSharedModule } from '../shared/storefront-shared.module';
   ],
   exports: [CheckoutService],
 })
-export class CheckoutModule {}
+export class CheckoutModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly cartService: CartService,
+    private readonly checkoutService: CheckoutService,
+  ) {}
+
+  /**
+   * O-44/O-45: diagnóstico merchant buyer-side vía `CartService` (cotiza sobre
+   * snapshots, nunca toca carritos persistidos) y `CheckoutService`. Este
+   * módulo ya importa `CartModule`, así que es el dueño natural del registro
+   * descentralizado — no `AIEngineModule` (ciclo DI).
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createEcommerceSupportTools({
+        cartService: this.cartService,
+        checkoutService: this.checkoutService,
+      }),
+    );
+  }
+}

@@ -108,6 +108,11 @@ import {
   isFiscalDocumentType,
   toFiscalDocumentType,
 } from '../fiscal-document-requirements';
+import {
+  resolveIncResponsibility,
+  resolveVatResponsibility,
+} from '../../../../common/helpers/vat-responsibility.helper';
+import { normalizeFiscalResponsibilityCode } from '../../../../common/constants/fiscal-responsibilities';
 import type {
   DraftEmitReadinessReport,
   EmitReadinessFinding,
@@ -1578,6 +1583,106 @@ export class InvoiceFlowService {
         },
       );
     });
+  }
+
+  /**
+   * Gate de identidad del EMISOR para la emisión agéntica (F-30, paso 11).
+   *
+   * Responde «¿puede este comercio emitir este documento?» desde la única
+   * fuente válida — la casilla 53 declarada en `fiscal_data` — sin leer jamás
+   * `tax_regime` como autoridad (vocabulario derogado; la lista manda y el
+   * régimen solo se consulta cuando la lista viene vacía, dentro del propio
+   * resolver). Fail-closed: sin señal fiscal, `can_emit` es `false`.
+   *
+   * Lectura parametrizada por la factura (org/tienda del documento, no del
+   * contexto ciego): `store_settings` primero y `organization_settings` como
+   * respaldo, el mismo patrón de `WithholdingFlowService`. No lanza por causa
+   * fiscal — devuelve los flags y es la tool quien bloquea con CTA al wizard;
+   * solo lanza `INVOICING_FIND_001` si la factura no existe.
+   */
+  async getIssuerEmissionGate(invoice_id: number): Promise<{
+    invoice_id: number;
+    invoice_number: string | null;
+    status: string;
+    tax_responsibilities: string[];
+    vat_responsible: boolean;
+    vat_indeterminate: boolean;
+    vat_reason: string;
+    vat_message: string;
+    inc_responsible: boolean;
+    inc_indeterminate: boolean;
+    can_emit: boolean;
+  }> {
+    const invoice = await this.getInvoice(invoice_id);
+
+    let fiscal: Record<string, unknown> | null = null;
+    if (invoice.store_id) {
+      fiscal = await this.readSettingsFiscalData('store', invoice.store_id);
+    }
+    if (!fiscal) {
+      fiscal = await this.readSettingsFiscalData(
+        'organization',
+        invoice.organization_id,
+      );
+    }
+
+    const vat = resolveVatResponsibility(fiscal);
+    const inc = resolveIncResponsibility(fiscal);
+    const declared = Array.isArray(
+      (fiscal as { tax_responsibilities?: unknown } | null)
+        ?.tax_responsibilities,
+    )
+      ? (
+          (fiscal as { tax_responsibilities: unknown[] }).tax_responsibilities ??
+          []
+        )
+          .map((code) =>
+            typeof code === 'string'
+              ? normalizeFiscalResponsibilityCode(code)
+              : null,
+          )
+          .filter((code): code is string => code !== null)
+      : [];
+
+    return {
+      invoice_id: invoice.id,
+      invoice_number: invoice.invoice_number ?? null,
+      status: invoice.status,
+      tax_responsibilities: declared,
+      vat_responsible: vat.responsible,
+      vat_indeterminate: vat.indeterminate,
+      vat_reason: vat.reason,
+      vat_message: vat.message,
+      inc_responsible: inc.responsible,
+      inc_indeterminate: inc.indeterminate,
+      can_emit: vat.responsible,
+    };
+  }
+
+  /** Lee `settings.fiscal_data` de store u organización (scope-safe). */
+  private async readSettingsFiscalData(
+    scope: 'store' | 'organization',
+    scope_id: number,
+  ): Promise<Record<string, unknown> | null> {
+    const row =
+      scope === 'store'
+        ? await this.prisma.store_settings.findFirst({
+            where: { store_id: scope_id },
+            select: { settings: true },
+          })
+        : await this.prisma.organization_settings.findFirst({
+            where: { organization_id: scope_id },
+            select: { settings: true },
+          });
+    const settings = row?.settings;
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      return null;
+    }
+    const fiscal = (settings as Record<string, unknown>).fiscal_data;
+    if (!fiscal || typeof fiscal !== 'object' || Array.isArray(fiscal)) {
+      return null;
+    }
+    return fiscal as Record<string, unknown>;
   }
 
   async validate(id: number) {

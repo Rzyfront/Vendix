@@ -1,4 +1,6 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createNotificationTools } from '../../../ai-engine/tools/domains/notifications.tools';
 import { NotificationsController } from './notifications.controller';
 import { NotificationSoundsCatalogController } from './notification-sounds-catalog.controller';
 import { NotificationsService } from './notifications.service';
@@ -46,4 +48,23 @@ import { InvoiceDeliveryModule } from '../invoicing/delivery/invoice-delivery.mo
     NotificationsPushService,
   ],
 })
-export class NotificationsModule {}
+export class NotificationsModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly notificationsService: NotificationsService,
+    private readonly pushService: NotificationsPushService,
+  ) {}
+
+  /**
+   * D-12/D-13: registro descentralizado en el módulo dueño, no en
+   * `AIEngineModule` (ciclo DI). `AIToolRegistry` viene del módulo global.
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createNotificationTools({
+        notificationsService: this.notificationsService,
+        pushService: this.pushService,
+      }),
+    );
+  }
+}

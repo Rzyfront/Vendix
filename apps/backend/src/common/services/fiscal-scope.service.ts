@@ -198,6 +198,46 @@ export class FiscalScopeService {
     return entity?.id ?? null;
   }
 
+  /**
+   * Etiqueta de la entidad contable vigente para las respuestas fiscales de
+   * Vexi (nombre + NIT + alcances). Mudada desde `accounting.tools.ts` en el
+   * paso 15: era la última lectura directa de la familia y este servicio ya
+   * resolvía el id (`findFiscalAccountingEntityId`). Lectura pura; `null` si
+   * la entidad no existe.
+   */
+  async findAccountingEntityDescription(
+    entityId: number,
+  ): Promise<{
+    id: number;
+    name: string | null;
+    tax_id: string | null;
+    fiscal_scope: unknown;
+    operating_scope: unknown;
+    store_id: number | null;
+  } | null> {
+    const entity = await this.prisma.accounting_entities.findFirst({
+      where: { id: entityId },
+      select: {
+        id: true,
+        name: true,
+        legal_name: true,
+        tax_id: true,
+        scope: true,
+        fiscal_scope: true,
+        store_id: true,
+      },
+    });
+    if (!entity) return null;
+    return {
+      id: entity.id,
+      name: entity.legal_name || entity.name,
+      tax_id: entity.tax_id,
+      fiscal_scope: entity.fiscal_scope,
+      operating_scope: entity.scope,
+      store_id: entity.store_id,
+    };
+  }
+
   async resolveFiscalContext(
     params: ResolveFiscalAccountingEntityParams,
   ): Promise<FiscalContext> {

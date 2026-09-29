@@ -48,7 +48,6 @@ export class CustomersModule implements OnModuleInit {
   constructor(
     private readonly toolRegistry: AIToolRegistry,
     private readonly customersService: CustomersService,
-    private readonly prisma: StorePrismaService,
   ) {}
 
   /**
@@ -62,7 +61,6 @@ export class CustomersModule implements OnModuleInit {
     this.toolRegistry.registerMany(
       createCustomerTools({
         customersService: this.customersService,
-        prisma: this.prisma,
       }),
     );
 
@@ -72,7 +70,6 @@ export class CustomersModule implements OnModuleInit {
     this.toolRegistry.registerMany(
       createCustomerWriteTools({
         customersService: this.customersService,
-        prisma: this.prisma,
       }),
     );
   }

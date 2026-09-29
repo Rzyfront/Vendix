@@ -21,6 +21,7 @@ export function createBusinessTools({
   return [
     {
       name: 'get_store_profile',
+      version: '1',
       domain: 'business',
       readOnly: true,
       description:
@@ -36,6 +37,7 @@ export function createBusinessTools({
     },
     {
       name: 'get_business_snapshot',
+      version: '1',
       domain: 'business',
       readOnly: true,
       description:

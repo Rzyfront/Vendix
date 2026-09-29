@@ -174,6 +174,14 @@ export const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
 const CANCELABLE_STATES: OrderState[] = [...CANCELABLE_ORDER_STATES];
 const REFUNDABLE_STATES: OrderState[] = ['delivered', 'finished'];
 
+/**
+ * Estados desde los que `confirmDelivery` cierra la orden (`delivered` y el
+ * `processing` de restaurante pagado en cocina). Antes era un literal local
+ * del método y `orders.tools.ts` lo espejaba para el preview de O-23; ahora
+ * vive aquí —única fuente— y la tool lo importa (paso 15).
+ */
+export const FINISHABLE_STATES: OrderState[] = ['delivered', 'processing'];
+
 // Una mesa se consume en el local: dine_in, pickup y direct_delivery no
 // requieren despacho. Mantener esta lista alineada con la del detalle de orden.
 const SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES = new Set<order_delivery_type_enum>([
@@ -590,6 +598,28 @@ export class OrderFlowService {
     }
 
     return order;
+  }
+
+  /**
+   * Contexto de `update_order_status`: la proyección mínima para resolver la
+   * transición (número, estado, saldo, cumplimiento). Devuelve `null` en vez
+   * de lanzar para que la tool conteste `{error, next_step}` en español.
+   * Misma proyección que la tool leía directa (paso 15). Lectura pura,
+   * scopeada por tienda.
+   */
+  async findOrderForStatusTransitionForAgent(
+    orderId: number,
+  ): Promise<any> {
+    return this.prisma.orders.findFirst({
+      where: { id: orderId },
+      select: {
+        id: true,
+        order_number: true,
+        state: true,
+        remaining_balance: true,
+        dispatch_fulfillment: true,
+      },
+    });
   }
 
   private async assertUnsplitOrderAfterLock(
@@ -5675,7 +5705,6 @@ export class OrderFlowService {
   async confirmDelivery(orderId: number) {
     const order = await this.getOrder(orderId);
 
-    const FINISHABLE_STATES: OrderState[] = ['delivered', 'processing'];
     if (!FINISHABLE_STATES.includes(order.state as OrderState)) {
       throw new BadRequestException(
         `Cannot confirm delivery for order in state '${order.state}'. ` +

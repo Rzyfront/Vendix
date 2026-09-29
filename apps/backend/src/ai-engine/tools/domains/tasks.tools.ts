@@ -86,6 +86,7 @@ export function createTaskTools({
   return [
     {
       name: 'queue_task',
+      version: '1',
       domain: 'tasks',
       readOnly: true,
       description:
@@ -137,6 +138,7 @@ export function createTaskTools({
     },
     {
       name: 'bulk_prepare',
+      version: '1',
       domain: 'tasks',
       readOnly: true,
       description:
