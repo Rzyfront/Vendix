@@ -1,4 +1,8 @@
 import { DianDirectProvider } from './dian-direct.provider';
+import {
+  DianResponseParserService,
+  describeDianVerdict,
+} from './dian-response-parser.service';
 import { UblInvoiceBuilder } from './xml/ubl-invoice.builder';
 import { DianInvoiceControl } from './interfaces/dian-config.interface';
 
@@ -93,7 +97,9 @@ describe('UblInvoiceBuilder — bloque sts:InvoiceControl (paso 2)', () => {
   it('emite la autorización, el período y el rango con valores reales', () => {
     const xml = buildXml(CONTROL);
 
-    expect(xml).toContain('<sts:InvoiceAuthorization>18760000001</sts:InvoiceAuthorization>');
+    expect(xml).toContain(
+      '<sts:InvoiceAuthorization>18760000001</sts:InvoiceAuthorization>',
+    );
     expect(xml).toContain('<cbc:StartDate>2019-01-19</cbc:StartDate>');
     expect(xml).toContain('<cbc:EndDate>2030-01-19</cbc:EndDate>');
     expect(xml).toContain('<sts:Prefix>SETP</sts:Prefix>');
@@ -268,5 +274,95 @@ describe('DianDirectProvider.loadIssuerData', () => {
     await expect(
       (provider as any).loadIssuerData({ ...CONFIG, nit: '902056589-9' }),
     ).resolves.toMatchObject({ nit: '902056589' });
+  });
+});
+
+describe('DianDirectProvider — mensaje y checkStatus con reglas estructuradas', () => {
+  const b64 = (t: string) => Buffer.from(t).toString('base64');
+  const raw = (strings: string[], is_valid: boolean, code: string, app = '') =>
+    `<s:Envelope xmlns:s="s" xmlns:b="b" xmlns:c="c"><s:Body><b:IsValid>${is_valid}</b:IsValid><b:StatusCode>${code}</b:StatusCode><b:StatusDescription>Procesado</b:StatusDescription>${
+      strings.length
+        ? `<b:ErrorMessage>${strings.map((t) => `<c:string>${t}</c:string>`).join('')}</b:ErrorMessage>`
+        : ''
+    }<b:XmlBase64Bytes>${app ? b64(app) : ''}</b:XmlBase64Bytes></s:Body></s:Envelope>`;
+
+  const makeStatusProvider = (dian_response: any) => {
+    const soap = { getStatus: jest.fn().mockResolvedValue(dian_response) };
+    const provider = new DianDirectProvider(
+      null as any,
+      null as any,
+      null as any,
+      soap as any,
+      null as any,
+      new DianResponseParserService(),
+      null as any,
+      null as any,
+    );
+    (provider as any).loadConfig = jest
+      .fn()
+      .mockResolvedValue({ id: 1, environment: 'test' });
+    (provider as any).loadWsCredentials = jest
+      .fn()
+      .mockResolvedValue(undefined);
+    return provider;
+  };
+
+  it('el mensaje de rechazo lista las reglas sin ", 0," ni vacíos', () => {
+    const parsed = new DianResponseParserService().parseApplicationResponse(
+      raw(
+        [
+          'Regla: 90, Rechazo: Documento procesado anteriormente',
+          'Regla: CTG01, Rechazo: Contingencia invalida',
+        ],
+        false,
+        '99',
+      ),
+    );
+    const msg = describeDianVerdict(parsed, 'ok', 'Documento rechazado');
+    expect(msg).toBe(
+      'Documento rechazado: Regla 90: Documento procesado anteriormente; Regla CTG01: Contingencia invalida',
+    );
+    expect(msg).not.toMatch(/, 0,|undefined/);
+  });
+
+  it('el mensaje de éxito agrega las notificaciones', () => {
+    const parsed = new DianResponseParserService().parseApplicationResponse(
+      raw(
+        ['Regla: RUT01, Notificación: Responsabilidad no informada'],
+        true,
+        '00',
+      ),
+    );
+    expect(
+      describeDianVerdict(parsed, 'Documento validado por la DIAN', 'x'),
+    ).toBe(
+      'Documento validado por la DIAN; Notificación RUT01: Responsabilidad no informada',
+    );
+  });
+
+  it('checkStatus expone rule_messages, application_response_xml y timed_out', async () => {
+    const xml = raw(
+      ['Regla: 90, Rechazo: Documento procesado anteriormente'],
+      false,
+      '99',
+    );
+    const provider = makeStatusProvider({
+      raw_response: xml,
+      timed_out: false,
+    });
+    const res = await provider.checkStatus('CUFE123');
+    expect(res.status).toBe('rejected');
+    expect(res.provider_data.rule_messages[0].code).toBe('90');
+    expect(res.provider_data.already_processed).toBe(true);
+    expect(res.provider_data.application_response_xml).toBe(xml);
+    expect(res.provider_data.timed_out).toBe(false);
+  });
+
+  it('checkStatus acepta con status_code 00 aunque IsValid falte', async () => {
+    const xml = raw([], false, '00');
+    const provider = makeStatusProvider({ raw_response: xml, timed_out: true });
+    const res = await provider.checkStatus('CUFE123');
+    expect(res.status).toBe('accepted');
+    expect(res.provider_data.timed_out).toBe(true);
   });
 });

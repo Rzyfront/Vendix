@@ -19,6 +19,7 @@ import {
   ProviderInvoiceData,
   ProviderInvoiceTax,
   ProviderResponse,
+  StatusResponse,
 } from '../providers/invoice-provider.interface';
 import {
   absorbInclusiveLine,
@@ -4153,7 +4154,16 @@ export class InvoiceFlowService {
       customer_is_withholding_agent: acquirer_identity.is_withholding_agent,
       // Anexo §12.2: a document re-sent after contingency must keep its prefix and
       // number and declare InvoiceTypeCode 04, not 01. Absent on a first send.
-      contingency_type: invoice.contingency_type ?? undefined,
+      // Solo mientras la contingencia declarada siga VIGENTE (48 h desde
+      // `contingency_declared_at`). Vencida, o sin declaracion, se firma 01:
+      // heredar '04' fuera de plazo hace que la DIAN rechace con CTG01.
+      contingency_type:
+        invoice.contingency_type &&
+        invoice.contingency_declared_at &&
+        invoice.contingency_deadline &&
+        new Date(invoice.contingency_deadline).getTime() > Date.now()
+          ? invoice.contingency_type
+          : undefined,
       // dianAmount, not `.toString()`: Prisma.Decimal drops trailing zeros, so
       // a Decimal(12,2) holding 1000.00 serializes as '1000'. The CUFE hashed
       // that bare '1000' while the UBL XML emitted '1000.00', and the DIAN —
@@ -4293,9 +4303,14 @@ export class InvoiceFlowService {
     });
 
     // Send to provider
+    // RESERVA ATOMICA antes de tocar la DIAN. Punto unico por el que pasan todos
+    // los llamadores: si otro ya transmite esta factura, lanza
+    // FISCAL_SEND_IN_PROGRESS y se propaga tal cual — sin estado, sin
+    // contingencia, sin markError (la transmision ajena sigue en vuelo).
+    await this.fiscal_ledger.claimSubmission(transmission.id);
+
     let provider_response: ProviderResponse;
     try {
-      await this.fiscal_ledger.markSubmitted(transmission.id);
       if (invoice.invoice_type === 'credit_note') {
         provider_response = await provider.sendCreditNote(provider_data);
       } else if (invoice.invoice_type === 'debit_note') {
@@ -4375,19 +4390,91 @@ export class InvoiceFlowService {
       );
     }
 
-    // A DIAN OUTAGE IS NOT A REJECTION. Anexo Técnico 1.9 §12.2: when the
-    // validation service is unavailable, the document is expedited under
-    // contingency Type 04 — it keeps its prefix and number, is delivered to the
-    // acquirer without prior validation, and owes the DIAN a transmission within
-    // 48 h. Falling through to the rejection branch below (the previous
-    // behaviour) stamped `status: rejected` + `accounting_status: blocked` on a
-    // perfectly valid invoice, a terminal state that no retry could undo.
-    if (!provider_response.success && provider_response.contingency_eligible) {
-      await this.handleContingency(id, invoice, transmission.id, provider_response);
-      return this.prisma.invoices.findFirstOrThrow({
-        where: { id },
-        include: INVOICE_INCLUDE,
-      });
+    const sent_fiscal_key =
+      provider_response.cufe ||
+      provider_response.cude ||
+      provider_response.cuds ||
+      provider_response.cune ||
+      invoice.cufe ||
+      undefined;
+
+    // REGLA 90: la DIAN ya proceso este documento. No es un rechazo: se confirma
+    // con GetStatus y, si esta aceptado, se aplica la aceptacion.
+    if (
+      !provider_response.success &&
+      provider_response.provider_data?.already_processed === true
+    ) {
+      const status = await this.queryStatusSafely(provider, sent_fiscal_key, id);
+      if (status?.status === 'accepted') {
+        const resolved = this.buildResponseFromStatus(
+          provider_response,
+          status,
+          sent_fiscal_key,
+          'get_status_regla_90',
+          'Documento procesado anteriormente por la DIAN y confirmado válido vía GetStatus',
+        );
+        return this.applyDianAcceptance({
+          id,
+          invoice,
+          transmission_id: transmission.id,
+          provider_response: resolved,
+          provider_data,
+          acquirer_identity,
+          is_support_document,
+          withholding_batches,
+        });
+      }
+    }
+
+    // TIMEOUT / DIAN NO DISPONIBLE. Ya NO se declara contingencia automatica
+    // (el '04' heredado provocaba CTG01 en los reenvios). Se consulta GetStatus:
+    // si la DIAN alcanzo a aceptar, se aplica; si no, error reintentable normal.
+    if (
+      !provider_response.success &&
+      (provider_response.provider_data?.timed_out === true ||
+        provider_response.contingency_eligible)
+    ) {
+      const status = await this.queryStatusSafely(provider, sent_fiscal_key, id);
+      if (status?.status === 'accepted') {
+        const resolved = this.buildResponseFromStatus(
+          provider_response,
+          status,
+          sent_fiscal_key,
+          'get_status_timeout',
+          'Transmisión sin respuesta de la DIAN y confirmada válida vía GetStatus',
+        );
+        return this.applyDianAcceptance({
+          id,
+          invoice,
+          transmission_id: transmission.id,
+          provider_response: resolved,
+          provider_data,
+          acquirer_identity,
+          is_support_document,
+          withholding_batches,
+        });
+      }
+
+      const reason =
+        provider_response.message ||
+        `La DIAN no respondió (${provider_response.failure_class ?? 'timeout'})`;
+      await this.fiscal_ledger.markError(transmission.id, new Error(reason));
+      this.retry_queue
+        .enqueue(id, invoice.organization_id, invoice.store_id, reason)
+        .catch((e) =>
+          this.logger.error(
+            `Failed to enqueue invoice #${id} for retry: ${e.message}`,
+          ),
+        );
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROVIDER_001,
+        reason.trim().slice(0, PROVIDER_MESSAGE_MAX_LENGTH) || undefined,
+        {
+          invoice_id: id,
+          fiscal_transmission_id: transmission.id,
+          retry_scheduled: true,
+        },
+      );
     }
 
     if (!provider_response.success) {
@@ -4410,7 +4497,12 @@ export class InvoiceFlowService {
           qr_code: provider_response.qr_code,
           xml_document: provider_response.xml_document,
           pdf_url: provider_response.pdf_url,
-          provider_response: this.toProviderEvidence(provider_response),
+          provider_response: {
+            ...this.toProviderEvidence(provider_response),
+            ...(this.extractRuleRejections(provider_response).length
+              ? { errors: this.extractRuleRejections(provider_response) }
+              : {}),
+          },
         },
         include: INVOICE_INCLUDE,
       });
@@ -4421,6 +4513,7 @@ export class InvoiceFlowService {
       // —la misma lista que queda persistida en `provider_response`— para que el
       // frontend pueda enumerarla en vez de mostrar «documento rechazado» a secas.
       const rejection = this.extractDianRejection(provider_response);
+      const rule_rejections = this.extractRuleRejections(provider_response);
 
       this.logger.warn(
         `Invoice #${id} (${rejected.invoice_number}) rejected by provider: ${
@@ -4438,11 +4531,16 @@ export class InvoiceFlowService {
 
       throw new VendixHttpException(
         ErrorCodes.INVOICING_PROVIDER_004,
-        this.dianRejectionMessage(provider_response, rejection),
+        rule_rejections.length
+          ? `La DIAN rechazó el documento — ${rule_rejections
+              .map((r) => `${r.code}: ${r.text}`)
+              .join(' | ')}`
+          : this.dianRejectionMessage(provider_response, rejection),
         {
           invoice_id: id,
           tracking_id: provider_response.tracking_id,
           ...rejection,
+          ...(rule_rejections.length ? { errors: rule_rejections } : {}),
         },
       );
     }
@@ -4484,7 +4582,50 @@ export class InvoiceFlowService {
       );
     }
 
-    await this.fiscal_ledger.markAccepted(transmission.id, provider_response);
+    return this.applyDianAcceptance({
+      id,
+      invoice,
+      transmission_id: transmission.id,
+      provider_response,
+      provider_data,
+      acquirer_identity,
+      is_support_document,
+      withholding_batches,
+    });
+  }
+
+  /**
+   * Aplica una aceptacion de la DIAN: ledger, factura, CxP de documento soporte,
+   * retenciones y evento contable. Extraido de `send()`; lo comparten el camino
+   * directo y la resolucion por GetStatus (Regla 90 / timeout).
+   */
+  private async applyDianAcceptance(params: {
+    id: number;
+    invoice: any;
+    transmission_id: number;
+    provider_response: ProviderResponse;
+    provider_data: any;
+    acquirer_identity: ResolvedAcquirerIdentity;
+    is_support_document: boolean;
+    withholding_batches: WithholdingBatch[];
+  }) {
+    const {
+      id,
+      invoice,
+      transmission_id,
+      provider_response,
+      provider_data,
+      acquirer_identity,
+      is_support_document,
+      withholding_batches,
+    } = params;
+    const fiscal_key =
+      provider_response.cufe ||
+      provider_response.cude ||
+      provider_response.cuds ||
+      provider_response.cune;
+
+    await this.fiscal_ledger.markAccepted(transmission_id, provider_response);
 
     // Update invoice with provider response
     const updated = await this.prisma.invoices.update({
@@ -4573,6 +4714,63 @@ export class InvoiceFlowService {
       `Invoice #${id} (${updated.invoice_number}) accepted by provider`,
     );
     return updated;
+  }
+
+  private async queryStatusSafely(
+    provider: any,
+    fiscal_key: string | undefined,
+    invoice_id: number,
+  ): Promise<StatusResponse | null> {
+    if (!fiscal_key || typeof provider?.checkStatus !== 'function') return null;
+    try {
+      return await provider.checkStatus(fiscal_key);
+    } catch (error) {
+      this.logger.warn(
+        `GetStatus failed for invoice #${invoice_id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private buildResponseFromStatus(
+    sent: ProviderResponse,
+    status: StatusResponse,
+    sent_fiscal_key: string | undefined,
+    resolved_via: string,
+    message: string,
+  ): ProviderResponse {
+    const cufe = status.cufe || sent.cufe || sent_fiscal_key;
+    return {
+      ...sent,
+      success: true,
+      tracking_id: status.tracking_id || sent.tracking_id || cufe || '',
+      cufe: sent.cude || sent.cuds || sent.cune ? sent.cufe : cufe,
+      cude: status.cude || sent.cude,
+      cuds: status.cuds || sent.cuds,
+      cune: status.cune || sent.cune,
+      message,
+      contingency_eligible: false,
+      provider_data: {
+        ...(sent.provider_data ?? {}),
+        ...(status.provider_data ?? {}),
+        resolved_via,
+      },
+    };
+  }
+
+  private extractRuleRejections(
+    response: ProviderResponse,
+  ): { code: string; text: string }[] {
+    const raw = response.provider_data?.rule_messages;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter(
+        (m: any) =>
+          m && m.severity === 'rechazo' && typeof m.text === 'string' && m.text,
+      )
+      .map((m: any) => ({ code: String(m.code ?? ''), text: m.text }));
   }
 
   async accept(id: number) {

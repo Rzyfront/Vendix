@@ -325,7 +325,7 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
           <!-- Emite el documento de verdad (no sólo crea el borrador). Se apaga
                cuando la DIAN ya lo aceptó: reemitir un documento aceptado no es
                un reintento, es un hecho económico distinto. -->
-          <app-button variant="ghost" size="md" (clicked)="createInvoice()" [disabled]="!orderId || dianConfigsLoading() || alreadyIssued()" [loading]="creatingInvoice()" [title]="invoiceButtonTitle()">
+          <app-button variant="ghost" size="md" (clicked)="createInvoice()" [disabled]="!orderId || dianConfigsLoading() || alreadyIssued() || fiscalPending()" [loading]="creatingInvoice()" [title]="invoiceButtonTitle()">
             <app-icon name="file-text" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Factura</span>
           </app-button>
@@ -1803,7 +1803,7 @@ private authFacade = inject(AuthFacade);
    * habilitación. El resultado de la emisión NUNCA abre nada.
    */
   createInvoice(): void {
-    if (!this.orderId || this.creatingInvoice()) return;
+    if (!this.orderId || this.creatingInvoice() || this.fiscalPending()) return;
 
     // Con las configuraciones todavía cargando se rechaza en silencio, para no
     // pintar un modal de «falta configurar» que se desmiente medio segundo
@@ -1946,6 +1946,11 @@ private authFacade = inject(AuthFacade);
         );
     }
   }
+
+  /** Envio a la DIAN en curso: el boton «Factura» no debe disparar otro. */
+  readonly fiscalPending = computed(
+    () => this.fiscalStatus()?.state === 'pending',
+  );
 
   /** La DIAN ya aceptó el documento de esta venta. */
   readonly alreadyIssued = computed(

@@ -197,10 +197,67 @@ describe('FiscalTransmissionLedgerService', () => {
   it('does not submit terminal accepted transmissions', async () => {
     const { service, client } = createService();
     client.fiscal_transmissions.updateMany.mockResolvedValueOnce({ count: 0 });
+    client.fiscal_transmissions.findFirst.mockResolvedValueOnce({
+      transmission_status: 'accepted',
+    });
 
-    await expect(service.markSubmitted(100)).rejects.toMatchObject({
+    await expect(service.claimSubmission(100)).rejects.toMatchObject({
       errorCode: 'FISCAL_IDEMPOTENCY_CONFLICT',
     });
+  });
+
+  it('rejects a claim on a fresh submitted transmission with FISCAL_SEND_IN_PROGRESS', async () => {
+    const { service, client } = createService();
+    client.fiscal_transmissions.updateMany.mockResolvedValueOnce({ count: 0 });
+    client.fiscal_transmissions.findFirst.mockResolvedValueOnce({
+      transmission_status: 'submitted',
+    });
+
+    await expect(service.claimSubmission(100)).rejects.toMatchObject({
+      errorCode: 'FISCAL_SEND_IN_PROGRESS',
+    });
+  });
+
+  it('claims with a where that allows stale submitted rows but not fresh ones', async () => {
+    const { service, client } = createService();
+
+    await expect(service.claimSubmission(100)).resolves.toBeUndefined();
+
+    const args = client.fiscal_transmissions.updateMany.mock.calls[0][0];
+    expect(args.where.id).toBe(100);
+    const [claimable, stale] = args.where.OR;
+    expect(claimable.transmission_status.in).not.toContain('submitted');
+    expect(claimable.transmission_status.in).not.toContain('accepted');
+    expect(stale.transmission_status).toBe('submitted');
+    const cutoff = stale.sent_at.lt.getTime();
+    expect(Date.now() - cutoff).toBeGreaterThanOrEqual(3 * 60_000 - 50);
+    expect(Date.now() - cutoff).toBeLessThan(3 * 60_000 + 5_000);
+    expect(args.data.transmission_status).toBe('submitted');
+  });
+
+  it('markSubmitted delegates to claimSubmission', async () => {
+    const { service, client } = createService();
+    await service.markSubmitted(100);
+    expect(client.fiscal_transmissions.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('ensureInvoiceTransmission does not reset a submitted transmission', async () => {
+    const existingRow = {
+      id: 100,
+      transmission_status: 'submitted',
+      request_hash: null,
+      retry_count: 0,
+    };
+    const { service, client } = createService();
+    client.fiscal_transmissions.findFirst.mockResolvedValueOnce(existingRow);
+
+    const result = await service.ensureInvoiceTransmission({
+      invoice,
+      provider_data: { total: 100 },
+    });
+
+    expect(result).toBe(existingRow);
+    expect(client.fiscal_transmissions.update).not.toHaveBeenCalled();
   });
 
   it('marks accepted transmissions and stores DIAN evidence without posting accounting', async () => {
