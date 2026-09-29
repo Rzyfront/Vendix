@@ -161,7 +161,10 @@ export function normalizePaymentLegs(
   const legs: NormalizedLeg[] = rawLegs.map((raw) => {
     const method = methodsById[raw.store_payment_method_id];
     assertDirectMethod(raw.store_payment_method_id, method, options.allowWallet === true);
-    if (toCents(raw.amount) <= 0) {
+    // Una venta de total $0 (cupón 100 %) es válida: su único tramo puede ser
+    // 0. Cualquier otro tramo — o un 0 con saldo por cobrar — se rechaza.
+    const isZeroSale = toCents(payableAmount) === 0 && rawLegs.length === 1;
+    if (toCents(raw.amount) < 0 || (toCents(raw.amount) === 0 && !isZeroSale)) {
       throw new VendixHttpException(
         ErrorCodes.PAY_INVALID_AMOUNT_001,
         'El monto de cada tramo debe ser mayor a cero.',

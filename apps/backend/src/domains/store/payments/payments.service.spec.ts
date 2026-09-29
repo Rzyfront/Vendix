@@ -1576,6 +1576,11 @@ describe('PaymentsService', () => {
       },
       payments: { findFirst: jest.fn().mockResolvedValue(paid) },
       bookings: { updateMany: jest.fn() },
+      order_items: {
+        findMany: jest.fn().mockResolvedValue([]),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      order_item_taxes: { update: jest.fn().mockResolvedValue({}) },
     });
 
     afterEach(() => jest.restoreAllMocks());
@@ -1668,6 +1673,53 @@ describe('PaymentsService', () => {
         }),
       }));
       expect(client.orders.update.mock.calls[0][0].data.order_items).toBeUndefined();
+    });
+
+    describe.each([
+      // [cupón bruto, base neta esperada, impuesto, descuento base, total]
+      ['100 % coupon', 1190, 0, 0, 1000, 0],
+      ['10 % coupon', 119, 900, 171, 100, 1071],
+    ])('adopted order with %s on a 19 %% line', (_n, coupon, newBase, tax, baseDisc, total) => {
+      it('retaxes persisted lines on the discounted base and writes discount_amount', async () => {
+        const client: any = tx({ ...order, subtotal_amount: 1000, tax_amount: 190 });
+        // Fila ya guardada con impuesto POST-descuento rancio: debe ignorarse.
+        const persisted = [{
+          id: 7, quantity: 1, total_price: 1000, tax_amount_item: 12,
+          order_item_taxes: [{ id: 70, tax_rate: 0.19, tax_amount: 12,
+            tax_type: 'VAT', tax_rate_id: 1, tax_name: 'IVA' }],
+        }];
+        client.order_items = {
+          findMany: jest.fn().mockResolvedValue(persisted),
+          update: jest.fn().mockResolvedValue({}),
+        };
+        client.order_item_taxes = { update: jest.fn().mockResolvedValue({}) };
+        jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+        jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+          product_name: 'Artículo', quantity: 1, total_price: 9999, tax_amount_item: 0,
+        });
+        jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+          total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+        });
+        jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+          coupon_id: 3, coupon_code: 'C', discount_amount: coupon,
+        });
+
+        await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+
+        const data = client.orders.update.mock.calls[0][0].data;
+        expect(data.subtotal_amount).toBe(1000);
+        expect(data.tax_amount).toBe(tax);
+        expect(data.discount_amount).toBe(baseDisc);
+        expect(data.grand_total).toBe(total);
+        expect(client.order_items.update).toHaveBeenCalledWith({
+          where: { id: 7 },
+          data: expect.objectContaining({ discount_amount: baseDisc }),
+        });
+        expect(client.order_item_taxes.update).toHaveBeenCalledWith({
+          where: { id: 70 }, data: { tax_amount: tax },
+        });
+        void newBase;
+      });
     });
 
     it('F.2 creates an alias shipping address in the same order transaction and links its FK', async () => {
@@ -1800,7 +1852,12 @@ describe('PaymentsService', () => {
     });
 
     it('E.6 retail: delegates 10% of gross products to resolveTip without taxing the tip', async () => {
-      const client = tx({ ...order, subtotal_amount: 100000, tax_amount: 19000 });
+      const client: any = tx({ ...order, subtotal_amount: 100000, tax_amount: 19000 });
+      client.order_items.findMany.mockResolvedValue([{
+        id: 7, quantity: 1, total_price: 100000, tax_amount_item: 19000,
+        order_item_taxes: [{ id: 70, tax_rate: 0.19, tax_amount: 19000,
+          tax_type: 'VAT', tax_rate_id: 1, tax_name: 'IVA' }],
+      }]);
       const resolveTipSpy = jest.spyOn(tipUtil, 'resolveTip');
       jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
       jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
@@ -1824,9 +1881,10 @@ describe('PaymentsService', () => {
       );
       expect(client.orders.update).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({
-          // Carrito adoptado: contrato legacy (descuento bruto, IVA pre-descuento).
-          subtotal_amount: 100000, tax_amount: 19000,
-          discount_amount: 2000, shipping_cost: 5000,
+          // Carrito adoptado: contrato nuevo (descuento trasladado a la base,
+          // IVA sobre la base descontada).
+          subtotal_amount: 100000, tax_amount: 18680.67,
+          discount_amount: 1680.67, shipping_cost: 5000,
           tip_amount: 11900, tip_type: 'fixed', tip_value: 11900,
           grand_total: 133900,
         }),

@@ -5629,8 +5629,28 @@ export class PaymentsService {
           : this.roundMoney(orderItems.reduce(
               (sum, item) => sum + Number(item.total_price || 0), 0,
             ));
+        // Orden adoptada: las líneas PERSISTIDAS son la verdad. El impuesto
+        // pre-descuento se reconstruye de `tax_rate × total_price` (las filas
+        // guardadas pueden venir ya descontadas: `existingOrder.tax_amount`
+        // NO es pre-descuento), así el cobro es idempotente.
+        const adoptedItems: any[] = existingOrder
+          ? await tx.order_items.findMany({
+              where: { order_id: existingOrder.id },
+              include: { order_item_taxes: true },
+            })
+          : [];
         const preDiscountTaxAmount = existingOrder
-          ? this.roundMoney(Number(existingOrder.tax_amount))
+          ? this.roundMoney(
+              adoptedItems.reduce(
+                (sum, item) =>
+                  sum +
+                  this.resolvePreDiscountLineTax(
+                    item,
+                    item.order_item_taxes ?? [],
+                  ),
+                0,
+              ),
+            )
           : this.roundMoney(orderItems.reduce((sum, item) => {
             const nestedTaxes = item.order_item_taxes?.create || [];
             if (nestedTaxes.length > 0) {
@@ -5693,7 +5713,12 @@ export class PaymentsService {
         // arriba). `orders.discount_amount` cambia de semántica: antes era
         // el descuento en BRUTO, ahora es SOLO la parte de BASE.
         const retaxResult = existingOrder
-          ? null
+          ? await this.retaxMergedPosOrderItemsForTableClose(
+              tx,
+              adoptedItems,
+              [],
+              totalGrossDiscount,
+            )
           : this.retaxPosOrderItemsAfterDiscount(
               orderItems,
               totalGrossDiscount,

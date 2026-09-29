@@ -1978,7 +1978,12 @@ export class OrderFlowService {
     let chargeAmount = amountToCharge;
     if (isChargeAmountLane && dto.amount != null) {
       chargeAmount = Number(dto.amount);
-      if (!Number.isFinite(chargeAmount) || toChargeCents(chargeAmount) <= 0) {
+      // Total $0 (cupón 100 %): registrar 0 sobre saldo 0 es válido.
+      if (
+        !Number.isFinite(chargeAmount) ||
+        toChargeCents(chargeAmount) < 0 ||
+        (toChargeCents(chargeAmount) === 0 && toChargeCents(amountToCharge) > 0)
+      ) {
         throw new VendixHttpException(
           ErrorCodes.PAY_INVALID_AMOUNT_001,
           'El monto a cobrar debe ser mayor a cero.',
@@ -8407,6 +8412,8 @@ export class OrderFlowService {
     paymentId?: number,
   ): Promise<void> {
     try {
+      // Venta de total $0 (cupón 100 %): no hay dinero que mover en caja.
+      if (!(Number(amount) > 0)) return;
       const settings = await this.settingsService.getSettings();
       const cr_settings = (settings as any)?.pos?.cash_register;
       if (!cr_settings?.enabled) return;
