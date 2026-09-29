@@ -1,4 +1,8 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createDispatchTools } from '../../../ai-engine/tools/domains/dispatch.tools';
+import { DispatchNotesModule } from '../dispatch-notes/dispatch-notes.module';
+import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
 import { DispatchRoutesService } from './dispatch-routes.service';
 import { DispatchRoutesController } from './dispatch-routes.controller';
 import { VehiclesService } from './vehicles.service';
@@ -30,6 +34,9 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
     // (reconcileOrderFromDispatch) instead of writing orders.state directly.
     // OrderFlowModule does NOT import DispatchRoutesModule → acyclic.
     OrderFlowModule,
+    // D-5 manage_dispatch_notes: DispatchNotesModule no importa (ni
+    // transitivamente) DispatchRoutesModule → acíclico.
+    DispatchNotesModule,
   ],
   controllers: [
     DispatchRoutesController,
@@ -47,4 +54,25 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
   ],
   exports: [DispatchRoutesService, VehiclesService, RouteFlowService],
 })
-export class DispatchRoutesModule {}
+export class DispatchRoutesModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly dispatchRoutesService: DispatchRoutesService,
+    private readonly routeFlowService: RouteFlowService,
+    private readonly dispatchNotesService: DispatchNotesService,
+  ) {}
+
+  /**
+   * D-1/D-3/D-5: registro descentralizado en el módulo dueño, no en
+   * `AIEngineModule` (ciclo DI). `AIToolRegistry` viene del módulo global.
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createDispatchTools({
+        dispatchRoutesService: this.dispatchRoutesService,
+        routeFlowService: this.routeFlowService,
+        dispatchNotesService: this.dispatchNotesService,
+      }),
+    );
+  }
+}

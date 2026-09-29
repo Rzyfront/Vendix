@@ -1,4 +1,6 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createTablesTools } from '../../../ai-engine/tools/domains/tables.tools';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -72,4 +74,25 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     SplitAccountPaymentService,
   ],
 })
-export class TablesModule {}
+export class TablesModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly tablesService: TablesService,
+    private readonly tableSessionsService: TableSessionsService,
+    private readonly splitOrderService: SplitOrderService,
+  ) {}
+
+  /**
+   * K-8/K-9 — tables tools. Registro descentralizado en el módulo dueño
+   * (no en `AIEngineModule`, para no reintroducir el ciclo DI).
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createTablesTools({
+        tablesService: this.tablesService,
+        tableSessionsService: this.tableSessionsService,
+        splitOrderService: this.splitOrderService,
+      }),
+    );
+  }
+}

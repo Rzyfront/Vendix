@@ -2659,6 +2659,17 @@ export class KitchenFireService {
   }
 
   /**
+   * Lectura pública de un ticket por id, con scope de tienda. La usan las
+   * agent tools K-4 (detalle) y K-5 (re-verificación del estado visto antes
+   * de transicionar). Es el mismo `getTicketForStore` privado que usan las
+   * mutaciones, expuesto sin cambiar su guarda de tenant.
+   */
+  async findTicketById(ticketId: number) {
+    const { ticket } = await this.getTicketForStore(ticketId);
+    return ticket;
+  }
+
+  /**
    * Ids de `kitchen_ticket_items` del ticket cuyo par (producto, variante)
    * NO tiene receta activa en la tabla FRESCA `recipes` (misma regla
    * exacta→base→null que `fireOrderItems` / `prepareFireContext`). Única

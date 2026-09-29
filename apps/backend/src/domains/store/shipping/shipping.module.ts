@@ -1,4 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createShippingTools } from '../../../ai-engine/tools/domains/shipping.tools';
 import { ShippingService } from './shipping.service';
 import { ShippingController } from './shipping.controller';
 import { ShippingCalculatorService } from './shipping-calculator.service';
@@ -50,4 +52,23 @@ import { GeocodingModule } from '../../ecommerce/geocoding/geocoding.module';
     ShippingDistanceService,
   ],
 })
-export class ShippingModule {}
+export class ShippingModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly shippingCalculatorService: ShippingCalculatorService,
+    private readonly shippingDistanceService: ShippingDistanceService,
+  ) {}
+
+  /**
+   * D-8: registro descentralizado en el módulo dueño, no en
+   * `AIEngineModule` (ciclo DI). `AIToolRegistry` viene del módulo global.
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createShippingTools({
+        shippingCalculatorService: this.shippingCalculatorService,
+        shippingDistanceService: this.shippingDistanceService,
+      }),
+    );
+  }
+}
