@@ -1,6 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { ResponseModule } from '../../common/responses/response.module';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+
+// Vexi (AI agent) — familia fiscal de sólo lectura (F-14, F-16, F-18).
+import { AIToolRegistry } from '../../ai-engine/tools/ai-tool-registry';
+import { createFiscalTools } from '../../ai-engine/tools/domains/fiscal.tools';
 import { ExogenousModule } from '../store/exogenous/exogenous.module';
 import { StoreFiscalController } from './store-fiscal.controller';
 import { OrganizationFiscalController } from './organization-fiscal.controller';
@@ -42,4 +47,30 @@ import { FiscalStatusService } from '@common/services/fiscal-status.service';
     FiscalConfigChecklistService,
   ],
 })
-export class FiscalOperationsModule {}
+export class FiscalOperationsModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly contextResolver: FiscalContextResolverService,
+    private readonly obligations: FiscalObligationService,
+    private readonly declarations: TaxDeclarationDraftService,
+    private readonly fiscalScope: FiscalScopeService,
+  ) {}
+
+  /**
+   * Registra la familia fiscal de Vexi desde el dominio que posee los datos.
+   * `AIToolRegistry` se exporta desde el `@Global() AIEngineModule`, así que
+   * la dependencia apunta dominio → motor y no al revés. `FiscalScopeService`
+   * llega vía `PrismaModule` (ya importado): las tools lo usan para la doble
+   * resolución fail-closed del NIT (`accounting_entity_id`).
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createFiscalTools({
+        contextResolver: this.contextResolver,
+        obligationsService: this.obligations,
+        declarationsService: this.declarations,
+        fiscalScopeService: this.fiscalScope,
+      }),
+    );
+  }
+}

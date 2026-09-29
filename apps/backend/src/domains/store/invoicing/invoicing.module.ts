@@ -1,4 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createInvoicingTools } from '../../../ai-engine/tools/domains/invoicing.tools';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { S3Module } from '../../../common/services/s3.module';
 import { QrService } from '@common/services/qr.service';
@@ -154,4 +156,32 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     DianTestService,
   ],
 })
-export class InvoicingModule {}
+export class InvoicingModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly invoicingService: InvoicingService,
+    private readonly invoiceFlowService: InvoiceFlowService,
+    private readonly dianEventsService: DianEventsService,
+    private readonly resolutionsService: ResolutionsService,
+    private readonly dianConfigService: DianConfigService,
+  ) {}
+
+  /**
+   * Registra la familia invoicing (F-28, F-32, F-34, F-35) para el agente.
+   * Vive aquí y no en `AIEngineModule` porque ese módulo es `@Global()`:
+   * importar un dominio por familia genera ciclos de dependencia.
+   * `AIToolRegistry` se exporta global, así que la dependencia apunta del
+   * dominio al motor y este módulo no importa nada extra.
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createInvoicingTools({
+        invoicingService: this.invoicingService,
+        invoiceFlowService: this.invoiceFlowService,
+        dianEventsService: this.dianEventsService,
+        resolutionsService: this.resolutionsService,
+        dianConfigService: this.dianConfigService,
+      }),
+    );
+  }
+}

@@ -5,6 +5,8 @@ import { JournalEntriesService } from '../../../domains/store/accounting/journal
 import { ChartOfAccountsService } from '../../../domains/store/accounting/chart-of-accounts/chart-of-accounts.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { AccountMappingService } from '../../../domains/store/accounting/account-mappings/account-mapping.service';
+import { AccountingEntryFailureService } from '../../../domains/store/accounting/auto-entries/accounting-entry-failure.service';
 
 /**
  * Familia contable de Vexi. Todas las herramientas son de LECTURA: ninguna
@@ -37,12 +39,15 @@ export interface AccountingToolDeps {
   chartOfAccountsService: ChartOfAccountsService;
   fiscalScopeService: FiscalScopeService;
   prisma: StorePrismaService;
+  accountMappingService: AccountMappingService;
+  entryFailureService: AccountingEntryFailureService;
 }
 
 const PERM_REPORTS = 'store:accounting:reports:read';
 const PERM_PERIODS = 'store:accounting:fiscal_periods:read';
 const PERM_JOURNAL = 'store:accounting:journal_entries:read';
 const PERM_CHART = 'store:accounting:chart_of_accounts:read';
+const PERM_MAPPINGS = 'store:accounting:account_mappings:read';
 
 const ENTRY_TYPES = [
   'manual',
@@ -920,6 +925,198 @@ export function createAccountingTools(
             accepts_entries: a.accepts_entries,
             parent: a.parent ? `${a.parent.code} ${a.parent.name}` : null,
           })),
+        };
+      }),
+    },
+
+    // ─── 9. get_journal_entry (F-1) ──────────────────────────────────
+    {
+      name: 'get_journal_entry',
+      version: '1',
+      domain: 'accounting',
+      readOnly: true,
+      description:
+        'Detalle completo de un asiento contable por su ID: cabecera (número, fecha, tipo, estado, periodo, origen del evento de negocio), totales débito/crédito con verificación de balance, y todas sus líneas con cuenta PUC, débito, crédito y tercero. Úsala cuando necesites auditar un asiento concreto que apareció en get_recent_journal_entries o en un libro auxiliar. Es el read habilitante de post/void (F-3/F-4): el preview de esos writes siempre cita este detalle.',
+      parameters: {
+        type: 'object',
+        properties: {
+          entry_id: {
+            type: 'number',
+            description: 'ID del asiento contable.',
+          },
+        },
+        required: ['entry_id'],
+      },
+      requiredPermissions: [PERM_JOURNAL],
+      handler: guard(async (args, context) => {
+        const entry_id = Number(args.entry_id);
+        if (!Number.isInteger(entry_id) || entry_id <= 0) {
+          return {
+            error: `entry_id inválido: "${args.entry_id}". Pasa el ID numérico del asiento (lo obtienes de get_recent_journal_entries).`,
+            next_step:
+              'Pide al usuario el número o la fecha del asiento y resuélvelo primero con get_recent_journal_entries.',
+          };
+        }
+
+        const entity = await describeFiscalEntity(context);
+        const e: any = await deps.journalEntriesService.findOne(entry_id);
+        const lines = e.accounting_entry_lines ?? [];
+        const total_debit = money(e.total_debit);
+        const total_credit = money(e.total_credit);
+
+        return {
+          accounting_entity: entity,
+          entry: {
+            id: e.id,
+            entry_number: e.entry_number,
+            entry_date: isoDate(e.entry_date),
+            entry_type: e.entry_type,
+            status: e.status,
+            description: e.description,
+            source: e.source_type
+              ? { type: e.source_type, id: e.source_id }
+              : null,
+            store: e.store?.name ?? null,
+            fiscal_period: e.fiscal_period?.name ?? null,
+            total_debit,
+            total_credit,
+            is_balanced: Math.abs(total_debit - total_credit) < 0.01,
+            lines: lines.map((l: any) => ({
+              account_code: l.account?.code,
+              account_name: l.account?.name,
+              account_type: l.account?.account_type ?? null,
+              nature: l.account?.nature ?? null,
+              debit: money(l.debit_amount),
+              credit: money(l.credit_amount),
+              description: l.description ?? null,
+              third_party: l.third_party_name ?? null,
+              third_party_tax_id: l.third_party_tax_id ?? null,
+            })),
+            lines_count: lines.length,
+          },
+        };
+      }),
+    },
+
+    // ─── 10. list_account_mappings (F-9) ─────────────────────────────
+    {
+      name: 'list_account_mappings',
+      version: '1',
+      domain: 'accounting',
+      readOnly: true,
+      description:
+        'Lista el mapeo efectivo evento→cuenta PUC que usa la contabilización automática (qué cuenta se debita/acredita cuando se vende, se compra, se paga nómina, etc.), indicando por cada clave si el valor viene de un override de tienda, de la base de organización o del default del sistema. Úsala cuando pregunten "a qué cuenta va X" o para diagnosticar un asiento automático inesperado. Es el read habilitante de los writes de mapeos (F-10/F-11), que sólo tocan overrides.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prefix: {
+            type: 'string',
+            description:
+              'Filtra por prefijo de clave de evento (ej. "invoice.", "payment.", "withholding."). Sin prefijo lista todo el catálogo.',
+          },
+          limit: {
+            type: 'number',
+            description:
+              'Máximo de mapeos a devolver. Por defecto 50, tope 200.',
+          },
+        },
+      },
+      requiredPermissions: [PERM_MAPPINGS],
+      handler: guard(async (args, context) => {
+        if (!context.organization_id) {
+          return {
+            error:
+              'Sin organización en contexto: los mapeos contables se resuelven por organización y tienda.',
+            next_step:
+              'Reintenta dentro de una sesión de tienda u organización autenticada.',
+          };
+        }
+
+        const entity = await describeFiscalEntity(context);
+        const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 200);
+        const prefix = args.prefix ? String(args.prefix) : undefined;
+
+        const mappings = await deps.accountMappingService.getMappings(
+          context.organization_id,
+          prefix,
+          context.store_id ?? undefined,
+        );
+
+        return {
+          accounting_entity: entity,
+          summary: `${mappings.length} mapeo(s) efectivo(s)${prefix ? ` con prefijo "${prefix}"` : ''}`,
+          filters: { prefix: prefix ?? null },
+          mappings: mappings.slice(0, limit).map((m) => ({
+            mapping_key: m.mapping_key,
+            account_code: m.account_code,
+            account_id: m.account_id ?? null,
+            description: m.description,
+            source: m.source,
+          })),
+          mappings_total: mappings.length,
+          mappings_omitted: Math.max(0, mappings.length - limit),
+          notes:
+            'source indica la cascada: store = override de tienda, organization = base de organización, default = default del sistema.',
+        };
+      }),
+    },
+
+    // ─── 11. list_entry_failures (F-12) ──────────────────────────────
+    {
+      name: 'list_entry_failures',
+      version: '1',
+      domain: 'accounting',
+      readOnly: true,
+      description:
+        'Lista los fallos de contabilización automática sin resolver: eventos de negocio (ventas, pagos, recepciones) cuyo asiento no pudo crearse y quedaron pendientes de reintento. Cada fallo cita el evento origen, el mensaje de error y cuántos intentos lleva. Úsala cuando la contabilidad parezca incompleta o antes de proponer un reintento (F-13): el reintento siempre cita un fallo visible de esta lista.',
+      parameters: {
+        type: 'object',
+        properties: {
+          page: {
+            type: 'number',
+            description: 'Página de resultados. Por defecto 1.',
+          },
+          limit: {
+            type: 'number',
+            description: 'Fallos por página. Por defecto 20, tope 50.',
+          },
+        },
+      },
+      requiredPermissions: [PERM_JOURNAL],
+      handler: guard(async (args, context) => {
+        const entity = await describeFiscalEntity(context);
+        const page = Math.max(Number(args.page) || 1, 1);
+        const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
+
+        const result = await deps.entryFailureService.listUnresolved(
+          page,
+          limit,
+        );
+
+        return {
+          accounting_entity: entity,
+          summary:
+            result.total === 0
+              ? 'No hay fallos de contabilización pendientes: todos los eventos generaron su asiento.'
+              : `${result.total} fallo(s) de contabilización sin resolver`,
+          failures: (result.data as any[]).map((f) => ({
+            id: f.id,
+            handler_key: f.handler_key,
+            source: f.source_type
+              ? { type: f.source_type, id: f.source_id ?? null }
+              : null,
+            store_id: f.store_id ?? null,
+            error_message: f.error_message,
+            attempt_count: f.attempt_count,
+            created_at: isoDate(f.created_at),
+          })),
+          page: result.page,
+          limit: result.limit,
+          total_unresolved: result.total,
+          next_step:
+            result.total === 0
+              ? undefined
+              : 'Para reintentar un fallo usa retry_entry_failure (F-13) citando su id; si el error menciona periodo cerrado o cuenta inexistente, resuelve eso primero.',
         };
       }),
     },

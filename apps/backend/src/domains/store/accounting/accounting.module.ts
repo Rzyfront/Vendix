@@ -181,6 +181,8 @@ export class AccountingModule implements OnModuleInit {
     private readonly chartOfAccountsService: ChartOfAccountsService,
     private readonly fiscalScopeService: FiscalScopeService,
     private readonly prisma: StorePrismaService,
+    private readonly accountMappingService: AccountMappingService,
+    private readonly entryFailureService: AccountingEntryFailureService,
   ) {}
 
   /**
@@ -204,6 +206,8 @@ export class AccountingModule implements OnModuleInit {
         chartOfAccountsService: this.chartOfAccountsService,
         fiscalScopeService: this.fiscalScopeService,
         prisma: this.prisma,
+        accountMappingService: this.accountMappingService,
+        entryFailureService: this.entryFailureService,
       }),
     );
   }
