@@ -2289,46 +2289,37 @@ export class InvoiceFlowService {
     const address = this.normalizeCustomerAddressForFiscalCheck(raw_address);
 
     // `other_addresses` — el UNIVERSO de direcciones reales del cliente,
-    // aparte de la ya intentada como `address` (la primaria/`[0]`). Poblado
-    // ⇒ `CustomerFiscalIdentityValidator.checkAddress` puede distinguir «el
-    // cliente no tiene NINGUNA dirección propia» (bloqueo
-    // `ADDRESS_UNRESOLVABLE`) de «tiene otra, no la primaria» (aviso).
-    // Deliberadamente NO incluye la dirección de la tienda emisora: ese
-    // respaldo sigue existiendo en `acquirer-address.resolver.ts` (fuera de
-    // alcance de este cambio) para el momento de la emisión, pero ya no se
-    // usa para decidir SI el documento puede numerarse.
+    // aparte de la ya intentada como `address` (la primaria/`[0]`). Cuando se
+    // popula, `CustomerFiscalIdentityValidator.checkAddress` escala el aviso
+    // `ADDRESS_REQUIRED` a un bloqueante `ADDRESS_UNRESOLVABLE` si ninguna
+    // candidata rescata la emisión.
     //
-    // P1-A — bloqueante SÓLO para dos carriles, no para todo adquiriente:
+    // Task B (2026-09-28) — DIAN Res. 000165/2023 art. 69, modificado por el
+    // art. 3 de la Res. 000202/2025: lo MÁXIMO que el emisor puede exigirle
+    // al adquiriente para facturar a su nombre es nombre/razón social, tipo y
+    // número de identificación, y correo (para la entrega; la DIAN ofrece su
+    // propia base de consulta). La DIRECCIÓN NO está en esa lista — ni
+    // siquiera para persona jurídica, ni para factura manual — así que no es
+    // un dato cuya ausencia pueda bloquear la emisión de NINGÚN adquiriente.
+    // (El art. 11 num. 12 sólo pide «dirección del lugar de entrega» cuando
+    // la venta ocurre FUERA del establecimiento del vendedor — un supuesto
+    // distinto, de despacho, no de identificación fiscal.)
     //
-    //   (a) Persona jurídica / NIT (código DIAN 31): la DIAN cruza el
-    //       municipio del adquiriente jurídico (exógena, retenciones), y no
-    //       hay cascada de emisor que sustituya honestamente ese dato.
-    //   (b) Factura MANUAL (`order_id`/`sales_order_id` ambos ausentes): nace
-    //       en el módulo de facturación electrónica con el cliente capturado
-    //       a mano — el mismo carril `sale_rail: 'advanced'` que ya exige
-    //       identidad fiscal completa unas líneas más abajo (`send()`). Aquí
-    //       vive el incidente Óptica Panorama SAS/Pollo Árabe: un NIT sin
-    //       ficha vinculada y sin `customer_address` en el snapshot.
-    //
-    // Fuera de esos dos carriles —persona NATURAL facturada desde una orden
-    // (POS/ecommerce, `sale_rail: 'on_demand'`)— se preserva el comportamiento
-    // PREVIO a `1109a03d7`: `other_addresses` quieto en `undefined`, así que
-    // `checkAddress` cae al aviso no bloqueante `ADDRESS_REQUIRED` y confía en
-    // la cascada de respaldo del emisor al transmitir. Bloquear ahí era la
-    // regresión: clientes de mostrador con sólo nombre+documento (sin
-    // dirección, porque el POS nunca la pide) dejaban de poder facturar.
-    const is_juridica_acquirer = identity.person_type === 'JURIDICA';
-    const born_from_order = Boolean(invoice.order_id || invoice.sales_order_id);
-    const address_is_blocking = is_juridica_acquirer || !born_from_order;
-
-    const other_addresses: CustomerFiscalAddressInput[] | undefined =
-      address_is_blocking
-        ? Array.isArray(invoice.customer?.addresses)
-          ? (invoice.customer.addresses as any[])
-              .map((raw: any) => this.normalizeCustomerAddressForFiscalCheck(raw))
-              .filter((a): a is CustomerFiscalAddressInput => a !== null)
-          : []
-        : undefined;
+    // P1-A (`baa9a4294`) había convertido esto en bloqueante para JURÍDICA
+    // (código DIAN 31) y factura MANUAL (sin `order_id`/`sales_order_id`),
+    // razonando que la DIAN cruza el municipio del adquiriente jurídico en
+    // exógena/retenciones. Cierto, pero ese cruce es sobre un dato que la ley
+    // le prohíbe al comerciante exigir; bloquear la NUMERACIÓN por su
+    // ausencia deja sin poder facturar a un adquiriente legítimo (ej.
+    // borrador PAVS14: persona natural con NIT, factura manual, sin
+    // dirección). Se revierte aquí para TODO carril — jurídica, manual y
+    // POS/ecommerce por igual —, siempre en `undefined`: `checkAddress` cae
+    // al aviso no bloqueante `ADDRESS_REQUIRED`, nunca a `ADDRESS_UNRESOLVABLE`.
+    // El aviso sigue existiendo para que la UI ofrezca capturarla cuando el
+    // cliente la dé voluntariamente. La emisión (`acquirer-address.resolver
+    // .ts`) declara sólo lo que exista realmente del cliente — nunca la
+    // dirección de la tienda emisora (ver su JSDoc).
+    const other_addresses: CustomerFiscalAddressInput[] | undefined = undefined;
 
     return {
       identification_mode: mode,
@@ -4407,6 +4398,21 @@ export class InvoiceFlowService {
         xml_document: provider_response.xml_document,
         pdf_url: provider_response.pdf_url,
         provider_response: this.toProviderEvidence(provider_response),
+        // Snapshot del adquirente que VIAJÓ a la DIAN: lo que el documento
+        // declaró es lo que queda en la fila (ficha viva → snapshot ya
+        // resueltos en `provider_data`). `?? undefined` = no pisar con null
+        // una columna que ya tenía valor cuando el resolvedor no aportó dato.
+        customer_name: provider_data.customer_name ?? undefined,
+        customer_tax_id: provider_data.customer_tax_id ?? undefined,
+        customer_document_type: provider_data.customer_document_type ?? undefined,
+        customer_verification_digit:
+          provider_data.customer_verification_digit ?? undefined,
+        customer_email: provider_data.customer_email ?? undefined,
+        customer_phone: provider_data.customer_phone ?? undefined,
+        customer_tax_regime: provider_data.customer_regime ?? undefined,
+        customer_fiscal_responsibilities:
+          provider_data.customer_tax_responsibilities ?? undefined,
+        customer_person_type: acquirer_identity.person_type ?? undefined,
       },
       include: INVOICE_INCLUDE,
     });
