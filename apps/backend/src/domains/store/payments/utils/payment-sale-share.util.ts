@@ -274,7 +274,17 @@ export async function resolvePaymentReceivedSaleFields(
     orders: { findUnique: (args: any) => Promise<any> };
     payments: { findMany: (args: any) => Promise<any[]> };
   },
-  args: { order_id: number; payment_id: number; amount: number },
+  args: {
+    order_id: number;
+    payment_id: number;
+    amount: number;
+    /**
+     * Orden creada con el contrato nuevo (POS, 2026-09-28): `tax_amount` y
+     * `order_item_taxes` ya salen post-descuento y `discount_amount` es
+     * base-only. Evita re-proyectar el descuento. Omitido = histórico.
+     */
+    discount_already_applied_to_lines?: boolean;
+  },
 ): Promise<PaymentReceivedSaleFields> {
   const order = await tx.orders.findUnique({
     where: { id: args.order_id },
@@ -330,6 +340,8 @@ export async function resolvePaymentReceivedSaleFields(
         product_tax_rows: [],
         order: { ...order, id: args.order_id },
         order_items: order.order_items,
+        discount_already_applied_to_lines:
+          args.discount_already_applied_to_lines,
       })
     : null;
   if (sale_tax?.discount_projected) {

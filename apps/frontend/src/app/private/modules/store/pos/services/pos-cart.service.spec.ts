@@ -1549,4 +1549,21 @@ describe('PosCartService — loadFromOrder repone shippingContext (flete del bor
     });
   });
 
+  it('cupón sobre la base: 100% deja impuesto 0 y total 0; 10% recalcula impuesto sobre la base descontada', () => {
+    const items: any[] = [
+      { quantity: 1, unitPrice: 59000, totalPrice: 63720, taxAmount: 4720 },
+      { quantity: 1, unitPrice: 18500, totalPrice: 19980, taxAmount: 1480 },
+    ];
+    const full = (service as any).calculateSummary(items, [{ amount: 83700 }]);
+    expect(full.subtotal).toBe(77500);
+    expect(full.taxAmount).toBe(0);
+    expect(full.discountAmount).toBe(77500);
+    expect(full.total).toBe(0);
+
+    const tenPct = (service as any).calculateSummary(items, [{ amount: 8370 }]);
+    expect(tenPct.taxAmount).toBe(5580);
+    expect(tenPct.discountAmount).toBe(7750);
+    expect(tenPct.total).toBe(75330);
+  });
+
 });
