@@ -226,7 +226,7 @@ type TitularSearchStep = 'search' | 'create';
               @if (externalLoading()) {
                 <div class="mt-3 flex items-center justify-center gap-2 text-sm text-[var(--color-neutral-600)]">
                   <app-icon name="loader-2" [size]="16" class="animate-spin"></app-icon>
-                  Consultando RUES…
+                  Consultando fuentes públicas…
                 </div>
               } @else if (externalResult()?.found && externalResult()?.identity) {
                 <app-rues-identity-card
@@ -241,11 +241,11 @@ type TitularSearchStep = 'search' | 'create';
                   </p>
                   @if (externalResult()?.unavailable) {
                     <p class="text-xs text-[var(--color-neutral-500)] mb-2">
-                      RUES no disponible en este momento
+                      Fuentes públicas no disponibles en este momento
                     </p>
                   } @else if (externalResult()) {
                     <p class="text-xs text-[var(--color-neutral-500)] mb-2">
-                      Tampoco aparece en RUES
+                      Tampoco aparece en fuentes públicas
                     </p>
                   }
                   <app-button variant="outline" size="sm" customClasses="min-h-[44px]" (clicked)="onCreateFromLookup()">
@@ -329,7 +329,7 @@ export class ChangeTitularSearchModalComponent {
   readonly lookupResult = signal<Customer | null>(null);
   readonly lookupPerformed = signal(false);
   readonly lookupLoading = signal(false);
-  /** Consulta RUES (sólo tras un no-encontrado local). */
+  /** Consulta en fuentes públicas (RUES, SECOP, RNT; sólo tras un no-encontrado local). */
   readonly externalResult = signal<ExternalCustomerLookupResult | null>(null);
   readonly externalLoading = signal(false);
 
@@ -428,7 +428,7 @@ export class ChangeTitularSearchModalComponent {
     this.externalLoading.set(false);
   }
 
-  /** Una sola consulta RUES por búsqueda; el service nunca lanza. */
+  /** Una sola consulta a fuentes públicas por búsqueda; el service nunca lanza. */
   private lookupExternal(doc: string): void {
     this.externalLoading.set(true);
     this.customersService
@@ -442,7 +442,7 @@ export class ChangeTitularSearchModalComponent {
       });
   }
 
-  /** "Crear con estos datos": prellenado RUES. */
+  /** "Crear con estos datos": prellenado desde la identidad pública. */
   onCreateFromExternal(): void {
     const identity = this.externalResult()?.identity;
     if (!identity) return;

@@ -6,12 +6,26 @@ import {
   ExternalCustomerIdentity,
 } from '../../models/customer.model';
 
-/** Prellenado de alta a partir de una identidad RUES (sin correo/teléfono/régimen). */
+/**
+ * Prellenado de alta a partir de una identidad pública (sin correo/teléfono/régimen).
+ * RNT: el nombre NO se prellena (el registro trae el establecimiento, no al titular).
+ */
 export function ruesIdentityToPrefill(
   identity: ExternalCustomerIdentity,
 ): Partial<CreateCustomerRequest> {
+  if (identity.source === 'rnt') {
+    return {
+      document_type: identity.document_type,
+      document_number: identity.document_number,
+      verification_digit: identity.verification_digit,
+      person_type: identity.person_type,
+      legal_name: null,
+      first_name: '',
+      last_name: '',
+    };
+  }
   const juridica = identity.person_type === 'JURIDICA';
-  // Persona natural sin nombres separados en RUES: sólo trae razón social
+  // Persona natural sin nombres separados: sólo trae razón social
   // («APELLIDOS NOMBRES», orden no fiable). Va entera al nombre y el operador
   // la reparte; mejor eso que un formulario vacío.
   const fullNameOnly =
@@ -28,7 +42,7 @@ export function ruesIdentityToPrefill(
 }
 
 /**
- * Tarjeta presentacional «Encontrado en RUES» compartida por el modal de
+ * Tarjeta presentacional «Encontrado en {fuente pública}» (RUES, SECOP, RNT) compartida por el modal de
  * cliente del POS y el modal «Cambiar titular».
  */
 @Component({
@@ -40,7 +54,7 @@ export function ruesIdentityToPrefill(
       <div class="mt-3 p-3 bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)]">
         <div class="flex items-center gap-2 mb-1">
           <app-icon name="check-circle" [size]="16"></app-icon>
-          <span class="text-xs font-medium text-[var(--color-text-secondary)]">Encontrado en RUES</span>
+          <span class="text-xs font-medium text-[var(--color-text-secondary)]">{{ sourceLabel() }}</span>
         </div>
         <p class="font-medium text-[var(--color-text-primary)] break-words">{{ displayName() }}</p>
         <div class="flex flex-wrap items-center gap-2 mt-1">
@@ -54,10 +68,18 @@ export function ruesIdentityToPrefill(
             >{{ id.registration_status }}</span>
           }
         </div>
-        @if (!id.is_active) {
+        @if (id.source_detail) {
+          <p class="mt-1 text-xs text-[var(--color-text-secondary)]">{{ id.source_detail }}</p>
+        }
+        @if (id.source === 'rnt' && id.trade_name) {
+          <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
+            Establecimiento: {{ id.trade_name }} — no es el nombre del titular
+          </p>
+        }
+        @if (inactiveWarning(); as warning) {
           <p class="mt-2 text-sm text-[var(--color-warning,#b45309)] flex items-start gap-1">
             <app-icon name="alert-triangle" [size]="16"></app-icon>
-            <span>Matrícula cancelada en RUES: verifica los datos</span>
+            <span>{{ warning }}</span>
           </p>
         }
         <div class="flex flex-col sm:flex-row gap-2 mt-3">
@@ -77,12 +99,39 @@ export class RuesIdentityCardComponent {
   readonly createWithData = output<void>();
   readonly createManual = output<void>();
 
+  readonly sourceLabel = computed(() => {
+    switch (this.identity()?.source) {
+      case 'rues':
+        return 'Encontrado en RUES';
+      case 'secop_proveedores':
+        return 'Encontrado en SECOP II (proveedores del Estado)';
+      case 'secop_contratos':
+        return 'Encontrado en SECOP (contratos con el Estado)';
+      case 'rnt':
+        return 'Encontrado en el Registro Nacional de Turismo';
+      default:
+        return 'Encontrado en fuentes públicas';
+    }
+  });
+
+  readonly inactiveWarning = computed(() => {
+    const id = this.identity();
+    if (!id || id.is_active) return null;
+    if (id.source === 'rues') return 'Matrícula cancelada en RUES: verifica los datos';
+    if (id.source === 'secop_proveedores') return 'Proveedor inactivo en SECOP: verifica los datos';
+    return null;
+  });
+
   readonly displayName = computed(() => {
     const id = this.identity();
     if (!id) return '';
     const legal = id.legal_name?.trim();
     if (legal) return legal;
-    return [id.first_name, id.last_name].filter(Boolean).join(' ').trim() || id.document_number;
+    const person = [id.first_name, id.last_name].filter(Boolean).join(' ').trim();
+    if (person) return person;
+    // RNT: el título es el establecimiento; la nota aclara que no es el titular.
+    if (id.source === 'rnt' && id.trade_name?.trim()) return id.trade_name.trim();
+    return id.document_number;
   });
 
   readonly documentLine = computed(() => {
