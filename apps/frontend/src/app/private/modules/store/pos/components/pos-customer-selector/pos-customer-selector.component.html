@@ -9,7 +9,7 @@
         </div>
         <div class="customer-info">
           <span class="customer-name">
-            {{ customer.first_name }} {{ customer.last_name }}
+            {{ displayName(customer) }}
           </span>
           @if (customer.document_number) {
             <span class="customer-document">
@@ -115,7 +115,7 @@
                   (click)="selectCustomer(customer)"
                 >
                   <span class="result-name">
-                    {{ customer.first_name }} {{ customer.last_name }}
+                    {{ displayName(customer) }}
                   </span>
                   <span class="result-email">
                     {{ customer.email || customer.phone || '—' }}
@@ -146,7 +146,7 @@
               (click)="selectCustomer(customer)"
             >
               <span class="result-name">
-                {{ customer.first_name }} {{ customer.last_name }}
+                {{ displayName(customer) }}
               </span>
               <span class="result-email">
                 {{ customer.email || customer.phone || '—' }}

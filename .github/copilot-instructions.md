@@ -78,6 +78,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a Vexi UI command or confirmation card | `vendix-ai-chat` |
 | Adding a background task on the ai-agent queue | `vendix-vexi-agent` |
 | Adding a clientSide tool the browser dispatches | `vendix-ai-agent-tools` |
+| Adding a column to an XLSX/CSV bulk import template or its header map | `vendix-bulk-operations` |
 | Adding a document or photo flow that Vexi processes from the chat | `vendix-vexi-agent` |
 | Adding a fiscal declaration calculator or DIAN tax scheme code | `vendix-tax-typing` |
 | Adding a menu entry to the store module catalog | `vendix-panel-ui` |
@@ -351,6 +352,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Non-destructive production verification with the demo account | `verify-ticket-prod` |
 | Normalizing product names, volumes, prices, categories or brands for bulk upload | `product-catalog-normalizer` |
 | Onboarding a new developer to the team's Engram memory | `vendix-engram` |
+| Paging a bulk upload session commit (offset/limit) with a progress bar | `vendix-bulk-operations` |
 | Parsing date strings from query parameters | `vendix-date-timezone` |
 | Parsing or normalizing Colombian address nomenclature | `vendix-address-geocoding` |
 | Period-keyed counters YYYYMM / YYYYMMDD | `vendix-redis-quota` |
@@ -436,6 +438,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | User explicitly asks for a massive, huge, or ultra-detailed plan (plan masivo, plan gigante, plan súper grande) | `how-to-critical-plan` |
 | User explicitly asks for a plan with checklists that tracks execution progress for handoff | `how-to-critical-plan` |
 | User explicitly asks for parallel multi-perspective auditing of a plan or its implementation | `how-to-critical-plan` |
+| User explicitly invokes sopus (big model orchestrates, small model codes) | `sopus` |
 | User explicitly requests business analysis | `vendix-business-analysis` |
 | User explicitly says the work cannot fail (esto no puede fallar, cero margen de error) | `how-to-critical-plan` |
 | User names or links the how-to-critical-plan skill | `how-to-critical-plan` |

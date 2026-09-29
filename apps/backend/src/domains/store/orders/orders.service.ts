@@ -84,6 +84,11 @@ import {
 } from './order-flow/order-action-policy.util';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
+import {
+  applyGrossDiscountRetax,
+  distributeAmount,
+  type GrossDiscountableLine,
+} from '../taxes/utils/order-discount-tax.util';
 import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.service';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
@@ -208,6 +213,22 @@ export function splitTaxSnapshotAcrossRates(
   }
   return cents.map((c) => c / 100);
 }
+
+/**
+ * Columnas por las que `OrdersService.findAll` puede ordenar sin romper
+ * Prisma. Vive en el servicio —el dueño del query— y no en cada llamante:
+ * las tools de Vexi (`orders.tools.ts`) la importan para validar `sort_by`
+ * en vez de mantener su propia copia.
+ */
+export const SORTABLE_COLUMNS = [
+  'created_at',
+  'updated_at',
+  'order_number',
+  'grand_total',
+  'state',
+] as const;
+
+export type SortableOrderColumn = (typeof SORTABLE_COLUMNS)[number];
 
 @Injectable()
 export class OrdersService {
@@ -1694,6 +1715,54 @@ export class OrdersService {
         : null,
       available_actions,
     };
+  }
+
+  /**
+   * T1 agent reads: narrow projections owned by this service so Vexi tools
+   * never touch Prisma directly. Tenant scope comes from the injected
+   * `StorePrismaService` plus the explicit `store_id` anchor below (same
+   * defense-in-depth as `findOne`).
+   */
+
+  private agentStoreAnchor() {
+    const context = RequestContextService.getContext();
+    return context?.store_id ? { store_id: context.store_id } : {};
+  }
+
+  /**
+   * `find_order` numeric rescue: "la orden 412" is the internal id, which
+   * `findAll({search})` never matches (it only looks at `order_number` and
+   * customer data). Lightweight projection for `compactOrder`, null when
+   * missing — never throws, unlike `findOne`.
+   */
+  async findOrderByIdForAgent(orderId: number) {
+    return this.prisma.orders.findFirst({
+      where: { id: orderId, ...this.agentStoreAnchor() },
+      include: {
+        users: {
+          select: { id: true, first_name: true, last_name: true, email: true },
+        },
+        order_items: { select: { id: true } },
+      },
+    }) as Promise<any | null>;
+  }
+
+  /** `get_dispatch_status` header projection (lines + fulfillment flag). */
+  async findDispatchStatusForAgent(orderId: number) {
+    return this.prisma.orders.findFirst({
+      where: { id: orderId, ...this.agentStoreAnchor() },
+      select: {
+        id: true,
+        order_number: true,
+        state: true,
+        delivery_type: true,
+        dispatch_fulfillment: true,
+        created_at: true,
+        order_items: {
+          select: { id: true, product_name: true, quantity: true },
+        },
+      },
+    }) as Promise<any | null>;
   }
 
   /**
@@ -3497,76 +3566,6 @@ export class OrdersService {
       }
     }
 
-    // 10) Coupon validation. Draft no consume `current_uses`; `created` lo
-    //     ajusta una vez si el código cambió.
-    let couponId: number | null = existingOrder.coupon_id ?? null;
-    let couponDiscount = 0;
-    const requestedCode = (dto.coupon_code || '').trim();
-    const currentCode = (existingOrder.coupon_code || '').trim();
-    const couponChanged = requestedCode !== currentCode;
-
-    if (requestedCode) {
-      try {
-        const remainingSubtotal = Math.max(
-          0,
-          Number(existingOrder.subtotal_amount) - promotionDiscount,
-        );
-        const cartItems = dto.items
-          .filter((item) => item.product_id)
-          .map((item) => ({
-            product_id: item.product_id as number,
-            category_id: null,
-            category_ids: null,
-            line_total: roundMoney(
-              Number(item.final_unit_price ?? item.unit_price ?? 0) *
-                Number(item.quantity || 0),
-            ),
-          }));
-        const validation = await this.couponsService.validate({
-          code: requestedCode,
-          cart_subtotal: remainingSubtotal,
-          customer_id: dto.customer_id,
-          items: cartItems,
-          store_id: storeId,
-        } as any);
-        couponId = validation.coupon_id;
-        couponDiscount = roundMoney(
-          Math.min(validation.discount_amount || 0, remainingSubtotal),
-        );
-      } catch (err) {
-        this.logger.warn(
-          `[editor] coupon validation failed: ${(err as Error).message}`,
-        );
-        await this.auditService.logCustom(
-          userId,
-          'order.editor.pricing_failed',
-          AuditResource.ORDERS,
-          {
-            order_id: orderId,
-            store_id: storeId,
-            request_id: requestId,
-            stage: 'coupon_validation',
-            // No logueamos el código del cupón — sólo su longitud.
-            coupon_code_length: requestedCode.length,
-            error: (err as Error).message,
-          },
-          orderId,
-        );
-        // Round 1 MAJOR #9: el error ya no se silencia — se traduce al código
-        // de promoción/cupón inválido. La causa original viaja en `details`
-        // para depuración sin filtrar PII.
-        throw new VendixHttpException(
-          ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001,
-          undefined,
-          { stage: 'coupon_validation', cause: (err as Error).message },
-        );
-      }
-    } else if (couponChanged && currentCode) {
-      // El cliente quitó el cupón. Limpiamos la referencia sin ajustar el
-      // contador: el consumo se hizo en `flow/pay`, no en el editor.
-      couponId = null;
-      couponDiscount = 0;
-    }
 
     // 11) Totales server-owned — ADR-05 (reescrito 2026-09-13, F-003/F-075
     //     blockers). El subtotal se compone desde la BASE (`unit_price`), no
@@ -3648,7 +3647,99 @@ export class OrdersService {
     );
     let { subtotal: recalculatedSubtotal, tax: recalculatedTax } =
       this.sumPlannedOrderLines(plannedEditorLines);
-    const discountAmount = roundMoney(promotionDiscount + couponDiscount);
+
+    // 10) Coupon validation. Draft no consume `current_uses`; `created` lo
+    //     ajusta una vez si el código cambió.
+    let couponId: number | null = existingOrder.coupon_id ?? null;
+    let couponDiscount = 0;
+    const requestedCode = (dto.coupon_code || '').trim();
+    const currentCode = (existingOrder.coupon_code || '').trim();
+    const couponChanged = requestedCode !== currentCode;
+
+    if (requestedCode) {
+      try {
+        // Contrato POS (owner 2026-09-28): el cupón se evalúa contra el BRUTO
+        // (base + impuesto) del carrito recién planificado, no contra el
+        // subtotal persistido; el descuento se traslada luego a la base.
+        const remainingSubtotal = Math.max(
+          0,
+          this.grossOfPlannedLines(plannedEditorLines) - promotionDiscount,
+        );
+        const cartItems = dto.items
+          .filter((item) => item.product_id)
+          .map((item) => ({
+            product_id: item.product_id as number,
+            category_id: null,
+            category_ids: null,
+            line_total: roundMoney(
+              Number(item.final_unit_price ?? item.unit_price ?? 0) *
+                Number(item.quantity || 0),
+            ),
+          }));
+        const validation = await this.couponsService.validate({
+          code: requestedCode,
+          cart_subtotal: remainingSubtotal,
+          customer_id: dto.customer_id,
+          items: cartItems,
+          store_id: storeId,
+        } as any);
+        couponId = validation.coupon_id;
+        couponDiscount = roundMoney(
+          Math.min(validation.discount_amount || 0, remainingSubtotal),
+        );
+      } catch (err) {
+        this.logger.warn(
+          `[editor] coupon validation failed: ${(err as Error).message}`,
+        );
+        await this.auditService.logCustom(
+          userId,
+          'order.editor.pricing_failed',
+          AuditResource.ORDERS,
+          {
+            order_id: orderId,
+            store_id: storeId,
+            request_id: requestId,
+            stage: 'coupon_validation',
+            // No logueamos el código del cupón — sólo su longitud.
+            coupon_code_length: requestedCode.length,
+            error: (err as Error).message,
+          },
+          orderId,
+        );
+        // Round 1 MAJOR #9: el error ya no se silencia — se traduce al código
+        // de promoción/cupón inválido. La causa original viaja en `details`
+        // para depuración sin filtrar PII.
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001,
+          undefined,
+          { stage: 'coupon_validation', cause: (err as Error).message },
+        );
+      }
+    } else if (couponChanged && currentCode) {
+      // El cliente quitó el cupón. Limpiamos la referencia sin ajustar el
+      // contador: el consumo se hizo en `flow/pay`, no en el editor.
+      couponId = null;
+      couponDiscount = 0;
+    }
+
+    // Contrato POS: el descuento (promoción + cupón, en bruto) se reparte por
+    // línea, se traslada a la BASE y el impuesto se recalcula sobre la base
+    // descontada. `tax_rate × total_price` reconstruye el impuesto PRE-descuento
+    // (nunca filas ya descontadas), así que reeditar es idempotente.
+    const grossDiscountTotal = roundMoney(promotionDiscount + couponDiscount);
+    let discountAmount = 0;
+    let editorLineDiscounts: number[] = [];
+    const applyEditorDiscount = () => {
+      const retaxed = this.applyGrossDiscountToPlannedLines(
+        plannedEditorLines,
+        grossDiscountTotal,
+      );
+      plannedEditorLines = retaxed.lines;
+      editorLineDiscounts = retaxed.discountByLine;
+      recalculatedTax = retaxed.tax;
+      discountAmount = retaxed.baseDiscount;
+    };
+    applyEditorDiscount();
     // F-081 (blocker): paridad con los dos carriles POS (`payments.service.ts`
     // `:3263`/`:3736`), que sí clampan a 0 — el editor no lo hacía.
     // Paso 5 (B1+B2): el total sale del helper único, con la propina
@@ -3872,6 +3963,7 @@ export class OrdersService {
       ]);
       ({ subtotal: recalculatedSubtotal, tax: recalculatedTax } =
         this.sumPlannedOrderLines(plannedEditorLines));
+      applyEditorDiscount();
       grandTotal = computeEditorGrandTotal();
       const previousByKey = new Map<
         string,
@@ -4010,6 +4102,8 @@ export class OrdersService {
             tax_rate: planned.tax_rate ?? undefined,
             tax_amount_item: planned.tax_amount_item ?? undefined,
             order_item_taxes: this.toOrderItemTaxesCreate(planned),
+            // Descuento de BASE de la línea (NULL = contrato legado).
+            discount_amount: editorLineDiscounts[index] ?? 0,
             catalog_unit_price:
               mergedCatalogUnit !== null && mergedCatalogUnit !== undefined
                 ? (mergedCatalogUnit as any)
@@ -5861,6 +5955,117 @@ export class OrdersService {
       if (Number.isFinite(shelf) && shelf > 0) byIndex.set(index, shelf);
     }
     return byIndex;
+  }
+
+  /** Impuesto PRE-descuento de una línea planificada: `tax_rate × base`. */
+  private plannedLinePreDiscountTax(line: PlannedOrderLine): number {
+    if (line.taxes.length === 0) return roundMoney(line.line_tax_total);
+    return line.taxes.reduce((sum, t) => {
+      const rate = Number(t.tax_rate || 0);
+      return (
+        sum +
+        (rate > 0
+          ? roundMoney(rate * Number(line.total_price))
+          : Number(t.tax_amount || 0))
+      );
+    }, 0);
+  }
+
+  /** Bruto (base + impuesto pre-descuento) de un plan de líneas. */
+  private grossOfPlannedLines(lines: PlannedOrderLine[]): number {
+    return roundMoney(
+      lines.reduce(
+        (sum, l) =>
+          sum + Number(l.total_price) + this.plannedLinePreDiscountTax(l),
+        0,
+      ),
+    );
+  }
+
+  /**
+   * Aplica un descuento en BRUTO (promoción + cupón) al plan de líneas con el
+   * contrato POS: reparto proporcional al bruto de cada línea, descuento
+   * trasladado a la BASE e impuesto recalculado sobre la base descontada.
+   * Devuelve líneas nuevas (no muta), el descuento de base por línea, el
+   * impuesto total y el descuento de base total. Sin descuento reconstruye el
+   * impuesto desde la tarifa (restituye líneas antes descontadas).
+   */
+  private applyGrossDiscountToPlannedLines(
+    lines: PlannedOrderLine[],
+    grossDiscount: number,
+  ): {
+    lines: PlannedOrderLine[];
+    discountByLine: number[];
+    tax: number;
+    baseDiscount: number;
+  } {
+    const discountable: GrossDiscountableLine[] = lines.map((line) => {
+      const base = Number(line.total_price || 0);
+      const preTax = this.plannedLinePreDiscountTax(line);
+      const rows =
+        line.taxes.length > 0
+          ? line.taxes.map((t) => ({
+              rate:
+                Number(t.tax_rate || 0) > 0
+                  ? Number(t.tax_rate)
+                  : base > 0
+                    ? Number(t.tax_amount || 0) / base
+                    : 0,
+              tax_type: t.tax_type,
+              tax_rate_id: t.tax_rate_id,
+              tax_name: t.tax_name,
+            }))
+          : // Línea sin desglose (custom con `tax_amount_item`): una fila
+            // sintética conserva su impuesto proporcional a la base.
+            [
+              {
+                rate: base > 0 ? preTax / base : 0,
+                tax_type: null,
+                tax_rate_id: null,
+                tax_name: '',
+              },
+            ];
+      return {
+        base,
+        grossOriginal: roundMoney(base + preTax),
+        taxRows: rows as any,
+      };
+    });
+    const grossByLine =
+      grossDiscount > 0
+        ? distributeAmount(
+            grossDiscount,
+            discountable.map((l) => l.grossOriginal),
+          )
+        : discountable.map(() => 0);
+    const retax = applyGrossDiscountRetax(discountable, grossByLine);
+    const out = lines.map((line, i) => {
+      const result = retax.lines[i];
+      // `tax_amount_item` es el impuesto de UNA unidad de precio: el
+      // multiplicador de la línea es `total_price / unit_price`.
+      const multiplier =
+        Number(line.unit_price) > 0
+          ? Number(line.total_price) / Number(line.unit_price)
+          : 0;
+      return {
+        ...line,
+        line_tax_total: result.taxTotal,
+        tax_amount_item:
+          line.tax_amount_item == null || multiplier <= 0
+            ? line.tax_amount_item
+            : roundMoney(result.taxTotal / multiplier),
+        taxes: line.taxes.map((t, k) => ({
+          ...t,
+          tax_amount: result.taxes[k]?.amount ?? t.tax_amount,
+        })),
+      } as PlannedOrderLine;
+    });
+    return {
+      lines: out,
+      discountByLine: retax.lines.map((l) => l.baseDiscount),
+      tax: retax.totalTax,
+      baseDiscount: retax.totalBaseDiscount,
+    };
   }
 
   /**

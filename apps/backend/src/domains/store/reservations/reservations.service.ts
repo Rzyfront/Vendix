@@ -1307,6 +1307,86 @@ export class ReservationsService {
   }
 
   /**
+   * Lectura agente (O-51): solicitudes de reagendamiento de la tienda con la
+   * reserva y los actores hidratados. Espejo del `findMany` del controller
+   * (`listRescheduleRequests`), movido al service para que la tool no toque
+   * Prisma directo (patrón T1). `storeId` explícito: fail-closed si falta.
+   */
+  async listRescheduleRequestsForAgent(storeId: number, status?: string) {
+    const where: any = { store_id: storeId };
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+    return this.prisma.booking_reschedule_requests.findMany({
+      where,
+      orderBy: { requested_at: 'desc' },
+      take: 200,
+      include: {
+        booking: {
+          select: {
+            id: true,
+            booking_number: true,
+            date: true,
+            start_time: true,
+            end_time: true,
+            customer: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                email: true,
+                phone: true,
+              },
+            },
+            product: { select: { id: true, name: true } },
+            provider: { select: { id: true, display_name: true } },
+          },
+        },
+        requested_by_user: {
+          select: { id: true, first_name: true, last_name: true },
+        },
+        decided_by_user: {
+          select: { id: true, first_name: true, last_name: true },
+        },
+      },
+    });
+  }
+
+  /**
+   * Lectura agente (O-51): UNA solicitud por id, acotada a la tienda. El
+   * preview de approve/reject la usa para nombrar la reserva y el slot
+   * solicitado; `null` cuando no existe o es de otra tienda.
+   */
+  async getRescheduleRequestForAgent(storeId: number, requestId: number) {
+    return this.prisma.booking_reschedule_requests.findFirst({
+      where: { id: requestId, store_id: storeId },
+      include: {
+        booking: {
+          select: {
+            id: true,
+            booking_number: true,
+            date: true,
+            start_time: true,
+            end_time: true,
+            status: true,
+            customer: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                email: true,
+                phone: true,
+              },
+            },
+            product: { select: { id: true, name: true } },
+            provider: { select: { id: true, display_name: true } },
+          },
+        },
+      },
+    });
+  }
+
+  /**
    * Resuelve el flag `settings.reservations.allow_direct_reschedule`
    * para la tienda dueña de la reserva. Default `true` (comportamiento
    * legacy: reagendar = 1 click).

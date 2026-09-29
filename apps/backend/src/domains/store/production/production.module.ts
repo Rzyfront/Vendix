@@ -1,4 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createProductionTools } from '../../../ai-engine/tools/domains/menus.tools';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { InventoryModule } from '../inventory/inventory.module';
@@ -22,4 +24,21 @@ import { ProductionOrdersService } from './production-orders.service';
   providers: [ProductionOrdersService],
   exports: [ProductionOrdersService],
 })
-export class ProductionOrdersModule {}
+export class ProductionOrdersModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly productionOrdersService: ProductionOrdersService,
+  ) {}
+
+  /**
+   * K-15: registro descentralizado en el módulo dueño, no en
+   * `AIEngineModule` (ciclo DI). `AIToolRegistry` viene del módulo global.
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createProductionTools({
+        productionOrdersService: this.productionOrdersService,
+      }),
+    );
+  }
+}

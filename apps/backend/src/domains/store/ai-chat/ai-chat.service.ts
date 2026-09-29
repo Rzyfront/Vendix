@@ -9,6 +9,11 @@ import { RAGService } from '../../../ai-engine/embeddings/rag.service';
 import { VexiContextService } from '../vexi/vexi-context.service';
 import { VexiStreamIntentService } from '../vexi/vexi-stream-intent.service';
 import { VexiUiChannelService } from '../vexi/vexi-ui-channel.service';
+import {
+  VexiPlanStateService,
+  renderPlanForModel,
+} from '../vexi/vexi-plan-state.service';
+import type { AgentPlan } from '../../../ai-engine/interfaces/agent-plan.interface';
 import { VexiSpeechService } from '../vexi/vexi-speech.service';
 import { SPEECH_REGISTER_BLOCK } from '../vexi/vexi-speech.constants';
 import type {
@@ -75,6 +80,22 @@ const PENDING_CONFIRMATION_BLOCK = (operation: string) =>
   ].join(' ');
 
 /**
+ * Objetivos internos de un turno de continuación. Los compone el servidor: la
+ * persona no escribió nada, y el cliente no decide qué se le dice al modelo.
+ */
+const CONTINUATION_GOALS = {
+  approved:
+    '(interno) La persona aprobó el cambio propuesto y ya quedó aplicado. Continúa con lo que sigue sin avisarle que retomas.',
+  rejected:
+    '(interno) La persona rechazó el cambio propuesto; no se aplicó. Decide si lo demás sigue teniendo sentido: si sí, continúa; si no, pregúntale con naturalidad.',
+  resume: '(interno) Continúa donde ibas.',
+} as const;
+
+/** Cómo tratar un mensaje normal de la persona mientras hay un plan activo. */
+const PLAN_MESSAGE_RULES_BLOCK =
+  '(interno) Hay un plan activo. Clasifica el mensaje de la persona: si responde a tu pregunta, retoma el plan; si cambia la tarea, usa revise_plan y sigue; si es una consulta sin relación, respóndela y sigue con el plan en el mismo turno; si es una tarea sin relación con cambios, usa pause_plan, atiéndela y al final pregunta si retomas.';
+
+/**
  * What the chat SSE turn can emit.
  *
  * The voice frames are a union on top of `AIStreamChunk` rather than new members
@@ -120,6 +141,7 @@ export class AIChatService {
     private readonly streamIntents: VexiStreamIntentService,
     private readonly uiChannel: VexiUiChannelService,
     private readonly speech: VexiSpeechService,
+    private readonly planState: VexiPlanStateService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -387,7 +409,9 @@ export class AIChatService {
 
     return this.streamIntents.create({
       conversation_id: conversationId,
-      content: dto.content,
+      // Un turno de continuación no lleva texto de la persona.
+      content: dto.continuation ? '' : (dto.content ?? ''),
+      continuation: dto.continuation,
       ui_context: dto.ui_context,
       attachment_ids: dto.attachment_ids,
       speak: dto.speak,
@@ -434,6 +458,23 @@ export class AIChatService {
       return;
     }
 
+    // Continuación sin plan activo: no-op silencioso. Puede llegar huérfana (el
+    // plan se pausó, venció o se abandonó entre la tarjeta y el clic) y no es un
+    // error que la persona deba ver ni un turno que valga la pena pagar: se
+    // cierra sin texto y sin persistir nada.
+    let continuationPlan: AgentPlan | null = null;
+    if (intent.continuation) {
+      continuationPlan = await this.planState.getActive(conversationId);
+      if (!continuationPlan) {
+        yield { type: 'done' };
+        return;
+      }
+      // `approved` NO se marca aquí: lo marca `applyConfirmation` al aplicar.
+      if (intent.continuation === 'rejected') {
+        await this.planState.markCurrentChangeStep(conversationId, 'rejected');
+      }
+    }
+
     // Opened — and the filler emitted — before the turn is persisted, because
     // this is the frame the person is waiting on. The writes below cost a few
     // milliseconds each, but they are milliseconds spent in the only window
@@ -476,7 +517,7 @@ export class AIChatService {
     // Trusting the client on this is safe because the flag can only ever cause a
     // *missing* user row, never a forged one: the content it would have written is
     // the client's own `content` either way.
-    if (!intent.skip_user_message) {
+    if (!intent.skip_user_message && !intent.continuation) {
       await this.prisma.ai_messages.create({
         data: {
           conversation_id: conversationId,
@@ -491,6 +532,10 @@ export class AIChatService {
     // feed fabricated screen results into somebody else's agent loop, and the
     // model treats those results as ground truth.
     await this.uiChannel.registerTurn(streamId, userId);
+
+    // Un turno por conversación: este desplaza al anterior, que se detiene en su
+    // siguiente iteración (`shouldAbort`).
+    await this.streamIntents.claimTurn(conversationId, streamId);
 
     // F4: en SSE no hay DTO por mensaje (el intent solo trae `content`), así
     // que el agente sale de `metadata.agent_key` de la conversación.
@@ -528,14 +573,31 @@ export class AIChatService {
       // `agent_enabled`, so simply opening the SSE connection turned the agent
       // off — the same question answered with data over POST and with a shrug
       // over SSE. It now runs the identical loop, narrating each tool call.
+      const goal = intent.continuation
+        ? CONTINUATION_GOALS[intent.continuation]
+        : intent.content;
+      const activePlan =
+        continuationPlan ?? (await this.planState.getActive(conversationId));
+      const storedPlan = activePlan
+        ? null
+        : await this.planState.get(conversationId);
       const agentStream = this.aiAgent.runAgentStream({
-        goal: intent.content,
+        goal,
         ...this.resolveAgentLoopArgs(chatAgent, conversation),
         // El mismo flag que enciende la síntesis enciende el registro hablado.
         // Derivarlo del intent y no de un ajuste de tienda es lo que mantiene los
         // dos en fase: si se dicta, se responde para ser oído — y si el mismo
         // hilo sigue por escrito en el turno siguiente, vuelve a prosa sola.
-        messages: this.buildContextWindow(conversation, undefined, intent.speak),
+        messages: this.buildContextWindow(
+          conversation,
+          undefined,
+          intent.speak,
+          {
+            active: activePlan,
+            paused: storedPlan?.status === 'paused' ? storedPlan : null,
+            isContinuation: !!intent.continuation,
+          },
+        ),
         variables: await this.vexiContext.buildSnapshot({
           uiContext: intent.ui_context,
           attachmentIds: intent.attachment_ids,
@@ -544,6 +606,9 @@ export class AIChatService {
         // commands worked. Only the chat surface passes it, because it is the only
         // one with an open SSE channel to a page that can answer.
         stream_id: streamId,
+        plan: this.planState.createHook(conversation.id),
+        shouldAbort: async () =>
+          !(await this.streamIntents.isCurrentTurn(conversationId, streamId)),
       });
 
       let step = await agentStream.next();
@@ -581,7 +646,10 @@ export class AIChatService {
       // full tool trace and, when the agent proposed a write, the token that
       // has to survive to the approval round trip.
       toolsUsed = result.tools_used;
-      if (!fullContent) {
+      // `plan_continue`: el turno terminó a propósito sin texto (el cliente
+      // encadena otro); `aborted`: otro turno lo reemplazó. En ambos casos el
+      // silencio es correcto y el fallback sería ruido.
+      if (!fullContent && !result.plan_continue && !result.aborted) {
         // A turn can end without a single text chunk — the model spends its
         // last iteration on a tool that fails and then says nothing. The user
         // is left staring at an empty bubble with no idea whether Vexi is
@@ -601,6 +669,7 @@ export class AIChatService {
           string,
           any
         >;
+        const planActive = !!(await this.planState.getActive(conversation.id));
         pendingProposal =
           [args.method, args.path].filter(Boolean).join(' ') ||
           result.pending_confirmation.tool;
@@ -615,6 +684,7 @@ export class AIChatService {
                 result.pending_confirmation.confirmation_token,
               arguments: result.pending_confirmation.arguments,
               preview: result.pending_confirmation.preview,
+              plan_active: planActive,
             }),
           },
         };
@@ -706,7 +776,11 @@ export class AIChatService {
     }
 
     // Auto-generate title if first message
-    if (conversation.messages.length === 0 && !conversation.title) {
+    if (
+      conversation.messages.length === 0 &&
+      !conversation.title &&
+      intent.content
+    ) {
       await this.prisma.ai_conversations.update({
         where: { id: conversationId },
         data: { title: intent.content.substring(0, 80) },
@@ -845,8 +919,7 @@ export class AIChatService {
     tools?: string[];
     max_iterations?: number;
   } {
-    const appKey =
-      agent?.app_key || conversation.app_key || 'chat_assistant';
+    const appKey = agent?.app_key || conversation.app_key || 'chat_assistant';
     if (!agent) {
       return { app_key: appKey };
     }
@@ -874,6 +947,11 @@ export class AIChatService {
      * Este turno se va a dictar, así que la respuesta se escribe para ser oída.
      */
     speak?: boolean,
+    plan?: {
+      active: AgentPlan | null;
+      paused: AgentPlan | null;
+      isContinuation: boolean;
+    },
   ): AIMessage[] {
     const messages: AIMessage[] = [];
 
@@ -914,11 +992,32 @@ export class AIChatService {
     // Pegado al turno nuevo, no al principio de la ventana: lo que gobierna es
     // cómo se responde a ESTE mensaje, y la señal se pierde veinte mensajes
     // atrás si viaja con el historial.
-    const pending = this.findPendingProposal(conversation.messages);
+    // Una continuación nace de resolver la tarjeta: tras «Rechazar» el marcador
+    // sigue vivo en el historial (el rechazo no deja fila en el servidor) y el
+    // bloque le diría al modelo que la tarjeta aún espera «Aprobar».
+    const pending = plan?.isContinuation
+      ? null
+      : this.findPendingProposal(conversation.messages);
     if (pending) {
       messages.push({
         role: 'system',
         content: PENDING_CONFIRMATION_BLOCK(pending),
+      });
+    }
+
+    // Inmediatamente antes del objetivo: el plan gobierna qué sigue en ESTE turno.
+    if (plan?.active) {
+      messages.push({
+        role: 'system',
+        content: renderPlanForModel(plan.active),
+      });
+      if (!plan.isContinuation) {
+        messages.push({ role: 'system', content: PLAN_MESSAGE_RULES_BLOCK });
+      }
+    } else if (plan?.paused) {
+      messages.push({
+        role: 'system',
+        content: `(interno) Tienes un trabajo en pausa: ${plan.paused.goal}. Si ya atendiste lo nuevo, pregúntale con naturalidad si retomas.`,
       });
     }
 

@@ -9,6 +9,7 @@ import {
     UpdateCustomerRequest,
     CustomerStats,
     CustomerFilters,
+    ExternalCustomerLookupResult,
     PersonType,
     TaxRegime,
 } from '../models/customer.model';
@@ -173,6 +174,25 @@ export class CustomersService {
                 return (data.customer ?? null) as Customer | null;
             }),
             catchError(() => of(null)),
+        );
+    }
+
+    /**
+     * `GET /store/customers/lookup/external?document_number=` — consulta RUES
+     * en vivo. Nunca lanza: cualquier error (400/429/red) se traduce a
+     * `{ found:false, unavailable:true }`.
+     */
+    lookupExternalByDocument(documentNumber: string): Observable<ExternalCustomerLookupResult> {
+        const params = new HttpParams().set('document_number', documentNumber);
+        return this.http.get<any>(`${this.apiUrl}/lookup/external`, { params }).pipe(
+            map((response): ExternalCustomerLookupResult => {
+                const data = response?.data;
+                if (!data || typeof data.found !== 'boolean') {
+                    return { found: false, unavailable: true };
+                }
+                return data as ExternalCustomerLookupResult;
+            }),
+            catchError(() => of<ExternalCustomerLookupResult>({ found: false, unavailable: true })),
         );
     }
 

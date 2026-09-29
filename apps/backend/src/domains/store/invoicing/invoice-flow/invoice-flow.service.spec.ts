@@ -125,6 +125,7 @@ describe('InvoiceFlowService support documents', () => {
       }),
       sendInvoice: jest.fn(),
       sendCreditNote: jest.fn(),
+      checkStatus: jest.fn(),
     };
     const resolver = {
       resolve: jest.fn().mockResolvedValue(provider),
@@ -141,6 +142,7 @@ describe('InvoiceFlowService support documents', () => {
     const fiscalLedger = {
       ensureInvoiceTransmission: jest.fn().mockResolvedValue({ id: 800 }),
       markSubmitted: jest.fn().mockResolvedValue(undefined),
+      claimSubmission: jest.fn().mockResolvedValue(undefined),
       markAccepted: jest.fn().mockResolvedValue(undefined),
       markRejected: jest.fn(),
       markError: jest.fn(),
@@ -301,6 +303,146 @@ describe('InvoiceFlowService support documents', () => {
       'invoice.accepted',
       expect.anything(),
     );
+  });
+
+  describe('reserva atómica y resolución por GetStatus', () => {
+    const rule90 = {
+      code: '90',
+      text: 'Regla 90: Documento procesado anteriormente',
+      severity: 'rechazo',
+    };
+
+    it('dos send() concurrentes: el proveedor se llama 1 vez y el segundo recibe FISCAL_SEND_IN_PROGRESS', async () => {
+      const { VendixHttpException, ErrorCodes } = await import(
+        'src/common/errors'
+      );
+      let claimed = false;
+      const claimSubmission = jest.fn().mockImplementation(async () => {
+        if (claimed) {
+          throw new VendixHttpException(ErrorCodes.FISCAL_SEND_IN_PROGRESS);
+        }
+        claimed = true;
+      });
+      const { service, provider, fiscalLedger } = createService({
+        fiscalLedger: { claimSubmission },
+      });
+
+      const results = await Promise.allSettled([
+        RequestContextService.run(requestContext, () => service.send(100)),
+        RequestContextService.run(requestContext, () => service.send(100)),
+      ]);
+
+      expect(provider.sendSupportDocument).toHaveBeenCalledTimes(1);
+      const rejected = results.filter((r) => r.status === 'rejected') as any[];
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].reason.errorCode).toBe('FISCAL_SEND_IN_PROGRESS');
+      // Sin markError ni contingencia para el llamador que perdio la reserva.
+      expect(fiscalLedger.markError).not.toHaveBeenCalled();
+    });
+
+    it('Regla 90 + GetStatus accepted: acepta la factura y emite el evento de aceptación', async () => {
+      const { service, provider, prisma, eventEmitter, fiscalLedger } =
+        createService();
+      provider.sendSupportDocument.mockResolvedValue({
+        success: false,
+        tracking_id: 'track-1',
+        cuds: 'cuds-1',
+        message: 'rechazado',
+        provider_data: {
+          already_processed: true,
+          timed_out: false,
+          rule_messages: [rule90],
+        },
+      });
+      provider.checkStatus.mockResolvedValue({
+        tracking_id: 'track-1',
+        status: 'accepted',
+        cufe: undefined,
+        message: 'ok',
+        provider_data: { application_response_xml: '<ar/>' },
+      });
+
+      await RequestContextService.run(requestContext, () => service.send(100));
+
+      expect(provider.checkStatus).toHaveBeenCalledWith('cuds-1');
+      expect(fiscalLedger.markRejected).not.toHaveBeenCalled();
+      expect(fiscalLedger.markAccepted).toHaveBeenCalledTimes(1);
+      const accepted = prisma.invoices.update.mock.calls
+        .map(([args]: any[]) => args)
+        .find((args: any) => args.data?.status === 'accepted');
+      expect(accepted).toBeDefined();
+      expect(accepted.data.provider_response.provider_data.resolved_via).toBe(
+        'get_status_regla_90',
+      );
+      expect(accepted.data.provider_response.message).toContain(
+        'confirmado válido vía GetStatus',
+      );
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'support_document.accepted',
+        expect.objectContaining({ invoice_id: 100 }),
+      );
+    });
+
+    it('Regla 90 + GetStatus rejected: sigue el camino de rechazo con la Regla 90 en el mensaje', async () => {
+      const { service, provider, fiscalLedger, prisma } = createService();
+      provider.sendSupportDocument.mockResolvedValue({
+        success: false,
+        tracking_id: 'track-1',
+        cuds: 'cuds-1',
+        provider_data: { already_processed: true, rule_messages: [rule90] },
+      });
+      provider.checkStatus.mockResolvedValue({ tracking_id: 'track-1', status: 'rejected' });
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.send(100)),
+      ).rejects.toMatchObject({ errorCode: 'INVOICING_PROVIDER_004' });
+
+      expect(fiscalLedger.markRejected).toHaveBeenCalledTimes(1);
+      expect(fiscalLedger.markAccepted).not.toHaveBeenCalled();
+      const rejectedUpdate = prisma.invoices.update.mock.calls
+        .map(([args]: any[]) => args)
+        .find((args: any) => args.data?.status === 'rejected');
+      expect(rejectedUpdate.data.provider_response.errors).toEqual([
+        { code: '90', text: rule90.text },
+      ]);
+    });
+
+    it('timeout + GetStatus no accepted: sin contingencia 04, error reintentable', async () => {
+      const declareContingency = jest.fn();
+      const enqueue = jest.fn().mockResolvedValue(undefined);
+      const { service, provider, fiscalLedger, prisma } = createService({
+        retryQueue: { declareContingency, enqueue },
+      });
+      provider.sendSupportDocument.mockResolvedValue({
+        success: false,
+        tracking_id: '',
+        cuds: 'cuds-1',
+        message: 'timeout',
+        contingency_eligible: true,
+        failure_class: 'timeout',
+        provider_data: { timed_out: true },
+      });
+      provider.checkStatus.mockResolvedValue({ tracking_id: 't', status: 'pending' });
+
+      await expect(
+        RequestContextService.run(requestContext, () => service.send(100)),
+      ).rejects.toMatchObject({ errorCode: 'INVOICING_PROVIDER_001' });
+
+      expect(provider.checkStatus).toHaveBeenCalledWith('cuds-1');
+      expect(declareContingency).not.toHaveBeenCalled();
+      expect(fiscalLedger.markError).toHaveBeenCalledTimes(1);
+      expect(enqueue).toHaveBeenCalledTimes(1);
+      const updates = prisma.invoices.update.mock.calls.map(
+        ([args]: any[]) => args.data,
+      );
+      expect(
+        updates.some(
+          (d: any) =>
+            d.contingency_type === '04' ||
+            d.transmission_status === 'contingency',
+        ),
+      ).toBe(false);
+    });
   });
 
   it('rejects support document send when supplier has no tax id', async () => {
@@ -706,12 +848,11 @@ describe('InvoiceFlowService support documents', () => {
       customer_tax_regime: null,
       customer_fiscal_responsibilities: ['O-48'],
       // Sin `order_id`/`sales_order_id`: es la factura MANUAL del incidente.
-      // P1-A bloquea esta combinación (jurídica O manual) cuando NO hay
-      // dirección — así que el fixture por defecto SÍ trae una (snapshot
-      // real, no la de la tienda), para que este describe siga probando
-      // identidad y no se vea interceptado por el bloqueo de dirección. El
-      // caso "sin dirección" tiene su propio test, que sobreescribe esto a
-      // `null`.
+      // El fixture por defecto trae una dirección real del snapshot (nunca la
+      // de la tienda) para que este describe siga probando identidad sin
+      // depender de si la dirección falta o no — desde Task B (2026-09-28) su
+      // ausencia ya no bloquea nada (ver el test dedicado, que sobreescribe
+      // esto a `null`).
       customer_address: {
         address_line: 'Calle 100 # 20-30',
         municipality_code: '11001',
@@ -830,27 +971,77 @@ describe('InvoiceFlowService support documents', () => {
       );
     });
 
-    it('P1-A: factura MANUAL sin ficha vinculada (NIT) y SIN dirección en el snapshot: validate() real bloquea con ADDRESS_UNRESOLVABLE', async () => {
+    it('send(): el update de aceptación re-persiste el snapshot del adquirente que viajó a la DIAN', async () => {
+      const findFirst = jest
+        .fn()
+        .mockResolvedValue(buildIncidentInvoice({ id: 510, status: 'validated' }));
+      const update = jest.fn().mockImplementation(async ({ where, data }: any) => ({
+        ...buildIncidentInvoice({ id: where.id, status: 'validated' }),
+        ...data,
+      }));
+      const { service, provider } = createService({
+        prisma: { invoices: { findFirst, update } },
+      });
+      provider.sendInvoice.mockResolvedValue({
+        success: true,
+        tracking_id: 'track-fv-510',
+        cufe: 'b'.repeat(96),
+        qr_code: 'qr',
+        xml_document: '<xml/>',
+        provider_data: { mock: true },
+      });
+
+      await RequestContextService.run(requestContext, () => service.send(510));
+
+      const accepted = update.mock.calls
+        .map(([args]: any[]) => args)
+        .find((args: any) => args.data?.status === 'accepted');
+      expect(accepted).toBeDefined();
+      expect(accepted.data).toEqual(
+        expect.objectContaining({
+          customer_name: 'Óptica Panorama SAS',
+          customer_tax_id: '800214345',
+          // Literal canónico que viajó al proveedor, no el código '31'.
+          customer_document_type: 'NIT',
+          customer_verification_digit: '7',
+          customer_email: 'facturacion@opticapanorama.co',
+          customer_fiscal_responsibilities: ['O-48'],
+          customer_person_type: 'JURIDICA',
+        }),
+      );
+      // Lo que se persiste es exactamente lo que se transmitió.
+      const sent = provider.sendInvoice.mock.calls[0][0];
+      expect(accepted.data.customer_document_type).toBe(sent.customer_document_type);
+      expect(accepted.data.customer_person_type).toBe(sent.customer_person_type);
+      // `?? undefined`: un dato ausente no pisa la columna con null.
+      expect(accepted.data.customer_phone).toBeUndefined();
+    });
+
+    it('Task B: factura MANUAL sin ficha vinculada (NIT) y SIN dirección en el snapshot: validate() real EMITE con aviso no bloqueante (revierte P1-A)', async () => {
       // Mismo incidente Óptica Panorama, pero sin la dirección que el
-      // fixture por defecto ahora trae — el caso que P1-A corrige: antes
-      // `other_addresses` quedaba `undefined` (por no haber `invoice.customer`
-      // vinculado) y el bloqueo nunca disparaba, así que esta factura manual
-      // (sin `order_id`/`sales_order_id`) emitía sin dirección real ninguna,
-      // con la dirección FISCAL de la tienda impresa en su lugar al firmar.
+      // fixture por defecto trae. P1-A (`baa9a4294`) bloqueaba esta
+      // combinación (jurídica O manual) con `ADDRESS_UNRESOLVABLE`. Task B
+      // (2026-09-28) revierte ese bloqueo: DIAN Res. 000165/2023 art. 69 no
+      // permite exigirle dirección al adquiriente, ni siquiera jurídico ni en
+      // factura manual, así que su ausencia nunca puede impedir la
+      // numeración. `other_addresses` ahora SIEMPRE es `undefined`
+      // (`buildAcquirerIdentityInput`), así que `checkAddress` degrada a
+      // `ADDRESS_REQUIRED` (aviso), nunca a `ADDRESS_UNRESOLVABLE` (bloqueo).
       const findFirst = jest.fn().mockResolvedValue(
         buildIncidentInvoice({ id: 503, status: 'draft', customer_address: null }),
       );
+      const update = jest.fn().mockImplementation(async ({ where, data }: any) => ({
+        ...buildIncidentInvoice({ id: where.id, status: 'validated', customer_address: null }),
+        ...data,
+      }));
       const { service } = createService({
-        prisma: { invoices: { findFirst } },
+        prisma: { invoices: { findFirst, update } },
       });
       (service as any).acquirerIdentity = new CustomerFiscalIdentityValidator();
 
       await expect(
         RequestContextService.run(requestContext, () => service.validate(503)),
-      ).rejects.toMatchObject({
-        errorCode: 'INVOICING_VALIDATE_001',
-        message: expect.stringMatching(/no tiene dirección fiscal propia/i),
-      });
+      ).resolves.toBeDefined();
     });
 
     // Fixture común a los dos tests "nacidos de orden" (POS/ecommerce) que
@@ -965,50 +1156,54 @@ describe('InvoiceFlowService support documents', () => {
       ).resolves.toBeDefined();
     });
 
-    it('P1-A: POS — persona JURÍDICA (NIT) nacida de una orden, SIN dirección propia: validate() real bloquea con ADDRESS_UNRESOLVABLE', async () => {
-      // La excepción declarada por la política: aun naciendo de una orden, un
-      // adquiriente jurídico SÍ exige dirección — la DIAN la cruza para
-      // exógena/retenciones y no hay excusa de "el POS nunca la pidió" para
-      // una razón social.
-      const findFirst = jest.fn().mockResolvedValue(
-        buildPosInvoice({
-          id: 701,
-          customer_id: 401,
-          customer: {
-            id: 401,
-            legal_name: 'Distribuidora Jurídica SAS',
-            first_name: null,
-            last_name: null,
-            document_type: 'NIT',
-            document_number: '900555666',
-            verification_digit: '1',
-            addresses: [],
-          },
-        }),
-      );
+    it('Task B: POS — persona JURÍDICA (NIT) nacida de una orden, SIN dirección propia: validate() real EMITE con aviso no bloqueante (revierte P1-A)', async () => {
+      // P1-A declaraba una excepción para jurídica: aun naciendo de una
+      // orden, exigía dirección porque la DIAN la cruza en exógena/
+      // retenciones. Task B revierte también esta rama: ese cruce es sobre un
+      // dato que el art. 69 le prohíbe al comerciante exigir, así que no
+      // puede condicionar la NUMERACIÓN de una venta legítima. El aviso
+      // `ADDRESS_REQUIRED` se sigue emitiendo (no bloqueante) para que la UI
+      // ofrezca capturarla.
+      const posInvoice = buildPosInvoice({
+        id: 701,
+        customer_id: 401,
+        customer: {
+          id: 401,
+          legal_name: 'Distribuidora Jurídica SAS',
+          first_name: null,
+          last_name: null,
+          document_type: 'NIT',
+          document_number: '900555666',
+          verification_digit: '1',
+          addresses: [],
+        },
+      });
+      const findFirst = jest.fn().mockResolvedValue(posInvoice);
       const { service } = createService({
-        prisma: { invoices: { findFirst } },
+        prisma: {
+          invoices: {
+            findFirst,
+            update: jest
+              .fn()
+              .mockResolvedValue({ ...posInvoice, status: 'validated' }),
+          },
+        },
       });
       (service as any).acquirerIdentity = new CustomerFiscalIdentityValidator();
 
       await expect(
         RequestContextService.run(requestContext, () => service.validate(701)),
-      ).rejects.toMatchObject({
-        errorCode: 'INVOICING_VALIDATE_001',
-        message: expect.stringMatching(/no tiene dirección fiscal propia/i),
-      });
+      ).resolves.toBeDefined();
     });
 
-    // Requisito #4 del incidente: cuando el adquiriente NOMINATIVO no tiene
-    // dirección propia, `send()` ya no debe poder caer en la dirección FISCAL
-    // de la propia tienda sin que `validate()` lo haya bloqueado antes.
-    // `buildAcquirerIdentityInput` alimenta `other_addresses` con el universo
-    // REAL de direcciones del cliente (`invoice.customer.addresses`, aquí
-    // vacío) — deliberadamente SIN la dirección de la tienda — así que
-    // `CustomerFiscalIdentityValidator.checkAddress` (mecanismo preexistente,
-    // antes nunca alimentado) encuentra el arreglo poblado y ningún rescate:
-    // ADDRESS_UNRESOLVABLE bloquea ANTES de numerar/transmitir.
-    it('adquiriente nominativo con ficha vinculada SIN ninguna dirección propia: validate() real bloquea con ADDRESS_UNRESOLVABLE', async () => {
+    // Task B (2026-09-28) revierte el requisito #4 del incidente original:
+    // ya NO existe una dirección FISCAL de la tienda a la que `send()` pueda
+    // caer (`acquirer-address.resolver.ts` eliminó ese escalón), y su
+    // ausencia tampoco bloquea `validate()`. `buildAcquirerIdentityInput`
+    // ahora SIEMPRE manda `other_addresses: undefined` — nunca el universo de
+    // direcciones del cliente — así que `checkAddress` jamás escala a
+    // `ADDRESS_UNRESOLVABLE`; sólo deja el aviso `ADDRESS_REQUIRED`.
+    it('Task B: adquiriente nominativo con ficha vinculada SIN ninguna dirección propia: validate() real EMITE con aviso no bloqueante', async () => {
       const linkedCustomerNoAddress = {
         id: 601,
         organization_id: 1,
@@ -1074,6 +1269,13 @@ describe('InvoiceFlowService support documents', () => {
         prisma: {
           invoices: {
             findFirst: jest.fn().mockResolvedValue(linkedCustomerNoAddress),
+            update: jest
+              .fn()
+              .mockImplementation(async ({ where, data }: any) => ({
+                ...linkedCustomerNoAddress,
+                ...data,
+                id: where.id,
+              })),
           },
         },
       });
@@ -1081,10 +1283,7 @@ describe('InvoiceFlowService support documents', () => {
 
       await expect(
         RequestContextService.run(requestContext, () => service.validate(601)),
-      ).rejects.toMatchObject({
-        errorCode: 'INVOICING_VALIDATE_001',
-        message: expect.stringMatching(/no tiene dirección fiscal propia/i),
-      });
+      ).resolves.toBeDefined();
     });
   });
 });
