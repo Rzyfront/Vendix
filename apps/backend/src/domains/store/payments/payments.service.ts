@@ -3145,6 +3145,11 @@ export class PaymentsService {
     totalGrossDiscount: number,
   ): { tax_amount: number; discount_amount_base: number } {
     if (totalGrossDiscount <= 0) {
+      // Contrato nuevo explícito en cada línea: sin descuento => 0 (NULL sólo
+      // significa contrato legado, p. ej. carrito adoptado).
+      orderItems.forEach((item) => {
+        item.discount_amount = 0;
+      });
       const tax_amount = this.roundMoney(
         orderItems.reduce((sum, item) => {
           const rows = item.order_item_taxes?.create || [];
@@ -3186,18 +3191,62 @@ export class PaymentsService {
     const retax = applyGrossDiscountRetax(lines, grossDiscountByLine);
 
     orderItems.forEach((item, i) => {
+      const lineResult = retax.lines[i];
       const rows = item.order_item_taxes?.create;
       if (Array.isArray(rows)) {
-        retax.lines[i].taxes.forEach((t, k) => {
+        lineResult.taxes.forEach((t, k) => {
           if (rows[k]) rows[k].tax_amount = t.amount;
         });
       }
+      // Descuento de BASE ya aplicado a la línea (columna
+      // `order_items.discount_amount`; NULL = contrato legado).
+      item.discount_amount = lineResult.baseDiscount;
+      // P2: `tax_amount_item` (impuesto por unidad de PRECIO) sigue al retax,
+      // igual que en el cierre de mesa.
+      const multiplier = this.posLineMultiplier(item);
+      item.tax_amount_item =
+        multiplier > 0
+          ? this.roundMoney(lineResult.taxTotal / multiplier)
+          : lineResult.taxTotal;
     });
 
     return {
       tax_amount: retax.totalTax,
       discount_amount_base: retax.totalBaseDiscount,
     };
+  }
+
+  /** Multiplicador de precio de una línea POS (1 si es pesable). */
+  private posLineMultiplier(item: any): number {
+    return Number(item.weight || 0) > 0
+      ? 1
+      : resolvePriceUnits(Number(item.quantity || 1), item.price_unit_quantity);
+  }
+
+  /**
+   * Impuesto PRE-descuento de una línea YA persistida. Las filas
+   * `order_item_taxes.tax_amount` y `order_items.tax_amount_item` se
+   * sobrescriben con el valor post-descuento en cada cierre; `total_price`
+   * (base) jamás se muta, así que `tax_rate × total_price` es la fuente
+   * estable (mismo redondeo que `buildPosOrderItem`). Sin `tax_rate` cae al
+   * comportamiento previo (valor persistido).
+   */
+  private resolvePreDiscountLineTax(item: any, rows: any[]): number {
+    const base = Number(item.total_price || 0);
+    if (rows.length > 0) {
+      return rows.reduce((s: number, r: any) => {
+        const rate = Number(r.tax_rate || 0);
+        return (
+          s + (rate > 0 ? this.roundMoney(rate * base) : Number(r.tax_amount || 0))
+        );
+      }, 0);
+    }
+    const itemRate = Number(item.tax_rate || 0);
+    return itemRate > 0
+      ? this.roundMoney(itemRate * base)
+      : this.roundMoney(
+          Number(item.tax_amount_item || 0) * this.posLineMultiplier(item),
+        );
   }
 
   /**
@@ -3239,6 +3288,45 @@ export class PaymentsService {
           );
 
     if (totalGrossDiscount <= 0) {
+      // Sin descuento: contrato nuevo explícito (0, no NULL) en cada línea.
+      // Una línea persistida que YA traía descuento (cierre previo con
+      // cupón, ahora retirado) restituye su impuesto pre-descuento.
+      for (let i = 0; i < allItems.length; i++) {
+        const item = allItems[i];
+        if (i >= existingItems.length) {
+          item.discount_amount = 0;
+          continue;
+        }
+        const data: any = { discount_amount: 0 };
+        if (Number(item.discount_amount || 0) > 0) {
+          const rows = rowsOf(item);
+          const base = Number(item.total_price || 0);
+          let restoredLine = 0;
+          for (const r of rows) {
+            const rate = Number(r.tax_rate || 0);
+            if (rate > 0) {
+              const amount = this.roundMoney(rate * base);
+              restoredLine += amount;
+              await tx.order_item_taxes.update({
+                where: { id: r.id },
+                data: { tax_amount: amount },
+              });
+              r.tax_amount = amount;
+            } else {
+              restoredLine += Number(r.tax_amount || 0);
+            }
+          }
+          if (rows.length > 0) {
+            const multiplier = multiplierOf(item);
+            data.tax_amount_item =
+              multiplier > 0
+                ? this.roundMoney(restoredLine / multiplier)
+                : restoredLine;
+            item.tax_amount_item = data.tax_amount_item;
+          }
+        }
+        await tx.order_items.update({ where: { id: item.id }, data });
+      }
       const tax_amount = this.roundMoney(
         allItems.reduce((sum, item) => {
           const rows = rowsOf(item);
@@ -3260,8 +3348,13 @@ export class PaymentsService {
     const lines: GrossDiscountableLine[] = allItems.map((item) => {
       const base = Number(item.total_price || 0);
       const rows = rowsOf(item);
-      const preDiscountTax =
-        rows.length > 0
+      const isExistingLine = allItems.indexOf(item) < existingItems.length;
+      // Ítems persistidos: el impuesto guardado ya puede ser post-descuento
+      // (cierre reintentado sin pago exitoso) -> se reconstruye desde la
+      // tarifa. Ítems nuevos: `tax_amount` en memoria es pre-descuento.
+      const preDiscountTax = isExistingLine
+        ? this.resolvePreDiscountLineTax(item, rows)
+        : rows.length > 0
           ? rows.reduce(
               (s: number, r: any) => s + Number(r.tax_amount || 0),
               0,
@@ -3302,7 +3395,10 @@ export class PaymentsService {
         // Ítem YA persistido: requiere escritura explícita dentro de `tx`.
         await tx.order_items.update({
           where: { id: item.id },
-          data: { tax_amount_item: newTaxAmountItem },
+          data: {
+            tax_amount_item: newTaxAmountItem,
+            discount_amount: lineResult.baseDiscount,
+          },
         });
         for (let k = 0; k < rows.length; k++) {
           if (lineResult.taxes[k] === undefined) continue;
@@ -3315,6 +3411,7 @@ export class PaymentsService {
         // Ítem nuevo aún en memoria (pre-insert): mutar en sitio, igual que
         // `retaxPosOrderItemsAfterDiscount`.
         item.tax_amount_item = newTaxAmountItem;
+        item.discount_amount = lineResult.baseDiscount;
         const createRows = item.order_item_taxes?.create;
         if (Array.isArray(createRows)) {
           createRows.forEach((r: any, k: number) => {
@@ -4588,7 +4685,20 @@ export class PaymentsService {
     // cupón (F-017, bruto) y como base del retax de abajo. El valor
     // PERSISTIDO en `orders.tax_amount` es el post-descuento (`finalTax`).
     const preDiscountTaxAmount = this.roundMoney(
-      mergedItems.reduce((sum, item) => {
+      mergedItems.reduce((sum, item, idx) => {
+        // Ítems ya persistidos: su impuesto guardado puede ser post-descuento
+        // de un cierre previo sin pago exitoso; se reconstruye desde
+        // `tax_rate × total_price` (estable) para no componer el descuento.
+        if (idx < existingItems.length) {
+          const persistedRows = (item as any).order_item_taxes;
+          return (
+            sum +
+            this.resolvePreDiscountLineTax(
+              item,
+              Array.isArray(persistedRows) ? persistedRows : [],
+            )
+          );
+        }
         const nestedTaxes = (item as any).order_item_taxes ?? [];
         if (Array.isArray(nestedTaxes) && nestedTaxes.length > 0) {
           return (

@@ -2115,12 +2115,57 @@ describe('PaymentsService', () => {
         }),
       }));
       expect(tx.order_items.update).toHaveBeenCalledWith({
-        where: { id: 17 }, data: { tax_amount_item: 0 },
+        where: { id: 17 }, data: { tax_amount_item: 0, discount_amount: 10000 },
       });
       expect(tx.order_item_taxes.update).toHaveBeenCalledWith({
         where: { id: 90 }, data: { tax_amount: 0 },
       });
       expect(result.discount_already_applied_to_lines).toBe(true);
+    });
+
+    it('P1-2: cerrar la mesa 3 veces con cupón fijo no compone el descuento (107.100 idéntico) y el mínimo de compra ve siempre el bruto 119.000', async () => {
+      const { tx, posUser } = arrangeCashSale();
+      const couponSpy = jest
+        .spyOn(service as any, 'calculatePosCouponDiscount')
+        .mockResolvedValue({
+          coupon_id: 5, coupon_code: 'FIJO', discount_amount: 11900,
+        });
+      // Línea persistida con estado mutable: cada `update` del cierre la
+      // sobrescribe como haría la base, y `findMany` la relee.
+      const line: any = {
+        id: 17, product_id: 425, quantity: 1, total_price: 100000,
+        tax_rate: 0.19, tax_amount_item: 19000, discount_amount: null,
+        order_item_taxes: [{
+          id: 90, tax_rate_id: 501, tax_type: TaxFiscalType.IVA,
+          tax_rate: 0.19, tax_amount: 19000,
+        }],
+      };
+      tx.order_items.findMany.mockImplementation(async () => [line]);
+      tx.order_items.update.mockImplementation(async ({ data }: any) => {
+        Object.assign(line, data);
+        return line;
+      });
+      tx.order_item_taxes.update.mockImplementation(async ({ data }: any) => {
+        Object.assign(line.order_item_taxes[0], data);
+        return line.order_item_taxes[0];
+      });
+
+      const grandTotals: number[] = [];
+      for (let attempt = 0; attempt < 3; attempt++) {
+        tx.orders.update.mockClear();
+        await (service as any).applyPosPaymentToTableSession(
+          tx, buildDto({ items: [] }), posUser, CONTEXT_STORE_ID,
+        );
+        const data = tx.orders.update.mock.calls[0][0].data;
+        grandTotals.push(data.grand_total);
+        expect(data.tax_amount).toBe(17100);
+        expect(data.discount_amount).toBe(10000);
+      }
+
+      expect(grandTotals).toEqual([107100, 107100, 107100]);
+      expect(line.discount_amount).toBe(10000);
+      // El mínimo de compra del cupón se evalúa contra el bruto ORIGINAL.
+      couponSpy.mock.calls.forEach((call) => expect(call[1]).toBe(119000));
     });
 
     it('conserva el impuesto persistido de una línea antigua aunque el catálogo actual no tenga asignación', async () => {

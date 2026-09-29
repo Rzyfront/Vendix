@@ -210,6 +210,34 @@ describe('applyGrossDiscountRetax — POS (descuento por línea ya en bruto)', (
   });
 });
 
+describe('applyGrossDiscountRetax — cierre a centavo contra el bruto del cliente', () => {
+  const lines: GrossDiscountableLine[] = [
+    { base: 49579.83, grossOriginal: 59000, taxRows: [{ rate: 0.19 }] },
+    { base: 15546.22, grossOriginal: 18500, taxRows: [{ rate: 0.19 }] },
+    { base: 8403.36, grossOriginal: 10000, taxRows: [{ rate: 0.19 }] },
+  ];
+
+  it('59.000 / 18.500 / 10.000 con cupón 10%: total 78.750,00 (antes 78.749,99), el residuo va al descuento de la línea mayor', () => {
+    const grossDiscountByLine = distributeAmount(
+      8750,
+      lines.map((l) => l.grossOriginal),
+    );
+    const result = applyGrossDiscountRetax(lines, grossDiscountByLine);
+
+    expect(
+      Math.round((result.totalBase + result.totalTax) * 100) / 100,
+    ).toBe(78750);
+    // Impuesto sigue siendo base × tarifa por línea (aritmética DIAN).
+    result.lines.forEach((l) =>
+      expect(l.taxTotal).toBe(Math.round(l.base * 0.19 * 100) / 100),
+    );
+    // Las líneas menores conservan su reparto proporcional; sólo la mayor absorbe.
+    expect(result.lines[1].base).toBe(13991.6);
+    expect(result.lines[2].base).toBe(7563.02);
+    expect(result.lines[0].base).not.toBe(44621.85);
+  });
+});
+
 describe('distributeAmount', () => {
   it('cuadra exacto a centavo aunque la proporción no sea exacta', () => {
     const result = distributeAmount(100, [1, 1, 1]);

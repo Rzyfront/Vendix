@@ -1566,4 +1566,21 @@ describe('PosCartService — loadFromOrder repone shippingContext (flete del bor
     expect(tenPct.total).toBe(75330);
   });
 
+  it('59.000 / 18.500 / 10.000 IVA incluido con cupón 10%: el total es bruto − descuento = 78.750,00 (igual al cierre a centavo del backend)', () => {
+    const items: any[] = [
+      { quantity: 1, unitPrice: 49579.83, totalPrice: 59000, taxAmount: 9420.17 },
+      { quantity: 1, unitPrice: 15546.22, totalPrice: 18500, taxAmount: 2953.78 },
+      { quantity: 1, unitPrice: 8403.36, totalPrice: 10000, taxAmount: 1596.64 },
+    ];
+    const summary = (service as any).calculateSummary(items, [{ amount: 8750 }]);
+
+    // Lo que ve el cliente es SOLO el total con IVA incluido.
+    expect(summary.total).toBe(78750);
+    // El backend suma base y tarifa redondeadas por línea (78.749,99) y
+    // absorbe el centavo en el descuento de la línea mayor: mismo total.
+    expect(summary.total).toBe(
+      Math.round((87500 - 8750) * 100) / 100,
+    );
+  });
+
 });

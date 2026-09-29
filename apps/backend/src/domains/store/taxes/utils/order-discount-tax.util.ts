@@ -188,18 +188,7 @@ export function applyGrossDiscountRetax(
   lines: GrossDiscountableLine[],
   grossDiscountByLine: number[],
 ): OrderDiscountProjection {
-  let totalBaseDiscount = 0;
-  let totalTax = 0;
-  let totalBase = 0;
-  const outLines: DiscountedLine[] = lines.map((line, i) => {
-    const grossDiscount = Math.max(
-      0,
-      Math.min(grossDiscountByLine[i] || 0, line.grossOriginal),
-    );
-    const fraction =
-      line.grossOriginal > 0 ? grossDiscount / line.grossOriginal : 0;
-    const newBase = round2(Math.max(0, line.base * (1 - fraction)));
-    const baseDiscount = round2(line.base - newBase);
+  const taxesOf = (line: GrossDiscountableLine, newBase: number) => {
     const taxes = line.taxRows.map((row) => ({
       rate: row.rate,
       tax_type: row.tax_type,
@@ -207,13 +196,78 @@ export function applyGrossDiscountRetax(
       tax_name: row.tax_name,
       amount: round2(newBase * (Number(row.rate) || 0)),
     }));
-    const taxTotal = round2(taxes.reduce((a, b) => a + b.amount, 0));
-    totalBaseDiscount = round2(totalBaseDiscount + baseDiscount);
-    totalTax = round2(totalTax + taxTotal);
-    totalBase = round2(totalBase + newBase);
+    return { taxes, taxTotal: round2(taxes.reduce((a, b) => a + b.amount, 0)) };
+  };
+
+  let grossDiscountTotal = 0;
+  const outLines: DiscountedLine[] = lines.map((line, i) => {
+    const grossDiscount = Math.max(
+      0,
+      Math.min(grossDiscountByLine[i] || 0, line.grossOriginal),
+    );
+    grossDiscountTotal = round2(grossDiscountTotal + grossDiscount);
+    const fraction =
+      line.grossOriginal > 0 ? grossDiscount / line.grossOriginal : 0;
+    const newBase = round2(Math.max(0, line.base * (1 - fraction)));
+    const baseDiscount = round2(line.base - newBase);
+    const { taxes, taxTotal } = taxesOf(line, newBase);
     return { base: newBase, baseDiscount, taxes, taxTotal };
   });
 
+  // Cierre a centavo contra lo que ve el cliente: `Σ bruto original − Σ
+  // descuento bruto`. Sumar base y tarifa redondeadas por línea puede
+  // diferir en centavos (78.749,99 vs 78.750). El residuo se absorbe en el
+  // DESCUENTO DE BASE de la línea mayor (nunca en el impuesto, que sigue
+  // siendo `base × tarifa`), para que la aritmética DIAN no se rompa.
+  const targetCents = Math.round(
+    (lines.reduce((s, l) => s + l.grossOriginal, 0) - grossDiscountTotal) * 100,
+  );
+  const actualCents = () =>
+    Math.round(
+      outLines.reduce((s, l) => s + l.base + l.taxTotal, 0) * 100,
+    );
+  const residual = targetCents - actualCents();
+  if (residual !== 0) {
+    const order = lines
+      .map((l, i) => ({ i, base: l.base }))
+      .filter(({ i }) => lines[i].base > 0)
+      .sort((a, b) => b.base - a.base);
+    let best: { i: number; nb: number; left: number } | null = null;
+    const span = Math.abs(residual) * 2 + 3;
+    search: for (const { i } of order) {
+      const cur = outLines[i];
+      for (let step = 0; step <= span; step++) {
+        for (const d of step === 0 ? [0] : [step, -step]) {
+          const nb = round2(cur.base + d / 100);
+          if (nb < 0 || nb > lines[i].base) continue;
+          const { taxTotal } = taxesOf(lines[i], nb);
+          const delta = Math.round((nb + taxTotal - cur.base - cur.taxTotal) * 100);
+          const left = Math.abs(residual - delta);
+          if (best === null || left < best.left) best = { i, nb, left };
+          if (left === 0) break search;
+        }
+      }
+      // Sólo se intenta la línea mayor si no cuadra exacto: no repartir el
+      // ajuste entre varias líneas.
+      break;
+    }
+    if (best && best.left < Math.abs(residual)) {
+      const line = lines[best.i];
+      const { taxes, taxTotal } = taxesOf(line, best.nb);
+      outLines[best.i] = {
+        base: best.nb,
+        baseDiscount: round2(line.base - best.nb),
+        taxes,
+        taxTotal,
+      };
+    }
+  }
+
+  const totalBaseDiscount = round2(
+    outLines.reduce((s, l) => s + l.baseDiscount, 0),
+  );
+  const totalTax = round2(outLines.reduce((s, l) => s + l.taxTotal, 0));
+  const totalBase = round2(outLines.reduce((s, l) => s + l.base, 0));
   return { lines: outLines, totalBaseDiscount, totalTax, totalBase };
 }
 
