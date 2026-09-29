@@ -12,6 +12,12 @@ import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import {
+  StockValidatorService,
+  StockDemandLine,
+  type InsufficientStockItem,
+} from '../inventory/shared/services/stock-validator.service';
+import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import type { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import {
   groupRatesByProductId,
@@ -34,6 +40,7 @@ import { resolvePriceUnitScale } from '../products/services/price-unit.util';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 import type { CancellationType } from './dto';
 import { ReassignTableSessionDto } from './dto/table-session.dto';
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 /**
  * QUI-INC — fila de impuesto COMPLETA de una línea de cuenta abierta: lo que
@@ -69,6 +76,12 @@ export interface TableSessionView {
   guest_count: number | null;
   /** Only present in the response that creates a session, never persisted. */
   previous_table_status?: table_status_enum;
+  /**
+   * docs/plans/no-overselling-stock-guard-plan.md step 9 — additive, only
+   * present when the store's "Permitir sobreventa" switch accepted a real
+   * shortfall while reserving the appended items. Never an empty array.
+   */
+  stock_warnings?: InsufficientStockItem[];
   order?: {
     id: number;
     state: string;
@@ -291,6 +304,11 @@ export class TableSessionsService {
       OrderFlowService,
       'cancelOrderItem' | 'deliverOrderItem'
     >,
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
+    private readonly orderHistory: OrderHistoryService,
+    private readonly stockValidator: StockValidatorService,
+    private readonly sellableStockAllocator: SellableStockAllocator,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -692,8 +710,9 @@ export class TableSessionsService {
    * Validates the order is still in 'draft' state (cannot mutate a
    * paid/closed order) and re-derives `subtotal_amount` and
    * `grand_total` after appending the new lines. Inventory reservation
-   * is intentionally NOT performed for `prepared` items — the consume
-   * happens at fire-to-kitchen (Fase D).
+   * is intentionally NOT performed for `prepared` items — this DTO has no
+   * `skip_kds`, so prepared lines always go to kitchen and consume ingredients
+   * at fire-to-kitchen (Fase D).
    */
   async addItems(
     sessionId: number,
@@ -739,6 +758,7 @@ export class TableSessionsService {
         is_on_sale: true,
         sale_price: true,
         is_sellable: true,
+        state: true,
         product_type: true,
         track_inventory: true,
         // QUI-648 / ADR-08 commit 5 (F-038/F-080) — escala de precio del
@@ -779,6 +799,12 @@ export class TableSessionsService {
           `Producto "${p.name}" no es vendible (is_sellable=false)`,
         );
       }
+      if (p.state !== 'active') {
+        throw new VendixHttpException(
+          ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+          `Producto "${p.name}" no está activo`,
+        );
+      }
       // ERR-07 — un producto CON variantes exige que la línea declare cuál
       // (preparado o no: la cuenta y la cocina trabajan por variante, nunca
       // por la base). Sin esto la comanda llega como el producto base y el
@@ -798,6 +824,11 @@ export class TableSessionsService {
     // F-094 punto 2 — timeout/maxWait explícitos (default 5 s): mismo valor
     // que `payments.service.ts:1769` para el mismo tipo de transacción con
     // trabajo variable por línea (N ítems, exclusiones, KDS).
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive to the
+    // response, only when the store's "Permitir sobreventa" switch accepted
+    // a real shortfall. Declared outside the tx so it survives into the
+    // final return below.
+    const stockWarnings: InsufficientStockItem[] = [];
     await this.prisma.$transaction(async (tx) => {
       // SplitOrderService locks this same source row before freezing account
       // allocations. Take that lock BEFORE inserting any line, then re-check
@@ -830,6 +861,7 @@ export class TableSessionsService {
         id: number;
         product_id: number;
         price_override: Prisma.Decimal | number | null;
+        track_inventory_override: boolean | null;
         is_on_sale: boolean;
         sale_price: Prisma.Decimal | number | null;
       };
@@ -842,6 +874,7 @@ export class TableSessionsService {
               id: true,
               product_id: true,
               price_override: true,
+              track_inventory_override: true,
               is_on_sale: true,
               sale_price: true,
             },
@@ -859,6 +892,28 @@ export class TableSessionsService {
           }
         }
       }
+
+      const stockDemands: StockDemandLine[] = dto.items.flatMap((item) => {
+        const product = productMap.get(item.product_id)!;
+        return product.product_type === 'prepared'
+          ? []
+          : [{
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id,
+              quantity: item.quantity,
+              product_name: product.name,
+            }];
+      });
+      const inventoryPolicy = await this.stockValidator.resolveInventoryPolicy(
+        storeId,
+        tx,
+      );
+      const allowOversell = inventoryPolicy.allowOversell === true;
+      const shortages = await this.stockValidator.assertLinesAvailable(
+        stockDemands,
+        { tx, allowOversell },
+      );
+      if (shortages.length > 0) stockWarnings.push(...shortages);
 
       for (const item of dto.items) {
         const product = productMap.get(item.product_id)!;
@@ -997,6 +1052,74 @@ export class TableSessionsService {
           },
         });
 
+        if (product.product_type !== 'prepared' && product.product_type !== 'service' &&
+          this.stockValidator.resolveEffectiveTracking(product, variant)) {
+          const allocation = await this.sellableStockAllocator.allocateForLine(
+            storeId,
+            item.product_id,
+            item.product_variant_id ?? undefined,
+            item.quantity,
+            [],
+            tx,
+          );
+          let reserveSlices = allocation.slices;
+          if (allocation.shortfall > 0) {
+            if (!allowOversell) {
+              throw new VendixHttpException(
+                ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+                `No hay existencias suficientes de ${product.name}.`,
+                { items: [{
+                  product_id: item.product_id,
+                  product_variant_id: item.product_variant_id ?? null,
+                  product_name: product.name,
+                  kind: 'product',
+                  requested: item.quantity,
+                  available: allocation.available,
+                }] },
+              );
+            }
+            this.logger.warn(
+              `Sobreventa permitida — ${product.name}: requiere ${item.quantity}, disponible ${allocation.available}.`,
+            );
+            stockWarnings.push({
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id ?? null,
+              product_name: product.name,
+              kind: 'product',
+              requested: item.quantity,
+              available: allocation.available,
+            });
+            const fallbackLocationId =
+              allocation.slices[0]?.location_id ??
+              (await this.stockLevelManager.getDefaultLocationForProduct(
+                item.product_id,
+                item.product_variant_id ?? undefined,
+                tx,
+              ));
+            reserveSlices = this.sellableStockAllocator.absorbShortfall(
+              allocation,
+              fallbackLocationId,
+            );
+          }
+          for (const slice of reserveSlices) {
+            await this.stockLevelManager.reserveStock(
+              item.product_id,
+              item.product_variant_id ?? undefined,
+              slice.location_id,
+              slice.quantity,
+              'order',
+              session.order_id,
+              RequestContextService.getContext()?.user_id ?? undefined,
+              !allowOversell,
+              tx,
+              undefined,
+              false,
+              undefined,
+              allowOversell,
+            );
+          }
+        }
+
         // QUI-655 — LA INTENCION, no el consumo. Se registra lo que el cliente
         // pidio sin, para que el KDS lo muestre tachado y el cocinero no tenga que
         // deducirlo de una nota. El consumo real se decide al confirmar en cocina y
@@ -1083,7 +1206,10 @@ export class TableSessionsService {
     this.logger.log(
       `Items appended: session=${sessionId} order=${session.order_id} lines=${dto.items.length}`,
     );
-    return this.findOne(sessionId);
+    const view = await this.findOne(sessionId);
+    return stockWarnings.length > 0
+      ? { ...view, stock_warnings: stockWarnings }
+      : view;
   }
 
   // -------------------------------------------------------------- remove
@@ -2526,6 +2652,19 @@ export class TableSessionsService {
       data: { customer_id: customerId, customer_alias: null, updated_at: new Date() },
     });
 
+    // Plan order-truth-and-invoice-tz (Step 6) — sólo se registra si el
+    // cliente vinculado realmente cambió (asignar el mismo cliente dos veces
+    // o desasignar una mesa ya anónima no es un cambio).
+    const priorCustomerId = session.order?.customer?.id ?? null;
+    if (priorCustomerId !== customerId) {
+      await this.orderHistory.record(this.prisma, {
+        orderId: session.order_id,
+        storeId,
+        type: 'customer_changed',
+        payload: { from_customer_id: priorCustomerId, to_customer_id: customerId },
+      });
+    }
+
     this.logger.log(
       `Table session customer ${
         customerId == null ? 'detached' : `set to ${customerId}`
@@ -2733,6 +2872,16 @@ export class TableSessionsService {
         order.id,
         Number(payment.amount),
       );
+
+      // Plan order-truth-and-invoice-tz (Step 6).
+      await this.orderHistory.record(tx, {
+        orderId: order.id,
+        storeId,
+        organizationId: order.stores?.organization_id ?? undefined,
+        type: 'payment_registered',
+        paymentId: payment.id,
+        amount: Number(payment.amount),
+      });
 
       // 6. Emit canonical `payment.received`. Shape mirrors the POS fresh-sale
       //    emit (payments.service.ts L1179) so the auto-entry listener + the

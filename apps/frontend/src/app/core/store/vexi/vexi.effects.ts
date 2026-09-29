@@ -6,6 +6,7 @@ import {
   switchMap,
   map,
   catchError,
+  filter,
   mergeMap,
   startWith,
   takeUntil,
@@ -30,6 +31,9 @@ export class VexiEffects {
    * running for ten minutes costs 120 requests instead of 600.
    */
   private static readonly TASK_POLL_MS = 5000;
+
+  /** Automatic `resume` turns allowed per message the person wrote. */
+  private static readonly MAX_AUTO_CONTINUATIONS = 3;
 
   /**
    * Wait before asking the server whether a dropped turn actually finished.
@@ -195,6 +199,7 @@ export class VexiEffects {
           speak,
           isRetry,
           skipUserMessage,
+          continuation,
         }) =>
           this.chatApi
             .createStreamIntent(
@@ -204,6 +209,7 @@ export class VexiEffects {
               attachmentIds,
               speak,
               skipUserMessage,
+              continuation,
             )
             .pipe(
               switchMap((streamId) =>
@@ -358,6 +364,8 @@ export class VexiEffects {
                 summary: result.summary ?? null,
                 audioBase64: result.audio_base64,
                 contentType: result.content_type,
+                planActive: proposal.planActive === true,
+                speak,
               }),
             ),
             catchError((error) =>
@@ -372,6 +380,79 @@ export class VexiEffects {
             ),
           );
       }),
+    ),
+  );
+
+  /**
+   * Reopens the agent's turn after the person resolved a proposal that belonged
+   * to its internal plan. No user bubble: the server composes the instruction.
+   */
+  continueAfterConfirmation$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(VexiActions.confirmProposalSuccess),
+      filter(({ planActive }) => planActive === true),
+      withLatestFrom(this.store.select(VexiSelectors.selectActiveConversationId)),
+      filter(([, conversationId]) => conversationId !== null),
+      map(([{ speak }, conversationId]) =>
+        VexiActions.sendMessage({
+          conversationId: conversationId as number,
+          content: '',
+          speak,
+          continuation: 'approved',
+        }),
+      ),
+    ),
+  );
+
+  /**
+   * Same for a rejection. The reducer has already cleared the proposal by the
+   * time effects run, so it leaves `rejectedPlanActive` behind for this to read;
+   * `speak` comes from the last turn because the action does not carry it.
+   */
+  continueAfterRejection$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(VexiActions.rejectProposal),
+      withLatestFrom(
+        this.store.select(VexiSelectors.selectRejectedPlanActive),
+        this.store.select(VexiSelectors.selectActiveConversationId),
+        this.store.select(VexiSelectors.selectLastTurn),
+      ),
+      filter(([, planActive, conversationId]) => planActive && conversationId !== null),
+      map(([, , conversationId, lastTurn]) =>
+        VexiActions.sendMessage({
+          conversationId: conversationId as number,
+          content: '',
+          speak: lastTurn?.speak,
+          continuation: 'rejected',
+        }),
+      ),
+    ),
+  );
+
+  /**
+   * Chains the next turn when the one that just ended announced `plan_continue`.
+   * Capped at 3 automatic turns per person message; past that, it asks instead.
+   */
+  chainPlanContinue$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(VexiActions.streamComplete),
+      withLatestFrom(
+        this.store.select(VexiSelectors.selectPlanContinuePending),
+        this.store.select(VexiSelectors.selectAutoContinuations),
+        this.store.select(VexiSelectors.selectActiveConversationId),
+        this.store.select(VexiSelectors.selectLastTurn),
+      ),
+      filter(([, pending, , conversationId]) => pending && conversationId !== null),
+      map(([, , count, conversationId, lastTurn]) =>
+        count < VexiEffects.MAX_AUTO_CONTINUATIONS
+          ? VexiActions.sendMessage({
+              conversationId: conversationId as number,
+              content: '',
+              speak: lastTurn?.speak,
+              continuation: 'resume',
+            })
+          : VexiActions.planContinueCapped(),
+      ),
     ),
   );
 
@@ -562,6 +643,7 @@ export class VexiEffects {
                   arguments: proposal.arguments ?? {},
                   confirmationToken: proposal.confirmation_token,
                   preview: proposal.preview,
+                  planActive: proposal.plan_active === true,
                 }),
               );
             }
@@ -575,6 +657,12 @@ export class VexiEffects {
             );
             break;
           }
+
+          case 'plan_continue':
+            // The turn ran out of budget with work pending. Only noted here: the
+            // chain is opened when `done` completes the stream, never mid-turn.
+            subscriber.next(VexiActions.planContinueReceived());
+            break;
 
           case 'audio':
             // Handed straight to the player, never dispatched. A base64 mp3 in
@@ -690,6 +778,7 @@ export class VexiEffects {
     confirmation_token: string;
     arguments?: Record<string, unknown>;
     preview?: VexiProposalPreview;
+    plan_active?: boolean;
   } | null {
     if (!summary || !summary.includes('confirmation_token')) return null;
     try {

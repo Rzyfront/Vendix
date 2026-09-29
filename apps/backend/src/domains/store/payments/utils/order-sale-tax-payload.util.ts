@@ -39,7 +39,14 @@ export type OrderSaleLineSource = Omit<OrderInvoiceLineSource, 'order_item_taxes
 export interface OrderSaleTaxPayloadOrder extends ShippingTaxOrderInput {
   /** `orders.tax_amount`: SOLO impuesto de productos (contrato shipping-rate-tax). */
   tax_amount?: unknown;
-  /** `orders.discount_amount`: descuento de ORDEN (después de impuesto). */
+  /**
+   * `orders.discount_amount`. Contrato LEGADO (histórico): descuento en
+   * BRUTO (después de impuesto) — la proyección de `projectOrderInvoiceLines`
+   * lo reparte y recalcula. Contrato NUEVO (owner, 2026-09-28, sólo POS por
+   * ahora — ver `discount_already_applied_to_lines`): descuento de BASE-only,
+   * `tax_amount` y `order_item_taxes` YA salieron post-descuento y esta
+   * proyección NO debe volver a aplicarlo.
+   */
   discount_amount?: unknown;
   /** `orders.subtotal_amount` = Σ `order_items.total_price` (base). */
   subtotal_amount?: unknown;
@@ -103,9 +110,20 @@ export function buildOrderSaleTaxPayload(input: {
    * se usan si la orden trae descuento de orden: ver `projectOrderDiscountedTaxes`.
    */
   order_items?: ReadonlyArray<OrderSaleLineSource> | null;
+  /**
+   * Regla de negocio (owner, 2026-09-28) — POS: cuando `true`, `order.tax_amount`
+   * y `order.discount_amount` YA salieron post-descuento/base-only (ver
+   * `PaymentsService.retaxPosOrderItemsAfterDiscount` /
+   * `retaxMergedPosOrderItemsForTableClose`). Re-proyectar el descuento aquí
+   * lo aplicaría una SEGUNDA vez (double-discount). Omitido o `false` conserva
+   * el comportamiento histórico (proyecta sobre `order_items` como siempre).
+   */
+  discount_already_applied_to_lines?: boolean;
 }): OrderSaleTaxPayload {
   const { order } = input;
-  const projected = projectOrderDiscountedTaxes(input.order_items, order, 'orden');
+  const projected = input.discount_already_applied_to_lines
+    ? null
+    : projectOrderDiscountedTaxes(input.order_items, order, 'orden');
   const product_breakdown = projected
     ? projected.product_breakdown
     : buildTaxBreakdown([...(input.product_tax_rows ?? [])]);

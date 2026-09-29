@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Logger,
   Param,
   ParseIntPipe,
   Post,
@@ -30,6 +31,7 @@ import { VexiUiChannelService } from './vexi-ui-channel.service';
 import { VexiTaskService } from './vexi-task.service';
 import { VexiActivityService } from './vexi-activity.service';
 import { VexiSpeechService } from './vexi-speech.service';
+import { VexiPlanStateService } from './vexi-plan-state.service';
 import { EmbeddingBackfillService } from '../../../ai-engine/embeddings/embedding-backfill.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
@@ -53,6 +55,8 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 @UseGuards(RolesGuard, VexiEnabledGuard)
 @Roles(UserRole.OWNER, UserRole.ADMIN)
 export class VexiController {
+  private readonly logger = new Logger(VexiController.name);
+
   constructor(
     private readonly context: VexiContextService,
     private readonly responseService: ResponseService,
@@ -64,6 +68,7 @@ export class VexiController {
     private readonly activity: VexiActivityService,
     private readonly embeddingBackfill: EmbeddingBackfillService,
     private readonly speech: VexiSpeechService,
+    private readonly planState: VexiPlanStateService,
   ) {}
 
   /**
@@ -123,6 +128,22 @@ export class VexiController {
     // spoken and the text that is shown are the same string by construction —
     // two renderings of one truth, never two truths.
     const summary = this.applySummary(output);
+
+    // Marcar el plan NUNCA puede hacer fallar una escritura ya aplicada: solo se
+    // registra el error.
+    if (dto.conversation_id) {
+      try {
+        await this.planState.markCurrentChangeStep(
+          dto.conversation_id,
+          'done',
+          summary ? summary.slice(0, 300) : undefined,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `No se pudo marcar el paso del plan (conversación ${dto.conversation_id}): ${(err as Error).message}`,
+        );
+      }
+    }
 
     // Persistido aparte del registro de auditoría: esa fila va sin prosa, y sin
     // esta el transcripto de una conversación reabierta mostraba la propuesta y
@@ -268,7 +289,10 @@ export class VexiController {
       );
     }
 
-    return this.responseService.success({ accepted: true }, 'Resultado recibido');
+    return this.responseService.success(
+      { accepted: true },
+      'Resultado recibido',
+    );
   }
 
   /**
@@ -345,9 +369,7 @@ export class VexiController {
    */
   @Get('activity')
   async getActivity(@Query('limit') limit?: string) {
-    const entries = await this.activity.list(
-      limit ? Number(limit) : undefined,
-    );
+    const entries = await this.activity.list(limit ? Number(limit) : undefined);
     return this.responseService.success(entries, 'Actividad de Vexi');
   }
 }

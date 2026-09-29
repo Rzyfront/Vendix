@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { Order, OrderItem } from '../interfaces/order.interface';
 import { TicketData, TicketItem } from '../../pos/models/ticket.model';
+import { customerDisplayName } from '../../../../../shared/utils/customer-display-name.util';
 
 /**
  * Cashier name printed when the caller does not know who sold the order.
@@ -188,7 +189,7 @@ export class OrderTicketService {
       transactionId: order.order_number,
       customer: order.users
         ? {
-            name: `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim() || 'Consumidor Final',
+            name: customerDisplayName(order.users, 'Consumidor Final'),
             email: order.users.email,
             phone: order.users.phone,
             shippingAddress,

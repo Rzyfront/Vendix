@@ -11,7 +11,10 @@
 >
   <div class="space-y-4 p-1">
     <p class="text-sm text-text-secondary">
-      Este plato se excluirá de la cuenta. El destino elegido quedará registrado junto con el motivo.
+      Este plato se excluirá de la cuenta y el motivo quedará registrado.
+      @if (showDestination()) {
+        También se registrará si decidiste desechar o reutilizar sus insumos.
+      }
     </p>
     @if (showDestination()) {
     <fieldset class="space-y-2">
@@ -44,7 +47,11 @@
       </label>
     </fieldset>
     } @else {
-      <p class="text-sm text-text-secondary">Aún no se ha preparado: no hay ingredientes consumidos que desechar o reutilizar.</p>
+      @if (autoRestorePending()) {
+        <p class="text-sm text-text-secondary">El ticket sigue pendiente. Al cancelar, los insumos descontados al enviarlo a cocina volverán automáticamente al inventario; no necesitas elegir un destino.</p>
+      } @else {
+        <p class="text-sm text-text-secondary">El plato aún no se envió a cocina; no hay insumos descontados que reintegrar.</p>
+      }
     }
     <label for="item-cancellation-reason" class="block text-sm font-semibold text-gray-900">Motivo obligatorio</label>
     <textarea id="item-cancellation-reason" #reasonInput rows="3" maxlength="500"

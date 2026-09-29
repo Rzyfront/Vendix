@@ -298,3 +298,93 @@ describe('AccountingEventsListener refund.completed', () => {
     );
   });
 });
+
+describe('AccountingEventsListener payment.voided', () => {
+  const voidedEvent = {
+    store_id: 2,
+    organization_id: 1,
+    order_id: 70,
+    payment_id: 321,
+    amount: 100,
+    payment_method: 'cash',
+    user_id: 9,
+    reason: 'payment_cancelled' as const,
+  };
+
+  const build = (overrides: any = {}) => {
+    const auto_entry_service = {
+      onPaymentVoided: jest.fn().mockResolvedValue({ id: 999 }),
+      prisma: {
+        stores: {
+          findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }),
+        },
+      },
+      ...overrides.auto_entry_service,
+    };
+    const fiscal_gate = {
+      isSubflowEnabled: jest.fn().mockResolvedValue(true),
+      ...overrides.fiscal_gate,
+    };
+    const entry_failure_service = {
+      recordSkip: jest.fn().mockResolvedValue(undefined),
+      recordFailure: jest.fn().mockResolvedValue(undefined),
+      ...overrides.entry_failure_service,
+    };
+    const listener = new AccountingEventsListener(
+      auto_entry_service as any,
+      { getMapping: jest.fn() } as any,
+      fiscal_gate as any,
+      { getPlatformContext: jest.fn() } as any,
+      entry_failure_service as any,
+    );
+    return { listener, auto_entry_service, fiscal_gate, entry_failure_service };
+  };
+
+  it('llama a onPaymentVoided con los ids exactos del pago/orden anulados', async () => {
+    const { listener, auto_entry_service, fiscal_gate } = build();
+
+    await listener.handlePaymentVoided(voidedEvent);
+
+    expect(fiscal_gate.isSubflowEnabled).toHaveBeenCalledWith(1, 2, 'payments');
+    expect(auto_entry_service.onPaymentVoided).toHaveBeenCalledWith({
+      payment_id: 321,
+      organization_id: 1,
+      store_id: 2,
+      order_id: 70,
+      user_id: 9,
+    });
+  });
+
+  it('no reversa nada si el subflujo de pagos está apagado para la organización', async () => {
+    const { listener, auto_entry_service, fiscal_gate } = build({
+      fiscal_gate: { isSubflowEnabled: jest.fn().mockResolvedValue(false) },
+    });
+
+    await listener.handlePaymentVoided(voidedEvent);
+
+    expect(fiscal_gate.isSubflowEnabled).toHaveBeenCalledWith(1, 2, 'payments');
+    expect(auto_entry_service.onPaymentVoided).not.toHaveBeenCalled();
+  });
+
+  it('nunca propaga un error interno de la reversa hacia el emisor del evento', async () => {
+    const { listener, auto_entry_service } = build({
+      auto_entry_service: {
+        onPaymentVoided: jest
+          .fn()
+          .mockRejectedValue(new Error('Ledger unavailable')),
+      },
+    });
+    const error = jest
+      .spyOn((listener as any).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    await expect(listener.handlePaymentVoided(voidedEvent)).resolves.toBeUndefined();
+
+    expect(auto_entry_service.onPaymentVoided).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('#321'),
+      expect.anything(),
+    );
+    error.mockRestore();
+  });
+});

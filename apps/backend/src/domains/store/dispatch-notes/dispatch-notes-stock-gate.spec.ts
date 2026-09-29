@@ -109,6 +109,7 @@ describe('DispatchNotesService — gate de stock de la remisión (QUI-557)', () 
     stockValidatorMock = {
       doesProductTrackInventory: jest.fn(),
       validateAvailability: jest.fn(),
+      resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowOversell: false }),
     };
 
     service = new DispatchNotesService(
@@ -127,6 +128,26 @@ describe('DispatchNotesService — gate de stock de la remisión (QUI-557)', () 
   afterEach(() => jest.restoreAllMocks());
 
   describe('validateDispatchItemsStock', () => {
+    it('permite despachar un pedido POS sobrevendido solo con el switch de la tienda activo', async () => {
+      setupStock({ onHand: 0, reservedTotal: 1, reservedForOrder: 1, available: -1 });
+      stockValidatorMock.resolveInventoryPolicy.mockResolvedValue({ allowOversell: true });
+
+      expect(await runGate([baseItem(1)])).toBeNull();
+      expect(stockValidatorMock.resolveInventoryPolicy).toHaveBeenCalledWith(STORE_ID);
+
+      stockValidatorMock.resolveInventoryPolicy.mockResolvedValue({ allowOversell: false });
+      expect((await runGate([baseItem(1)]))?.reason).toBe('no_stock');
+    });
+
+    it('con sobreventa activa sigue bloqueando bodega no resuelta y variante requerida', async () => {
+      setupStock({ onHand: 0, reservedTotal: 0, reservedForOrder: 0,
+        available: 0, variantAvailableAtLocation: 5 });
+      stockValidatorMock.resolveInventoryPolicy.mockResolvedValue({ allowOversell: true });
+
+      expect((await runGate([baseItem(1, null as any)]))?.reason).toBe('location_unresolved');
+      expect((await runGate([baseItem(1)]))?.reason).toBe('variant_required');
+    });
+
     it('no bloquea cuando lo reservado para ESTA orden cubre lo despachado', async () => {
       // El caso exacto del ticket: 25 unidades, todas apartadas para la orden.
       // `available` ya está en 0 justamente porque la reserva las descontó.

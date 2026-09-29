@@ -2684,6 +2684,9 @@ export class InventoryAnalyticsService {
    * generadas por `KitchenFireService` o `ProductionOrdersService`, vinculando
    * el insumo gastado con el plato preparado.
    *
+   * Descuenta los insumos devueltos por reuso (`REUSO-INSUMO:` en notas) del
+   * mismo ítem de orden: sólo se reporta lo realmente consumido.
+   *
    * Admite agrupación por `ingredient` (secciones = insumos) o `dish` (secciones = platos).
    */
   async getIngredientConsumption(query: InventoryAnalyticsQueryDto): Promise<{
@@ -2730,29 +2733,110 @@ export class InventoryAnalyticsService {
         total_cost: any;
       }>
     >(Prisma.sql`
+      WITH consumo AS (
+        SELECT
+          it.id,
+          it.product_id,
+          it.product_variant_id,
+          it.order_item_id,
+          it.notes,
+          ABS(it.quantity_change)::numeric AS qty,
+          COALESCE(it.total_cost, ABS(it.quantity_change) * COALESCE(it.unit_cost, ing.cost_price, 0))::numeric AS cost,
+          COALESCE(it.unit_cost, ing.cost_price, 0)::numeric AS unit_cost
+        FROM inventory_transactions it
+        JOIN products ing ON ing.id = it.product_id
+        WHERE ing.store_id = ${storeId}
+          AND it.quantity_change < 0
+          AND (it.notes LIKE '%Fire%' OR it.notes LIKE '%Producci%' OR it.order_item_id IS NOT NULL)
+          AND COALESCE(it.transaction_date, it.created_at) >= ${startDate}
+          AND COALESCE(it.transaction_date, it.created_at) <= ${endDate}
+      ),
+      -- Devoluciones por REUSO de insumo (plato cancelado cuyos insumos se
+      -- reutilizan): el ítem de origen va en las notas. No se filtra por fecha:
+      -- la devolución pertenece a su fire y la fecha del fire define el período.
+      reuso AS (
+        SELECT
+          it.product_id,
+          it.product_variant_id,
+          substring(it.notes from 'ítem #([0-9]+)')::int AS order_item_id,
+          SUM(it.quantity_change)::numeric AS qty
+        FROM inventory_transactions it
+        JOIN products ing ON ing.id = it.product_id
+        WHERE ing.store_id = ${storeId}
+          AND it.quantity_change > 0
+          AND it.notes LIKE 'REUSO-INSUMO:%'
+          AND it.notes ~ 'ítem #[0-9]+'
+        GROUP BY it.product_id, it.product_variant_id, substring(it.notes from 'ítem #([0-9]+)')::int
+      ),
+      -- Factor neto por transacción: (consumido - reusado) / consumido, con el
+      -- reusado acotado al consumido. Sin order_item (producción) el factor es 1.
+      neto AS (
+        SELECT
+          c.id,
+          c.product_id,
+          c.order_item_id,
+          c.notes,
+          c.unit_cost,
+          c.qty,
+          c.cost,
+          CASE
+            WHEN c.order_item_id IS NULL OR c.qty_total <= 0 THEN 1
+            ELSE GREATEST(c.qty_total - LEAST(COALESCE(r.qty, 0), c.qty_total), 0) / c.qty_total
+          END AS factor
+        FROM (
+          SELECT
+            consumo.*,
+            SUM(consumo.qty) OVER (
+              PARTITION BY consumo.product_id, consumo.product_variant_id, consumo.order_item_id
+            ) AS qty_total
+          FROM consumo
+        ) c
+        LEFT JOIN reuso r
+          ON r.product_id = c.product_id
+         AND r.product_variant_id IS NOT DISTINCT FROM c.product_variant_id
+         AND r.order_item_id = c.order_item_id
+      ),
+      -- Una fila por (insumo, ítem de orden): así oi.quantity se cuenta una vez
+      -- aunque el ítem tenga varias transacciones del mismo insumo.
+      por_item AS (
+        SELECT
+          n.product_id,
+          n.order_item_id,
+          CASE WHEN n.order_item_id IS NULL THEN n.id END AS tx_key,
+          oi.product_id AS dish_id,
+          COALESCE(dish.name, oi.product_name, n.notes, 'Consumo Interno') AS dish_name,
+          MAX(oi.quantity)::numeric AS oi_quantity,
+          COUNT(*)::int AS tx_count,
+          SUM(n.qty * n.factor)::numeric AS qty,
+          SUM(n.cost * n.factor)::numeric AS cost,
+          SUM(n.unit_cost)::numeric AS unit_cost_sum
+        FROM neto n
+        LEFT JOIN order_items oi ON oi.id = n.order_item_id
+        LEFT JOIN products dish ON dish.id = oi.product_id
+        WHERE n.factor > 0
+        GROUP BY
+          n.product_id,
+          n.order_item_id,
+          CASE WHEN n.order_item_id IS NULL THEN n.id END,
+          oi.product_id,
+          COALESCE(dish.name, oi.product_name, n.notes, 'Consumo Interno')
+      )
       SELECT
-        it.product_id AS ingredient_id,
+        pit.product_id AS ingredient_id,
         ing.name AS ingredient_name,
         ing.sku AS ingredient_sku,
         COALESCE(ing.stock_unit, 'und') AS ingredient_unit,
-        oi.product_id AS dish_id,
-        COALESCE(dish.name, oi.product_name, it.notes, 'Consumo Interno') AS dish_name,
-        COUNT(DISTINCT it.id)::int AS transaction_count,
-        COUNT(DISTINCT oi.id)::int AS orders_count,
-        COALESCE(SUM(oi.quantity), COUNT(DISTINCT it.id))::numeric AS dish_quantity,
-        SUM(ABS(it.quantity_change))::numeric AS consumed_quantity,
-        AVG(COALESCE(it.unit_cost, ing.cost_price, 0))::numeric AS avg_unit_cost,
-        SUM(COALESCE(it.total_cost, ABS(it.quantity_change) * COALESCE(it.unit_cost, ing.cost_price, 0)))::numeric AS total_cost
-      FROM inventory_transactions it
-      JOIN products ing ON ing.id = it.product_id
-      LEFT JOIN order_items oi ON oi.id = it.order_item_id
-      LEFT JOIN products dish ON dish.id = oi.product_id
-      WHERE ing.store_id = ${storeId}
-        AND it.quantity_change < 0
-        AND (it.notes LIKE '%Fire%' OR it.notes LIKE '%Producci%' OR it.order_item_id IS NOT NULL)
-        AND COALESCE(it.transaction_date, it.created_at) >= ${startDate}
-        AND COALESCE(it.transaction_date, it.created_at) <= ${endDate}
-      GROUP BY it.product_id, ing.name, ing.sku, ing.stock_unit, oi.product_id, COALESCE(dish.name, oi.product_name, it.notes, 'Consumo Interno')
+        pit.dish_id,
+        pit.dish_name,
+        SUM(pit.tx_count)::int AS transaction_count,
+        COUNT(DISTINCT pit.order_item_id)::int AS orders_count,
+        COALESCE(SUM(pit.oi_quantity), SUM(pit.tx_count))::numeric AS dish_quantity,
+        SUM(pit.qty)::numeric AS consumed_quantity,
+        (SUM(pit.unit_cost_sum) / NULLIF(SUM(pit.tx_count), 0))::numeric AS avg_unit_cost,
+        SUM(pit.cost)::numeric AS total_cost
+      FROM por_item pit
+      JOIN products ing ON ing.id = pit.product_id
+      GROUP BY pit.product_id, ing.name, ing.sku, ing.stock_unit, pit.dish_id, pit.dish_name
       ORDER BY total_cost DESC
     `);
 

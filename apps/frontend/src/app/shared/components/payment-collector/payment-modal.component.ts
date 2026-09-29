@@ -63,6 +63,7 @@ import type {
         [requireCustomer]="requireCustomer()"
         [allowAmountOverride]="allowAmountOverride()"
         [showKeypad]="showKeypad()"
+        [allowMultiTender]="allowMultiTender()"
         (submit)="submit.emit($event)"
         (methodSelected)="methodSelected.emit($event)"
         (requestCustomer)="requestCustomer.emit()"
@@ -142,6 +143,7 @@ export class PaymentModalComponent {
   readonly requireCustomer = input<boolean | undefined>(undefined);
   readonly allowAmountOverride = input<boolean | undefined>(undefined);
   readonly showKeypad = input<boolean | undefined>(undefined);
+  readonly allowMultiTender = input<boolean | undefined>(undefined);
 
   // Outputs (mirrors of the collector)
   readonly submit = output<PaymentSubmit>();

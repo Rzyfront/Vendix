@@ -166,7 +166,7 @@ export class UpdateOrderEditorItemDto {
   total_price: number;
 
   @IsOptional()
-  @Transform(({ value }) => parseFloat(value))
+  @Transform(({ value }) => value == null ? undefined : parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   final_unit_price?: number;
@@ -187,7 +187,7 @@ export class UpdateOrderEditorItemDto {
    * salía un `500 SYS_INTERNAL_001` en lugar de un 400 accionable.
    */
   @IsOptional()
-  @Transform(({ value }) => parseFloat(value))
+  @Transform(({ value }) => value == null ? undefined : parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 5 })
   @Min(0)
   @Max(1, {
@@ -200,13 +200,13 @@ export class UpdateOrderEditorItemDto {
   // producto, sigue decidiendo el impuesto de cabecera (ver
   // `orders.service.ts` § 11 en `updateOrderFromEditor`).
   @IsOptional()
-  @Transform(({ value }) => parseFloat(value))
+  @Transform(({ value }) => value == null ? undefined : parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   tax_amount_item?: number;
 
   @IsOptional()
-  @Transform(({ value }) => parseFloat(value))
+  @Transform(({ value }) => value == null ? undefined : parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })
   cost?: number;
 
@@ -215,7 +215,7 @@ export class UpdateOrderEditorItemDto {
    * inventario: queda como snapshot para reportes y ticket.
    */
   @IsOptional()
-  @Transform(({ value }) => parseFloat(value))
+  @Transform(({ value }) => value == null ? undefined : parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 3 })
   weight?: number;
 
@@ -379,10 +379,17 @@ export class UpdateOrderEditorDto {
    * editor rechaza con `ORD_EDIT_INVALID_SHIPPING_001`.
    */
   @IsOptional()
-  @Transform(({ value }) => parseFloat(value))
+  @Transform(({ value }) => value == null ? undefined : parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   shipping_cost?: number;
+
+  /** Gross if rate includes tax, base if rate adds tax. Requires shipping_rate_id. */
+  @IsOptional()
+  @Transform(({ value }) => value == null ? undefined : parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  manual_shipping_price?: number;
 
   /**
    * Promociones manuales que el operador quiere forzar (las auto-apply las

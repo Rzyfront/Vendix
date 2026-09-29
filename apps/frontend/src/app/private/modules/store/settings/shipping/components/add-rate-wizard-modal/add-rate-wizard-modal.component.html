@@ -175,7 +175,7 @@
               <h4 id="shipping-tax-title" class="tax-section__title">Impuesto del envío (opcional)</h4>
             </div>
             <p class="tax-section__hint">
-              El precio que configuras es lo que paga el cliente. Si eliges un impuesto, va incluido en ese precio.
+              Si eliges un impuesto, decide si va incluido en el precio o se suma al cobrar.
             </p>
 
             <app-selector
@@ -206,13 +206,57 @@
               </div>
             }
 
+            @if (has_tax_category()) {
+              <div class="tax-mode" role="group" aria-labelledby="shipping-tax-mode-title">
+                <h5 id="shipping-tax-mode-title" class="tax-mode__title">Modo de impuesto</h5>
+                <div class="tax-mode-grid">
+                  <button
+                    type="button"
+                    class="rate-type-card"
+                    [class.rate-type-card--selected]="is_inclusive_mode()"
+                    [attr.aria-pressed]="is_inclusive_mode()"
+                    (click)="selectTaxMode(true)"
+                  >
+                    <app-icon name="percent" [size]="20" />
+                    <span class="rate-type-card__label">Incluido</span>
+                    <span class="tax-mode__desc">El precio ya trae el impuesto</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="rate-type-card"
+                    [class.rate-type-card--selected]="!is_inclusive_mode()"
+                    [attr.aria-pressed]="!is_inclusive_mode()"
+                    (click)="selectTaxMode(false)"
+                  >
+                    <app-icon name="plus" [size]="20" />
+                    <span class="rate-type-card__label">Agregado</span>
+                    <span class="tax-mode__desc">Se suma al cobrar</span>
+                  </button>
+                </div>
+              </div>
+            }
+
+            @if (tax_mode_mismatch(); as mismatch) {
+              <div class="tax-note tax-note--warning" role="alert">
+                <app-icon name="alert-triangle" [size]="14" />
+                <span>{{ mismatch }}</span>
+              </div>
+            }
+
             @if (tax_preview(); as preview) {
               <div class="tax-preview">
                 <app-icon name="percent" [size]="14" class="text-primary" />
-                <span>
-                  De <strong>{{ preview.cost | currency }}</strong>,
-                  <strong>{{ preview.tax | currency: 2 }}</strong> son {{ preview.label }}.
-                </span>
+                @if (preview.mode === 'exclusive') {
+                  <span>
+                    Cliente paga <strong>{{ preview.gross | currency }}</strong>
+                    ({{ preview.base | currency }} + {{ preview.type_label }} {{ preview.tax | currency: 2 }}).
+                  </span>
+                } @else {
+                  <span>
+                    Cliente paga <strong>{{ preview.gross | currency }}</strong>
+                    (incluye {{ preview.label }}: {{ preview.tax | currency: 2 }}).
+                  </span>
+                }
               </div>
             }
           </section>

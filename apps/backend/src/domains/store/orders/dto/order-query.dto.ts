@@ -14,6 +14,28 @@ import {
 } from '@prisma/client';
 import { Transform } from 'class-transformer';
 
+/**
+ * Normaliza un filtro que acepta uno o varios valores (paso 3 del plan
+ * dashboard-sales-filters-pin-multiselect-sse): params repetidos
+ * (`?status=a&status=b`) llegan como array, la URL del frontend serializa
+ * con coma (`?status=a,b`) y el valor único sigue siendo un string.
+ * undefined→undefined, array→tal cual, string con coma→split+trim sin
+ * vacíos, string único→array de uno, string vacío→undefined.
+ */
+function normalizeMultiValue({ value }: { value: unknown }): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) return value as string[];
+  if (typeof value !== 'string') return value as unknown as string[];
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (!trimmed.includes(',')) return [trimmed];
+  const parts = trimmed
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  return parts.length > 0 ? parts : undefined;
+}
+
 export class OrderQueryDto {
   @IsOptional()
   @Transform(({ value }) => parseInt(value))
@@ -32,12 +54,21 @@ export class OrderQueryDto {
   search?: string;
 
   @IsOptional()
-  @IsEnum(order_state_enum)
-  status?: order_state_enum;
+  @Transform(normalizeMultiValue)
+  @IsEnum(order_state_enum, { each: true })
+  status?: order_state_enum | order_state_enum[];
 
   @IsOptional()
-  @IsEnum(payments_state_enum)
-  payment_status?: payments_state_enum;
+  @Transform(normalizeMultiValue)
+  @IsEnum(payments_state_enum, { each: true })
+  payment_status?: payments_state_enum | payments_state_enum[];
+
+  /** Matches any settled payment leg using this store payment method. */
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsInt()
+  @Min(1)
+  payment_method_id?: number;
 
   @IsOptional()
   @Transform(({ value }) => parseInt(value))
@@ -75,8 +106,9 @@ export class OrderQueryDto {
   date_to?: string;
 
   @IsOptional()
-  @IsEnum(order_channel_enum)
-  channel?: order_channel_enum;
+  @Transform(normalizeMultiValue)
+  @IsEnum(order_channel_enum, { each: true })
+  channel?: order_channel_enum | order_channel_enum[];
 
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)

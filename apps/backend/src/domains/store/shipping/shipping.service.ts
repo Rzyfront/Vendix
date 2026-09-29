@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { ShippingTaxService } from './services/shipping-tax.service';
 import {
   CreateShippingMethodDto,
   UpdateShippingMethodDto,
@@ -11,7 +13,46 @@ import {
 
 @Injectable()
 export class ShippingService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private readonly shippingTaxService: ShippingTaxService,
+  ) {}
+
+  /** Quote the exact gross that POS must collect for a manual rate price. */
+  async quoteManualShipping(
+    storeId: number,
+    methodId: number,
+    rateId: number,
+    manualPrice: number,
+  ) {
+    const rate = await this.prisma.shipping_rates.findFirst({
+      where: {
+        id: rateId,
+        shipping_method_id: methodId,
+        is_active: true,
+        shipping_method: { store_id: storeId, is_active: true },
+        shipping_zone: { is_active: true, OR: [{ store_id: storeId }, { is_system: true, store_id: null }] },
+      },
+      select: { id: true },
+    });
+    if (!rate) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_SHIP_RATE_MISMATCH_001,
+        'La tarifa de envío seleccionada no está activa o no pertenece a esta tienda',
+      );
+    }
+    const charge = await this.shippingTaxService.chargeForRate(
+      null, rate.id, manualPrice, { store_id: storeId },
+    );
+    return {
+      shipping_rate_id: rate.id,
+      manual_shipping_price: manualPrice,
+      shipping_cost: charge.gross,
+      base: charge.base,
+      shipping_tax_amount: charge.tax,
+      tax_is_inclusive: charge.applies ? charge.reason === 'inclusive' : null,
+    };
+  }
 
   // --- METHODS ---
   async getMethods(storeId: number) {

@@ -233,12 +233,20 @@ export class WithholdingTaxService {
             ivaAmount: dto.ivaAmount,
             year: dto.year,
           })
-        : await this.withholdingFlow.resolveSuffered({
+        : await this.withholdingFlow.resolveSufferedByOperation({
             organization_id: context.organization_id!,
             store_id: context.store_id ?? null,
             customer_id: dto.customer_id ?? null,
-            base: dto.base,
-            ivaAmount: dto.ivaAmount,
+            // Un solo grupo: el preview de hoy no desglosa por línea. Ausente
+            // `product_type` ⇒ bucket `purchase` (bien), igual que `prepared`
+            // o un ítem sin producto — misma regla que el resto del flujo.
+            items: [
+              {
+                product_type: dto.product_type ?? null,
+                base: dto.base,
+                ivaAmount: dto.ivaAmount ?? 0,
+              },
+            ],
             year: dto.year,
           });
 

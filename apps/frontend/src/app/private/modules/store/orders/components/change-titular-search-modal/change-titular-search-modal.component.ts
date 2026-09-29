@@ -10,7 +10,15 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import {
   CustomersService,
 } from '../../../customers/services/customers.service';
-import { Customer } from '../../../customers/models/customer.model';
+import {
+  CreateCustomerRequest,
+  Customer,
+  ExternalCustomerLookupResult,
+} from '../../../customers/models/customer.model';
+import {
+  RuesIdentityCardComponent,
+  ruesIdentityToPrefill,
+} from '../../../customers/components/rues-identity-card/rues-identity-card.component';
 
 type TitularSearchStep = 'search' | 'create';
 
@@ -38,6 +46,7 @@ type TitularSearchStep = 'search' | 'create';
     InputComponent,
     InputsearchComponent,
     ButtonComponent,
+    RuesIdentityCardComponent,
   ],
   template: `
     <app-modal
@@ -175,7 +184,7 @@ type TitularSearchStep = 'search' | 'create';
               <div class="flex-1">
                 <app-input
                   [ngModel]="lookupQuery()"
-                  (ngModelChange)="lookupQuery.set($event)"
+                  (ngModelChange)="onLookupQueryChange($event)"
                   placeholder="Ingrese cédula o NIT..."
                   type="text"
                   [size]="'md'"
@@ -214,15 +223,37 @@ type TitularSearchStep = 'search' | 'create';
             }
             <!-- Lookup Result: Not Found -->
             @if (lookupPerformed() && !lookupResult() && !lookupLoading()) {
-              <div class="mt-3 text-center">
-                <p class="text-sm text-[var(--color-neutral-600)] mb-2">
-                  No se encontró cliente con este documento
-                </p>
-                <app-button variant="outline" size="sm" customClasses="min-h-[44px]" (clicked)="onCreateNew()">
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  Crear con este documento
-                </app-button>
-              </div>
+              @if (externalLoading()) {
+                <div class="mt-3 flex items-center justify-center gap-2 text-sm text-[var(--color-neutral-600)]">
+                  <app-icon name="loader-2" [size]="16" class="animate-spin"></app-icon>
+                  Consultando fuentes públicas…
+                </div>
+              } @else if (externalResult()?.found && externalResult()?.identity) {
+                <app-rues-identity-card
+                  [identity]="externalResult()!.identity!"
+                  (createWithData)="onCreateFromExternal()"
+                  (createManual)="onCreateFromLookup()"
+                ></app-rues-identity-card>
+              } @else {
+                <div class="mt-3 text-center">
+                  <p class="text-sm text-[var(--color-neutral-600)] mb-2">
+                    No se encontró cliente con este documento
+                  </p>
+                  @if (externalResult()?.unavailable) {
+                    <p class="text-xs text-[var(--color-neutral-500)] mb-2">
+                      Fuentes públicas no disponibles en este momento
+                    </p>
+                  } @else if (externalResult()) {
+                    <p class="text-xs text-[var(--color-neutral-500)] mb-2">
+                      Tampoco aparece en fuentes públicas
+                    </p>
+                  }
+                  <app-button variant="outline" size="sm" customClasses="min-h-[44px]" (clicked)="onCreateFromLookup()">
+                    <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                    Crear con este documento
+                  </app-button>
+                </div>
+              }
             }
           </div>
         </div>
@@ -286,7 +317,7 @@ export class ChangeTitularSearchModalComponent {
   /** Emitted with the chosen existing customer. Parent PATCHes the titular. */
   readonly selected = output<Customer>();
   /** Emitted when the operator wants the full create flow instead. */
-  readonly createNew = output<void>();
+  readonly createNew = output<Partial<CreateCustomerRequest> | void>();
   /** Emitted when the operator dismisses the modal. */
   readonly closed = output<void>();
 
@@ -298,6 +329,9 @@ export class ChangeTitularSearchModalComponent {
   readonly lookupResult = signal<Customer | null>(null);
   readonly lookupPerformed = signal(false);
   readonly lookupLoading = signal(false);
+  /** Consulta en fuentes públicas (RUES, SECOP, RNT; sólo tras un no-encontrado local). */
+  readonly externalResult = signal<ExternalCustomerLookupResult | null>(null);
+  readonly externalLoading = signal(false);
 
   readonly modalTitle = computed(() =>
     this.currentStep() === 'search' ? 'Buscar titular' : 'Crear titular',
@@ -367,6 +401,8 @@ export class ChangeTitularSearchModalComponent {
     const doc = this.lookupQuery().trim();
     if (doc.length < 5 || this.lookupLoading()) return;
     this.lookupLoading.set(true);
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
     this.customersService
       .lookupByDocument(doc)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -375,13 +411,51 @@ export class ChangeTitularSearchModalComponent {
           this.lookupResult.set(customer);
           this.lookupPerformed.set(true);
           this.lookupLoading.set(false);
+          if (!customer) this.lookupExternal(doc);
         },
         error: () => {
           this.lookupResult.set(null);
           this.lookupPerformed.set(true);
           this.lookupLoading.set(false);
+          this.lookupExternal(doc);
         },
       });
+  }
+
+  onLookupQueryChange(value: string): void {
+    this.lookupQuery.set(value);
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
+  }
+
+  /** Una sola consulta a fuentes públicas por búsqueda; el service nunca lanza. */
+  private lookupExternal(doc: string): void {
+    this.externalLoading.set(true);
+    this.customersService
+      .lookupExternalByDocument(doc)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res) => {
+        // Descarta respuesta rancia si el operador cambió el texto.
+        if (this.lookupQuery().trim() !== doc) return;
+        this.externalResult.set(res);
+        this.externalLoading.set(false);
+      });
+  }
+
+  /** "Crear con estos datos": prellenado desde la identidad pública. */
+  onCreateFromExternal(): void {
+    const identity = this.externalResult()?.identity;
+    if (!identity) return;
+    const prefill = ruesIdentityToPrefill(identity);
+    this.reset();
+    this.createNew.emit(prefill);
+  }
+
+  /** "Crear con este documento" / "Crear manualmente": lleva el documento digitado. */
+  onCreateFromLookup(): void {
+    const doc = this.lookupQuery().trim();
+    this.reset();
+    this.createNew.emit(doc ? { document_number: doc } : undefined);
   }
 
   selectCustomer(customer: Customer): void {
@@ -424,5 +498,7 @@ export class ChangeTitularSearchModalComponent {
     this.lookupResult.set(null);
     this.lookupPerformed.set(false);
     this.lookupLoading.set(false);
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
   }
 }

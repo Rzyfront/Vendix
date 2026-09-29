@@ -31,6 +31,10 @@ import {
   PrintTokenDefinition,
 } from '../interfaces/print-format.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
 
 export interface RenderResult {
   format_type: print_format_type_enum;
@@ -92,6 +96,22 @@ export class PrintGatewayService {
     @Optional()
     private readonly s3Service?: S3Service,
   ) {}
+
+  /**
+   * Zona horaria de la tienda para el helper `{{date}}` del compositor
+   * (Step 8). Nunca lanza: los specs que construyen este gateway a mano
+   * (engine-pdf, profile-template, dispatch-note-pdf) mockean
+   * `PrintLayoutComposerService` entero y no siempre traen `store_settings`
+   * en su doble de `prisma`, así que una resolución fallida degrada al
+   * default en vez de romper el render.
+   */
+  private async resolveGatewayTimezone(storeId: number): Promise<string> {
+    try {
+      return await resolveStoreTimezone(this.prisma, storeId);
+    } catch {
+      return DEFAULT_STORE_TIMEZONE;
+    }
+  }
 
   /**
    * Resuelve la configuración efectiva de un formato para una tienda
@@ -352,8 +372,9 @@ export class PrintGatewayService {
     const provider = this.registry.getProvider(formatType);
     const data = await provider.fetchDocumentData(storeId, documentId);
 
-    // Componer HTML
-    const html = this.composer.compose(effective.definition, data);
+    // Componer HTML — Step 8: fecha del compositor en la zona de la tienda.
+    const gateway_tz = await this.resolveGatewayTimezone(storeId);
+    const html = this.composer.compose(effective.definition, data, undefined, gateway_tz);
 
     const elapsed = Date.now() - start;
     this.logger.log(
@@ -608,10 +629,13 @@ export class PrintGatewayService {
     // Always enrich sample preview with the real store logo and business data if available
     data = await this.enrichDataWithStoreIdentity(storeId, data);
 
+    // Step 8 — fecha del compositor en la zona de la tienda.
+    const preview_tz = await this.resolveGatewayTimezone(storeId);
     const html = this.composer.compose(
       previewDef,
       data,
       renderMode === 'tokenized' ? 'tokenized' : 'dummy',
+      preview_tz,
     );
 
     return {

@@ -17,6 +17,11 @@ import { MovementListComponent } from './components/movement-list';
 
 // Services
 import { InventoryService } from '../services';
+import {
+  VexiUiHost,
+  VexiUiHostRegistry,
+  vexiWhenReady,
+} from '../../../../../core/services/vexi-ui-host.registry';
 
 // Interfaces
 import { InventoryMovement, MovementType } from '../interfaces';
@@ -120,6 +125,7 @@ interface MovementsStats {
 })
 export class MovementsComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
+  private vexiHosts = inject(VexiUiHostRegistry);
   // Data
   readonly movements = signal<InventoryMovement[]>([]);
 
@@ -155,12 +161,133 @@ export class MovementsComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    this.vexiHosts.register(this.vexiHostAdapter);
     this.loadMovements();
   }
 
   ngOnDestroy(): void {
+    this.vexiHosts.unregister(this.vexiHostAdapter);
     this.subscriptions.forEach((sub) => sub.unsubscribe());
   }
+
+  // ── Host de Vexi (G8) ─────────────────────────────────────────────────
+  //
+  // Adapter delegating in the list's own handlers (`onSearch`,
+  // `onFilterChange`, `onPageChange`), which reset to page 1 exactly like
+  // the UI controls do. No mutating actions: movements are history, and
+  // adjustments live in their own screen.
+  private readonly vexiHostAdapter: VexiUiHost = {
+    vexiModuleKey: 'inventory_movements',
+    readScreen: () => ({
+      module_key: 'inventory_movements',
+      title: 'Movimientos de inventario',
+      visible_count: this.movements().length,
+      filters: {
+        search: this.search_term() || undefined,
+        movement_type: this.current_type !== 'all' ? this.current_type : undefined,
+      },
+      page: this.filters().page,
+      limit: this.filters().limit,
+      total: this.totalItems(),
+      total_pages: this.totalPages(),
+      open_modal: this.is_detail_modal_open()
+        ? { id: 'detalle_movimiento', title: 'el detalle del movimiento' }
+        : undefined,
+      notes: this.is_loading()
+        ? 'La lista todavía está cargando.'
+        : `${this.stats().total} movimiento(s) en total (${this.stats().stock_in} entradas, ${this.stats().stock_out} salidas).`,
+    }),
+    listActions: () => [
+      { id: 'limpiar_filtros', label: 'Quitar todos los filtros de la lista' },
+    ],
+    runAction: async (id) => {
+      if (id === 'limpiar_filtros') {
+        this.onClearFilters();
+        return { status: 'ok' as const, message: 'Quité los filtros de la lista.' };
+      }
+      return {
+        status: 'not_found' as const,
+        message: `La pantalla de Movimientos no tiene una acción "${id}".`,
+      };
+    },
+    setFilter: async (values) => {
+      const applied: string[] = [];
+      const ignored: string[] = [];
+      let note: string | undefined;
+
+      if (typeof values['search'] === 'string') {
+        this.onSearch(values['search']);
+        applied.push(`búsqueda "${values['search']}"`);
+      }
+
+      if (values['movement_type'] !== undefined || values['type'] !== undefined) {
+        const type = String(values['movement_type'] ?? values['type'] ?? '');
+        this.onFilterChange({ movement_type: type } as FilterValues);
+        applied.push(`tipo ${type || 'todos'}`);
+      }
+
+      if (values['limit'] !== undefined || values['sort'] !== undefined) {
+        if (values['limit'] !== undefined) ignored.push('limit');
+        if (values['sort'] !== undefined) ignored.push('sort');
+      }
+
+      if (values['page'] !== undefined) {
+        let page = Math.floor(Number(values['page']));
+        if (!Number.isFinite(page)) {
+          ignored.push('page');
+        } else {
+          const totalPages = this.totalPages();
+          if (page < 1) page = 1;
+          if (page > totalPages) {
+            note = `Pediste la página ${page} pero solo hay ${totalPages}; te dejé en la última.`;
+            page = totalPages;
+          }
+          this.onPageChange(page);
+          applied.push(`página ${page}`);
+        }
+      }
+
+      for (const key of Object.keys(values)) {
+        if (!['search', 'movement_type', 'type', 'limit', 'sort', 'page'].includes(key)) {
+          ignored.push(key);
+        }
+      }
+
+      if (!applied.length) {
+        return {
+          status: 'not_found' as const,
+          message:
+            'La lista de Movimientos filtra por búsqueda y tipo, y pagina con page. No cambia filas por página ni ordena.',
+        };
+      }
+
+      return {
+        status: 'ok' as const,
+        message:
+          `Apliqué ${applied.join(', ')} en movimientos. La lista se está recargando; si necesitas el conteo, léelo de la pantalla después.` +
+          (note ? ` ${note}` : '') +
+          (ignored.length
+            ? ` No apliqué ${ignored.join(', ')} porque esta lista no lo soporta.`
+            : ''),
+        detail: note ? { note } : undefined,
+      };
+    },
+    closeModal: async () => {
+      if (!this.is_detail_modal_open()) {
+        return {
+          status: 'not_found' as const,
+          message: 'No hay ningún modal abierto en Movimientos.',
+        };
+      }
+      this.closeDetailModal();
+      return { status: 'ok' as const, message: 'Cerré el detalle del movimiento.' };
+    },
+    refresh: () => {
+      this.loadMovements();
+      return { status: 'ok' as const, message: 'Recargué los movimientos.' };
+    },
+    whenReady: () => vexiWhenReady(() => this.is_loading()),
+  };
 
   // ============================================================
   // Data Loading

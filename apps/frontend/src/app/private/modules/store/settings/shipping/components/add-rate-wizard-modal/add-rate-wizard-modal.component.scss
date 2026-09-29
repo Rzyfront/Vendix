@@ -258,6 +258,35 @@
   color: var(--color-text-secondary);
 }
 
+// ─── Modo de impuesto (paso 15a) ───
+
+.tax-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  &__title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 4px 0 0 0;
+  }
+
+  &__desc {
+    font-size: 0.6875rem;
+    color: var(--color-text-secondary);
+    text-align: center;
+  }
+}
+
+.tax-mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 // ─── Escala por distancia ───
 
 .tiers-list {

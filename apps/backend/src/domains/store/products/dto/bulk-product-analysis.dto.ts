@@ -8,6 +8,7 @@ export class BulkProductAnalysisItemDto {
   row_number: number;
   name: string;
   sku: string;
+  barcode?: string;
   product_type: 'physical' | 'service';
   base_price: number;
   cost_price: number;

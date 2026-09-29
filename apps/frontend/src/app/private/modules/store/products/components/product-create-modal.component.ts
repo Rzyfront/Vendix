@@ -35,6 +35,21 @@ import {
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
+  VexiFillFormResult,
+  vexiCollectValidationErrors,
+} from '../../../../../core/services/vexi-ui-host.registry';
+
+/** Field names `ui_fill_form` understands on this form (G1). */
+export const PRODUCT_CREATE_FILLABLE_FIELDS = [
+  'name',
+  'description',
+  'base_price',
+  'price',
+  'sku',
+  'barcode',
+  'state',
+] as const;
+import {
   Product,
   ProductState,
   ProductCategory,
@@ -619,5 +634,58 @@ export class ProductCreateModalComponent {
   formatStatus(status: string | undefined): string {
     if (!status) return 'Unknown';
     return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+
+  // --- Vexi fillForm (G1) ---
+
+  /**
+   * Fills this form on Vexi's behalf. NEVER submits: the person reviews and
+   * saves through the modal's own buttons.
+   *
+   * `price` is an alias for `base_price`. Multi-selects (`category_ids`,
+   * `brand_ids`, `tax_category_ids`) are deliberately not fillable: they need
+   * resolved ids the chat cannot guess, and a wrong tax assignment is worse
+   * than an empty one the person picks.
+   */
+  vexiFillForm(values: Record<string, unknown>): VexiFillFormResult {
+    const applied: string[] = [];
+    const unknown: string[] = [];
+
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined || value === null || value === '') continue;
+      const target = key === 'price' ? 'base_price' : key;
+      const control = this.productForm.get(target);
+      if (
+        !control ||
+        ['category_ids', 'brand_ids', 'tax_category_ids'].includes(target)
+      ) {
+        unknown.push(key);
+        continue;
+      }
+      if (target === 'base_price') {
+        const price = Number(value);
+        if (!Number.isFinite(price)) {
+          unknown.push(key);
+          continue;
+        }
+        control.setValue(price);
+      } else {
+        control.setValue(String(value));
+      }
+      control.markAsTouched();
+      applied.push(key);
+    }
+
+    this.productForm.updateValueAndValidity();
+    const validation_errors = vexiCollectValidationErrors(this.productForm, {
+      name: 'El nombre',
+      description: 'La descripción',
+      base_price: 'El precio base',
+      sku: 'El SKU',
+      barcode: 'El código de barras',
+      state: 'El estado',
+    });
+
+    return { applied, unknown, validation_errors, valid: this.productForm.valid };
   }
 }

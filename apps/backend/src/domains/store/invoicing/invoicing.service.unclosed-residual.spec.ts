@@ -81,6 +81,11 @@ describe('InvoicingService · bloqueo pre-numeración del residuo (A.2)', () => 
           uvt_value_used: 0,
           counterparty_type: null,
         }),
+        resolveSufferedByOperation: jest.fn().mockResolvedValue({
+          lines: [],
+          uvt_value_used: 0,
+          counterparty_type: null,
+        }),
         resolveSelf: jest.fn().mockResolvedValue({
           lines: [],
           uvt_value_used: 0,

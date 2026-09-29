@@ -457,6 +457,18 @@ export interface SplitAccountPaymentResult {
  * `subtotal` + `total_amount` are required by the POS DTO validator even
  * though the backend re-derives the authoritative totals from the order.
  */
+/**
+ * Tramo de un cobro multimétodo de contado (`PaymentLegDto` del backend).
+ * Claves snake_case EXACTAS: `forbidNonWhitelisted` rechaza cualquier otra.
+ */
+export interface TablePaymentLeg {
+  store_payment_method_id: number;
+  amount: number;
+  amount_received?: number;
+  payment_reference?: string;
+  bank_account_id?: number;
+}
+
 export interface PayTableSessionDto {
   table_session_id: number;
   store_payment_method_id: number;
@@ -470,6 +482,11 @@ export interface PayTableSessionDto {
   tip_amount?: number;
   /** QUI-728 (E.1) — cuenta bancaria elegida para transferencia. */
   bank_account_id?: number;
+  /**
+   * Cobro multimétodo: 2..5 tramos. Cuando llega, el backend lo prefiere
+   * sobre el contrato escalar.
+   */
+  payments?: TablePaymentLeg[];
 }
 
 /**

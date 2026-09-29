@@ -11,6 +11,12 @@ import {
 } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  formatStoreDate,
+  formatStoreTime,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
 
 /**
  * CP-DTLP-20260827 — Tiquete de Despacho (dispatch_ticket).
@@ -73,7 +79,14 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
         // sabe leer.
         dispatch_notes: {
           where: { status: { notIn: ['draft', 'voided'] } },
-          orderBy: { emission_date: 'desc' },
+          // QUI-889 (rev 868) — la "última" es por instante real de despacho
+          // (`confirmed_at`, nulos al final) y luego creación. `emission_date`
+          // NO sirve: el formulario la guarda como solo-fecha (medianoche
+          // UTC) e imprimiría el día anterior 7 p. m. en Bogotá.
+          orderBy: [
+            { confirmed_at: { sort: 'desc', nulls: 'last' } },
+            { created_at: 'desc' },
+          ],
           take: 1,
           include: {
             dispatch_note_items: true,
@@ -92,7 +105,9 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
     // Firmado acá (única llamada async del flujo) — `mapOrderToDispatchTicket`
     // es un mapeador puro y síncrono, no puede tener un `await` adentro.
     const signedLogoUrl = await signStoreLogoUrl(this.s3Service, order.stores?.logo_url, this.logger);
-    return this.mapOrderToDispatchTicket(order, signedLogoUrl);
+    // B17 — fecha/hora del documento en la zona de la tienda, no la del contenedor.
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    return this.mapOrderToDispatchTicket(order, signedLogoUrl, tz);
   }
 
   async getSampleData(_storeId?: number): Promise<StandardPrintDataModel> {
@@ -243,7 +258,24 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
   // Mapeo interno
   // ============================================================
 
-  private mapOrderToDispatchTicket(order: any, signedLogoUrl?: string): StandardPrintDataModel {
+  /**
+   * QUI-889 (rev 868) — instante real del despacho de una remisión:
+   * `confirmed_at`, luego su `created_at`. `null` = sin instante usable.
+   * NUNCA `emission_date`: el formulario la guarda como solo-fecha.
+   */
+  private dispatchInstant(note: any | undefined): Date | null {
+    if (!note) return null;
+    const raw = note.confirmed_at ?? note.created_at;
+    if (!raw) return null;
+    const at = new Date(raw);
+    return Number.isNaN(at.getTime()) ? null : at;
+  }
+
+  private mapOrderToDispatchTicket(
+    order: any,
+    signedLogoUrl?: string,
+    tz: string = DEFAULT_STORE_TIMEZONE,
+  ): StandardPrintDataModel {
     const store = order.stores || {};
     const org = store.organizations || {};
     const storeAddr = store.addresses?.[0] || {};
@@ -317,18 +349,19 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
       document: {
         id: order.id,
         number: String(order.order_number),
-        date: order.created_at
-          ? new Date(order.created_at).toISOString()
-          : new Date().toISOString(),
-        date_formatted: order.created_at
-          ? new Date(order.created_at).toLocaleDateString('es-CO')
-          : new Date().toLocaleDateString('es-CO'),
-        time: order.created_at
-          ? new Date(order.created_at).toLocaleTimeString('es-CO', {
-              hour: '2-digit',
-              minute: '2-digit',
-            })
-          : undefined,
+        // QUI-889 (rev 868) — instante real del despacho: `confirmed_at`,
+        // luego creación de la remisión, luego hora de impresión (ahora).
+        // NUNCA `emission_date` (solo-fecha). Siempre en la zona de la
+        // tienda. Solo este formato: los demás providers no se tocan.
+        date: (this.dispatchInstant(latestDispatch) ?? new Date()).toISOString(),
+        date_formatted: formatStoreDate(
+          this.dispatchInstant(latestDispatch) ?? new Date(),
+          tz,
+        ),
+        time: formatStoreTime(
+          this.dispatchInstant(latestDispatch) ?? new Date(),
+          tz,
+        ),
         state: order.state,
         state_label: order.state,
         notes: order.notes || undefined,

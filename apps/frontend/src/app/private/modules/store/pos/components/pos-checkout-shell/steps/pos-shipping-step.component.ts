@@ -10,6 +10,7 @@ import {
   signal,
   untracked,
   viewChild,
+  TemplateRef,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -22,11 +23,13 @@ import { Router } from '@angular/router';
 import {
   CurrencyInputDirective,
   IconComponent,
+  SelectorComponent,
   StepsLineComponent,
   ToggleComponent,
 } from '../../../../../../../shared/components';
 import type {
   PaymentSubmit,
+  SelectorOption,
   StepsLineItem,
 } from '../../../../../../../shared/components';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
@@ -39,9 +42,14 @@ import {
   AddressPayload,
 } from '../../../../../../../shared/components/address-form-fields/address-form-fields.component';
 import { CountryService } from '../../../../../../../core/services/country.service';
+import {
+  GeocodingService,
+  type GeocodePrecision,
+} from '../../../../../ecommerce/services/geocoding.service';
 
 import { PosPaymentService } from '../../../services/pos-payment.service';
 import { PosShippingService } from '../../../services/pos-shipping.service';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import {
   CustomersService,
   CustomerAddressPayload,
@@ -51,9 +59,29 @@ import { PosCustomerAddress } from '../../../models/customer.model';
 import {
   PosShippingMethod,
   PosShippingAddress,
+  PosShippingOption,
   PosShippingSaleData,
 } from '../../../models/shipping.model';
 import { PaymentRequest } from '../../../models/payment.model';
+import type { PaymentLeg } from '../../../../../../../shared/components/payment-collector/payment-collector.model';
+import type { PosPaymentLeg } from '../../../services/pos-payment.service';
+
+/**
+ * B11 — el collector emite tramos en camelCase (`PaymentLeg`); el backend
+ * espera snake_case exacto (`PaymentLegDto`, `forbidNonWhitelisted`). Espeja
+ * el helper homónimo de `pos-payment-step.component.ts` (mismo contrato, sin
+ * exportarlo desde allá para no tocar un archivo fuera de las 5 asignadas
+ * salvo necesidad).
+ */
+function toPosPaymentLegs(legs: PaymentLeg[]): PosPaymentLeg[] {
+  return legs.map((leg) => ({
+    store_payment_method_id: leg.storePaymentMethodId,
+    amount: leg.amount,
+    ...(leg.amountReceived != null ? { amount_received: leg.amountReceived } : {}),
+    ...(leg.reference ? { payment_reference: leg.reference } : {}),
+    ...(leg.bankAccountId != null ? { bank_account_id: leg.bankAccountId } : {}),
+  }));
+}
 
 type FlashSection = 'shipping-method' | 'address' | 'customer';
 
@@ -66,6 +94,35 @@ type ShippingCreditConfig = {
   initial_payment: number;
   initial_payment_method_id?: number;
 };
+
+/**
+ * Paso 15b (lote C) — desglose fiscal de la ÚLTIMA cotización aceptada para
+ * el método seleccionado. Copia tal cual el bloque del backend
+ * (`ShippingOption.base`, `shipping_tax_amount`, `tax_is_inclusive`); nunca
+ * se deriva en floats desde el costo.
+ */
+type QuotedShippingTax = {
+  base: number;
+  tax: number;
+  taxIsInclusive: boolean;
+};
+
+/**
+ * Normaliza el bloque fiscal de la opción cotizada. Cualquier campo ausente,
+ * no numérico o incoherente (impuesto ≤ 0, base ≤ 0) ⇒ null: sin respaldo no
+ * hay desglose. El modo ausente se lee como incluido (default del backend).
+ */
+function toQuotedShippingTax(option: {
+  base?: unknown;
+  shipping_tax_amount?: unknown;
+  tax_is_inclusive?: unknown;
+}): QuotedShippingTax | null {
+  const base = Number(option.base);
+  const tax = Number(option.shipping_tax_amount);
+  if (!Number.isFinite(base) || !Number.isFinite(tax)) return null;
+  if (tax <= 0 || base <= 0) return null;
+  return { base, tax, taxIsInclusive: option.tax_is_inclusive !== false };
+}
 
 /**
  * Fase 5·B2b — `app-pos-shipping-step`.
@@ -84,6 +141,7 @@ type ShippingCreditConfig = {
     IconComponent,
     CurrencyPipe,
     CurrencyInputDirective,
+    SelectorComponent,
     StepsLineComponent,
     ToggleComponent,
     AddressFormFieldsComponent,
@@ -98,12 +156,53 @@ export class PosShippingStepComponent {
   readonly cartState = input<CartState | null>(null);
   readonly customerAlias = input<string>('');
   readonly editingOrderId = input<number | null>(null);
+  /** The Cliente step renders delivery details from this component's template. */
+  readonly detailsInCliente = input(false);
+  readonly clientDeliveryDetails = viewChild<TemplateRef<unknown>>('clientDeliveryDetails');
   // ── Address capture (owned by shipping step according to method type) ───
   readonly address = signal<AddressPayload | null>(null);
   readonly addressValid = signal<boolean>(false);
   readonly showAddressErrors = signal<boolean>(false);
   readonly addressId = signal<number | null>(null);
   private readonly addressCustomerId = signal<number | null>(null);
+  /**
+   * Geocode precision + pin-confirmation state for the address currently in
+   * view, mirroring `app-address-form-fields`' own signals (its emitted
+   * `geocode_precision`/`pin_confirmed` for a freshly-typed address, or the
+   * result of {@link ensureSavedAddressCoords} for a saved address that had
+   * no coordinates yet). Non-blocking — only feeds `addressPrecisionBadge`.
+   */
+  readonly addressGeocodePrecision = signal<GeocodePrecision | null>(null);
+  readonly addressPinConfirmed = signal<boolean>(false);
+  readonly addressPrecisionBadge = computed<
+    { text: string; tone: 'success' | 'warning'; icon: string } | null
+  >(() => {
+    if (this.addressPinConfirmed()) {
+      return { text: 'Punto confirmado en el mapa', tone: 'success', icon: 'check-circle' };
+    }
+    switch (this.addressGeocodePrecision()) {
+      case 'exact':
+        return { text: 'Ubicación exacta', tone: 'success', icon: 'check-circle' };
+      case 'interpolated':
+        return { text: 'Ubicación aproximada a la placa', tone: 'success', icon: 'map-pin' };
+      case 'intersection':
+        return { text: 'Ubicada en la esquina', tone: 'success', icon: 'map-pin' };
+      case 'street':
+        return {
+          text: 'Solo encontramos la calle — confirma el punto en el mapa',
+          tone: 'warning',
+          icon: 'alert-triangle',
+        };
+      case 'area':
+        return {
+          text: 'Solo encontramos el barrio o sector — confirma el punto en el mapa',
+          tone: 'warning',
+          icon: 'alert-triangle',
+        };
+      default:
+        return null;
+    }
+  });
 
   /** Stable form seed; emitted form values must never feed their own input. */
   readonly initialAddress = signal<AddressPayload | null>(null);
@@ -112,6 +211,10 @@ export class PosShippingStepComponent {
   private readonly shippingEdited = signal(false);
   private readonly freeAddressEdited = signal(false);
   private quoteGeneration = 0;
+  /** Manual tax quotes depend on amount/rate, not on address requotes. */
+  private manualQuoteGeneration = 0;
+  private walletMultiAttemptKey: string | null = null;
+  private walletMultiAttemptSignature: string | null = null;
   readonly shippingRateId = signal<number | null>(null);
   readonly quoteError = signal<string | null>(null);
   readonly methodsLoaded = signal(false);
@@ -168,6 +271,21 @@ export class PosShippingStepComponent {
     return !!m && m.type !== 'pickup';
   });
 
+  /**
+   * Coordinator directive (requirement 3, 2026-09): a delivery method may
+   * NEVER quote/charge a default rate for an address that has no resolved
+   * point — neither a forward-geocode hit nor a confirmed map pin. This is
+   * the single source of truth `getFirstValidationError`/`calculateShippingCost`
+   * key off. The cashier's own device sits at the store, so the POS never
+   * offers GPS (`[allowGeolocation]="false"` on both `app-address-form-fields`
+   * usages below) — marking the pin on the map is the only path to a location
+   * once geocoding fails.
+   */
+  readonly hasResolvedLocation = computed<boolean>(() => {
+    const a = this.address();
+    return !!a && Number.isFinite(a.latitude) && Number.isFinite(a.longitude);
+  });
+
   /** Keep the missing-method reason visible for a delivery address, not only
    * during the short validation flash shown after an attempted charge. */
   readonly missingShippingMethodReason = computed<string | null>(() =>
@@ -182,6 +300,20 @@ export class PosShippingStepComponent {
     return [a.address_line1, a.city].filter(Boolean).join(', ') || 'Sin dirección';
   });
 
+  /**
+   * H6 — nombra los campos nullable de `addresses` (Prisma: `state_province`,
+   * `phone_number`) que faltan en la dirección guardada actual, para el aviso
+   * que precede el formulario precargado en `#clientDeliveryDetails`.
+   */
+  readonly missingAddressFieldsLabel = computed<string>(() => {
+    const a = this.address();
+    if (!a) return '';
+    const missing: string[] = [];
+    if (!a.state_province) missing.push('el departamento');
+    if (!a.phone_number) missing.push('el teléfono');
+    return missing.join(' y ');
+  });
+
   // ── Outputs ───────────────────────────────────────────────────────────────
   readonly shippingCompleted = output<any>();
 
@@ -192,6 +324,9 @@ export class PosShippingStepComponent {
   private readonly toastService = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly countryService = inject(CountryService);
+  private readonly geocodingService = inject(GeocodingService);
+  /** Addresses currently being backfilled by {@link ensureSavedAddressCoords}. */
+  private readonly savedAddressGeocodeInFlight = new Set<number>();
 
   readonly currencySymbol = this.currencyService.currencySymbol;
 
@@ -203,19 +338,49 @@ export class PosShippingStepComponent {
    * históricos (un original inactivo intacto sigue guardable).
    */
   readonly activeShippingMethods = computed<PosShippingMethod[]>(() =>
-    this.shippingMethods().filter((m) => m.is_active !== false),
+    this.shippingMethods().filter((m) =>
+      m.is_active !== false &&
+      (m.type !== 'pickup' || !!this.originalShipping()),
+    ),
   );
   readonly selectedShippingMethod = signal<PosShippingMethod | null>(null);
   readonly shippingCost = signal<number>(0);
   readonly calculatedShippingCost = signal<number | null>(null);
   readonly manualCostOverride = signal<boolean>(false);
+  /** Cashier input: gross for inclusive rates, base for additive rates. */
+  readonly manualShippingPrice = signal<number>(0);
+  readonly manualQuotedShippingTax = signal<QuotedShippingTax | null>(null);
   readonly isCalculatingShipping = signal<boolean>(false);
+  /**
+   * Paso 15b — bloque fiscal de la última cotización aceptada. Solo lo
+   * escribe el handler de `calculateShippingCost`; lo limpian los cambios de
+   * insumos de cotización (vía `invalidateQuote`, salvo el toggle manual que
+   * lo preserva para poder restaurar el desglose al volver a automático).
+   */
+  readonly quotedShippingTax = signal<QuotedShippingTax | null>(null);
+
+  /**
+   * B6 — todas las tarifas devueltas por el backend para el método
+   * seleccionado (antes se descartaban todas menos la primera). Vacío o
+   * un solo elemento ⇒ sin selector visible (comportamiento igual a hoy).
+   */
+  readonly rateOptions = signal<PosShippingOption[]>([]);
+  readonly rateSelectorOptions = computed<SelectorOption[]>(() =>
+    this.rateOptions().map((o) => ({
+      value: o.rate_id ?? o.id,
+      label: [o.rate_name || o.method_name, o.zone_name]
+        .filter(Boolean)
+        .join(' · '),
+      description: this.currencyService.format(o.cost),
+    })),
+  );
 
   // ── Envío sub-wizard (presentación; espeja el patrón de Cobro) ────────────
   /** Sub-paso activo del paso Envío: 0=Método · 1=Dirección (si no pickup) · Costo (terminal). */
   readonly shipSubStep = signal<number>(0);
   /** Sub-pasos dinámicos reflejados en el `app-steps-line` vertical. */
   readonly shipSubSteps = computed<StepsLineItem[]>(() => {
+    if (this.detailsInCliente()) return [{ label: 'Costo' }];
     if (this.requiresAddress()) {
       return [
         { label: 'Método' },
@@ -231,7 +396,7 @@ export class PosShippingStepComponent {
 
   /** True cuando el sub-paso activo es el sub-paso terminal de Costo. */
   readonly isCostSubStep = computed<boolean>(
-    () => this.shipSubStep() === (this.requiresAddress() ? 2 : 1),
+    () => this.detailsInCliente() || this.shipSubStep() === (this.requiresAddress() ? 2 : 1),
   );
 
   // ── Processing ────────────────────────────────────────────────────────────
@@ -273,6 +438,40 @@ export class PosShippingStepComponent {
 
   readonly totalWithShipping = computed<number>(
     () => this.subtotal() + this.shippingCost(),
+  );
+
+  /**
+   * Paso 15b — desglose visible al cajero (base + impuesto del envío). Solo
+   * cuando la cotización trae impuesto > 0 para el método actual: en pickup
+   * (costo 0), con costo manual (viaja sin tarifa y el backend lo registra
+   * sin impuesto) o sin respaldo fiscal no hay filas.
+   */
+  readonly shippingTaxBreakdown = computed<QuotedShippingTax | null>(() => {
+    if (this.isPickupMethod()) return null;
+    return this.manualCostOverride()
+      ? this.manualQuotedShippingTax()
+      : this.quotedShippingTax();
+  });
+
+  /** Etiqueta del modo de la tarifa para el desglose: Incluido/Agregado. */
+  readonly shippingTaxModeLabel = computed<string>(() =>
+    this.shippingTaxBreakdown()?.taxIsInclusive === false ? 'Agregado' : 'Incluido',
+  );
+
+  readonly manualInputIsBase = computed<boolean>(() =>
+    this.rateOptions().find((o) => (o.rate_id ?? o.id) === this.shippingRateId())
+      ?.tax_is_inclusive === false,
+  );
+
+  /**
+   * El costo manual pierde la tarifa y su impuesto: avisar al cajero, pero
+   * solo cuando la cotización vigente sí traía impuesto (si la tarifa no
+   * tiene impuesto no hay nada que perder y el aviso sería ruido).
+   */
+  readonly manualTaxUnavailable = computed<boolean>(() =>
+    this.manualCostOverride() &&
+    !this.isPickupMethod() &&
+    !this.shippingRateId(),
   );
 
   /**
@@ -330,7 +529,7 @@ export class PosShippingStepComponent {
             if (method) this.selectedShippingMethod.set(method);
           }
         } else if (!selected) {
-          const first = methods.find((m) => m.is_active !== false);
+          const first = this.activeShippingMethods()[0];
           if (first) this.selectShippingMethod(first, { advance: false, userInitiated: false });
         }
       });
@@ -451,7 +650,24 @@ export class PosShippingStepComponent {
   private loadDefaultAddress(): void {
     const addresses = this.cartState()?.customer?.addresses;
     const address = addresses?.find((a) => a.is_primary) ?? addresses?.[0];
-    this.setAddress(address ? this.toAddressPayload(address) : null, address?.id ?? null);
+    if (address) {
+      const payload = this.toAddressPayload(address);
+      this.setAddress(payload, address.id);
+      this.ensureSavedAddressCoords(address.id, payload);
+      // H6 — la dirección principal guardada puede tener `state_province` o
+      // `phone_number` nulos (columnas nullable en Prisma): abrir el
+      // formulario precargado en vez de solo un resumen sin vía de completarla.
+      this.addressEditing.set(!this.addressValid());
+    } else {
+      this.setAddress(null, null);
+      // Prefill contact once, without making a blank address look valid.
+      this.initialAddress.set({
+        address_line1: null, address_line2: null, city: null,
+        state_province: null, country_code: 'CO', postal_code: null,
+        phone_number: this.cartState()?.customer?.phone ?? null,
+        latitude: null, longitude: null,
+      });
+    }
   }
 
   private setAddress(address: AddressPayload | null, id: number | null): void {
@@ -459,7 +675,71 @@ export class PosShippingStepComponent {
     this.initialAddress.set(address);
     this.addressId.set(id);
     this.addressCustomerId.set(id ? this.cartState()?.customer?.id ?? null : null);
-    this.addressValid.set(!!(address?.address_line1 && address.city));
+    this.addressValid.set(!!(address?.address_line1 && address.city &&
+      address.state_province && address.country_code && address.phone_number));
+    this.addressGeocodePrecision.set(address?.geocode_precision ?? null);
+    this.addressPinConfirmed.set(!!address?.pin_confirmed);
+  }
+
+  /**
+   * Backfills coordinates for a saved address that has none, so a
+   * distance-priced shipping method quotes against a real point instead of
+   * silently bailing (`calculateShippingCost` requires `a?.city` and only
+   * sends lat/lng when finite — an address book entry saved before this
+   * feature existed has neither). Mirrors the ecommerce checkout's own
+   * `ensureSavedAddressCoords`: forward-geocodes through the backend proxy
+   * (never Nominatim/Google directly) using the address's own city/state,
+   * then best-effort persists the result back to the address book so the
+   * next load skips this call entirely. Failures are silent — the address
+   * simply stays without coords, exactly as it already could before this
+   * feature existed; this never blocks the quote or the sale.
+   */
+  private ensureSavedAddressCoords(id: number, address: AddressPayload): void {
+    if (address.latitude != null && address.longitude != null &&
+      Number.isFinite(address.latitude) && Number.isFinite(address.longitude)) return;
+    if (!address.address_line1 || !address.city) return;
+    if (this.savedAddressGeocodeInFlight.has(id)) return;
+    this.savedAddressGeocodeInFlight.add(id);
+    const country = (address.country_code ?? '').trim().toUpperCase();
+    const query = !country || country === 'CO'
+      ? [address.address_line1, address.city, 'Colombia'].filter(Boolean).join(', ')
+      : [address.address_line1, address.city, address.state_province].filter(Boolean).join(', ');
+    this.geocodingService.forward(query, {
+      city: address.city || undefined,
+      state: address.state_province || undefined,
+    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (res) => {
+        this.savedAddressGeocodeInFlight.delete(id);
+        if (res?.lat == null || res?.lng == null) return;
+        // 'area' = city/neighbourhood centroid — NOT a resolved point (GAP 1,
+        // 2026-09-27, mirrors the ecommerce checkout's own
+        // `ensureSavedAddressCoords` and commit 28947e899). Never persisted:
+        // writing a centroid into the customer's saved address would poison
+        // it permanently. Leaving `latitude`/`longitude` untouched keeps
+        // `hasResolvedLocation()` false, so the cashier marks the map
+        // instead of silently charging/shipping from a city centroid.
+        if (res.precision === 'area') return;
+        // The cashier may have switched to a different address while the
+        // request was in flight — never apply a stale geocode result.
+        if (this.addressId() !== id) return;
+        const updated: AddressPayload = { ...address, latitude: res.lat, longitude: res.lng };
+        this.address.set(updated);
+        this.initialAddress.set(updated);
+        this.addressGeocodePrecision.set(res.precision ?? null);
+        this.invalidateQuote();
+        if (!this.manualCostOverride() && !this.isPickupMethod()) this.isCalculatingShipping.set(true);
+        // Best-effort: a failed PATCH just means the next load re-geocodes.
+        this.customersService.updateCustomerAddress(id, {
+          latitude: String(res.lat),
+          longitude: String(res.lng),
+        }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+          error: (err) => console.error('updateCustomerAddress (coords backfill) failed', err),
+        });
+      },
+      error: () => {
+        this.savedAddressGeocodeInFlight.delete(id);
+      },
+    });
   }
 
   private toAddressPayload(address: PosCustomerAddress): AddressPayload {
@@ -471,7 +751,10 @@ export class PosShippingStepComponent {
       country_code: address.country_code ?? 'CO',
       postal_code: address.postal_code ?? null,
       phone_number: address.phone_number ?? this.cartState()?.customer?.phone ?? null,
-      latitude: null, longitude: null,
+      latitude: address.latitude != null && Number.isFinite(Number(address.latitude))
+        ? Number(address.latitude) : null,
+      longitude: address.longitude != null && Number.isFinite(Number(address.longitude))
+        ? Number(address.longitude) : null,
     };
   }
 
@@ -486,40 +769,109 @@ export class PosShippingStepComponent {
     this.shippingEdited.set(true);
     this.freeAddressEdited.set(false);
     this.addressEditing.set(false);
-    this.setAddress(this.toAddressPayload(address), id);
+    const payload = this.toAddressPayload(address);
+    this.setAddress(payload, id);
+    this.ensureSavedAddressCoords(id, payload);
+    // H6 — una dirección guardada distinta puede resultar igual de incompleta;
+    // reabre el formulario precargado en vez de dejar el resumen sin salida.
+    this.addressEditing.set(!this.addressValid());
   }
 
-  onAddressChange(payload: AddressPayload): void {
+  onAddressChange(payload: AddressPayload, formDirty = this.addressForm()?.form.dirty ?? true): void {
     // Country/municipality lookup and initial form hydration also emit. Only
     // a dirty form opened deliberately can author an existing order's address.
     if (this.originalShipping() &&
-      (!this.addressEditing() || !this.addressForm()?.form.dirty)) return;
+      (!this.addressEditing() || !formDirty)) return;
+    if (!formDirty) return;
     this.invalidateQuote();
     this.address.set(payload);
+    this.addressGeocodePrecision.set(payload.geocode_precision ?? null);
+    this.addressPinConfirmed.set(!!payload.pin_confirmed);
     if (!this.manualCostOverride() && !this.isPickupMethod()) this.isCalculatingShipping.set(true);
-    if (this.addressForm()?.form.dirty) {
+    if (formDirty) {
       this.shippingEdited.set(true);
       this.freeAddressEdited.set(this.addressKey(payload) !== this.addressKey(this.initialAddress()));
     }
   }
 
+  /**
+   * Includes lat/lng so a coords-only change (pin moved, or a re-geocode
+   * that resolved a new point without touching any text field) counts as an
+   * edit against an existing order's original address — otherwise
+   * `hasShippingChanges()` would stay false and the shipping-cost recompute
+   * effect (gated by `!original || edited`) would never re-quote a
+   * distance-priced method after the coordinates changed.
+   */
   private addressKey(address: AddressPayload | null): string {
     const norm = (value: unknown) => String(value ?? '').trim().toLocaleLowerCase();
+    const coord = (value: number | null | undefined) =>
+      value != null && Number.isFinite(value) ? value.toFixed(6) : '';
     return JSON.stringify([
       address?.address_line1, address?.address_line2, address?.city,
       address?.state_province, address?.country_code ?? 'CO', address?.postal_code,
       address?.phone_number,
-    ].map(norm));
+    ].map(norm).concat([coord(address?.latitude), coord(address?.longitude)]));
   }
 
-  private invalidateQuote(): void {
+  private invalidateQuote(preserveBreakdown = false): void {
     this.quoteGeneration++;
     this.isCalculatingShipping.set(false);
     this.quoteError.set(null);
+    if (!preserveBreakdown) {
+      this.quotedShippingTax.set(null);
+      this.manualQuotedShippingTax.set(null);
+      this.rateOptions.set([]);
+    }
   }
 
   onAddressValidChange(valid: boolean): void {
     this.addressValid.set(valid);
+  }
+
+  /** Gate the delivery details while the cashier is still beside Cliente. */
+  validateDetailsForCliente(): boolean {
+    // Historical orders keep their original destination when nothing was
+    // edited, even if that snapshot cannot be hydrated into today's form.
+    if (this.originalShipping() && !this.hasShippingChanges() && !this.customerChanged()) {
+      return true;
+    }
+    if (!this.selectedShippingMethod()) {
+      this.flashDeliveryDetail('shipping-method', 'Selecciona cómo llegará el pedido');
+      return false;
+    }
+    if (this.requiresAddress() && (!this.addressValid() ||
+      !this.address()?.address_line1 || !this.address()?.city)) {
+      this.showAddressErrors.set(true);
+      this.flashDeliveryDetail('address', 'Completa la dirección de entrega');
+      return false;
+    }
+    return true;
+  }
+
+  /** A new destination must not mutate the customer's selected saved address. */
+  beginNewAddress(): void {
+    this.invalidateQuote();
+    this.addressEditing.set(true);
+    this.shippingEdited.set(true);
+    this.freeAddressEdited.set(true);
+    this.shippingRateId.set(null);
+    this.setAddress(null, null);
+    this.initialAddress.set({
+      address_line1: null, address_line2: null, city: null,
+      state_province: null, country_code: 'CO', postal_code: null,
+      phone_number: this.cartState()?.customer?.phone ?? null,
+      latitude: null, longitude: null,
+    });
+  }
+
+  private flashDeliveryDetail(section: FlashSection, message: string): void {
+    this.flashSection.set(section);
+    this.flashMessage.set(message);
+    if (this.flashTimeout) clearTimeout(this.flashTimeout);
+    this.flashTimeout = setTimeout(() => {
+      this.flashSection.set(null);
+      this.flashMessage.set('');
+    }, 3000);
   }
 
   /**
@@ -529,6 +881,7 @@ export class PosShippingStepComponent {
    *  - Costo (terminal) → devuelve true para que el shell avance a Cobro.
    */
   attemptNextSubStep(): boolean {
+    if (this.detailsInCliente()) return true;
     if (this.originalShipping() && !this.hasShippingChanges() && !this.customerChanged()) return true;
     const current = this.shipSubStep();
     if (current === 0) {
@@ -566,6 +919,7 @@ export class PosShippingStepComponent {
    * Devuelve true si retrocedió internamente, false si ya estaba en 0 (el shell maneja).
    */
   attemptPrevSubStep(): boolean {
+    if (this.detailsInCliente()) return false;
     if (this.shipSubStep() > 0) {
       this.goToShipSubStep(this.shipSubStep() - 1);
       return true;
@@ -591,6 +945,22 @@ export class PosShippingStepComponent {
     if (!method || !this.cartState()?.items?.length || method.type === 'pickup') return;
     const a = this.address();
     if (!a?.city) return;
+    // Requirement 3 (coordinator, 2026-09): a delivery method must NEVER
+    // quote/auto-select a default rate for an address with no resolved
+    // point. Skip the network call entirely rather than let the backend
+    // return a flat/zone rate that ignores the missing coordinate —
+    // `getFirstValidationError` blocks the confirm gate on
+    // `!hasResolvedLocation()` regardless, but not calling here also means
+    // no rate is ever auto-selected/shown while the location is unresolved.
+    if (!this.hasResolvedLocation()) {
+      this.calculatedShippingCost.set(null);
+      this.shippingRateId.set(null);
+      // Never leave a stale amount (from a previous method/address) sitting
+      // in the totals while the location is unresolved — the confirm gate
+      // already blocks on this, but the displayed total must not lie either.
+      if (!this.manualCostOverride()) this.shippingCost.set(0);
+      return;
+    }
     this.isCalculatingShipping.set(true);
     const items = this.cartState()!.items.filter((item) => item.itemType !== 'custom')
       .map((item) => ({
@@ -600,42 +970,120 @@ export class PosShippingStepComponent {
       country_code: a.country_code || 'CO', city: a.city,
       state_province: a.state_province || undefined,
       address_line1: a.address_line1 || undefined,
+      postal_code: a.postal_code || undefined,
+      ...(a.latitude != null && a.longitude != null &&
+        Number.isFinite(a.latitude) && Number.isFinite(a.longitude)
+        ? { latitude: a.latitude, longitude: a.longitude }
+        : {}),
     }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (options) => {
         if (generation !== this.quoteGeneration) return;
         this.isCalculatingShipping.set(false);
-        const matching = options.find((o) => o.method_id === method.id);
-        if (matching) {
-          this.calculatedShippingCost.set(matching.cost);
-          this.shippingRateId.set(matching.rate_id ?? matching.id);
-          if (!this.manualCostOverride()) this.shippingCost.set(matching.cost);
+        // B6 — el backend devuelve TODAS las tarifas del método (zona/tipo
+        // variados), no solo una. Antes `.find` se quedaba con la primera y
+        // descartaba el resto; ahora se conservan todas para el selector y
+        // se preselecciona la tarifa original (si sigue vigente) o la primera.
+        const matches = options.filter((o) => o.method_id === method.id);
+        this.rateOptions.set(matches);
+        if (matches.length > 0) {
+          const original = this.originalShipping();
+          const preferred =
+            original?.shippingRateId != null
+              ? matches.find((o) => (o.rate_id ?? o.id) === original.shippingRateId)
+              : undefined;
+          this.applyRateSelection(preferred ?? matches[0]);
         } else {
           this.calculatedShippingCost.set(null);
           this.shippingRateId.set(null);
-          this.quoteError.set('No hay tarifa para el método y la dirección elegidos. Selecciona otra opción o ingresa un costo válido.');
+          this.quoteError.set('No hay tarifa de envío para esta ubicación');
         }
       },
-      error: () => {
+      error: (error) => {
         if (generation !== this.quoteGeneration) return;
         this.isCalculatingShipping.set(false);
         this.calculatedShippingCost.set(null);
         this.shippingRateId.set(null);
-        this.quoteError.set('No se pudo calcular el envío. Reintenta o ingresa un costo válido.');
+        this.quoteError.set(parseApiError(error).userMessage ||
+          'No se pudo calcular el envío. Verifica la dirección y vuelve a intentarlo.');
       },
     });
   }
 
-  toggleManualCost(): void {
-    this.invalidateQuote();
-    this.manualCostOverride.update((value) => !value);
-    const calc = this.calculatedShippingCost();
-    if (!this.manualCostOverride() && calc !== null) this.shippingCost.set(calc);
+  /** B6 — aplica una tarifa (de la cotización) al costo/impuesto/tarifa activos. */
+  private applyRateSelection(option: PosShippingOption): void {
+    this.calculatedShippingCost.set(option.cost);
+    this.shippingRateId.set(option.rate_id ?? option.id);
+    this.quotedShippingTax.set(toQuotedShippingTax(option));
+    if (!this.manualCostOverride()) this.shippingCost.set(option.cost);
   }
 
-  onShippingCostChange(): void {
-    this.invalidateQuote();
+  /** B6 — el cajero cambia de tarifa en el selector (solo visible con 2+ opciones). */
+  onRateSelected(rateId: string | number | null): void {
+    if (rateId == null) return;
+    const option = this.rateOptions().find(
+      (o) => (o.rate_id ?? o.id) === Number(rateId),
+    );
+    if (option) this.applyRateSelection(option);
+  }
+
+  toggleManualCost(): void {
+    // Keep the selected automatic quote so switching back restores its gross.
+    this.invalidateQuote(true);
+    this.manualCostOverride.update((value) => !value);
+    const calc = this.calculatedShippingCost();
+    if (this.manualCostOverride()) {
+      const option = this.rateOptions().find((o) => (o.rate_id ?? o.id) === this.shippingRateId());
+      this.manualShippingPrice.set(option?.tax_is_inclusive === false
+        ? (option.base ?? option.cost) : (option?.cost ?? this.shippingCost()));
+      this.quoteManualCost();
+    } else {
+      this.manualQuotedShippingTax.set(null);
+      if (calc !== null) this.shippingCost.set(calc);
+    }
+    this.shippingEdited.set(true);
+  }
+
+  onShippingCostChange(value = this.shippingCost()): void {
+    this.manualShippingPrice.set(Number(value));
     this.manualCostOverride.set(true);
     this.shippingEdited.set(true);
+    this.quoteManualCost();
+  }
+
+  private quoteManualCost(): void {
+    this.invalidateQuote(true);
+    this.manualQuotedShippingTax.set(null);
+    const generation = ++this.manualQuoteGeneration;
+    const amount = this.manualShippingPrice();
+    const rateId = this.shippingRateId();
+    const methodId = this.selectedShippingMethod()?.id;
+    if (!Number.isFinite(amount) || amount < 0) {
+      this.quoteError.set('Ingresa un costo de envío válido.');
+      return;
+    }
+    // No applicable rate: retain the historical no-tax manual path, visibly
+    // labelled in the wizard instead of pretending the amount inherits IVA.
+    if (!rateId || !methodId) {
+      this.shippingCost.set(amount);
+      return;
+    }
+    this.isCalculatingShipping.set(true);
+    this.shippingService.quoteManualShipping(methodId, rateId, amount)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (quote) => {
+          if (generation !== this.manualQuoteGeneration || !this.manualCostOverride()) return;
+          this.isCalculatingShipping.set(false);
+          this.shippingCost.set(quote.shipping_cost);
+          this.manualQuotedShippingTax.set(toQuotedShippingTax(quote));
+        },
+        error: (error) => {
+          if (generation !== this.manualQuoteGeneration || !this.manualCostOverride()) return;
+          this.isCalculatingShipping.set(false);
+          this.quoteError.set(parseApiError(error).userMessage ||
+            'No se pudo calcular el impuesto del envío. Inténtalo nuevamente.');
+        },
+      });
   }
 
   navigateToShippingSettings(): void {
@@ -654,6 +1102,25 @@ export class PosShippingStepComponent {
     }
     if (this.quoteError()) {
       return { section: 'shipping-method', message: this.quoteError()! };
+    }
+    // Requirement 3 (coordinator, 2026-09): hard gate, no manual-cost escape
+    // hatch — a delivery method must never confirm/charge a default rate for
+    // an address with no resolved point (neither a forward-geocode hit nor a
+    // confirmed map pin). Placed before the generic shippingCost-finite check
+    // on purpose: a manually typed shipping cost
+    // (`onShippingCostChange`/`quoteManualCost`) sets `shippingCost` to a
+    // finite value regardless of location, which would otherwise slip past
+    // that check and let the cashier confirm a made-up cost for a location
+    // that was never resolved.
+    //
+    // Deliberately keyed on `hasResolvedLocation()`, NOT `shippingRateId()`:
+    // a `null` `shippingRateId` also covers the pre-existing, unrelated
+    // "manual cost, no automated rate table at all" path (alias deliveries,
+    // methods with no configured `shipping_rates`) — see `quoteManualCost`'s
+    // own comment. That path has real coords and is a legitimate cashier
+    // override, not the "no default rate" case this gate targets.
+    if (this.requiresAddress() && !this.hasResolvedLocation()) {
+      return { section: 'address', message: 'Marca la ubicación en el mapa para calcular el envío' };
     }
     if (!Number.isFinite(this.shippingCost()) || this.shippingCost() < 0) {
       return { section: 'shipping-method', message: 'Ingresa un costo de envío válido' };
@@ -736,7 +1203,40 @@ export class PosShippingStepComponent {
         // también en la venta con envío; sin esto el pago por transferencia de
         // una venta a domicilio queda sin `payments.bank_account_id`.
         bank_account_id: paymentSubmit.bankAccountId,
+        ...(paymentSubmit.tip != null && paymentSubmit.tip > 0
+          ? {
+              tip_amount: paymentSubmit.tip,
+              tip_type: paymentSubmit.tipType ?? 'fixed',
+              tip_value: paymentSubmit.tipValue ?? paymentSubmit.tip,
+              ...(paymentSubmit.tipWaiterId != null
+                ? { tip_waiter_id: paymentSubmit.tipWaiterId }
+                : {}),
+            }
+          : {}),
       };
+      // B11 — cobro multimétodo de contado: el collector ya excluye
+      // cash_on_delivery de los tramos elegibles (`directMethods`), así que
+      // ningún tramo aquí puede ser ON_DELIVERY. Con 2+ tramos se adjunta
+      // `payments[]`; `processShippingSale` decide si lo envía en vez del
+      // escalar (mismo patrón que `processSaleWithPayment`).
+      if (paymentSubmit.legs && paymentSubmit.legs.length >= 2) {
+        (paymentRequest as PaymentRequest & { payments?: PosPaymentLeg[] }).payments =
+          toPosPaymentLegs(paymentSubmit.legs);
+        if (paymentSubmit.legs.some((leg) => leg.methodType === 'wallet')) {
+          const signature = JSON.stringify({
+            customerId: cart.customer?.id ?? null,
+            orderId: this.editingOrderId() ?? cart.linkedOrderId ?? null,
+            items: cart.items.map((item) => [item.product.id, item.quantity, item.totalPrice]),
+            shippingRateId: this.shippingRateId(), shippingCost: this.shippingCost(),
+            legs: (paymentRequest as PaymentRequest & { payments?: PosPaymentLeg[] }).payments,
+          });
+          if (signature !== this.walletMultiAttemptSignature) {
+            this.walletMultiAttemptSignature = signature;
+            this.walletMultiAttemptKey = crypto.randomUUID();
+          }
+          paymentRequest.idempotencyKey = this.walletMultiAttemptKey ?? undefined;
+        }
+      }
     } else {
       // credito: build the installment-shaped plan (see limitation above).
       const credit = paymentSubmit.credit;
@@ -800,9 +1300,7 @@ export class PosShippingStepComponent {
         ? { municipality_code: a.municipality_code.trim() }
         : {}),
       recipient_name: this.customerDisplayName,
-      recipient_phone: this.customerAlias().trim()
-        ? a?.phone_number || ''
-        : this.cartState()?.customer?.phone || '',
+      recipient_phone: a?.phone_number || this.cartState()?.customer?.phone || '',
     };
   }
 
@@ -819,6 +1317,9 @@ export class PosShippingStepComponent {
       shippingMethodId: method.id,
       shippingRateId: this.shippingRateId(),
       shippingCost: this.shippingCost(),
+      ...(this.manualCostOverride() && this.shippingRateId()
+        ? { manualShippingPrice: this.manualShippingPrice() }
+        : {}),
       deliveryType: method.id === this.originalShipping()?.shippingMethodId
         ? this.originalShipping()!.deliveryType ?? this.resolveDeliveryType(method)
         : this.resolveDeliveryType(method),
@@ -991,6 +1492,9 @@ export class PosShippingStepComponent {
           deliveryNotes: this.notesControl.value || undefined,
           shippingAddressId: addressId,
           shippingRateId: this.shippingRateId(),
+          ...(this.manualCostOverride() && this.shippingRateId()
+            ? { manualShippingPrice: this.manualShippingPrice() }
+            : {}),
           manualCostOverride: this.manualCostOverride(),
         },
         paymentRequest,
@@ -1003,6 +1507,8 @@ export class PosShippingStepComponent {
         next: (response) => {
           this.isProcessing.set(false);
           if (response.success) {
+            this.walletMultiAttemptKey = null;
+            this.walletMultiAttemptSignature = null;
             this.shippingCompleted.emit({
               success: true,
               order: response.order,

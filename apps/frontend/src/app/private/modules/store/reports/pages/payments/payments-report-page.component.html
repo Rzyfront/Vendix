@@ -1,0 +1,99 @@
+<h1 class="sr-only">Reporte de pagos</h1>
+<div class="w-full space-y-4">
+  <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+    <app-stats
+      title="Recaudado"
+      [value]="formatMoney(summary()?.total_collected)"
+      [smallText]="growthText()"
+      iconName="wallet"
+      iconBgColor="bg-green-100"
+      iconColor="text-green-600"
+      [loading]="loadingSummary()"
+    ></app-stats>
+    <app-stats
+      title="# Pagos"
+      [value]="summary()?.payments_count ?? 0"
+      smallText="Pagos en el período"
+      iconName="credit-card"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+      [loading]="loadingSummary()"
+    ></app-stats>
+    <app-stats
+      title="Ticket promedio"
+      [value]="formatMoney(summary()?.average_payment)"
+      smallText="Promedio por pago"
+      iconName="receipt"
+      iconBgColor="bg-purple-100"
+      iconColor="text-purple-600"
+      [loading]="loadingSummary()"
+    ></app-stats>
+    <app-stats
+      title="Reembolsado"
+      [value]="formatMoney(summary()?.total_refunded)"
+      smallText="Total devuelto"
+      iconName="undo-2"
+      iconBgColor="bg-amber-100"
+      iconColor="text-amber-600"
+      [loading]="loadingSummary()"
+    ></app-stats>
+  </div>
+
+  <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[500px]">
+    <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
+      <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+        <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+          Pagos ({{ totalItems() }})
+        </h2>
+        <div class="flex items-center gap-2 w-full md:w-auto">
+          <app-inputsearch
+            class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            size="sm"
+            placeholder="Buscar orden, cliente o referencia..."
+            [debounceTime]="600"
+            [ngModel]="searchTerm()"
+            (searchChange)="onSearchChange($event)"
+          ></app-inputsearch>
+          <app-options-dropdown
+            class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            [filters]="filterConfigs()"
+            [filterValues]="filterValues()"
+            [headerPin]="headerPin"
+            [actions]="dropdownActions()"
+            [isLoading]="loading()"
+            (filterChange)="onFilterChange($event)"
+            (clearAllFilters)="onClearAll()"
+            (actionClick)="onActionClick($event)"
+          ></app-options-dropdown>
+        </div>
+      </div>
+    </div>
+
+    <div class="px-2 pb-2 pt-3 md:p-4">
+      <app-responsive-data-view
+        [data]="viewRows()"
+        [columns]="columns"
+        [actions]="actions"
+        [cardConfig]="cardConfig"
+        [loading]="loading()"
+        [sortable]="true"
+        emptyIcon="credit-card"
+        emptyMessage="No hay pagos para los filtros seleccionados"
+        emptyTitle="Sin pagos"
+        emptyDescription="Ajusta el período o los filtros para ver pagos."
+        [showEmptyClearFilters]="hasFilters()"
+        (emptyClearFiltersClick)="onClearAll()"
+        (sort)="onSort($event)"
+        (rowClick)="onRowClick($event)"
+      ></app-responsive-data-view>
+
+      <app-pagination
+        [currentPage]="page()"
+        [totalPages]="totalPages()"
+        [total]="totalItems()"
+        [limit]="limit"
+        (pageChange)="onPageChange($event)"
+      ></app-pagination>
+    </div>
+  </app-card>
+</div>

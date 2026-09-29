@@ -26,6 +26,20 @@ type StepKind = 'data' | 'ui';
 
 const isUiStep = (name: string): boolean => name.startsWith('ui_');
 
+/**
+ * The agent's internal plan is never shown. The backend no longer emits these;
+ * this is defense in depth so a stray frame cannot leak the plan into the trace.
+ */
+const HIDDEN_TOOLS: ReadonlySet<string> = new Set([
+  'propose_plan',
+  'update_plan_step',
+  'verify_deliverables',
+  'ask_user',
+  'revise_plan',
+  'pause_plan',
+  'resume_plan',
+]);
+
 /** Reads a string argument, tolerating the model sending a number. */
 function argText(
   args: Record<string, unknown> | undefined,
@@ -403,8 +417,12 @@ interface TraceRow {
 export class VexiToolTraceComponent {
   readonly steps = input<ToolStep[]>([]);
 
+  private readonly visibleSteps = computed(() =>
+    this.steps().filter((step) => !HIDDEN_TOOLS.has(step.name)),
+  );
+
   protected readonly running = computed(() =>
-    this.steps().some((step) => step.status === 'running'),
+    this.visibleSteps().some((step) => step.status === 'running'),
   );
 
   /**
@@ -418,7 +436,7 @@ export class VexiToolTraceComponent {
   protected readonly expanded = linkedSignal(() => this.running());
 
   protected readonly rows = computed<TraceRow[]>(() =>
-    this.steps().map((step) => ({
+    this.visibleSteps().map((step) => ({
       id: step.id,
       kind: isUiStep(step.name) ? ('ui' as const) : ('data' as const),
       status: step.status,

@@ -421,6 +421,7 @@ export class StoreConfigurationModalComponent
       out_of_stock_action: 'hide',
       track_inventory: true,
       allow_negative_stock: false,
+      allow_ingredient_overuse: true,
       costing_method: 'cpp',
       pos_stock_scope: 'main_location',
       low_stock_alerts_scope: 'main_location',

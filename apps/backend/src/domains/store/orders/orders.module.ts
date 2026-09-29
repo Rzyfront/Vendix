@@ -15,6 +15,7 @@ import { ShippingModule } from '../shipping/shipping.module';
 import { DispatchNotesModule } from '../dispatch-notes/dispatch-notes.module';
 import { DispatchRoutesModule } from '../dispatch-routes/dispatch-routes.module';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import { OrderEtaService } from './services/order-eta.service';
@@ -31,13 +32,13 @@ import { createOrdersTools } from '../../../ai-engine/tools/domains/orders.tools
 import { createSalesTools } from '../../../ai-engine/tools/domains/sales.tools';
 import { createOrderWriteTools } from '../../../ai-engine/tools/domains/writes.tools';
 import { OrderFlowService } from './order-flow/order-flow.service';
+import { RefundFlowService } from './order-flow/services/refund-flow.service';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 import { SalesAnalyticsService } from '../analytics/services/sales-analytics.service';
 import { ProductsAnalyticsService } from '../analytics/services/products-analytics.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 // Carril B - B3: NotificationsSseService es el hub compartido por tienda que
 // el endpoint `@Sse('orders/stream')` consume. OrderSseService lo envuelve
 // con un payload tipado para el dominio `orders`.
@@ -48,6 +49,7 @@ import { OrderSseService } from './services/order-sse.service';
 // no importa este módulo hoy, pero ambos dominios se referencian vía eventos
 // y seeds, y el ciclo rompería el arranque en silencio.
 import { InvoicingModule } from '../invoicing/invoicing.module';
+import { OrderHistoryModule } from './order-history/order-history.module'; // Plan order-truth-and-invoice-tz — OrdersService inyecta OrderHistoryService directo (customer_changed / shipping_assigned)
 
 @Module({
   imports: [
@@ -73,12 +75,14 @@ import { InvoicingModule } from '../invoicing/invoicing.module';
     NotificationsModule,
     // Release-853 paso 10: propagación del titular al borrador de factura.
     forwardRef(() => InvoicingModule),
+    OrderHistoryModule,
   ],
   controllers: [OrdersController, OrdersBulkController],
   providers: [
     OrdersService,
     OrdersBulkService,
     StockLevelManager,
+    StockValidatorService,
     SellableStockAllocator,
     InventoryTransactionsService,
     OrderEtaService,
@@ -97,10 +101,18 @@ export class OrdersModule implements OnModuleInit {
     private readonly sessionsService: SessionsService,
     private readonly salesAnalyticsService: SalesAnalyticsService,
     private readonly productsAnalyticsService: ProductsAnalyticsService,
-    private readonly prisma: StorePrismaService,
     // Único escritor legítimo de `orders.state` (QUI-557). Viene de
     // `OrderFlowModule`, que este módulo ya importa y reexporta.
     private readonly orderFlowService: OrderFlowService,
+    // Dueño de preview/create de reembolsos (O-25/O-26). También lo exporta
+    // `OrderFlowModule`, ya importado arriba: cero imports nuevos.
+    private readonly refundFlowService: RefundFlowService,
+    // Guarda no-overselling para crear/editar órdenes (O-19/O-20).
+    // Provider local de este módulo (ver `providers`).
+    private readonly stockValidatorService: StockValidatorService,
+    // Dueño del carril masivo preview/transition (O-28). Provider local de
+    // este módulo (ver `providers`): cero imports nuevos.
+    private readonly ordersBulkService: OrdersBulkService,
   ) {}
 
   onModuleInit(): void {
@@ -116,7 +128,10 @@ export class OrdersModule implements OnModuleInit {
         ordersService: this.ordersService,
         dispatchNotesService: this.dispatchNotesService,
         sessionsService: this.sessionsService,
-        prisma: this.prisma,
+        orderFlowService: this.orderFlowService,
+        refundFlowService: this.refundFlowService,
+        stockValidatorService: this.stockValidatorService,
+        ordersBulkService: this.ordersBulkService,
       }),
     );
 
@@ -127,7 +142,6 @@ export class OrdersModule implements OnModuleInit {
       createOrderWriteTools({
         orderFlowService: this.orderFlowService,
         dispatchNotesService: this.dispatchNotesService,
-        prisma: this.prisma,
       }),
     );
   }

@@ -68,6 +68,19 @@ interface IncomingNoteTaxRow {
   taxable_amount?: number;
   tax_amount?: number;
   tax_type?: string | null;
+  /**
+   * F-INC6 — índice (0-based) de la línea de la NOTA a la que esta fila
+   * pertenece, cuando la factura padre mezcla ≥2 tributos y el desglose se
+   * deriva por línea (`resolvePerLineNoteSchemes`). `undefined` = fila de
+   * CABECERA (un solo tributo en el documento), la forma histórica.
+   *
+   * `invoice_taxes.invoice_item_id` documenta que un documento con ≥2
+   * tributos exige UNA fila por (línea × tributo), todas ligadas — nunca
+   * agregada por tributo — porque el emisor UBL arma el desglose POR LÍNEA
+   * leyendo ese vínculo. Sin él, hereda a toda línea el primer tributo del
+   * documento. Nunca viaja desde el DTO del cliente: sólo lo puebla el kernel.
+   */
+  line_index?: number;
 }
 
 /**
@@ -242,6 +255,10 @@ export class CreditNotesService {
         issue_date: true,
         note_concept_code: true,
         created_at: true,
+        // El frontend compara `n.refund_id === refund.id` para resaltar la NC
+        // ya vinculada a un reembolso puntual (order-details-page.component.ts).
+        // Sin esta columna esa comparación siempre da `undefined === id`.
+        refund_id: true,
       },
       orderBy: { id: 'asc' },
     });
@@ -397,6 +414,15 @@ export class CreditNotesService {
     // Paso 7: la NC guiada deriva sus líneas del refund (mapeo ADR-03).
     // Nunca cae al copiado TOTAL: `resolveRefundLink` rechaza el refund sin
     // líneas derivables antes de llegar acá.
+    // F-INC6 — nota TOTAL genuina: ni líneas explícitas ni reembolso. Copia
+    // EXACTA de la factura que corrige (subtotal/descuento/impuesto/total de
+    // cabecera Y cada línea, incluidos `unit_code`/`price_unit_quantity`/
+    // `stock_units_consumed`/`serial_numbers_snapshot`/`is_inclusive`/
+    // `total_amount`), sin recalcular un solo centavo: es la forma más segura
+    // de anular o corregir un documento ya firmado, y evita que el propio
+    // recompute introduzca la deriva que este fix corrige en las otras ramas.
+    const is_total_copy = !dto.items?.length && !refund_link;
+
     const items = dto.items?.length
       ? dto.items
       : refund_link
@@ -444,6 +470,14 @@ export class CreditNotesService {
             this.logger,
           )
         : null;
+    // P2(a) — nota TOTAL: mapa id-de-línea-original → índice, para poder
+    // religar cada tributo copiado a SU línea de la nota (ver `line_index`
+    // abajo). `items` para el copiado TOTAL es literalmente
+    // `related_invoice.invoice_items.map(...)` EN EL MISMO ORDEN (arriba), así
+    // que el índice del item original es el mismo índice del item de la nota.
+    const total_copy_original_item_index = new Map<number, number>(
+      related_invoice.invoice_items.map((item, idx) => [item.id, idx]),
+    );
     const incoming_taxes: IncomingNoteTaxRow[] = dto.taxes?.length
       ? dto.taxes
       : derived_partial
@@ -455,6 +489,19 @@ export class CreditNotesService {
             taxable_amount: Number(t.taxable_amount),
             tax_amount: Number(t.tax_amount),
             tax_type: t.tax_type,
+            // P2(a) — la factura padre puede tener ≥2 tributos LIGADOS por
+            // línea (`invoice_taxes.invoice_item_id`: IVA+INC mixto, o
+            // líneas con impuesto inclusivo). Copiar sólo el importe sin este
+            // vínculo desataba cada tributo de su línea — la nota salía con
+            // TODOS los tributos como fila de cabecera
+            // (`invoice_item_id: null`), y el emisor UBL por línea heredaba
+            // el PRIMERO a toda línea del desglose. `undefined` (fila de
+            // cabecera) para la factura padre de un solo tributo — la forma
+            // histórica, sin cambio.
+            line_index:
+              t.invoice_item_id != null
+                ? total_copy_original_item_index.get(t.invoice_item_id)
+                : undefined,
           }));
 
     // QUI-INC — el tipo fiscal se resuelve ACÁ, contra la fila fuente, y ANTES
@@ -467,32 +514,79 @@ export class CreditNotesService {
       context.store_id ?? null,
     );
 
-    // Calculate amounts
-    let subtotal = 0;
-    let discount = 0;
-    let tax = 0;
-    let total = 0;
-    if (derived_partial) {
+    // P1-C — misma razón que el comentario de arriba: esta comprobación vivía
+    // DESPUÉS de `invoices.create` (dentro del `.map()` que arma
+    // `invoice_taxes`), así que una fila sin `taxable_amount`/`tax_amount`
+    // fallaba con el consecutivo YA gastado y la nota (cabecera + líneas) YA
+    // persistida sin sus impuestos — un documento fiscal a medio escribir.
+    // Se mueve ANTES de `generateNextNumber` para que el rechazo no cueste
+    // nada: ni numeración, ni una fila huérfana que limpiar.
+    for (const [index, tax_item] of taxes.entries()) {
+      if (
+        tax_item.taxable_amount === undefined ||
+        tax_item.taxable_amount === null ||
+        tax_item.tax_amount === undefined ||
+        tax_item.tax_amount === null
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_CALC_001,
+          `El impuesto «${tax_item.tax_name}» de la nota llegó sin taxable_amount o sin tax_amount. ` +
+            'Una nota crédito o débito no recalcula: copia los importes del documento que corrige, ' +
+            'así que ambos deben venir ya calculados.',
+          { tax_index: index, tax_name: tax_item.tax_name },
+        );
+      }
+    }
+
+    // Calculate amounts — SIEMPRE en `Prisma.Decimal`, nunca en `number`. Un
+    // `+=` de floats (la forma anterior) da 3900.0000000000005 sobre 3×1300
+    // INC-inclusivo: mayor que el saldo exacto de 3900 y rechaza con
+    // `INVOICING_CREDIT_NOTE_001` una nota que sí cabe. Todo el resto del
+    // método (guarda de saldo, columnas `Decimal`) ya operaba en `Decimal`;
+    // la única fuga de float era este cálculo.
+    let subtotal: Prisma.Decimal;
+    let discount: Prisma.Decimal;
+    let tax: Prisma.Decimal;
+    let total: Prisma.Decimal;
+    if (is_total_copy) {
+      // Nota TOTAL: copia VERBATIM de la cabecera del documento que corrige.
+      // Recomputar Σ(líneas) en vez de copiar reintroduce exactamente el
+      // defecto de FAU02 (`HEADER_LINE_EXTENSION_MISMATCH`) que este fix
+      // corrige — la factura padre pudo tener un descuento a nivel de orden
+      // que ninguna recomposición por línea reproduce con un centavo exacto.
+      subtotal = new Prisma.Decimal(related_invoice.subtotal_amount ?? 0);
+      discount = new Prisma.Decimal(related_invoice.discount_amount ?? 0);
+      tax = new Prisma.Decimal(related_invoice.tax_amount ?? 0);
+      total = new Prisma.Decimal(related_invoice.total_amount ?? 0);
+    } else if (derived_partial) {
       // Parcial por kernel: la cabecera suma base/cuota DERIVADAS, no el
       // reclamo del cliente. Todo en `Decimal`: ni un float en el camino.
-      subtotal = derived_partial.totals.subtotal.toNumber();
-      discount = derived_partial.totals.discount.toNumber();
-      tax = derived_partial.totals.tax.toNumber();
-      total = derived_partial.totals.total.toNumber();
+      subtotal = derived_partial.totals.subtotal;
+      discount = derived_partial.totals.discount;
+      tax = derived_partial.totals.tax;
+      total = derived_partial.totals.total;
     } else {
-      for (const item of items) {
-        subtotal += item.quantity * item.unit_price;
-        discount += item.discount_amount || 0;
-        tax += item.tax_amount || 0;
-      }
-      total = subtotal - discount + tax;
+      subtotal = items.reduce(
+        (acc, item) =>
+          acc.plus(new Prisma.Decimal(item.quantity).times(item.unit_price)),
+        new Prisma.Decimal(0),
+      );
+      discount = items.reduce(
+        (acc, item) => acc.plus(new Prisma.Decimal(item.discount_amount || 0)),
+        new Prisma.Decimal(0),
+      );
+      tax = items.reduce(
+        (acc, item) => acc.plus(new Prisma.Decimal(item.tax_amount || 0)),
+        new Prisma.Decimal(0),
+      );
+      total = subtotal.minus(discount).plus(tax);
     }
 
     // ANTES de numerar, por la misma razón que las dos guardas de arriba: un
-    // consecutivo gastado no se devuelve. Se mide `new Prisma.Decimal(total)`,
-    // que es EXACTAMENTE la expresión que más abajo aterriza en la columna
-    // `total_amount`: la guarda juzga lo que se va a escribir, no una
-    // aproximación paralela.
+    // consecutivo gastado no se devuelve. Se mide `total` (ya `Decimal`, sin
+    // pasar por `number` en ningún punto), que es EXACTAMENTE lo que más abajo
+    // aterriza en la columna `total_amount`: la guarda juzga lo que se va a
+    // escribir, no una aproximación paralela.
     //
     // Sólo nota CRÉDITO: la nota débito AUMENTA el valor de la factura, no lo
     // acredita, así que no consume saldo ni tiene techo que agotar.
@@ -504,7 +598,7 @@ export class CreditNotesService {
           total_amount: related_invoice.total_amount,
           accounting_entity_id: note_accounting_entity_id,
         },
-        new Prisma.Decimal(total),
+        total,
       );
     }
 
@@ -525,7 +619,37 @@ export class CreditNotesService {
           ),
         );
 
-    const note = await this.prisma.invoices.create({
+    // P1-C — ATOMICIDAD: create (cabecera + líneas) → createMany de impuestos
+    // → refetch, en UNA sola transacción de base de datos.
+    //
+    // Antes eran tres llamadas independientes: si `invoice_taxes.createMany`
+    // fallaba (o el proceso caía) DESPUÉS de que `invoices.create` ya
+    // persistiera la nota con sus líneas, el consecutivo recién asignado
+    // (`invoice_number`/`resolution_id`, ya COMMITEADO por
+    // `generateNextNumber` en su propia transacción — ver
+    // `invoice-number-generator.ts`) quedaba atado para siempre a un
+    // documento fiscal sin impuestos: ni borrable en caliente (violaría la
+    // regla anti-destructiva de migraciones — nunca `DELETE` manual sobre una
+    // tabla con datos), ni corregible sin dejar un hueco en la numeración. La
+    // validación de `taxable_amount`/`tax_amount` de más arriba YA corrió
+    // ANTES de `generateNextNumber`, así que lo único que puede fallar aquí
+    // dentro es infraestructura (la propia DB), nunca un dato de entrada
+    // previsible — el rollback de esta transacción nunca desperdicia el
+    // consecutivo por un error de negocio evitable.
+    //
+    // `tx` es el cliente RAW de la transacción: `StorePrismaService
+    // .$transaction` (heredado de `BasePrismaService`) delega directo al
+    // `baseClient` de Prisma, así que el callback NO recibe el wrapper con
+    // scoping — recibe el mismo tipo de cliente que ya usa `withoutScope()`
+    // más abajo para `invoice_taxes`/`credit_note_refund_items`. Es seguro
+    // exactamente por la misma razón que ya vale para esos dos: cada
+    // `data`/`where` de este bloque trae `store_id`/`organization_id`/`id`
+    // explícitos y ya verificados en scope antes de llegar aquí, nunca un
+    // filtro que dependa del scoping automático. Mezclar `tx` con
+    // `this.prisma.withoutScope()` (clientes DISTINTOS) en este bloque
+    // rompería la atomicidad, así que las tres operaciones usan `tx`.
+    let note = await this.prisma.$transaction(async (tx: any) => {
+      let created = await tx.invoices.create({
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id,
@@ -538,12 +662,34 @@ export class CreditNotesService {
         customer_name: related_invoice.customer_name,
         customer_tax_id: related_invoice.customer_tax_id,
         customer_address: related_invoice.customer_address,
+        // F-INC6 — identidad del adquiriente COMPLETA, no sólo nombre/NIT.
+        // Sin `customer_document_type`/`customer_verification_digit` una NC
+        // sobre una factura a persona JURÍDICA (NIT + DV) salía a la DIAN
+        // como CC + persona natural, sin DV ni email/teléfono (medido: FE
+        // manual de Pollo Arabe a Óptica Panorama SAS, NIT 800214345-7). El
+        // emisor lee ESTE snapshot, no el de la factura padre: si la nota no
+        // lo copia, la identidad se pierde en la transmisión aunque la
+        // factura original la tuviera completa.
+        customer_document_type: related_invoice.customer_document_type,
+        customer_verification_digit:
+          related_invoice.customer_verification_digit,
+        customer_email: related_invoice.customer_email,
+        customer_phone: related_invoice.customer_phone,
+        customer_tax_regime: related_invoice.customer_tax_regime,
+        customer_fiscal_responsibilities:
+          related_invoice.customer_fiscal_responsibilities,
+        // Task E#4 — mismo criterio que el resto de este bloque: sin copiar
+        // `customer_person_type`, una NC sobre una factura de persona natural
+        // con NIT queda sin el respaldo que `resolveAcquirerIdentity` necesita
+        // y puede transmitirse como JURIDICA (Task D) al perder la ficha
+        // vinculada de origen.
+        customer_person_type: related_invoice.customer_person_type,
         related_invoice_id: related_invoice.id,
         resolution_id,
-        subtotal_amount: new Prisma.Decimal(subtotal),
-        discount_amount: new Prisma.Decimal(discount),
-        tax_amount: new Prisma.Decimal(tax),
-        total_amount: new Prisma.Decimal(total),
+        subtotal_amount: subtotal,
+        discount_amount: discount,
+        tax_amount: tax,
+        total_amount: total,
         currency: dto.currency || related_invoice.currency || 'COP',
         issue_date,
         created_by_user_id: context.user_id,
@@ -572,9 +718,48 @@ export class CreditNotesService {
           dto.note_concept_code ?? refund_link?.concept_code ?? null,
         invoice_items: {
           create: items.map((item, index) => {
+            // F-INC6 — nota TOTAL: copia VERBATIM de la línea gemela de la
+            // factura — `items` en este camino ES
+            // `related_invoice.invoice_items` en el mismo orden (ver arriba).
+            // `unit_price` se copia tal cual, y con él la inclusividad REAL de
+            // la gemela. Forzar `false` sólo es correcto cuando el precio ya
+            // está en forma base (`8f8427f4b` en adelante, o el legado con el
+            // flag mentiroso). Una factura manual anterior guardó el BRUTO
+            // con `is_inclusive=true` (PAVS36: $24.500 bruto, base $22.685,19):
+            // copiarla como no inclusiva emite LineExtension = bruto contra una
+            // cabecera en base y el prevalidador la frena
+            // (HEADER_LINE_EXTENSION_MISMATCH). `twinIsGenuinelyInclusive`
+            // separa los dos casos igual que en la rama parcial.
+            if (is_total_copy) {
+              const twin = related_invoice.invoice_items[index];
+              const twin_divisor = Number(twin.price_unit_quantity ?? 1);
+              return {
+                product_id: twin.product_id,
+                product_variant_id: twin.product_variant_id,
+                description: twin.description,
+                quantity: twin.quantity,
+                unit_price: twin.unit_price,
+                discount_amount: twin.discount_amount,
+                tax_amount: twin.tax_amount,
+                total_amount: twin.total_amount,
+                is_inclusive: twinIsGenuinelyInclusive(
+                  twin,
+                  Number.isFinite(twin_divisor) && twin_divisor >= 1
+                    ? Math.floor(twin_divisor)
+                    : 1,
+                ),
+                unit_code: twin.unit_code,
+                price_unit_quantity: twin.price_unit_quantity,
+                stock_units_consumed: twin.stock_units_consumed,
+                serial_numbers_snapshot: twin.serial_numbers_snapshot,
+              };
+            }
             // B.1 (F-020) — parcial por kernel: la línea persiste base/cuota
-            // derivadas (nunca el reclamo del cliente). Total/explícito:
-            // idéntico a siempre.
+            // DERIVADAS (nunca el reclamo del cliente). F-INC6 añade
+            // `unit_price` a esa misma derivación: antes persistía el BRUTO
+            // del DTO con `is_inclusive` default falso, mientras la cabecera
+            // ya sumaba la BASE derivada — Σ líneas ≠ subtotal (FAU02) y la
+            // emisión se rechazaba con el consecutivo ya gastado.
             const derived_line = derived_partial?.lines[index];
             const line_tax =
               derived_line?.tax_amount ??
@@ -585,76 +770,107 @@ export class CreditNotesService {
                   .times(item.unit_price)
                   .minus(item.discount_amount || 0)
                   .plus(item.tax_amount || 0);
+            const unit_price = derived_line
+              ? derived_line.unit_price
+              : new Prisma.Decimal(item.unit_price);
             return {
               product_id: item.product_id,
               product_variant_id: item.product_variant_id,
               description: item.description,
               quantity: new Prisma.Decimal(item.quantity),
-              unit_price: new Prisma.Decimal(item.unit_price),
+              unit_price,
               discount_amount: new Prisma.Decimal(item.discount_amount || 0),
               tax_amount: line_tax,
               total_amount: item_total,
+              is_inclusive: false,
+              unit_code: derived_line?.unit_code ?? null,
+              price_unit_quantity: derived_line?.price_unit_quantity ?? null,
+              stock_units_consumed: derived_line?.stock_units_consumed ?? null,
             };
           }),
         },
-        ...(taxes.length > 0 && {
-            invoice_taxes: {
-              create: taxes.map((tax_item, index) => {
-                // `taxable_amount` y `tax_amount` son opcionales en
-                // `CreateInvoiceTaxDto` porque en las FACTURAS los deriva
-                // `InvoiceCalculatorService` a partir de la línea. Este servicio
-                // no pasa por ese calculador —la nota copia los importes del
-                // documento que corrige—, así que aquí no hay nada de donde
-                // derivarlos y sí hay que exigirlos.
-                //
-                // Sin esta comprobación, `new Prisma.Decimal(undefined)` lanza un
-                // `TypeError` crudo: 500 «Error interno» sobre lo que en realidad
-                // es un campo que faltó en la petición.
-                if (
-                  tax_item.taxable_amount === undefined ||
-                  tax_item.taxable_amount === null ||
-                  tax_item.tax_amount === undefined ||
-                  tax_item.tax_amount === null
-                ) {
-                  throw new VendixHttpException(
-                    ErrorCodes.INVOICING_CALC_001,
-                    `El impuesto «${tax_item.tax_name}» de la nota llegó sin taxable_amount o sin tax_amount. ` +
-                      'Una nota crédito o débito no recalcula: copia los importes del documento que corrige, ' +
-                      'así que ambos deben venir ya calculados.',
-                    { tax_index: index, tax_name: tax_item.tax_name },
-                  );
-                }
-                return {
-                  tax_rate_id: tax_item.tax_rate_id,
-                  tax_name: tax_item.tax_name,
-                  // F-212 — la nota es copista pura: el `tax_rate` que recibe
-                  // viaja tal cual a `invoice_taxes` (`Decimal(5,2)`,
-                  // PORCENTAJE). Por eso la nota 170 heredó el `0.19` de la
-                  // factura 67. Este es un SEGUNDO escritor: no pasa por
-                  // `buildInvoiceTaxCreateInput`, así que necesita el mismo
-                  // desambiguador que el escritor de facturas.
-                  tax_rate: normalizeInvoiceTaxRate(
-                    tax_item.tax_rate,
-                    tax_item.tax_type,
-                  ),
-                  taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
-                  tax_amount: new Prisma.Decimal(tax_item.tax_amount),
-                  // QUI-INC — sin `??` y sin ningún `as`. `resolveNoteTaxTypes`
-                  // ya lo resolvió contra la fila fuente (el propio tributo del
-                  // documento padre, o la `tax_categories` del `tax_rate_id`),
-                  // y si no había de dónde resolverlo la nota no llegó hasta
-                  // acá. El `?? 'iva'` que había en este punto no podía
-                  // distinguir «tributo genuinamente sin tipar» de «tributo INC
-                  // cuyo tipo nadie propagó»: acreditaba con IVA lo que se
-                  // facturó como INC, en un documento que va firmado a la DIAN.
-                  tax_type: tax_item.tax_type,
-                };
-              }),
-            },
-          }),
       },
       include: INVOICE_INCLUDE,
-    }).catch((error) => this.throwIfDuplicateRefundLink(error, refund_link));
+      }).catch((error: unknown) =>
+        this.throwIfDuplicateRefundLink(error, refund_link),
+      );
+
+      // F-INC6 — segunda fase: los tributos se crean DESPUÉS de las líneas.
+      // Prisma no permite que un `create` anidado lea el id que otro `create`
+      // anidado HERMANO va a generar en la MISMA llamada, y
+      // `invoice_taxes.invoice_item_id` exige justamente eso cuando la
+      // factura padre mezcla ≥2 tributos (`per_line_schemes`, ver
+      // `derivePartialNoteLinesViaKernel`): el modelo documenta que un
+      // documento con ≥2 tributos exige UNA fila por (línea × tributo)
+      // —nunca agregada— porque el emisor UBL arma el desglose POR LÍNEA
+      // leyendo ese vínculo; sin él hereda a toda línea el primer tributo
+      // del documento. Con un solo tributo (el 100% del histórico)
+      // `line_index` viene `undefined` en cada fila y el resultado es
+      // idéntico a antes: una fila de cabecera con `invoice_item_id` NULL.
+      if (taxes.length > 0) {
+        const created_items = [...created.invoice_items].sort(
+          (a: { id: number }, b: { id: number }) => a.id - b.id,
+        );
+        const tax_rows = taxes.map((tax_item) => {
+          // P1-C — `taxable_amount`/`tax_amount` YA se validaron arriba,
+          // ANTES de `generateNextNumber` (ver el comentario en ese punto):
+          // esta rama sólo construye la fila, ya no puede rechazar por dato
+          // faltante. Los `!` son deliberados: el guard que los garantiza
+          // corrió antes de que este bloque —y el consecutivo— existieran.
+          return {
+            invoice_id: created.id,
+            tax_rate_id: tax_item.tax_rate_id,
+            tax_name: tax_item.tax_name,
+            // F-212 — la nota es copista pura: el `tax_rate` que recibe
+            // viaja tal cual a `invoice_taxes` (`Decimal(5,2)`,
+            // PORCENTAJE). Por eso la nota 170 heredó el `0.19` de la
+            // factura 67. Este es un SEGUNDO escritor: no pasa por
+            // `buildInvoiceTaxCreateInput`, así que necesita el mismo
+            // desambiguador que el escritor de facturas.
+            tax_rate: normalizeInvoiceTaxRate(
+              tax_item.tax_rate,
+              tax_item.tax_type,
+            ),
+            taxable_amount: new Prisma.Decimal(tax_item.taxable_amount!),
+            tax_amount: new Prisma.Decimal(tax_item.tax_amount!),
+            // QUI-INC — sin `??` y sin ningún `as`. `resolveNoteTaxTypes`
+            // ya lo resolvió contra la fila fuente (el propio tributo del
+            // documento padre, o la `tax_categories` del `tax_rate_id`),
+            // y si no había de dónde resolverlo la nota no llegó hasta
+            // acá. El `?? 'iva'` que había en este punto no podía
+            // distinguir «tributo genuinamente sin tipar» de «tributo INC
+            // cuyo tipo nadie propagó»: acreditaba con IVA lo que se
+            // facturó como INC, en un documento que va firmado a la DIAN.
+            tax_type: tax_item.tax_type,
+            invoice_item_id:
+              tax_item.line_index != null
+                ? (created_items[tax_item.line_index]?.id ?? null)
+                : null,
+          };
+        });
+        // Mismo `tx` que el `create` de arriba — NO `withoutScope()`: usar el
+        // cliente `baseClient` fuera de esta transacción escribiría en una
+        // conexión/transacción DISTINTA y el `invoices.create` de arriba
+        // podría comitear sin sus impuestos si esta llamada fallara después.
+        // `invoice_taxes` sigue sin registrar en `StorePrismaService`, así
+        // que no hay wrapper de scoping que perder: `created.id` y los ids de
+        // `created_items` ya se validaron en scope, ambos recién creados en
+        // esta misma transacción bajo el tenant de este servicio.
+        await tx.invoice_taxes.createMany({
+          data: tax_rows,
+        });
+        const refetched = await tx.invoices.findFirst({
+          where: { id: created.id },
+          include: INVOICE_INCLUDE,
+        });
+        if (!refetched) {
+          throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+        }
+        created = refetched;
+      }
+
+      return created;
+    });
 
     // Paso 7 — puente refund↔NC por línea. `withoutScope()` + ids ya
     // verificados: el modelo no está registrado en `StorePrismaService`
@@ -1164,11 +1380,21 @@ export class CreditNotesService {
     const parent_total = new Prisma.Decimal(parent.total_amount ?? 0);
     const remaining = parent_total.minus(already_credited);
 
-    if (note_total.lessThanOrEqualTo(remaining)) return;
+    // F-INC6 — redondeo a CENTAVOS antes de comparar. `note_total` ya llega
+    // en `Decimal` desde el llamador (Fix A eliminó la fuga de float), pero
+    // esta guarda es la última línea de defensa: si algún carril futuro
+    // vuelve a filtrar un residuo sub-centavo (p. ej. 3900.0000000000005), el
+    // redondeo a 2 decimales lo absorbe antes de comparar contra el saldo —
+    // que sale de columnas `Decimal(12,2)` y siempre está exacto a centavos.
+    const note_total_cents = note_total.toDecimalPlaces(
+      2,
+      Prisma.Decimal.ROUND_HALF_UP,
+    );
+    if (note_total_cents.lessThanOrEqualTo(remaining)) return;
 
     throw new VendixHttpException(
       ErrorCodes.INVOICING_CREDIT_NOTE_001,
-      `La nota crédito de ${note_total.toString()} excede el saldo acreditable de la factura ${parent.invoice_number}: ` +
+      `La nota crédito de ${note_total_cents.toString()} excede el saldo acreditable de la factura ${parent.invoice_number}: ` +
         `de ${parent_total.toString()} facturados ya hay ${already_credited.toString()} acreditados en ${prior_notes.length} nota(s) aceptada(s), ` +
         `así que quedan ${remaining.toString()}. Emite la nota por ese saldo o menos.`,
       {
@@ -1177,7 +1403,7 @@ export class CreditNotesService {
         parent_total: parent_total.toString(),
         already_credited: already_credited.toString(),
         remaining: remaining.toString(),
-        attempted: note_total.toString(),
+        attempted: note_total_cents.toString(),
         accepted_note_ids: prior_notes.map((note) => note.id),
       },
     );
@@ -1271,6 +1497,19 @@ export interface DerivedPartialNoteLine {
   tax_amount: Prisma.Decimal;
   total_amount: Prisma.Decimal;
   is_inclusive: boolean;
+  /**
+   * F-INC6 — precio unitario en FORMA BASE (nunca bruto), a la MISMA escala
+   * que el `unit_price` de entrada (mismo divisor que la gemela): lo que
+   * `invoice_items.unit_price` debe persistir, sea o no inclusiva la línea
+   * de origen. Back-solve: `(base + descuento) × divisor / cantidad` — para
+   * una línea NO inclusiva esto es una identidad (no-op); para una inclusiva
+   * despoja el impuesto que antes quedaba mezclado en el bruto persistido.
+   */
+  unit_price: Prisma.Decimal;
+  /** Snapshot de la gemela, propagado tal cual (ver `invoice_items` schema). */
+  unit_code: string | null;
+  price_unit_quantity: number | null;
+  stock_units_consumed: number | null;
 }
 
 /**
@@ -1350,6 +1589,12 @@ export function derivePartialNoteLinesViaKernel(
     quantity?: Prisma.Decimal | number | null;
     unit_price?: Prisma.Decimal | number | null;
     discount_amount?: Prisma.Decimal | number | null;
+    // F-INC6 — snapshot a propagar tal cual a la línea de la nota, y
+    // `total_amount` para que `twinIsGenuinelyInclusive` pueda leer la cuota
+    // YA declarada de la gemela sin depender de que venga en `tax_amount`.
+    total_amount?: Prisma.Decimal | number | null;
+    unit_code?: string | null;
+    stock_units_consumed?: number | null;
   }>,
   invoice_taxes: Array<{
     tax_rate_id: number | null;
@@ -1369,6 +1614,7 @@ export function derivePartialNoteLinesViaKernel(
     taxable_amount: number;
     tax_amount: number;
     tax_type: string | null;
+    line_index?: number;
   }>;
   lines: DerivedPartialNoteLine[];
   totals: {
@@ -1434,15 +1680,23 @@ export function derivePartialNoteLinesViaKernel(
     // presentación en factura sin impuestos no vale 12× por omitir N3.
     if (schemes.length === 0 && claimed.equals(0)) {
       const zero_lines = items.map((item) => {
-        const base = new Prisma.Decimal(item.quantity)
+        const match = match_related(item);
+        const divisor = divisor_for(item);
+        const quantity = new Prisma.Decimal(item.quantity);
+        const discount = new Prisma.Decimal(item.discount_amount || 0);
+        const base = quantity
           .times(new Prisma.Decimal(item.unit_price))
-          .dividedBy(divisor_for(item))
-          .minus(new Prisma.Decimal(item.discount_amount || 0));
+          .dividedBy(divisor)
+          .minus(discount);
         return {
           base_amount: base,
           tax_amount: new Prisma.Decimal(0),
           total_amount: base,
           is_inclusive: false,
+          unit_price: backSolveUnitPrice(base, discount, divisor, quantity),
+          unit_code: match?.unit_code ?? null,
+          price_unit_quantity: divisor,
+          stock_units_consumed: match?.stock_units_consumed ?? null,
         };
       });
       return {
@@ -1504,6 +1758,12 @@ export function derivePartialNoteLinesViaKernel(
     const divisor = divisor_for(item);
     const gross = quantity.times(unit_price).dividedBy(divisor).minus(discount);
 
+    // F-INC6 — campos a propagar tal cual desde la gemela en TODOS los
+    // caminos de retorno de esta línea (exenta, N1, o kernel), y el helper
+    // que reconstruye `unit_price` en forma BASE en cada uno.
+    const twin_unit_code = match?.unit_code ?? null;
+    const twin_stock_units_consumed = match?.stock_units_consumed ?? null;
+
     // Carril mixto: la gemela de esta línea es exenta ⇒ sin cuota.
     const line_scheme = scheme_of(index);
     if (line_scheme === null) {
@@ -1512,19 +1772,34 @@ export function derivePartialNoteLinesViaKernel(
         tax_amount: new Prisma.Decimal(0),
         total_amount: gross,
         is_inclusive: false,
+        unit_price: backSolveUnitPrice(gross, discount, divisor, quantity),
+        unit_code: twin_unit_code,
+        price_unit_quantity: divisor,
+        stock_units_consumed: twin_stock_units_consumed,
       };
     }
     const { scheme_type, rate_basis, scheme_rate } = scheme_params(line_scheme);
 
     // Herencia de inclusividad del motor: flag de línea ⇒ primer impuesto
     // del DTO ⇒ línea de la factura (misma pareja, o la única) ⇒ adicional.
+    //
+    // F-INC6 — el último eslabón YA NO hereda el flag a ciegas
+    // (`match?.is_inclusive === true`). Una factura anterior a `8f8427f4b`
+    // puede tener `is_inclusive=true` persistido junto a un `unit_price` YA
+    // en forma base (el bug que esa fecha corrigió; el dato viejo queda
+    // intacto). Heredar el flag re-despeja un impuesto que la factura
+    // original nunca cobró encima de su `unit_price`. `twinIsGenuinelyInclusive`
+    // reconoce la forma base igual que `judgeDraftLineSnapshot`
+    // (`invoice-flow.service.ts`): si el bruto de la gemela ya coincide con
+    // su `total - cuota` declarados, el `unit_price` YA es base pese al
+    // flag, y la línea se trata como NO inclusiva.
     let is_inclusive: boolean | undefined;
     if (item.is_inclusive === true) is_inclusive = true;
     else if (item.is_inclusive === false) is_inclusive = false;
     else if (item.taxes?.[0]?.is_inclusive === true) is_inclusive = true;
     else if (item.taxes?.[0]?.is_inclusive === false) is_inclusive = false;
     if (is_inclusive === undefined) {
-      is_inclusive = match?.is_inclusive === true;
+      is_inclusive = twinIsGenuinelyInclusive(match, divisor);
     }
 
     // N1 (round 2): línea exenta (su gemela de factura no tiene impuesto y
@@ -1547,6 +1822,10 @@ export function derivePartialNoteLinesViaKernel(
         tax_amount: new Prisma.Decimal(0),
         total_amount: gross,
         is_inclusive: false,
+        unit_price: backSolveUnitPrice(gross, discount, divisor, quantity),
+        unit_code: twin_unit_code,
+        price_unit_quantity: divisor,
+        stock_units_consumed: twin_stock_units_consumed,
       };
     }
 
@@ -1611,15 +1890,23 @@ export function derivePartialNoteLinesViaKernel(
           `client tax_amount=${claimed_tax.toString()} replaced by kernel quota=${quota.toString()} (server wins)`,
       );
     }
+    const final_base = is_inclusive ? kernel.base.minus(delta) : kernel.base;
     return {
       // Inclusiva: el total queda (es el bruto) y la base absorbe el delta.
       // Adicional: la base queda y el total lo suma.
-      base_amount: is_inclusive ? kernel.base.minus(delta) : kernel.base,
+      base_amount: final_base,
       tax_amount: quota,
       total_amount: is_inclusive
         ? kernel.closed_total
         : kernel.closed_total.plus(delta),
       is_inclusive,
+      // F-INC6 — `unit_price` back-solved de la base FINAL (post full-twin-
+      // quota si aplicó): así la línea persistida es coherente con su propio
+      // `tax_amount`/`total_amount`, nunca con un intermedio del kernel.
+      unit_price: backSolveUnitPrice(final_base, discount, divisor, quantity),
+      unit_code: twin_unit_code,
+      price_unit_quantity: divisor,
+      stock_units_consumed: twin_stock_units_consumed,
     };
   });
 
@@ -1642,34 +1929,30 @@ export function derivePartialNoteLinesViaKernel(
 
   if (totals.tax.isZero()) return { taxes: [], lines, totals };
   if (per_line_schemes) {
-    // Una fila por tributo (tipo + tarifa), con la base y la cuota de SUS
-    // líneas: cada fila cuadra base × tarifa y Σ filas = impuesto de cabecera.
-    const groups = new Map<
-      string,
-      { scheme: Scheme; base: Prisma.Decimal; tax: Prisma.Decimal }
-    >();
-    lines.forEach((line, index) => {
-      const line_scheme = per_line_schemes[index];
-      if (line_scheme === null) return;
-      const key = schemeKey(line_scheme);
-      const group = groups.get(key) ?? {
-        scheme: line_scheme,
-        base: new Prisma.Decimal(0),
-        tax: new Prisma.Decimal(0),
-      };
-      group.base = group.base.plus(line.base_amount);
-      group.tax = group.tax.plus(line.tax_amount);
-      groups.set(key, group);
-    });
+    // F-INC6 — UNA fila POR LÍNEA gravada (nunca agregada por tributo): el
+    // schema de `invoice_taxes.invoice_item_id` documenta que un documento
+    // con ≥2 tributos exige una fila por (línea × tributo), todas ligadas,
+    // porque el emisor UBL arma el desglose POR LÍNEA leyendo ese vínculo —
+    // agregar por tributo aquí dejaba la nota sin ese vínculo y el emisor
+    // heredaba a TODA línea el primer tributo del documento. `line_index` es
+    // la posición en `lines`/`items`; el llamador la traduce al
+    // `invoice_item_id` recién creado en esa misma posición.
     return {
-      taxes: Array.from(groups.values()).map((group) => ({
-        tax_rate_id: group.scheme.tax_rate_id ?? undefined,
-        tax_name: group.scheme.tax_name,
-        tax_rate: Number(group.scheme.tax_rate),
-        taxable_amount: group.base.toNumber(),
-        tax_amount: group.tax.toNumber(),
-        tax_type: group.scheme.tax_type,
-      })),
+      taxes: lines
+        .map((line, index) => {
+          const line_scheme = per_line_schemes[index];
+          if (line_scheme === null) return null;
+          return {
+            tax_rate_id: line_scheme.tax_rate_id ?? undefined,
+            tax_name: line_scheme.tax_name,
+            tax_rate: Number(line_scheme.tax_rate),
+            taxable_amount: line.base_amount.toNumber(),
+            tax_amount: line.tax_amount.toNumber(),
+            tax_type: line_scheme.tax_type,
+            line_index: index,
+          };
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null),
       lines,
       totals,
     };
@@ -1701,6 +1984,77 @@ const decimalOrNull = (value: unknown): Prisma.Decimal | null => {
     return null;
   }
 };
+
+/**
+ * F-INC6 — reconstruye `unit_price` en forma BASE, a la MISMA escala que el
+ * `unit_price` de entrada (mismo divisor que la gemela):
+ * `(base + descuento) × divisor / cantidad`. Para una línea NO inclusiva es
+ * una identidad (no-op: `base = qty×unit_price/divisor - descuento` implica
+ * el resultado es el `unit_price` de entrada sin cambios); para una
+ * genuinamente inclusiva despoja el impuesto que el bruto de entrada llevaba
+ * mezclado. `quantity` cero es defensivo (no debería ocurrir: la línea ya
+ * pasó validación) — devuelve la base tal cual en vez de dividir por cero.
+ */
+function backSolveUnitPrice(
+  base_amount: Prisma.Decimal,
+  discount: Prisma.Decimal,
+  divisor: number,
+  quantity: Prisma.Decimal,
+): Prisma.Decimal {
+  if (quantity.isZero()) return base_amount;
+  return base_amount.plus(discount).times(divisor).dividedBy(quantity);
+}
+
+/**
+ * F-INC6 — decide si la INCLUSIVIDAD heredada de la gemela es genuina o un
+ * artefacto histórico. Una factura anterior a `8f8427f4b` (2026-09-22) puede
+ * tener `invoice_items.is_inclusive=true` persistido junto a un `unit_price`
+ * YA en forma base — el bug que esa fecha corrigió, con el dato viejo
+ * intacto. Heredar el flag a ciegas re-despeja un impuesto que la factura
+ * original nunca cobró encima de su `unit_price`, duplicándolo en la nota.
+ *
+ * Reimplementación LOCAL y reducida del mismo criterio de
+ * `judgeDraftLineSnapshot` (`invoice-flow.service.ts`, archivo fuera de
+ * alcance): si el bruto de la gemela (misma escala, mismo divisor que esta
+ * línea) ya coincide con su `total_amount - tax_amount` declarados, el
+ * `unit_price` de la gemela YA es base pese al flag, y la línea se trata
+ * como NO inclusiva. Sin `tax_amount`/`total_amount` con qué juzgar (fixtures
+ * antiguos, o gemela sin esos campos) se confía en el flag como siempre —
+ * `true` — para no introducir una regresión sobre el comportamiento previo.
+ */
+function twinIsGenuinelyInclusive(
+  match:
+    | {
+        is_inclusive: boolean | null;
+        unit_price?: Prisma.Decimal | number | null;
+        quantity?: Prisma.Decimal | number | null;
+        discount_amount?: Prisma.Decimal | number | null;
+        tax_amount?: Prisma.Decimal | number | null;
+        total_amount?: Prisma.Decimal | number | null;
+      }
+    | undefined,
+  divisor: number,
+): boolean {
+  if (!match || match.is_inclusive !== true) return false;
+  const declared_quota = decimalOrNull(match.tax_amount);
+  const declared_total = decimalOrNull(match.total_amount);
+  if (
+    declared_quota === null ||
+    declared_total === null ||
+    !declared_quota.greaterThan(0)
+  ) {
+    return true;
+  }
+  const declared_base = declared_total.minus(declared_quota);
+  const quantity = decimalOrNull(match.quantity) ?? new Prisma.Decimal(1);
+  const unit_price = decimalOrNull(match.unit_price) ?? new Prisma.Decimal(0);
+  const discount =
+    decimalOrNull(match.discount_amount) ?? new Prisma.Decimal(0);
+  const gross = quantity.times(unit_price).dividedBy(divisor).minus(discount);
+  const round2 = (d: Prisma.Decimal) =>
+    d.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  return !round2(gross).equals(round2(declared_base));
+}
 
 /**
  * Cuota persistida de la línea gemela cuando la nota la acredita COMPLETA:

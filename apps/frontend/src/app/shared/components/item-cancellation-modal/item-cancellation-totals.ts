@@ -107,13 +107,13 @@ export function previewItemCancellation(
 
 /**
  * Destino del modal → `cancellation_type` canónico del seam de cancelación.
- * Sin disparo a cocina no hay nada que clasificar: se omite y el backend
- * resuelve `before_fire` por `inventory_consumed_at_fire`.
+ * Sin decisión de destino (plato sin disparar o ticket aún pendiente) se
+ * omite; el backend resuelve `before_fire` o retorno automático según KDS.
  */
 export function cancellationTypeForDestination(
   destination: ItemCancellationDestination,
-  preparedFired: boolean,
+  needsDisposition: boolean,
 ): 'after_fire_reused' | 'after_fire_waste' | undefined {
-  if (!preparedFired) return undefined;
+  if (!needsDisposition) return undefined;
   return destination === 'reuse' ? 'after_fire_reused' : 'after_fire_waste';
 }

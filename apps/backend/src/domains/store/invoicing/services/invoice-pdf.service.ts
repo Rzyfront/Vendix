@@ -6,6 +6,7 @@ import { RequestContextService } from '../../../../common/context/request-contex
 import { S3Service } from '../../../../common/services/s3.service';
 import { QrService } from '../../../../common/services/qr.service';
 import { InvoicePdfBuilder, InvoicePdfData } from './invoice-pdf.builder';
+import { resolveAcquirerIdentity } from '../utils/acquirer-identity.resolver';
 import {
   PRINT_FORMATS,
   PrintFormat,
@@ -16,6 +17,11 @@ import {
 } from '@common/helpers/fiscal-identity.helper';
 import { RESOLUTION_PUBLIC_SELECT } from '../utils/technical-key.util';
 import { resolveFiscalQualitiesLine } from '../../print-formats/services/fiscal-issuer-identity';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  formatStoreDate,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
 
 /**
  * El PDF no publica la fila de la resolución —devuelve un buffer—, así que esto
@@ -64,7 +70,10 @@ const INVOICE_PDF_INCLUDE = {
       id: true,
       first_name: true,
       last_name: true,
+      legal_name: true,
       email: true,
+      document_type: true,
+      verification_digit: true,
     },
   },
 };
@@ -127,6 +136,9 @@ export class InvoicePdfService {
 
     const org = invoice.organization;
     const store = invoice.store;
+    // B17 — `formatDate` mostraba las fechas con los componentes LOCALES del
+    // contenedor (`d.getDate()`), no la zona de la tienda.
+    const tz = await resolveStoreTimezone(this.prisma, store.id);
 
     // DOCUMENTO ELECTRÓNICO vs RECIBO INTERNO — decide la severidad del emisor.
     //
@@ -173,6 +185,16 @@ export class InvoicePdfService {
         ? `${customer.first_name} ${customer.last_name}`
         : 'Consumidor Final');
 
+    // Identidad efectiva del adquiriente — MISMA función y MISMA precedencia
+    // (ficha → snapshot) que `invoice-flow.service.ts` usa para validar y
+    // emitir. Antes el PDF sólo sabía imprimir «NIT/CC» a secas, sin el tipo
+    // real ni el DV, e ignoraba el correo persistido en el snapshot cuando la
+    // factura no tenía `customer` vinculado.
+    const acquirer_identity = resolveAcquirerIdentity({
+      snapshot: invoice,
+      customer: customer ?? undefined,
+    });
+
     const resolution = invoice.resolution;
 
     const pdf_data: InvoicePdfData = {
@@ -189,37 +211,41 @@ export class InvoicePdfService {
 
       // Paper format configured for this store.
       format: this.resolveInvoiceFormat(store),
+      // B17 — sello "Documento generado el ..." del pie, en la zona de la tienda.
+      tz,
 
       // Resolucion
       resolution_number: resolution?.resolution_number,
       resolution_date: resolution?.resolution_date
-        ? this.formatDate(resolution.resolution_date)
+        ? this.formatDate(resolution.resolution_date, tz)
         : undefined,
       resolution_range_from: resolution?.range_from,
       resolution_range_to: resolution?.range_to,
       resolution_prefix: resolution?.prefix,
       resolution_valid_from: resolution?.valid_from
-        ? this.formatDate(resolution.valid_from)
+        ? this.formatDate(resolution.valid_from, tz)
         : undefined,
       resolution_valid_to: resolution?.valid_to
-        ? this.formatDate(resolution.valid_to)
+        ? this.formatDate(resolution.valid_to, tz)
         : undefined,
 
       // Cliente
       customer_name,
       customer_tax_id: invoice.customer_tax_id || undefined,
+      customer_document_type: acquirer_identity.document_type_literal ?? undefined,
+      customer_verification_digit: acquirer_identity.verification_digit ?? undefined,
       customer_address,
-      customer_email: customer?.email || undefined,
+      customer_email: acquirer_identity.email ?? undefined,
 
       // Factura
       invoice_number: invoice.invoice_number,
       invoice_type: invoice.invoice_type,
-      issue_date: this.formatDate(invoice.issue_date),
+      issue_date: this.formatDate(invoice.issue_date, tz),
       due_date: invoice.due_date
-        ? this.formatDate(invoice.due_date)
+        ? this.formatDate(invoice.due_date, tz)
         : undefined,
       payment_date: invoice.payment_date
-        ? this.formatDate(invoice.payment_date)
+        ? this.formatDate(invoice.payment_date, tz)
         : undefined,
       currency: invoice.currency || 'COP',
       notes: invoice.notes || undefined,
@@ -639,13 +665,16 @@ export class InvoicePdfService {
     return PRINT_FORMATS.includes(format) ? format : 'letter';
   }
 
-  /** Formats a Date as DD/MM/YYYY. */
-  private formatDate(date: Date): string {
-    const d = new Date(date);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
+  /**
+   * Formats a Date as DD/MM/YYYY in the store's timezone (B17).
+   *
+   * Used to read `d.getDate()`/`getMonth()`/`getFullYear()` — the
+   * CONTAINER's local components, not the store's. `resolveStoreTimezone`
+   * defaults to `DEFAULT_STORE_TIMEZONE` when no `tz` is passed (the
+   * `previewPdf()` sample path has no invoice/store to resolve one from).
+   */
+  private formatDate(date: Date, tz?: string): string {
+    return formatStoreDate(new Date(date), tz ?? DEFAULT_STORE_TIMEZONE);
   }
 
   /** Extracts a displayable address from the customer_address JSON field. */

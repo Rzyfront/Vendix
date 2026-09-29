@@ -26,7 +26,6 @@ import { createReportTools } from './tools/domains/reports.tools';
 import { AIAgentProcessor } from './queue/processors/ai-agent.processor';
 import { S3Module } from '../common/services/s3.module';
 import { S3Service } from '../common/services/s3.service';
-import { StorePrismaService } from '../prisma/services/store-prisma.service';
 
 /**
  * Tool registration is decentralized: each domain module registers its own
@@ -107,7 +106,6 @@ export class AIEngineModule implements OnModuleInit {
     private readonly capabilities: CapabilityRegistryService,
     private readonly toolbox: AiToolboxService,
     private readonly attachments: VexiAttachmentsService,
-    private readonly storePrisma: StorePrismaService,
     private readonly s3: S3Service,
   ) {}
 
@@ -129,7 +127,6 @@ export class AIEngineModule implements OnModuleInit {
       createAiToolboxTools({
         toolbox: this.toolbox,
         attachments: this.attachments,
-        prisma: this.storePrisma,
         s3: this.s3,
       }),
     );

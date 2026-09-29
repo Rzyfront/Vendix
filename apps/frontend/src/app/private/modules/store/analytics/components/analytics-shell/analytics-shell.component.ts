@@ -113,6 +113,9 @@ export class AnalyticsShellComponent {
     '/admin/analytics/dispatch/summary': '/admin/reports/dispatch',
     '/admin/analytics/dispatch/fulfillment': '/admin/reports/dispatch',
     '/admin/analytics/dispatch/collections': '/admin/reports/dispatch',
+    // Payments — Paso 4 PLAN-reporte-analitica-pagos-2026-09-28
+    '/admin/analytics/payments/overview': '/admin/reports/payments/payments-list',
+    '/admin/analytics/payments/by-method': '/admin/reports/payments/payments-list',
   };
 
   onActivate(componentRef: any): void {

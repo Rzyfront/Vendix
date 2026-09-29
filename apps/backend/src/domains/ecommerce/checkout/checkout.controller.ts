@@ -16,7 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { plainToInstance } from 'class-transformer';
 import { validateOrReject, ValidationError } from 'class-validator';
 import { CheckoutService } from './checkout.service';
-import { CheckoutDto } from './dto/checkout.dto';
+import { CheckoutDto, CouponPreviewDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { StoreAvailabilityGuard } from './guards/store-availability.guard';
@@ -54,6 +54,19 @@ export class CheckoutController {
   @OptionalAuth()
   async getDeliveryOptions() {
     const data = await this.checkout_service.getDeliveryOptions();
+    return { success: true, data };
+  }
+
+  /**
+   * Vista previa del descuento de un cupón (QUI-883). Solo lectura: corre la
+   * misma validación que el confirm, con precios de servidor. Público con
+   * `@OptionalAuth()` (invitados también ven su descuento); el tenant lo
+   * resuelve `DomainResolverMiddleware`.
+   */
+  @Post('coupon-preview')
+  @OptionalAuth()
+  async previewCoupon(@Body() dto: CouponPreviewDto) {
+    const data = await this.checkout_service.previewCouponDiscount(dto);
     return { success: true, data };
   }
 

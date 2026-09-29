@@ -14,10 +14,28 @@
   margin-bottom: 1rem;
 }
 
+/* Positioning context for the skeleton/error overlays below, independent of
+   the hint's slot: the hint (`.amp-hint`) can render BEFORE this wrapper
+   (`hintPosition() === 'top'`) without the overlays (`inset: 0`, absolute)
+   sliding up to cover the hint instead of the map underneath. */
+.amp-map-wrap {
+  position: relative;
+}
+
+/* `--amp-map-height`/`--amp-map-aspect-ratio` (owner directive, 2026-09-27):
+   expuestas como variables CSS heredadas en vez de un input, porque un
+   consumidor (checkout) necesita pisar el alto fijo del mapa SIN afectar el
+   default de los otros consumidores (POS `app-address-form-fields`,
+   customer-modal, dispatch-note editor) — y porque este componente usa
+   `ViewEncapsulation.None`, las variables CSS cruzan igual el limite hacia el
+   arbol interno sin depender de selectores con atributo de encapsulación.
+   Ningun otro consumidor las setea, así que su fallback (240px / auto) no
+   cambia. */
 .amp-map {
   position: relative;
   width: 100%;
-  height: 240px;
+  height: var(--amp-map-height, 240px);
+  aspect-ratio: var(--amp-map-aspect-ratio, auto);
   border-radius: var(--radius-lg, 12px);
   overflow: hidden;
   border: 1px solid var(--color-border, #e5e7eb);
@@ -31,7 +49,8 @@
   position: absolute;
   inset: 0;
   bottom: auto;
-  height: 240px;
+  height: var(--amp-map-height, 240px);
+  aspect-ratio: var(--amp-map-aspect-ratio, auto);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -70,7 +89,8 @@
   position: absolute;
   inset: 0;
   bottom: auto;
-  height: 240px;
+  height: var(--amp-map-height, 240px);
+  aspect-ratio: var(--amp-map-aspect-ratio, auto);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -111,6 +131,10 @@
   border: 1px solid #16a34a;
   border-left-width: 3px;
   border-radius: var(--radius-md, 8px);
+  /* Owner directive (2026-09-27): fades in with a slight lift, same rhythm as
+     the other map-column indicators (chip/warning/badge) it now shares a slot
+     with when `hintPosition() === 'top'`. */
+  animation: amp-hint-in 180ms ease-out;
 }
 
 .amp-hint-icon {
@@ -118,6 +142,23 @@
   width: 18px;
   height: 18px;
   color: #16a34a;
+}
+
+@keyframes amp-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .amp-hint {
+    animation: none;
+  }
 }
 
 /* OSM/OpenFreeMap attribution is REQUIRED by the OpenStreetMap ODbL license, so
@@ -176,7 +217,10 @@
   .amp-map,
   .amp-skeleton,
   .amp-error {
-    height: 40vh;
-    height: 40dvh;
+    // Mismo mecanismo de variable CSS que arriba: si un consumidor fijó
+    // `--amp-map-height` (p. ej. checkout con `auto` + aspect-ratio 1:1),
+    // el override gana igual en mobile; si no, cae al 40dvh de siempre.
+    height: var(--amp-map-height, 40vh);
+    height: var(--amp-map-height, 40dvh);
   }
 }

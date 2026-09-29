@@ -44,6 +44,7 @@ describe('OrderShippingTaxRepairService', () => {
     prisma = {
       orders: { findFirst: jest.fn(), updateMany: jest.fn() },
       invoices: { findFirst: jest.fn(), findMany: jest.fn() },
+      payments: { findMany: jest.fn() },
       accounting_entries: { findFirst: jest.fn() },
     };
     base = { tax_rates: { findFirst: jest.fn() } };
@@ -56,6 +57,7 @@ describe('OrderShippingTaxRepairService', () => {
     jest.spyOn((service as any).logger, 'log').mockImplementation(() => undefined);
     prisma.invoices.findFirst.mockResolvedValue(null);
     prisma.invoices.findMany.mockResolvedValue([]);
+    prisma.payments.findMany.mockResolvedValue([]);
     prisma.accounting_entries.findFirst.mockResolvedValue(null);
     prisma.orders.updateMany.mockResolvedValue({ count: 1 });
   });
@@ -174,10 +176,71 @@ describe('OrderShippingTaxRepairService', () => {
       });
       expect(prisma.orders.updateMany).not.toHaveBeenCalled();
     });
+
+    it('Paso 6: IVA 19% coherente (amount < shipping_cost) ⇒ ok, revalida con resolveInvoiceShippingTax', async () => {
+      const iva19Rate = {
+        id: 71,
+        name: 'IVA 19%',
+        rate: 0.19,
+        tax_categories: { tax_type: 'iva' },
+      };
+      prisma.orders.findFirst.mockResolvedValue(
+        deliveredOrder({
+          shipping_tax_rate_id: 71,
+          shipping_tax_name: null,
+          shipping_tax_type: null,
+          shipping_tax_rate: null,
+          shipping_cost: 15000,
+          shipping_tax_amount: 2400, // < shipping_cost: coherente
+        }),
+      );
+      base.tax_rates.findFirst.mockResolvedValue(iva19Rate);
+
+      const result = await service.repair(1044, {
+        action: 'complete_rate',
+        reason: 'copia incompleta',
+      } as RepairShippingTaxDto);
+
+      expect(prisma.orders.updateMany).toHaveBeenCalledWith({
+        where: { id: 1044, store_id: 3 },
+        data: {
+          shipping_tax_name: 'IVA 19%',
+          shipping_tax_type: 'iva',
+          shipping_tax_rate: 0.19,
+        },
+      });
+      expect(result.shipping_tax.shipping_tax_type).toBe('iva');
+      expect(auditService.logCustom).toHaveBeenCalled();
+    });
+
+    it('Paso 6: shipping_tax_amount >= shipping_cost ⇒ 409 amount_not_below_cost, updateMany NO se llama', async () => {
+      prisma.orders.findFirst.mockResolvedValue(
+        deliveredOrder({
+          shipping_cost: 15000,
+          shipping_tax_amount: 15000, // >= shipping_cost: incoherente
+        }),
+      );
+      base.tax_rates.findFirst.mockResolvedValue(inc8Rate);
+
+      await expect(
+        service.repair(1044, {
+          action: 'complete_rate',
+          reason: 'copia incompleta',
+        } as RepairShippingTaxDto),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: expect.objectContaining({
+          error_code: 'ORD_SHIPPING_TAX_REPAIR_BLOCKED_001',
+          details: expect.objectContaining({ reason: 'amount_not_below_cost' }),
+        }),
+      });
+      expect(prisma.orders.updateMany).not.toHaveBeenCalled();
+      expect(auditService.logCustom).not.toHaveBeenCalled();
+    });
   });
 
   describe('clear', () => {
-    it('sin facturas ⇒ copia vacía OK', async () => {
+    it('sin asientos (ni facturas ni pagos) ⇒ devuelve la copia vacía; se consulta credit_sale.created por id de orden y status posted', async () => {
       prisma.orders.findFirst.mockResolvedValue(deliveredOrder());
 
       const result = await service.repair(1044, {
@@ -205,9 +268,18 @@ describe('OrderShippingTaxRepairService', () => {
       expect(result.shipping_cost).toBe(15000);
       expect(result.grand_total).toBe(115000);
       expect(auditService.logCustom).toHaveBeenCalled();
+      // El filtro por posted se respeta incluso con OR de un solo origen
+      // (sin invoice_ids ni payment_ids no hay facturas/pagos que agregar).
+      expect(prisma.accounting_entries.findFirst).toHaveBeenCalledWith({
+        where: {
+          status: 'posted',
+          OR: [{ source_type: 'credit_sale.created', source_id: 1044 }],
+        },
+        select: { id: true, entry_number: true, source_type: true },
+      });
     });
 
-    it('con borrador sin asiento ⇒ copia vacía OK', async () => {
+    it('con factura de venta (borrador) sin asiento posted ⇒ copia vacía OK; agrega la rama invoice.validated', async () => {
       prisma.orders.findFirst.mockResolvedValue(deliveredOrder());
       prisma.invoices.findMany.mockResolvedValue([{ id: 5 }]);
       prisma.accounting_entries.findFirst.mockResolvedValue(null);
@@ -219,21 +291,51 @@ describe('OrderShippingTaxRepairService', () => {
 
       expect(prisma.accounting_entries.findFirst).toHaveBeenCalledWith({
         where: {
-          source_type: 'invoice.validated',
-          source_id: { in: [5] },
           status: 'posted',
+          OR: [
+            { source_type: 'credit_sale.created', source_id: 1044 },
+            { source_type: 'invoice.validated', source_id: { in: [5] } },
+          ],
         },
-        select: { id: true, entry_number: true },
+        select: { id: true, entry_number: true, source_type: true },
       });
       expect(prisma.orders.updateMany).toHaveBeenCalled();
     });
 
-    it('con asiento de venta contabilizado ⇒ 409 (sin mutar ni auditar)', async () => {
+    it('con pagos de la orden sin asiento posted ⇒ copia vacía OK; agrega la rama payment.received', async () => {
+      prisma.orders.findFirst.mockResolvedValue(deliveredOrder());
+      prisma.payments.findMany.mockResolvedValue([{ id: 501 }, { id: 502 }]);
+      prisma.accounting_entries.findFirst.mockResolvedValue(null);
+
+      await service.repair(1044, {
+        action: 'clear',
+        reason: 'impuesto no aplica',
+      } as RepairShippingTaxDto);
+
+      expect(prisma.payments.findMany).toHaveBeenCalledWith({
+        where: { order_id: 1044 },
+        select: { id: true },
+      });
+      expect(prisma.accounting_entries.findFirst).toHaveBeenCalledWith({
+        where: {
+          status: 'posted',
+          OR: [
+            { source_type: 'credit_sale.created', source_id: 1044 },
+            { source_type: 'payment.received', source_id: { in: [501, 502] } },
+          ],
+        },
+        select: { id: true, entry_number: true, source_type: true },
+      });
+      expect(prisma.orders.updateMany).toHaveBeenCalled();
+    });
+
+    it('asiento posted con origen invoice.validated ⇒ 409 (sin mutar ni auditar)', async () => {
       prisma.orders.findFirst.mockResolvedValue(deliveredOrder());
       prisma.invoices.findMany.mockResolvedValue([{ id: 5 }]);
       prisma.accounting_entries.findFirst.mockResolvedValue({
         id: 9,
         entry_number: 'AE-2026-000123',
+        source_type: 'invoice.validated',
       });
 
       await expect(
@@ -245,6 +347,62 @@ describe('OrderShippingTaxRepairService', () => {
         status: 409,
         response: expect.objectContaining({
           error_code: 'ORD_SHIPPING_TAX_REPAIR_BLOCKED_001',
+          details: expect.objectContaining({
+            source_type: 'invoice.validated',
+          }),
+        }),
+      });
+      expect(prisma.orders.updateMany).not.toHaveBeenCalled();
+      expect(auditService.logCustom).not.toHaveBeenCalled();
+    });
+
+    it('asiento posted con origen payment.received (pago POS sin factura) ⇒ 409 (sin mutar ni auditar)', async () => {
+      prisma.orders.findFirst.mockResolvedValue(deliveredOrder());
+      prisma.payments.findMany.mockResolvedValue([{ id: 501 }]);
+      prisma.accounting_entries.findFirst.mockResolvedValue({
+        id: 12,
+        entry_number: 'AE-2026-000200',
+        source_type: 'payment.received',
+      });
+
+      await expect(
+        service.repair(1044, {
+          action: 'clear',
+          reason: 'impuesto no aplica',
+        } as RepairShippingTaxDto),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: expect.objectContaining({
+          error_code: 'ORD_SHIPPING_TAX_REPAIR_BLOCKED_001',
+          details: expect.objectContaining({
+            source_type: 'payment.received',
+          }),
+        }),
+      });
+      expect(prisma.orders.updateMany).not.toHaveBeenCalled();
+      expect(auditService.logCustom).not.toHaveBeenCalled();
+    });
+
+    it('asiento posted con origen credit_sale.created (venta a crédito) ⇒ 409 (sin mutar ni auditar)', async () => {
+      prisma.orders.findFirst.mockResolvedValue(deliveredOrder());
+      prisma.accounting_entries.findFirst.mockResolvedValue({
+        id: 13,
+        entry_number: 'AE-2026-000210',
+        source_type: 'credit_sale.created',
+      });
+
+      await expect(
+        service.repair(1044, {
+          action: 'clear',
+          reason: 'impuesto no aplica',
+        } as RepairShippingTaxDto),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: expect.objectContaining({
+          error_code: 'ORD_SHIPPING_TAX_REPAIR_BLOCKED_001',
+          details: expect.objectContaining({
+            source_type: 'credit_sale.created',
+          }),
         }),
       });
       expect(prisma.orders.updateMany).not.toHaveBeenCalled();

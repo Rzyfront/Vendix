@@ -530,6 +530,9 @@ import {
                               {{ item.quantity }} {{ item.quantity === 1 ? 'paquete' : 'paquetes' }}
                             </span>
                           }
+                          @if (getOversellWarning(item); as warning) {
+                            <span class="text-[10px] font-medium text-amber-700" role="status">{{ warning }}</span>
+                          }
                         </div>
                       }
                     </div>
@@ -2142,13 +2145,18 @@ export class PosCartModalComponent {
     return !!item.is_package_unit && Number(item.units_per_package ?? 0) > 1;
   }
 
-  getQuantityMax(item: CartItem): number {
+  getQuantityMax(item: CartItem): number | null {
+    if (this.cartService.allowNegativeStock()) return null;
     if (item.itemType === 'custom' || item.product.track_inventory === false) {
       return 999;
     }
     const availableStock = this.getAvailableStockForItem(item);
     const requiredPerUnit = this.getRequiredStockPerUnit(item);
     return Math.max(0, Math.floor(availableStock / requiredPerUnit));
+  }
+
+  getOversellWarning(item: CartItem): string | null {
+    return this.cartService.getOversellWarningForItem(item);
   }
 
   private getAvailableStockForItem(item: CartItem): number {

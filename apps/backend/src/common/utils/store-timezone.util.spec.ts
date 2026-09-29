@@ -11,6 +11,8 @@ import {
   localOffsetString,
   localDateString,
   localTimeString,
+  fiscalIssueDate,
+  fiscalIssueTime,
 } from './store-timezone.util';
 
 const BOGOTA = 'America/Bogota'; // UTC-5, no DST
@@ -400,6 +402,51 @@ describe('store-timezone.util', () => {
       const instant = new Date('2026-01-05T14:02:07Z');
       expect(localDateString(instant, BOGOTA)).toBe('2026-01-05');
       expect(localTimeString(instant, BOGOTA)).toBe('09:02:07-05:00');
+    });
+  });
+
+  // Step 8 (order-truth-and-invoice-tz-plan.md) — relocated from
+  // `InvoiceFlowService.formatIssueDate`/`formatIssueTime` so every reader of
+  // `cbc:IssueDate`/`cbc:IssueTime` (dian-events, invoice-delivery,
+  // fiscal-document.validator, invoicing.service) shares the SAME
+  // bifurcation: real time-of-day → convert to the store's civil day;
+  // exact UTC midnight → read the naive calendar date as-is, NEVER
+  // reconverted (doing so would roll a negative-offset store back a day).
+  describe('fiscalIssueDate / fiscalIssueTime', () => {
+    it('converts a genuine instant to the civil date/time of the store', () => {
+      const instant = new Date('2026-09-26T02:30:00Z');
+      expect(fiscalIssueDate(instant, BOGOTA)).toBe('2026-09-25');
+      expect(fiscalIssueTime(instant, BOGOTA)).toBe('21:30:00-05:00');
+    });
+
+    it('reads an exact-UTC-midnight value as the naive calendar date, never reconverted', () => {
+      const naive_date = new Date('2026-09-25T00:00:00Z');
+      expect(fiscalIssueDate(naive_date, BOGOTA)).toBe('2026-09-25');
+      // Sin timezone la lectura también es UTC cruda — no hay conversión posible.
+      expect(fiscalIssueDate(naive_date)).toBe('2026-09-25');
+    });
+
+    it('formatIssueTime honra la MISMA fecha civil de formatIssueDate para decidir si created_at es utilizable', () => {
+      // `value` es medianoche UTC exacta (fecha naive del 2026-09-25). Con
+      // `created_at` en la MISMA fecha civil, se usa su hora real.
+      const naive_date = new Date('2026-09-25T00:00:00Z');
+      const created_at = new Date('2026-09-25T14:02:07Z'); // 09:02:07 Bogotá
+      expect(fiscalIssueTime(naive_date, BOGOTA, created_at)).toBe(
+        '09:02:07-05:00',
+      );
+
+      // Con `created_at` en OTRA fecha civil (retroactiva), cae a
+      // medianoche + desfase de la fecha declarada, nunca a la hora de
+      // `created_at`.
+      const created_at_other_day = new Date('2026-09-26T14:02:07Z');
+      expect(
+        fiscalIssueTime(naive_date, BOGOTA, created_at_other_day),
+      ).toBe('00:00:00-05:00');
+    });
+
+    it('sin timezone, formatIssueDate mantiene la lectura UTC aunque el valor traiga hora real', () => {
+      const instant = new Date('2026-09-26T02:30:00Z');
+      expect(fiscalIssueDate(instant)).toBe('2026-09-26');
     });
   });
 });

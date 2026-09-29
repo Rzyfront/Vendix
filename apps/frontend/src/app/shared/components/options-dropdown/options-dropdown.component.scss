@@ -221,6 +221,48 @@
   margin: 0;
 }
 
+// Right side of the filters header: header pin + "Limpiar" side by side
+.dropdown-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+// Compact pin toggle in the filters header (same semantics as
+// `.filter-checkbox`, but inline next to "Limpiar")
+.header-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  cursor: pointer;
+  user-select: none;
+  padding: 0.375rem 0.5rem;
+  border-radius: var(--radius-sm);
+
+  input[type='checkbox'] {
+    width: 0.875rem;
+    height: 0.875rem;
+    margin: 0;
+    flex-shrink: 0;
+    accent-color: var(--color-primary);
+    cursor: pointer;
+
+    &:disabled {
+      cursor: not-allowed;
+    }
+  }
+
+  .header-pin-label {
+    font-size: var(--fs-xs);
+    color: var(--color-text-secondary);
+    transition: color var(--transition-fast) ease;
+  }
+
+  &:hover .header-pin-label {
+    color: var(--color-text-primary);
+  }
+}
+
 .clear-all-btn {
   display: inline-flex;
   align-items: center;
