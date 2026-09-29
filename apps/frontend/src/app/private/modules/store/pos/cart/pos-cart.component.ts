@@ -1312,7 +1312,7 @@ import {
 
     <!--
       CP-POS-SVC-PERF-001 / C.2 + C.3 — service scheduler modal. Mounted
-      at the cart root so the calendar icon on a service/prepared item
+      at the cart root so the calendar icon on a service item
       can toggle the schedulerOpen signal with the target cartItem and
       optional existing booking for re-agendamiento.
     -->
