@@ -1,4 +1,4 @@
-import { Component, OnDestroy, inject, signal } from '@angular/core';
+import { Component, OnDestroy, inject, signal, viewChild } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
 
@@ -23,7 +23,10 @@ import {
 
 import { ExpensesStatsComponent } from './components/expenses-stats/expenses-stats.component';
 import { ExpensesListComponent } from './components/expenses-list/expenses-list.component';
-import { ExpenseCreateComponent } from './components/expense-create/expense-create.component';
+import {
+  EXPENSE_CREATE_FILLABLE_FIELDS,
+  ExpenseCreateComponent,
+} from './components/expense-create/expense-create.component';
 import { ExpenseEditComponent } from './components/expense-edit/expense-edit.component';
 import { ExpenseCategoriesComponent } from './components/expense-categories/expense-categories.component';
 import { ExpenseScannerModalComponent } from './components/expense-scanner/expense-scanner-modal.component';
@@ -113,6 +116,11 @@ export class ExpensesComponent implements VexiUiHost, OnDestroy {
   readonly isScannerModalOpen = signal(false);
   readonly selectedExpense = signal<Expense | null>(null);
 
+  // The create form lives in the child modal (always mounted, opened via
+  // `isOpen`), so fillForm reaches it through the child's own fill method —
+  // never by writing the store or the service behind the form's back.
+  private readonly createForm = viewChild(ExpenseCreateComponent);
+
   constructor() {
     this.currencyService.loadCurrency();
     this.store.dispatch(loadExpenses());
@@ -135,6 +143,9 @@ export class ExpensesComponent implements VexiUiHost, OnDestroy {
       title: 'Gastos',
       visible_count: rows.length,
       selection: this.selectedExpense()?.description ?? null,
+      form_fields: this.isCreateModalOpen()
+        ? [...EXPENSE_CREATE_FILLABLE_FIELDS]
+        : undefined,
       notes: this.loading()
         ? 'La lista todavía está cargando.'
         : this.openModalNote(),
@@ -251,6 +262,48 @@ export class ExpensesComponent implements VexiUiHost, OnDestroy {
    */
   openModal(id: string): Promise<VexiUiActionResult> {
     return this.runAction(id);
+  }
+
+  /**
+   * Fills the new-expense form (G1). Opens it first through the module's own
+   * handler when closed, fills through the child's own method, and NEVER
+   * saves: the person reviews and confirms in the modal.
+   */
+  async fillForm(values: Record<string, unknown>): Promise<VexiUiActionResult> {
+    const form = this.createForm();
+    if (!form) {
+      return {
+        status: 'error',
+        message: 'El formulario de gasto no está montado en esta pantalla.',
+      };
+    }
+
+    if (!this.isCreateModalOpen()) {
+      this.openCreateModal();
+    }
+
+    const result = form.vexiFillForm(values);
+    const unknownNote = result.unknown.length
+      ? ` No reconocí ${result.unknown.join(', ')}; los campos válidos son ${EXPENSE_CREATE_FILLABLE_FIELDS.join(', ')}.`
+      : '';
+
+    if (!result.valid) {
+      return {
+        status: 'needs_user_input',
+        message:
+          `Dejé el formulario de gasto lleno con ${result.applied.join(', ') || 'nada nuevo'}, pero todavía falta: ` +
+          result.validation_errors.map((e) => e.message).join('; ') +
+          `.${unknownNote} Nada se guardó.`,
+        detail: { validation_errors: result.validation_errors },
+      };
+    }
+
+    return {
+      status: 'ok',
+      message:
+        `Dejé el formulario de gasto lleno (${result.applied.join(', ')}) y válido, listo para revisar.` +
+        `${unknownNote} Nada se guardó.`,
+    };
   }
 
   refresh(): VexiUiActionResult {

@@ -243,17 +243,50 @@ export const uiTools: RegisteredTool[] = [
     domain: 'ui',
     clientSide: true,
     description:
-      'Aplica filtros a la lista que la persona tiene en pantalla: fechas, estado, búsqueda, categoría. Úsala cuando pidan ver un subconjunto de lo que ya están viendo ("muéstrame solo los de agosto sin aprobar"). Te devuelve cuántos registros quedaron, así que puedes decírselo.',
+      'Aplica filtros a la lista que la persona tiene en pantalla: fechas, estado, búsqueda, categoría. Úsala cuando pidan ver un subconjunto de lo que ya están viendo ("muéstrame solo los de agosto sin aprobar"). También acepta `page` y `limit` para paginar y `sort` ("campo:dirección", p.ej. "name:asc") para ordenar. Cambiar un filtro vuelve a la página 1, igual que la UI. El conteo se lee después con ui_read_screen porque el refetch es asíncrono.',
     parameters: {
       type: 'object',
       properties: {
         values: {
           type: 'object',
           description:
-            'Pares filtro-valor, con los nombres que devolvió ui_read_screen.',
+            'Pares filtro-valor, con los nombres que devolvió ui_read_screen, más las claves reservadas `page` (número de página, 1-based), `limit` (filas por página) y `sort` ("campo:asc|desc"). Las claves que la lista no entienda se reportan, no se inventan.',
         },
       },
       required: ['values'],
+    },
+  },
+  {
+    name: 'ui_export',
+    version: '1',
+    domain: 'ui',
+    clientSide: true,
+    description:
+      'Descarga el export del contexto actual en el navegador: si la persona está viendo un reporte, dispara su exportación XLSX existente; si el módulo expone una acción de exportar, la dispara. Devuelve el nombre del archivo descargado. Complementa a `export_report` del servidor (A-1): ese genera el XLSX, este lo dispara desde la pantalla. Nunca inventa un archivo: si no hay export en este contexto lo dice con `no_export`.',
+    parameters: {
+      type: 'object',
+      properties: {
+        report_id: {
+          type: 'string',
+          description:
+            'Id del reporte a exportar, de REPORT_DEFINITIONS. Omítelo para exportar lo que la persona tiene en pantalla.',
+        },
+        format: {
+          type: 'string',
+          description: 'Formato pedido. Solo se soporta "xlsx".',
+        },
+        date_from: {
+          type: 'string',
+          description:
+            'Inicio del rango (YYYY-MM-DD) cuando el reporte lo admite. Omítelo para usar el rango de la pantalla.',
+        },
+        date_to: {
+          type: 'string',
+          description:
+            'Fin del rango (YYYY-MM-DD) cuando el reporte lo admite. Omítelo para usar el rango de la pantalla.',
+        },
+      },
+      required: [],
     },
   },
   {

@@ -1,4 +1,4 @@
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, signal, viewChild } from '@angular/core';
 import { NavigationEnd, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -68,20 +68,30 @@ export class OrdersComponent {
    */
   reloadTick = signal(0);
 
+  // Los filtros y la paginación de este módulo viven dentro del hijo
+  // `OrdersListComponent`: el host delega en SUS handlers (`onSearchChange`,
+  // `onFilterChange`, `onPageChange`, `onSort`) en vez de reimplementarlos.
+  private readonly ordersList = viewChild(OrdersListComponent);
+
   // ── Host de Vexi ────────────────────────────────────────────────────────
-  //
-  // Deliberadamente NO declara `setFilter`: los filtros de este módulo viven
-  // dentro de `OrdersListComponent`, no acá. Declararlos y no aplicarlos haría
-  // que Vexi dijera "ya filtré" sobre una lista intacta, que es exactamente el
-  // defecto de honestidad que el registro de hosts viene a cerrar.
   private readonly vexiHostAdapter: VexiUiHost = {
     vexiModuleKey: 'orders',
     readScreen: () => {
       const stats = this.orderStats();
+      const paging = this.ordersList()?.vexiPaginationState();
 
       return {
         module_key: 'orders',
         title: 'Ventas',
+        visible_count: this.ordersList()?.orders().length,
+        filters: {
+          search: this.ordersList()?.searchTerm() || undefined,
+        },
+        page: paging?.page,
+        limit: paging?.limit,
+        total: paging?.total,
+        total_pages: paging?.total_pages,
+        sort: paging?.sort,
         notes:
           `${stats.total_orders} orden(es) en total, ${stats.pending_orders} pendiente(s), ` +
           `${stats.completed_orders} completada(s).`,
@@ -129,6 +139,116 @@ export class OrdersComponent {
             message: `La pantalla de Ventas no tiene una acción "${id}".`,
           };
       }
+    },
+    setFilter: async (values) => {
+      const list = this.ordersList();
+      if (!list) {
+        return {
+          status: 'error' as const,
+          message: 'El listado de ventas no está montado en esta pantalla.',
+        };
+      }
+
+      const applied: string[] = [];
+      const ignored: string[] = [];
+      let note: string | undefined;
+
+      if (typeof values['search'] === 'string') {
+        // `onSearchChange` resetea a página 1, igual que teclear en el buscador.
+        list.onSearchChange(values['search']);
+        applied.push(`búsqueda "${values['search']}"`);
+      }
+
+      // Filtros nominales del dropdown, en la forma que `onFilterChange` espera.
+      const dropdown: Record<string, string | string[] | null> = {};
+      for (const key of [
+        'status',
+        'channel',
+        'payment_status',
+        'payment_method_id',
+        'date_range',
+        'table_id',
+      ]) {
+        const value = values[key];
+        if (value === undefined || value === null || value === '') continue;
+        dropdown[key] =
+          Array.isArray(value) || typeof value === 'string'
+            ? (value as string | string[])
+            : String(value);
+      }
+      if (Object.keys(dropdown).length) {
+        list.onFilterChange(dropdown);
+        applied.push(Object.keys(dropdown).join(', '));
+      }
+
+      if (typeof values['sort'] === 'string') {
+        const [column, direction] = values['sort'].split(':');
+        if (column && (direction === 'asc' || direction === 'desc')) {
+          list.onSort({ column, direction });
+          applied.push(`orden ${column} ${direction}`);
+        } else {
+          ignored.push('sort');
+        }
+      }
+
+      if (values['limit'] !== undefined) {
+        // El listado no expone cambio de filas por página: el límite es fijo.
+        ignored.push('limit');
+      }
+
+      if (values['page'] !== undefined) {
+        const totalPages = list.vexiPaginationState().total_pages;
+        let page = Math.floor(Number(values['page']));
+        if (!Number.isFinite(page)) {
+          ignored.push('page');
+        } else {
+          if (page < 1) page = 1;
+          if (page > totalPages) {
+            note = `Pediste la página ${page} pero solo hay ${totalPages}; te dejé en la última.`;
+            page = totalPages;
+          }
+          list.onPageChange(page);
+          applied.push(`página ${page}`);
+        }
+      }
+
+      for (const key of Object.keys(values)) {
+        if (
+          ![
+            'search',
+            'status',
+            'channel',
+            'payment_status',
+            'payment_method_id',
+            'date_range',
+            'table_id',
+            'sort',
+            'limit',
+            'page',
+          ].includes(key)
+        ) {
+          ignored.push(key);
+        }
+      }
+
+      if (!applied.length) {
+        return {
+          status: 'not_found' as const,
+          message:
+            'No me pasaste ningún filtro que las ventas entiendan (búsqueda, estado, canal, pago, fecha, mesa, sort, page).',
+        };
+      }
+
+      return {
+        status: 'ok' as const,
+        message:
+          `Apliqué ${applied.join(', ')} en ventas. La lista se está recargando; si necesitas el conteo, léelo de la pantalla después.` +
+          (note ? ` ${note}` : '') +
+          (ignored.length
+            ? ` No apliqué ${ignored.join(', ')} porque esta lista no lo soporta.`
+            : ''),
+        detail: note ? { note } : undefined,
+      };
     },
     refresh: () => {
       this.refreshOrders();

@@ -1,4 +1,5 @@
 import { Injectable, signal } from '@angular/core';
+import type { FormGroup, ValidationErrors } from '@angular/forms';
 
 /**
  * Outcome of a UI action Vexi asked a module to run.
@@ -44,6 +45,20 @@ export interface VexiUiScreen {
   form_fields?: string[];
   /** Anything else worth one line in the prompt. */
   notes?: string;
+  // ── Paginación server-side (G3) ─────────────────────────────────────
+  // El módulo estándar es server-paginated por contrato: cuando el host conoce
+  // su página, la publica aquí para que Vexi pueda decir "página 2 de 6".
+  // Un host sin paginación omite los cinco campos sin romper nada.
+  /** Current page, 1-based, as the UI shows it. */
+  page?: number;
+  /** Rows per page. */
+  limit?: number;
+  /** Total records across all pages, not just the visible ones. */
+  total?: number;
+  /** Total pages, so the model never asks for one past the end. */
+  total_pages?: number;
+  /** Current sort as "field:asc|desc", when the list owns an order. */
+  sort?: string;
 }
 
 /**
@@ -60,7 +75,25 @@ export interface VexiUiHost {
   readScreen?(): VexiUiScreen;
   listActions?(): VexiUiAction[];
   runAction?(id: string, args?: Record<string, unknown>): Promise<VexiUiActionResult>;
+  /**
+   * Fills the open form but NEVER saves it (G1).
+   *
+   * Maps field→control on the module's own form, runs the form's own
+   * validation, and leaves the form open for the person to review. On an
+   * invalid form the result carries `detail.validation_errors` (one entry per
+   * field) so the dispatcher can tell the model what is missing; unknown
+   * fields are named in the message, never silently dropped.
+   */
   fillForm?(values: Record<string, unknown>): Promise<VexiUiActionResult>;
+  /**
+   * Applies filters through the module's own handlers (G3).
+   *
+   * Besides the module's own filter names, `values` accepts the reserved keys
+   * `page` (1-based), `limit` and `sort` ("field:asc|desc"). A filter change
+   * resets to page 1 exactly like the UI does; an explicit `page` applies
+   * after the filters so `{search, page: 2}` lands on page 2 of the filtered
+   * list. Out-of-range pages clamp with a `note`; unknown keys are reported.
+   */
   setFilter?(values: Record<string, unknown>): Promise<VexiUiActionResult>;
   openModal?(
     id: string,
@@ -88,6 +121,69 @@ export interface VexiUiHost {
  * Adding a module to Vexi's reach costs one `register()` call in that component and
  * zero changes to the agent.
  */
+/**
+ * What a modal reports after Vexi filled its form (G1).
+ *
+ * The form is left open and unsaved in every case; `valid === false` means the
+ * person still has fields to fix, named in `validation_errors`, and `unknown`
+ * names the keys no control understood so the model can retry with the names
+ * from `form_fields`.
+ */
+export interface VexiFillFormResult {
+  applied: string[];
+  unknown: string[];
+  validation_errors: Array<{ field: string; message: string }>;
+  valid: boolean;
+}
+
+/**
+ * Collects the module form's own validation errors in words Vexi can relay.
+ *
+ * Reads the errors the form's own validators already produced — it never
+ * invents rules — so what Vexi reports is exactly what the person would see
+ * refusing the save.
+ */
+export function vexiCollectValidationErrors(
+  form: FormGroup,
+  labels: Record<string, string> = {},
+): Array<{ field: string; message: string }> {
+  const collected: Array<{ field: string; message: string }> = [];
+
+  for (const [name, control] of Object.entries(form.controls)) {
+    if (!control || control.valid) continue;
+    const label = labels[name] ?? name;
+    const errors: ValidationErrors = control.errors ?? {};
+    for (const key of Object.keys(errors)) {
+      collected.push({
+        field: name,
+        message: `${label}: ${vexiErrorText(key, errors[key])}`,
+      });
+    }
+  }
+
+  return collected;
+}
+
+function vexiErrorText(key: string, detail: unknown): string {
+  const params = (detail ?? {}) as Record<string, unknown>;
+  switch (key) {
+    case 'required':
+      return 'es obligatorio';
+    case 'minlength':
+      return `está muy corto (mínimo ${String(params['requiredLength'] ?? '?')})`;
+    case 'maxlength':
+      return 'está muy largo';
+    case 'min':
+      return `debe ser mayor a ${String(params['min'] ?? 0)}`;
+    case 'email':
+      return 'no es un correo válido';
+    case 'pattern':
+      return 'tiene un formato inválido';
+    default:
+      return 'es inválido';
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class VexiUiHostRegistry {
   private readonly host = signal<VexiUiHost | null>(null);
