@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
@@ -12,6 +13,8 @@ import { RegisterArPaymentDto } from './dto/register-ar-payment.dto';
 
 @Injectable()
 export class AccountsReceivableService {
+  private readonly logger = new Logger(AccountsReceivableService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly event_emitter: EventEmitter2,
@@ -416,11 +419,24 @@ export class AccountsReceivableService {
       where: { id: data.order_id, ...(data.store_id ? { store_id: data.store_id } : {}) },
       select: { id: true, store_id: true },
     });
-    if (!scopedOrder) return null;
+    // QUI-540: estos `null` eran silenciosos y escondieron el bug del emit
+    // pre-commit (el listener no veía la orden sin commitear). Con warn el
+    // soporte puede pivotar del reporte vacío al motivo exacto.
+    if (!scopedOrder) {
+      this.logger.warn(
+        `Skipping AR for credit_sale order #${data.order_id}: order not visible (rolled back, wrong store, or emitted before commit)`,
+      );
+      return null;
+    }
 
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const locked = await lockOrderLifecycle(tx, scopedOrder.id, scopedOrder.store_id);
-      if (locked.state === 'cancelled') return null;
+      if (locked.state === 'cancelled') {
+        this.logger.debug(
+          `Skipping AR for credit_sale order #${scopedOrder.id}: order cancelled before the lock`,
+        );
+        return null;
+      }
 
       const order = await tx.orders.findFirst({
         where: { id: scopedOrder.id, store_id: scopedOrder.store_id },
@@ -430,7 +446,12 @@ export class AccountsReceivableService {
           stores: { select: { organization_id: true } },
         },
       });
-      if (!order?.customer_id || !order.stores?.organization_id) return null;
+      if (!order?.customer_id || !order.stores?.organization_id) {
+        this.logger.warn(
+          `Skipping AR for credit_sale order #${scopedOrder.id}: missing customer (${order?.customer_id ?? 'null'}) or organization (${order?.stores?.organization_id ?? 'null'})`,
+        );
+        return null;
+      }
 
       // No unique index exists for AR source identity. The order lock makes
       // this check + insert idempotent against concurrent event deliveries.

@@ -24,6 +24,7 @@ import {
   InventoryAnalyticsQueryDto,
   ProductsAnalyticsQueryDto,
 } from './dto/analytics-query.dto';
+import { PurchaseTrendsQueryDto } from './dto/purchase-trends-query.dto';
 import {
   LowStockBySupplierQueryDto,
   LowStockBySupplierAnalyticsQueryDto,
@@ -356,6 +357,45 @@ export class AnalyticsController {
     ]);
   }
 
+  @Get('sales/tips-by-waiter')
+  @Permissions('store:analytics:read')
+  async getTipsByWaiter(@Query() query: SalesAnalyticsQueryDto) {
+    const result = await this.sales_analytics_service.getTipsByWaiter(query);
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+      'Propinas por mesero obtenidas correctamente',
+      undefined,
+      { truncated: result.meta.truncated },
+    );
+  }
+
+  @Get('sales/tips-by-waiter/export')
+  @Permissions('store:analytics:read')
+  async exportTipsByWaiter(
+    @Query() query: SalesAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const result =
+      await this.sales_analytics_service.getTipsByWaiterForExport(query);
+
+    const summaryColumns: ReportColumn[] = [
+      { key: 'waiter_name', header: 'Mesero', type: 'text' },
+      { key: 'waiter_email', header: 'Correo', type: 'text' },
+      { key: 'tipped_orders_count', header: 'Órdenes con propina', type: 'number' },
+      { key: 'total_tips', header: 'Total propinas', type: 'currency' },
+      { key: 'avg_tip', header: 'Propina promedio', type: 'currency' },
+      { key: 'last_tip_date', header: 'Última propina', type: 'date', tz },
+    ];
+
+    await this.emitReport(res, 'propinas_por_mesero', tz, [
+      this.toSheet('Propinas por mesero', summaryColumns, result.summary, tz),
+    ]);
+  }
+
   // ==================== PRODUCTS ANALYTICS ====================
 
   @Get('products/summary')
@@ -515,6 +555,11 @@ export class AnalyticsController {
       { key: 'Unidades Vendidas', header: 'Unidades Vendidas', type: 'number' },
       { key: 'Unidad', header: 'Unidad', type: 'text', width: 14 },
       { key: 'Ingresos', header: 'Ingresos', type: 'currency' },
+      {
+        key: 'Costo Unitario (Snapshot)',
+        header: 'Costo Unitario (Snapshot)',
+        type: 'currency',
+      },
       {
         key: 'Costo Unitario (Receta)',
         header: 'Costo Unitario (Receta)',
@@ -1242,6 +1287,53 @@ export class AnalyticsController {
   }
 
   /**
+   * QUI-547: Tendencias de compra a proveedores por período.
+   * Vista paginada con métricas agregadas en meta.summary.
+   */
+  @Get('purchases/trends')
+  @Permissions('store:analytics:read')
+  async getPurchaseTrends(@Query() query: PurchaseTrendsQueryDto) {
+    const result =
+      await this.purchases_analytics_service.getPurchaseTrends(query);
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+      undefined,
+      undefined,
+      { summary: result.summary },
+    );
+  }
+
+  /**
+   * QUI-547: Exportación XLSX de tendencias de compra a proveedores.
+   */
+  @Get('purchases/trends/export')
+  @Permissions('store:analytics:read')
+  async exportPurchaseTrends(
+    @Query() query: PurchaseTrendsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.purchases_analytics_service.getPurchaseTrendsForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'period', header: 'Período', type: 'date-only' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'purchase_count', header: 'Nº OC', type: 'number' },
+      { key: 'total_amount', header: 'Total Comprado', type: 'currency' },
+      { key: 'avg_purchase', header: 'Ticket Promedio', type: 'currency' },
+      { key: 'items_received', header: 'Unidades Recibidas', type: 'number' },
+    ];
+
+    await this.emitReport(res, 'tendencias_compra', tz, [
+      this.toSheet('Tendencias de Compra', columns, rows, tz),
+    ]);
+  }
+
+  /**
    * QUI-542: Cuentas por pagar a proveedores por edades (aging) - Vista previa paginada.
    * Agrupa saldos pendientes por proveedor en buckets (corriente, 1-30, 31-60, 61-90, >90).
    */
@@ -1315,6 +1407,18 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getReviewsSummary(@Query() query: AnalyticsQueryDto) {
     const result = await this.reviews_analytics_service.getReviewsSummary(query);
+    return this.response_service.success(result);
+  }
+
+  /**
+   * QUI-548: reseñas agregadas por producto con promedio, distribución
+   * de estrellas, conteo de verificadas/pendientes y fecha de la última.
+   * Pantalla (misma fuente que el export: pantalla == archivo).
+   */
+  @Get('reviews/by-product')
+  @Permissions('store:analytics:read')
+  async getReviewsByProduct(@Query() query: AnalyticsQueryDto) {
+    const result = await this.reviews_analytics_service.getReviewsByProduct(query);
     return this.response_service.success(result);
   }
 

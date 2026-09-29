@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { resolvePaymentInvoiceBranch } from './payment-invoice-branch.util';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { AccountMappingService } from '../account-mappings/account-mapping.service';
@@ -3297,39 +3298,13 @@ export class AutoEntryService {
         }
       : undefined;
 
-    // Check if this payment's order has an associated invoice
-    let has_invoice = false;
-    let has_real_invoice = false;
-    let has_credit_sale = false;
-    if (data.order_id) {
-      const invoice = await this.prisma.invoices.findFirst({
-        where: {
-          order_id: data.order_id,
-          status: { notIn: ['cancelled', 'voided'] },
-        },
-        select: { id: true },
+    // Check if this payment's order has an associated invoice. Criterio
+    // compartido con `OrderFlowService` (no retener en un cobro que cae aquí).
+    const { has_invoice, has_real_invoice, has_credit_sale } =
+      await resolvePaymentInvoiceBranch(this.prisma, {
+        order_id: data.order_id,
+        organization_id: data.organization_id,
       });
-      has_invoice = !!invoice;
-      has_real_invoice = !!invoice;
-      // Venta a crédito: `credit_sale.created` ya reconoció el ingreso +
-      // impuestos contra 1305 (con propina incluida en la 1305 y acreditada a su
-      // pasivo). El cobro posterior sólo cruza cartera (DR caja / CR 1305); por
-      // la rama «sin factura» reconocería la venta otra vez, y con factura no
-      // debe volver a separar la propina.
-      const credit_sale = await this.prisma
-        .withoutScope()
-        .accounting_entries.findFirst({
-          where: {
-            organization_id: data.organization_id,
-            source_type: 'credit_sale.created',
-            source_id: data.order_id,
-            status: 'posted',
-          },
-          select: { id: true },
-        });
-      has_credit_sale = !!credit_sale;
-      has_invoice = has_invoice || has_credit_sale;
-    }
 
     const payment_desc = data.payment_method
       ? `Pago ${data.payment_method}`
@@ -3507,6 +3482,128 @@ export class AutoEntryService {
       source_id: data.payment_id,
       organization_id: data.organization_id,
       store_id: data.store_id,      description,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * payment.voided — reversa el asiento de `payment.received` al anular un
+   * pago ya asentado (`OrderFlowService.cancelPayment`). El evento NO trae el
+   * desglose de impuestos/descuento/envío/propina que armó el asiento
+   * original (el branching has_invoice/has_credit_sale de `onPaymentReceived`
+   * de arriba), así que la reversa NO se recalcula desde cero: se LEE el
+   * asiento ya posteado — `source_type='payment.received', source_id=
+   * payment_id`, la misma clave que fija `onPaymentReceived` — y se invierte
+   * cada línea débito↔crédito 1:1, preservando cuenta PUC y snapshot de
+   * tercero. El espejo postea con `source_type='payment.voided'` (mismo
+   * patrón que `dispatch_note.void` / `vat_declaration_reversal`);
+   * `createAutoEntry` dedupea por (organization_id, source_type, source_id,
+   * accounting_entity_id), así que un segundo `payment.voided` para el mismo
+   * pago es no-op silencioso vía su propio guard — igual reforzado aquí con
+   * un chequeo explícito para no depender solo de esa red de seguridad.
+   *
+   * Idempotente y NUNCA lanza hacia el listener: si el pago nunca se asentó
+   * (contabilidad inactiva, mapping faltante, etc. — no hay asiento
+   * `payment.received` que reversar) o ya fue revertido, solo deja un log
+   * debug y no hace nada. La anulación del pago de negocio ya se completó y
+   * no debe deshacerse por un fallo o no-op contable.
+   */
+  async onPaymentVoided(data: {
+    payment_id: number;
+    organization_id: number;
+    store_id?: number;
+    order_id?: number;
+    user_id?: number;
+  }) {
+    const db = this.prisma.withoutScope();
+    const original = await db.accounting_entries.findFirst({
+      where: {
+        organization_id: data.organization_id,
+        source_type: 'payment.received',
+        source_id: data.payment_id,
+        status: 'posted',
+      },
+      select: {
+        id: true,
+        accounting_entity_id: true,
+        accounting_entry_lines: {
+          select: {
+            debit_amount: true,
+            credit_amount: true,
+            third_party_id: true,
+            third_party_type: true,
+            third_party_name: true,
+            third_party_tax_id: true,
+            account: { select: { code: true } },
+          },
+        },
+      },
+    });
+
+    if (!original) {
+      this.logger.debug(
+        `Skipping payment.voided reversal for payment #${data.payment_id}: ` +
+          `no hay asiento posteado 'payment.received' para ese pago (contabilidad ` +
+          `inactiva al momento del cobro, o el pago nunca se asentó)`,
+      );
+      return null;
+    }
+
+    const already_reversed = await db.accounting_entries.findFirst({
+      where: {
+        organization_id: data.organization_id,
+        source_type: 'payment.voided',
+        source_id: data.payment_id,
+        accounting_entity_id: original.accounting_entity_id ?? undefined,
+      },
+      select: { id: true },
+    });
+    if (already_reversed) {
+      this.logger.debug(
+        `Skipping payment.voided reversal for payment #${data.payment_id}: ` +
+          `ya revertido (entry #${already_reversed.id})`,
+      );
+      return already_reversed;
+    }
+
+    const description = `Anulación de pago #${data.payment_id}${
+      data.order_id ? ` de orden #${data.order_id}` : ''
+    }`;
+
+    const lines: AutoEntryLine[] = (
+      original.accounting_entry_lines as Array<{
+        debit_amount: any;
+        credit_amount: any;
+        third_party_id: number | null;
+        third_party_type: string | null;
+        third_party_name: string | null;
+        third_party_tax_id: string | null;
+        account: { code: string };
+      }>
+    ).map((line) => ({
+      account_code: line.account.code,
+      description,
+      // Reversa: invierte débito↔crédito de la línea original 1:1.
+      debit_amount: Number(line.credit_amount),
+      credit_amount: Number(line.debit_amount),
+      third_party: line.third_party_id
+        ? {
+            id: line.third_party_id,
+            type: (line.third_party_type as AutoEntryThirdParty['type']) || 'customer',
+            name: line.third_party_name ?? undefined,
+            tax_id: line.third_party_tax_id ?? undefined,
+          }
+        : undefined,
+    }));
+
+    return this.createAutoEntry({
+      source_type: 'payment.voided',
+      source_id: data.payment_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: original.accounting_entity_id ?? undefined,
+      description,
       lines,
       user_id: data.user_id,
     });

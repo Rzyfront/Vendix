@@ -7,6 +7,22 @@
  * importa el builder UBL y el builder importa este archivo. Declararlo en la
  * cascada cerraría el ciclo interfaces → cascada → builder → interfaces. Este
  * archivo no importa nada, así que es el único sitio donde el tipo no crea uno.
+ *
+ * Task B (2026-09-28): DIAN Res. 000165/2023 art. 69 prohíbe exigirle
+ * dirección al adquiriente, y declarar la dirección de la TIENDA emisora como
+ * si fuera la del comprador es un dato falso — no un respaldo legítimo. El
+ * camino de facturación DIAN (`DianDirectProvider`) dejó de pasar el
+ * parámetro `store_address` a `resolveAcquirerAddress`, así que para ese
+ * camino la cascada nunca produce `'store'`: cuando el cliente no tiene
+ * ninguna dirección real, devuelve `null` y el documento se emite sin grupo
+ * de dirección.
+ *
+ * `'store'` se conserva en el tipo sólo por compatibilidad hacia atrás con
+ * llamadores AJENOS a la facturación DIAN que reutilizan la misma cascada
+ * (p. ej. `subscriptions/services/subscription-billing-profile.service.ts` y
+ * `superadmin/subscriptions/fiscal/subscription-fiscal.service.ts`, donde el
+ * "adquiriente" es el tenant y el "emisor" es Vendix) — hoy los cuatro sitios
+ * conocidos pasan `store_address: null`, por lo que tampoco allí se produce.
  */
 export type DianAcquirerAddressSource = 'fiscal' | 'shipping' | 'store';
 

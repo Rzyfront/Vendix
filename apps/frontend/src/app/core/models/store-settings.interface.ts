@@ -295,6 +295,13 @@ export interface InventorySettings {
   out_of_stock_action: 'hide' | 'show' | 'disable' | 'allow_backorder';
   track_inventory: boolean;
   allow_negative_stock: boolean;
+  /**
+   * Permite a la cocina preparar platos aunque un insumo con inventario no
+   * tenga stock; el insumo queda en negativo. Ausente/`null` en el backend
+   * se trata como `true` (nunca `?? false`) — ver `vendix-restaurant-ops` y
+   * el plan `no-overselling-stock-guard-plan.md` paso 9.
+   */
+  allow_ingredient_overuse: boolean;
   costing_method: 'cpp' | 'fifo';
   /**
    * Scope used by POS when looking up stock for sale.

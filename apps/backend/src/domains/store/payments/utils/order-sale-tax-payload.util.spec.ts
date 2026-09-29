@@ -242,4 +242,34 @@ describe('buildOrderSaleTaxPayload', () => {
       warn.mockRestore();
     });
   });
+  describe('discount_already_applied_to_lines (contrato POS 2026-09-28)', () => {
+    it('no re-proyecta el descuento: usa tax_amount/discount_amount de la orden tal cual', () => {
+      // Orden 10% sobre base 1000 + IVA 19%: líneas y cabecera YA post-descuento.
+      const payload = buildOrderSaleTaxPayload({
+        product_tax_rows: [
+          { tax_type: 'iva', tax_rate: 0.19, tax_amount: 171, taxable_amount: 1000 },
+        ],
+        order: {
+          subtotal_amount: 1000,
+          discount_amount: 100, // base-only
+          tax_amount: 171, // post-descuento
+          shipping_cost: 0,
+          shipping_tax_amount: 0,
+        },
+        order_items: [
+          {
+            quantity: 1,
+            total_price: 1000,
+            tax_amount_item: 171,
+            order_item_taxes: [{ tax_type: 'iva', tax_rate: 0.19, tax_amount: 171 }],
+          },
+        ],
+        discount_already_applied_to_lines: true,
+      });
+      expect(payload.discount_projected).toBe(false);
+      expect(payload.tax_amount).toBe(171);
+      expect(payload.discount_amount).toBe(100);
+    });
+  });
+
 });

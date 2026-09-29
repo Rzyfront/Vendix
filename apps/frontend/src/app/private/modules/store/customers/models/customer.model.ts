@@ -73,6 +73,37 @@ export interface CreateCustomerRequest {
     is_withholding_agent?: boolean;
 }
 
+/** Fuente pública que resolvió la identidad externa. */
+export type ExternalIdentitySource = 'rues' | 'secop_proveedores' | 'secop_contratos' | 'rnt';
+
+/** Identidad devuelta por `GET /store/customers/lookup/external` (RUES, SECOP II, SECOP contratos o RNT). */
+export interface ExternalCustomerIdentity {
+    source: ExternalIdentitySource;
+    document_type: string;
+    document_number: string;
+    verification_digit: string | null;
+    person_type: 'NATURAL' | 'JURIDICA';
+    legal_name: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    registration_status: string | null;
+    is_active: boolean;
+    last_renewed_year: number | null;
+    chamber: string | null;
+    source_updated_at: string | null;
+    dv_mismatch?: boolean;
+    /** Nombre del establecimiento (sólo RNT; NO es el nombre del titular). */
+    trade_name?: string | null;
+    /** Detalle secundario de la fuente (p. ej. «Último contrato: 2025-03-01»). */
+    source_detail?: string | null;
+}
+
+export interface ExternalCustomerLookupResult {
+    found: boolean;
+    unavailable?: boolean;
+    identity?: ExternalCustomerIdentity;
+}
+
 export interface UpdateCustomerRequest extends Partial<CreateCustomerRequest> { }
 
 export interface CustomerStats {

@@ -251,6 +251,13 @@ export const analyticsRoutes: Routes = [
               ),
           },
           {
+            path: 'trends',
+            loadComponent: () =>
+              import('./pages/purchases/purchase-trends.component').then(
+                (c) => c.PurchaseTrendsComponent,
+              ),
+          },
+          {
             path: 'payable-aging',
             loadComponent: () =>
               import('./pages/purchases/payable-aging.component').then(
@@ -335,6 +342,13 @@ export const analyticsRoutes: Routes = [
                 (c) => c.ReviewSummaryComponent,
               ),
           },
+          {
+            path: 'by-product',
+            loadComponent: () =>
+              import('./pages/reviews/review-by-product.component').then(
+                (c) => c.ReviewByProductComponent,
+              ),
+          },
         ],
       },
       // Financial Analytics (shell)
@@ -370,6 +384,36 @@ export const analyticsRoutes: Routes = [
             loadComponent: () =>
               import('./pages/financial/refunds-summary.component').then(
                 (c) => c.RefundsSummaryComponent,
+              ),
+          },
+        ],
+      },
+      // Payments Analytics (shell) — Paso 4 PLAN-reporte-analitica-pagos-2026-09-28
+      {
+        path: 'payments',
+        loadComponent: () =>
+          import('./components/analytics-shell/analytics-shell.component').then(
+            (c) => c.AnalyticsShellComponent,
+          ),
+        data: { categoryId: 'payments' as AnalyticsCategoryId },
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'overview',
+          },
+          {
+            path: 'overview',
+            loadComponent: () =>
+              import('./pages/payments/payments-overview.component').then(
+                (c) => c.PaymentsOverviewComponent,
+              ),
+          },
+          {
+            path: 'by-method',
+            loadComponent: () =>
+              import('./pages/payments/payments-by-method.component').then(
+                (c) => c.PaymentsByMethodComponent,
               ),
           },
         ],

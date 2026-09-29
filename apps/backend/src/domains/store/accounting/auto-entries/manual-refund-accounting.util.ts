@@ -4,6 +4,10 @@ import {
   scaleBreakdownToTotal,
   type TaxBreakdownItem,
 } from '../../../../common/interfaces/tax-breakdown.interface';
+import {
+  proportionalShippingTaxCents,
+  prorateShippingTaxRefundCents,
+} from '../../shipping/utils/shipping-tax.util';
 
 type Money = Prisma.Decimal;
 
@@ -120,15 +124,16 @@ export function buildManualRefundFiscalPayload(
     if (shippingCost <= 0 || !order.shipping_tax_type) {
       throw new UnexplainedRefundAmountError('shipping tax lacks gross cost or fiscal type');
     }
-    const proportional = (gross: number) => Math.round(shippingTaxTotal * gross / shippingCost);
-    const priorShipping = prior.reduce((sum, row) => sum + cents(row.shipping_refund), 0);
-    const priorShippingTax = prior.reduce((sum, row) => sum + proportional(cents(row.shipping_refund)), 0);
+    const priorShippingRefunds = prior.map((row) => cents(row.shipping_refund));
+    const priorShipping = priorShippingRefunds.reduce((sum, gross) => sum + gross, 0);
+    const priorShippingTax = priorShippingRefunds.reduce(
+      (sum, gross) => sum + proportionalShippingTaxCents(shippingCost, shippingTaxTotal, gross),
+      0,
+    );
     if (priorShipping + shipping > shippingCost || priorShippingTax > shippingTaxTotal) {
       throw new UnexplainedRefundAmountError('shipping tax exceeds original snapshot');
     }
-    shippingTax = priorShipping + shipping >= shippingCost
-      ? shippingTaxTotal - priorShippingTax
-      : Math.min(shippingTaxTotal - priorShippingTax, proportional(shipping));
+    shippingTax = prorateShippingTaxRefundCents(shippingCost, shippingTaxTotal, priorShippingRefunds, shipping);
     taxBreakdown.push({
       tax_type: order.shipping_tax_type as TaxBreakdownItem['tax_type'],
       tax_amount: shippingTax / 100,

@@ -53,9 +53,9 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
                   <h4 class="product-name">{{ product.name }}</h4>
                   <div class="product-price">
                     <span class="current-price">{{ product.final_price | currency }}</span>
-                    @if (product.is_on_sale) {
+                    @if (product.is_on_sale && product.regular_final_price != null && product.regular_final_price > product.final_price) {
                       <span class="original-price text-xs line-through opacity-50 ml-2" style="text-decoration: line-through;">
-                        {{ product.base_price | currency }}
+                        {{ product.regular_final_price | currency }}
                       </span>
                     }
                   </div>

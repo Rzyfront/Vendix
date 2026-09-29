@@ -64,6 +64,9 @@ import type {
       :host {
         display: block;
       }
+      [hidden] {
+        display: none !important;
+      }
       .split-panel {
         display: grid;
         gap: 1rem;
@@ -204,10 +207,13 @@ export class SplitAccountsPanelComponent {
   readonly activeItems = computed(() =>
     this.items().filter((item) => !item.cancelled_at),
   );
-  readonly accountRows = computed(
-    () => this.group()?.accounts ?? this.preview()?.accounts ?? [],
+  readonly currentPreview = computed(() =>
+    this.previewFingerprint() === this.fingerprint() ? this.preview() : null,
   );
-  readonly summary = computed(() => this.group() ?? this.preview());
+  readonly accountRows = computed(
+    () => this.group()?.accounts ?? this.currentPreview()?.accounts ?? [],
+  );
+  readonly summary = computed(() => this.group() ?? this.currentPreview());
   readonly canManage = computed(
     () =>
       this.auth.hasPermission('store:table_sessions:update') ||
@@ -225,8 +231,7 @@ export class SplitAccountsPanelComponent {
     () =>
       !this.busy() &&
       !this.group() &&
-      !!this.preview() &&
-      this.previewFingerprint() === this.fingerprint(),
+      !!this.currentPreview(),
   );
   readonly canCancel = computed(
     () =>
@@ -253,8 +258,10 @@ export class SplitAccountsPanelComponent {
     this.form.controls.count.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((count) => {
-        if (Number.isInteger(count) && count >= 2 && count <= 20)
-          this.resizeAccounts(count);
+        // The shared app-input CVA emits strings even with type="number".
+        const parsed = Number(count);
+        if (Number.isInteger(parsed) && parsed >= 2 && parsed <= 20)
+          this.resizeAccounts(parsed);
       });
     effect(() => {
       const sourceId = this.sourceOrderId();
@@ -376,7 +383,7 @@ export class SplitAccountsPanelComponent {
     this.assignments.update((current) => ({ ...current, [itemId]: group }));
   }
   private request(): SplitPreviewDto {
-    const count = this.form.controls.count.value;
+    const count = Number(this.form.controls.count.value);
     const aliases = this.form.controls.aliases.getRawValue();
     const accounts = this.payers().map((payer, index) => ({
       ...payer,

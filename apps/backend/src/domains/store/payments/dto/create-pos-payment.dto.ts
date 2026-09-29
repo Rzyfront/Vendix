@@ -18,6 +18,7 @@ import {
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { table_status_enum } from '@prisma/client';
+import { PaymentLegDto } from './payment-leg.dto';
 
 export class PosOrderItemDto {
   @IsOptional()
@@ -468,6 +469,20 @@ export class CreatePosPaymentDto {
   @MaxLength(255)
   payment_reference?: string;
 
+  /**
+   * Cobro multimétodo de contado: 2..5 tramos cuya suma debe ser igual al
+   * total a cobrar. Si llega con elementos, gana sobre el contrato escalar
+   * (`store_payment_method_id` + `amount_received` + …); si no llega, el cobro
+   * sigue el camino escalar de siempre. Ver `normalizePaymentLegs`.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(5)
+  @ValidateNested({ each: true })
+  @Type(() => PaymentLegDto)
+  payments?: PaymentLegDto[];
+
   // Control de flujo de pago
   @IsOptional()
   @IsBoolean()
@@ -521,12 +536,17 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   shipping_cost?: number;
 
+  /** Gross for inclusive rates; taxable base for additive rates. Server derives shipping_cost. */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  manual_shipping_price?: number;
+
   /**
    * Tarifa de envío de la que salió `shipping_cost`. El frontend la envía
-   * SOLO cuando el costo viene de la tarifa (sin override manual). Con ella el
-   * backend valida que la tarifa sea del método y de la tienda y congela la
-   * copia del impuesto del envío en la orden; sin ella (costo digitado a
-   * mano) el envío queda sin impuesto.
+   * Also accompanies manual_shipping_price so the backend can inherit its
+   * fiscal mode and tax category without trusting a client tax calculation.
    */
   @IsOptional()
   @IsInt()
@@ -675,6 +695,12 @@ export class CreatePosPaymentDto {
   @IsNumber()
   wallet_id?: number;
 
+  /** Stable checkout attempt key; required for Wallet in payments[]. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  idempotency_key?: string;
+
   @IsOptional()
   @IsString()
   return_url?: string;
@@ -793,6 +819,14 @@ export class PosPaymentResponseDto {
       data?: any;
     };
   };
+  /**
+   * Cobro multimétodo de contado: un elemento por tramo, en orden de
+   * creación, con la MISMA forma que `payment`. Sólo presente cuando el
+   * cobro usó `payments[]` (2..5 tramos); el escalar no la trae (respuesta
+   * histórica intacta) y `payment` sigue siendo el primero, por
+   * compatibilidad con la app móvil.
+   */
+  payments?: NonNullable<PosPaymentResponseDto['payment']>[];
   nextAction?: {
     type: 'redirect' | '3ds' | 'await' | 'none';
     url?: string;

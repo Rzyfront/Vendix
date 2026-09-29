@@ -231,6 +231,23 @@
     (closed)="closeDetail()"
   />
 
+  <app-modal
+    [isOpen]="cancelDispositionTicket() !== null"
+    size="md"
+    [dialog]="true"
+    title="Cancelar plato en preparación"
+    [showCloseButton]="true"
+    (cancel)="closeCancelDisposition()"
+  >
+    <p class="mb-3">El ticket #{{ cancelDispositionTicket()?.id }} ya entró en preparación. ¿Qué pasó con los insumos?</p>
+    <p class="text-sm text-muted-foreground">Selecciona una opción explícita. Reutilizar los devuelve al inventario; desecharlos registra la merma.</p>
+    <div slot="footer" class="flex flex-wrap justify-end gap-2">
+      <app-button variant="secondary" (clicked)="closeCancelDisposition()">Volver</app-button>
+      <app-button variant="primary" (clicked)="confirmCancelDisposition('reuse')">Reutilizar y reintegrar</app-button>
+      <app-button variant="danger" (clicked)="confirmCancelDisposition('waste')">Desechar insumos</app-button>
+    </div>
+  </app-modal>
+
   <!--
     QUI-651 — gate de turno. El tablero se LEE sin turno abierto; gestionar un
     ticket consume inventario y genera COGS, y eso necesita un responsable. Misma

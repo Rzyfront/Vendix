@@ -3,11 +3,13 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
   MaxLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
@@ -74,9 +76,21 @@ export class UiContextDto {
  * an access log.
  */
 export class StreamIntentDto {
+  // Obligatorio salvo en un turno de continuación (aprobar/rechazar/retomar el
+  // plan), que no lleva texto de la persona: el servidor compone el objetivo.
+  @ValidateIf((o: StreamIntentDto) => !o.continuation)
   @IsString()
   @MaxLength(4000)
-  content!: string;
+  content?: string;
+
+  /**
+   * Turno sin mensaje de la persona que retoma el plan interno de Vexi tras
+   * resolver una tarjeta (`approved`/`rejected`) o al reanudar (`resume`).
+   * Sin `content`; el objetivo lo compone el servidor.
+   */
+  @IsOptional()
+  @IsIn(['approved', 'rejected', 'resume'])
+  continuation?: 'approved' | 'rejected' | 'resume';
 
   @IsOptional()
   @IsObject()

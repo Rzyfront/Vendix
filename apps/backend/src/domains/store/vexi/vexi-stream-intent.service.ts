@@ -49,6 +49,11 @@ export interface VexiStreamIntent {
    * left it behind and a retry would duplicate the person's question.
    */
   skip_user_message?: boolean;
+  /**
+   * Turno de continuación del plan interno (sin mensaje de la persona). El
+   * `content` viaja vacío; el objetivo lo compone `sendMessageStream`.
+   */
+  continuation?: 'approved' | 'rejected' | 'resume';
 }
 
 /**
@@ -56,6 +61,9 @@ export interface VexiStreamIntent {
  * Anything longer is a replayable handle to someone else's prompt.
  */
 const INTENT_TTL_SECONDS = 60;
+
+/** Vigencia del claim de turno por conversación. */
+const TURN_TTL_SECONDS = 600;
 
 /**
  * Two-step handshake for the chat SSE endpoint.
@@ -106,6 +114,48 @@ export class VexiStreamIntentService {
     if (intent.user_id !== undefined && intent.user_id !== userId) return null;
 
     return intent;
+  }
+
+  /**
+   * Marca `streamId` como el único turno vigente de la conversación. Un turno
+   * nuevo desplaza al anterior: el bucle del agente consulta `isCurrentTurn`
+   * entre iteraciones y se detiene si ya no es el vigente.
+   *
+   * Un fallo de Redis nunca debe romper el turno: solo se pierde la capacidad
+   * de cancelar al anterior.
+   */
+  async claimTurn(conversationId: number, streamId: string): Promise<void> {
+    try {
+      await this.redis.set(
+        this.turnKey(conversationId),
+        streamId,
+        'EX',
+        TURN_TTL_SECONDS,
+      );
+    } catch {
+      // Sin claim no hay cancelación; el turno sigue.
+    }
+  }
+
+  /**
+   * `true` salvo que otro turno haya reclamado la conversación después. Ante
+   * cualquier error de infraestructura (o clave ausente) responde `true`: jamás
+   * se aborta un turno por un fallo de Redis.
+   */
+  async isCurrentTurn(
+    conversationId: number,
+    streamId: string,
+  ): Promise<boolean> {
+    try {
+      const current = await this.redis.get(this.turnKey(conversationId));
+      return current === null || current === streamId;
+    } catch {
+      return true;
+    }
+  }
+
+  private turnKey(conversationId: number): string {
+    return `vexi:turn:${conversationId}`;
   }
 
   private key(streamId: string): string {

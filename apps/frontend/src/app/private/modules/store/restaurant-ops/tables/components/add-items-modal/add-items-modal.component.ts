@@ -25,6 +25,7 @@ import {
 } from '../../../../../../../shared/components/index';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/index';
 import { ProductsService } from '../../../../products/services/products.service';
+import { ProductState } from '../../../../products/interfaces/product.interface';
 import { TablesService } from '../../services/tables.service';
 import {
   TableSessionAddItem,
@@ -642,6 +643,9 @@ export class AddItemsModalComponent {
         limit: this.limit(),
         page: this.page,
         is_sellable: true,
+        // Solo activos: sin `state` el backend devuelve todo salvo archivados
+        // e incluiría productos inactivos, que no deben poder agregarse a mesa.
+        state: ProductState.ACTIVE,
         search: this.searchTerm().trim() || undefined,
         // CP-POLLO-ARABE-727 C.4 (QUI-736) — para el picker de variante de
         // platos `prepared`. Sin esto el backend no incluye `product_variants`

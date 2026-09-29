@@ -12,9 +12,11 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.2"
+  version: "1.3"
   scope: [root]
   auto_invoke:
+    - "Validating tracked ingredients before fire/resend/production consumption"
+    - "Debugging a fire/resend/production block on insufficient tracked ingredient (INV_STOCK_INSUFFICIENT_LINES kind:'ingredient')"
     - "Editing recipes, BOM explosion, or sub-recipe production orders"
     - "Editing kitchen-fire, fire-to-kitchen, or kitchen tickets / KDS"
     - "Editing tables, table sessions, or order split logic"
@@ -162,6 +164,53 @@ the ticket as delivered directly to bypass `in_preparation`.
 `payments.service.ts:2554` (`if (item.inventory_consumed_at_fire === true) continue;`)
 DOES NOT distinguish between the two cases — and that is correct: in both
 cases the KDS owns the item and the payment must not double-discount.
+
+### No overselling: validate tracked ingredients before consuming (plan step 6/9)
+
+`docs/plans/no-overselling-stock-guard-plan.md` (2026-09-26, reverses
+QUI-557). A tracked ingredient never gets consumed beyond what is available —
+untracked ingredients are unlimited by definition, same rule as products (see
+`vendix-inventory-stock`). Before burning anything, `fireOrderItems` /
+`fireOrderItemsInTx` (`kitchen-fire.service.ts`, covers POS and split),
+`resendOrderItems`, and `production-orders.service.ts complete()` call
+`StockValidatorService.assertIngredientsAvailable(demands, {tx})` against the
+SUMMED exploded BOM (`RecipesService.explodeBom`) — an ingredient shared by
+two dishes in the same fire is checked once, aggregated, not per line.
+Untracked ingredients (`resolveEffectiveTracking === false`) are skipped by
+the validator, same code path as products.
+
+- **Which stock is validated depends on `skipKds`** (§Fase K — POS
+  stock-vs-KDS decision): a `prepared` dish going to the kitchen
+  (`skipKds=false`, the default "Producir por KDS") is validated THROUGH its
+  ingredients — its own product stock is never touched at fire. A dish marked
+  `skipKds=true` ("Usar stock") skips fire entirely; it is validated and
+  consumed as an ordinary product line (`assertLinesAvailable`, not this
+  ingredient check) at payment time.
+- **Default policy is permissive, not strict**: `store_settings.inventory
+  .allow_ingredient_overuse` defaults to `true` (missing/null resolves to
+  `true`, never `?? false`) so no kitchen changes behavior on deploy — Pollo
+  Arabe (store 105) cooks with 18 of 24 tracked ingredients at 0 and would be
+  blocked otherwise. OFF is what makes the guard actually block: a 409
+  `INV_STOCK_INSUFFICIENT_LINES` (`kind: 'ingredient'`, naming the ingredient
+  AND, via `used_by`, the dish(es) demanding it), nothing consumed, no ticket
+  reaches the KDS.
+- **ON (default) behavior**: the shortfall does not throw — it is
+  `logger.warn`'d, the FULL BOM quantity is still consumed via
+  `StockLevelManager.updateStock({allow_negative: true, validate_availability:
+  false})` (the ingredient's stock goes negative, no clamp to 0), and the
+  shortfall list rides back as `stock_warnings`
+  (`InsufficientStockItem[]`, additive — absent when nothing was short) in the
+  fire/resend/production response.
+- **Frontend**: `stock_warnings` is rendered as a warning toast
+  (`formatStockWarningSummary`, `apps/frontend/src/app/core/utils/
+  stock-shortage.util.ts`) in the POS (`pos.component.ts`,
+  `pos-checkout-shell.component.ts`), the table session page (fire from a
+  table), the KDS resend-dish modal, and the production orders list page.
+
+See `vendix-inventory-stock` for the shared validator method signatures, the
+`INV_STOCK_INSUFFICIENT_LINES` vs `INV_STOCK_002` contract, and the full
+reserve-on-add / consume-on-delivery lifecycle for the PRODUCT side (this
+section only covers ingredients).
 
 ## Tables and Open Tab
 
@@ -447,5 +496,12 @@ Do not duplicate that documentation here.
 - Adding `restaurant_ops` to the `restaurant` industry in
   `INDUSTRY_HIDDEN_MODULES` — the rule is inverse; `restaurant` keeps
   it visible.
+- Reading `store_settings.inventory.allow_ingredient_overuse` with `?? false`
+  instead of `?? true` — inverts the default and silently blocks every
+  kitchen that never touched the switch (see the no-overselling subsection
+  above).
+- Consuming ingredients (fire/resend/production) without calling
+  `StockValidatorService.assertIngredientsAvailable` first, or validating a
+  `skipKds=false` dish's OWN stock instead of its exploded ingredients.
 - Migrating inventory quantities to `Decimal` in this MVP — defer with a
   dedicated migration plan that follows `vendix-prisma-migrations` rules.

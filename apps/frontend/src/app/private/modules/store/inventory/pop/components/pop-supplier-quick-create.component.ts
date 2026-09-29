@@ -1,4 +1,13 @@
-import {Component, model, output, inject, signal, DestroyRef} from '@angular/core';
+import {
+  Component,
+  model,
+  output,
+  inject,
+  signal,
+  input,
+  effect,
+  DestroyRef,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -136,6 +145,17 @@ export class PopSupplierQuickCreateComponent {
   readonly close = output<void>();
   readonly supplierCreated = output<Supplier>();
 
+  /**
+   * QUI-845: datos OCR para precargar el formulario cuando el quick-create se
+   * abre desde el flujo de escaneo (proveedor nuevo). El código queda a cargo
+   * del operador: el escaneo no puede inferirlo.
+   */
+  readonly preload = input<{
+    name?: string;
+    tax_id?: string;
+    phone?: string;
+  } | null>(null);
+
   private fb = inject(FormBuilder);
   private suppliersService = inject(SuppliersService);
   private toastService = inject(ToastService);
@@ -145,6 +165,20 @@ export class PopSupplierQuickCreateComponent {
 
   constructor() {
     this.initForm();
+
+    // Zoneless: al abrir con preload, rellena los campos que el OCR reconoció.
+    effect(() => {
+      if (this.isOpen()) {
+        const data = this.preload();
+        if (data) {
+          this.supplierForm.patchValue({
+            name: data.name ?? '',
+            tax_id: data.tax_id ?? '',
+            phone: data.phone ?? '',
+          });
+        }
+      }
+    });
   }
 
   private initForm(): void {

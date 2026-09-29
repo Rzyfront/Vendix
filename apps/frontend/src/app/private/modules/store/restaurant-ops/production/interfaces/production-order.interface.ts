@@ -6,6 +6,7 @@
  * Mirrors the Prisma model `production_orders` and the controller exposed by
  * `apps/backend/src/domains/store/production/`.
  */
+import type { InsufficientStockItem } from '../../../../../../core/utils/parse-api-error';
 
 export type ProductionOrderStatus =
   | 'draft'
@@ -44,6 +45,15 @@ export interface ProductionOrder {
   // Populated by GET list/detail.
   product?: ProductionOrderProduct;
   recipe?: ProductionOrderRecipe;
+
+  /**
+   * Presente en la respuesta de `POST .../complete` cuando
+   * `allow_ingredient_overuse` dejó pasar el consumo con insumos
+   * faltantes: no bloqueó, pero el insumo quedó en negativo. Plan
+   * no-overselling-stock-guard-plan.md paso 9 — la lista se muestra como
+   * toast de advertencia.
+   */
+  stock_warnings?: InsufficientStockItem[];
 }
 
 export interface CreateProductionOrderDto {

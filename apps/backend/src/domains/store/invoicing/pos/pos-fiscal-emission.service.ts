@@ -9,6 +9,8 @@ import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.servic
 import { FiscalDocumentFinding } from '../validators/fiscal-document.validator';
 import { PosFiscalState, PosFiscalStatus } from './pos-fiscal-status.interface';
 import { INVOICE_AUTO_SEND_FAILED_ALERT } from './presential-pos-sale';
+// Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+import { OrderHistoryService } from '../../orders/order-history/order-history.service';
 
 /**
  * El tipo de evento con el que queda anotada una venta cobrada que se quedó
@@ -81,6 +83,8 @@ export class PosFiscalEmissionService {
     private readonly invoice_flow: InvoiceFlowService,
     private readonly retry_queue: InvoiceRetryQueueService,
     private readonly fiscal_scope: FiscalScopeService,
+    // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
+    private readonly orderHistory: OrderHistoryService,
   ) {}
 
   /**
@@ -105,8 +109,51 @@ export class PosFiscalEmissionService {
     // encontrar la factura aceptada.
     if (status.state === 'issued') {
       await this.clearAutoSendFailedAlert(order_id);
+      await this.recordInvoiceIssued(order_id, status);
     }
     return status;
+  }
+
+  /**
+   * Registra `invoice_issued` en `order_events` la PRIMERA vez que este
+   * pedido queda `issued`. `emitForOrder` es idempotente y se reinvoca
+   * (cron de reintento, botón manual, listener), así que sin este guard cada
+   * reinvocación sobre una factura ya aceptada escribiría una fila duplicada.
+   * Nunca lanza: la venta ya está cobrada (misma regla que el resto del
+   * archivo).
+   */
+  private async recordInvoiceIssued(
+    order_id: number,
+    status: PosFiscalStatus,
+  ): Promise<void> {
+    try {
+      const already = await this.prisma.order_events.findFirst({
+        where: { order_id, event_type: 'invoice_issued' },
+        select: { id: true },
+      });
+      if (already) return;
+
+      const order = await this.prisma.orders.findFirst({
+        where: { id: order_id },
+        select: { store_id: true, stores: { select: { organization_id: true } } },
+      });
+      if (!order) return;
+
+      await this.orderHistory.record(this.prisma, {
+        orderId: order_id,
+        storeId: order.store_id,
+        organizationId: order.stores?.organization_id ?? undefined,
+        type: 'invoice_issued',
+        payload: {
+          invoice_id: status.invoice_id,
+          invoice_number: status.invoice_number,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `POS: no se pudo registrar invoice_issued en order_events para el pedido #${order_id}: ${this.describe(error)}`,
+      );
+    }
   }
 
   /**

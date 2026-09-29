@@ -28,15 +28,6 @@ describe('acquirer-address.resolver', () => {
     department_name: 'Valle Del Cauca',
     country_code: 'CO',
   };
-  const STORE_BOGOTA = {
-    address_line: 'Calle 100 8-60',
-    city_code: '11001',
-    city_name: 'Bogotá, D.c.',
-    department_code: '11',
-    department_name: 'Bogotá',
-    country_code: 'CO',
-  };
-
   describe('classifyAcquirerAddressType', () => {
     it('trata billing y legal como la dirección FISCAL', () => {
       expect(classifyAcquirerAddressType('billing')).toBe('fiscal');
@@ -69,7 +60,6 @@ describe('acquirer-address.resolver', () => {
           { ...CALI, type: 'shipping' },
           { ...MEDELLIN, type: 'billing' },
         ],
-        store_address: STORE_BOGOTA,
       });
 
       expect(resolved?.source).toBe('fiscal');
@@ -85,7 +75,6 @@ describe('acquirer-address.resolver', () => {
           { ...CALI, type: 'home' },
           { ...MEDELLIN, type: 'billing' },
         ],
-        store_address: STORE_BOGOTA,
       });
 
       expect(resolved?.source).toBe('fiscal');
@@ -95,7 +84,6 @@ describe('acquirer-address.resolver', () => {
     it('2. cae a la dirección de ENVÍO cuando no hay fiscal', () => {
       const resolved = resolveAcquirerAddress({
         candidates: [{ ...CALI, type: 'shipping' }],
-        store_address: STORE_BOGOTA,
       });
 
       expect(resolved?.source).toBe('shipping');
@@ -117,24 +105,24 @@ describe('acquirer-address.resolver', () => {
           },
           { ...CALI, type: 'shipping' },
         ],
-        store_address: STORE_BOGOTA,
       });
 
       expect(resolved?.source).toBe('shipping');
       expect(resolved?.address.city_code).toBe('76001');
     });
 
-    it('3. cae a la dirección de la TIENDA cuando el cliente no tiene ninguna', () => {
-      const resolved = resolveAcquirerAddress({
-        candidates: [],
-        store_address: STORE_BOGOTA,
-      });
+    it('3. Task B — devuelve null (NO la dirección de la tienda) cuando el cliente no tiene ninguna', () => {
+      // Hasta Task B este escalón caía en `source: 'store'`. DIAN Res.
+      // 000165/2023 art. 69 no permite exigirle dirección al adquiriente, y
+      // declarar la de la tienda emisora como si fuera la del comprador es un
+      // dato falso. `null` es la respuesta honesta: el llamador emite sin
+      // grupo de dirección, igual que hoy con Consumidor Final.
+      const resolved = resolveAcquirerAddress({ candidates: [] });
 
-      expect(resolved?.source).toBe('store');
-      expect(resolved?.address.city_code).toBe('11001');
+      expect(resolved).toBeNull();
     });
 
-    it('3-bis. cae a la TIENDA cuando ninguna dirección del cliente es emitible', () => {
+    it('3-bis. Task B — devuelve null cuando ninguna dirección del cliente es emitible (sin caer a la tienda)', () => {
       const resolved = resolveAcquirerAddress({
         candidates: [
           {
@@ -144,28 +132,21 @@ describe('acquirer-address.resolver', () => {
             country_code: 'CO',
           },
         ],
-        store_address: STORE_BOGOTA,
       });
 
-      expect(resolved?.source).toBe('store');
+      expect(resolved).toBeNull();
     });
 
     it('4. devuelve null —no una dirección fabricada— cuando se acaban los escalones', () => {
-      // `null` significa «no lo sé». El llamador lo convierte en un error
-      // accionable; lo que NO puede pasar es que salga un municipio que nadie
-      // eligió, porque ese documento la DIAN lo ACEPTA con el consecutivo ya
-      // gastado y sólo se corrige con nota crédito.
-      expect(
-        resolveAcquirerAddress({ candidates: [], store_address: null }),
-      ).toBeNull();
+      // `null` significa «no lo sé». El llamador lo convierte en una emisión
+      // sin grupo de dirección; lo que NO puede pasar es que salga un
+      // municipio que nadie eligió, porque ese documento la DIAN lo ACEPTA con
+      // el consecutivo ya gastado y sólo se corrige con nota crédito.
+      expect(resolveAcquirerAddress({ candidates: [] })).toBeNull();
 
       expect(
         resolveAcquirerAddress({
           candidates: [{ type: 'billing', country_code: 'CO' }],
-          store_address: {
-            address_line: 'Tienda sin municipio',
-            country_code: 'CO',
-          },
         }),
       ).toBeNull();
     });
@@ -183,7 +164,6 @@ describe('acquirer-address.resolver', () => {
             country_code: 'US',
           },
         ],
-        store_address: STORE_BOGOTA,
       });
 
       expect(resolved?.source).toBe('fiscal');
@@ -193,38 +173,21 @@ describe('acquirer-address.resolver', () => {
     it('descarta una fila vacía en vez de dejar que gane el turno', () => {
       // Una fila con sólo país extranjero no lanza en el rol de adquiriente,
       // así que sin este filtro «ganaría» y la cascada se detendría en una
-      // dirección que no dice nada.
+      // dirección que no dice nada. Task B: sin escalón de tienda, el
+      // resultado correcto es `null`, no un respaldo.
       const resolved = resolveAcquirerAddress({
         candidates: [{ type: 'billing', country_code: 'US' }],
-        store_address: STORE_BOGOTA,
       });
 
-      expect(resolved?.source).toBe('store');
+      expect(resolved).toBeNull();
     });
 
     it('no deja escapar el metadato `type` hacia el XML', () => {
       const resolved = resolveAcquirerAddress({
         candidates: [{ ...MEDELLIN, type: 'billing' }],
-        store_address: STORE_BOGOTA,
       });
 
       expect(resolved?.address).not.toHaveProperty('type');
-    });
-
-    it('rechaza una dirección de tienda que el EMISOR no podría declarar', () => {
-      // El emisor debe estar en Colombia (FAJ16) y con municipio Divipola
-      // (FAJ09). Una tienda cuya dirección no aguanta su propio rol no puede
-      // ser el respaldo de nadie.
-      const resolved = resolveAcquirerAddress({
-        candidates: [],
-        store_address: {
-          address_line: '742 Evergreen Terrace',
-          city_name: 'Springfield',
-          country_code: 'US',
-        },
-      });
-
-      expect(resolved).toBeNull();
     });
   });
 });

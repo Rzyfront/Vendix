@@ -394,7 +394,7 @@ describe('SplitOrderService financial ledger', () => {
     ).rejects.toThrow('desglose fiscal');
   });
 
-  it('rechaza dividir una orden cuyo envío lleva impuesto; sin copia se divide como hoy', async () => {
+  it('divides a taxed shipment using the immutable gross and fiscal snapshot', async () => {
     // Fixture base: envío 5 sin copia de impuesto ⇒ se divide.
     await expect(
       service.preview(100, { mode: 'equal', n_splits: 2 }),
@@ -406,15 +406,60 @@ describe('SplitOrderService financial ledger', () => {
     source.shipping_tax_type = 'inc';
     source.shipping_tax_rate = '0.08000';
     source.shipping_tax_amount = '0.37';
-    await expect(
-      service.preview(100, { mode: 'equal', n_splits: 2 }),
-    ).rejects.toThrow('envío con impuesto');
+    const preview = await service.preview(100, { mode: 'equal', n_splits: 2 });
+    expect(preview.accounts).toHaveLength(2);
+    const result = await service.splitByAmount(100, {
+      mode: 'equal',
+      n_splits: 2,
+      source_version: preview.source_version,
+      idempotency_key: 'taxed-shipping-key',
+    });
+    expect(result.accounts).toHaveLength(2);
+    expect(accounts.reduce((sum, row) => sum + Number(row.shipping_cost), 0)).toBe(5);
+    expect(source.grand_total).toBe('130.00');
+    expect(db.orders.create).not.toHaveBeenCalled();
+    expect(db.order_items.create).not.toHaveBeenCalled();
 
-    // Copia vacía (default de la columna) ⇒ vuelve a dividirse.
-    source.shipping_tax_amount = '0.00';
+    // Copy missing tax details must fail before creating an account.
+  });
+
+  it('rejects malformed taxable-shipping copy before financial writes', async () => {
+    source.shipping_tax_amount = '0.37';
+    source.shipping_tax_type = 'unsupported';
+    source.shipping_tax_rate = '0.08';
     await expect(
       service.preview(100, { mode: 'equal', n_splits: 2 }),
-    ).resolves.toMatchObject({ original_total: '130.00' });
+    ).rejects.toThrow('impuesto del envío es incoherente');
+    expect(db.order_financial_accounts.create).not.toHaveBeenCalled();
+  });
+
+  it('invalidates a preview if the frozen shipping-tax copy changes', async () => {
+    const preview = await service.preview(100, { mode: 'equal', n_splits: 2 });
+    source.shipping_tax_amount = '0.37';
+    source.shipping_tax_rate = '0.08';
+    source.shipping_tax_type = 'inc';
+    await expect(
+      service.splitByAmount(100, {
+        mode: 'equal',
+        n_splits: 2,
+        source_version: preview.source_version,
+        idempotency_key: 'source-tax-changed',
+      }),
+    ).rejects.toThrow('La cuenta cambió');
+    expect(db.order_financial_accounts.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cent-level split that would silently drop shipping tax', async () => {
+    source.payments = [];
+    source.shipping_cost = '0.02';
+    source.grand_total = '125.02';
+    source.shipping_tax_amount = '0.01';
+    source.shipping_tax_rate = '0.19';
+    source.shipping_tax_type = 'iva';
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).rejects.toThrow('sin perder centavos');
+    expect(db.order_financial_accounts.create).not.toHaveBeenCalled();
   });
 
   it('supports items and custom remainder, rejecting duplicate/omitted items', async () => {

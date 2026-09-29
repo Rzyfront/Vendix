@@ -958,9 +958,20 @@ describe('InvoicingService.createFromOrder — el escalar de línea escala por u
     prisma = createPrismaMock({
       orders: ['findFirst'],
       invoices: ['findFirst', 'create'],
+      // F-090 remediación (Agente E) — el catálogo de la línea huérfana
+      // (población 3) se resuelve con una consulta APARTE
+      // (`this.prisma.products.findMany`), no anidada dentro del `include`
+      // de `orders.findFirst` (ver el comentario en `invoicing.service.ts`
+      // sobre el OOM de `backend-typecheck` que motivó separarla).
+      products: ['findMany'],
     });
     // Sin factura previa: `assertNotAlreadyInvoiced` deja pasar.
     prisma.invoices.findFirst.mockResolvedValue(null);
+    // Por defecto, sin catálogo de producto: las líneas CON desglose
+    // (`order_item_taxes` no vacío) nunca llaman a esta consulta porque no
+    // entran a la población 3; los tests que sí ejercitan una línea
+    // huérfana configuran su propio `mockResolvedValue` explícito.
+    prisma.products.findMany.mockResolvedValue([]);
     prisma.invoices.create.mockImplementation(
       async ({ data }: { data: Record<string, unknown> }) => ({
         ...data,
@@ -1070,6 +1081,29 @@ describe('InvoicingService.createFromOrder — el escalar de línea escala por u
     // Sin filas `order_item_taxes` (población 3, F-090) el único dato es el
     // escalar: el multiplicador correcto sigue siendo 24 / 24 = 1, no 24.
     // El defecto declaraba 8.000 × 24 = $192.000.
+    // F-090 remediación (Agente E) — sin este catálogo la línea huérfana no
+    // resuelve tarifa y `createFromOrder` corta con `INVOICING_CALC_001`
+    // antes de crear la factura. INC 8 % es la única tarifa del catálogo
+    // que reconstruye $8.000 sobre una base de $100.000 ($100.000 × 0,08 =
+    // $8.000). Va por `prisma.products.findMany` (consulta separada, no
+    // anidada en el `include` de `orders.findFirst` — ver el comentario en
+    // `invoicing.service.ts`), con el `product_id: 100` que trae
+    // `buildOrderItem` por defecto.
+    prisma.products.findMany.mockResolvedValueOnce([
+      {
+        id: 100,
+        product_tax_assignments: [
+          {
+            is_inclusive: false,
+            tax_categories: {
+              tax_type: 'inc',
+              is_inclusive: false,
+              tax_rates: [{ id: 900, name: 'INC', rate: money('0.08') }],
+            },
+          },
+        ],
+      },
+    ]);
     const data = await persistedInvoiceData(
       buildOrder({
         order_items: [
@@ -1096,6 +1130,24 @@ describe('InvoicingService.createFromOrder — el escalar de línea escala por u
     // $9.500 de línea. `quantity` vale 1 acá, así que el defecto declaraba
     // el impuesto de UN solo kilo ($3.800). Esta es la rama que un helper
     // de sola escala (`quantity / price_unit_quantity`) pierde.
+    // F-090 remediación (Agente E) — IVA 19 % reconstruye $9.500 sobre una
+    // base de $50.000 ($50.000 × 0,19 = $9.500); sin este catálogo
+    // `createFromOrder` corta con `INVOICING_CALC_001`.
+    prisma.products.findMany.mockResolvedValueOnce([
+      {
+        id: 100,
+        product_tax_assignments: [
+          {
+            is_inclusive: false,
+            tax_categories: {
+              tax_type: 'iva',
+              is_inclusive: false,
+              tax_rates: [{ id: 901, name: 'IVA', rate: money('0.19') }],
+            },
+          },
+        ],
+      },
+    ]);
     const data = await persistedInvoiceData(
       buildOrder({
         order_items: [

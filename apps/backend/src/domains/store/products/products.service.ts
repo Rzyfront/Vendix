@@ -2951,6 +2951,10 @@ export class ProductsService {
                 // resuelto con las tasas heredadas del producto. Sin tocar
                 // los valores persistidos.
                 final_price: calculateVariantFinalPrice(variant, product),
+                regular_final_price: calculateVariantFinalPrice(
+                  { ...variant, is_on_sale: false, sale_price: null },
+                  { ...product, is_on_sale: false, sale_price: null },
+                ),
                 stock: variantStock,
                 stock_quantity: variantStock,
                 // Campos explícitos source-of-truth para el frontend POS.
@@ -3171,6 +3175,10 @@ export class ProductsService {
                 // resuelto con las tasas heredadas del producto. Sin tocar
                 // los valores persistidos.
                 final_price: calculateVariantFinalPrice(variant, product),
+                regular_final_price: calculateVariantFinalPrice(
+                  { ...variant, is_on_sale: false, sale_price: null },
+                  { ...product, is_on_sale: false, sale_price: null },
+                ),
                 stock_quantity: variantStock,
                 available_stock: effectiveTracking ? variantStock : null,
                 is_available: !effectiveTracking || variantStock > 0,
@@ -6024,8 +6032,10 @@ export class ProductsService {
 
   /**
    * Calculates the final price of a product including taxes and active offers.
+   * Public: single fiscal source of truth for Vexi tools (T1) — tools never
+   * sum tax rates locally.
    */
-  private calculateFinalPrice(product: any): number {
+  calculateFinalPrice(product: any): number {
     const basePrice =
       product.is_on_sale && product.sale_price
         ? Number(product.sale_price)
@@ -6036,6 +6046,567 @@ export class ProductsService {
     // asignaciones, resolveLineTotals devuelve el precio intacto (cero
     // regresión histórica).
     return resolveLineTotals(basePrice, extractTypedRates(product)).total;
+  }
+
+  /**
+   * Additive tax rate derived from `calculateFinalPrice` (T1): `rate =
+   * (final - base) / base`. `PriceResolverService` multiplies `unitPrice *
+   * (1 + rate)`, so feeding it this rate reproduces exactly the final price
+   * above — inclusive taxes yield 0 (no growth) instead of overcharging.
+   * Tools call this instead of summing `tax_rates` locally.
+   */
+  getEffectiveTaxRate(product: any): number {
+    const base =
+      product?.is_on_sale && product?.sale_price
+        ? Number(product.sale_price)
+        : Number(product?.base_price ?? 0);
+    if (!Number.isFinite(base) || base <= 0) return 0;
+    const final = this.calculateFinalPrice(product);
+    if (!Number.isFinite(final) || final <= base) return 0;
+    return (final - base) / base;
+  }
+
+  /**
+   * T1 agent reads: narrow projections owned by this service so Vexi tools
+   * never touch Prisma directly. Tenant scope comes from the injected
+   * `StorePrismaService` (same as `findAll`/`findOne`).
+   */
+
+  /** `find_product` id pass: selects only `{id}`, ordered by name. */
+  async findProductIdsForAgent(where: any, take: number) {
+    return this.prisma.products.findMany({
+      where,
+      select: { id: true },
+      orderBy: { name: 'asc' },
+      take,
+    });
+  }
+
+  /** `find_product` accent-insensitive fallback pool (bounded scan). */
+  async findProductFuzzyPoolForAgent(where: any, take: number) {
+    return this.prisma.products.findMany({
+      where,
+      select: { id: true, name: true, sku: true, barcode: true },
+      orderBy: { name: 'asc' },
+      take,
+    });
+  }
+
+  /** Full cards for a bounded id set (tax, variants, counts, stock levels). */
+  async findProductCardsForAgent(
+    orderedIds: number[],
+    maxVariantsInline = 25,
+  ) {
+    if (!orderedIds.length) return [];
+    return this.prisma.products.findMany({
+      where: { id: { in: orderedIds } },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        barcode: true,
+        state: true,
+        product_type: true,
+        track_inventory: true,
+        is_sellable: true,
+        base_price: true,
+        sale_price: true,
+        is_on_sale: true,
+        stock_unit: true,
+        requires_booking: true,
+        has_multiple_price_tiers: true,
+        brands: { select: { name: true } },
+        product_tax_assignments: {
+          select: {
+            tax_categories: {
+              select: { tax_rates: { select: { rate: true, name: true } } },
+            },
+          },
+        },
+        product_variants: {
+          orderBy: { id: 'asc' },
+          take: maxVariantsInline,
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            barcode: true,
+            price_override: true,
+            sale_price: true,
+            is_on_sale: true,
+            track_inventory_override: true,
+            attributes: true,
+          },
+        },
+        _count: { select: { product_variants: true } },
+        stock_levels: {
+          select: { product_variant_id: true, quantity_available: true },
+        },
+      },
+    }) as Promise<any[]>;
+  }
+
+  /** `get_product_pricing` detail projection (pricing + variants + taxes). */
+  async findProductPricingForAgent(productId: number) {
+    return this.prisma.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        state: true,
+        base_price: true,
+        cost_price: true,
+        profit_margin: true,
+        price_unit_quantity: true,
+        is_on_sale: true,
+        sale_price: true,
+        track_inventory: true,
+        has_multiple_price_tiers: true,
+        product_tax_assignments: {
+          select: {
+            tax_categories: {
+              select: { tax_rates: { select: { rate: true, name: true } } },
+            },
+          },
+        },
+        product_variants: {
+          orderBy: { id: 'asc' },
+          take: 25,
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            price_override: true,
+            cost_price: true,
+            profit_margin: true,
+            is_on_sale: true,
+            sale_price: true,
+            track_inventory_override: true,
+            attributes: true,
+          },
+        },
+        _count: { select: { product_variants: true } },
+      },
+    }) as Promise<any | null>;
+  }
+
+  /** Active price tiers + overrides for a multi-tarifa product. */
+  async findProductPriceTiersForAgent(productId: number) {
+    const assignments: any[] =
+      await this.prisma.product_price_tier_assignments.findMany({
+        where: { product_id: productId },
+        select: { price_tier_id: true },
+      });
+    const tierIds = assignments.map((row) => row.price_tier_id);
+    if (!tierIds.length) return { tiers: [], overrides: [] };
+    const [tiers, overrides] = await Promise.all([
+      this.prisma.price_tiers.findMany({
+        where: { id: { in: tierIds }, is_active: true },
+        orderBy: { sort_order: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          discount_percentage: true,
+          is_package_unit: true,
+          units_per_package: true,
+        },
+      }) as Promise<any[]>,
+      this.prisma.product_price_tier_overrides.findMany({
+        where: { product_id: productId },
+        select: {
+          price_tier_id: true,
+          variant_id: true,
+          override_price: true,
+          override_units_per_package: true,
+        },
+      }) as Promise<any[]>,
+    ]);
+    return { tiers, overrides };
+  }
+
+  /**
+   * O-9 agent write context: everything `create_variant` needs to preview and
+   * re-verify without touching Prisma (T1). Tenant scope comes from the
+   * injected `StorePrismaService`.
+   *
+   * Returns the product (or null), its current variants (for the SKU-uniqueness
+   * pre-check), whether the BASE line has active reservations (the service
+   * rejects variantizing over them with `PROD_HAS_RESERVATIONS_001`), and how
+   * many recipes use the product as a component (the service rejects
+   * variantizing a recipe component with
+   * `PRODUCT_VARIANT_BLOCKED_IS_RECIPE_COMPONENT`).
+   */
+  async findProductVariantWriteContextForAgent(productId: number) {
+    const product: any = await this.prisma.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        state: true,
+        product_type: true,
+        track_inventory: true,
+        product_variants: {
+          orderBy: { id: 'asc' },
+          select: { id: true, name: true, sku: true },
+        },
+      },
+    });
+    if (!product) {
+      return {
+        product: null,
+        variants: [],
+        baseHasActiveReservations: false,
+        recipeComponentCount: 0,
+      };
+    }
+    const [baseReservation, recipeComponentCount] = await Promise.all([
+      this.prisma.stock_reservations.findFirst({
+        where: {
+          product_id: productId,
+          product_variant_id: null,
+          status: 'active',
+        },
+        select: { id: true },
+      }),
+      this.prisma.recipe_items.count({
+        where: { component_product_id: productId },
+      }),
+    ]);
+    return {
+      product,
+      variants: product.product_variants ?? [],
+      baseHasActiveReservations: !!baseReservation,
+      recipeComponentCount,
+    };
+  }
+
+  /**
+   * O-10/O-11 agent write target: the variant plus its product, sibling SKUs
+   * (for the uniqueness pre-check), whether the variant has active
+   * reservations, and its on-hand units summed across locations.
+   *
+   * The stock figure mirrors `ProductVariantService.removeVariant`, which sums
+   * `quantity_on_hand` — not available — because the physical units are what a
+   * delete would destroy. Returns null when the variant does not exist.
+   */
+  async findVariantWriteTargetForAgent(variantId: number) {
+    const variant: any = await this.prisma.product_variants.findFirst({
+      where: { id: variantId },
+      select: {
+        id: true,
+        product_id: true,
+        name: true,
+        sku: true,
+        barcode: true,
+        price_override: true,
+        cost_price: true,
+        profit_margin: true,
+        is_on_sale: true,
+        sale_price: true,
+        stock_quantity: true,
+        track_inventory_override: true,
+        service_duration_minutes: true,
+        service_pricing_type: true,
+        buffer_minutes: true,
+        preparation_time_minutes: true,
+        attributes: true,
+        products: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            state: true,
+            product_type: true,
+            track_inventory: true,
+            product_variants: {
+              orderBy: { id: 'asc' },
+              select: { id: true, name: true, sku: true },
+            },
+          },
+        },
+      },
+    });
+    if (!variant) return null;
+    const [variantReservation, stockAggregate] = await Promise.all([
+      this.prisma.stock_reservations.findFirst({
+        where: { product_variant_id: variantId, status: 'active' },
+        select: { id: true },
+      }),
+      this.prisma.stock_levels.aggregate({
+        where: { product_variant_id: variantId },
+        _sum: { quantity_on_hand: true },
+      }),
+    ]);
+    return {
+      variant,
+      product: variant.products,
+      siblings: (variant.products?.product_variants ?? []).filter(
+        (row: any) => row.id !== variantId,
+      ),
+      hasActiveReservations: !!variantReservation,
+      onHandUnits: Number(stockAggregate._sum.quantity_on_hand ?? 0),
+    };
+  }
+
+  /**
+   * O-3/O-4 agent archive context: product label + write-off plan + active
+   * reservations flag, in service-owned reads (tools never touch Prisma).
+   *
+   * MISMO predicado que `loadProductForArchive()` (`state != archived` +
+   * alcance de tienda): un id inexistente y uno ya archivado devuelven
+   * `product: null` para que la tool responda el error guiado en vez de
+   * lanzar. El plan sale de `buildArchiveWriteOffPlan`, la misma cuenta que
+   * `remove()` va a ejecutar.
+   */
+  async findProductArchivePreviewForAgent(productId: number) {
+    const context = RequestContextService.getContext();
+    const product = await this.prisma.products.findFirst({
+      where: {
+        id: productId,
+        state: { not: ProductState.ARCHIVED },
+        ...(!context?.is_super_admin && { store_id: context?.store_id }),
+      },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        state: true,
+        store_id: true,
+        cost_price: true,
+      },
+    });
+    if (!product) {
+      return { product: null, plan: null, hasActiveReservations: false };
+    }
+    // Superconjunto deliberado (igual que `remove()`): cualquier reserva
+    // activa sobre el producto o sus variantes bloquea el archivado.
+    const [plan, reservation] = await Promise.all([
+      this.buildArchiveWriteOffPlan(product),
+      this.prisma.stock_reservations.findFirst({
+        where: { product_id: productId, status: 'active' },
+        select: { id: true },
+      }),
+    ]);
+    return {
+      product: {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        state: product.state,
+      },
+      plan,
+      hasActiveReservations: !!reservation,
+    };
+  }
+
+  /**
+   * O-5 agent image target: the image plus its product label. Null when the
+   * image does not exist in this store (relational scope via `products`).
+   */
+  async findProductImageForAgent(imageId: number) {
+    const image: any = await this.prisma.product_images.findFirst({
+      where: { id: imageId },
+      select: {
+        id: true,
+        product_id: true,
+        image_url: true,
+        is_main: true,
+        products: {
+          select: { id: true, name: true, sku: true, state: true },
+        },
+      },
+    });
+    if (!image) return null;
+    return {
+      id: image.id,
+      product_id: image.product_id,
+      image_url: image.image_url,
+      is_main: image.is_main === true,
+      product: image.products ?? null,
+    };
+  }
+
+  /**
+   * O-7 agent promotion lookup: existence + display names for the preview.
+   * No money fields selected, so no cocina stripping is needed here (the
+   * write itself returns `getProductPromotions`, already stripped).
+   */
+  async findPromotionsByIdsForAgent(ids: number[]) {
+    if (!ids.length) return [];
+    return this.prisma.promotions.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, type: true, state: true },
+      orderBy: { id: 'asc' },
+    }) as Promise<
+      Array<{ id: number; name: string; type: string; state: string }>
+    >;
+  }
+
+  /**
+   * O-8 agent online-purchase context: product label + store readiness + the
+   * URL that would be generated. Read-only: generating happens in
+   * `generateOnlinePurchaseLink` after the user confirms.
+   */
+  async findOnlinePurchaseContextForAgent(productId: number) {
+    const product = await this.prisma.products.findFirst({
+      where: { id: productId, state: { not: ProductState.ARCHIVED } },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        slug: true,
+        store_id: true,
+        online_purchase_url: true,
+        online_purchase_generated_at: true,
+      },
+    });
+    if (!product) {
+      return {
+        product: null,
+        ready: false,
+        reason: 'product_not_found',
+        message: `No existe un producto con id ${productId} en esta tienda.`,
+        pending_url: null as string | null,
+      };
+    }
+    if (product.store_id == null) {
+      return {
+        product: {
+          id: product.id,
+          name: product.name,
+          sku: product.sku,
+          online_purchase_url: product.online_purchase_url,
+          online_purchase_generated_at:
+            product.online_purchase_generated_at,
+        },
+        ready: false,
+        reason: 'ecommerce_not_configured',
+        message: 'El producto no tiene tienda asociada.',
+        pending_url: null as string | null,
+      };
+    }
+    const status = await this.resolveOnlinePurchaseStatus(product.store_id);
+    return {
+      product: {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        online_purchase_url: product.online_purchase_url,
+        online_purchase_generated_at: product.online_purchase_generated_at,
+      },
+      ready: status.ready,
+      reason: status.reason,
+      message: status.message,
+      pending_url:
+        status.ready && status.domain_hostname
+          ? this.buildOnlinePurchaseUrl(status.domain_hostname, product.slug)
+          : null,
+    };
+  }
+
+  /**
+   * Precondición de `update_product_price`: con reservas activas el `update`
+   * lanza `INV_STOCK_001`. La tool la consulta para decirlo en la propuesta
+   * en vez de fallar al aplicar. Lectura pura, scopeada por tienda.
+   */
+  async hasActiveStockReservationsForAgent(
+    productId: number,
+    variantId: number | null,
+  ): Promise<boolean> {
+    const found = await this.prisma.stock_reservations.findFirst({
+      where: {
+        product_id: productId,
+        product_variant_id: variantId,
+        status: 'active',
+      },
+      select: { id: true },
+    });
+    return !!found;
+  }
+
+  /**
+   * Contexto de `update_product_price`: producto + asignaciones fiscales +
+   * variantes (precio/override/oferta). Misma proyección que la tool leía
+   * directa; mudada al servicio dueño en el paso 15 (cero `prisma.` en tools).
+   */
+  async findProductForPriceChangeForAgent(productId: number): Promise<any> {
+    return this.prisma.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        state: true,
+        base_price: true,
+        sale_price: true,
+        is_on_sale: true,
+        product_tax_assignments: {
+          select: {
+            tax_categories: {
+              select: { tax_rates: { select: { rate: true } } },
+            },
+          },
+        },
+        product_variants: {
+          orderBy: { id: 'asc' },
+          take: 100,
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            price_override: true,
+            sale_price: true,
+            is_on_sale: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Réplicas de lectura de las precondiciones de `create` (slug, SKU y código
+   * de barras únicos dentro de la tienda — `PROD_DUP_001` /
+   * `PROD_BARCODE_DUP_001`). `create_product` las consulta para proponer con
+   * sujeto humano; el servicio re-valida al aplicar. Cada clave ausente en el
+   * parámetro se devuelve `null` sin consultar.
+   */
+  async findProductUniquenessConflictsForAgent(params: {
+    slug: string;
+    sku?: string | null;
+    barcode?: string | null;
+  }): Promise<{
+    slug: { id: number; name: string } | null;
+    sku: { id: number; name: string } | null;
+    barcodeProduct: { id: number; name: string } | null;
+    barcodeVariant: { id: number } | null;
+  }> {
+    const [slug, sku, barcodeProduct, barcodeVariant] = await Promise.all([
+      this.prisma.products.findFirst({
+        where: { slug: params.slug },
+        select: { id: true, name: true },
+      }),
+      params.sku
+        ? this.prisma.products.findFirst({
+            where: { sku: params.sku },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve(null),
+      params.barcode
+        ? this.prisma.products.findFirst({
+            where: { barcode: params.barcode },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve(null),
+      params.barcode
+        ? this.prisma.product_variants.findFirst({
+            where: { barcode: params.barcode },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
+    ]);
+    return { slug, sku, barcodeProduct, barcodeVariant };
   }
 
   private async resolvePosScope(

@@ -15,6 +15,7 @@ import {
   order_channel_enum,
   order_state_enum,
   order_delivery_type_enum,
+  payments_state_enum,
 } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OrderStatsDto } from './dto/order-stats.dto';
@@ -28,6 +29,11 @@ import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import {
+  StockValidatorService,
+  StockDemandLine,
+  type InsufficientStockItem,
+} from '../inventory/shared/services/stock-validator.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
@@ -52,15 +58,44 @@ import {
   isVatResponsible,
 } from '@common/helpers/vat-responsibility.helper';
 import { OrderFlowService } from './order-flow/order-flow.service';
-import { getOrderCancellationPolicy } from './order-flow/order-cancellation-policy.util';
+import {
+  getOrderCancellationPolicy,
+  SETTLED_PAYMENT_STATES,
+} from './order-flow/order-cancellation-policy.util';
+import {
+  canPay,
+  canCancelPaymentAsRole,
+  canCancel,
+  canAssignShipping,
+  canConfirmDelivery,
+  canRefund,
+  canReactivateAsRole,
+  canFastTrack,
+  canCreditPayment,
+  requiresPaymentRegistration,
+  canEditOrder,
+  canDispatchOrder,
+  canManualShip,
+  canReadyForPickupBeforePayment,
+  canDirectDeliver,
+  canCollectViaShip,
+  computeItemActions,
+  OrderActionSnapshot,
+} from './order-flow/order-action-policy.util';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
+import {
+  applyGrossDiscountRetax,
+  distributeAmount,
+  type GrossDiscountableLine,
+} from '../taxes/utils/order-discount-tax.util';
 import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.service';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 // Release-853 paso 10 — propagación del titular al borrador de factura.
 import { InvoicingService } from '../invoicing/invoicing.service';
+import { OrderHistoryService } from './order-history/order-history.service';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -179,6 +214,22 @@ export function splitTaxSnapshotAcrossRates(
   return cents.map((c) => c / 100);
 }
 
+/**
+ * Columnas por las que `OrdersService.findAll` puede ordenar sin romper
+ * Prisma. Vive en el servicio —el dueño del query— y no en cada llamante:
+ * las tools de Vexi (`orders.tools.ts`) la importan para validar `sort_by`
+ * en vez de mantener su propia copia.
+ */
+export const SORTABLE_COLUMNS = [
+  'created_at',
+  'updated_at',
+  'order_number',
+  'grand_total',
+  'state',
+] as const;
+
+export type SortableOrderColumn = (typeof SORTABLE_COLUMNS)[number];
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -269,7 +320,100 @@ export class OrdersService {
     @Optional()
     @Inject(forwardRef(() => InvoicingService))
     private readonly invoicingService?: InvoicingService,
+    // Plan order-truth-and-invoice-tz — Paso 6. Único escritor de
+    // `order_events`. `@Optional()` por el mismo motivo que el resto de
+    // dependencias tardías: no romper los TestingModule/`new OrdersService(...)`
+    // existentes. En prod siempre resuelve vía `OrderHistoryModule` (ver
+    // `orders.module.ts`).
+    @Optional() private readonly orderHistoryService?: OrderHistoryService,
+    @Optional() private readonly stockValidator?: StockValidatorService,
   ) {}
+
+  /**
+   * Reserve every sellable slice, rather than assuming one location holds the
+   * entire line.
+   *
+   * `allowOversell` (docs/plans/no-overselling-stock-guard-plan.md, step 9):
+   * default `false` preserves the strict guard byte-for-byte. When `true`
+   * (the caller already resolved `StockValidatorService.resolveInventoryPolicy(...)
+   * .allowOversell === true` for this order's store), a shortfall does NOT
+   * throw — it is logged and the full `required` quantity is reserved anyway,
+   * with the uncovered remainder landing on a fallback location via
+   * `allow_negative_available: true` (and `validate_availability: false`,
+   * since the two describe the same accepted-shortfall intent).
+   */
+  private async reserveOrderItemStrict(
+    item: {
+      product_id: number;
+      product_variant_id: number | null;
+      quantity: number;
+      stock_units_consumed: number | null;
+      product_name: string;
+    },
+    orderId: number,
+    storeId: number,
+    userId: number | undefined,
+    tx: Prisma.TransactionClient,
+    allowOversell = false,
+  ): Promise<void> {
+    const required = Math.max(0, Number(item.stock_units_consumed ?? 0)) || item.quantity;
+    const allocation = await this.sellableStockAllocator.allocateForLine(
+      storeId,
+      item.product_id,
+      item.product_variant_id ?? undefined,
+      required,
+      [],
+      tx,
+    );
+    let slices = allocation.slices;
+    if (allocation.shortfall > 0) {
+      if (!allowOversell) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+          `No hay existencias suficientes de ${item.product_name}.`,
+          { items: [{
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id,
+            product_name: item.product_name,
+            kind: 'product',
+            requested: required,
+            available: allocation.available,
+          }] },
+        );
+      }
+      this.logger.warn(
+        `Sobreventa permitida — ${item.product_name}: requiere ${required}, disponible ${allocation.available}.`,
+      );
+      const fallbackLocationId =
+        allocation.slices[0]?.location_id ??
+        (await this.stockLevelManager.getDefaultLocationForProduct(
+          item.product_id,
+          item.product_variant_id ?? undefined,
+          tx,
+        ));
+      slices = this.sellableStockAllocator.absorbShortfall(
+        allocation,
+        fallbackLocationId,
+      );
+    }
+    for (const slice of slices) {
+      await this.stockLevelManager.reserveStock(
+        item.product_id,
+        item.product_variant_id ?? undefined,
+        slice.location_id,
+        slice.quantity,
+        'order',
+        orderId,
+        userId,
+        !allowOversell,
+        tx,
+        undefined,
+        false,
+        undefined,
+        allowOversell,
+      );
+    }
+  }
 
   /** Copia del impuesto de la tarifa `rate_id` (vacía sin tarifa/servicio). */
   private async snapshotShippingTax(
@@ -285,6 +429,118 @@ export class OrdersService {
       shipping_cost,
       { store_id },
     );
+  }
+
+  /**
+   * Paso 5 (B1+B2) — total de cabecera único (invariante I-6):
+   * `grand_total = max(0, subtotal + tax − descuento + envío + propina)`.
+   *
+   * Lo usan los tres caminos que cambian el envío (editor, `update()`,
+   * `assignShipping`). La propina sale de la orden persistida salvo que el
+   * llamador traiga una explícita; sin propina el término es 0 y el
+   * resultado es idéntico al cálculo histórico.
+   */
+  private computeOrderGrandTotal(args: {
+    subtotal: number;
+    tax: number;
+    discount: number;
+    shipping: number;
+    tip?: number | string | Prisma.Decimal | null;
+  }): number {
+    const tip = Number(args.tip ?? 0);
+    return Math.max(
+      0,
+      roundMoney(
+        Number(args.subtotal) +
+          Number(args.tax) -
+          Number(args.discount) +
+          Number(args.shipping) +
+          (Number.isFinite(tip) ? tip : 0),
+      ),
+    );
+  }
+
+  /**
+   * Paso 5 (B1+B2) — regla única del impuesto del envío, usada por los
+   * tres caminos (editor, `update()`, `assignShipping`):
+   * - `shippingUnchanged` ⇒ `undefined`: la copia congelada queda intacta
+   *   (editar una nota no refactura el envío).
+   * - tarifa con costo de tarifa (±1¢) ⇒ snapshot vigente de la tarifa.
+   * - resto (costo manual, tarifa sin costo determinista) ⇒ copia vacía.
+   *
+   * Cada llamador resuelve `rateCost` con `resolveExpectedRateCost`; el
+   * editor pasa su costo de servidor ya validado por el guard de
+   * tolerancia. Paso 14: la copia viaja con `shipping_tax_is_inclusive`
+   * (modo de la tarifa cuando hay impuesto, null si no).
+   */
+  private async resolveShippingTaxChange(args: {
+    shippingUnchanged: boolean;
+    rateId: number | null;
+    rateCost: number | null;
+    shippingCost: number;
+    storeId: number;
+    client?: any;
+  }): Promise<
+    (ShippingTaxSnapshot & { shipping_tax_is_inclusive: boolean | null }) | undefined
+  > {
+    if (args.shippingUnchanged) return undefined;
+    const costComesFromRate =
+      args.rateId != null &&
+      args.rateCost != null &&
+      !differsByAtLeastCents(args.shippingCost, args.rateCost, 1);
+    if (!costComesFromRate) {
+      return { ...EMPTY_SHIPPING_TAX, shipping_tax_is_inclusive: null };
+    }
+    const snapshot = await this.snapshotShippingTax(
+      args.rateId,
+      args.shippingCost,
+      args.storeId,
+      args.client,
+    );
+    // Paso 14 — el modo sale del cálculo único, evaluado sobre el costo
+    // cobrado (el modo vive en la fila de la tarifa, así que el precio de
+    // entrada no lo mueve; solo se consulta cuando hay impuesto). Sin
+    // `chargeForRate` (dobles viejos de specs) ⇒ null.
+    if (!(snapshot.shipping_tax_amount > 0)) {
+      return { ...snapshot, shipping_tax_is_inclusive: null };
+    }
+    const charge =
+      this.shippingTaxService &&
+      typeof this.shippingTaxService.chargeForRate === 'function'
+        ? await this.shippingTaxService.chargeForRate(
+            args.client ?? null,
+            args.rateId,
+            args.shippingCost,
+            { store_id: args.storeId },
+          )
+        : null;
+    return {
+      ...snapshot,
+      shipping_tax_is_inclusive:
+        charge && charge.applies ? charge.reason === 'inclusive' : null,
+    };
+  }
+
+  /**
+   * Paso 5 (B1+B2) — costo que dicta una tarifa para una orden. Unificado
+   * (ver `vendix-shipping-distance-pricing` / plan de unificación del
+   * cálculo de envío): TODOS los tipos (`flat`, `weight_based`,
+   * `price_based`, `free`) pasan por el mismo cálculo único de
+   * `ShippingCalculatorService` sobre la dirección y las líneas de la
+   * orden — ya no hay atajo `flat = base_cost`, que ignoraba el umbral de
+   * envío gratis, el costo por unidad y el precio por distancia.
+   * `carrier_calculated`, sin dirección resoluble, tarifa desconocida o
+   * fallo del calculador ⇒ `null` ⇒ copia vacía (nunca inventa impuesto).
+   */
+  private async resolveExpectedRateCost(
+    rate: { id: number; type: string; base_cost: unknown } | null,
+    orderId: number,
+    storeId: number,
+  ): Promise<number | null> {
+    if (!rate) return null;
+    const options = await this.quoteOrderShippingOptions(orderId, storeId);
+    const match = options?.find((o) => o.rate_id === rate.id);
+    return match ? Number(match.cost) : null;
   }
 
   // === Carril B - B3: listeners de EventEmitter que empujan al SSE =========
@@ -585,8 +841,28 @@ export class OrdersService {
           createOrderDto,
         );
 
+        // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive to
+        // the response, only when the store's "Permitir sobreventa" switch
+        // accepted a real shortfall. Declared outside the tx so it survives
+        // into the final return below.
+        const stockWarnings: InsufficientStockItem[] = [];
         // Use scoped client (creates are not scoped by extension but using correct service is good style)
-        const order = await this.prisma.orders.create({
+        const order = await this.prisma.$transaction(async (tx) => {
+          const demands: StockDemandLine[] = createOrderDto.items.flatMap((item, index) =>
+            item.product_id != null && variantCheckProductById.get(item.product_id)?.product_type !== 'prepared'
+              ? [{
+                  product_id: item.product_id,
+                  product_variant_id: item.product_variant_id,
+                  quantity: Math.max(0, Number(tierSnapshots[index]?.stock_units_consumed ?? 0)) || item.quantity,
+                  product_name: item.product_name,
+                }]
+              : [],
+          );
+          const inventoryPolicy = await this.stockValidator!.resolveInventoryPolicy(store_id, tx);
+          const allowOversell = inventoryPolicy.allowOversell === true;
+          const shortages = await this.stockValidator!.assertLinesAvailable(demands, { tx, allowOversell });
+          if (shortages.length > 0) stockWarnings.push(...shortages);
+          const createdOrder = await tx.orders.create({
           data: {
             created_by_user_id: creatingUser?.id ?? context?.user_id ?? null,
             customer_id: createOrderDto.customer_id ?? null,
@@ -629,10 +905,12 @@ export class OrdersService {
                   const product = item.product_id
                     ? variantCheckProductById.get(item.product_id) ?? null
                     : null;
-                  const itemType =
-                    item.item_type === 'product'
-                      ? product?.product_type || 'physical'
-                      : item.item_type || product?.product_type || 'custom';
+                  // The catalog, not a caller-provided item_type, decides
+                  // whether this line is prepared (ingredient-backed) or
+                  // physical (reservation-backed).
+                  const itemType = item.product_id
+                    ? product?.product_type || 'physical'
+                    : item.item_type || 'custom';
                   const tierSnap = tierSnapshots[index];
                   // Snapshot variant image S3 key (never signed URL)
                   let variant_image_url: string | null = null;
@@ -728,47 +1006,17 @@ export class OrdersService {
           },
         });
 
-        // Reserve stock for each item with track_inventory
-        for (const item of order.order_items) {
-          if (!item.products?.track_inventory) continue;
-          try {
-            const location_id =
-              await this.stockLevelManager.getDefaultLocationForProduct(
-                item.product_id,
-                item.product_variant_id || undefined,
-              );
-            // Multi-tarifa: si el item persistió stock_units_consumed (>0),
-            // pasarlo como override al reservador.
-            const stockUnitsConsumed =
-              typeof item.stock_units_consumed === 'number' &&
-              item.stock_units_consumed > 0
-                ? item.stock_units_consumed
-                : undefined;
-            await this.stockLevelManager.reserveStock(
-              item.product_id,
-              item.product_variant_id || undefined,
-              location_id,
-              item.quantity,
-              'order',
-              order.id,
-              creatingUser?.id,
-              false, // POS: don't validate availability (non-restrictive UX)
-              undefined,
-              undefined,
-              false,
-              stockUnitsConsumed,
-              // QUI-557: el POS sobrevende a propósito, así que aquí SÍ se
-              // autoriza el disponible negativo. Es la única forma de que el
-              // piso duro de `reserveStock` proteja al resto de flujos sin
-              // romper esta decisión de producto.
-              true,
-            );
-          } catch (error) {
-            this.logger.warn(
-              `Stock reservation failed for product ${item.product_id}: ${error.message}`,
-            );
+          // The order and its reservations must commit or roll back together.
+          for (const item of createdOrder.order_items) {
+            if (!item.product_id || item.item_type === 'prepared' || item.item_type === 'service' ||
+              !this.stockValidator!.resolveEffectiveTracking(
+                item.products ?? { track_inventory: false },
+                item.product_variants ?? undefined,
+              )) continue;
+            await this.reserveOrderItemStrict(item, createdOrder.id, store_id, creatingUser?.id, tx, allowOversell);
           }
-        }
+          return createdOrder;
+        }, { timeout: 20_000, maxWait: 5_000 });
 
         this.eventEmitter.emit('order.created', {
           store_id: order.store_id,
@@ -778,7 +1026,9 @@ export class OrdersService {
           currency: order.currency,
         });
 
-        return order;
+        return stockWarnings.length > 0
+          ? { ...order, stock_warnings: stockWarnings }
+          : order;
       } catch (error) {
         if (
           error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -824,6 +1074,7 @@ export class OrdersService {
       // aplicaba. Por eso filtrar por "Pagado" no recortaba la tabla.
       // Verificado: `orders.payments payments[]` (schema.prisma:1548).
       payment_status,
+      payment_method_id,
       // FIX admin-orders-filters (BUG C) — destructurar `dispatchable`
       // explícitamente para condicionar la rama de `state`. Si se deja
       // implícito (`query.dispatchable`) no podemos hacer la guardia
@@ -855,7 +1106,11 @@ export class OrdersService {
           { customer_alias: { contains: search, mode: 'insensitive' } },
         ],
       }),
-      ...(status && !dispatchable && { state: status }),
+      // Paso 3 (multi-select ventas) — array usa `in` (equivalente a
+      // igualdad para un elemento); single conserva la igualdad exacta.
+      ...(status && !dispatchable && {
+        state: Array.isArray(status) ? { in: status } : status,
+      }),
       ...(customer_id && { customer_id }),
       // Carril B — B2: filtra órdenes que tengan al menos una table_session
       // apuntando a la mesa solicitada (incluye sesiones ya cerradas; la orden
@@ -863,7 +1118,9 @@ export class OrdersService {
       ...(table_id && {
         table_sessions: { some: { table_id } },
       }),
-      ...(channel && { channel }),
+      ...(channel && {
+        channel: Array.isArray(channel) ? { in: channel } : channel,
+      }),
       // FIX admin-orders-filters (BUG A) — aplica el filtro de "Estado de
       // pago" del dropdown. Viaja como `payments_state_enum` en el DTO.
       // La columna destino NO está denormalizada en `orders` (sólo existe
@@ -872,8 +1129,40 @@ export class OrdersService {
       // porque una orden puede tener varios pagos en distintos estados
       // (parcialmente pagada, reembolsada parcial, etc.) y queremos
       // matchear si CUALQUIERA cumple.
-      ...(payment_status && {
-        payments: { some: { state: payment_status } },
+      ...(payment_status && !payment_method_id && {
+        payments: {
+          some: {
+            state: Array.isArray(payment_status)
+              ? { in: payment_status }
+              : payment_status,
+          },
+        },
+      }),
+      ...(payment_method_id && {
+        AND: [
+          { payments: { some: {
+            store_payment_method_id: payment_method_id,
+            state: { in: [
+              payments_state_enum.succeeded,
+              payments_state_enum.captured,
+              payments_state_enum.partially_refunded,
+              payments_state_enum.refunded,
+            ] },
+          } } },
+          ...(payment_status
+            ? [
+                {
+                  payments: {
+                    some: {
+                      state: Array.isArray(payment_status)
+                        ? { in: payment_status }
+                        : payment_status,
+                    },
+                  },
+                },
+              ]
+            : []),
+        ],
       }),
       ...(query.missing_shipping_method && {
         shipping_method_id: null,
@@ -953,6 +1242,10 @@ export class OrdersService {
               },
             },
           },
+          refunds: {
+            where: { state: 'completed' },
+            select: { amount: true },
+          },
           // Cliente para la columna "Cliente" de los listados (wizard de
           // remisiones, lista de órdenes). findAll ya FILTRA por users en la
           // búsqueda pero no los devolvía → "No data" en la lista. Select
@@ -997,11 +1290,42 @@ export class OrdersService {
         const cancellation_policy = getOrderCancellationPolicy(order);
         // The minimal payment projection is policy input, not a partial
         // Payment[] response that consumers could mistake for receipt data.
-        const { payments: _policyPayments, ...listOrder } = order;
-        return { ...listOrder, cancellation_policy };
+        const completedRefundTotal = (order.refunds ?? []).reduce(
+          (sum, refund) => sum.plus(refund.amount),
+          new Prisma.Decimal(0),
+        );
+        const netTotal = Prisma.Decimal.max(
+          new Prisma.Decimal(0),
+          new Prisma.Decimal(order.grand_total ?? 0).minus(completedRefundTotal),
+        );
+        // Neither the policy-only payments nor raw refund rows are part of
+        // the list contract. Project only the aggregate read model.
+        const { payments: _policyPayments, refunds: _completedRefunds, ...listOrder } = order;
+        return {
+          ...listOrder,
+          cancellation_policy,
+          net_total: netTotal.toNumber(),
+          completed_refund_amount: completedRefundTotal.toNumber(),
+          is_partially_refunded: completedRefundTotal.gt(0) && netTotal.gt(0),
+        };
       }),
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
+  }
+
+  /** Store-scoped labels for the sales-list payment-method filter. */
+  async listPaymentMethods() {
+    return this.prisma.store_payment_methods.findMany({
+      select: {
+        id: true,
+        display_name: true,
+        state: true,
+        system_payment_method: {
+          select: { display_name: true },
+        },
+      },
+      orderBy: [{ display_order: 'asc' }, { id: 'asc' }],
+    });
   }
 
   async findOne(id: number) {
@@ -1124,6 +1448,13 @@ export class OrdersService {
             },
           },
           orderBy: { created_at: 'asc' },
+        },
+        // order-truth-and-invoice-tz plan — Step 2: `available_actions` reuses
+        // the SAME `canPay`/`canRefund` predicates `OrderFlowService
+        // .getAvailableActions` calls, which need a refund-aware settlement
+        // snapshot (`toSettlementSnapshot` in `order-action-policy.util.ts`).
+        refunds: {
+          select: { state: true, amount: true },
         },
         shipping_method: {
           select: {
@@ -1329,19 +1660,409 @@ export class OrdersService {
       }
     }
 
-    // Release-854 follow-up paso 2 — campo aditivo para el pre-chequeo
-    // del frontend. El `invoices[0]` del include sigue siendo la última
-    // factura de CUALQUIER tipo (lo necesita la tarjeta del detalle); este
-    // campo responde otra pregunta: ¿hay una `sales_invoice` vigente?
+    // Mirrors `findBlockingSalesInvoiceForPaymentCancel`'s exact semantics
+    // (`OrderFlowService`, order-flow.service.ts) — a `draft` sales invoice
+    // was never transmitted, so it does not block a local payment cancel.
+    // Scoped to `sales_invoice` ONLY — see `findActiveSalesInvoice`'s
+    // docblock; do not widen this one.
     const activeSalesInvoice = await this.findActiveSalesInvoice(id);
+    const hasIssuedSalesInvoice =
+      !!activeSalesInvoice && activeSalesInvoice.status !== 'draft';
+
+    // Release-854 follow-up paso 2 (ampliado — titular en cualquier
+    // estado) — campo aditivo para el pre-chequeo del frontend. El
+    // `invoices[0]` del include sigue siendo la última factura de
+    // CUALQUIER tipo (lo necesita la tarjeta del detalle); este campo
+    // responde otra pregunta: ¿hay un documento electrónico
+    // (`sales_invoice`/`export_invoice`/`pos_equivalent_document`) vigente
+    // que bloquee el cambio de titular? Deliberadamente una consulta aparte
+    // de `activeSalesInvoice` de arriba — comparten forma pero no filtro,
+    // y mezclarlas cambiaría silenciosamente `hasIssuedSalesInvoice`.
+    const activeTitularInvoice = await this.findActiveTitularInvoice(id);
+
+    // order-truth-and-invoice-tz plan — Step 2: additive `available_actions`
+    // (order-level) + `items[].available_actions` (item-level). Both are
+    // computed through the SAME util predicates
+    // `OrderFlowService.getAvailableActions` calls (`order-action-policy
+    // .util.ts`) — one source of truth for "what can this order/item do",
+    // reachable from either GET endpoint without a second round-trip. Built
+    // entirely from data this query already loaded (plus the `refunds`
+    // include added above) — no extra queries.
+    const available_actions = this.buildOrderAvailableActions(order, hasIssuedSalesInvoice);
+    const orderHasSettledPayment = (order.payments ?? []).some((p: any) =>
+      SETTLED_PAYMENT_STATES.has(p.state),
+    );
+    const orderItemsWithActions = (order.order_items ?? []).map((item: any) => ({
+      ...item,
+      available_actions: computeItemActions({
+        order_state: order.state,
+        item_type: item.item_type,
+        product_type: item.products?.product_type,
+        skip_kds: item.skip_kds,
+        delivered_at: item.delivered_at,
+        cancelled_at: item.cancelled_at,
+        latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
+        orderHasSettledPayment,
+      }),
+    }));
 
     return {
       ...order,
+      order_items: orderItemsWithActions,
       cancellation_policy: getOrderCancellationPolicy(order),
-      active_sales_invoice: activeSalesInvoice
-        ? { id: activeSalesInvoice.id, status: activeSalesInvoice.status }
+      active_sales_invoice: activeTitularInvoice
+        ? { id: activeTitularInvoice.id, status: activeTitularInvoice.status }
         : null,
+      available_actions,
     };
+  }
+
+  /**
+   * T1 agent reads: narrow projections owned by this service so Vexi tools
+   * never touch Prisma directly. Tenant scope comes from the injected
+   * `StorePrismaService` plus the explicit `store_id` anchor below (same
+   * defense-in-depth as `findOne`).
+   */
+
+  private agentStoreAnchor() {
+    const context = RequestContextService.getContext();
+    return context?.store_id ? { store_id: context.store_id } : {};
+  }
+
+  /**
+   * `find_order` numeric rescue: "la orden 412" is the internal id, which
+   * `findAll({search})` never matches (it only looks at `order_number` and
+   * customer data). Lightweight projection for `compactOrder`, null when
+   * missing — never throws, unlike `findOne`.
+   */
+  async findOrderByIdForAgent(orderId: number) {
+    return this.prisma.orders.findFirst({
+      where: { id: orderId, ...this.agentStoreAnchor() },
+      include: {
+        users: {
+          select: { id: true, first_name: true, last_name: true, email: true },
+        },
+        order_items: { select: { id: true } },
+      },
+    }) as Promise<any | null>;
+  }
+
+  /** `get_dispatch_status` header projection (lines + fulfillment flag). */
+  async findDispatchStatusForAgent(orderId: number) {
+    return this.prisma.orders.findFirst({
+      where: { id: orderId, ...this.agentStoreAnchor() },
+      select: {
+        id: true,
+        order_number: true,
+        state: true,
+        delivery_type: true,
+        dispatch_fulfillment: true,
+        created_at: true,
+        order_items: {
+          select: { id: true, product_name: true, quantity: true },
+        },
+      },
+    }) as Promise<any | null>;
+  }
+
+  /**
+   * order-truth-and-invoice-tz plan — Step 2. Mirrors
+   * `OrderFlowService.getAvailableActions`'s per-state orchestration
+   * action-for-action (same codes, same `label_key`s, same util predicates)
+   * so `findOne`'s response can render the same buttons without a second
+   * call to `GET .../flow/available-actions`. Deliberately duplicates only
+   * the "which code applies in which state" wiring — never the rule logic
+   * itself, which stays in `order-action-policy.util.ts`'s predicates.
+   *
+   * Two small, intentional differences from `OrderFlowService
+   * .getAvailableActions`, both required to stay a pure/non-requerying
+   * helper over data `findOne` already loaded:
+   *  - `processing`'s method-type branch reads `order.shipping_method?.type`
+   *    (already `include`d by `findOne`) instead of the sibling method's own
+   *    `shipping_methods.findFirst` query.
+   *  - `hasIssuedSalesInvoice` is the caller's already-computed
+   *    `activeSalesInvoice` (unconditional in `findOne`), not the lazy,
+   *    conditional `findBlockingSalesInvoiceForPaymentCancel` lookup — same
+   *    semantics (`status !== 'draft'`), just no separate branch to decide
+   *    whether to bother resolving it.
+   */
+  private buildOrderAvailableActions(
+    order: any,
+    hasIssuedSalesInvoice: boolean,
+  ): Array<{ code: string; label_key: string; enabled: boolean; reason?: string }> {
+    const actions: Array<{
+      code: string;
+      label_key: string;
+      enabled: boolean;
+      reason?: string;
+    }> = [];
+
+    const state = order.state as string;
+    const deliveryType = order.delivery_type as string | null | undefined;
+    const hasMethod = !!order.shipping_method_id;
+    const isDirectDelivery = deliveryType === 'direct_delivery';
+    const isPickupDelivery = (deliveryType || 'direct_delivery') === 'pickup';
+    const requiresDispatch = deliveryType === 'home_delivery';
+    const shippingMethodType = order.shipping_method?.type ?? null;
+
+    const isKitchenOrder = (order.order_items ?? []).some(
+      (item: any) => (item.kitchen_ticket_items ?? []).length > 0,
+    );
+    const hasPendingKitchen = (order.order_items ?? []).some((item: any) =>
+      (item.kitchen_ticket_items ?? []).some(
+        (k: any) => k.status !== 'delivered' && k.status !== 'cancelled',
+      ),
+    );
+    const offersDispatchFlow = requiresDispatch || isKitchenOrder;
+
+    const snapshot: OrderActionSnapshot & {
+      delivery_type?: string | null;
+      shipping_method_id?: number | null;
+      payment_form?: string | null;
+      isKitchenOrder?: boolean;
+      hasOrderItems?: boolean;
+      remaining_balance?: Prisma.Decimal | number | string | null;
+    } = {
+      ...order,
+      refunds: order.refunds ?? [],
+      hasPendingKitchen,
+      isKitchenOrder,
+      hasOrderItems: (order.order_items ?? []).length > 0,
+      hasIssuedSalesInvoice,
+    };
+    const roleCtx = { roles: RequestContextService.getRoles() };
+
+    if (state === 'draft' || state === 'created') {
+      actions.push({
+        code: 'edit_order',
+        label_key: 'ORD_ACTION_EDIT_ORDER',
+        ...canEditOrder(snapshot, roleCtx),
+      });
+      actions.push({ code: 'pay', label_key: 'ORD_ACTION_PAY', ...canPay(snapshot) });
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          ...canAssignShipping(snapshot),
+        });
+      }
+      actions.push({ code: 'cancel', label_key: 'ORD_ACTION_CANCEL', ...canCancel(snapshot) });
+    }
+
+    if (state === 'pending_payment') {
+      const isCreditOrder = order.payment_form === '2';
+      if (isCreditOrder) {
+        actions.push({
+          code: 'credit_payment',
+          label_key: 'ORD_ACTION_CREDIT_PAYMENT',
+          ...canCreditPayment(snapshot),
+        });
+      } else if (requiresPaymentRegistration(snapshot)) {
+        // Fase 2 paso 6 — espejo de `getAvailableActions`: pago manual
+        // pendiente o saldo parcial → el personal REGISTRA por `flow/pay`.
+        actions.push({ code: 'pay', label_key: 'ORD_ACTION_PAY', ...canPay(snapshot) });
+      } else {
+        actions.push({
+          code: 'confirm_payment',
+          label_key: 'ORD_ACTION_CONFIRM_PAYMENT',
+          enabled: true,
+        });
+      }
+
+      actions.push({
+        code: 'cancel_payment',
+        label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+        ...canCancelPaymentAsRole(snapshot, roleCtx),
+      });
+
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          ...canAssignShipping(snapshot),
+        });
+      }
+      actions.push({ code: 'cancel', label_key: 'ORD_ACTION_CANCEL', ...canCancel(snapshot) });
+
+      // Keep the detail projection in lockstep with OrderFlowService:
+      // only one fulfillment action applies to this delivery type.
+      if (requiresDispatch) {
+        actions.push({
+          code: 'dispatch_order',
+          label_key: 'ORD_ACTION_DISPATCH_ORDER',
+          ...canDispatchOrder(snapshot),
+        });
+      } else if (isPickupDelivery) {
+        actions.push({
+          code: 'ready_for_pickup',
+          label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+          ...canReadyForPickupBeforePayment(snapshot),
+        });
+      } else if (offersDispatchFlow) {
+        actions.push({
+          code: 'manual_ship',
+          label_key: 'ORD_ACTION_MANUAL_SHIP',
+          ...canManualShip(snapshot),
+        });
+      }
+    }
+
+    if (state === 'processing') {
+      if (!offersDispatchFlow && !hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          ...canAssignShipping(snapshot),
+        });
+        actions.push({
+          code: 'ready_for_pickup',
+          label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+          enabled: false,
+          reason: 'ORD_SHIP_REQUIRED_001',
+        });
+        actions.push({
+          code: 'ship_with_tracking',
+          label_key: 'ORD_ACTION_SHIP_WITH_TRACKING',
+          enabled: false,
+          reason: 'ORD_SHIP_REQUIRED_001',
+        });
+      } else if (!offersDispatchFlow && hasMethod) {
+        if (shippingMethodType === 'pickup') {
+          actions.push({
+            code: 'ready_for_pickup',
+            label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+            enabled: true,
+          });
+        } else {
+          actions.push({
+            code: 'ship_with_tracking',
+            label_key: 'ORD_ACTION_SHIP_WITH_TRACKING',
+            enabled: true,
+          });
+        }
+      }
+
+      if (offersDispatchFlow) {
+        actions.push({
+          code: 'dispatch_order',
+          label_key: 'ORD_ACTION_DISPATCH_ORDER',
+          ...canDispatchOrder(snapshot),
+        });
+        if (isPickupDelivery) {
+          actions.push({
+            code: 'direct_deliver',
+            label_key: 'ORD_ACTION_DIRECT_DELIVER',
+            ...canDirectDeliver(snapshot),
+          });
+        }
+      } else {
+        // Restores the web's removed `ship` button ("Pasar a Cobro", commit
+        // cbebc40db8f) — see `canCollectViaShip`'s doc comment in
+        // `order-action-policy.util.ts`. Same `!offersDispatchFlow` presence
+        // gate as the dispatch trio above, mirroring `getAvailableActions`.
+        actions.push({
+          code: 'collect_payment',
+          label_key: 'ORD_ACTION_COLLECT_PAYMENT',
+          ...canCollectViaShip(snapshot),
+        });
+      }
+
+      if (!requiresDispatch) {
+        actions.push({
+          code: 'confirm_delivery',
+          label_key: 'ORD_ACTION_CONFIRM_DELIVERY',
+          ...canConfirmDelivery(snapshot),
+        });
+      }
+
+      // Parity fix (order-actions-parity spec): mirrors the SAME fix in
+      // `OrderFlowService.getAvailableActions` — the web has always shown
+      // `cancel-payment` in `processing` (gated only by `isPrivilegedUser()`)
+      // and objective 12 explicitly lists `processing` among the
+      // `cancel_payment`-eligible states.
+      actions.push({
+        code: 'cancel_payment',
+        label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+        ...canCancelPaymentAsRole(snapshot, roleCtx),
+      });
+
+      actions.push({
+        code: 'cancel',
+        label_key: 'ORD_ACTION_CANCEL',
+        ...canCancel(snapshot),
+      });
+    }
+
+    if (state === 'shipped') {
+      actions.push({
+        code: 'mark_delivered',
+        label_key: 'ORD_ACTION_MARK_DELIVERED',
+        enabled: true,
+      });
+    }
+
+    if (state === 'delivered') {
+      actions.push({
+        code: 'confirm_delivery',
+        label_key: 'ORD_ACTION_CONFIRM_DELIVERY',
+        ...canConfirmDelivery(snapshot),
+      });
+    }
+
+    if (state === 'cancelled') {
+      // `reactivate` now requires owner/admin (same `RolesGuard` +
+      // `@Roles` as `cancel_payment`) — see `canReactivateAsRole`.
+      actions.push({
+        code: 'reactivate',
+        label_key: 'ORD_ACTION_REACTIVATE',
+        ...canReactivateAsRole(snapshot, roleCtx),
+      });
+    }
+
+    if (state === 'delivered' || state === 'finished') {
+      actions.push({ code: 'refund', label_key: 'ORD_ACTION_REFUND', ...canRefund(snapshot) });
+    }
+
+    const isPayEligibleFulfilledState =
+      state === 'shipped' || state === 'delivered' || state === 'finished';
+    if (isPayEligibleFulfilledState) {
+      const hasSettled = (order.payments ?? []).some((p: any) =>
+        SETTLED_PAYMENT_STATES.has(p.state),
+      );
+      const isCreditOrder = order.payment_form === '2';
+      const payResult = canPay(snapshot);
+      actions.push({
+        code: 'pay',
+        label_key: 'ORD_ACTION_PAY',
+        ...(payResult.enabled && isCreditOrder
+          ? { enabled: false, reason: ErrorCodes.ORD_PAY_CREDIT_ORDER_001.code }
+          : payResult),
+      });
+
+      if (isCreditOrder && state === 'finished') {
+        actions.push({
+          code: 'credit_payment',
+          label_key: 'ORD_ACTION_CREDIT_PAYMENT',
+          ...canCreditPayment(snapshot),
+        });
+      }
+
+      if (hasSettled) {
+        actions.push({
+          code: 'cancel_payment',
+          label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+          ...canCancelPaymentAsRole(snapshot, roleCtx),
+        });
+      }
+    }
+
+    actions.push({
+      code: 'fast_track',
+      label_key: 'ORD_ACTION_FAST_TRACK',
+      ...canFastTrack(snapshot),
+    });
+
+    return actions;
   }
 
   /**
@@ -1421,26 +2142,14 @@ export class OrdersService {
     const economicFields = ['items', 'subtotal', 'total_amount', 'tax_amount', 'discount_amount', 'shipping_cost', 'customer_id', 'customer_alias', 'currency'];
     if (economicFields.some((key) => Object.prototype.hasOwnProperty.call(updateOrderDto, key))) assertNoActiveFinancialSplit(order);
 
-    // Contrato PATCH titular: el cambio de titular (customer_id/customer_alias)
-    // se permite mientras la orden no haya salido ni esté cerrada
-    // (created/draft/pending_payment/processing/pending_delivery). Una vez
-    // enviada, entregada, finalizada, cancelada o reembolsada el titular es
-    // inmutable y se responde 409 ORD_EDIT_NOT_ALLOWED_001.
-    // Más laxo que `updateOrderFromEditor` (sigue en created/draft) porque el
-    // titular no recotiza ni mueve stock; el editor sí.
-    const TITULAR_LOCKED_STATES = [
-      'shipped',
-      'delivered',
-      'finished',
-      'cancelled',
-      'refunded',
-    ];
-    const touchesTitular =
-      Object.prototype.hasOwnProperty.call(updateOrderDto, 'customer_id') ||
-      Object.prototype.hasOwnProperty.call(updateOrderDto, 'customer_alias');
-    if (touchesTitular && TITULAR_LOCKED_STATES.includes(order.state)) {
-      throw new VendixHttpException(ErrorCodes.ORD_EDIT_NOT_ALLOWED_001);
-    }
+    // Contrato PATCH titular (regla vigente): el cambio de titular
+    // (customer_id/customer_alias) se permite en CUALQUIER estado de la
+    // orden — incluidos shipped/delivered/finished/cancelled/refunded. El
+    // único bloqueo por estado del documento vive en la guarda de factura de
+    // abajo (`ORD_TITULAR_INVOICED_001`), que corre exclusivamente cuando el
+    // DTO trae `customer_id` (ver `titularCustomerChanged`). Un cambio de
+    // SOLO `customer_alias` (etiqueta de display, no viaja al
+    // `titular_snapshot` de la factura) nunca se bloquea.
     // Titular del store: un customer_id de otra tienda se rechaza con 403
     // antes de tocar la fila, igual que el editor.
     if (
@@ -1459,15 +2168,62 @@ export class OrdersService {
         );
       }
     }
-    // Release-853 paso 10 — titular vs factura. Si la orden tiene una
-    // `sales_invoice` vigente (cualquier estado fuera de draft/voided/
-    // cancelled), el adquiriente es inmutable y el cambio responde 409
-    // ORD_TITULAR_INVOICED_001. Si la factura es un borrador, se guarda para
-    // propagarle el titular justo antes del write de la orden: si la
-    // propagación falla, la orden no se toca. Solo cubre `customer_id` (el
-    // `customer_alias` es etiqueta de display y no viaja al
-    // `titular_snapshot` de la factura). El filtro espeja
-    // `assertNotAlreadyInvoiced` de `InvoicingService`.
+    // Paso 5 (B1) — el envío congela su impuesto en la copia
+    // `shipping_tax_*`: cambiarlo en una orden que ya salió (shipped /
+    // delivered / finished) descuadraría la factura, igual que en
+    // `assignShipping`. Solo el CAMBIO se bloquea: reenviar el mismo
+    // costo/método/tarifa es no-op y pasa. `hasOwn` distingue "el DTO
+    // trae null explícito" (cambio) de "el DTO no dice nada" (persistido).
+    const hasShippingKey = (key: string): boolean =>
+      Object.prototype.hasOwnProperty.call(updateOrderDto, key);
+    const persistedShippingCost = Number(order.shipping_cost ?? 0);
+    const nextShippingCost = hasShippingKey('shipping_cost')
+      ? Number(updateOrderDto.shipping_cost ?? 0)
+      : persistedShippingCost;
+    const nextShippingMethodId = hasShippingKey('shipping_method_id')
+      ? (updateOrderDto.shipping_method_id ?? null)
+      : (order.shipping_method_id ?? null);
+    const nextShippingRateId = hasShippingKey('shipping_rate_id')
+      ? (updateOrderDto.shipping_rate_id ?? null)
+      : (order.shipping_rate_id ?? null);
+    const shippingChanged =
+      differsByAtLeastCents(nextShippingCost, persistedShippingCost, 1) ||
+      nextShippingMethodId !== (order.shipping_method_id ?? null) ||
+      nextShippingRateId !== (order.shipping_rate_id ?? null);
+    if (
+      shippingChanged &&
+      ['shipped', 'delivered', 'finished'].includes(order.state)
+    ) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_LOCKED_001);
+    }
+    // Regla vigente — titular vs factura electrónica. El titular es
+    // inmutable SOLO cuando la orden tiene un documento electrónico
+    // TRANSMITIDO y vigente (`sales_invoice` / `export_invoice` /
+    // `pos_equivalent_document` en `sent`/`accepted`): 409
+    // ORD_TITULAR_INVOICED_001, "ya tiene factura electrónica emitida".
+    //
+    // `validated`/`rejected` NO están transmitidos a la DIAN, pero
+    // `InvoicingService.update()` (apps/backend/src/domains/store/invoicing/
+    // invoicing.service.ts ~3996) solo acepta cambiar `customer_id` cuando
+    // `invoice.status === 'draft'` — para cualquier otro estado lanza
+    // `INVOICING_STATUS_002` si el titular difiere. No se modifica ese
+    // servicio (otro agente trabaja en `invoicing/`), así que
+    // `validated`/`rejected` también bloquean con el MISMO código
+    // (`ORD_TITULAR_INVOICED_001`) pero un mensaje distinto ("factura en
+    // proceso") en vez de intentar una propagación que el propio
+    // `InvoicingService` rechazaría.
+    //
+    // `draft` sí propaga (sin cambios): se guarda para propagarle el
+    // titular justo antes del write de la orden; si la propagación falla,
+    // la orden no se toca. `voided`/`cancelled` no aparecen aquí — el
+    // filtro `status: { notIn: ['voided', 'cancelled'] } ya los excluye, así
+    // que no bloquean ni se propagan (documento anulado, irrelevante para
+    // el titular).
+    //
+    // Solo cubre `customer_id` (el `customer_alias` es etiqueta de display
+    // y no viaja al `titular_snapshot` de la factura). El filtro espeja
+    // `assertNotAlreadyInvoiced` de `InvoicingService`, ampliado a los tres
+    // tipos de documento con CUFE/CUDE electrónico.
     const titularCustomerChanged =
       Object.prototype.hasOwnProperty.call(updateOrderDto, 'customer_id') &&
       updateOrderDto.customer_id !== order.customer_id;
@@ -1477,11 +2233,34 @@ export class OrdersService {
       customer_id: number | null;
     } | null = null;
     if (titularCustomerChanged) {
-      const titularInvoice = await this.findActiveSalesInvoice(id);
+      // Cartera abierta de la orden: la CxC guarda su propio customer_id y
+      // quedaría a nombre del titular anterior.
+      const openReceivable = await this.prisma.accounts_receivable.findFirst({
+        where: {
+          source_type: { in: ['credit_sale', 'order'] },
+          source_id: id,
+          balance: { gt: 0 },
+          status: { notIn: ['paid', 'cancelled', 'written_off'] },
+        },
+        select: { id: true },
+      });
+      if (openReceivable) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_TITULAR_OPEN_RECEIVABLE_001,
+          undefined,
+          { accounts_receivable_id: openReceivable.id },
+        );
+      }
+      const titularInvoice = await this.findActiveTitularInvoice(id);
       if (titularInvoice && titularInvoice.status !== 'draft') {
+        const isTransmitted =
+          titularInvoice.status === 'sent' ||
+          titularInvoice.status === 'accepted';
         throw new VendixHttpException(
           ErrorCodes.ORD_TITULAR_INVOICED_001,
-          undefined,
+          isTransmitted
+            ? undefined
+            : `La factura #${titularInvoice.id} de esta orden está en proceso (${titularInvoice.status}, aún no transmitida a la DIAN); espera a que se resuelva o anúlala antes de cambiar el titular.`,
           {
             invoice_id: titularInvoice.id,
             invoice_status: titularInvoice.status,
@@ -1561,39 +2340,48 @@ export class OrdersService {
           : order_delivery_type_enum.home_delivery;
     }
 
+    // Paso 5 (B1) — copia coherente con el costo nuevo: si es el costo
+    // de la tarifa efectiva (DTO o persistida) se re-deriva el snapshot;
+    // si es manual, copia vacía. Sin cambio de envío no se toca la copia.
+    if (shippingChanged) {
+      const shippingStoreId =
+        RequestContextService.getContext()?.store_id ?? order.store_id;
+      const shippingRate =
+        nextShippingRateId != null
+          ? await this.prisma.shipping_rates.findFirst({
+              where: { id: nextShippingRateId, is_active: true },
+            })
+          : null;
+      const rateCost = await this.resolveExpectedRateCost(
+        shippingRate,
+        id,
+        shippingStoreId,
+      );
+      const taxChange = await this.resolveShippingTaxChange({
+        shippingUnchanged: false,
+        rateId: nextShippingRateId,
+        rateCost,
+        shippingCost: nextShippingCost,
+        storeId: shippingStoreId,
+      });
+      if (taxChange) Object.assign(updateOrderDto, taxChange);
+    }
+
     // Recalculate grand_total if shipping_cost changes.
     //
-    // F-086 punto (b) — a esta fórmula le faltaban DOS términos frente a los
-    // dos carriles POS que ya la calculan bien (venta directa
-    // `payments.service.ts` y cierre de mesa, ambos:
-    // `Math.max(0, subtotal + tax − descuento + envío + propina)`):
-    //
-    //  1. La propina (`tip_amount`). Sin ella, reabrir el editor y guardar
-    //     sólo un cambio de envío sobre una orden POS con propina le borraba
-    //     la propina del `grand_total` mientras `orders.tip_amount` seguía
-    //     intacta: el pago ya cobrado queda por encima del nuevo total y el
-    //     asiento contable pierde el CR del pasivo custodio de la propina.
-    //     `UpdateOrderDto` no declara `tip_amount` hoy (el `whitelist` del
-    //     ValidationPipe rechazaría el campo si llegara), así que el término
-    //     sale SIEMPRE de la orden persistida; el `(updateOrderDto as
-    //     any).tip_amount ?? …` deja el cálculo listo para el día en que el
-    //     DTO sí la exponga, sin que nadie tenga que volver a tocar esta
-    //     fórmula.
-    //  2. El clamp `Math.max(0, …)`. Sin él, un cupón del 100% puede dejar
-    //     el paréntesis en negativo y romper la invariante de cabecera I-6
-    //     (`grand_total = max(0, subtotal + tax − descuento + envío +
-    //     propina)`).
+    // F-086 punto (b) — la fórmula vive en `computeOrderGrandTotal`:
+    // incluye la propina (persistida; `UpdateOrderDto` no declara
+    // `tip_amount` hoy, así que el término sale SIEMPRE de la orden y el
+    // `??` solo deja el cálculo listo para cuando el DTO la exponga) y el
+    // clamp `Math.max(0, …)` de la invariante I-6.
     if (updateOrderDto.shipping_cost !== undefined) {
-      const subtotal = Number(order.subtotal_amount);
-      const tax = Number(order.tax_amount);
-      const discount = Number(order.discount_amount);
-      const shipping = Number(updateOrderDto.shipping_cost);
-      const tip = Number(
-        (updateOrderDto as any).tip_amount ?? order.tip_amount ?? 0,
-      );
-      (updateOrderDto as any).grand_total = roundMoney(
-        Math.max(0, subtotal + tax - discount + shipping + tip),
-      );
+      (updateOrderDto as any).grand_total = this.computeOrderGrandTotal({
+        subtotal: Number(order.subtotal_amount),
+        tax: Number(order.tax_amount),
+        discount: Number(order.discount_amount),
+        shipping: Number(updateOrderDto.shipping_cost),
+        tip: (updateOrderDto as any).tip_amount ?? order.tip_amount ?? 0,
+      });
     }
 
     // Release-853 paso 10 — propagación al borrador. Va AQUÍ (después de
@@ -1706,6 +2494,26 @@ export class OrdersService {
       throw error;
     }
 
+    // Plan order-truth-and-invoice-tz — customer_changed. Solo cuando el DTO
+    // trae `customer_id` y difiere del persistido (mismo predicado que la
+    // guarda de factura de arriba); `customer_alias` es etiqueta de display
+    // y no cambia el titular. Este carril no abre transacción: el evento se
+    // escribe justo después del `orders.update` exitoso, como el resto de
+    // escritores no transaccionales de `order_events`.
+    if (titularCustomerChanged) {
+      await this.orderHistoryService?.record(this.prisma, {
+        orderId: id,
+        storeId: order.store_id,
+        organizationId:
+          RequestContextService.getContext()?.organization_id ?? null,
+        type: 'customer_changed',
+        payload: {
+          from_customer_id: order.customer_id ?? null,
+          to_customer_id: updateOrderDto.customer_id ?? null,
+        },
+      });
+    }
+
     /**
      * El estado va DESPUÉS de la metadata, y el orden NO es cosmético.
      *
@@ -1732,14 +2540,16 @@ export class OrdersService {
   }
 
   /**
-   * Release-854 follow-up paso 2 — factura de venta vigente de la orden.
-   *
-   * El filtro es el de la guarda de titular de `update()` (espejo de
-   * `assertNotAlreadyInvoiced` de `InvoicingService`): `sales_invoice` no
-   * anulada ni cancelada, la más reciente. Se comparte entre la guarda y
-   * `findOne()` para que la regla viva en un solo lugar. `customer_id`
-   * viaja solo para la compensación del paso 1; el campo público
-   * `active_sales_invoice` proyecta únicamente `{ id, status }`.
+   * Release-854 follow-up paso 2 — `sales_invoice` vigente de la orden,
+   * exclusivamente. Alimenta `hasIssuedSalesInvoice` en `findOne()`, que
+   * mantiene la MISMA semántica de `OrderFlowService
+   * .findBlockingSalesInvoiceForPaymentCancel` (mirror exacto, documentado
+   * en `buildOrderAvailableActions`). NO ampliar este filtro a otros
+   * `invoice_type`: eso divergiría de ese mirror y de
+   * `available_actions`/pago-cancelación, fuera del alcance de la regla de
+   * titular. La guarda de titular y la proyección `active_sales_invoice`
+   * usan `findActiveTitularInvoice` (más abajo), que sí cubre los tres
+   * tipos de documento electrónico.
    */
   private async findActiveSalesInvoice(orderId: number): Promise<{
     id: number;
@@ -1750,6 +2560,38 @@ export class OrdersService {
       where: {
         order_id: orderId,
         invoice_type: 'sales_invoice',
+        status: { notIn: ['voided', 'cancelled'] },
+      },
+      select: { id: true, status: true, customer_id: true },
+      orderBy: { id: 'desc' },
+    });
+  }
+
+  /**
+   * Guarda de titular (regla vigente) — a diferencia de
+   * `findActiveSalesInvoice` (solo `sales_invoice`, ver arriba), este
+   * helper cubre los TRES tipos de documento que pueden llevar un CUFE/CUDE
+   * transmitido a la DIAN: `sales_invoice`, `export_invoice` y
+   * `pos_equivalent_document`. La más reciente, sin anular/cancelar. Se
+   * comparte entre la guarda de `update()` y la proyección
+   * `active_sales_invoice` de `findOne()` para que la regla viva en un solo
+   * lugar. `customer_id` viaja solo para la compensación del borrador; el
+   * campo público `active_sales_invoice` proyecta únicamente
+   * `{ id, status }` — el frontend decide `sent`/`accepted` (transmitido,
+   * bloqueo firme) vs `validated`/`rejected` (en proceso) a partir del
+   * `status`.
+   */
+  private async findActiveTitularInvoice(orderId: number): Promise<{
+    id: number;
+    status: string;
+    customer_id: number | null;
+  } | null> {
+    return this.prisma.invoices.findFirst({
+      where: {
+        order_id: orderId,
+        invoice_type: {
+          in: ['sales_invoice', 'export_invoice', 'pos_equivalent_document'],
+        },
         status: { notIn: ['voided', 'cancelled'] },
       },
       select: { id: true, status: true, customer_id: true },
@@ -1783,12 +2625,6 @@ export class OrdersService {
     }
 
     await this.assertTableOrderEditable(id, order.store_id);
-
-    // Las órdenes de mesa nacen en 'draft' SIN reservar stock (se reserva al
-    // pagar vía promoteDraftToCreated). Al editar un draft NO liberamos ni
-    // re-reservamos: no hay reservas que liberar y re-reservar duplicaría el
-    // descuento con inventory_consumed_at_fire. Para 'created' sí (flujo actual).
-    const isDraft = order.state === 'draft';
 
     // Multi-tarifa: revalida permission + recalcula snapshots si las nuevas
     // líneas traen applied_price_tier_id.
@@ -1873,12 +2709,17 @@ export class OrdersService {
     const discountAmount = roundMoney(Number(dto.discount_amount ?? 0));
     const persistedShipping = roundMoney(Number(order.shipping_cost ?? 0));
 
-    return this.prisma.$transaction(async (tx) => {
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive to the
+    // response, only when the store's "Permitir sobreventa" switch accepted
+    // a real shortfall. Declared outside the tx so it survives into the
+    // final return below.
+    const stockWarnings: InsufficientStockItem[] = [];
+    const finalOrder = await this.prisma.$transaction(async (tx) => {
       // ERR-07 / DB-14 — invariante "prepared + variantes exige variante".
       // Único enforcement centralizado (mismo helper que `create` y
       // `updateOrderFromEditor`); si queda duplicado en dos sitios,
       // vuelve a divergir como ya pasó (Round 3 minor #15).
-      await assertVariantRequiredForPrepared(tx, dto.items);
+      const updateProductsById = await assertVariantRequiredForPrepared(tx, dto.items);
 
       // Release old reservations before deleting items
       const existingOrder = await tx.orders.findUnique({
@@ -1942,8 +2783,24 @@ export class OrdersService {
         );
       }
 
-      if (!isDraft) {
-        // Se liberan las reservas POR REFERENCIA, no adivinando la bodega.
+      const inventoryPolicy = await this.stockValidator!.resolveInventoryPolicy(order.store_id, tx);
+      const allowOversell = inventoryPolicy.allowOversell === true;
+      const shortages = await this.stockValidator!.assertLinesAvailable(
+        dto.items.flatMap((item, index) =>
+          item.product_id != null && updateProductsById.get(item.product_id)?.product_type !== 'prepared'
+            ? [{
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id,
+                quantity: Math.max(0, Number(tierSnapshots[index]?.stock_units_consumed ?? 0)) || item.quantity,
+                product_name: item.product_name,
+              }]
+            : [],
+        ),
+        { orderId: id, tx, allowOversell },
+      );
+      if (shortages.length > 0) stockWarnings.push(...shortages);
+
+      // Se liberan las reservas POR REFERENCIA, no adivinando la bodega.
         // Antes se resolvía `getDefaultLocationForProduct` —la bodega con más
         // disponible HOY— y se liberaba ahí; pero el POS reserva repartido en
         // varias bodegas (slices del asignador), así que la porción de la otra
@@ -1952,13 +2809,12 @@ export class OrdersService {
         // filas reales de `stock_reservations`, cubre todas las bodegas y corre
         // DENTRO de la transacción, así que un fallo revierte el update completo
         // en vez de dejarlo a medias con un warn.
-        await this.stockLevelManager.releaseReservationsByReference(
-          'order',
-          id,
-          'cancelled',
-          tx,
-        );
-      }
+      await this.stockLevelManager.releaseReservationsByReference(
+        'order',
+        id,
+        'cancelled',
+        tx,
+      );
 
       // Delete existing items. P0-4: primero el desglose fiscal (FK
       // `order_item_taxes_order_item_id_fkey` requerida, sin `onDelete`),
@@ -2029,9 +2885,9 @@ export class OrdersService {
             weight: item.weight,
             weight_unit: item.weight_unit,
             item_type:
-              item.item_type === 'product'
-                ? 'physical'
-                : item.item_type || (item.product_id ? 'physical' : 'custom'),
+              item.product_id != null
+                ? updateProductsById.get(item.product_id)?.product_type ?? 'physical'
+                : item.item_type || 'custom',
             // Multi-tarifa snapshot
             applied_price_tier_id: tierSnap?.tier_id ?? null,
             applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
@@ -2061,46 +2917,19 @@ export class OrdersService {
           order_items: {
             include: {
               products: { select: { id: true, track_inventory: true } },
+              product_variants: { select: { track_inventory_override: true } },
             },
           },
         },
       });
 
-      if (!isDraft) {
-        for (const item of updatedOrder?.order_items || []) {
-          if (!item.products?.track_inventory) continue;
-          try {
-            const location_id =
-              await this.stockLevelManager.getDefaultLocationForProduct(
-                item.product_id,
-                item.product_variant_id || undefined,
-              );
-            const stockUnitsConsumed =
-              typeof item.stock_units_consumed === 'number' &&
-              item.stock_units_consumed > 0
-                ? item.stock_units_consumed
-                : undefined;
-            await this.stockLevelManager.reserveStock(
-              item.product_id,
-              item.product_variant_id || undefined,
-              location_id,
-              item.quantity,
-              'order',
-              id,
-              undefined,
-              false, // Don't validate availability (non-restrictive UX)
-              undefined,
-              undefined,
-              false,
-              stockUnitsConsumed,
-              true, // QUI-557: oversell deliberado, disponible negativo autorizado.
-            );
-          } catch (error) {
-            this.logger.warn(
-              `Failed to reserve stock for product ${item.product_id}: ${error.message}`,
-            );
-          }
-        }
+      for (const item of updatedOrder?.order_items || []) {
+        if (!item.product_id || item.item_type === 'prepared' || item.item_type === 'service' ||
+            !this.stockValidator!.resolveEffectiveTracking(
+              item.products ?? { track_inventory: false },
+              item.product_variants ?? undefined,
+            )) continue;
+        await this.reserveOrderItemStrict(item, id, order.store_id, undefined, tx, allowOversell);
       }
 
       // Return updated order with all includes
@@ -2137,6 +2966,9 @@ export class OrdersService {
         },
       });
     });
+    return stockWarnings.length > 0
+      ? { ...finalOrder, stock_warnings: stockWarnings }
+      : finalOrder;
   }
 
   /**
@@ -2361,11 +3193,20 @@ export class OrdersService {
     let shippingCost = 0;
     let resolvedShippingRateId: number | null = null;
     let resolvedDeliveryType: order_delivery_type_enum | null = null;
+    let manualShippingCharge: Awaited<ReturnType<ShippingTaxService['chargeForRate']>> | null = null;
 
     // El DTO declara que la orden deja de tener envío: entonces sí, cero.
     const dtoDropsShipment =
       dto.delivery_type === order_delivery_type_enum.pickup ||
       dto.delivery_type === order_delivery_type_enum.dine_in;
+
+    if (dto.manual_shipping_price != null &&
+      (!dto.shipping_method_id || !dto.shipping_rate_id || dtoDropsShipment)) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+        'Selecciona una tarifa de domicilio para aplicar su impuesto al costo manual',
+      );
+    }
 
     if (
       !dto.shipping_method_id &&
@@ -2392,16 +3233,119 @@ export class OrdersService {
           ? order_delivery_type_enum.pickup
           : order_delivery_type_enum.home_delivery;
 
+      // POS alias deliveries own an orphan address persisted on the SAME
+      // draft. The editor intentionally does not send it as a customer
+      // address (there is no customer); reuse only that already-linked row.
+      // Never let a new alias borrow a formal customer's address.
+      const editingExistingAlias =
+        dto.customer_id == null && !!dto.customer_alias?.trim() &&
+        existingOrder.customer_id == null && !!existingOrder.customer_alias;
+      if (editingExistingAlias && dto.shipping_address_id != null &&
+          dto.shipping_address_id !== existingOrder.shipping_address_id) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+          'La dirección del alias no pertenece a esta orden.',
+        );
+      }
+      const shippingAddressId = dto.shipping_address_id ??
+        (editingExistingAlias ? existingOrder.shipping_address_id : null);
+
       if (
         (resolvedDeliveryType === order_delivery_type_enum.home_delivery ||
           dto.delivery_type === 'home_delivery' ||
           dto.delivery_type === 'direct_delivery') &&
-        !dto.shipping_address_id
+        !shippingAddressId
       ) {
         throw new VendixHttpException(
           ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
-          'Delivery requires a shipping_address_id',
+          'La entrega a domicilio requiere una dirección asociada a la orden.',
         );
+      }
+
+      // Paso 2 (unificación de envío) — dirección + líneas del carrito para
+      // el cálculo único, compartida por la tarifa explícita Y el
+      // auto-cálculo. Antes la rama de tarifa explícita ni siquiera
+      // resolvía dirección, así que nunca pasaba por el umbral de envío
+      // gratis, el costo por unidad ni la distancia
+      // (`vendix-shipping-distance-pricing`).
+      let shippingAddressForCalc: {
+        country_code: string;
+        address_line1?: string;
+        state_province?: string;
+        city?: string;
+        postal_code?: string;
+        latitude?: number;
+        longitude?: number;
+      } | null = null;
+      let itemsForShippingCalc: Array<{
+        product_id: number;
+        quantity: number;
+        price: number;
+        weight?: number;
+        product_type?: string;
+      }> = [];
+      if (shippingAddressId) {
+        // La dirección debe pertenecer al customer_id del editor — sin esto
+        // un operador con acceso al store podría leer o grabar la dirección
+        // de cualquier cliente que comparta tienda (Round 1, blocker 8).
+        const address = await this.prisma.addresses.findFirst({
+          where: {
+            id: shippingAddressId,
+            store_id: storeId,
+            user_id: editingExistingAlias ? null : dto.customer_id,
+          },
+          select: {
+            country_code: true,
+            address_line1: true,
+            state_province: true,
+            city: true,
+            postal_code: true,
+            latitude: true,
+            longitude: true,
+          },
+        });
+        if (!address?.country_code) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+            'La dirección de entrega ya no pertenece a esta orden y tienda. Selecciona otra dirección.',
+          );
+        }
+        if (address?.country_code) {
+          shippingAddressForCalc = {
+            country_code: address.country_code,
+            address_line1: address.address_line1 || undefined,
+            state_province: address.state_province || undefined,
+            city: address.city || undefined,
+            postal_code: address.postal_code || undefined,
+            latitude:
+              address.latitude != null ? Number(address.latitude) : undefined,
+            longitude:
+              address.longitude != null
+                ? Number(address.longitude)
+                : undefined,
+          };
+          itemsForShippingCalc = dto.items
+            .filter((it): it is typeof it & { product_id: number } =>
+              typeof it.product_id === 'number',
+            )
+            .map((it) => ({
+              product_id: it.product_id,
+              quantity: Number(it.quantity || 0),
+              // Round 3 MAJOR #7 — server-owned price. Trusting the client
+              // `total_price` (or anything the operator typed in the editor)
+              // lets a manipulated row bias the shipping calculator; here we
+              // derive the price the shipping calculator needs from
+              // `final_unit_price × quantity` so the rate the server picks
+              // never depends on a client-supplied total. The original
+              // `total_price` is still accepted by the rest of the editor
+              // (recomputed server-side in step 11).
+              price:
+                Number(it.final_unit_price ?? it.unit_price ?? 0) *
+                Number(it.quantity || 0),
+              weight: it.weight ? Number(it.weight) : undefined,
+              product_type: (it as any).product_type,
+            }));
+        }
       }
 
       if (dto.shipping_rate_id) {
@@ -2410,6 +3354,7 @@ export class OrdersService {
             id: dto.shipping_rate_id,
             shipping_method_id: method.id,
             is_active: true,
+            shipping_zone: { is_active: true, OR: [{ store_id: storeId }, { is_system: true, store_id: null }] },
           },
         });
         if (!rate) {
@@ -2419,63 +3364,64 @@ export class OrdersService {
           );
         }
         resolvedShippingRateId = rate.id;
-        shippingCost = Number(rate.base_cost);
-      } else {
-        // Auto-calcular si no hay rate explícito.
-        if (dto.shipping_address_id) {
-          // La dirección debe pertenecer al customer_id del editor — sin esto
-          // un operador con acceso al store podría leer o grabar la dirección
-          // de cualquier cliente que comparta tienda (Round 1, blocker 8).
-          const address = await this.prisma.addresses.findFirst({
-            where: {
-              id: dto.shipping_address_id,
-              user_id: dto.customer_id,
-            },
-            select: {
-              country_code: true,
-              state_province: true,
-              city: true,
-              postal_code: true,
-            },
-          });
-          if (address?.country_code) {
-            const itemsForCalc = dto.items
-              .filter((it): it is typeof it & { product_id: number } =>
-                typeof it.product_id === 'number',
-              )
-              .map((it) => ({
-                product_id: it.product_id,
-                quantity: Number(it.quantity || 0),
-                // Round 3 MAJOR #7 — server-owned price. Trusting the client
-                // `total_price` (or anything the operator typed in the editor)
-                // lets a manipulated row bias the shipping calculator; here we
-                // derive the price the shipping calculator needs from
-                // `final_unit_price × quantity` so the rate the server picks
-                // never depends on a client-supplied total. The original
-                // `total_price` is still accepted by the rest of the editor
-                // (recomputed server-side in step 11).
-                price:
-                  Number(it.final_unit_price ?? it.unit_price ?? 0) *
-                  Number(it.quantity || 0),
-                weight: it.weight ? Number(it.weight) : undefined,
-                product_type: (it as any).product_type,
-              }));
-            const options = await this.shippingCalculatorService.calculateRates(
+
+        // Paso 2 — la tarifa explícita ahora pasa por el mismo cálculo
+        // único que el auto-cálculo (umbral de envío gratis, costo por
+        // unidad, distancia y agregado del impuesto) en vez del atajo
+        // `chargeForRate(base_cost)`, que ignoraba todo lo anterior.
+        const quoted = shippingAddressForCalc
+          ? await this.shippingCalculatorService.quoteRateGross(
               storeId,
-              itemsForCalc,
-              {
-                country_code: address.country_code,
-                state_province: address.state_province || undefined,
-                city: address.city || undefined,
-                postal_code: address.postal_code || undefined,
-              },
+              rate.id,
+              itemsForShippingCalc,
+              shippingAddressForCalc,
+            )
+          : null;
+        if (quoted != null) {
+          shippingCost = quoted;
+        } else {
+          // Fallback (Paso 14 histórico) — sin dirección resoluble en el
+          // DTO, o la tarifa no apareció entre las opciones calculadas
+          // (specs viejos sin `ShippingCalculatorService` real, o la zona
+          // ya no cubre la dirección): cobra el BRUTO sobre `base_cost` vía
+          // `chargeForRate`; sin `chargeForRate` (dobles viejos de specs)
+          // ⇒ `base_cost` tal cual.
+          shippingCost =
+            this.shippingTaxService &&
+            typeof this.shippingTaxService.chargeForRate === 'function'
+              ? (
+                  await this.shippingTaxService.chargeForRate(
+                    null,
+                    rate.id,
+                    Number(rate.base_cost),
+                    { store_id: storeId },
+                  )
+                ).gross
+              : Number(rate.base_cost);
+        }
+        if (dto.manual_shipping_price != null) {
+          if (quoted == null || !this.shippingTaxService) {
+            throw new VendixHttpException(
+              ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
+              'La tarifa ya no cubre esta dirección. Vuelve a calcular el envío.',
             );
-            const match = options.find((o) => o.method_id === method.id);
-            if (match) {
-              resolvedShippingRateId = match.rate_id;
-              shippingCost = Number(match.cost);
-            }
           }
+          manualShippingCharge = await this.shippingTaxService.chargeForRate(
+            null, rate.id, dto.manual_shipping_price, { store_id: storeId },
+          );
+          shippingCost = manualShippingCharge.gross;
+        }
+      } else if (shippingAddressForCalc) {
+        // Auto-calcular si no hay rate explícito.
+        const options = await this.shippingCalculatorService.calculateRates(
+          storeId,
+          itemsForShippingCalc,
+          shippingAddressForCalc,
+        );
+        const match = options.find((o) => o.method_id === method.id);
+        if (match) {
+          resolvedShippingRateId = match.rate_id;
+          shippingCost = Number(match.cost);
         }
       }
     }
@@ -2538,20 +3484,27 @@ export class OrdersService {
           (resolvedShippingRateId ?? null) ===
             (existingOrder.shipping_rate_id ?? null)
         : true);
-    let shippingTaxUpdate: ShippingTaxSnapshot | undefined;
-    if (dtoDropsShipment) {
-      shippingTaxUpdate = { ...EMPTY_SHIPPING_TAX };
-    } else if (shippingUnchanged) {
-      shippingTaxUpdate = undefined;
-    } else if (dto.shipping_method_id) {
-      shippingTaxUpdate = await this.snapshotShippingTax(
-        resolvedShippingRateId,
-        shippingCost,
-        storeId,
-      );
-    } else if (dto.shipping_cost !== undefined) {
-      shippingTaxUpdate = { ...EMPTY_SHIPPING_TAX };
-    }
+    // Paso 5 (B1+B2) — regla única del impuesto del envío. El guard de
+    // tolerancia de arriba asegura que el costo es el de la tarifa, así
+    // que `rateCost` es el costo del servidor y un método con tarifa
+    // siempre re-deriva su snapshot. `undefined` ⇒ se conserva la actual.
+    const manualSnapshot = manualShippingCharge && !shippingUnchanged
+      ? await this.snapshotShippingTax(resolvedShippingRateId, shippingCost, storeId)
+      : null;
+    const shippingTaxUpdate = manualSnapshot
+      ? {
+          ...manualSnapshot,
+          shipping_tax_is_inclusive: manualSnapshot.shipping_tax_amount > 0 && manualShippingCharge?.applies
+            ? manualShippingCharge.reason === 'inclusive'
+            : null,
+        }
+      : await this.resolveShippingTaxChange({
+          shippingUnchanged,
+          rateId: dtoDropsShipment ? null : resolvedShippingRateId,
+          rateCost: dtoDropsShipment ? null : shippingCost,
+          shippingCost,
+          storeId,
+        });
 
     // 9) Promotion quote: recotizamos server-side, NUNCA confiamos en
     //    `promotion_ids` como verdad. El motor decide qué aplica.
@@ -2613,76 +3566,6 @@ export class OrdersService {
       }
     }
 
-    // 10) Coupon validation. Draft no consume `current_uses`; `created` lo
-    //     ajusta una vez si el código cambió.
-    let couponId: number | null = existingOrder.coupon_id ?? null;
-    let couponDiscount = 0;
-    const requestedCode = (dto.coupon_code || '').trim();
-    const currentCode = (existingOrder.coupon_code || '').trim();
-    const couponChanged = requestedCode !== currentCode;
-
-    if (requestedCode) {
-      try {
-        const remainingSubtotal = Math.max(
-          0,
-          Number(existingOrder.subtotal_amount) - promotionDiscount,
-        );
-        const cartItems = dto.items
-          .filter((item) => item.product_id)
-          .map((item) => ({
-            product_id: item.product_id as number,
-            category_id: null,
-            category_ids: null,
-            line_total: roundMoney(
-              Number(item.final_unit_price ?? item.unit_price ?? 0) *
-                Number(item.quantity || 0),
-            ),
-          }));
-        const validation = await this.couponsService.validate({
-          code: requestedCode,
-          cart_subtotal: remainingSubtotal,
-          customer_id: dto.customer_id,
-          items: cartItems,
-          store_id: storeId,
-        } as any);
-        couponId = validation.coupon_id;
-        couponDiscount = roundMoney(
-          Math.min(validation.discount_amount || 0, remainingSubtotal),
-        );
-      } catch (err) {
-        this.logger.warn(
-          `[editor] coupon validation failed: ${(err as Error).message}`,
-        );
-        await this.auditService.logCustom(
-          userId,
-          'order.editor.pricing_failed',
-          AuditResource.ORDERS,
-          {
-            order_id: orderId,
-            store_id: storeId,
-            request_id: requestId,
-            stage: 'coupon_validation',
-            // No logueamos el código del cupón — sólo su longitud.
-            coupon_code_length: requestedCode.length,
-            error: (err as Error).message,
-          },
-          orderId,
-        );
-        // Round 1 MAJOR #9: el error ya no se silencia — se traduce al código
-        // de promoción/cupón inválido. La causa original viaja en `details`
-        // para depuración sin filtrar PII.
-        throw new VendixHttpException(
-          ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001,
-          undefined,
-          { stage: 'coupon_validation', cause: (err as Error).message },
-        );
-      }
-    } else if (couponChanged && currentCode) {
-      // El cliente quitó el cupón. Limpiamos la referencia sin ajustar el
-      // contador: el consumo se hizo en `flow/pay`, no en el editor.
-      couponId = null;
-      couponDiscount = 0;
-    }
 
     // 11) Totales server-owned — ADR-05 (reescrito 2026-09-13, F-003/F-075
     //     blockers). El subtotal se compone desde la BASE (`unit_price`), no
@@ -2764,20 +3647,113 @@ export class OrdersService {
     );
     let { subtotal: recalculatedSubtotal, tax: recalculatedTax } =
       this.sumPlannedOrderLines(plannedEditorLines);
-    const discountAmount = roundMoney(promotionDiscount + couponDiscount);
+
+    // 10) Coupon validation. Draft no consume `current_uses`; `created` lo
+    //     ajusta una vez si el código cambió.
+    let couponId: number | null = existingOrder.coupon_id ?? null;
+    let couponDiscount = 0;
+    const requestedCode = (dto.coupon_code || '').trim();
+    const currentCode = (existingOrder.coupon_code || '').trim();
+    const couponChanged = requestedCode !== currentCode;
+
+    if (requestedCode) {
+      try {
+        // Contrato POS (owner 2026-09-28): el cupón se evalúa contra el BRUTO
+        // (base + impuesto) del carrito recién planificado, no contra el
+        // subtotal persistido; el descuento se traslada luego a la base.
+        const remainingSubtotal = Math.max(
+          0,
+          this.grossOfPlannedLines(plannedEditorLines) - promotionDiscount,
+        );
+        const cartItems = dto.items
+          .filter((item) => item.product_id)
+          .map((item) => ({
+            product_id: item.product_id as number,
+            category_id: null,
+            category_ids: null,
+            line_total: roundMoney(
+              Number(item.final_unit_price ?? item.unit_price ?? 0) *
+                Number(item.quantity || 0),
+            ),
+          }));
+        const validation = await this.couponsService.validate({
+          code: requestedCode,
+          cart_subtotal: remainingSubtotal,
+          customer_id: dto.customer_id,
+          items: cartItems,
+          store_id: storeId,
+        } as any);
+        couponId = validation.coupon_id;
+        couponDiscount = roundMoney(
+          Math.min(validation.discount_amount || 0, remainingSubtotal),
+        );
+      } catch (err) {
+        this.logger.warn(
+          `[editor] coupon validation failed: ${(err as Error).message}`,
+        );
+        await this.auditService.logCustom(
+          userId,
+          'order.editor.pricing_failed',
+          AuditResource.ORDERS,
+          {
+            order_id: orderId,
+            store_id: storeId,
+            request_id: requestId,
+            stage: 'coupon_validation',
+            // No logueamos el código del cupón — sólo su longitud.
+            coupon_code_length: requestedCode.length,
+            error: (err as Error).message,
+          },
+          orderId,
+        );
+        // Round 1 MAJOR #9: el error ya no se silencia — se traduce al código
+        // de promoción/cupón inválido. La causa original viaja en `details`
+        // para depuración sin filtrar PII.
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001,
+          undefined,
+          { stage: 'coupon_validation', cause: (err as Error).message },
+        );
+      }
+    } else if (couponChanged && currentCode) {
+      // El cliente quitó el cupón. Limpiamos la referencia sin ajustar el
+      // contador: el consumo se hizo en `flow/pay`, no en el editor.
+      couponId = null;
+      couponDiscount = 0;
+    }
+
+    // Contrato POS: el descuento (promoción + cupón, en bruto) se reparte por
+    // línea, se traslada a la BASE y el impuesto se recalcula sobre la base
+    // descontada. `tax_rate × total_price` reconstruye el impuesto PRE-descuento
+    // (nunca filas ya descontadas), así que reeditar es idempotente.
+    const grossDiscountTotal = roundMoney(promotionDiscount + couponDiscount);
+    let discountAmount = 0;
+    let editorLineDiscounts: number[] = [];
+    const applyEditorDiscount = () => {
+      const retaxed = this.applyGrossDiscountToPlannedLines(
+        plannedEditorLines,
+        grossDiscountTotal,
+      );
+      plannedEditorLines = retaxed.lines;
+      editorLineDiscounts = retaxed.discountByLine;
+      recalculatedTax = retaxed.tax;
+      discountAmount = retaxed.baseDiscount;
+    };
+    applyEditorDiscount();
     // F-081 (blocker): paridad con los dos carriles POS (`payments.service.ts`
     // `:3263`/`:3736`), que sí clampan a 0 — el editor no lo hacía.
+    // Paso 5 (B1+B2): el total sale del helper único, con la propina
+    // persistida (F-086): antes se perdía del `grand_total` al guardar.
     const editorShipping = dto.shipping_cost ?? shippingCost;
+    const editorTip = Number(existingOrder.tip_amount ?? 0);
     const computeEditorGrandTotal = () =>
-      Math.max(
-        0,
-        roundMoney(
-          recalculatedSubtotal +
-            recalculatedTax -
-            discountAmount +
-            editorShipping,
-        ),
-      );
+      this.computeOrderGrandTotal({
+        subtotal: recalculatedSubtotal,
+        tax: recalculatedTax,
+        discount: discountAmount,
+        shipping: editorShipping,
+        tip: editorTip,
+      });
     let grandTotal = computeEditorGrandTotal();
 
     // 12) Stock validation se ejecuta DENTRO de la transacción. Para
@@ -2987,6 +3963,7 @@ export class OrdersService {
       ]);
       ({ subtotal: recalculatedSubtotal, tax: recalculatedTax } =
         this.sumPlannedOrderLines(plannedEditorLines));
+      applyEditorDiscount();
       grandTotal = computeEditorGrandTotal();
       const previousByKey = new Map<
         string,
@@ -3125,6 +4102,8 @@ export class OrdersService {
             tax_rate: planned.tax_rate ?? undefined,
             tax_amount_item: planned.tax_amount_item ?? undefined,
             order_item_taxes: this.toOrderItemTaxesCreate(planned),
+            // Descuento de BASE de la línea (NULL = contrato legado).
+            discount_amount: editorLineDiscounts[index] ?? 0,
             catalog_unit_price:
               mergedCatalogUnit !== null && mergedCatalogUnit !== undefined
                 ? (mergedCatalogUnit as any)
@@ -3478,7 +4457,7 @@ export class OrdersService {
       //
       //      Round 1 MAJOR #10: `coupons.update` (cruzar el contador) se
       //      hace con `updateMany` idempotente y guarda `current_uses:
-      //      { lt: max_uses }` + `state='active'`. count=0 ⇒ otro cargo
+      //      { lt: max_uses }` + `is_active`. count=0 ⇒ otro cargo
       //      consumió el cupón primero y lanzamos `ORD_EDIT_COUPON_COMMIT_001`.
       //      El `decrement` usa el mismo patrón para que un rollback que
       //      ya bajó el contador no se vuelva a bajar.
@@ -3486,14 +4465,14 @@ export class OrdersService {
       //      Round 1 BLOCKER #4: el `tx.coupons.update` corría sobre el
       //      cliente no-scoped; un cupón de OTRA tienda cuya id cayera en
       //      el filtro sería aceptado por la FK y mutaba su contador.
-      //      Ahora el `where` exige `stores: { some: { id: storeId } }`
-      //      para garantizar pertenencia.
+      //      Ahora el `where` exige `store_id` (la relación es `store`,
+      //      singular FK) para garantizar pertenencia.
       if (!isDraft && couponChanged) {
         if (currentCode && existingOrder.coupon_id) {
           const dec = await tx.coupons.updateMany({
             where: {
               id: existingOrder.coupon_id,
-              stores: { some: { id: storeId } },
+              store_id: storeId,
               current_uses: { gt: 0 },
             },
             data: { current_uses: { decrement: 1 } },
@@ -3510,8 +4489,8 @@ export class OrdersService {
           const inc = await tx.coupons.updateMany({
             where: {
               id: couponId,
-              stores: { some: { id: storeId } },
-              state: 'active',
+              store_id: storeId,
+              is_active: true,
             },
             data: { current_uses: { increment: 1 } },
           });
@@ -3569,6 +4548,32 @@ export class OrdersService {
           updated_at: new Date(),
         },
       });
+
+      // Plan order-truth-and-invoice-tz — customer_changed. Mismo ternario de
+      // arriba (única fuente de la resolución titular) solo para detectar si
+      // el customer_id efectivo cambió; `undefined` (DTO no lo tocó) nunca
+      // dispara el evento.
+      const nextCustomerId =
+        dto.customer_id != null
+          ? dto.customer_id
+          : dto.customer_alias != null
+            ? null
+            : dto.customer_id === null
+              ? null
+              : existingOrder.customer_id;
+      if (nextCustomerId !== existingOrder.customer_id) {
+        await this.orderHistoryService?.record(tx, {
+          orderId,
+          storeId,
+          organizationId: context?.organization_id ?? null,
+          type: 'customer_changed',
+          actorUserId: userId || null,
+          payload: {
+            from_customer_id: existingOrder.customer_id,
+            to_customer_id: nextCustomerId,
+          },
+        });
+      }
 
       // 13h) Hidratar respuesta completa dentro de la misma transacción.
       const hydrated = await tx.orders.findFirst({
@@ -3853,6 +4858,11 @@ export class OrdersService {
       throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
     }
 
+    // Paso 5 (B2) — el envío mueve `shipping_cost`/`grand_total`: con
+    // cuentas independientes activas se cobra cada cuenta primero, igual
+    // que en `update()` y el editor.
+    assertNoActiveFinancialSplit(order);
+
     const lockedStates: string[] = [
       'shipped',
       'delivered',
@@ -3908,50 +4918,57 @@ export class OrdersService {
         throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
       }
 
-      // Costo esperado de la tarifa (mismo contrato que
-      // `PaymentsService.resolvePosShippingTax`, 16081a2ab):
-      //  - `flat`: `base_cost`.
-      //  - calculadas (`weight_based`, `price_based`, `free`): se RECALCULA
-      //    en el servidor con `ShippingCalculatorService` sobre la dirección y
-      //    las líneas de ESTA orden, y se toma la opción de ESTA tarifa. Antes
-      //    se comparaba contra `base_cost`, que en una tarifa calculada no es
-      //    el costo real: el costo correcto se leía como manual (sin
-      //    impuesto) y uno arbitrario igual a `base_cost` heredaba impuesto.
-      //  - `carrier_calculated`: sin cotización determinista (el calculador
-      //    no la devuelve) ⇒ `null` ⇒ copia vacía. Igual sin dirección
-      //    resoluble o si el calculador no ofrece la tarifa.
-      if (rate.type === 'flat') {
-        rateCost = Number(rate.base_cost);
-      } else {
-        const options = await this.quoteOrderShippingOptions(
-          orderId,
-          storeId,
-        );
-        const match = options?.find((o) => o.rate_id === rate.id);
-        rateCost = match ? Number(match.cost) : null;
-      }
+      // Costo esperado de la tarifa (paso 5: helper compartido con
+      // `update()`; mismo contrato que
+      // `PaymentsService.resolvePosShippingTax`, 16081a2ab).
+      rateCost = await this.resolveExpectedRateCost(rate, orderId, storeId);
       if (dto.shipping_cost === undefined) {
         shippingCost = rateCost ?? Number(rate.base_cost);
       }
     }
 
-    const costComesFromRate =
-      resolvedRateId != null &&
-      rateCost != null &&
-      !differsByAtLeastCents(shippingCost, rateCost, 1);
-    const shippingTax = costComesFromRate
-      ? await this.snapshotShippingTax(resolvedRateId, shippingCost, storeId)
-      : { ...EMPTY_SHIPPING_TAX };
+    // Paso 2 (checkout-whatsapp-location-fallback) — una orden con pagos ya
+    // aplicados no puede cambiar su costo de envío aquí: el pago ya se
+    // aplicó sobre el grand_total anterior, y cambiar el costo ahora
+    // desincroniza total_paid/remaining_balance sin tocar el pago.
+    // Reasignar método/tarifa SIN que cambie el costo sigue permitido.
+    const hasAppliedPayments = Number(order.total_paid ?? 0) > 0;
+    const shippingCostChanged = differsByAtLeastCents(
+      shippingCost,
+      Number(order.shipping_cost ?? 0),
+      1,
+    );
+    if (hasAppliedPayments && shippingCostChanged) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_SHIP_CHARGED_COST_CHANGE_001,
+      );
+    }
+
+    // Paso 5 (B1+B2) — regla única: sin cambio ⇒ copia intacta; tarifa
+    // con su costo ⇒ snapshot; costo manual ⇒ copia vacía.
+    const shippingUnchanged =
+      !shippingCostChanged &&
+      method.id === (order.shipping_method_id ?? null) &&
+      (resolvedRateId ?? null) === (order.shipping_rate_id ?? null);
+    const shippingTax = await this.resolveShippingTaxChange({
+      shippingUnchanged,
+      rateId: resolvedRateId,
+      rateCost,
+      shippingCost,
+      storeId,
+    });
 
     const { deriveDeliveryType } =
       await import('../shipping/shipping-derivation.util');
     const deliveryType = deriveDeliveryType(method.type);
 
-    const newGrandTotal =
-      Number(order.subtotal_amount) +
-      Number(order.tax_amount) -
-      Number(order.discount_amount) +
-      shippingCost;
+    const newGrandTotal = this.computeOrderGrandTotal({
+      subtotal: Number(order.subtotal_amount),
+      tax: Number(order.tax_amount),
+      discount: Number(order.discount_amount),
+      shipping: shippingCost,
+      tip: order.tip_amount ?? 0,
+    });
 
     const updated = await this.prisma.orders.update({
       where: { id: orderId },
@@ -3960,9 +4977,8 @@ export class OrdersService {
         shipping_rate_id: resolvedRateId,
         delivery_type: deliveryType,
         shipping_cost: shippingCost,
-        // Copia del impuesto del envío: de la tarifa si el costo es el suyo;
-        // vacía si el costo se digitó a mano. No mueve `grand_total`.
-        ...shippingTax,
+        // Copia del impuesto del envío: `undefined` ⇒ se conserva la actual.
+        ...(shippingTax ?? {}),
         grand_total: newGrandTotal,
         updated_at: new Date(),
       },
@@ -4041,6 +5057,23 @@ export class OrdersService {
       delivery_type: deliveryType,
     });
 
+    // Plan order-truth-and-invoice-tz — solo si el envío realmente cambió
+    // (mismo `shippingUnchanged` que decide la copia de impuesto arriba);
+    // reenviar el mismo método/tarifa/costo es un no-op y no es un evento.
+    if (!shippingUnchanged) {
+      await this.orderHistoryService?.record(this.prisma, {
+        orderId,
+        storeId,
+        organizationId: context?.organization_id ?? null,
+        type: 'shipping_assigned',
+        payload: {
+          shipping_method_id: method.id,
+          shipping_rate_id: resolvedRateId,
+          shipping_cost: shippingCost,
+        },
+      });
+    }
+
     return updated;
   }
 
@@ -4100,9 +5133,17 @@ export class OrdersService {
         items,
         {
           country_code: address.country_code,
+          address_line1: address.address_line1 || undefined,
           state_province: address.state_province || undefined,
           city: address.city || undefined,
           postal_code: address.postal_code || undefined,
+          // Paso 2 (unificación de envío) — sin esto el precio por
+          // distancia (`vendix-shipping-distance-pricing`) nunca se
+          // evaluaba para tarifas ya asignadas a una orden.
+          latitude:
+            address.latitude != null ? Number(address.latitude) : undefined,
+          longitude:
+            address.longitude != null ? Number(address.longitude) : undefined,
         },
       );
     } catch (error) {
@@ -4266,9 +5307,47 @@ export class OrdersService {
     };
   }
 
-  async getTimeline(orderId: number) {
+  /**
+   * Plan order-truth-and-invoice-tz — Paso 7.
+   *
+   * Fuente única: si la orden ya tiene `order_events` (escritos por
+   * `OrderHistoryService` desde el paso 6), el timeline sale SOLO de ahí,
+   * ascendente. Las órdenes anteriores al cambio no tienen ninguna fila en
+   * `order_events`, así que caen al `audit_logs` de siempre (`legacy: true`),
+   * sin tocar datos ni su etiquetado actual.
+   */
+  async getTimeline(
+    orderId: number,
+  ): Promise<{ legacy: boolean; events: unknown[] }> {
     // Ensure order exists and belongs to store (handled by findOne/scoped prisma)
     await this.findOne(orderId);
+
+    if (this.orderHistoryService) {
+      const events = await this.orderHistoryService.listForOrder(orderId);
+      if (events.length > 0) {
+        return {
+          legacy: false,
+          events: events.map((evt) => ({
+            id: evt.id,
+            event_type: evt.event_type,
+            from_state: evt.from_state,
+            to_state: evt.to_state,
+            actor: evt.users
+              ? {
+                  user_id: evt.users.id,
+                  name: `${evt.users.first_name ?? ''} ${evt.users.last_name ?? ''}`.trim(),
+                }
+              : null,
+            actor_source: evt.actor_source,
+            payment_id: evt.payment_id,
+            order_item_id: evt.order_item_id,
+            amount: evt.amount,
+            payload: evt.payload,
+            created_at: evt.created_at,
+          })),
+        };
+      }
+    }
 
     // Fetch audit logs for this order
     // Note: StorePrismaService might scope this, but audit_logs are usually queried via findMany
@@ -4297,7 +5376,7 @@ export class OrdersService {
       },
     });
 
-    return logs;
+    return { legacy: true, events: logs };
   }
 
   /**
@@ -4876,6 +5955,117 @@ export class OrdersService {
       if (Number.isFinite(shelf) && shelf > 0) byIndex.set(index, shelf);
     }
     return byIndex;
+  }
+
+  /** Impuesto PRE-descuento de una línea planificada: `tax_rate × base`. */
+  private plannedLinePreDiscountTax(line: PlannedOrderLine): number {
+    if (line.taxes.length === 0) return roundMoney(line.line_tax_total);
+    return line.taxes.reduce((sum, t) => {
+      const rate = Number(t.tax_rate || 0);
+      return (
+        sum +
+        (rate > 0
+          ? roundMoney(rate * Number(line.total_price))
+          : Number(t.tax_amount || 0))
+      );
+    }, 0);
+  }
+
+  /** Bruto (base + impuesto pre-descuento) de un plan de líneas. */
+  private grossOfPlannedLines(lines: PlannedOrderLine[]): number {
+    return roundMoney(
+      lines.reduce(
+        (sum, l) =>
+          sum + Number(l.total_price) + this.plannedLinePreDiscountTax(l),
+        0,
+      ),
+    );
+  }
+
+  /**
+   * Aplica un descuento en BRUTO (promoción + cupón) al plan de líneas con el
+   * contrato POS: reparto proporcional al bruto de cada línea, descuento
+   * trasladado a la BASE e impuesto recalculado sobre la base descontada.
+   * Devuelve líneas nuevas (no muta), el descuento de base por línea, el
+   * impuesto total y el descuento de base total. Sin descuento reconstruye el
+   * impuesto desde la tarifa (restituye líneas antes descontadas).
+   */
+  private applyGrossDiscountToPlannedLines(
+    lines: PlannedOrderLine[],
+    grossDiscount: number,
+  ): {
+    lines: PlannedOrderLine[];
+    discountByLine: number[];
+    tax: number;
+    baseDiscount: number;
+  } {
+    const discountable: GrossDiscountableLine[] = lines.map((line) => {
+      const base = Number(line.total_price || 0);
+      const preTax = this.plannedLinePreDiscountTax(line);
+      const rows =
+        line.taxes.length > 0
+          ? line.taxes.map((t) => ({
+              rate:
+                Number(t.tax_rate || 0) > 0
+                  ? Number(t.tax_rate)
+                  : base > 0
+                    ? Number(t.tax_amount || 0) / base
+                    : 0,
+              tax_type: t.tax_type,
+              tax_rate_id: t.tax_rate_id,
+              tax_name: t.tax_name,
+            }))
+          : // Línea sin desglose (custom con `tax_amount_item`): una fila
+            // sintética conserva su impuesto proporcional a la base.
+            [
+              {
+                rate: base > 0 ? preTax / base : 0,
+                tax_type: null,
+                tax_rate_id: null,
+                tax_name: '',
+              },
+            ];
+      return {
+        base,
+        grossOriginal: roundMoney(base + preTax),
+        taxRows: rows as any,
+      };
+    });
+    const grossByLine =
+      grossDiscount > 0
+        ? distributeAmount(
+            grossDiscount,
+            discountable.map((l) => l.grossOriginal),
+          )
+        : discountable.map(() => 0);
+    const retax = applyGrossDiscountRetax(discountable, grossByLine);
+    const out = lines.map((line, i) => {
+      const result = retax.lines[i];
+      // `tax_amount_item` es el impuesto de UNA unidad de precio: el
+      // multiplicador de la línea es `total_price / unit_price`.
+      const multiplier =
+        Number(line.unit_price) > 0
+          ? Number(line.total_price) / Number(line.unit_price)
+          : 0;
+      return {
+        ...line,
+        line_tax_total: result.taxTotal,
+        tax_amount_item:
+          line.tax_amount_item == null || multiplier <= 0
+            ? line.tax_amount_item
+            : roundMoney(result.taxTotal / multiplier),
+        taxes: line.taxes.map((t, k) => ({
+          ...t,
+          tax_amount: result.taxes[k]?.amount ?? t.tax_amount,
+        })),
+      } as PlannedOrderLine;
+    });
+    return {
+      lines: out,
+      discountByLine: retax.lines.map((l) => l.baseDiscount),
+      tax: retax.totalTax,
+      baseDiscount: retax.totalBaseDiscount,
+    };
   }
 
   /**

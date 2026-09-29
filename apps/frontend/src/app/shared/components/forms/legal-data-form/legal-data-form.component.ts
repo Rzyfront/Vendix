@@ -411,15 +411,19 @@ const VALID_VAT_PERIODICITIES: FiscalVatPeriodicity[] = [
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
               <app-selector
                 [options]="departmentOptions()"
+                [value]="referenceDepartment()"
+                [disabled]="disabled()"
                 [placeholder]="
                   loadingDepartments() ? 'Cargando...' : 'Departamento'
                 "
-                [disabled]="true"
+                (valueChange)="onReferenceDepartmentChange($event)"
               ></app-selector>
               <app-selector
                 [options]="cityOptions()"
+                [value]="referenceCity()"
+                [disabled]="disabled()"
                 [placeholder]="cityPlaceholder()"
-                [disabled]="true"
+                (valueChange)="onReferenceCityChange($event)"
               ></app-selector>
             </div>
             <p class="text-[11px] text-text-secondary mt-2">
@@ -724,6 +728,7 @@ export class LegalDataFormComponent implements OnInit {
   private readonly selectedNitType = signal<NitType>('NIT');
   private readonly selectedCountry = signal<string>('CO');
   private readonly selectedDepartment = signal<string>('');
+  private readonly selectedCity = signal<string>('');
 
   /** Colombia catalog state (api-colombia via CountryService). */
   private readonly departments = signal<Department[]>([]);
@@ -864,6 +869,11 @@ export class LegalDataFormComponent implements OnInit {
     if (!this.selectedDepartment()) return 'Seleccione departamento primero';
     return 'Seleccione ciudad';
   });
+
+  /** Selectores de referencia (api-colombia): siempre reflejan el valor de los
+   *  controles department/city del formulario (par A). */
+  readonly referenceDepartment = computed(() => this.selectedDepartment());
+  readonly referenceCity = computed(() => this.selectedCity());
 
   // ── Typed form ────────────────────────────────────────────
   readonly form: FormGroup<LegalDataControls> = new FormGroup<LegalDataControls>(
@@ -1071,6 +1081,7 @@ export class LegalDataFormComponent implements OnInit {
       this.selectedCountry.set(country);
       if (country === 'CO') {
         const dept = this.form.controls.department.value;
+        this.selectedCity.set(this.form.controls.city.value);
         void this.ensureDepartments().then(() => {
           if (dept) {
             this.selectedDepartment.set(dept);
@@ -1118,6 +1129,7 @@ export class LegalDataFormComponent implements OnInit {
           this.form.controls.department.setValue('', { emitEvent: false });
           this.form.controls.city.setValue('', { emitEvent: false });
           this.selectedDepartment.set('');
+          this.selectedCity.set('');
           this.cities.set([]);
           if (country === 'CO') void this.ensureDepartments();
           else this.departments.set([]);
@@ -1128,8 +1140,14 @@ export class LegalDataFormComponent implements OnInit {
           this.selectedDepartment.set(dept);
           // Department changed → reset the city and reload its options.
           this.form.controls.city.setValue('', { emitEvent: false });
+          this.selectedCity.set('');
           if (dept) void this.loadCities(dept);
           else this.cities.set([]);
+        }
+
+        const city = this.form.controls.city.value;
+        if (city !== this.selectedCity()) {
+          this.selectedCity.set(city);
         }
 
         const regime = this.form.controls.tax_regime.value;
@@ -1186,6 +1204,23 @@ export class LegalDataFormComponent implements OnInit {
     }
     const expected = computeNitDv(nit);
     this.dvHint.set(expected ? `DV sugerido: ${expected}` : '');
+  }
+
+  /** Selectores de "Referencia geográfica (api-colombia)": escriben en los
+   *  mismos controles que el par A (department/city), así quedan siempre
+   *  sincronizados con el formulario y con la cascada de ciudades. */
+  onReferenceDepartmentChange(value: string | number | null): void {
+    const v = value == null ? '' : String(value);
+    if (v !== this.form.controls.department.value) {
+      this.form.controls.department.setValue(v);
+    }
+  }
+
+  onReferenceCityChange(value: string | number | null): void {
+    const v = value == null ? '' : String(value);
+    if (v !== this.form.controls.city.value) {
+      this.form.controls.city.setValue(v);
+    }
   }
 
   isResponsibilityChecked(code: string): boolean {

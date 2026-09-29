@@ -1,20 +1,28 @@
-import { RegisteredTool } from '../interfaces/tool.interface';
+import { HttpException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
+import { RegisteredTool, ToolPreview } from '../interfaces/tool.interface';
+import { VendixHttpException } from '../../../common/errors';
 import { ProductsService } from '../../../domains/store/products/products.service';
+import {
+  ProductImageDto,
+  UpdateProductDto,
+  UpdateProductPromotionsDto,
+} from '../../../domains/store/products/dto';
 import { PriceResolverService } from '../../../domains/store/products/services/price-resolver.service';
 import { SettingsService } from '../../../domains/store/settings/settings.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { resolvePricedUnits } from '../../../domains/store/products/services/tier-margin.util';
+import {
+  effectiveTracking,
+  taxBreakdown,
+  variantLabel,
+  parseAttributes,
+} from '../_adapters/product.adapter';
 
 export interface ProductToolDeps {
   productsService: ProductsService;
   priceResolver: PriceResolverService;
   settingsService: SettingsService;
-  /**
-   * Always `StorePrismaService`, never `GlobalPrismaService`: `products` and
-   * `product_variants` are tenant data and the scoped client injects the
-   * store filter (variants relationally, through `products.store_id`).
-   */
-  prisma: StorePrismaService;
 }
 
 /**
@@ -58,75 +66,136 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-/**
- * Same summation `ProductsService.calculateFinalPrice` performs: every rate of
- * every assigned tax category. Kept identical on purpose — the assistant must
- * quote the number the catalog screen shows, not a second opinion.
- */
-function totalTaxRate(assignments: any[] | undefined | null): number {
-  let rate = 0;
-  for (const assignment of assignments ?? []) {
-    for (const tax of assignment?.tax_categories?.tax_rates ?? []) {
-      rate += toNumber(tax.rate);
-    }
-  }
-  return rate;
-}
-
-function taxBreakdown(
-  assignments: any[] | undefined | null,
-): Array<{ name: string; rate_pct: number }> {
-  const rows: Array<{ name: string; rate_pct: number }> = [];
-  for (const assignment of assignments ?? []) {
-    for (const tax of assignment?.tax_categories?.tax_rates ?? []) {
-      rows.push({
-        name: tax.name,
-        rate_pct: round2(toNumber(tax.rate) * 100),
-      });
-    }
-  }
-  return rows;
-}
-
-/**
- * Effective inventory tracking for a product/variant pair.
- * `track_inventory_override` is authoritative when set; `null` inherits.
- * See `vendix-product-variants`: this is the ONLY input that decides whether
- * stock is meaningful for a variant. A variant is never hidden or downgraded
- * just because its stock is 0.
- */
-function effectiveTracking(product: any, variant?: any): boolean {
-  const override = variant?.track_inventory_override;
-  return override === null || override === undefined
-    ? product.track_inventory === true
-    : override === true;
-}
-
-function parseAttributes(attributes: unknown): Record<string, string> | null {
-  if (!attributes || typeof attributes !== 'object') return null;
-  const entries = Object.entries(attributes as Record<string, unknown>).map(
-    ([key, value]) => [key, String(value)] as const,
-  );
-  return entries.length ? Object.fromEntries(entries) : null;
-}
-
-/** Human label for a variant when it has no explicit name (falls back to its attributes, then its SKU). */
-function variantLabel(variant: any): string {
-  if (variant.name) return String(variant.name);
-  const attributes = parseAttributes(variant.attributes);
-  if (attributes) {
-    return Object.entries(attributes)
-      .map(([key, value]) => `${key}: ${value}`)
-      .join(', ');
-  }
-  return String(variant.sku ?? `variante ${variant.id}`);
-}
-
 const PRODUCT_STATES = ['active', 'inactive', 'archived'] as const;
 const PRODUCT_TYPES = ['physical', 'service', 'prepared'] as const;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Doctrina de escritura de O-1 `update_product` (misma que `writes.tools.ts`:
+// el `preview` es proyección, no transacción; el `handler` re-verifica; los
+// handlers NO lanzan, devuelven `{error, next_step}`; ninguna lectura directa
+// a la base aquí).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Resultado uniforme de una resolución previa a escribir. */
+type WriteResolution<T> =
+  | { ok: true; value: T }
+  | { ok: false; label: string; message: string; nextStep?: string };
+
+function writeFailure(
+  label: string,
+  message: string,
+  nextStep?: string,
+): { ok: false; label: string; message: string; nextStep?: string } {
+  return { ok: false, label, message, nextStep };
+}
+
+/** `ToolPreview` de error: el registry aborta sin acuñar token. */
+function writePreviewError(
+  label: string,
+  message: string,
+  domain: string,
+): ToolPreview {
+  return { status: 'error', target: label, changes: [], message, domain };
+}
+
+/** Respuesta de fallo de un handler. Nunca se lanza: el modelo debe poder leerla. */
+function writeToolError(message: string, nextStep?: string): string {
+  return JSON.stringify({
+    error: message,
+    ...(nextStep && { next_step: nextStep }),
+  });
+}
+
+/**
+ * Valida un DTO ya construido como lo haría el `ValidationPipe` global del
+ * HTTP (`whitelist` + `forbidNonWhitelisted`): las tools llaman a los
+ * servicios directo, sin pasar por el pipe.
+ */
+function toValidatedWriteDto<T extends object>(
+  DtoClass: new () => T,
+  plain: Record<string, unknown>,
+): { ok: true; dto: T } | { ok: false; message: string } {
+  const dto = plainToInstance(DtoClass, plain, {
+    enableImplicitConversion: true,
+  });
+  const errors = validateSync(dto, {
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  });
+  if (!errors.length) return { ok: true, dto };
+  const details = errors
+    .flatMap((entry) => Object.values(entry.constraints ?? {}))
+    .join('; ');
+  return {
+    ok: false,
+    message: `Los datos no pasaron la validación: ${details || 'revisa los campos enviados'}.`,
+  };
+}
+
+/** Traduce una excepción del dominio a texto que el modelo pueda narrar. */
+function describeWriteError(error: unknown): { code?: string; message: string } {
+  if (error instanceof VendixHttpException) {
+    const response = error.getResponse() as { message?: string } | string;
+    const message =
+      typeof response === 'string'
+        ? response
+        : (response?.message ?? error.message);
+    return { code: error.errorCode, message };
+  }
+  if (error instanceof HttpException) {
+    const response = error.getResponse() as
+      | { message?: unknown; error_code?: string }
+      | string;
+    if (typeof response === 'string') return { message: response };
+    const raw = response?.message;
+    const message = Array.isArray(raw)
+      ? raw.join('; ')
+      : typeof raw === 'string'
+        ? raw
+        : error.message;
+    return {
+      ...(response?.error_code && { code: response.error_code }),
+      message,
+    };
+  }
+  if (error instanceof Error) return { message: error.message };
+  return { message: 'Error desconocido' };
+}
+
+function toWritePositiveInt(value: unknown): number | null {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+/** Texto limpio o `undefined`. Nunca cadena vacía: eso confunde a los DTOs. */
+function cleanWriteString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
+}
+
+/** Campos que `update_product` sabe escribir, con su etiqueta para la propuesta. */
+const PRODUCT_EDIT_FIELD_LABELS: Record<string, string> = {
+  name: 'Nombre',
+  description: 'Descripción',
+  sku: 'SKU',
+  barcode: 'Código de barras',
+  base_price: 'Precio base (sin impuestos)',
+  cost_price: 'Costo',
+  profit_margin: 'Margen (%)',
+  is_on_sale: 'En oferta',
+  sale_price: 'Precio de oferta',
+  track_inventory: 'Control de inventario',
+  is_sellable: 'Vendible',
+  available_for_ecommerce: 'Publicado en tienda en línea',
+  is_featured: 'Destacado',
+  allow_pos_price_override: 'Precio manual en POS',
+  brand_id: 'Marca',
+};
+
 export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
-  const { productsService, priceResolver, settingsService, prisma } = deps;
+  const { productsService, priceResolver, settingsService } = deps;
 
   async function storeCurrency(): Promise<string | undefined> {
     try {
@@ -146,52 +215,11 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
   async function hydrateProductCards(orderedIds: number[]) {
     if (!orderedIds.length) return [];
 
-    const rows: any[] = await prisma.products.findMany({
-      where: { id: { in: orderedIds } },
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        barcode: true,
-        state: true,
-        product_type: true,
-        track_inventory: true,
-        is_sellable: true,
-        base_price: true,
-        sale_price: true,
-        is_on_sale: true,
-        stock_unit: true,
-        requires_booking: true,
-        has_multiple_price_tiers: true,
-        brands: { select: { name: true } },
-        product_tax_assignments: {
-          select: {
-            tax_categories: {
-              select: { tax_rates: { select: { rate: true, name: true } } },
-            },
-          },
-        },
-        product_variants: {
-          orderBy: { id: 'asc' },
-          take: MAX_VARIANTS_INLINE,
-          select: {
-            id: true,
-            name: true,
-            sku: true,
-            barcode: true,
-            price_override: true,
-            sale_price: true,
-            is_on_sale: true,
-            track_inventory_override: true,
-            attributes: true,
-          },
-        },
-        _count: { select: { product_variants: true } },
-        stock_levels: {
-          select: { product_variant_id: true, quantity_available: true },
-        },
-      },
-    });
+    const rows: any[] =
+      await productsService.findProductCardsForAgent(
+        orderedIds,
+        MAX_VARIANTS_INLINE,
+      );
 
     const byId = new Map<number, any>(rows.map((row) => [row.id, row]));
 
@@ -199,7 +227,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
       .map((id) => byId.get(id))
       .filter(Boolean)
       .map((product) => {
-        const taxRate = totalTaxRate(product.product_tax_assignments);
+        const taxRate = productsService.getEffectiveTaxRate(product);
         const variantCount = product._count?.product_variants ?? 0;
         const hasVariants = variantCount > 0;
 
@@ -279,7 +307,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           requires_booking: product.requires_booking === true,
           stock_unit: product.stock_unit ?? null,
           net_price: round2(netPrice),
-          unit_price: round2(netPrice * (1 + taxRate)),
+          unit_price: round2(productsService.calculateFinalPrice(product)),
           tax_rate_pct: round2(taxRate * 100),
           inventory_tracked: product.track_inventory === true,
           available_stock:
@@ -294,10 +322,777 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
       });
   }
 
+  /** Datos ya validados para editar un producto existente (O-1). */
+  interface ProductEdit {
+    dto: UpdateProductDto;
+    productId: number;
+    label: string;
+    changes: ToolPreview['changes'];
+  }
+
+  async function resolveProductEdit(
+    args: Record<string, any>,
+    storeId: number | undefined,
+  ): Promise<WriteResolution<ProductEdit>> {
+    const label = 'Edición de producto';
+
+    if (!storeId) {
+      return writeFailure(
+        label,
+        'Sin tienda en contexto: los productos se editan siempre dentro de una tienda.',
+      );
+    }
+
+    const productId = toWritePositiveInt(args.product_id);
+    if (!productId) {
+      return writeFailure(
+        label,
+        'product_id inválido.',
+        'Usa find_product para obtener el product_id antes de editar.',
+      );
+    }
+
+    // `final_price` es un calculado de lectura (precio + impuestos asignados),
+    // no un campo persistido: el DTO ni siquiera lo declara y el servicio lo
+    // ignoraría en silencio. Se rechaza en voz alta para que el modelo corrija
+    // el precio que sí se persiste (`base_price` o `sale_price`).
+    if (args.final_price !== undefined) {
+      return writeFailure(
+        label,
+        'final_price no se puede editar: es el precio calculado con impuestos que muestran las lecturas.',
+        'Para cambiar lo que paga el cliente edita base_price (precio normal) o sale_price con is_on_sale (oferta).',
+      );
+    }
+
+    let product: any;
+    try {
+      // `findOne` excluye archivados: un producto archivado cae al mismo error
+      // guiado que uno inexistente.
+      product = await productsService.findOne(productId);
+    } catch {
+      return writeFailure(
+        label,
+        `No existe un producto activo con id ${productId} en esta tienda (los archivados no se editan).`,
+        'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
+      );
+    }
+
+    const targetLabel = product.sku
+      ? `${product.name} (${product.sku})`
+      : String(product.name);
+
+    // Se arma el DTO solo con los campos que viajaron: semántica PATCH.
+    const dto: Record<string, unknown> = {};
+    const name = cleanWriteString(args.name);
+    if (name) {
+      if (name.length < 2 || name.length > 255) {
+        return writeFailure(
+          targetLabel,
+          'El nombre del producto debe tener entre 2 y 255 caracteres.',
+        );
+      }
+      dto.name = name;
+    }
+    const description = cleanWriteString(args.description);
+    if (description) dto.description = description;
+    const sku = cleanWriteString(args.sku);
+    if (sku) dto.sku = sku;
+    const barcode = cleanWriteString(args.barcode);
+    if (barcode) dto.barcode = barcode;
+    if (toNumberOrNull(args.base_price) !== null) {
+      const basePrice = toNumberOrNull(args.base_price)!;
+      if (basePrice < 0) {
+        return writeFailure(targetLabel, 'El precio base no puede ser negativo.');
+      }
+      dto.base_price = round2(basePrice);
+    }
+    if (toNumberOrNull(args.cost_price) !== null) {
+      const costPrice = toNumberOrNull(args.cost_price)!;
+      if (costPrice < 0) {
+        return writeFailure(targetLabel, 'El costo no puede ser negativo.');
+      }
+      dto.cost_price = round2(costPrice);
+    }
+    if (toNumberOrNull(args.profit_margin) !== null) {
+      const margin = toNumberOrNull(args.profit_margin)!;
+      if (margin < 0) {
+        return writeFailure(targetLabel, 'El margen no puede ser negativo.');
+      }
+      dto.profit_margin = round2(margin);
+    }
+    if (typeof args.is_on_sale === 'boolean') dto.is_on_sale = args.is_on_sale;
+    if (toNumberOrNull(args.sale_price) !== null) {
+      dto.sale_price = round2(toNumberOrNull(args.sale_price)!);
+    }
+    if (typeof args.track_inventory === 'boolean')
+      dto.track_inventory = args.track_inventory;
+    if (typeof args.is_sellable === 'boolean')
+      dto.is_sellable = args.is_sellable;
+    if (typeof args.available_for_ecommerce === 'boolean')
+      dto.available_for_ecommerce = args.available_for_ecommerce;
+    if (typeof args.is_featured === 'boolean')
+      dto.is_featured = args.is_featured;
+    if (typeof args.allow_pos_price_override === 'boolean')
+      dto.allow_pos_price_override = args.allow_pos_price_override;
+    if (args.brand_id !== undefined) {
+      const brandId = toWritePositiveInt(args.brand_id);
+      if (!brandId) {
+        return writeFailure(targetLabel, 'brand_id inválido.');
+      }
+      dto.brand_id = brandId;
+    }
+
+    if (!Object.keys(dto).length) {
+      return writeFailure(
+        targetLabel,
+        'No hay cambios: indica al menos un campo a editar (name, base_price, sale_price, sku…).',
+      );
+    }
+
+    // Regla de `vendix-product-pricing`: la oferta solo tiene sentido por
+    // debajo del precio normal y con un precio de oferta vigente.
+    const effectiveOnSale =
+      (dto.is_on_sale as boolean | undefined) ?? product.is_on_sale === true;
+    const effectiveSale =
+      (dto.sale_price as number | undefined) ??
+      toNumberOrNull(product.sale_price);
+    const effectiveBase =
+      (dto.base_price as number | undefined) ?? toNumber(product.base_price);
+    if (effectiveOnSale) {
+      if (effectiveSale === null || effectiveSale <= 0) {
+        return writeFailure(
+          targetLabel,
+          'El producto queda en oferta pero no tiene un sale_price mayor que cero.',
+          'Envía sale_price junto con is_on_sale, o apaga la oferta.',
+        );
+      }
+      if (effectiveBase > 0 && effectiveSale >= effectiveBase) {
+        return writeFailure(
+          targetLabel,
+          `El precio de oferta (${effectiveSale}) debe ser menor que el precio normal (${effectiveBase}).`,
+        );
+      }
+    }
+
+    const checked = toValidatedWriteDto(UpdateProductDto, dto);
+    if (!checked.ok) {
+      return writeFailure(targetLabel, checked.message);
+    }
+
+    const current: Record<string, unknown> = {
+      name: product.name,
+      description: product.description ?? null,
+      sku: product.sku ?? null,
+      barcode: product.barcode ?? null,
+      base_price: toNumberOrNull(product.base_price),
+      cost_price: toNumberOrNull(product.cost_price),
+      profit_margin: toNumberOrNull(product.profit_margin),
+      is_on_sale: product.is_on_sale === true,
+      sale_price: toNumberOrNull(product.sale_price),
+      track_inventory: product.track_inventory === true,
+      is_sellable: product.is_sellable,
+      available_for_ecommerce: product.available_for_ecommerce,
+      is_featured: product.is_featured,
+      allow_pos_price_override: product.allow_pos_price_override,
+      brand_id: product.brand_id ?? product.brand?.id ?? null,
+    };
+
+    const changes: ToolPreview['changes'] = Object.entries(checked.dto).map(
+      ([field, to]) => ({
+        field,
+        label: PRODUCT_EDIT_FIELD_LABELS[field] ?? field,
+        from: current[field] ?? null,
+        to: to as unknown,
+      }),
+    );
+
+    return {
+      ok: true,
+      value: { dto: checked.dto, productId, label: targetLabel, changes },
+    };
+  }
+
+  /** Etiqueta humana de un producto: "Coca Cola 1L (COCA-1L)", nunca "#101". */
+  function productTargetLabel(product: {
+    name: string;
+    sku?: string | null;
+  }): string {
+    return product.sku
+      ? `${product.name} (${product.sku})`
+      : String(product.name);
+  }
+
+  // ─── O-2 deactivate_product ────────────────────────────────────────────
+
+  interface ProductDeactivation {
+    productId: number;
+    label: string;
+    fromState: string;
+  }
+
+  async function resolveProductDeactivation(
+    args: Record<string, any>,
+    storeId: number | undefined,
+  ): Promise<WriteResolution<ProductDeactivation>> {
+    const label = 'Desactivación de producto';
+
+    if (!storeId) {
+      return writeFailure(
+        label,
+        'Sin tienda en contexto: los productos se desactivan siempre dentro de una tienda.',
+      );
+    }
+
+    const productId = toWritePositiveInt(args.product_id);
+    if (!productId) {
+      return writeFailure(
+        label,
+        'product_id inválido.',
+        'Usa find_product para obtener el product_id antes de desactivar.',
+      );
+    }
+
+    let product: any;
+    try {
+      // `findOne` excluye archivados: un archivado cae al error guiado.
+      product = await productsService.findOne(productId);
+    } catch {
+      return writeFailure(
+        label,
+        `No existe un producto con id ${productId} en esta tienda (los archivados no se desactivan: ya están fuera del catálogo).`,
+        'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
+      );
+    }
+
+    const targetLabel = productTargetLabel(product);
+
+    if (product.state === 'inactive') {
+      return writeFailure(
+        targetLabel,
+        `"${product.name}" ya está desactivado: no hay nada que cambiar.`,
+      );
+    }
+
+    return {
+      ok: true,
+      value: { productId, label: targetLabel, fromState: product.state },
+    };
+  }
+
+  // ─── O-3/O-4 archivado ─────────────────────────────────────────────────
+
+  /**
+   * Contexto de archivado ya resuelto: etiqueta humana + plan de castigo +
+   * bandera de reservas. Lo usan el read O-3 (lo devuelve tal cual) y el
+   * write O-4 (lo re-verifica en preview y en handler).
+   */
+  interface ArchiveContext {
+    productId: number;
+    label: string;
+    state: string;
+    plan: {
+      requires_confirmation: boolean;
+      total_units: number;
+      total_value: number;
+      zero_cost_units: number;
+      lines: Array<{
+        location_id: number;
+        location_name: string;
+        product_variant_id: number | null;
+        variant_sku: string | null;
+        quantity_on_hand: number;
+        unit_cost: number;
+        value: number;
+        has_known_cost: boolean;
+      }>;
+      out_of_scope_units: number;
+      out_of_scope: Array<{
+        location_id: number;
+        location_name: string;
+        store_id: number | null;
+        quantity_on_hand: number;
+      }>;
+    };
+    hasActiveReservations: boolean;
+  }
+
+  async function resolveArchiveContext(
+    args: Record<string, any>,
+    storeId: number | undefined,
+  ): Promise<WriteResolution<ArchiveContext>> {
+    const label = 'Archivado de producto';
+
+    if (!storeId) {
+      return writeFailure(
+        label,
+        'Sin tienda en contexto: los productos se archivan siempre dentro de una tienda.',
+      );
+    }
+
+    const productId = toWritePositiveInt(args.product_id);
+    if (!productId) {
+      return writeFailure(
+        label,
+        'product_id inválido.',
+        'Usa find_product para obtener el product_id antes de archivar.',
+      );
+    }
+
+    const context =
+      await productsService.findProductArchivePreviewForAgent(productId);
+    if (!context?.product || !context?.plan) {
+      return writeFailure(
+        label,
+        `No existe un producto archivable con id ${productId} en esta tienda (inexistente o ya archivado).`,
+        'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
+      );
+    }
+
+    return {
+      ok: true,
+      value: {
+        productId,
+        label: productTargetLabel(context.product),
+        state: context.product.state,
+        plan: context.plan,
+        hasActiveReservations: context.hasActiveReservations === true,
+      },
+    };
+  }
+
+  /** Datos ya validados para archivar (O-4): el contexto + la cifra aprobada. */
+  interface ProductArchive extends ArchiveContext {
+    confirmedUnits: number;
+    confirmedValue: number;
+  }
+
+  function toWriteNumber(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  async function resolveProductArchive(
+    args: Record<string, any>,
+    storeId: number | undefined,
+  ): Promise<WriteResolution<ProductArchive>> {
+    // Cadena O-3→O-4: el agente pasa las cifras que `preview_archive_product`
+    // le devolvió y acá se re-verifican contra el plan vigente. Si el
+    // inventario se movió entre el preview y la propuesta, no procede.
+    const confirmedUnits = toWriteNumber(args.confirmed_total_units);
+    const confirmedValue = toWriteNumber(args.confirmed_total_value);
+    if (confirmedUnits === null || confirmedValue === null) {
+      return writeFailure(
+        'Archivado de producto',
+        'Todo archivado exige preview_archive_product primero: llama a esa lectura y pasa sus confirmed_total_units y confirmed_total_value tal cual.',
+        'Llama preview_archive_product con el product_id y reintenta con las cifras que devuelva.',
+      );
+    }
+
+    const base = await resolveArchiveContext(args, storeId);
+    if (!base.ok) return base;
+    const context = base.value;
+
+    if (context.hasActiveReservations) {
+      return writeFailure(
+        context.label,
+        'El producto tiene reservas de stock activas (pedidos en curso apartando unidades). Libéralas antes de archivarlo: el archivado nunca destruye existencia comprometida.',
+        'Despacha o cancela esos pedidos y repite preview_archive_product.',
+      );
+    }
+
+    if (context.plan.out_of_scope_units > 0) {
+      const where = context.plan.out_of_scope
+        .map((row) => row.location_name)
+        .join(', ');
+      return writeFailure(
+        context.label,
+        `El producto tiene ${context.plan.out_of_scope_units} unidades en ubicaciones fuera de esta tienda (${where}). Transfiérelas o ajústalas desde Inventario antes de archivarlo.`,
+      );
+    }
+
+    if (
+      context.plan.total_units !== confirmedUnits ||
+      round2(context.plan.total_value) !== round2(confirmedValue)
+    ) {
+      return writeFailure(
+        context.label,
+        `El inventario se movió desde el preview (ahora: ${context.plan.total_units} unidades por ${round2(context.plan.total_value)}; aprobado: ${confirmedUnits} por ${round2(confirmedValue)}).`,
+        'Repite preview_archive_product para cotizar con el estado actual y reintenta.',
+      );
+    }
+
+    return {
+      ok: true,
+      value: { ...context, confirmedUnits, confirmedValue },
+    };
+  }
+
+  // ─── O-5 manage_product_images ─────────────────────────────────────────
+
+  type ProductImageAction = 'add' | 'remove';
+
+  interface ProductImageChange {
+    action: ProductImageAction;
+    label: string;
+    dto?: ProductImageDto;
+    productId?: number;
+    imageId?: number;
+    imageUrl?: string;
+    isMain?: boolean;
+    changes: ToolPreview['changes'];
+    status: 'ok' | 'warning';
+    message?: string;
+  }
+
+  async function resolveProductImageChange(
+    args: Record<string, any>,
+    storeId: number | undefined,
+  ): Promise<WriteResolution<ProductImageChange>> {
+    const label = 'Imágenes de producto';
+
+    if (!storeId) {
+      return writeFailure(
+        label,
+        'Sin tienda en contexto: las imágenes se gestionan siempre dentro de una tienda.',
+      );
+    }
+
+    const action = String(args.action ?? '');
+    if (action !== 'add' && action !== 'remove') {
+      return writeFailure(
+        label,
+        `action "${action}" inválida. Usa add (agregar) o remove (quitar).`,
+      );
+    }
+    const imageAction = action as ProductImageAction;
+
+    if (imageAction === 'add') {
+      const productId = toWritePositiveInt(args.product_id);
+      if (!productId) {
+        return writeFailure(
+          label,
+          'product_id inválido.',
+          'Usa find_product para obtener el product_id antes de agregar la imagen.',
+        );
+      }
+
+      const imageUrl = cleanWriteString(args.image_url);
+      if (!imageUrl) {
+        return writeFailure(
+          label,
+          'image_url es obligatoria para agregar una imagen.',
+        );
+      }
+
+      let product: any;
+      try {
+        product = await productsService.findOne(productId);
+      } catch {
+        return writeFailure(
+          label,
+          `No existe un producto con id ${productId} en esta tienda.`,
+          'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
+        );
+      }
+
+      const targetLabel = productTargetLabel(product);
+
+      // Réplica de `addImage`: solo productos ACTIVOS admiten imágenes
+      // nuevas; un inactivo cae al error guiado en vez de fallar al aplicar.
+      if (product.state !== 'active') {
+        return writeFailure(
+          targetLabel,
+          `El producto está en estado "${product.state}": solo los productos activos admiten imágenes nuevas.`,
+        );
+      }
+
+      const dto: Record<string, unknown> = { image_url: imageUrl };
+      if (typeof args.is_main === 'boolean') dto.is_main = args.is_main;
+      const altText = cleanWriteString(args.alt_text);
+      if (altText) dto.alt_text = altText;
+      if (toNumberOrNull(args.sort_order) !== null) {
+        const sortOrder = Number(args.sort_order);
+        if (!Number.isInteger(sortOrder) || sortOrder < 0) {
+          return writeFailure(
+            targetLabel,
+            'sort_order debe ser un entero mayor o igual a cero.',
+          );
+        }
+        dto.sort_order = sortOrder;
+      }
+
+      const checked = toValidatedWriteDto(ProductImageDto, dto);
+      if (!checked.ok) {
+        return writeFailure(targetLabel, checked.message);
+      }
+
+      const isMain = checked.dto.is_main === true;
+      return {
+        ok: true,
+        value: {
+          action: imageAction,
+          label: targetLabel,
+          dto: checked.dto,
+          productId,
+          isMain,
+          changes: [
+            {
+              field: 'images',
+              label: 'Imagen agregada',
+              from: null,
+              to: imageUrl,
+            },
+            ...(isMain
+              ? [
+                  {
+                    field: 'is_main',
+                    label: 'Imagen principal',
+                    from: false,
+                    to: true,
+                  },
+                ]
+              : []),
+          ],
+          status: 'ok',
+        },
+      };
+    }
+
+    const imageId = toWritePositiveInt(args.image_id);
+    if (!imageId) {
+      return writeFailure(
+        label,
+        'image_id inválido: para quitar se necesita el id de la imagen.',
+        'Llama a get_product para ver las imágenes del producto y sus ids.',
+      );
+    }
+
+    const target =
+      await productsService.findProductImageForAgent(imageId);
+    if (!target) {
+      return writeFailure(
+        label,
+        `No existe una imagen con id ${imageId} en esta tienda.`,
+        'Llama a get_product para ver las imágenes del producto y sus ids.',
+      );
+    }
+
+    const targetLabel = target.product
+      ? productTargetLabel(target.product)
+      : `Producto ${target.product_id}`;
+    return {
+      ok: true,
+      value: {
+        action: imageAction,
+        label: targetLabel,
+        imageId,
+        imageUrl: target.image_url,
+        isMain: target.is_main,
+        changes: [
+          {
+            field: 'images',
+            label: 'Imagen eliminada',
+            from: target.image_url,
+            to: null,
+          },
+        ],
+        // Quitar borra el archivo en S3 además de la fila: avisar en voz
+        // alta, igual que un irreversible.
+        status: 'warning',
+        message: target.is_main
+          ? 'Es la imagen principal del producto: al quitarla el producto queda sin imagen destacada.'
+          : 'Al confirmar se borra también el archivo de imagen guardado.',
+      },
+    };
+  }
+
+  // ─── O-7 set_product_promotions ────────────────────────────────────────
+
+  interface ProductPromotionsChange {
+    productId: number;
+    label: string;
+    promotionIds: number[];
+    changes: ToolPreview['changes'];
+  }
+
+  async function resolveProductPromotionsChange(
+    args: Record<string, any>,
+    storeId: number | undefined,
+  ): Promise<WriteResolution<ProductPromotionsChange>> {
+    const label = 'Promociones de producto';
+
+    if (!storeId) {
+      return writeFailure(
+        label,
+        'Sin tienda en contexto: las promociones se asignan siempre dentro de una tienda.',
+      );
+    }
+
+    const productId = toWritePositiveInt(args.product_id);
+    if (!productId) {
+      return writeFailure(
+        label,
+        'product_id inválido.',
+        'Usa find_product para obtener el product_id antes de asignar promociones.',
+      );
+    }
+
+    if (!Array.isArray(args.promotion_ids)) {
+      return writeFailure(
+        label,
+        'promotion_ids debe ser un arreglo de ids (vacío para quitar todas las promociones).',
+      );
+    }
+    const promotionIds: number[] = [];
+    for (const raw of args.promotion_ids) {
+      const parsed = toWritePositiveInt(raw);
+      if (!parsed) {
+        return writeFailure(
+          label,
+          `promotion_ids trae un id inválido (${JSON.stringify(raw)}): todos deben ser enteros mayores que cero.`,
+        );
+      }
+      if (!promotionIds.includes(parsed)) promotionIds.push(parsed);
+    }
+
+    let product: any;
+    try {
+      product = await productsService.findOne(productId);
+    } catch {
+      return writeFailure(
+        label,
+        `No existe un producto con id ${productId} en esta tienda.`,
+        'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
+      );
+    }
+    const targetLabel = productTargetLabel(product);
+
+    const checked = toValidatedWriteDto(UpdateProductPromotionsDto, {
+      promotion_ids: promotionIds,
+    });
+    if (!checked.ok) {
+      return writeFailure(targetLabel, checked.message);
+    }
+
+    // Las promociones pedidas tienen que existir: mejor decirlo en la
+    // propuesta que fallar al aplicar con un error de llave foránea.
+    const found =
+      await productsService.findPromotionsByIdsForAgent(promotionIds);
+    const foundIds = new Set((found ?? []).map((row: any) => row.id));
+    const missing = promotionIds.filter((id) => !foundIds.has(id));
+    if (missing.length) {
+      return writeFailure(
+        targetLabel,
+        `No existen promociones con id ${missing.join(', ')} en esta tienda.`,
+        'Pide al usuario los nombres de las promociones vigentes antes de reintentar.',
+      );
+    }
+
+    const current: any[] =
+      await productsService.getProductPromotions(productId);
+    const fromNames = (current ?? [])
+      .map((row: any) => row?.name)
+      .filter(Boolean);
+    const toNames = (found ?? []).map((row: any) => String(row.name));
+
+    return {
+      ok: true,
+      value: {
+        productId,
+        label: targetLabel,
+        promotionIds,
+        changes: [
+          {
+            field: 'promotion_ids',
+            label: 'Promociones',
+            from: fromNames.length ? fromNames : null,
+            to: toNames.length ? toNames : null,
+          },
+        ],
+      },
+    };
+  }
+
+  // ─── O-8 generate_online_purchase_link ────────────────────────────────
+
+  interface OnlinePurchaseLink {
+    productId: number;
+    label: string;
+    pendingUrl: string;
+    previousUrl: string | null;
+    changes: ToolPreview['changes'];
+  }
+
+  async function resolveOnlinePurchaseLink(
+    args: Record<string, any>,
+    storeId: number | undefined,
+  ): Promise<WriteResolution<OnlinePurchaseLink>> {
+    const label = 'Enlace de compra en línea';
+
+    if (!storeId) {
+      return writeFailure(
+        label,
+        'Sin tienda en contexto: los enlaces de compra se generan siempre dentro de una tienda.',
+      );
+    }
+
+    const productId = toWritePositiveInt(args.product_id);
+    if (!productId) {
+      return writeFailure(
+        label,
+        'product_id inválido.',
+        'Usa find_product para obtener el product_id antes de generar el enlace.',
+      );
+    }
+
+    const context =
+      await productsService.findOnlinePurchaseContextForAgent(productId);
+    if (!context?.product) {
+      return writeFailure(
+        label,
+        `No existe un producto con id ${productId} en esta tienda.`,
+        'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
+      );
+    }
+
+    const targetLabel = productTargetLabel(context.product);
+
+    // Réplica de `generateOnlinePurchaseLink`: sin tienda en línea activa no
+    // hay enlace que generar. Se dice en la propuesta, no al aplicar.
+    if (!context.ready || !context.pending_url) {
+      return writeFailure(
+        targetLabel,
+        context.message ||
+          'La tienda en línea no está lista para generar el enlace.',
+        'Configura y activa la tienda en línea (dominio primario activo) y vuelve a intentarlo.',
+      );
+    }
+
+    return {
+      ok: true,
+      value: {
+        productId,
+        label: targetLabel,
+        pendingUrl: context.pending_url,
+        previousUrl: context.product.online_purchase_url ?? null,
+        changes: [
+          {
+            field: 'online_purchase_url',
+            label: 'Enlace de compra',
+            from: context.product.online_purchase_url ?? null,
+            to: context.pending_url,
+          },
+        ],
+      },
+    };
+  }
+
   return [
     // ─── Tool 1: find_product ────────────────────────────────────────
     {
       name: 'find_product',
+      version: '1',
       domain: 'products',
       readOnly: true,
       description:
@@ -416,12 +1211,10 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
         let matches: any[] = [];
 
         for (const attempt of attempts) {
-          const found: any[] = await prisma.products.findMany({
-            where: attempt.where,
-            select: { id: true },
-            orderBy: { name: 'asc' },
-            take: limit + 1,
-          });
+          const found: any[] = await productsService.findProductIdsForAgent(
+            attempt.where,
+            limit + 1,
+          );
           if (found.length) {
             matchedBy = attempt.matchedBy;
             matches = found;
@@ -434,12 +1227,10 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
 
         if (!matches.length) {
           usedFuzzyPass = true;
-          const pool: any[] = await prisma.products.findMany({
-            where: base,
-            select: { id: true, name: true, sku: true, barcode: true },
-            orderBy: { name: 'asc' },
-            take: FUZZY_SCAN_CAP,
-          });
+          const pool: any[] = await productsService.findProductFuzzyPoolForAgent(
+            base,
+            FUZZY_SCAN_CAP,
+          );
           scanCapReached = pool.length === FUZZY_SCAN_CAP;
 
           const normalizedTokens = normalize(rawQuery)
@@ -504,6 +1295,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     // ─── Tool 2: get_product ─────────────────────────────────────────
     {
       name: 'get_product',
+      version: '1',
       domain: 'products',
       readOnly: true,
       description:
@@ -546,7 +1338,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           });
         }
 
-        const taxRate = totalTaxRate(product.product_tax_assignments);
+        const taxRate = productsService.getEffectiveTaxRate(product);
         const allVariants = product.product_variants ?? [];
         const hasVariants = allVariants.length > 0;
 
@@ -693,6 +1485,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     // ─── Tool 3: list_products ───────────────────────────────────────
     {
       name: 'list_products',
+      version: '1',
       domain: 'products',
       readOnly: true,
       description:
@@ -831,6 +1624,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
     // ─── Tool 4: get_product_pricing ─────────────────────────────────
     {
       name: 'get_product_pricing',
+      version: '1',
       domain: 'products',
       readOnly: true,
       description:
@@ -871,49 +1665,8 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           ? Number(args.product_variant_id)
           : null;
 
-        const product: any = await prisma.products.findFirst({
-          where: { id: productId },
-          select: {
-            id: true,
-            name: true,
-            sku: true,
-            state: true,
-            base_price: true,
-            cost_price: true,
-            profit_margin: true,
-            // QUI-648 — a cuántas unidades de stock corresponde `base_price`.
-            // Sin ella el margen que se le reporta a Vexi mezcla escalas.
-            price_unit_quantity: true,
-            is_on_sale: true,
-            sale_price: true,
-            track_inventory: true,
-            has_multiple_price_tiers: true,
-            product_tax_assignments: {
-              select: {
-                tax_categories: {
-                  select: { tax_rates: { select: { rate: true, name: true } } },
-                },
-              },
-            },
-            product_variants: {
-              orderBy: { id: 'asc' },
-              take: MAX_VARIANTS_INLINE,
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                price_override: true,
-                cost_price: true,
-                profit_margin: true,
-                is_on_sale: true,
-                sale_price: true,
-                track_inventory_override: true,
-                attributes: true,
-              },
-            },
-            _count: { select: { product_variants: true } },
-          },
-        });
+        const product: any =
+          await productsService.findProductPricingForAgent(productId);
 
         if (!product) {
           return JSON.stringify({
@@ -939,7 +1692,7 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           });
         }
 
-        const taxRate = totalTaxRate(product.product_tax_assignments);
+        const taxRate = productsService.getEffectiveTaxRate(product);
         const productInput = {
           base_price: toNumber(product.base_price),
           is_on_sale: product.is_on_sale === true,
@@ -1031,37 +1784,10 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
         // ── Price tiers (multi-tarifa / venta por empaque) ────────────
         let tiers: any[] | undefined;
         if (product.has_multiple_price_tiers) {
-          const assignments: any[] =
-            await prisma.product_price_tier_assignments.findMany({
-              where: { product_id: productId },
-              select: { price_tier_id: true },
-            });
-          const tierIds = assignments.map((row) => row.price_tier_id);
+          const { tiers: tierRows, overrides: overrideRows } =
+            await productsService.findProductPriceTiersForAgent(productId);
 
-          if (tierIds.length) {
-            const [tierRows, overrideRows] = await Promise.all([
-              prisma.price_tiers.findMany({
-                where: { id: { in: tierIds }, is_active: true },
-                orderBy: { sort_order: 'asc' },
-                select: {
-                  id: true,
-                  name: true,
-                  discount_percentage: true,
-                  is_package_unit: true,
-                  units_per_package: true,
-                },
-              }) as Promise<any[]>,
-              prisma.product_price_tier_overrides.findMany({
-                where: { product_id: productId },
-                select: {
-                  price_tier_id: true,
-                  variant_id: true,
-                  override_price: true,
-                  override_units_per_package: true,
-                },
-              }) as Promise<any[]>,
-            ]);
-
+          if (tierRows.length) {
             tiers = tierRows.map((tier) => {
               // Filtrado por tarifa. `resolveWithTier` ya compara el
               // `variant_id` real contra `variant.id`, así que el pre-filtro por
@@ -1193,6 +1919,743 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
               ? 'Un producto con variantes no tiene un precio único: price es el del producto base y variant_prices trae el de cada variante. Al vender hay que elegir variante.'
               : 'unit_price es el precio final al público (impuestos incluidos); net_price es sin impuestos.',
         });
+      },
+    },
+
+    // ─── Tool 5: update_product (O-1, write) ────────────────────────────
+    {
+      name: 'update_product',
+      version: '1',
+      domain: 'products',
+      requiresConfirmation: true,
+      description:
+        'Edita un producto existente del catálogo: nombre, descripción, SKU, código de barras, precio base, costo, margen, oferta, control de inventario y banderas de venta. Solo se cambian los campos enviados (semántica PATCH). Requiere product_id: obtenlo con find_product. Nunca acepta final_price: ese es un calculado de lectura (precio + impuestos); para cambiar lo que paga el cliente edita base_price o sale_price. No edita stock (eso es adjust_stock), ni variantes (create/update/delete_variant), ni archiva (eso se hace en el módulo de productos).',
+      parameters: {
+        type: 'object',
+        properties: {
+          product_id: {
+            type: 'number',
+            description: 'ID del producto, obtenido con find_product.',
+          },
+          name: {
+            type: 'string',
+            description: 'Nuevo nombre comercial (2 a 255 caracteres).',
+          },
+          description: { type: 'string', description: 'Nueva descripción.' },
+          sku: {
+            type: 'string',
+            description:
+              'Nuevo SKU. Debe seguir siendo único en la tienda.',
+          },
+          barcode: { type: 'string', description: 'Nuevo código de barras.' },
+          base_price: {
+            type: 'number',
+            description: 'Nuevo precio de venta SIN impuestos.',
+          },
+          cost_price: {
+            type: 'number',
+            description: 'Nuevo costo unitario.',
+          },
+          profit_margin: {
+            type: 'number',
+            description: 'Nuevo margen de ganancia en porcentaje sobre el costo.',
+          },
+          is_on_sale: {
+            type: 'boolean',
+            description: 'Si el producto queda en promoción.',
+          },
+          sale_price: {
+            type: 'number',
+            description:
+              'Nuevo precio de oferta SIN impuestos. Debe ser menor que el precio normal.',
+          },
+          track_inventory: {
+            type: 'boolean',
+            description: 'Si el producto lleva control de existencias.',
+          },
+          is_sellable: {
+            type: 'boolean',
+            description: 'Si se puede vender directamente.',
+          },
+          available_for_ecommerce: {
+            type: 'boolean',
+            description: 'Si se publica en la tienda en línea.',
+          },
+          is_featured: {
+            type: 'boolean',
+            description: 'Si se marca como destacado.',
+          },
+          allow_pos_price_override: {
+            type: 'boolean',
+            description:
+              'Si el cajero puede cambiarle el precio a mano en el POS.',
+          },
+          brand_id: { type: 'number', description: 'Nueva marca.' },
+        },
+        required: ['product_id'],
+      },
+      requiredPermissions: ['store:products:update'],
+      preview: async (args, context) => {
+        const resolved = await resolveProductEdit(args, context.store_id);
+        if (!resolved.ok) {
+          return writePreviewError(
+            resolved.label,
+            [resolved.message, resolved.nextStep].filter(Boolean).join(' '),
+            'products',
+          );
+        }
+
+        return {
+          status: 'ok',
+          target: resolved.value.label,
+          changes: resolved.value.changes,
+          domain: 'products',
+        };
+      },
+      handler: async (args, context) => {
+        try {
+          // Re-verificación: el producto pudo cambiar (u otro usuario pudo
+          // tomar el mismo SKU) entre la propuesta y la confirmación.
+          const resolved = await resolveProductEdit(args, context.store_id);
+          if (!resolved.ok) {
+            return writeToolError(resolved.message, resolved.nextStep);
+          }
+
+          await productsService.update(
+            resolved.value.productId,
+            resolved.value.dto,
+            { lean: true },
+          );
+
+          return JSON.stringify({
+            summary: `${resolved.value.label}: ${resolved.value.changes.length} campo(s) actualizado(s).`,
+            data: {
+              product_id: resolved.value.productId,
+              updated_fields: resolved.value.changes.map(
+                (change) => change.field,
+              ),
+            },
+          });
+        } catch (error) {
+          const { code, message } = describeWriteError(error);
+          return writeToolError(
+            `No se pudo editar el producto${code ? ` (${code})` : ''}: ${message}`,
+          );
+        }
+      },
+    },
+
+    // ─── Tool 6: deactivate_product (O-2, write) ─────────────────────────
+    {
+      name: 'deactivate_product',
+      version: '1',
+      domain: 'products',
+      requiresConfirmation: true,
+      description:
+        'Desactiva un producto para que deje de venderse sin borrarlo del catálogo (reversible desde el módulo de productos, a diferencia de archive_product que es definitivo). Requiere product_id: obtenlo con find_product.',
+      parameters: {
+        type: 'object',
+        properties: {
+          product_id: {
+            type: 'number',
+            description: 'ID del producto, obtenido con find_product.',
+          },
+        },
+        required: ['product_id'],
+      },
+      requiredPermissions: ['store:products:delete'],
+      preview: async (args, context) => {
+        const resolved = await resolveProductDeactivation(
+          args,
+          context.store_id,
+        );
+        if (!resolved.ok) {
+          return writePreviewError(
+            resolved.label,
+            [resolved.message, resolved.nextStep].filter(Boolean).join(' '),
+            'products',
+          );
+        }
+
+        return {
+          status: 'ok',
+          target: resolved.value.label,
+          changes: [
+            {
+              field: 'state',
+              label: 'Estado',
+              from: resolved.value.fromState,
+              to: 'inactive',
+            },
+          ],
+          message:
+            'El producto deja de venderse pero conserva su ficha, su stock y su historial.',
+          domain: 'products',
+        };
+      },
+      handler: async (args, context) => {
+        try {
+          // Re-verificación: el producto pudo cambiar de estado (u otro
+          // usuario pudo archivarlo) entre la propuesta y la confirmación.
+          const resolved = await resolveProductDeactivation(
+            args,
+            context.store_id,
+          );
+          if (!resolved.ok) {
+            return writeToolError(resolved.message, resolved.nextStep);
+          }
+
+          await productsService.deactivate(resolved.value.productId);
+
+          return JSON.stringify({
+            summary: `${resolved.value.label}: desactivado, ya no se vende.`,
+            data: {
+              product_id: resolved.value.productId,
+              state: 'inactive',
+            },
+          });
+        } catch (error) {
+          const { code, message } = describeWriteError(error);
+          return writeToolError(
+            `No se pudo desactivar el producto${code ? ` (${code})` : ''}: ${message}`,
+          );
+        }
+      },
+    },
+
+    // ─── Tool 7: preview_archive_product (O-3, read) ─────────────────────
+    {
+      name: 'preview_archive_product',
+      version: '1',
+      domain: 'products',
+      readOnly: true,
+      description:
+        'Calcula, SIN ESCRIBIR NADA, qué existencias se darían de baja si se archiva el producto: unidades y valor por ubicación y variante, unidades sin costo conocido, y existencias fuera de la tienda que bloquearían el archivado. Es el paso OBLIGATORIO antes de archive_product: ese write exige las cifras confirmed_total_units y confirmed_total_value que esta lectura devuelve. Requiere product_id: obtenlo con find_product.',
+      parameters: {
+        type: 'object',
+        properties: {
+          product_id: {
+            type: 'number',
+            description: 'ID del producto, obtenido con find_product.',
+          },
+        },
+        required: ['product_id'],
+      },
+      // `admin_delete` y no `read`, igual que el endpoint: es el ensayo de
+      // una operación irreversible y enumera existencias con su valoración.
+      // Quien no puede archivar no necesita saber cuánto se destruiría.
+      requiredPermissions: ['store:products:admin_delete'],
+      handler: async (args, context) => {
+        const resolved = await resolveArchiveContext(args, context.store_id);
+        if (!resolved.ok) {
+          return JSON.stringify({
+            error: resolved.message,
+            ...(resolved.nextStep && { next_step: resolved.nextStep }),
+          });
+        }
+        const { productId, label, state, plan, hasActiveReservations } =
+          resolved.value;
+
+        const blocked =
+          hasActiveReservations || plan.out_of_scope_units > 0;
+        return JSON.stringify({
+          product: { product_id: productId, name: label, state },
+          requires_confirmation: plan.requires_confirmation,
+          confirmed_total_units: plan.total_units,
+          confirmed_total_value: round2(plan.total_value),
+          total_units: plan.total_units,
+          total_value: round2(plan.total_value),
+          zero_cost_units: plan.zero_cost_units,
+          lines: plan.lines.map((line) => ({
+            location_id: line.location_id,
+            location: line.location_name,
+            product_variant_id: line.product_variant_id,
+            variant_sku: line.variant_sku,
+            quantity_on_hand: line.quantity_on_hand,
+            unit_cost: round2(line.unit_cost),
+            value: round2(line.value),
+            has_known_cost: line.has_known_cost,
+          })),
+          out_of_scope_units: plan.out_of_scope_units,
+          out_of_scope: plan.out_of_scope,
+          has_active_reservations: hasActiveReservations,
+          archivable: !blocked,
+          next_step: blocked
+            ? hasActiveReservations
+              ? 'El archivado está bloqueado por reservas activas: despacha o cancela esos pedidos antes de proponer archive_product.'
+              : 'El archivado está bloqueado por existencias fuera de la tienda: transfiérelas o ajústalas desde Inventario antes de proponer archive_product.'
+            : 'Pasa confirmed_total_units y confirmed_total_value tal cual a archive_product. Si el inventario se mueve, repite este preview.',
+        });
+      },
+    },
+
+    // ─── Tool 8: archive_product (O-4, write) ────────────────────────────
+    {
+      name: 'archive_product',
+      version: '1',
+      domain: 'products',
+      requiresConfirmation: true,
+      description:
+        'Archiva un producto DEFINITIVAMENTE (DELETE irreversible, da de baja sus existencias con un ajuste de tipo pérdida y deja auditoría). EXIGE haber llamado preview_archive_product primero: pasa sus confirmed_total_units y confirmed_total_value tal cual y el handler los re-verifica contra el plan vigente (si se movió, te pide repetir el preview). Se bloquea con reservas activas o con existencias fuera de la tienda. Requiere product_id: obtenlo con find_product.',
+      parameters: {
+        type: 'object',
+        properties: {
+          product_id: {
+            type: 'number',
+            description: 'ID del producto, obtenido con find_product.',
+          },
+          confirmed_total_units: {
+            type: 'number',
+            description:
+              'Las unidades que devolvió preview_archive_product para este producto. Sin haber llamado ese preview, el archivado no procede.',
+          },
+          confirmed_total_value: {
+            type: 'number',
+            description:
+              'El valor que devolvió preview_archive_product para este producto. Sin haber llamado ese preview, el archivado no procede.',
+          },
+        },
+        required: [
+          'product_id',
+          'confirmed_total_units',
+          'confirmed_total_value',
+        ],
+      },
+      requiredPermissions: ['store:products:admin_delete'],
+      preview: async (args, context) => {
+        const resolved = await resolveProductArchive(args, context.store_id);
+        if (!resolved.ok) {
+          return writePreviewError(
+            resolved.label,
+            [resolved.message, resolved.nextStep].filter(Boolean).join(' '),
+            'products',
+          );
+        }
+        const archive = resolved.value;
+
+        return {
+          status: 'warning',
+          target: archive.label,
+          changes: [
+            {
+              field: 'state',
+              label: 'Estado',
+              from: archive.state,
+              to: 'archived',
+            },
+            {
+              field: 'stock_write_off_units',
+              label: 'Unidades dadas de baja',
+              from: archive.plan.total_units,
+              to: 0,
+            },
+            {
+              field: 'stock_write_off_value',
+              label: 'Valor dado de baja',
+              from: round2(archive.plan.total_value),
+              to: 0,
+            },
+          ],
+          message:
+            `Archivado IRREVERSIBLE: da de baja ${archive.plan.total_units} ` +
+            `unidades por ${round2(archive.plan.total_value)} en ` +
+            `${archive.plan.lines.length} ubicación(es)` +
+            (archive.plan.zero_cost_units > 0
+              ? ` (${archive.plan.zero_cost_units} sin costo conocido, no producen asiento)`
+              : '') +
+            '.',
+          domain: 'products',
+        };
+      },
+      handler: async (args, context) => {
+        try {
+          // Re-verificación completa: el plan pudo moverse (o aparecer
+          // reservas) entre la propuesta y la confirmación. El token de
+          // confirmación de Vexi ES la confirmación del castigo: se pasa
+          // `confirm_stock_write_off: true` al servicio.
+          const resolved = await resolveProductArchive(args, context.store_id);
+          if (!resolved.ok) {
+            return writeToolError(resolved.message, resolved.nextStep);
+          }
+
+          await productsService.remove(resolved.value.productId, {
+            confirm_stock_write_off: true,
+          });
+
+          return JSON.stringify({
+            summary:
+              `${resolved.value.label}: archivado con baja de ` +
+              `${resolved.value.plan.total_units} unidades por ` +
+              `${round2(resolved.value.plan.total_value)}.`,
+            data: {
+              product_id: resolved.value.productId,
+              state: 'archived',
+              write_off_units: resolved.value.plan.total_units,
+              write_off_value: round2(resolved.value.plan.total_value),
+            },
+          });
+        } catch (error) {
+          const { code, message } = describeWriteError(error);
+          return writeToolError(
+            `No se pudo archivar el producto${code ? ` (${code})` : ''}: ${message}`,
+          );
+        }
+      },
+    },
+
+    // ─── Tool 9: manage_product_images (O-5, write) ──────────────────────
+    {
+      name: 'manage_product_images',
+      version: '1',
+      domain: 'products',
+      requiresConfirmation: true,
+      description:
+        'Agrega (add) o quita (remove) imágenes de un producto. add necesita product_id (obtenlo con find_product) e image_url, y solo procede en productos activos; remove necesita image_id (míralo en get_product) y borra también el archivo guardado. Marcar is_main mueve la imagen principal.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['add', 'remove'],
+            description: 'add: agregar una imagen. remove: quitarla.',
+          },
+          product_id: {
+            type: 'number',
+            description:
+              'ID del producto, obtenido con find_product. Obligatorio para add.',
+          },
+          image_url: {
+            type: 'string',
+            description:
+              'URL o clave S3 de la imagen. Obligatoria para add.',
+          },
+          image_id: {
+            type: 'number',
+            description:
+              'ID de la imagen a quitar. Obligatorio para remove (míralo en get_product).',
+          },
+          is_main: {
+            type: 'boolean',
+            description:
+              'Si la imagen agregada queda como principal (add).',
+          },
+          alt_text: {
+            type: 'string',
+            description: 'Texto alternativo de la imagen (add).',
+          },
+          sort_order: {
+            type: 'number',
+            description: 'Orden de aparición de la imagen (add).',
+          },
+        },
+        required: ['action'],
+      },
+      requiredPermissions: ['store:products:update'],
+      preview: async (args, context) => {
+        const resolved = await resolveProductImageChange(
+          args,
+          context.store_id,
+        );
+        if (!resolved.ok) {
+          return writePreviewError(
+            resolved.label,
+            [resolved.message, resolved.nextStep].filter(Boolean).join(' '),
+            'products',
+          );
+        }
+
+        return {
+          status: resolved.value.status,
+          target: resolved.value.label,
+          changes: resolved.value.changes,
+          ...(resolved.value.message && { message: resolved.value.message }),
+          domain: 'products',
+        };
+      },
+      handler: async (args, context) => {
+        try {
+          // Re-verificación: el producto pudo desactivarse (add) o la
+          // imagen pudo borrarse (remove) entre la propuesta y la
+          // confirmación.
+          const resolved = await resolveProductImageChange(
+            args,
+            context.store_id,
+          );
+          if (!resolved.ok) {
+            return writeToolError(resolved.message, resolved.nextStep);
+          }
+          const change = resolved.value;
+
+          if (change.action === 'add') {
+            const created = await productsService.addImage(
+              change.productId!,
+              change.dto!,
+            );
+            return JSON.stringify({
+              summary: `${change.label}: imagen agregada.`,
+              data: {
+                product_id: change.productId,
+                image_id: (created as any)?.id ?? null,
+                is_main: change.isMain === true,
+              },
+            });
+          }
+
+          await productsService.removeImage(change.imageId!);
+          return JSON.stringify({
+            summary: `${change.label}: imagen ${change.imageId} eliminada.`,
+            data: {
+              image_id: change.imageId,
+              deleted: true,
+            },
+          });
+        } catch (error) {
+          const { code, message } = describeWriteError(error);
+          return writeToolError(
+            `No se pudo gestionar la imagen${code ? ` (${code})` : ''}: ${message}`,
+          );
+        }
+      },
+    },
+
+    // ─── Tool 10: get_product_promotions (O-6, read) ─────────────────────
+    {
+      name: 'get_product_promotions',
+      version: '1',
+      domain: 'products',
+      readOnly: true,
+      description:
+        'Ver qué promociones tiene aplicadas un producto: nombre, tipo, estado y vigencia de cada una. Úsala para "qué descuento tiene esto" y como cadena de validación antes de set_product_promotions. Requiere product_id: obtenlo con find_product.',
+      parameters: {
+        type: 'object',
+        properties: {
+          product_id: {
+            type: 'number',
+            description: 'ID del producto, obtenido con find_product.',
+          },
+        },
+        required: ['product_id'],
+      },
+      requiredPermissions: ['store:products:read'],
+      handler: async (args, context) => {
+        if (!context.store_id) {
+          return JSON.stringify({
+            error:
+              'Sin tienda en contexto: las promociones se leen siempre dentro de una tienda.',
+          });
+        }
+
+        const productId = toWritePositiveInt(args.product_id);
+        if (!productId) {
+          return JSON.stringify({
+            error:
+              'product_id inválido. Resuelve el producto con find_product antes de pedir sus promociones.',
+          });
+        }
+
+        let product: any;
+        try {
+          product = await productsService.findOne(productId);
+        } catch {
+          return JSON.stringify({
+            error: `No existe un producto con id ${productId} en esta tienda.`,
+            next_step:
+              'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
+          });
+        }
+
+        const promotions: any[] =
+          await productsService.getProductPromotions(productId);
+
+        return JSON.stringify({
+          product: {
+            product_id: product.id,
+            name: product.name,
+            sku: product.sku ?? null,
+            state: product.state,
+          },
+          promotion_count: (promotions ?? []).length,
+          promotions: (promotions ?? []).map((promotion: any) => ({
+            promotion_id: promotion.id,
+            name: promotion.name,
+            type: promotion.type ?? null,
+            value: promotion.value ?? null,
+            state: promotion.state ?? null,
+            start_date: promotion.start_date ?? null,
+            end_date: promotion.end_date ?? null,
+          })),
+          next_step:
+            'Para cambiar a qué promociones pertenece usa set_product_promotions con la lista completa de promotion_ids (la asignación reemplaza, no suma).',
+        });
+      },
+    },
+
+    // ─── Tool 11: set_product_promotions (O-7, write) ────────────────────
+    {
+      name: 'set_product_promotions',
+      version: '1',
+      domain: 'products',
+      requiresConfirmation: true,
+      description:
+        'Cambia a qué promociones pertenece un producto. La lista REEMPLAZA la asignación actual (manda la lista completa; vacía para quitarlas todas). Consulta primero get_product_promotions para ver las vigentes. Requiere product_id: obtenlo con find_product.',
+      parameters: {
+        type: 'object',
+        properties: {
+          product_id: {
+            type: 'number',
+            description: 'ID del producto, obtenido con find_product.',
+          },
+          promotion_ids: {
+            type: 'array',
+            items: { type: 'number' },
+            description:
+              'Lista COMPLETA de ids de promoción que quedan asignados. Vacía para quitar todas.',
+          },
+        },
+        required: ['product_id', 'promotion_ids'],
+      },
+      requiredPermissions: ['store:products:update'],
+      preview: async (args, context) => {
+        const resolved = await resolveProductPromotionsChange(
+          args,
+          context.store_id,
+        );
+        if (!resolved.ok) {
+          return writePreviewError(
+            resolved.label,
+            [resolved.message, resolved.nextStep].filter(Boolean).join(' '),
+            'products',
+          );
+        }
+
+        return {
+          status: 'ok',
+          target: resolved.value.label,
+          changes: resolved.value.changes,
+          domain: 'products',
+        };
+      },
+      handler: async (args, context) => {
+        try {
+          // Re-verificación: el producto o las promociones pudieron cambiar
+          // entre la propuesta y la confirmación.
+          const resolved = await resolveProductPromotionsChange(
+            args,
+            context.store_id,
+          );
+          if (!resolved.ok) {
+            return writeToolError(resolved.message, resolved.nextStep);
+          }
+
+          const updated =
+            await productsService.updateProductPromotions(
+              resolved.value.productId,
+              resolved.value.promotionIds,
+            );
+
+          return JSON.stringify({
+            summary:
+              `${resolved.value.label}: ahora pertenece a ` +
+              `${(updated ?? []).length} promoción(es).`,
+            data: {
+              product_id: resolved.value.productId,
+              promotion_ids: resolved.value.promotionIds,
+            },
+          });
+        } catch (error) {
+          const { code, message } = describeWriteError(error);
+          return writeToolError(
+            `No se pudieron asignar las promociones${code ? ` (${code})` : ''}: ${message}`,
+          );
+        }
+      },
+    },
+
+    // ─── Tool 12: generate_online_purchase_link (O-8, write) ─────────────
+    {
+      name: 'generate_online_purchase_link',
+      version: '1',
+      domain: 'products',
+      requiresConfirmation: true,
+      description:
+        'Genera (o regenera) el enlace de compra directa del producto en la tienda en línea, con su código QR. Escribe en la ficha del producto, por eso pide confirmación. Exige la tienda en línea configurada con dominio primario activo. Requiere product_id: obtenlo con find_product.',
+      parameters: {
+        type: 'object',
+        properties: {
+          product_id: {
+            type: 'number',
+            description: 'ID del producto, obtenido con find_product.',
+          },
+        },
+        required: ['product_id'],
+      },
+      requiredPermissions: ['store:products:update'],
+      preview: async (args, context) => {
+        const resolved = await resolveOnlinePurchaseLink(
+          args,
+          context.store_id,
+        );
+        if (!resolved.ok) {
+          return writePreviewError(
+            resolved.label,
+            [resolved.message, resolved.nextStep].filter(Boolean).join(' '),
+            'products',
+          );
+        }
+
+        return {
+          status: 'ok',
+          target: resolved.value.label,
+          changes: resolved.value.changes,
+          message: resolved.value.previousUrl
+            ? 'Ya existía un enlace: al confirmar se reemplaza junto con su QR.'
+            : 'El QR se genera junto con el enlace y queda en la ficha del producto.',
+          domain: 'products',
+        };
+      },
+      handler: async (args, context) => {
+        try {
+          // Re-verificación: la tienda en línea pudo desactivarse entre la
+          // propuesta y la confirmación.
+          const resolved = await resolveOnlinePurchaseLink(
+            args,
+            context.store_id,
+          );
+          if (!resolved.ok) {
+            return writeToolError(resolved.message, resolved.nextStep);
+          }
+
+          const generated =
+            await productsService.generateOnlinePurchaseLink(
+              resolved.value.productId,
+            );
+
+          // La respuesta porta solo lo público: la URL, el dominio visible y
+          // la fecha. Ni el `online_purchase_domain_id` interno ni el QR en
+          // base64 (multitud de KB que saturan el contexto y ya queda en la
+          // ficha) viajan al modelo.
+          return JSON.stringify({
+            summary: `${resolved.value.label}: enlace de compra generado.`,
+            data: {
+              product_id: resolved.value.productId,
+              online_purchase_url:
+                (generated as any)?.online_purchase_url ??
+                resolved.value.pendingUrl,
+              domain_hostname:
+                (generated as any)?.domain_hostname ?? null,
+              online_purchase_generated_at:
+                (generated as any)?.online_purchase_generated_at ?? null,
+              qr_available: true,
+            },
+            next_step:
+              'El QR quedó guardado en la ficha del producto, listo para mostrar o imprimir.',
+          });
+        } catch (error) {
+          const { code, message } = describeWriteError(error);
+          return writeToolError(
+            `No se pudo generar el enlace de compra${code ? ` (${code})` : ''}: ${message}`,
+          );
+        }
       },
     },
   ];

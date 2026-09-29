@@ -2151,6 +2151,27 @@ export class ProductCreatePageComponent {
    */
   get priceWithTax(): number {
     const basePrice = Number(this.productForm.get('base_price')?.value || 0);
+    return this.estimateConfiguredPrice(basePrice);
+  }
+
+  get salePriceWithTax(): number {
+    const salePrice = Number(this.productForm.get('sale_price')?.value || 0);
+    return this.estimateConfiguredPrice(salePrice);
+  }
+
+  get saleTaxExplanation(): string {
+    const taxes = this.selectedTaxEstimateInputs().filter((tax) => tax.rateFraction > 0);
+    if (taxes.length === 0) return 'Sin impuestos configurados';
+    if (taxes.every((tax) => tax.inclusive)) return 'Impuestos incluidos en la oferta';
+    if (taxes.every((tax) => !tax.inclusive)) return 'Impuestos agregados a la oferta';
+    return 'Incluye algunos impuestos; otros se agregan a la oferta';
+  }
+
+  private estimateConfiguredPrice(price: number): number {
+    return estimatePriceWithTax(price, this.selectedTaxEstimateInputs());
+  }
+
+  private selectedTaxEstimateInputs(): Array<{ rateFraction: number; inclusive: boolean }> {
     const selectedTaxIds =
       this.productForm.get('tax_category_ids')?.value || [];
     // F4 — si el comercio no es responsable de IVA, el IVA nunca compone el
@@ -2158,22 +2179,19 @@ export class ProductCreatePageComponent {
     const ivaIds = this.ivaTaxCategoryIdSet();
     const blocked = this.isVatBlocked();
 
-    return estimatePriceWithTax(
-      basePrice,
-      selectedTaxIds
-        .filter((id: number) => !(blocked && ivaIds.has(id)))
-        .map((id: number) => {
-          const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
-          return {
-            rateFraction: taxCat
-              ? parseTaxRateFraction(
-                  taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0,
-                )
-              : 0,
-            inclusive: this.isTaxInclusive(id),
-          };
-        }),
-    );
+    return selectedTaxIds
+      .filter((id: number) => !(blocked && ivaIds.has(id)))
+      .map((id: number) => {
+        const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
+        return {
+          rateFraction: taxCat
+            ? parseTaxRateFraction(
+                taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0,
+              )
+            : 0,
+          inclusive: this.isTaxInclusive(id),
+        };
+      });
   }
 
   get taxBreakdown(): {

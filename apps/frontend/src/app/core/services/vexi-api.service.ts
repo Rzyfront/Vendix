@@ -70,7 +70,9 @@ export interface VexiStreamChunk {
     // synthesized segment, `timing` one latency mark — neither renders as
     // content, and both are ignored by the chat mode.
     | 'audio'
-    | 'timing';
+    | 'timing'
+    // The turn ran out of budget with work pending; open a continuation turn.
+    | 'plan_continue';
   content?: string;
   tool?: {
     id: string;
@@ -136,6 +138,12 @@ export interface VexiActivityEntry {
   tool: string;
   operation: string;
   applied: boolean;
+  /** `ui` for interface commands, `write` for data changes (default). */
+  kind?: 'write' | 'ui';
+  /** Screen the UI command ran on, when the result carried it. */
+  module_key?: string;
+  /** Outcome of a UI command (`ok`, `no_host`, `needs_user_input`, …). */
+  status?: string;
   document?: {
     attachment_id: string;
     original_name: string;
@@ -239,12 +247,16 @@ export class VexiApiService {
     attachmentIds?: string[],
     speak?: boolean,
     skipUserMessage?: boolean,
+    continuation?: 'approved' | 'rejected' | 'resume',
   ): Observable<string> {
     return this.http
       .post<{ data: { stream_id: string } }>(
         `${this.baseUrl}/conversations/${conversationId}/stream-intent`,
         {
-          content,
+          // With a continuation the server composes the instruction and stores
+          // no user message, so the field is omitted.
+          content: continuation ? undefined : content,
+          continuation: continuation ?? undefined,
           ui_context: uiContext,
           // Handles, never bytes: the files were uploaded ahead of the handshake
           // so this body stays small enough to send synchronously before the

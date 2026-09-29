@@ -526,7 +526,12 @@
                            the kitchen provenance is a hint INSIDE that one
                            chip, never a second visual treatment. -->
                       <div class="item-status">
-                        @if (isPrepared(item)) {
+                        @if (item.cancelled_at && isDelivered(item)) {
+                          <app-badge variant="error" size="sm" title="La entrega de este plato fue reversada">
+                            <app-icon name="rotate-ccw" [size]="11"></app-icon>
+                            Entrega reversada
+                          </app-badge>
+                        } @else if (isPrepared(item)) {
                           @if (kitchenStatusFor(item); as status) {
                             @if (status === 'delivered') {
                               <span
@@ -612,8 +617,7 @@
                               size="sm"
                               customClasses="!h-11 !w-11 !px-0"
                               [loading]="removingItemId() === item.id"
-                              [attr.title]="'Eliminar de la cuenta'"
-                              [attr.aria-label]="'Eliminar ' + item.product_name"
+                              [ariaLabel]="'Eliminar ' + item.product_name + ' de la cuenta'"
                               (clicked)="onRemoveItem(item)"
                             >
                               <app-icon slot="icon" name="trash-2" [size]="13"></app-icon>
@@ -812,8 +816,9 @@
     [isOpen]="cancellationModalOpen()"
     (isOpenChange)="!$event && closeItemCancellationModal()"
     [itemName]="cancellationTarget()?.product_name || ''"
-    [showDestination]="cancellationPreparedFired()"
-    [canReuse]="cancellationPreparedFired()"
+    [showDestination]="cancellationNeedsDisposition()"
+    [canReuse]="cancellationNeedsDisposition()"
+    [autoRestorePending]="cancellationAutoRestorePending()"
     [inFlight]="removingItemId() !== null"
     [serverError]="cancellationError()"
     [currentTotal]="orderTotal()"

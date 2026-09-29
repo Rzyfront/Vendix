@@ -65,7 +65,12 @@ import {
   parseApiError,
   withApiErrorReference,
   readApiErrorRequestId,
+  readInsufficientStockItems,
 } from '../../../../../../../core/utils/parse-api-error';
+import {
+  formatStockShortageSummary,
+  formatStockWarningSummary,
+} from '../../../../../../../core/utils/stock-shortage.util';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { AddItemsModalComponent } from '../../components/add-items-modal/add-items-modal.component';
@@ -204,6 +209,14 @@ export class TableSessionPageComponent implements OnInit {
   readonly cancellationModalOpen = computed(() => this.cancellationTarget() !== null);
   readonly cancellationPreparedFired = computed(
     () => this.cancellationTarget()?.inventory_consumed_at_fire === true,
+  );
+  readonly cancellationAutoRestorePending = computed(() => {
+    const item = this.cancellationTarget();
+    return !!item && this.cancellationPreparedFired() &&
+      this.kitchenStatusFor(item) === 'pending';
+  });
+  readonly cancellationNeedsDisposition = computed(() =>
+    this.cancellationPreparedFired() && !this.cancellationAutoRestorePending(),
   );
   /**
    * D.4 — mesa NO pasa preview: el GET de sesión no trae `order_item_taxes`
@@ -438,7 +451,7 @@ export class TableSessionPageComponent implements OnInit {
   );
 
   readonly deliveredCount = computed(() =>
-    this.items().filter((it) => this.isDelivered(it)).length,
+    this.items().filter((it) => !it.cancelled_at && this.isDelivered(it)).length,
   );
 
   readonly filteredItems = computed<TableSessionOrderItem[]>(() => {
@@ -454,7 +467,7 @@ export class TableSessionPageComponent implements OnInit {
       });
     }
     if (filter === 'delivered') {
-      return all.filter((it) => this.isDelivered(it));
+      return all.filter((it) => !it.cancelled_at && this.isDelivered(it));
     }
     return all;
   });
@@ -813,11 +826,9 @@ export class TableSessionPageComponent implements OnInit {
    * Rules mirror the backend gate:
    *   - not closed, and
    *   - the item was NEVER fired  → deletable outright, or
-   *   - the item was fired but its ticket is still `pending` → deletable
-   *     (backend cancels the KDS ticket + returns the fire-consumed stock).
-   *
-   * Hidden for `in_preparation` / `ready` / `delivered` / `cancelled`
-   * (terminal or in-progress kitchen states the backend rejects with 409).
+   *   - `pending` → backend cancels KDS and returns inputs automatically;
+   *   - `in_preparation` / `ready` → the modal requires reuse or waste.
+   * Delivered and cancelled remain unavailable in this normal-cancel seam.
    */
   canRemoveItem(item: TableSessionOrderItem): boolean {
     if (this.isClosed() || this.hasFinancialSplit()) return false;
@@ -825,7 +836,10 @@ export class TableSessionPageComponent implements OnInit {
     // (`delivered_at`, hecho de servicio) ya no se puede cancelar. Solo
     // presentación: el enforcement real lo pone el backend (paso 1).
     if (this.isDelivered(item)) return false;
-    return !this.isItemFired(item) || this.kitchenStatusFor(item) === 'pending';
+    if (!this.isItemFired(item)) return true;
+    const kitchenStatus = this.kitchenStatusFor(item);
+    return kitchenStatus === 'pending' ||
+      kitchenStatus === 'in_preparation' || kitchenStatus === 'ready';
   }
 
   /**
@@ -1046,10 +1060,39 @@ export class TableSessionPageComponent implements OnInit {
         error: (err: unknown) => {
           this.isAddingItems.set(false);
           this.toastService.error(
-            typeof err === 'string' ? err : 'Error al agregar items',
+            this.describeAddOrPayError(err, 'Error al agregar items'),
           );
         },
       });
+  }
+
+  /**
+   * No overselling — `INV_STOCK_INSUFFICIENT_LINES` / `INV_STOCK_002`.
+   *
+   * `TablesService.handleError` (fuera de este scope, ver `tables.service.ts`)
+   * colapsa HOY todo error a un string plano, así que casi siempre `err` ya
+   * trae el mensaje humano del backend armado — con el producto/insumo y las
+   * cantidades, porque `isPresentableApiMessage` en `parse-api-error.ts` deja
+   * pasar el texto del backend tal cual. Este helper es defensivo y
+   * forward-compatible: si `err` alguna vez llega como objeto con `details`
+   * estructurado (mismo contrato que ya preserva `pos-payment.service.ts`),
+   * preferimos listar cada faltante en vez de un string genérico.
+   */
+  private describeAddOrPayError(err: unknown, fallback: string): string {
+    if (typeof err === 'string') {
+      return err;
+    }
+    const record =
+      typeof err === 'object' && err !== null ? (err as Record<string, unknown>) : null;
+    const details =
+      record?.['details'] ??
+      (record?.['error'] as Record<string, unknown> | undefined)?.['details'];
+    const shortages = readInsufficientStockItems(details);
+    if (shortages.length) {
+      return formatStockShortageSummary(shortages);
+    }
+    const message = record?.['message'];
+    return typeof message === 'string' && message.trim() ? message : fallback;
   }
 
   // ── Remove item (Frente 2) ───────────────────────────────────────────
@@ -1231,8 +1274,9 @@ export class TableSessionPageComponent implements OnInit {
       this.cancellationError.set('El motivo debe tener entre 3 y 500 caracteres.');
       return;
     }
-    const preparedFired = item.inventory_consumed_at_fire === true;
-    const cancellation_type = cancellationTypeForDestination(result.destination, preparedFired);
+    const autoRestorePending = this.cancellationAutoRestorePending();
+    const needsDisposition = this.cancellationNeedsDisposition();
+    const cancellation_type = cancellationTypeForDestination(result.destination, needsDisposition);
     this.removingItemId.set(item.id);
     this.cancellationError.set(null);
     this.tablesService
@@ -1249,7 +1293,11 @@ export class TableSessionPageComponent implements OnInit {
           this.session.set(s);
           this.seedKitchenStateFromOrder(s);
           this.toastService.success(
-            preparedFired ? 'Plato cancelado como merma' : 'Plato cancelado de la cuenta',
+            autoRestorePending || (needsDisposition && result.destination === 'reuse')
+              ? 'Plato cancelado; insumos reintegrados al inventario'
+              : needsDisposition
+                ? 'Plato cancelado como merma'
+                : 'Plato cancelado de la cuenta',
           );
         },
         error: (err: unknown) => {
@@ -1398,6 +1446,9 @@ export class TableSessionPageComponent implements OnInit {
               'No se enviaron platos a cocina (puede que ya estuvieran enviados).',
             );
           }
+          if (res?.stock_warnings?.length) {
+            this.toastService.warning(formatStockWarningSummary(res.stock_warnings));
+          }
           // Refetch by SESSION id (the route param drives getSession → /store/table-sessions/:id).
           // Using order.id here previously triggered a 404 that — even with `silent: true` —
           // raced with the optimistic SSE merge and blanked the page.
@@ -1486,6 +1537,19 @@ export class TableSessionPageComponent implements OnInit {
     // at the catchError boundary, so it only survives in whichever shape kept
     // the raw body. Quote it back when present; never invent one.
     const requestId = readApiErrorRequestId(err);
+    // No overselling — `INV_STOCK_INSUFFICIENT_LINES`. `fireOrderItems` /
+    // `previewFire` (kitchen-tickets.service.ts) normalize through a string-
+    // collapsing handler today, so `structured.details` is unreachable in
+    // practice — this check is forward-compatible defense, not dead code we
+    // expect to hit: if `details` ever survives structured, list every
+    // faltante instead of the generic code-lookup below.
+    const shortages = readInsufficientStockItems(structured?.details);
+    if (shortages.length) {
+      this.toastService.error(
+        withApiErrorReference(formatStockShortageSummary(shortages), requestId),
+      );
+      return;
+    }
     if (structured?.code) {
       // parseApiError pulls userMessage from ERROR_MESSAGES using the code,
       // and falls back to DEFAULT_ERROR_MESSAGE if the code isn't mapped.
@@ -1667,6 +1731,9 @@ export class TableSessionPageComponent implements OnInit {
         // QUI-728 (E.1) — el cobro de mesa va a POST /store/payments/pos
         // (CreatePosPaymentDto); el bank_account_id viaja con él.
         bank_account_id: payload.bank_account_id,
+        // Multimétodo: `TablePaymentSubmit.payments?` (solo 2+ tramos);
+        // `payTableSession` lo prefiere sobre el contrato escalar.
+        payments: payload.payments,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -1685,7 +1752,7 @@ export class TableSessionPageComponent implements OnInit {
         error: (err: unknown) => {
           this.isPaying.set(false);
           this.toastService.error(
-            typeof err === 'string' ? err : 'Error al procesar el cobro',
+            this.describeAddOrPayError(err, 'Error al procesar el cobro'),
           );
         },
       });
@@ -1779,8 +1846,9 @@ export class TableSessionPageComponent implements OnInit {
     this.dialogService
       .confirm({
         title: 'Cerrar mesa',
-        message:
-          '¿Cerrar la mesa? La cuenta seguirá activa para ser cobrada después.',
+        message: this.isPaid()
+          ? '¿Cerrar la mesa? La cuenta ya está pagada; los cobros registrados se conservarán.'
+          : '¿Cerrar la mesa? La cuenta seguirá activa para ser cobrada después.',
         confirmText: 'Cerrar mesa',
         cancelText: 'Volver',
         confirmVariant: 'danger',

@@ -95,6 +95,13 @@ export class SessionsController {
     return this.response_service.success(summary);
   }
 
+  @Get(':id/close-report')
+  @Permissions('store:cash_registers:read')
+  async getCloseReport(@Param('id') id: string) {
+    const report = await this.sessions_service.getCloseReport(+id);
+    return this.response_service.success(report);
+  }
+
   @Post(':id/close')
   @Permissions('store:cash_registers:close_session')
   @HttpCode(HttpStatus.OK)

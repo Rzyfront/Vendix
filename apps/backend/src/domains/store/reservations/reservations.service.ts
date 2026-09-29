@@ -21,6 +21,7 @@ import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { TablesService } from '../tables/tables.service';
 import { TableSessionsService } from '../tables/table-sessions.service';
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 @Injectable()
 export class ReservationsService {
@@ -35,6 +36,8 @@ export class ReservationsService {
     private readonly priceResolverService: PriceResolverService,
     private readonly tablesService: TablesService,
     private readonly tableSessionsService: TableSessionsService,
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    private readonly orderHistory: OrderHistoryService,
   ) {}
 
   // Estado maquina de transiciones validas
@@ -989,12 +992,26 @@ export class ReservationsService {
     if (dto.reopen_order === true && updated.order_id) {
       const order = await this.prisma.orders.findUnique({
         where: { id: updated.order_id },
-        select: { id: true, state: true, store_id: true, order_number: true },
+        select: {
+          id: true,
+          state: true,
+          store_id: true,
+          order_number: true,
+          stores: { select: { organization_id: true } },
+        },
       });
       if (order && order.state === 'cancelled') {
         await this.prisma.orders.update({
           where: { id: order.id },
           data: { state: 'processing', updated_at: new Date() },
+        });
+        await this.orderHistory.record(this.prisma, {
+          orderId: order.id,
+          storeId: order.store_id,
+          organizationId: order.stores?.organization_id ?? undefined,
+          type: 'state_changed',
+          fromState: 'cancelled',
+          toState: 'processing',
         });
         this.eventEmitter.emit('order.status_changed', {
           store_id: order.store_id,
@@ -1287,6 +1304,86 @@ export class ReservationsService {
     });
 
     return this.findOne(booking.id);
+  }
+
+  /**
+   * Lectura agente (O-51): solicitudes de reagendamiento de la tienda con la
+   * reserva y los actores hidratados. Espejo del `findMany` del controller
+   * (`listRescheduleRequests`), movido al service para que la tool no toque
+   * Prisma directo (patrón T1). `storeId` explícito: fail-closed si falta.
+   */
+  async listRescheduleRequestsForAgent(storeId: number, status?: string) {
+    const where: any = { store_id: storeId };
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+    return this.prisma.booking_reschedule_requests.findMany({
+      where,
+      orderBy: { requested_at: 'desc' },
+      take: 200,
+      include: {
+        booking: {
+          select: {
+            id: true,
+            booking_number: true,
+            date: true,
+            start_time: true,
+            end_time: true,
+            customer: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                email: true,
+                phone: true,
+              },
+            },
+            product: { select: { id: true, name: true } },
+            provider: { select: { id: true, display_name: true } },
+          },
+        },
+        requested_by_user: {
+          select: { id: true, first_name: true, last_name: true },
+        },
+        decided_by_user: {
+          select: { id: true, first_name: true, last_name: true },
+        },
+      },
+    });
+  }
+
+  /**
+   * Lectura agente (O-51): UNA solicitud por id, acotada a la tienda. El
+   * preview de approve/reject la usa para nombrar la reserva y el slot
+   * solicitado; `null` cuando no existe o es de otra tienda.
+   */
+  async getRescheduleRequestForAgent(storeId: number, requestId: number) {
+    return this.prisma.booking_reschedule_requests.findFirst({
+      where: { id: requestId, store_id: storeId },
+      include: {
+        booking: {
+          select: {
+            id: true,
+            booking_number: true,
+            date: true,
+            start_time: true,
+            end_time: true,
+            status: true,
+            customer: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+                email: true,
+                phone: true,
+              },
+            },
+            product: { select: { id: true, name: true } },
+            provider: { select: { id: true, display_name: true } },
+          },
+        },
+      },
+    });
   }
 
   /**

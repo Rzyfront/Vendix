@@ -2086,6 +2086,11 @@ export class BulkProductItemDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
+  barcode?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
 
   @IsOptional()
@@ -2279,6 +2284,33 @@ export class BulkProductUploadDto {
   products: BulkProductItemDto[];
 }
 
+/** Tope de filas por página al confirmar una sesión de carga masiva. */
+export const MAX_BULK_UPLOAD_PAGE = 100;
+
+/**
+ * Body de `POST store/products/bulk/upload-session`. Sin `offset`/`limit` se
+ * confirma el archivo completo (comportamiento legacy); con ellos se procesa
+ * solo la página `[offset, offset + limit)`.
+ */
+export class BulkUploadSessionDto {
+  @IsString()
+  @IsNotEmpty()
+  session_id: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_BULK_UPLOAD_PAGE)
+  limit?: number;
+}
+
 export class BulkUploadItemResultDto {
   row_number?: number;
   product_name?: string;
@@ -2298,6 +2330,14 @@ export class BulkUploadResultDto {
   failed: number;
   skipped: number;
   results: BulkUploadItemResultDto[];
+}
+
+/** Resultado de confirmar una página de la sesión (campos legacy + paginación). */
+export class BulkUploadSessionResultDto extends BulkUploadResultDto {
+  total: number;
+  offset: number;
+  limit: number;
+  done: boolean;
 }
 
 export class BulkValidationResultDto {

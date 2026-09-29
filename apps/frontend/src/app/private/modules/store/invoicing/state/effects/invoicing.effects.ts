@@ -377,14 +377,28 @@ export class InvoicingEffects {
   sendInvoice$ = createEffect(() =>
     this.actions$.pipe(
       ofType(InvoicingActions.sendInvoice),
-      switchMap(({ id }) =>
+      // exhaustMap: mientras hay un envio a la DIAN en curso se ignora todo
+      // clic adicional (switchMap solo cancelaba en el navegador y el backend
+      // procesaba ambos envios).
+      exhaustMap(({ id }) =>
         this.invoicingService.sendInvoice(id).pipe(
           map((response) => InvoicingActions.sendInvoiceSuccess({ invoice: response.data })),
-          catchError((error) =>
-            this.fail(error, (f) =>
+          catchError((error) => {
+            // 409: el backend ya tiene un envio en curso de esta factura. No es
+            // un fallo: se avisa, se libera el loading y se refresca el detalle.
+            if (describeApiFailure(error).errorCode === 'FISCAL_SEND_IN_PROGRESS') {
+              this.toastService.info('La factura ya se está enviando a la DIAN');
+              return of(
+                InvoicingActions.sendInvoiceFailure({
+                  error: 'La factura ya se está enviando a la DIAN',
+                }),
+                InvoicingActions.loadInvoice({ id }),
+              );
+            }
+            return this.fail(error, (f) =>
               InvoicingActions.sendInvoiceFailure({ error: f.message }),
-            ),
-          )
+            );
+          })
         )
       )
     )

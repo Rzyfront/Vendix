@@ -7,8 +7,12 @@ import {
   PaymentModalComponent,
 } from '../../../../../../../shared/components/index';
 import type { PaymentSubmit } from '../../../../../../../shared/components/index';
+import type { PaymentLeg } from '../../../../../../../shared/components/payment-collector/payment-collector.model';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/index';
-import { PaymentPendingView } from '../../interfaces/table.interface';
+import {
+  PaymentPendingView,
+  TablePaymentLeg,
+} from '../../interfaces/table.interface';
 
 /**
  * Restaurant Suite — table checkout / payment-confirmation modal.
@@ -70,6 +74,11 @@ export interface TablePaymentSubmit {
   tip_waiter_id?: number | null;
   /** QUI-728 (E.1) — cuenta bancaria elegida para transferencia. */
   bank_account_id?: number;
+  /**
+   * Cobro multimétodo: tramos en snake_case para `PayTableSessionDto`. Solo
+   * presente con 2+ tramos; con uno, el payload escalar es el de siempre.
+   */
+  payments?: TablePaymentLeg[];
 }
 
 /** Output for the `'confirm'` mode — staff confirms a diner's payment. */
@@ -85,6 +94,25 @@ export interface TablePaymentConfirmSubmit {
   tip_type?: 'percentage' | 'fixed';
   tip_value?: number;
   tip_waiter_id?: number | null;
+}
+
+/**
+ * Cobro multimétodo de contado: traduce los tramos del collector al DTO del
+ * backend (`PaymentLegDto`). Claves snake_case EXACTAS; `leg.method` es eco
+ * de UI y NUNCA viaja.
+ */
+function toTablePaymentLegs(legs: PaymentLeg[]): TablePaymentLeg[] {
+  return legs.map((leg) => ({
+    store_payment_method_id: leg.storePaymentMethodId,
+    amount: leg.amount,
+    ...(leg.amountReceived != null
+      ? { amount_received: leg.amountReceived }
+      : {}),
+    ...(leg.reference ? { payment_reference: leg.reference } : {}),
+    ...(leg.bankAccountId != null
+      ? { bank_account_id: leg.bankAccountId }
+      : {}),
+  }));
 }
 
 export type TablePaymentMode = 'pos' | 'confirm';
@@ -168,12 +196,18 @@ export class TablePaymentModalComponent {
    * consumidores (`table-session-page.component.ts`) esperan.
    */
   onCollectorSubmit(submit: PaymentSubmit): void {
+    // Multimétodo (modo 'pos'): con 2+ tramos se adjunta `payments[]` en
+    // snake_case. El escalar se conserva (compat + `PayTableSessionDto` lo
+    // exige); el backend prefiere `payments[]`.
+    const multiLegs =
+      submit.legs && submit.legs.length >= 2 ? submit.legs : null;
     const payload: TablePaymentSubmit = {
       store_payment_method_id: Number(submit.storePaymentMethodId),
       ...(submit.amountReceived != null
         ? { amount_received: submit.amountReceived }
         : {}),
       ...(submit.reference ? { payment_reference: submit.reference } : {}),
+      ...(multiLegs ? { payments: toTablePaymentLegs(multiLegs) } : {}),
       // T1 — la tarjeta del collector emite los 4 metadatos ya
       // resueltos (`tip` es el monto, `tipValue` puede ser % o monto
       // crudo, `tipType` es 'percentage'|'fixed', `tipWaiterId` el id

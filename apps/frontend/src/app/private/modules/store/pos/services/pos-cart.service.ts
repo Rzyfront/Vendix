@@ -11,6 +11,7 @@ import {
 } from 'rxjs/operators';
 import { toObservable, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import {
   CartItem,
   CartSummary,
@@ -95,6 +96,12 @@ export class PosCartService {
   private saleUnitService = inject(PosSaleUnitService);
   private priceTierCache = inject(PriceTierCacheService);
   private authFacade = inject(AuthFacade);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
+
+  /** Only an explicit store opt-in permits negative sellable stock. */
+  readonly allowNegativeStock = computed(
+    () => this.storeSettingsFacade.settings()?.inventory?.allow_negative_stock === true,
+  );
 
   /**
    * Techo de 5 UVT para el documento equivalente POS (Art. 616-1 ET / Res.
@@ -806,7 +813,23 @@ export class PosCartService {
     const candidates = [item.products, item.product, item.item_product];
     for (const c of candidates) {
       if (c && typeof c === 'object' && (c.id || c.sku || c.name)) {
-        return c as Product;
+        // GET /orders/:id embeds Prisma's product row (`stock_quantity`),
+        // while the POS cart consumes its own normalized `stock` field. A
+        // bare cast made every adopted draft look like stock=0, producing a
+        // false oversell warning even when the grid showed availability.
+        const stock = Number(c.stock ?? c.available_stock ?? c.stock_quantity ?? 0);
+        return {
+          ...c,
+          id: String(c.id),
+          stock,
+          available_stock: Number(c.available_stock ?? c.stock_quantity ?? stock),
+          product_variants: Array.isArray(c.product_variants)
+            ? c.product_variants.map((variant: any) => ({
+                ...variant,
+                stock: Number(variant.stock ?? variant.available_stock ?? variant.stock_quantity ?? 0),
+              }))
+            : [],
+        } as Product;
       }
     }
     return null;
@@ -1249,13 +1272,18 @@ export class PosCartService {
             () => new Error('Respuesta vacía al actualizar la orden adoptada'),
           );
         }
-        return this.loadFromOrder(order).pipe(
-          map((state) => ({
-            ...state,
-            linkedOrderId: order.id ?? orderId,
-            linkedOrderNumber: order.order_number ?? null,
-            updatedAt: new Date(),
-          })),
+        // PUT /items returns its transactional snapshot without signed S3
+        // URLs. Hydrating from that response strips every existing product
+        // image from the cart after adding a line. GET /:id signs the images
+        // and is the same authoritative read used when opening the editor.
+        return this.posApi.getOrderById(String(orderId)).pipe(
+          switchMap((freshResponse: any) => {
+            const freshOrder = freshResponse?.data ?? freshResponse;
+            if (!freshOrder) {
+              return throwError(() => new Error('No se pudo recargar la orden editada'));
+            }
+            return this.loadFromOrder(freshOrder);
+          }),
         );
       }),
       tap((newState) => {
@@ -1357,13 +1385,14 @@ export class PosCartService {
             () => new Error('Respuesta vacía al actualizar la orden adoptada'),
           );
         }
-        return this.loadFromOrder(order).pipe(
-          map((state) => ({
-            ...state,
-            linkedOrderId: order.id ?? orderId,
-            linkedOrderNumber: order.order_number ?? null,
-            updatedAt: new Date(),
-          })),
+        return this.posApi.getOrderById(String(orderId)).pipe(
+          switchMap((freshResponse: any) => {
+            const freshOrder = freshResponse?.data ?? freshResponse;
+            if (!freshOrder) {
+              return throwError(() => new Error('No se pudo recargar la orden editada'));
+            }
+            return this.loadFromOrder(freshOrder);
+          }),
         );
       }),
       tap((newState) => {
@@ -2662,6 +2691,7 @@ export class PosCartService {
       ? item.product.product_variants?.find((v) => v.id === item.variant_id)
       : undefined;
     if (
+      !this.allowNegativeStock() &&
       !item.is_weight_product &&
       this.doesLineTrackInventory(item.product, variant)
     ) {
@@ -2677,7 +2707,7 @@ export class PosCartService {
             ? ` (${item.units_per_package} unidades por empaque)`
             : '';
         throw new Error(
-          `Stock insuficiente. Máximo permitido: ${maxQuantity}${unitsHint}`,
+          `Stock insuficiente de ${item.product.name}. Máximo permitido: ${maxQuantity}${unitsHint}`,
         );
       }
     }
@@ -2794,11 +2824,14 @@ export class PosCartService {
     discounts: CartDiscount[],
   ): CartSummary {
     const grossTotal = this.calculateSubtotal(items); // Gross Total (with tax)
-    const discountAmount = discounts.reduce(
-      (total, discount) => total + discount.amount,
-      0,
+    const grossDiscount = Math.min(
+      grossTotal,
+      Math.max(
+        0,
+        discounts.reduce((total, discount) => total + discount.amount, 0),
+      ),
     );
-    const taxAmount = items.reduce((sum, item) => sum + item.taxAmount, 0);
+    const preDiscountTax = items.reduce((sum, item) => sum + item.taxAmount, 0);
 
     // C.6 (R-4) — el subtotal es la base NETA recibida (`unitPrice` neto ×
     // `lineUnits`), nunca `grossTotal − taxAmount`: con truncado DIAN la
@@ -2807,8 +2840,18 @@ export class PosCartService {
       items.reduce((sum, item) => sum + item.unitPrice * resolveLineUnits(item), 0),
     );
 
-    // Total is based on Gross Total minus Discounts
-    const total = grossTotal - discountAmount;
+    // Regla del dueño (2026-09-28): el cupón/promoción descuenta sobre la base
+    // SIN impuesto y el impuesto se recalcula sobre esa base. Reducir el bruto
+    // en la fracción f equivale a reducir la base y el impuesto en esa misma
+    // f (bruto = base × (1 + tarifa)), así que el descuento en bruto que
+    // producen promos/cupón se convierte a base-only y el impuesto sale
+    // post-descuento. Cupón 100% => impuesto 0 y total 0.
+    const fraction = grossTotal > 0 ? grossDiscount / grossTotal : 0;
+    const discountAmount = this.roundMoney(subtotal * fraction);
+    const taxAmount = this.roundMoney(preDiscountTax * (1 - fraction));
+
+    // Total = bruto − descuento en bruto (== subtotal − descuento base + impuesto).
+    const total = this.roundMoney(grossTotal - grossDiscount);
     const itemCount = items.length;
     const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -3047,7 +3090,10 @@ export class PosCartService {
     }
 
     // Only validate stock when the line effectively tracks inventory
-    if (this.doesLineTrackInventory(request.product, request.variant)) {
+    if (
+      !this.allowNegativeStock() &&
+      this.doesLineTrackInventory(request.product, request.variant)
+    ) {
       const availableStock = this.getAvailableStock(
         request.product,
         request.variant,
@@ -3071,14 +3117,16 @@ export class PosCartService {
         : 1;
       const totalRequiredStock = totalRequestedQuantity * requiredPerUnit;
 
-      if (request.product && totalRequiredStock > availableStock) {
+      if (totalRequiredStock > availableStock) {
         const packageHint =
           requiredPerUnit > 1 ? ` (${requiredPerUnit} unidades por empaque)` : '';
+        const visibleAvailable = Math.max(0, availableStock);
+        const stockAdvice = 'Actualiza el inventario o pide habilitar «Permitir sobreventa» en Configuración → Logística.';
         errors.push({
           field: 'quantity',
           message: currentCartQuantity > 0
-            ? `Stock insuficiente. Ya tienes ${currentCartQuantity} en el carrito${packageHint}. Disponible: ${availableStock} unidades`
-            : `Stock insuficiente. Disponible: ${availableStock} unidades`,
+            ? `No puedes agregar ${request.product.name}: ya tienes ${currentCartQuantity} en el carrito${packageHint} y solo hay ${visibleAvailable} unidades disponibles. ${stockAdvice}`
+            : `No puedes agregar ${request.product.name}: solo hay ${visibleAvailable} unidades disponibles. ${stockAdvice}`,
         });
       }
     }
@@ -3106,6 +3154,31 @@ export class PosCartService {
     return Number(product.stock ?? 0);
   }
 
+  /** Cashier-facing warning; never substitutes the backend's authoritative stock check. */
+  getOversellWarningForItem(item: CartItem): string | null {
+    if (!this.allowNegativeStock() || item.itemType === 'custom') return null;
+    const variant = item.variant_id
+      ? item.product.product_variants?.find((candidate) =>
+          Number(candidate.id) === Number(item.variant_id),
+        )
+      : undefined;
+    if (!this.doesLineTrackInventory(item.product, variant)) return null;
+    const available = this.getAvailableStock(item.product, variant);
+    const requested = this.cartState().items
+      .filter((candidate) =>
+        candidate.product.id === item.product.id &&
+        Number(candidate.variant_id ?? 0) === Number(item.variant_id ?? 0),
+      )
+      .reduce((sum, candidate) =>
+        sum + candidate.quantity * this.getRequiredStockPerUnit(
+          candidate.product,
+          !!candidate.is_package_unit,
+          candidate.units_per_package ?? null,
+        ), 0);
+    if (requested <= available) return null;
+    return `Sobreventa de ${item.product.name}: ${requested} unidades solicitadas, ${available} disponibles. Actualiza el inventario.`;
+  }
+
   /**
    * Stock units consumed per cart line unit. Packaging is now TIER-OWNED:
    * when the applied tier resolves a pack size > 1, each cart `quantity`
@@ -3130,6 +3203,7 @@ export class PosCartService {
     unitsPerPackage?: number | null,
   ): number {
     if (!this.doesLineTrackInventory(product, variant)) return 999;
+    if (this.allowNegativeStock()) return Number.POSITIVE_INFINITY;
     const availableStock = this.getAvailableStock(product, variant);
     const requiredStockPerUnit = this.getRequiredStockPerUnit(
       product,

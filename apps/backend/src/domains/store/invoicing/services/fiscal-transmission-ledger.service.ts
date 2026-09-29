@@ -11,6 +11,8 @@ type FiscalDocumentType =
   | 'support_document'
   | 'support_adjustment_note';
 
+const SUBMISSION_CLAIM_STALE_MS = 3 * 60_000;
+
 @Injectable()
 export class FiscalTransmissionLedgerService {
   constructor(private readonly prisma: StorePrismaService) {}
@@ -69,6 +71,13 @@ export class FiscalTransmissionLedgerService {
         );
       }
 
+      // Una fila `submitted` esta en vuelo hacia la DIAN: NO se reinicia a
+      // `queued` (eso permitia a un segundo llamador colarse). La reserva la
+      // decide `claimSubmission` de forma atomica.
+      if (existing.transmission_status === 'submitted') {
+        return existing;
+      }
+
       return client.fiscal_transmissions.update({
         where: { id: existing.id },
         data: {
@@ -121,11 +130,35 @@ export class FiscalTransmissionLedgerService {
     });
   }
 
-  async markSubmitted(transmission_id: number): Promise<void> {
-    const result = await this.prisma.withoutScope().fiscal_transmissions.updateMany({
+  /**
+   * Reserva atomica de la transmision. Un unico llamador gana el `updateMany`;
+   * los demas reciben FISCAL_SEND_IN_PROGRESS. Una reserva `submitted` mas vieja
+   * que SUBMISSION_CLAIM_STALE_MS se considera abandonada y puede reclamarse.
+   */
+  async claimSubmission(transmission_id: number): Promise<void> {
+    const client = this.prisma.withoutScope();
+    const result = await client.fiscal_transmissions.updateMany({
       where: {
         id: transmission_id,
-        transmission_status: { notIn: ['accepted', 'cancelled'] },
+        OR: [
+          {
+            transmission_status: {
+              in: [
+                'queued',
+                'retrying',
+                'error',
+                'rejected',
+                'draft',
+                'signing',
+                'signed',
+              ],
+            },
+          },
+          {
+            transmission_status: 'submitted',
+            sent_at: { lt: new Date(Date.now() - SUBMISSION_CLAIM_STALE_MS) },
+          },
+        ],
       },
       data: {
         transmission_status: 'submitted',
@@ -134,13 +167,32 @@ export class FiscalTransmissionLedgerService {
       },
     });
 
-    if (result.count !== 1) {
+    if (result.count === 1) return;
+
+    const current = await client.fiscal_transmissions.findFirst({
+      where: { id: transmission_id },
+      select: { transmission_status: true },
+    });
+    if (
+      current &&
+      ['accepted', 'cancelled'].includes(current.transmission_status)
+    ) {
       throw new VendixHttpException(
         ErrorCodes.FISCAL_IDEMPOTENCY_CONFLICT,
         'The fiscal transmission cannot be submitted from its current terminal state.',
         { fiscal_transmission_id: transmission_id },
       );
     }
+    throw new VendixHttpException(
+      ErrorCodes.FISCAL_SEND_IN_PROGRESS,
+      undefined,
+      { fiscal_transmission_id: transmission_id },
+    );
+  }
+
+  /** @deprecated usar claimSubmission. */
+  async markSubmitted(transmission_id: number): Promise<void> {
+    return this.claimSubmission(transmission_id);
   }
 
   async markAccepted(

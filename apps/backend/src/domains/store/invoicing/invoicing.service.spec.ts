@@ -176,6 +176,18 @@ describe('InvoicingService support adjustment notes', () => {
             uvt_value_used: 0,
             counterparty_type: null,
           }),
+          // `resolveWithholdingAmount` ahora agrupa por tipo de operación
+          // (Step 1, retención sufrida por bienes/servicios) y llama a
+          // `resolveSufferedByOperation` en vez de `resolveSuffered`
+          // directamente. Todos los casos de este archivo son
+          // `support_document`/`support_adjustment_note` (`is_purchase_side`),
+          // así que `resolveWithholdingAmount` nunca corre — este doble sólo
+          // completa la forma del servicio real.
+          resolveSufferedByOperation: jest.fn().mockResolvedValue({
+            lines: [],
+            uvt_value_used: 0,
+            counterparty_type: null,
+          }),
           resolveSelf: jest.fn().mockResolvedValue({
             lines: [],
             uvt_value_used: 0,

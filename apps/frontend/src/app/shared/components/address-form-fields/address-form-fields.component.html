@@ -1,5 +1,17 @@
 <div class="address-form-fields space-y-4">
+  <!-- Chip de carga (2026-09-27): mientras `forwardGeocodeFromForm` tiene
+       una peticion en vuelo, este chip se muestra arriba de la seccion del
+       mapa. El warning/badge de mas abajo se ocultan mientras tanto (ver
+       `isLocatingAddress`) para que nunca convivan dos chips a la vez. -->
+  @if (isLocatingAddress()) {
+    <div class="address-locating-chip" role="status" aria-live="polite">
+      <span class="address-locating-chip__spinner" aria-hidden="true"></span>
+      <span>Ubicando tu dirección en el mapa…</span>
+    </div>
+  }
+
   <!-- Collapsible map section -->
+  @if (showAdvanced()) {
   <div class="map-section">
     <button
       type="button"
@@ -12,26 +24,23 @@
     </button>
 
     @if (showMap()) {
-      <div class="map-wrapper mt-3">
+      <div #mapWrapper class="map-wrapper mt-3"
+        [class.no-gps]="!allowGeolocation()"
+        [class.map-wrapper--highlight]="mapHighlight()">
         <app-address-map-picker
-          [center]="coordsSignal()"
+          [center]="coordsSignal() ?? mapCenterHint()"
           (located)="onLocated($event)"
         />
       </div>
     }
   </div>
+  }
 
   <!-- Non-blocking warning (forward-geocode failed, etc.) -->
-  @if (addressWarning()) {
+  @if (addressWarning() && !isLocatingAddress()) {
     <div class="address-warning" role="status">
       <app-icon name="alert-triangle" [size]="16"></app-icon>
       <span>{{ addressWarning() }}</span>
-    </div>
-  }
-
-  @if (reverseLoading()) {
-    <div class="reverse-loading" role="status">
-      <span>Resolviendo dirección desde el mapa…</span>
     </div>
   }
 
@@ -50,22 +59,44 @@
           <span>Ingresa una dirección válida (mínimo 5 caracteres).</span>
         </p>
       }
+      @if (!isLocatingAddress() && precisionBadge(); as badge) {
+        <p
+          class="precision-badge"
+          [class.precision-badge--warning]="badge.tone === 'warning'"
+          role="status"
+        >
+          <app-icon [name]="badge.icon" [size]="14"></app-icon>
+          <span>{{ badge.text }}</span>
+          @if (!pinConfirmed() && geocodeLabel()) {
+            <span class="precision-badge-label">{{ geocodeLabel() }}</span>
+          }
+        </p>
+      }
     </div>
 
+    @if (showAdvanced()) {
     <app-input
       label="Apartamento, oficina, etc. (opcional)"
       formControlName="address_line2"
       placeholder="Apto, piso, oficina"
       [control]="form.get('address_line2')!"
     ></app-input>
+    }
 
-    @if (showMunicipality()) {
+    @if (municipalitySelectVisible()) {
       <!--
         Municipio DANE (Divipola). Es el dato que la facturación electrónica
         exige del adquiriente: sin él el documento declararía 11001 (Bogotá)
         para cualquier cliente del país. Al elegirlo, ciudad y departamento se
         completan solos desde el catálogo y quedan en solo-lectura, así que no
         pueden discrepar del código.
+
+        H7: antes esto vivía detrás de `showAdvanced() && showMunicipality()`.
+        En `compact` (POS) `showAdvanced()` empieza en false, así que el
+        selector nunca aparecía para una dirección nueva. `municipalitySelectVisible`
+        agrega: mismo comportamiento cuando showAdvanced() es true, MÁS
+        visible en compact si el auto-resolve (constructor) no encontró
+        código — para que el cajero pueda elegirlo.
       -->
       <div class="field-block">
         <label class="municipality-label" for="municipality-select">
@@ -119,6 +150,7 @@
       </div>
     </div>
 
+    @if (showAdvanced()) {
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <!--
         País por catálogo, no texto libre: se muestra el nombre («Colombia»)
@@ -142,11 +174,12 @@
         [control]="form.get('postal_code')!"
       ></app-input>
     </div>
+    }
 
     @if (showPhone()) {
       <div class="field-block">
         <app-input
-          label="Teléfono"
+          [label]="compact() ? 'Teléfono de entrega' : 'Teléfono'"
           formControlName="phone_number"
           type="tel"
           placeholder="Teléfono de contacto"
@@ -162,4 +195,17 @@
       </div>
     }
   </form>
+  @if (compact() && !showAdvanced()) {
+    <button type="button" class="map-toggle advanced-toggle" (click)="advancedOverride.set(true)"
+      aria-label="Mostrar más detalles de dirección">
+      <app-icon name="plus" [size]="16"></app-icon>
+      <span>Más detalles de dirección</span>
+    </button>
+  } @else if (compact() && showAdvanced()) {
+    <button type="button" class="map-toggle advanced-toggle" (click)="advancedOverride.set(false)"
+      aria-label="Ocultar detalles adicionales de dirección">
+      <app-icon name="minus" [size]="16"></app-icon>
+      <span>Menos detalles</span>
+    </button>
+  }
 </div>

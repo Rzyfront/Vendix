@@ -16,6 +16,7 @@ import {
   UpdateAddressPayload,
   FlowCancelOrderDto,
   KitchenDisposition,
+  RepairShippingTaxAction,
 } from '../../services/store-orders.service';
 // Plan refund-gateway-dispatch-fix (Step C.1): `resolveRefund` lives on
 // `OrdersService` (W1-C), not on `StoreOrdersService`. Aliased to
@@ -28,7 +29,7 @@ import { OrdersService } from '../../services/orders.service';
 // `payload.data.order_id` en el cliente.
 import { OrderDetailSseService } from '../../services/order-detail-sse.service';
 import { AddressPayload } from '../../../../../../shared/components';
-import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
+import { formatDateOnlyUTC, formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
 import { ShippingAddressModalComponent } from '../../components/shipping-address-modal/shipping-address-modal.component';
 import {
@@ -57,14 +58,18 @@ import {
   OrderInvoiceSnapshot,
   OrderTableSession,
   Address,
+  OrderAvailableAction,
+  OrderEvent,
+  OrderEventType,
+  OrderEventSource,
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
+import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
 import { ResendDishModalComponent } from '../../../restaurant-ops/kds/components/resend-dish-modal/resend-dish-modal.component';
-import { canResendOrderItem } from './can-resend';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
 import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent, type PaymentSubmit } from '../../../../../../shared/components';
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
@@ -99,7 +104,10 @@ import { StoreShippingMethod } from '../../../settings/shipping/interfaces/shipp
 import { ShippingRate } from '../../../settings/shipping/interfaces/shipping-zones.interface';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ItemCancellationModalComponent, previewItemCancellation, type ItemCancellationSubmit } from '../../../../../../shared/components';
-import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
+import {
+  OrderPaymentModalComponent,
+  type OrderPendingPaymentPreset,
+} from '../../components/order-payment-modal/order-payment-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
 // Paso 5: reutiliza el modal canónico de clientes (quick/advanced,
 // NATURAL/JURIDICA) para capturar el nuevo titular de la orden.
@@ -112,6 +120,11 @@ import {
 } from '../../../customers/services/customers.service';
 import { CreateCustomerRequest, Customer } from '../../../customers/models/customer.model';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import {
+  VexiUiHost,
+  VexiUiHostRegistry,
+  vexiWhenReady,
+} from '../../../../../../core/services/vexi-ui-host.registry';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../../services/order-ticket.service';
 import { TicketData } from '../../../pos/models/ticket.model';
@@ -122,7 +135,6 @@ import {
   Invoice,
   RelatedNote,
   CreateCreditNoteDto,
-  CreateInvoiceItemDto,
 } from '../../../invoicing/interfaces/invoice.interface';
 import * as InvoicingActions from '../../../invoicing/state/actions/invoicing.actions';
 import { InvoiceDetailComponent } from '../../../invoicing/components/invoice-detail/invoice-detail.component';
@@ -163,6 +175,26 @@ const SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES = new Set<string>([
   'direct_delivery',
   'dine_in',
 ]);
+
+/**
+ * order-truth-and-invoice-tz plan — texto corto en español para los codes
+ * de `reason` que `available_actions` puede traer y que NO están en
+ * `ERROR_MESSAGES` (`core/utils/error-messages.ts`, fuera del alcance de
+ * este archivo). `actionDisabledReason` primero busca en `ERROR_MESSAGES`
+ * y solo cae aquí para los codes ausentes de ese mapa; el genérico cubre
+ * cualquier code futuro no listado en ninguno de los dos.
+ */
+const ACTION_REASON_FALLBACK: Record<string, string> = {
+  FORBIDDEN: 'Solo un administrador o encargado puede realizar esta acción.',
+  SPLIT_ACCOUNT_LOCKED: 'Esta orden tiene una cuenta independiente activa; gestiona el cobro desde el panel de cuentas.',
+  ORDER_HAS_PENDING_KITCHEN_ITEMS: 'Hay platos pendientes en cocina. Espera a que se completen antes de finalizar.',
+  ORD_PAY_CREDIT_ORDER_001: 'Esta es una orden a crédito; usa Registrar Pago de crédito.',
+  ORD_PAYMENT_CANCEL_FINISHED_001: 'La orden ya está finalizada; usa un reembolso para devolver el dinero.',
+  ORD_PAYMENT_CANCEL_INVOICED_001: 'Esta orden ya tiene una factura electrónica emitida; no se puede anular el pago.',
+  ORD_FAST_TRACK_INVALID_STATE_001: 'La orden en su estado actual no admite procesar en cadena.',
+};
+
+const GENERIC_ACTION_DISABLED_REASON = 'No disponible en el estado actual de la orden.';
 
 export interface LifecycleStep {
   key: string;
@@ -213,6 +245,50 @@ interface PaymentReceiptPreview {
 type ItemCancellationDestination = 'waste' | 'reuse';
 type ItemCancellationMode = 'cancel' | 'reverse';
 
+/** Contra entrega is a collection promise, never the final tender. */
+export function isCodAwaitingConfirmation(order: Pick<Order, 'payments'> | null | undefined): boolean {
+  return !!order?.payments?.some((payment) =>
+    payment.state === 'pending' &&
+    (payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY' ||
+      payment.store_payment_method?.system_payment_method?.type === 'cash_on_delivery'),
+  );
+}
+
+/**
+ * Fase 2 (paso 8) — espejo de `requiresPaymentRegistration` del backend
+ * (`order-action-policy.util.ts`): `pending_payment` con pago `pending` de
+ * confirmación manual (todo lo que no es wallet/wompi ni ON_DELIVERY) o con
+ * saldo parcial por cobrar. El personal REGISTRA por `flow/pay` (monto +
+ * método), nunca confirma con un clic. UI advisory, API authoritative.
+ */
+export function isManualPaymentPending(
+  order: Pick<Order, 'state' | 'payments' | 'remaining_balance'> | null | undefined,
+): boolean {
+  if (!order || order.state !== 'pending_payment') return false;
+  if (Number(order.remaining_balance ?? 0) > 0) return true;
+  return !!order.payments?.some((payment) => {
+    if (!payment || payment.state !== 'pending') return false;
+    const system = payment.store_payment_method?.system_payment_method;
+    if (!system || system.processing_mode === 'ON_DELIVERY') return false;
+    return !['wallet', 'wompi'].includes(system.type ?? '');
+  });
+}
+
+export function isOrderEligibleForSplitCreation(order: Order | null, hasRefunds = false): boolean {
+  if (!order || order.active_financial_split_id) return false;
+  if (['cancelled', 'refunded'].includes(order.state)) return false;
+  if (order.payment_form === '2' || order.credit_type || order.order_installments?.length) return false;
+  if (!order.order_items?.some((item) => item.cancelled_at == null)) return false;
+  if (order.payments?.some((payment) =>
+    ['pending', 'refunded', 'partially_refunded', 'disputed'].includes(payment.state))) return false;
+  if (order.invoices?.some((invoice) => !['cancelled', 'voided'].includes(invoice.status ?? ''))) return false;
+  if (hasRefunds) return false;
+  const settled = (order.payments ?? [])
+    .filter((payment) => payment.state === 'succeeded' || payment.state === 'captured')
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  return Number(order.grand_total || 0) - settled > 0.01;
+}
+
 /** Mirror the backend's settled-payment gate; UI is advisory, API remains authoritative. */
 export function isOrderItemCancellationPaid(order: Pick<Order, 'payments'> | null): boolean {
   return !!order?.payments?.some((payment) =>
@@ -232,6 +308,372 @@ export function cancellationBody(
   return preparedFired
     ? { reason, cancellation_type: destination === 'reuse' ? 'after_fire_reused' : 'after_fire_waste' }
     : { reason };
+}
+
+/**
+ * Prefijo del modo del impuesto del envío (plan shipping-tax paso 15):
+ * "Incluye" cuando el impuesto va dentro de `shipping_cost`,
+ * "Base +" cuando se agregó encima. `null`/`undefined` (órdenes legacy
+ * sin copia del modo) se leen como incluido: el régimen anterior era
+ * solo-incluido. Pura para spec sin TestBed.
+ */
+export function shippingTaxModePrefix(isInclusive: unknown): 'Incluye' | 'Base +' {
+  return isInclusive === false ? 'Base +' : 'Incluye';
+}
+
+/**
+ * B13 (release-855) — `draft`/`pending_delivery` have no dedicated step in
+ * `HAPPY_PATH`/`stateOrder`; without this alias their lifecycle index lookup
+ * returns -1 and the stepper renders with nothing marked current. Index-only:
+ * never rewrites the order's real state or any displayed label. Pure for
+ * spec sin TestBed.
+ */
+export const LIFECYCLE_STATE_ALIASES: Partial<Record<OrderState, OrderState>> = {
+  draft: 'created',
+  pending_delivery: 'processing',
+};
+
+export function lifecycleLookupState(state: OrderState): OrderState {
+  return LIFECYCLE_STATE_ALIASES[state] ?? state;
+}
+
+/**
+ * B16 (release-855) — kitchen state for an item: the in-flight row (pending/
+ * in_preparation/ready) takes precedence over a terminal one, since a re-fire
+ * after `delivered` must not hide behind the older terminal row. `items` is
+ * pre-sorted desc by the backend include. Pure for spec sin TestBed.
+ */
+export function kitchenStateForItem(
+  item: Pick<OrderItem, 'kitchen_ticket_items'>,
+): { status: string; kitchen_ticket_id?: number } | null {
+  const items = item.kitchen_ticket_items;
+  if (!items || items.length === 0) return null;
+  const inFlight = items.find(
+    (k) => k.status === 'pending' || k.status === 'in_preparation' || k.status === 'ready',
+  );
+  if (inFlight) return inFlight;
+  return items[0];
+}
+
+/**
+ * order-truth-and-invoice-tz plan (Objetivo 3) — reemplaza los predicados
+ * locales por ítem (el viejo `canDeliverItem` de B16, `canCancelItem`,
+ * `canReverseDeliveredItem`, `canResendOrderItem`). La visibilidad de cada
+ * botón de ítem viene ÚNICA Y EXCLUSIVAMENTE de `item.available_actions`
+ * (backend `computeItemActions`, que SIEMPRE devuelve los 4 codes por
+ * ítem: `deliver`/`cancel`/`reverse_delivered`/`resend`). Pura para spec
+ * sin TestBed.
+ */
+export function isItemActionEnabled(
+  item: Pick<OrderItem, 'available_actions'>,
+  code: 'deliver' | 'cancel' | 'reverse_delivered' | 'resend',
+): boolean {
+  return !!item.available_actions?.some((a) => a.code === code && a.enabled === true);
+}
+
+/**
+ * order-truth-and-invoice-tz plan (Objetivos 3/11/12) — mapea
+ * `order.available_actions` (verdad única del backend, armada por
+ * `buildOrderAvailableActions` en `orders.service.ts` a partir de los
+ * predicados puros de `order-action-policy.util.ts`) a la configuración
+ * presentational de cada botón: label/icono/variante/orden. La web YA NO
+ * decide visibilidad ni habilitación propia — solo pinta lo que el backend
+ * envía, con `enabled:false` como deshabilitado y `reason` como motivo
+ * (tooltip). Ausencia de `available_actions` (respuesta vieja) devuelve
+ * `[]`: nunca cae a un predicado local. Pura para spec sin TestBed.
+ *
+ * Codes recibidos del backend pero NO mapeados aquí a propósito (no son
+ * parte de este arreglo de botones):
+ * - `assign_shipping` / `ship_with_tracking`: viven en la sección
+ *   `showShippingAssignment`/`canEditShipping`, una UI separada y
+ *   preexistente — fuera de este paso del plan.
+ * - `ready_for_pickup` cuando `order.state === 'processing'`: mismo code,
+ *   pero ahí significa "listo para recoger" atado al `shipping_method.type`
+ *   — vive en esa misma sección de envío, no en este arreglo. Solo se
+ *   mapea su ocurrencia en `pending_payment`
+ *   (`canReadyForPickupBeforePayment`).
+ * - `fast_track`: checkbox standalone (`canFastTrack`), nunca un botón.
+ */
+export function buildOrderActionButtons(
+  order: Pick<Order, 'state' | 'delivery_type' | 'available_actions' | 'payments'>,
+): OrderActionConfig[] {
+  const backendActions: OrderAvailableAction[] | undefined = order.available_actions;
+  if (!backendActions || backendActions.length === 0) return [];
+
+  const delivery = order.delivery_type || 'direct_delivery';
+
+  const BUTTON_IDS: Record<string, string> = {
+    edit_order: 'edit-order',
+    pay: 'pay',
+    credit_payment: 'credit-payment',
+    confirm_payment: 'confirm-payment',
+    dispatch_order: 'dispatch-order',
+    manual_ship: 'manual-ship',
+    ready_for_pickup: 'manual-ready-pickup',
+    direct_deliver: 'direct-deliver',
+    collect_payment: 'ship',
+    mark_delivered: 'deliver',
+    confirm_delivery: 'finish',
+    cancel_payment: 'cancel-payment',
+    refund: 'refund',
+    cancel: 'cancel',
+    reactivate: 'reactivate',
+  };
+
+  const configFor = (
+    code: string,
+  ): { label: string; icon: string; variant: OrderActionConfig['variant']; weight: number } | null => {
+    switch (code) {
+      case 'edit_order':
+        return { label: 'Modificar Orden', icon: 'edit', variant: 'info', weight: 10 };
+      case 'pay':
+        return { label: isCodAwaitingConfirmation(order) ? 'Confirmar Pago' : 'Registrar Pago', icon: 'credit-card', variant: 'primary', weight: 20 };
+      case 'credit_payment':
+        return { label: 'Registrar Pago', icon: 'credit-card', variant: 'primary', weight: 20 };
+      case 'confirm_payment':
+        return { label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary', weight: 20 };
+      case 'dispatch_order':
+        return { label: 'Despachar Orden', icon: 'truck', variant: 'primary', weight: 30 };
+      case 'manual_ship':
+        return { label: 'Despachar Orden', icon: 'truck', variant: 'primary', weight: 30 };
+      case 'ready_for_pickup':
+        // Ver nota de la función: solo la ocurrencia de `pending_payment`
+        // pertenece a este arreglo de botones.
+        if (order.state !== 'pending_payment') return null;
+        return { label: 'Lista para recogida', icon: 'package', variant: 'primary', weight: 30 };
+      case 'direct_deliver':
+        return { label: 'Entregar directamente', icon: 'package-check', variant: 'warning', weight: 32 };
+      case 'collect_payment':
+        // Restaura el viejo boton "Pasar a Cobro" (commit cbebc40db8f): una
+        // orden `processing` sin fulfillment (ni domicilio ni cocina) no
+        // tiene otra via a `shipped`, donde `pay` vuelve a estar disponible.
+        // Mismo id/handler que el `ship` original (`openShipModal`).
+        return { label: 'Pasar a Cobro', icon: 'credit-card', variant: 'primary', weight: 30 };
+      case 'mark_delivered': {
+        const label = delivery === 'home_delivery'
+          ? 'Marcar como Entregado'
+          : delivery === 'pickup'
+            ? 'Confirmar recogida en tienda'
+            : 'Confirmar Entrega';
+        const icon = delivery === 'home_delivery' ? 'package-check' : delivery === 'pickup' ? 'user-check' : 'check-circle';
+        return { label, icon, variant: 'primary', weight: 40 };
+      }
+      case 'confirm_delivery':
+        return { label: 'Finalizar Orden', icon: 'check-circle', variant: 'success', weight: 45 };
+      case 'cancel_payment':
+        return { label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning', weight: 50 };
+      case 'refund':
+        return { label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning', weight: 60 };
+      case 'cancel':
+        return { label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger', weight: 90 };
+      case 'reactivate':
+        return { label: 'Reactivar Orden', icon: 'rotate-ccw', variant: 'warning', weight: 90 };
+      default:
+        return null;
+    }
+  };
+
+  return backendActions
+    .map((action) => {
+      const cfg = configFor(action.code);
+      if (!cfg) return null;
+      return {
+        weight: cfg.weight,
+        button: {
+          id: BUTTON_IDS[action.code] ?? action.code,
+          label: cfg.label,
+          icon: cfg.icon,
+          variant: cfg.variant,
+          enabled: action.enabled,
+          reason: action.reason,
+        } as OrderActionConfig,
+      };
+    })
+    .filter((entry): entry is { weight: number; button: OrderActionConfig } => entry !== null)
+    .sort((a, b) => a.weight - b.weight)
+    .map((entry) => entry.button);
+}
+
+/**
+ * B3 (release-855) — a CREATE audit row is "the" order-creation row only
+ * when its own `new_values.id` matches the order's real id. The backend's
+ * `isCreateOperation` is a broad catch-all (nearly any non-update/delete
+ * POST), so order sub-actions (e.g. a refund creation) also land as CREATE
+ * rows sharing `resource: 'orders'` — those must NOT be deduped away as if
+ * they were a repeated order-creation event. Pure for spec sin TestBed.
+ */
+export function isOrderCreateLog(log: any, orderId: number | null | undefined): boolean {
+  const isCreate = log?.action?.toUpperCase?.() === 'CREATE';
+  return !!isCreate && orderId != null && log?.new_values?.id === orderId;
+}
+
+/**
+ * B3 (release-855) — `RefundState` values collide by name with real
+ * `OrderState` values (`processing`, `cancelled`). A raw `state in
+ * REFUND_STATE_LABELS` check alone can't tell "this row IS a refund" from
+ * "this row is an order transition that happens to land on a state refunds
+ * also use". Checks the audit row's own shape instead of the state string:
+ * `metadata.flow_action==='refund'` (POST .../flow/refund) or an `order_id`
+ * on `old_values`/`new_values` (only `refunds` rows have it — `orders`
+ * snapshots have `.id`, never `.order_id`). Pure for spec sin TestBed.
+ */
+export function isRefundAuditRow(log: any): boolean {
+  return (
+    log?.metadata?.flow_action === 'refund' ||
+    log?.new_values?.order_id != null ||
+    log?.old_values?.order_id != null
+  );
+}
+
+/**
+ * B3 (release-855) — a truthy `new_values.state` does not prove a real
+ * transition happened: a PATCH that returns a full order snapshot (e.g.
+ * `deliverOrderItem`, or a generic notes/address edit) carries the SAME
+ * `state` in both `old_values` and `new_values`. Without this gate those
+ * rows got a transition label (e.g. "Pago Confirmado") applied anyway. A
+ * FLOW-tagged row is always a real transition regardless of the old/new
+ * diff (some flow ops don't echo `old_values`). Pure for spec sin TestBed.
+ */
+export function isConfirmedStateTransition(
+  log: any,
+  oldState: string | null | undefined,
+  newState: string | null | undefined,
+): boolean {
+  return log?.metadata?.method === 'FLOW' || (oldState != null && oldState !== newState);
+}
+
+/**
+ * order-truth-and-invoice-tz plan, Step 7 — Spanish label for an
+ * `OrderState` value. Extracted as a pure function so `formatStatus()`
+ * (status badges, cancellation dialogs, legacy state-changed timeline rows)
+ * and `orderEventLabel()` below (new `order_events`-backed timeline) share
+ * ONE map instead of two copies drifting apart. Unknown values pass through
+ * as-is. Pure for spec sin TestBed.
+ */
+export function orderStateLabel(status: string | null | undefined): string {
+  if (!status) return 'Desconocido';
+  const labels: Record<string, string> = {
+    draft: 'Borrador',
+    created: 'Creada',
+    pending_payment: 'Pago Pendiente',
+    processing: 'Procesando',
+    shipped: 'Enviada',
+    delivered: 'Entregada',
+    cancelled: 'Cancelada',
+    refunded: 'Reembolsada',
+    finished: 'Finalizada',
+  };
+  return labels[status] || status;
+}
+
+/**
+ * Texto veraz del «Cancelar pago» según el estado en que se anula (espejo de
+ * `OrderFlowService.cancelPayment`): `shipped`/`delivered` conservan su
+ * estado; `pending_payment`/`processing` vuelven a «Creada». En ningún caso
+ * se vuelve a descontar el stock ya entregado al cobrar de nuevo. Pura, para
+ * spec sin TestBed.
+ */
+export function cancelPaymentCopy(state: string | null | undefined): {
+  confirm: string;
+  success: string;
+} {
+  const keepsState = state === 'shipped' || state === 'delivered';
+  if (keepsState) {
+    return {
+      confirm:
+        '¿Estás seguro de cancelar el pago de esta orden? La orden conserva su estado y podrás registrar el pago de nuevo.',
+      success: 'Pago cancelado exitosamente. La orden conserva su estado; registra el pago de nuevo.',
+    };
+  }
+  return {
+    confirm:
+      '¿Estás seguro de cancelar el pago de esta orden? La orden volverá al estado "Creada" y podrás registrar el pago de nuevo. Los productos ya entregados no se vuelven a descontar del inventario.',
+    success: 'Pago cancelado exitosamente. La orden ha vuelto a estado "Creada".',
+  };
+}
+
+/**
+ * order-truth-and-invoice-tz plan, Step 7 — deterministic label map by
+ * `event_type` for the order_events-backed timeline (`legacy:false`). Pure:
+ * takes the amount formatter as a parameter instead of reaching for
+ * `CurrencyFormatService` directly, so it is testable without Angular DI —
+ * same "pure for spec sin TestBed" convention as `isRefundAuditRow` above.
+ * Unlike `getTimelineLabel` (audit_logs), this never needs the
+ * `isRefundAuditRow` heuristic: `event_type` already says unambiguously
+ * whether a row is a refund.
+ */
+export function orderEventLabel(
+  evt: Pick<OrderEvent, 'event_type' | 'from_state' | 'to_state' | 'amount' | 'payload'>,
+  formatAmount: (amount: number | string | null | undefined) => string,
+): string {
+  if (evt.event_type === 'state_changed') {
+    return `Estado: ${orderStateLabel(evt.from_state)} → ${orderStateLabel(evt.to_state)}`;
+  }
+  if (evt.event_type === 'payment_registered') {
+    const amount = evt.amount != null ? formatAmount(evt.amount) : '';
+    const rawMethod = evt.payload?.['method'];
+    const method = typeof rawMethod === 'string' ? rawMethod : '';
+    const suffix = [amount, method].filter(Boolean).join(' — ');
+    return suffix ? `Pago registrado — ${suffix}` : 'Pago registrado';
+  }
+  if (evt.event_type === 'invoice_issued') {
+    const number = evt.payload?.['invoice_number'];
+    return number ? `Factura emitida — ${number}` : 'Factura emitida';
+  }
+  if (evt.event_type === 'kitchen_fired') {
+    const base = evt.payload?.['resend'] === true ? 'Reenviado a cocina' : 'Enviado a cocina';
+    const itemIds = evt.payload?.['order_item_ids'];
+    const count = Array.isArray(itemIds) ? itemIds.length : 0;
+    if (count === 0) return base;
+    return `${base} — ${count} ${count === 1 ? 'plato' : 'platos'}`;
+  }
+  const labels: Partial<Record<OrderEventType, string>> = {
+    payment_cancelled: 'Pago anulado',
+    refund_created: 'Reembolso creado',
+    refund_resolved: 'Reembolso resuelto',
+    customer_changed: 'Cliente cambiado',
+    item_delivered: 'Ítem entregado',
+    item_cancelled: 'Ítem cancelado',
+    item_delivery_reverted: 'Entrega de ítem revertida',
+    shipping_assigned: 'Envío asignado',
+  };
+  return labels[evt.event_type] ?? evt.event_type;
+}
+
+/**
+ * order-truth-and-invoice-tz plan, Step 7 — actor text for a NEW
+ * `order_events` row: the user's full name when there is one, otherwise a
+ * fixed label by `actor_source`. `http` without a resolved user (should not
+ * normally happen — `record()` only sets `actor_source:'http'` when the
+ * request context had a user) still falls back to «Sistema» rather than a
+ * blank string. Pure for spec sin TestBed.
+ */
+export function orderEventActorLabel(
+  evt: Pick<OrderEvent, 'actor' | 'actor_source'>,
+): string {
+  const name = evt.actor?.name?.trim();
+  if (name) return name;
+  const sourceLabels: Record<OrderEventSource, string> = {
+    system: 'Sistema',
+    webhook: 'Pasarela de pago',
+    job: 'Proceso automático',
+    listener: 'Cocina/Despacho',
+    http: 'Sistema',
+  };
+  return sourceLabels[evt.actor_source] ?? 'Sistema';
+}
+
+/**
+ * order-truth-and-invoice-tz plan, Step 7 — the «Reembolso» badge on a NEW
+ * timeline row is driven ONLY by `event_type`, never by the
+ * `isRefundAuditRow` string-sniffing heuristic (that heuristic exists
+ * because legacy `audit_logs` rows have no closed event vocabulary; a closed
+ * `order_events.event_type` doesn't need it). Pure for spec sin TestBed.
+ */
+export function isRefundOrderEvent(
+  evt: Pick<OrderEvent, 'event_type'>,
+): boolean {
+  return evt.event_type === 'refund_created' || evt.event_type === 'refund_resolved';
 }
 
 /**
@@ -288,8 +730,51 @@ type RefundState =
 })
 export class OrderDetailsPageComponent {
   private destroyRef = inject(DestroyRef);
+  private vexiHosts = inject(VexiUiHostRegistry);
   orderId: string | null = null;
   order = signal<Order | null>(null);
+
+  // ── Host de Vexi ──────────────────────────────────────────────────────
+  //
+  // Same `orders` module key as the sales list: the two never mount together
+  // (list vs `:id` are sibling routes), so the registry always points at the
+  // screen actually on display. Read-only by choice — payments, refunds and
+  // dispatches on this page go through their own validated flows, and driving
+  // them blind from the chat would bypass the guards the page exists to show.
+  private readonly vexiHostAdapter: VexiUiHost = {
+    vexiModuleKey: 'orders',
+    readScreen: () => {
+      const order = this.order();
+      const label = order
+        ? `Orden ${order.order_number}${order.customer_alias ? ` de ${order.customer_alias}` : ''}`
+        : null;
+      return {
+        module_key: 'orders',
+        title: 'Detalle de orden',
+        visible_count: order?.order_items?.length,
+        selection: label,
+        filters: order ? { state: order.state } : undefined,
+        notes: this.isLoading()
+          ? 'El detalle todavía está cargando.'
+          : order
+            ? `${label} en estado ${order.state}, con ${order.order_items?.length ?? 0} línea(s).`
+            : 'El detalle todavía no cargó la orden.',
+      };
+    },
+    refresh: () => {
+      this.refreshOrder();
+      return { status: 'ok' as const, message: 'Recargué el detalle de la orden.' };
+    },
+    whenReady: () => vexiWhenReady(() => this.isLoading()),
+  };
+  /**
+   * QUI-886 — query params heredados del listado (página + filtros) para el
+   * botón "Volver": se alimentan al sticky header vía `backQueryParams`.
+   * `undefined` (deep-link sin params) = volver al listado limpio.
+   */
+  readonly listReturnQuery = signal<Record<string, string> | undefined>(
+    undefined,
+  );
   /**
    * C.9 CP-pos-exclusive-tax-double-charge — entrada del diccionario de alerta
    * fiscal para el `fiscal_alert_code` de la orden; `null` = sin banner. El
@@ -315,12 +800,13 @@ export class OrderDetailsPageComponent {
   });
   /**
    * Release-853 paso 10 — Subtotal BRUTO del Resumen de Pago: Σ de las
-   * líneas en bruto (`final_total_price ?? total_price`). El IVA va
-   * incluido, no suma; el persistido `subtotal_amount` puede traer otra
+   * líneas ACTIVAS en bruto (`final_total_price ?? total_price`). Las
+   * canceladas siguen visibles para auditoría, pero ya no se cobran. El IVA
+   * va incluido, no suma; el persistido `subtotal_amount` puede traer otra
    * base según el canal que creó la orden.
    */
   readonly grossSubtotal = computed(() =>
-    (this.order()?.order_items ?? []).reduce(
+    (this.order()?.order_items ?? []).filter((item) => item.cancelled_at == null).reduce(
       (sum, item) =>
         sum + Number(item.final_total_price ?? item.total_price ?? 0),
       0,
@@ -427,6 +913,14 @@ export class OrderDetailsPageComponent {
    */
   dispatchNotes = signal<DispatchNote[]>([]);
   private rawTimeline = signal<any[]>([]);
+  /**
+   * order-truth-and-invoice-tz plan, Step 7 — mirrors
+   * `OrderTimelineResponse.legacy`. `true` (the safe default before the
+   * timeline loads) means `rawTimeline()` holds raw `audit_logs` rows
+   * (today's shape); `false` means it holds `OrderEvent[]`.
+   */
+  private timelineLegacy = signal<boolean>(true);
+  readonly isLegacyTimeline = computed<boolean>(() => this.timelineLegacy());
   isLoading = signal(false);
   error: string | null = null;
 
@@ -435,6 +929,8 @@ export class OrderDetailsPageComponent {
 
   // Flow modal visibility signals
   showPayModal = signal(false);
+  /** Último error del cobro del modal; el modal lo mapea a mensaje inline. */
+  payModalError = signal<unknown>(null);
   showShipModal = signal(false);
   showDeliverModal = signal(false);
   showCancelModal = signal(false);
@@ -506,6 +1002,8 @@ export class OrderDetailsPageComponent {
    * el operador elige un existente o salta al flujo crear actual.
    */
   showTitularSearchModal = signal(false);
+  /** Prellenado (RUES / documento digitado) para el alta de titular. */
+  changeCustomerInitialValues = signal<Partial<CreateCustomerRequest> | null>(null);
   /**
    * Dirección capturada en el modal (`addressData`, solo crear-mode). Se
    * persiste contra el cliente resuelto antes del PATCH titular; se limpia
@@ -579,9 +1077,10 @@ export class OrderDetailsPageComponent {
    */
   readonly tipAmount = computed(() => Number(this.order()?.tip_amount ?? 0));
   /**
-   * Impuesto del envío (copia congelada de la tarifa al vender). Va SIEMPRE
-   * incluido en `shipping_cost`, así que es una nota informativa: no suma al
-   * total. 0 = envío sin impuesto (tarifa sin impuesto o costo manual).
+   * Impuesto del envío (copia congelada de la tarifa al vender). Nota
+   * informativa fuera de la aritmética: no suma al total. 0 = envío sin
+   * impuesto (tarifa sin impuesto o costo manual). El modo (incluido /
+   * agregado) lo pinta `shippingTaxPrefix`.
    */
   readonly shippingTaxAmount = computed<number>(() => {
     const amount = Number(this.order()?.shipping_tax_amount ?? 0);
@@ -589,6 +1088,18 @@ export class OrderDetailsPageComponent {
   });
   readonly shippingTaxLabel = computed<string>(
     () => this.order()?.shipping_tax_name?.trim() || 'impuesto',
+  );
+  /**
+   * Prefijo del modo del impuesto del envío ("Incluye" / "Base +").
+   * Lee `shipping_tax_is_inclusive` por cast (mismo patrón que
+   * `showDetailVatNote`): el campo viaja en `findOne` pero aún no está
+   * en la interfaz `Order`.
+   */
+  readonly shippingTaxPrefix = computed<string>(() =>
+    shippingTaxModePrefix(
+      (this.order() as unknown as { shipping_tax_is_inclusive?: unknown } | null)
+        ?.shipping_tax_is_inclusive,
+    ),
   );
   /**
    * Plan KDS fire-flows (F3): show the per-plate kitchen dispatch UI only
@@ -644,6 +1155,57 @@ export class OrderDetailsPageComponent {
 
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
+  readonly isCodPending = computed(() => isCodAwaitingConfirmation(this.order()));
+  /** Fase 2 (paso 8): cobro manual pendiente → "Registrar pago" por `flow/pay`. */
+  readonly isManualPayPending = computed(() => isManualPaymentPending(this.order()));
+  readonly codActualMethods = computed(() => this.paymentMethods().filter((method) => {
+    const catalog = method.system_payment_method as { type?: string; processing_mode?: string } | null;
+    if (!catalog || catalog.processing_mode === 'ON_DELIVERY') return false;
+    return ['cash', 'bank_transfer', 'voucher'].includes(catalog.type ?? '') ||
+      (catalog.type === 'card' && catalog.processing_mode === 'DIRECT');
+  }));
+  /**
+   * Pago online manual `pending` que "Registrar pago" confirma en sitio (el
+   * backend lo pasa a `succeeded` en vez de anularlo): su método y la cuenta
+   * bancaria a la que el cliente transfirió se preseleccionan en el modal.
+   * Contra entrega no aplica (su marcador se anula y se crea el pago real).
+   */
+  readonly manualPendingPaymentPreset = computed<OrderPendingPaymentPreset | null>(() => {
+    if (!this.isManualPayPending() || this.isCodPending()) return null;
+    const pending = this.order()?.payments?.find((payment) => {
+      if (payment.state !== 'pending') return false;
+      const system = payment.store_payment_method?.system_payment_method as
+        | { type?: string; processing_mode?: string }
+        | null
+        | undefined;
+      if (!system || system.processing_mode === 'ON_DELIVERY') return false;
+      return !['wallet', 'wompi'].includes(system.type ?? '');
+    });
+    if (!pending) return null;
+    const rawMethodId = pending.store_payment_method_id ?? pending.store_payment_method?.id ?? null;
+    const methodId = rawMethodId != null ? Number(rawMethodId) : null;
+    const bankAccountId = (pending as { bank_account_id?: number | null }).bank_account_id ?? null;
+    return { store_payment_method_id: methodId, bank_account_id: bankAccountId };
+  });
+  /**
+   * Métodos del modal de cobro. En contra entrega / registro manual son los
+   * medios realmente recibidos (`codActualMethods`) MÁS el método original del
+   * pago online pendiente, aunque el filtro lo deje fuera, para poder
+   * registrarlo tal como el cliente lo pagó.
+   */
+  readonly payModalMethods = computed<StorePaymentMethod[]>(() => {
+    if (!this.isCodPending() && !this.isManualPayPending()) return this.paymentMethods();
+    const base = this.codActualMethods();
+    const originalId = this.manualPendingPaymentPreset()?.store_payment_method_id;
+    if (originalId == null || base.some((method) => Number(method.id) === originalId)) return base;
+    const original = this.paymentMethods().find((method) => Number(method.id) === originalId);
+    return original ? [...base, original] : base;
+  });
+  readonly canCreateFinancialSplit = computed(() => {
+    return isOrderEligibleForSplitCreation(this.order(), this.orderRefunds().length > 0) &&
+      (this.hasNamedPermission('store:table_sessions:update') ||
+        this.hasNamedPermission('store:pos:access'));
+  });
 
   // Shipping method assignment
   shippingMethods = signal<StoreShippingMethod[]>([]);
@@ -660,6 +1222,13 @@ export class OrderDetailsPageComponent {
 
   // Fast-track
   showFastTrackModal = signal(false);
+  /**
+   * QUI-885 — apertura explícita de la configuración de cuenta dividida. El
+   * panel `app-split-accounts-panel` ya NO se renderiza desplegado solo por
+   * ser la orden elegible: solo aparece con reparto activo o cuando el
+   * operador pulsa "Dividir cuenta". Se resetea al cambiar de orden.
+   */
+  readonly showSplitConfig = signal(false);
   fastTrackEnabled = signal(false);
   fastTrackForm!: FormGroup;
 
@@ -768,6 +1337,19 @@ export class OrderDetailsPageComponent {
     'finished',
   ];
 
+  // B13 (release-855) — `draft` (pre-checkout POS/mesa draft) and
+  // `pending_delivery` (Bug 7: envío a domicilio + platos, orden pagada
+  // esperando que despache) are real `OrderState` values but were never in
+  // the happy-path index used by `lifecycleSteps`/`trackingSteps`. `indexOf`
+  // silently returned -1 for both, which `lifecycleSteps` reads as "unknown
+  // state" and short-circuits to an empty list — the whole progress bar
+  // vanished for any order still in `draft` or `pending_delivery`. Alias
+  // them to the closest happy-path step for INDEX LOOKUP ONLY; the order's
+  // real `state` (and its own label) is never rewritten anywhere else.
+  private lifecycleLookupState(state: OrderState): OrderState {
+    return lifecycleLookupState(state);
+  }
+
   // ── Step Labels (delivery-type aware) ──────────────────────
 
   readonly stepLabels = computed<Record<string, string>>(() => {
@@ -795,7 +1377,7 @@ export class OrderDetailsPageComponent {
       ];
     }
 
-    const currentIndex = this.HAPPY_PATH.indexOf(state);
+    const currentIndex = this.HAPPY_PATH.indexOf(this.lifecycleLookupState(state));
     if (currentIndex === -1) return [];
 
     return this.HAPPY_PATH.map((key, i) => ({
@@ -925,9 +1507,19 @@ export class OrderDetailsPageComponent {
     return this.requiresShippingAddress() && !this.hasShippingAddress() && !terminal;
   });
 
+  /**
+   * order-truth-and-invoice-tz plan — `fast_track` viaja incondicionalmente
+   * en `order.available_actions` (código standalone, nunca un botón del
+   * arreglo — ver `buildOrderActionButtons`). Se prefiere su `enabled`
+   * cuando está presente; una respuesta vieja sin `available_actions` cae
+   * al predicado local previo (checkbox, no botón — no aplica la regla de
+   * "sin available_actions no se pinta nada").
+   */
   readonly canFastTrack = computed(() => {
     const o = this.order();
     if (!o) return false;
+    const backendEntry = o.available_actions?.find((a) => a.code === 'fast_track');
+    if (backendEntry) return backendEntry.enabled;
     if (['finished', 'cancelled', 'refunded'].includes(o.state)) return false;
     if (this.blockedByMissingShipping()) return false;
     return (o.order_items?.length ?? 0) > 0;
@@ -949,13 +1541,25 @@ export class OrderDetailsPageComponent {
       (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
 
-    // Deduplicate: keep only the first CREATE event
-    let seenCreate = false;
+    // B3 (release-855) — the backend's `isCreateOperation` (audit
+    // interceptor) is a broad catch-all: any POST whose URL doesn't scream
+    // update/edit/delete gets logged as `action: 'CREATE'` under
+    // `resource: 'orders'` — including order SUB-actions (add item, apply
+    // coupon, resend to kitchen…), not just the order's own creation. The
+    // old dedupe treated every 'CREATE' row as "order created" and silently
+    // dropped every one after the first, hiding real sub-action history
+    // instead of just true duplicates. Only dedupe a CREATE row whose OWN
+    // payload IS the order (`new_values.id === orderId`); a child object
+    // (item, coupon…) has its own id — usually with an `order_id` FK
+    // instead — so it passes through untouched and gets its own
+    // (fallback) timeline label from `getTimelineLabel`.
+    const orderId = this.order()?.id;
+    let seenOrderCreate = false;
     return sorted.filter((log) => {
-      const isCreate = log.action?.toUpperCase() === 'CREATE';
-      if (isCreate) {
-        if (seenCreate) return false;
-        seenCreate = true;
+      const isOrderCreate = isOrderCreateLog(log, orderId);
+      if (isOrderCreate) {
+        if (seenOrderCreate) return false;
+        seenOrderCreate = true;
       }
       return true;
     });
@@ -1015,20 +1619,19 @@ export class OrderDetailsPageComponent {
     () => this.requiresDispatchFlow() || this.isKitchenOrder(),
   );
 
-  /**
-   * Platos ya disparados a cocina que aún no están entregados (ticket ni
-   * `delivered` ni `cancelled`). Solo informa: despachar un domicilio con
-   * cocina pendiente se advierte, nunca se bloquea — el operador puede estar
-   * armando la ruta mientras el último plato sale.
-   */
+  /** Fired dishes still waiting for the kitchen hand-off. */
   readonly undeliveredKitchenItems = computed<OrderItem[]>(() => {
     const order = this.order();
     if (!order?.order_items) return [];
     return order.order_items.filter((it) => {
       const ks = this.kitchenStateFor(it);
-      return !!ks && ks.status !== 'delivered' && ks.status !== 'cancelled';
+      return it.cancelled_at == null && !!ks && ks.status !== 'delivered';
     });
   });
+
+  readonly kitchenBlocksWholeOrder = computed<boolean>(() =>
+    this.pendingKitchenItems().length > 0 || this.undeliveredKitchenItems().length > 0,
+  );
 
   /**
    * Whether this order can produce a remisión (dispatch note). Mirrors the
@@ -1064,36 +1667,48 @@ export class OrderDetailsPageComponent {
     ),
   );
 
+  /**
+   * order-truth-and-invoice-tz plan (Objetivos 3/11/12) — los botones de
+   * orden se pintan ÚNICA Y EXCLUSIVAMENTE desde `order.available_actions`
+   * (ver `buildOrderActionButtons`, función pura testeable sin TestBed). Se
+   * eliminan los predicados de visibilidad propios (switch por estado,
+   * `hasSuccessfulPayment()` como decisor, `isPrivilegedUser()` como gate de
+   * botón, `applyCancellationPolicy`): el backend ya los aplicó al calcular
+   * `enabled`/`reason` por code. Las alertas informativas que NO deciden
+   * botones (envío faltante, dirección faltante, pago online pendiente,
+   * cocina pendiente) se conservan, prependidas al arreglo del backend.
+   */
   readonly availableActions = computed<OrderActionConfig[]>(() => {
     const order = this.order();
     if (!order) return [];
 
-    if (this.blockedByMissingShipping()) {
-      return this.applyCancellationPolicy(order, [
-        {
-          id: 'info',
-          type: 'alert',
-          color: 'warning',
-          icon: 'alert-triangle',
-          label: 'Asigna un metodo de envio para continuar con el flujo.',
-        } as OrderActionConfig,
-        { id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' },
-      ]);
-    }
+    const alerts: OrderActionConfig[] = [];
 
-    const state = order.state;
-    const delivery = order.delivery_type || 'direct_delivery';
-    const channel = order.channel || 'pos';
-    const isShipping = delivery === 'home_delivery' || delivery === 'direct_delivery' || delivery === 'other';
-    const isPickup = delivery === 'pickup';
-    const hasPaid = this.hasSuccessfulPayment();
-    const actions: OrderActionConfig[] = [];
+    // Gate de envío: se conserva como alerta informativa (antes reemplazaba
+    // TODO el arreglo de botones; ahora el backend ya decide qué botón vive
+    // habilitado/deshabilitado, esto solo avisa).
+    if (this.blockedByMissingShipping()) {
+      // checkout-whatsapp-location-fallback: una orden 'other' sin metodo de
+      // envio casi siempre viene del fallback de WhatsApp (el comprador no
+      // pudo ubicarse en el mapa) en vez de un gate generico de envio.
+      const pendingFromWhatsappFallback =
+        order.delivery_type === 'other' && !order.shipping_method_id;
+      alerts.push({
+        id: 'shipping-required-info',
+        type: 'alert',
+        color: 'warning',
+        icon: 'alert-triangle',
+        label: pendingFromWhatsappFallback
+          ? 'Envío por asignar — el cliente no pudo ubicarse en el mapa. Asigna método y tarifa antes de cobrar o despachar.'
+          : 'Asigna un metodo de envio para continuar con el flujo.',
+      } as OrderActionConfig);
+    }
 
     // Gate de dirección: para envíos a domicilio sin dirección, mostrar un
     // alert persistente. El botón de despacho sigue visible pero su handler
     // (openDispatchSelector) bloquea con un toast hasta que haya dirección.
     if (this.blockedByMissingAddress()) {
-      actions.push({
+      alerts.push({
         id: 'address-info',
         type: 'alert',
         color: 'warning',
@@ -1102,216 +1717,66 @@ export class OrderDetailsPageComponent {
       } as OrderActionConfig);
     }
 
-    switch (state) {
-      // `draft` (POS counter orders before confirmation) behaves exactly like
-      // `created`: register payment, modify (privileged), cancel. Fall-through.
-      case 'draft':
-      case 'created':
-        if (channel !== 'pos' || !hasPaid) {
-          actions.push({ id: 'pay', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
-        }
-        if (this.isPrivilegedUser()) {
-          actions.push({ id: 'edit-order', label: 'Modificar Orden', icon: 'edit', variant: 'info' });
-        }
-        actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
-        break;
-
-      case 'pending_payment': {
-        // Only an ONLINE payment pending confirmation (ecommerce) is a real
-        // "money not captured yet" risk. A contra-entrega (COD) — or an order
-        // with no online payment — collects on delivery by design, so its
-        // dispatch is a normal action with NO warning banner/alert.
-        const hasPendingOnline = this.hasPendingOnlinePayment();
-
-        actions.push({ id: 'confirm-payment', label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary' });
-        if (hasPendingOnline) {
-          actions.push({ id: 'info', label: 'Esperando confirmacion de pago', icon: 'clock', type: 'alert', color: 'warning' });
-        }
-
-        // Dispatch label/variant: warning only when an ONLINE payment is still
-        // pending. For COD / no online payment, dispatch is a normal primary
-        // action ("Despachar Orden").
-        const dispatchLabel = hasPendingOnline ? 'Despachar sin confirmar pago' : 'Despachar Orden';
-        const dispatchVariant: OrderActionConfig['variant'] = hasPendingOnline ? 'warning' : 'primary';
-
-        // Dispatching is allowed BEFORE the payment is confirmed so the route
-        // can carry the order (COD collects on delivery; online still uncaptured).
-        if (this.canOfferDispatch() && this.canGenerateRemision()) {
-          // Unified entry: one button → con/sin-remisión chooser.
-          actions.push({
-            id: 'dispatch-order',
-            label: dispatchLabel,
-            icon: 'truck',
-            variant: dispatchVariant,
-          });
-        } else if (this.canOfferDispatch() && isShipping) {
-          // direct_delivery: no remisión; manual ship.
-          actions.push({
-            id: 'manual-ship',
-            label: dispatchLabel,
-            icon: 'truck',
-            variant: dispatchVariant,
-          });
-        } else if (isPickup) {
-          // Pickup: can mark "ready to pick up" without payment (confirm dialog)
-          actions.push({
-            id: 'manual-ready-pickup',
-            label: 'Lista para recogida',
-            icon: 'package',
-            variant: 'primary',
-          });
-        }
-
-        actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
-
-        // Si es crédito, reemplazar "Confirmar Pago" por "Registrar Pago"
-        if (order.payment_form === '2') {
-          const idx = actions.findIndex(a => a.id === 'confirm-payment');
-          if (idx !== -1) {
-            actions[idx] = { id: 'credit-payment', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' };
-          }
-          const infoIdx = actions.findIndex(a => a.id === 'info');
-          if (infoIdx !== -1) actions.splice(infoIdx, 1);
-        }
-        break;
-      }
-
-      case 'processing':
-        if (this.isKitchenOrder() && !this.requiresDispatchFlow()) {
-          // Kitchen orders consumed in the store (mesa / mostrador / para
-          // llevar) skip shipping/dispatch entirely: once the kitchen
-          // finishes, the operator finalizes directly. Reuse the exact same
-          // `finish` action config/handler as `delivered` (backend allows
-          // `processing → finished`). Un domicilio NO entra aquí: su entrega
-          // la estampa el flujo de despacho (ver `requiresDispatchFlow`).
-          actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        } else if (this.canOfferDispatch() && this.canGenerateRemision()) {
-          // Domicilio de restaurante con platos aún en cocina: se avisa, no se
-          // bloquea. El despacho sigue siendo la única vía de entrega.
-          if (this.requiresDispatchFlow() && this.undeliveredKitchenItems().length > 0) {
-            actions.push({
-              id: 'kitchen-info',
-              type: 'alert',
-              color: 'info',
-              icon: 'chef-hat',
-              label: `Hay ${this.undeliveredKitchenItems().length} plato(s) en cocina sin entregar. Puedes despachar igual cuando el domiciliario los reciba.`,
-            } as OrderActionConfig);
-          }
-          // Unified dispatch entry point: ONE button opens the con/sin-remisión
-          // chooser. "Con remisión" runs the wizard (document + optional route)
-          // then ships the order; "sin remisión" just marks it shipped. Both
-          // paths converge with the order in `shipped` — no more duplicate
-          // "Despachar Orden" + "Generar Remisión" buttons.
-          actions.push({ id: 'dispatch-order', label: 'Despachar Orden', icon: 'truck', variant: 'primary' });
-          if (isPickup) {
-            // Pickup + paid: keep the "hand over at the counter now" shortcut
-            // (skip shipped → delivered → auto-finalize).
-            actions.push({
-              id: 'direct-deliver',
-              label: 'Entregar directamente',
-              icon: 'package-check',
-              variant: 'warning',
-            });
-          }
-        } else if (!hasPaid) {
-          // Re-auditoría 1060: sin fulfillment no hay nada que despachar,
-          // pero el paso por `shipped` es la ÚNICA vía de cobro (ofrece
-          // Registrar Pago y en `processing` no hay `pay`). Se etiqueta
-          // como cobro, nunca como despacho.
-          actions.push({ id: 'ship', label: 'Pasar a Cobro', icon: 'credit-card', variant: 'primary' });
-        } else {
-          // Pagada y sin fulfillment: finalizar directo (el backend permite
-          // processing → finished; sin filas de cocina el F2-guard pasa).
-          actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        }
-        if (this.isPrivilegedUser()) {
-          actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
-        }
-        actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
-        break;
-
-      case 'shipped':
-        if (!hasPaid) {
-          // Unpaid in shipped: open payment modal to register payment
-          actions.push({
-            id: 'pay',
-            label: 'Registrar Pago',
-            icon: 'credit-card',
-            variant: 'primary',
-          });
-        } else {
-          // Paid: standard deliver
-          if (delivery === 'home_delivery') {
-            actions.push({ id: 'deliver', label: 'Marcar como Entregado', icon: 'package-check', variant: 'primary' });
-          } else if (isPickup) {
-            actions.push({ id: 'deliver', label: 'Confirmar recogida en tienda', icon: 'user-check', variant: 'primary' });
-          } else {
-            actions.push({ id: 'deliver', label: 'Confirmar Entrega', icon: 'check-circle', variant: 'primary' });
-          }
-        }
-        break;
-
-      case 'delivered':
-        actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        // Paso 8 — sin saldo reembolsable no se ofrece el reembolso.
-        if (this.hasRefundableBalance()) {
-          actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
-        }
-        break;
-
-      case 'finished':
-        if (order.payment_form === '2' && Number(order.remaining_balance) > 0.01) {
-          actions.push({ id: 'credit-payment', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
-        }
-        // Paso 8 — sin saldo reembolsable no se ofrece el reembolso.
-        if (this.hasRefundableBalance()) {
-          actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
-        }
-        break;
-
-      case 'cancelled':
-        if (this.isPrivilegedUser()) {
-          actions.push({
-            id: 'reactivate',
-            label: 'Reactivar Orden',
-            icon: 'rotate-ccw',
-            variant: 'warning',
-          });
-        }
-        break;
-      case 'refunded':
-        break;
-    }
-
-    return this.applyCancellationPolicy(order, order.active_financial_split_id
-      ? actions.filter((action) => !['pay', 'credit-payment', 'edit-order'].includes(action.id))
-      : actions);
-  });
-
-  /** The server owns this policy, including legacy rows and settled gateways. */
-  private applyCancellationPolicy(
-    order: Order,
-    actions: OrderActionConfig[],
-  ): OrderActionConfig[] {
-    const policy = order.cancellation_policy;
-    const result = actions.filter((action) => {
-      if (action.id === 'cancel') return policy?.can_cancel === true;
-      if (action.id === 'cancel-payment') return policy?.can_cancel_payment === true;
-      return true;
-    });
+    // Solo un pago ONLINE pendiente de confirmación (ecommerce) es un riesgo
+    // real de "dinero no capturado". Un crédito no muestra este aviso (mismo
+    // criterio que el código previo: se ocultaba junto con confirm-payment).
     if (
-      result.length !== actions.length &&
-      (!policy || policy.reason_code)
+      order.state === 'pending_payment' &&
+      order.payment_form !== '2' &&
+      this.hasPendingOnlinePayment()
     ) {
-      result.push({
-        id: 'cancellation-info',
+      alerts.push({
+        id: 'info',
         type: 'alert',
         color: 'warning',
-        icon: 'alert-triangle',
-        label: this.cancellationPolicyMessage(order),
-      });
+        icon: 'clock',
+        label: 'Esperando confirmacion de pago',
+      } as OrderActionConfig);
     }
-    return result;
+
+    // Whole-order dispatch must wait for both unfired and fired dishes. Direct
+    // retail lines can still be delivered individually from their item action.
+    if (
+      (order.state === 'processing' || order.state === 'pending_payment') &&
+      this.requiresDispatchFlow() &&
+      this.kitchenBlocksWholeOrder()
+    ) {
+      alerts.push({
+        id: 'kitchen-info',
+        type: 'alert',
+        color: 'info',
+        icon: 'chef-hat',
+        label: `Hay ${this.pendingKitchenItems().length + this.undeliveredKitchenItems().length} plato(s) pendientes de cocina. Entrega o cancela esos platos antes de despachar toda la orden; los productos directos se pueden entregar por separado.`,
+      } as OrderActionConfig);
+    }
+
+    const buttons = [...buildOrderActionButtons(order)];
+
+    // QUI-885 — "Dividir cuenta" explícito: solo cuando la orden NO tiene
+    // reparto activo pero sí es elegible. El panel ya no se abre solo.
+    if (!order.active_financial_split_id && this.canCreateFinancialSplit()) {
+      buttons.push({
+        id: 'split-account',
+        label: 'Dividir cuenta',
+        icon: 'split',
+        variant: 'secondary',
+        enabled: true,
+      } as OrderActionConfig);
+    }
+
+    return [...alerts, ...buttons];
+  });
+
+  /**
+   * order-truth-and-invoice-tz plan — texto del tooltip para un botón con
+   * `enabled:false`. Busca primero en `ERROR_MESSAGES` (el mapa compartido
+   * de mensajes de error del front) y solo cae al diccionario local
+   * `ACTION_REASON_FALLBACK` para los codes que ese mapa no cubre; sin
+   * `reason` o sin match en ninguno, texto genérico.
+   */
+  actionDisabledReason(action: OrderActionConfig): string {
+    if (!action.reason) return GENERIC_ACTION_DISABLED_REASON;
+    return ERROR_MESSAGES[action.reason] ?? ACTION_REASON_FALLBACK[action.reason] ?? GENERIC_ACTION_DISABLED_REASON;
   }
 
   private cancellationPolicyMessage(order: Order | null): string {
@@ -1382,7 +1847,9 @@ export class OrderDetailsPageComponent {
 
     const state = order.state;
     const stateOrder = ['created', 'pending_payment', 'processing', 'shipped', 'delivered', 'finished'];
-    const stateIndex = stateOrder.indexOf(state);
+    // B13 (release-855) — same `draft`/`pending_delivery` alias as
+    // `lifecycleSteps` above; see `LIFECYCLE_STATE_ALIASES`.
+    const stateIndex = stateOrder.indexOf(this.lifecycleLookupState(state));
 
     const steps = [
       { key: 'received', label: 'Orden recibida', status: 'pending' as string },
@@ -1427,6 +1894,20 @@ export class OrderDetailsPageComponent {
         status: 'current' as const,
         date: order ? this.formatDate(order.created_at) : '',
       }];
+    }
+    // order-truth-and-invoice-tz plan, Step 7 — `legacy:false` renders
+    // ONLY from `order_events` (OrderEvent[]): deterministic label map by
+    // `event_type` and store-timezone dates. `legacy:true` (orders older
+    // than the change) keeps the exact `audit_logs` rendering below.
+    if (!this.timelineLegacy()) {
+      const events = logs as OrderEvent[];
+      return events.map((evt, i) => ({
+        key: `evt-${evt.id ?? i}`,
+        label: this.getOrderEventLabel(evt),
+        status: i === events.length - 1 ? 'current' as const : 'completed' as const,
+        date: formatStoreDateTime(evt.created_at, this.settingsFacade.timezone()),
+        data: evt,
+      }));
     }
     return logs.map((log, i) => ({
       key: `log-${i}`,
@@ -1686,6 +2167,11 @@ export class OrderDetailsPageComponent {
   private readonly settingsFacade = inject(StoreSettingsFacade);
 
   constructor() {
+    this.vexiHosts.register(this.vexiHostAdapter);
+    this.destroyRef.onDestroy(() =>
+      this.vexiHosts.unregister(this.vexiHostAdapter),
+    );
+
     this.currencySymbol = this.currencyService.currencySymbol;
     this.isPrivilegedUser.set(this.authFacade.isAdmin() || this.authFacade.isOwner());
 
@@ -1819,6 +2305,17 @@ export class OrderDetailsPageComponent {
 
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       this.orderId = params.get('id');
+      // QUI-885: al cambiar de orden se cierra la configuración de reparto.
+      this.showSplitConfig.set(false);
+      // QUI-886: se capturan los query params que el listado preservó en la
+      // URL del detalle para devolverlos en "Volver".
+      const qp = this.route.snapshot.queryParamMap;
+      const back: Record<string, string> = {};
+      for (const key of qp.keys) {
+        const value = qp.get(key);
+        if (value != null) back[key] = value;
+      }
+      this.listReturnQuery.set(Object.keys(back).length > 0 ? back : undefined);
       if (this.orderId) {
         // Carril B - B3: abre el SSE del detalle filtrado por esta orden.
         // Idempotente: si navegamos a otra orden, connect() cierra la
@@ -1940,13 +2437,24 @@ export class OrderDetailsPageComponent {
             })),
           });
 
-          this.rawTimeline.set(
-            Array.isArray(timeline)
-              ? timeline
-              : Array.isArray((timeline as any)?.data)
-                ? (timeline as any).data
-                : [],
-          );
+          // order-truth-and-invoice-tz plan, Step 7 — `getOrderTimeline`
+          // normalizes to `{legacy, events}`. Defensive fallback (bare
+          // array / envelope leak) keeps the pre-fork behaviour: treat it
+          // as legacy `audit_logs` rows rather than crash the page.
+          const timelineResponse = timeline as any;
+          if (Array.isArray(timelineResponse)) {
+            this.timelineLegacy.set(true);
+            this.rawTimeline.set(timelineResponse);
+          } else {
+            this.timelineLegacy.set(timelineResponse?.legacy !== false);
+            this.rawTimeline.set(
+              Array.isArray(timelineResponse?.events)
+                ? timelineResponse.events
+                : Array.isArray(timelineResponse?.data)
+                  ? timelineResponse.data
+                  : [],
+            );
+          }
           this.isLoading.set(false);
 
           // Load payment methods if order can accept payment
@@ -2076,6 +2584,10 @@ export class OrderDetailsPageComponent {
       case 'credit-payment':
         this.openPayModal();
         break;
+      case 'split-account':
+        // QUI-885: abre la configuración de reparto bajo demanda.
+        this.showSplitConfig.set(true);
+        break;
       case 'generate-dispatch':
         this.openDispatchModal();
         break;
@@ -2096,8 +2608,32 @@ export class OrderDetailsPageComponent {
       this.loadPaymentMethods();
     }
     this.preSelectedInstallment.set(null);
+    this.payModalError.set(null);
     this.showPayModal.set(true);
   }
+
+  /**
+   * User-facing copy for the 4 multi-tender error codes `flow/pay` can
+   * surface. Stored locally because these codes do not exist in the shared
+   * `ERROR_MESSAGES` catalog (same reason as `ERROR_COPY` below), and
+   * `parseApiError` falls back to a generic copy otherwise. Keys are matched
+   * on the surface `errorCode` AND on `details.cause_code`: payload
+   * validation rejections (sum mismatch, method not allowed, multiple cash,
+   * invalid amount, the online+legs guard) arrive unwrapped as a 400 with
+   * their own `PAY_*` code, while flow-stage failures (order not payable,
+   * kitchen pending, finish blocked, …) still arrive wrapped as a 409
+   * `ORD_FLOW_PAYMENT_FAILED_001` with the typed cause in `details.cause_code`.
+   */
+  private readonly MULTI_TENDER_COPY: Record<string, string> = {
+    PAY_MULTI_TENDER_SUM_MISMATCH:
+      'La suma de los métodos no coincide con el total a cobrar. Revisa los montos.',
+    PAY_MULTI_TENDER_METHOD_NOT_ALLOWED:
+      'El cobro en varios métodos solo acepta métodos directos (efectivo, tarjeta, transferencia).',
+    PAY_MULTI_TENDER_MULTIPLE_CASH:
+      'Solo se permite un tramo en efectivo en el cobro en varios métodos.',
+    PAY_MULTI_TENDER_CASH_INSUFFICIENT:
+      'El monto recibido en efectivo es menor que el monto del tramo.',
+  };
 
   onPaymentSubmitted(submit: PaymentSubmit): void {
     if (this.order()?.active_financial_split_id) return;
@@ -2112,19 +2648,49 @@ export class OrderDetailsPageComponent {
 
     const isCredit = this.isCreditOrder();
 
-    const dto: PayOrderDto = {
+    const dto: PayOrderDto & { bank_account_id?: number } = {
       store_payment_method_id: submit.storePaymentMethodId,
       payment_type: submit.methodType === 'wompi' ? 'online' : 'direct',
       ...(submit.amountReceived != null ? { amount_received: submit.amountReceived } : {}),
       ...(submit.reference ? { payment_reference: submit.reference } : {}),
+      // Cuenta bancaria del cobro escalar (transferencia): el backend la valida
+      // y la persiste; en el registro manual es la cuenta preseleccionada del
+      // pago online (o la que el cajero cambió).
+      ...(submit.bankAccountId != null ? { bank_account_id: submit.bankAccountId } : {}),
     };
+
+    // Cobro multimétodo de contado: con 2+ tramos se envía `payments[]` y se
+    // fuerza `payment_type: 'direct'` (el backend rechaza tramos con
+    // 'online'). El escalar `store_payment_method_id` se conserva porque el
+    // DTO lo exige (`@IsInt()` sin `@IsOptional()`); el normalizador
+    // prefiere `payments[]` cuando trae elementos. `leg.method` es eco de UI
+    // y NUNCA viaja. El crédito nunca entra aquí: el abono sigue escalar
+    // por `flowCreditPayment` (el modal ya apaga la sección con
+    // `[allowMultiTender]="!isCreditOrder()"`; este guard es la segunda
+    // línea, porque un submit puede venir de un estado anterior).
+    const legs = submit.legs ?? [];
+    if (!isCredit && legs.length >= 2) {
+      dto.payment_type = 'direct';
+      dto.payments = legs.map((leg) => ({
+        store_payment_method_id: leg.storePaymentMethodId,
+        amount: leg.amount,
+        ...(leg.amountReceived != null ? { amount_received: leg.amountReceived } : {}),
+        ...(leg.reference ? { payment_reference: leg.reference } : {}),
+        ...(leg.bankAccountId != null ? { bank_account_id: leg.bankAccountId } : {}),
+      }));
+    }
 
     // Credit abono: carry the amount (override ?? remaining balance) and, when the
     // operator picked one, the target installment. `flow/pay` ignores `amount`
-    // (it charges the full order total), so only attach it for the credit path.
+    // (it charges the full order total), so only attach it for the credit path…
     if (isCredit) {
       dto.amount = submit.amount;
       if (submit.installmentId != null) dto.installment_id = submit.installmentId;
+    } else if (this.isManualPayPending()) {
+      // …and for the Fase 2 (paso 8) manual-registration lane, where `flow/pay`
+      // charges `amount`: partial when below the balance, exact otherwise.
+      // Every other contado lane keeps omitting it (partial not allowed there).
+      dto.amount = submit.amount;
     }
 
     // Propina (T3). El collector la trae ya resuelta a monto en `tip`, mas los
@@ -2159,9 +2725,33 @@ export class OrderDetailsPageComponent {
           this.toastService.success(`Pago registrado exitosamente${changeMsg}`);
           this.loadData();
         },
-        error: (err) => {
+        error: (err: unknown) => {
           this.isProcessingAction.set(false);
-          this.toastService.error(err.message || 'Error al registrar el pago');
+          this.payModalError.set(err);
+          // `flowPayOrder`/`flowCreditPayment` lanzan `buildApiError`
+          // (store-orders.service): un `Error` con el `errorCode` de
+          // superficie en camelCase y el `HttpErrorResponse` crudo en
+          // `cause`. Se lee el wrapper primero y se cae a `parseApiError`
+          // sobre la causa (mismo patrón que `isTitularLockedError`):
+          // pasarle el wrapper tal cual siempre da `errorCode: null`.
+          const wrapped = err as {
+            errorCode?: string | null;
+            cause?: unknown;
+          } | null;
+          const parsed = parseApiError(wrapped?.cause ?? err);
+          const surface = wrapped?.errorCode ?? parsed.errorCode ?? '';
+          const causeDetails = parsed.details as { cause_code?: unknown } | null;
+          const cause =
+            typeof causeDetails?.cause_code === 'string'
+              ? causeDetails.cause_code
+              : '';
+          const code = this.MULTI_TENDER_COPY[surface] ? surface : cause;
+          const message =
+            (code && this.MULTI_TENDER_COPY[code]) ||
+            parsed.userMessage ||
+            (err as { message?: string })?.message ||
+            'Error al registrar el pago';
+          this.toastService.error(message);
         },
       });
   }
@@ -2222,6 +2812,10 @@ export class OrderDetailsPageComponent {
    * straight away. This is what collapses the old two-button UX into one flow.
    */
   openDispatchSelector(): void {
+    if (this.kitchenBlocksWholeOrder()) {
+      this.toastService.warning('Entrega o cancela los platos pendientes de cocina antes de despachar toda la orden.');
+      return;
+    }
     // Gate obligatorio: un envío a domicilio sin dirección no se puede
     // despachar. Avisar y ofrecer capturar la dirección antes de continuar.
     if (this.blockedByMissingAddress()) {
@@ -2503,11 +3097,7 @@ export class OrderDetailsPageComponent {
       this.toastService.success('Orden entregada');
       this.loadData();
     } catch (err: any) {
-      this.toastService.error(
-        err?.error?.message ||
-          err?.message ||
-          'No se pudo completar la entrega directa',
-      );
+      this.showDeliveryStockError(err, 'No se pudo completar la entrega directa');
     } finally {
       this.isProcessingAction.set(false);
     }
@@ -2719,6 +3309,14 @@ export class OrderDetailsPageComponent {
 
   confirmPayment(): void {
     if (!this.orderId) return;
+
+    // Fase 2 (paso 8): un pago manual nunca se confirma con un clic — se
+    // REGISTRA (monto + método) por el modal de cobro (`flow/pay`). El backend
+    // rechaza al personal en `confirm-payment` con 409 en este caso.
+    if (this.isCodPending() || this.isManualPayPending()) {
+      this.openPayModal();
+      return;
+    }
 
     this.dialogService
       .confirm({
@@ -3530,10 +4128,29 @@ export class OrderDetailsPageComponent {
       this.dispatchNotes().find((n) => !!n.courier_name?.trim())
         ?.courier_name?.trim() || undefined;
 
+    // QUI-889 (rev 868) — instante real del despacho: última remisión no
+    // anulada por `confirmed_at` (luego su creación). NUNCA `emission_date`
+    // (solo-fecha: imprimiría el día anterior 7 p. m. en Bogotá). Sin
+    // despacho, hora de impresión (ahora), igual que el tiquete backend.
+    const instantOf = (n: { confirmed_at?: string; created_at: string }) =>
+      new Date(n.confirmed_at ?? n.created_at).getTime();
+    const latestDispatch = this.dispatchNotes()
+      .filter((n) => n.status !== 'draft' && n.status !== 'voided')
+      .sort((a, b) => instantOf(b) - instantOf(a))[0];
+    const dispatchAt = latestDispatch
+      ? new Date(
+          latestDispatch.confirmed_at ?? latestDispatch.created_at,
+        )
+      : null;
+
     return {
       orderId: order.id,
       orderNumber: order.order_number,
-      dateFormatted: this.formatDate(order.created_at),
+      dateFormatted: this.formatDate(
+        !dispatchAt || Number.isNaN(dispatchAt.getTime())
+          ? new Date().toISOString()
+          : dispatchAt.toISOString(),
+      ),
       storeName,
       customer: {
         name: customerName,
@@ -3776,6 +4393,7 @@ export class OrderDetailsPageComponent {
       this.loadPaymentMethods();
     }
     this.preSelectedInstallment.set(installment);
+    this.payModalError.set(null);
     this.showPayModal.set(true);
   }
 
@@ -3816,10 +4434,11 @@ export class OrderDetailsPageComponent {
       return;
     }
 
+    const copy = cancelPaymentCopy(this.order()?.state);
     this.dialogService
       .confirm({
         title: 'Cancelar Pago',
-        message: '¿Estás seguro de cancelar el pago de esta orden? La orden volverá al estado "Creada" y podrás registrar un nuevo pago.',
+        message: copy.confirm,
         confirmText: 'Cancelar Pago',
         cancelText: 'Volver',
         confirmVariant: 'danger',
@@ -3838,7 +4457,7 @@ export class OrderDetailsPageComponent {
           .subscribe({
             next: () => {
               this.isProcessingAction.set(false);
-              this.toastService.success('Pago cancelado exitosamente. La orden ha vuelto a estado "Creada".');
+              this.toastService.success(copy.success);
               this.loadData();
             },
             error: (err) => {
@@ -3934,19 +4553,7 @@ export class OrderDetailsPageComponent {
   }
 
   formatStatus(status: string | undefined): string {
-    if (!status) return 'Desconocido';
-    const labels: Record<string, string> = {
-      draft: 'Borrador',
-      created: 'Creada',
-      pending_payment: 'Pago Pendiente',
-      processing: 'Procesando',
-      shipped: 'Enviada',
-      delivered: 'Entregada',
-      cancelled: 'Cancelada',
-      refunded: 'Reembolsada',
-      finished: 'Finalizada',
-    };
-    return labels[status] || status;
+    return orderStateLabel(status);
   }
 
   formatDate(dateString: string | undefined): string {
@@ -3966,7 +4573,10 @@ export class OrderDetailsPageComponent {
     // Paso 8 — los audits de refund comparten `resource: 'orders'`, así que
     // sus estados (`completed`, ...) llegan a `new_values.state`. Sin esta
     // rama el timeline mostraba "Nuevo estado: completed" en crudo.
-    if (newState && this.isRefundStateValue(newState)) {
+    // B3 (release-855): `RefundState` colisiona por valor con `OrderState`
+    // en `processing`/`cancelled` — sin `isRefundAuditRow` una transición real
+    // de orden a `processing` se etiquetaba "Reembolso en proceso".
+    if (newState && this.isRefundStateValue(newState) && this.isRefundAuditRow(log)) {
       const label = this.refundStateLabel(newState);
       return `Reembolso ${label.charAt(0).toLowerCase()}${label.slice(1)}`;
     }
@@ -3990,7 +4600,14 @@ export class OrderDetailsPageComponent {
         cancelled: 'Orden Cancelada',
         refunded: 'Orden Reembolsada',
       };
-      if (stateLabels[newState]) return stateLabels[newState];
+      // B3 (release-855): un `new_values.state` truthy no prueba que HUBO
+      // transición — un PATCH que devuelve el snapshot completo de la orden
+      // (p. ej. `deliverOrderItem`, o una edición de notas/dirección) trae el
+      // mismo `state` en `old_values` y `new_values`. Sin este guard, esas
+      // filas se etiquetaban con el label de transición igual.
+      if (isConfirmedStateTransition(log, oldState, newState) && stateLabels[newState]) {
+        return stateLabels[newState];
+      }
     }
 
     // Fallback to generic action labels
@@ -4009,6 +4626,25 @@ export class OrderDetailsPageComponent {
       return 'Evento de reembolso';
     }
     return actionLabels[action] || log.action || 'Evento';
+  }
+
+  /**
+   * order-truth-and-invoice-tz plan, Step 7 — thin delegator to the pure
+   * `orderEventLabel()` (spec-tested without TestBed); only the amount
+   * formatter needs `this.currencyService`.
+   */
+  getOrderEventLabel(evt: OrderEvent): string {
+    return orderEventLabel(evt, (amount) => this.currencyService.format(amount));
+  }
+
+  /** Thin delegator to the pure `orderEventActorLabel()`. */
+  getOrderEventActorLabel(evt: OrderEvent): string {
+    return orderEventActorLabel(evt);
+  }
+
+  /** Thin delegator to the pure `isRefundOrderEvent()`. */
+  isRefundOrderEvent(evt: OrderEvent): boolean {
+    return isRefundOrderEvent(evt);
   }
 
   parseVariantAttributes(raw: unknown): VariantAttribute[] {
@@ -4035,13 +4671,7 @@ export class OrderDetailsPageComponent {
   kitchenStateFor(item: OrderItem):
     | { status: string; kitchen_ticket_id?: number }
     | null {
-    const items = item.kitchen_ticket_items;
-    if (!items || items.length === 0) return null;
-    const inFlight = items.find(
-      (k) => k.status === 'pending' || k.status === 'in_preparation' || k.status === 'ready',
-    );
-    if (inFlight) return inFlight;
-    return items[0]; // items are pre-sorted desc by the backend include
+    return kitchenStateForItem(item); // items are pre-sorted desc by the backend include
   }
 
   /**
@@ -4106,10 +4736,13 @@ export class OrderDetailsPageComponent {
       .fireOrderItems({ order_id: order.id, order_item_ids: ids })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (res) => {
           this.isFiringKitchen.set(false);
           this.clearKitchenSelection();
           this.toastService.success('Enviado a cocina');
+          if (res?.stock_warnings?.length) {
+            this.toastService.warning(formatStockWarningSummary(res.stock_warnings));
+          }
           // Re-fetch the order so the kitchen_ticket_items badges update.
           this.refreshOrder();
         },
@@ -4138,30 +4771,21 @@ export class OrderDetailsPageComponent {
   /**
    * Punto de entrada de "Cambiar cliente".
    *
-   * PRE-CHECK (espejo del guard backend `ORD_EDIT_NOT_ALLOWED_001` en
-   * `orders.service.ts`): el titular cambia en created/draft/pending_payment/
-   * processing/pending_delivery. En shipped/delivered/finished/cancelled/
-   * refunded se muestra el dialog informativo y no se abre ningún modal.
-   * Release-853 paso 10: también se bloquea si la orden tiene una
-   * `sales_invoice` vigente (espejo de `ORD_TITULAR_INVOICED_001`); el
-   * borrador sí deja pasar porque el backend le propaga el titular.
-   * En estado editable se abre el buscar-primero; el `app-customer-modal`
-   * en modo crear solo aparece vía "Crear cliente nuevo".
+   * Regla vigente (release-titular-any-state): el titular se puede cambiar
+   * en CUALQUIER estado de la orden (incluidos shipped/delivered/finished/
+   * cancelled/refunded) — ya no hay gate de estado. El único bloqueo es
+   * fiscal: si la orden tiene un documento electrónico TRANSMITIDO a la DIAN
+   * (`sent`/`accepted`) se muestra el dialog informativo (espejo de
+   * `ORD_TITULAR_INVOICED_001`) y no se abre ningún modal. Documentos no
+   * transmitidos (draft/validated/rejected) no bloquean aquí — el backend
+   * decide caso a caso (draft: propaga; validated/rejected: 409 con mensaje
+   * "en proceso"). En estado permitido se abre el buscar-primero; el
+   * `app-customer-modal` en modo crear solo aparece vía "Crear cliente
+   * nuevo".
    */
   async openChangeCustomer(): Promise<void> {
     const order = this.order();
     if (!order) return;
-    const TITULAR_LOCKED_STATES: readonly OrderState[] = [
-      'shipped',
-      'delivered',
-      'finished',
-      'cancelled',
-      'refunded',
-    ];
-    if (TITULAR_LOCKED_STATES.includes(order.state)) {
-      await this.notifyTitularLocked();
-      return;
-    }
     if (this.hasActiveSalesInvoice()) {
       await this.notifyTitularLocked('ORD_TITULAR_INVOICED_001');
       return;
@@ -4171,34 +4795,43 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * Release-854 follow-up — espejo local del gate backend
-   * `ORD_TITULAR_INVOICED_001`: decide con `active_sales_invoice` (calculado
-   * por el backend con el filtro de la guarda) en lugar de `invoices[0]`,
-   * que puede ser una NC aunque exista una `sales_invoice` aceptada. El
-   * borrador sí deja pasar porque el backend le propaga el titular.
-   * `orderInvoice` y la tarjeta de factura no cambian: siguen mostrando
-   * `invoices[0]`.
+   * Espejo local del gate backend `ORD_TITULAR_INVOICED_001`: decide con
+   * `active_sales_invoice` (calculado por el backend con el filtro de la
+   * guarda — incluye `sales_invoice`/`export_invoice`/
+   * `pos_equivalent_document`) en lugar de `invoices[0]`, que puede ser una
+   * NC aunque exista una factura aceptada. Solo bloquea si el documento fue
+   * TRANSMITIDO a la DIAN (`sent`/`accepted`); `draft`/`validated`/
+   * `rejected` no bloquean el pre-check local (el backend decide si
+   * propaga o responde 409 "en proceso"). `orderInvoice` y la tarjeta de
+   * factura no cambian: siguen mostrando `invoices[0]`.
    */
   private hasActiveSalesInvoice(): boolean {
     const active = this.order()?.active_sales_invoice;
     if (!active) return false;
-    return active.status !== 'draft';
+    return active.status === 'sent' || active.status === 'accepted';
   }
 
   /**
    * Dialog informativo (español) del titular bloqueado. Se usa tanto en el
    * pre-check local como al mapear 409/403 del PATCH titular.
    *
-   * Release-853 regresión (paso 10): recibe opcionalmente el `errorCode` que
-   * disparó el bloqueo para diferenciar el copy del caso factura vigente
-   * (`ORD_TITULAR_INVOICED_001`) del genérico de estado/tienda ajena.
+   * Regla vigente (release-titular-any-state): ya no hay gate de estado, así
+   * que se retiró la frase "orden en curso o finalizada" (dejó de aplicar).
+   * Copy por código: factura vigente (`ORD_TITULAR_INVOICED_001`), tienda
+   * ajena (`ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`) y un genérico neutro para
+   * cualquier otro código defensivo (p. ej. `ORD_EDIT_NOT_ALLOWED_001`, que
+   * el backend ya no lanza por titular pero se conserva reconocido por
+   * compatibilidad — ver `isTitularLockedError`).
    */
   private notifyTitularLocked(code?: string | null): Promise<boolean> {
     const message =
       code === 'ORD_TITULAR_INVOICED_001'
         ? 'La orden ya tiene una factura emitida; anúlala o emite una nota crédito para cambiar el titular.'
-        : 'Esta orden ya está en curso o finalizada, por lo que su titular no puede cambiarse. ' +
-          'El titular queda fijado al avanzar la orden y es inmutable por trazabilidad fiscal.';
+        : code === 'ORD_TITULAR_OPEN_RECEIVABLE_001'
+          ? 'La orden tiene saldo pendiente en cartera a nombre del cliente actual; salda o anula la cuenta por cobrar para cambiar el titular.'
+          : code === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001'
+            ? 'El cliente seleccionado pertenece a otra tienda; elige un cliente de esta tienda.'
+            : 'No se pudo cambiar el titular de esta orden.';
     return this.dialogService.confirm({
       title: 'No se puede cambiar el titular',
       message,
@@ -4209,12 +4842,16 @@ export class OrderDetailsPageComponent {
 
   /**
    * Devuelve el `errorCode` cuando el error del PATCH titular es uno de los
-   * tres bloqueos de titular: estado (409 `ORD_EDIT_NOT_ALLOWED_001`), tienda
-   * ajena (403 `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`) o factura vigente (409
-   * `ORD_TITULAR_INVOICED_001`); `null` en cualquier otro caso. Release-853
-   * paso 10: decide SOLO por `errorCode` — el fallback por status HTTP metía
-   * en el dialog de bloqueo cualquier 409/403 ajeno al titular (p. ej. un
-   * split financiero activo).
+   * bloqueos de titular reconocidos: tienda ajena (403
+   * `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`) o factura vigente (409
+   * `ORD_TITULAR_INVOICED_001`); `null` en cualquier otro caso.
+   * `ORD_EDIT_NOT_ALLOWED_001` se sigue reconociendo de forma defensiva
+   * (compatibilidad hacia atrás / otros llamadores del PATCH), pero el
+   * backend ya no lo lanza por razón de titular — el gate de estado se
+   * eliminó (regla vigente: el titular cambia en cualquier estado). Decide
+   * SOLO por `errorCode` — el fallback por status HTTP metía en el dialog de
+   * bloqueo cualquier 409/403 ajeno al titular (p. ej. un split financiero
+   * activo).
    *
    * `StoreOrdersService.updateOrderCustomer` lanza `buildApiError(error)`: un
    * `Error` con `errorCode` en camelCase y el `HttpErrorResponse` original en
@@ -4231,7 +4868,8 @@ export class OrderDetailsPageComponent {
       parseApiError((error as { cause?: unknown } | null)?.cause ?? error).errorCode;
     return code === 'ORD_EDIT_NOT_ALLOWED_001' ||
       code === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001' ||
-      code === 'ORD_TITULAR_INVOICED_001'
+      code === 'ORD_TITULAR_INVOICED_001' ||
+      code === 'ORD_TITULAR_OPEN_RECEIVABLE_001'
       ? code
       : null;
   }
@@ -4260,7 +4898,8 @@ export class OrderDetailsPageComponent {
    * "Crear cliente nuevo" desde el buscar-primero: conserva el flujo actual
    * (lookup → resolve → PATCH en `onChangeCustomerSave`).
    */
-  onTitularSearchCreateNew(): void {
+  onTitularSearchCreateNew(prefill?: Partial<CreateCustomerRequest> | void): void {
+    this.changeCustomerInitialValues.set((prefill as Partial<CreateCustomerRequest> | undefined) ?? null);
     this.showTitularSearchModal.set(false);
     this.pendingChangeCustomerAddress.set(null);
     this.showChangeCustomerModal.set(true);
@@ -4292,6 +4931,7 @@ export class OrderDetailsPageComponent {
 
   closeChangeCustomer(): void {
     this.showChangeCustomerModal.set(false);
+    this.changeCustomerInitialValues.set(null);
     this.pendingChangeCustomerAddress.set(null);
   }
 
@@ -4349,6 +4989,7 @@ export class OrderDetailsPageComponent {
         next: () => {
           this.toastService.success('Titular de la orden actualizado');
           this.showChangeCustomerModal.set(false);
+          this.changeCustomerInitialValues.set(null);
           this.pendingChangeCustomerAddress.set(null);
           this.refreshOrder();
         },
@@ -4412,8 +5053,8 @@ export class OrderDetailsPageComponent {
    * Gestión avanzada de cocina = admin/encargado: sin el permiso, el botón
    * queda visible pero deshabilitado con motivo (patrón
    * `deliverDisabledReason` del KDS), nunca un 403 por sorpresa. Roles con
-   * permiso ven cero cambios. El predicado de negocio (`canResendOrderItem`)
-   * no se toca: el permiso se gatea en el llamador.
+   * permiso ven cero cambios. El predicado de negocio (`canResend`, backend
+   * `item.available_actions`) no se toca: el permiso se gatea en el llamador.
    */
   readonly canUseKitchenResend = computed(() =>
     this.hasNamedPermission('store:kitchen_fire:resend'),
@@ -4439,18 +5080,15 @@ export class OrderDetailsPageComponent {
 
   // ─── QUI-762 — reenviar un plato a cocina ─────────────────────────
   /**
-   * Espejo del predicado `KITCHEN_FIRE_NOT_RESENDABLE` del backend.
-   * Delegado a `canResendOrderItem` (helper puro testeable). Ver
-   * `can-resend.ts` para el contrato y `can-resend.spec.ts` para los
-   * 8 casos canónicos + 4 casos de borde.
+   * order-truth-and-invoice-tz plan — reemplaza el antiguo predicado local
+   * `canResendOrderItem` (`can-resend.ts`); la visibilidad viene de
+   * `item.available_actions` (code `resend`, backend `canResendItem`).
    *
    * El botón "Reenviar a cocina" se oculta cuando devuelve `false` —
    * no ofrezco acciones que el backend rechazaría con 422.
    */
   canResend(item: OrderItem): boolean {
-    // La regla de fila cancelada vive en `canResendOrderItem` (testeable):
-    // veta SALVO decisión reuse/waste, que es el remake post-cancelación.
-    return canResendOrderItem(item, this.order()?.state);
+    return isItemActionEnabled(item, 'resend');
   }
 
   /** Abre el modal con el ítem elegido. */
@@ -4490,38 +5128,13 @@ export class OrderDetailsPageComponent {
   readonly deliveringItemId = signal<number | null>(null);
 
   /**
-   * Espejo del predicado `DELIVER_ORDER_ITEM_NOT_DELIVERABLE` del backend.
-   * Ofrece la acción "Entregar" SOLO si:
-   *  - El ítem NO está entregado todavía (`delivered_at` IS NULL).
-   *  - La orden NO está en estado terminal. Lista reusada del predicado
-   *    `canResend` (:556): shipped / delivered / finished / cancelled /
-   *    refunded. NO se ofrece si la orden ya está cancelada, devuelta,
-   *    enviada como domicilio o marcada como entregada globalmente.
-   *  - Si el ítem pasó por cocina, su `kitchen_ticket_items[0].status`
-   *    debe ser `ready`. En cualquier otro estado el backend responde 422;
-   *    no ofrezco un botón que sé que va a fallar.
-   *  - Si el ítem NUNCA pasó por cocina (cerveza, retail, etc.) es
-   *    entregable directo. Este es el caso que cubre T9p6: una orden
-   *    POS / para llevar / domicilio que NO tiene sesión de mesa no
-   *    tenía superficie de entrega hasta hoy.
+   * order-truth-and-invoice-tz plan — reemplaza el antiguo `canDeliverItem`
+   * (B16, release-855); la visibilidad viene de `item.available_actions`
+   * (code `deliver`, backend `canDeliverItem` en
+   * `order-action-policy.util.ts`).
    */
   canDeliver(item: OrderItem): boolean {
-    if (item.delivered_at) return false;
-    // Fila cancelada: excluida de acciones posteriores (badge + motivo).
-    if (item.cancelled_at) return false;
-    const order = this.order();
-    if (!order) return false;
-    const terminalStates: OrderState[] = [
-      'shipped',
-      'delivered',
-      'finished',
-      'cancelled',
-      'refunded',
-    ];
-    if (terminalStates.includes(order.state as OrderState)) return false;
-    const ks = this.kitchenStateFor(item);
-    if (ks == null) return true;
-    return ks.status === 'ready';
+    return isItemActionEnabled(item, 'deliver');
   }
 
   /**
@@ -4549,14 +5162,34 @@ export class OrderDetailsPageComponent {
         },
         error: (err: unknown) => {
           this.deliveringItemId.set(null);
-          // C.3: passthrough del mensaje mapeado (ERR-12 lleva al KDS).
-          const { userMessage } = parseApiError(err);
-          this.toastService.error(
-            userMessage || 'No se pudo marcar como entregado',
-          );
+          this.showDeliveryStockError(err, 'No se pudo marcar como entregado');
           console.error('Deliver item failed', err);
         },
       });
+  }
+
+  /** Keep every short line visible and offer the first product's inventory settings. */
+  private showDeliveryStockError(error: unknown, fallback: string): void {
+    const raw = (error as { cause?: unknown } | null)?.cause ?? error;
+    const parsed = parseApiError(raw);
+    const firstProduct = parsed.stockShortages?.find((item) => item.product_id > 0);
+    if (parsed.stockShortages?.length) {
+      this.toastService.show({
+        description: parsed.userMessage,
+        variant: 'error',
+        duration: 8000,
+        ...(firstProduct ? {
+          action: {
+            label: 'Ver producto',
+            onClick: () => void this.router.navigate(['/admin/products/edit', firstProduct.product_id]),
+          },
+        } : {}),
+      });
+      return;
+    }
+    this.toastService.error(
+      (error as Error | null)?.message || parsed.userMessage || fallback,
+    );
   }
 
   // ─── Paso 2 PLAN-order-detail-cancel-item — cancelar un ítem ──────
@@ -4579,8 +5212,14 @@ export class OrderDetailsPageComponent {
     return item?.products?.product_type === 'prepared' && item.inventory_consumed_at_fire === true;
   });
 
+  readonly cancellationNeedsDisposition = computed(() => {
+    const item = this.cancellationTarget()?.item;
+    return this.cancellationPreparedFired() &&
+      (item ? this.kitchenStateFor(item)?.status !== 'pending' : false);
+  });
+
   readonly canReuseCancellation = computed(() =>
-    this.cancellationTarget()?.mode === 'reverse' || this.cancellationPreparedFired(),
+    this.cancellationTarget()?.mode === 'reverse' || this.cancellationNeedsDisposition(),
   );
 
   /**
@@ -4610,28 +5249,12 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * Espejo del gate de mesa (`canRemoveItem` en
-   * `table-session-page.component.ts:701`). Ofrece "Cancelar" SOLO si:
-   *  - El ítem NO está ya cancelado (`cancelled_at` IS NULL).
-   *  - El ítem NO está entregado (hecho de servicio irreversible).
-   *  - Si pasó por cocina, su estado es `pending` (se cancela como merma
-   *    in-tx con SSE post-commit) o nunca fue disparado (exclusión directa
-   *    del total). En `in_preparation` / `ready` / `delivered` el backend
-   *    rechazaría, así que no ofrezco un botón que sé que va a fallar.
-   *
-   * Predicado inline (no `can-cancel.ts` aparte): reutiliza
-   * `kitchenStateFor` como única fuente de verdad del estado de cocina,
-   * igual que `canDeliver` — un helper extra duplicaría esa resolución
-   * y divergiría de ella.
+   * order-truth-and-invoice-tz plan — reemplaza el predicado local inline
+   * (espejo del gate de mesa); la visibilidad viene de
+   * `item.available_actions` (code `cancel`, backend `canCancelItem`).
    */
   canCancelItem(item: OrderItem): boolean {
-    if (isOrderItemCancellationPaid(this.order())) return false;
-    if (['finished', 'cancelled', 'refunded'].includes(this.order()?.state ?? '')) return false;
-    if (item.cancelled_at) return false;
-    if (item.delivered_at) return false;
-    const ks = this.kitchenStateFor(item);
-    if (ks == null) return true;
-    return ks.status === 'pending';
+    return isItemActionEnabled(item, 'cancel');
   }
 
   /**
@@ -4723,15 +5346,15 @@ export class OrderDetailsPageComponent {
   readonly reversingItemId = signal<number | null>(null);
 
   /**
-   * Ofrece "Reversar" a TODO ítem entregado no cancelado. El permiso
-   * (`store:orders:order_flow:cancel_delivered`) se gatea en el llamador:
-   * sin él, el botón queda visible pero deshabilitado con motivo en vez de
-   * ofrecer un 403 por sorpresa.
+   * order-truth-and-invoice-tz plan — reemplaza el predicado local inline;
+   * la visibilidad viene de `item.available_actions` (code
+   * `reverse_delivered`, backend `canReverseDeliveredItem`). El permiso
+   * (`store:orders:order_flow:cancel_delivered`) se sigue gateando en el
+   * llamador: sin él, el botón queda visible pero deshabilitado con motivo
+   * en vez de ofrecer un 403 por sorpresa.
    */
   canReverseDeliveredItem(item: OrderItem): boolean {
-    return !!item.delivered_at && !item.cancelled_at &&
-      !['finished', 'cancelled', 'refunded'].includes(this.order()?.state ?? '') &&
-      !isOrderItemCancellationPaid(this.order());
+    return isItemActionEnabled(item, 'reverse_delivered');
   }
 
   /**
@@ -4767,7 +5390,7 @@ export class OrderDetailsPageComponent {
     let body: ReturnType<typeof cancellationBody>;
     try {
       body = cancellationBody(target.mode, reason, result.destination,
-        this.cancellationPreparedFired());
+        this.cancellationNeedsDisposition());
     } catch (err) {
       this.cancellationError.set((err as Error).message);
       return;
@@ -4923,6 +5546,20 @@ export class OrderDetailsPageComponent {
   }
 
   /**
+   * B3 (release-855): `RefundState` values collide by name with real
+   * `OrderState` values (`processing`, `cancelled`). `isRefundStateValue`
+   * alone can't tell "this row IS a refund" from "this row is an order
+   * transition that happens to land on a state refunds also use". This
+   * checks the audit row's own shape instead of the state string:
+   * `metadata.flow_action==='refund'` (POST .../flow/refund) or an
+   * `order_id` on `old_values`/`new_values` (only `refunds` rows have it —
+   * `orders` snapshots have `.id`, never `.order_id`).
+   */
+  isRefundAuditRow(log: any): boolean {
+    return isRefundAuditRow(log);
+  }
+
+  /**
    * Paso 8 — 1 clic del banner FE→NC: emite la NC del primer reembolso
    * sugerido por el backend que siga siendo candidato. Reutiliza el flujo
    * B.3 (`startRefundNote`): nunca automática, siempre vía borrador +
@@ -4980,7 +5617,7 @@ export class OrderDetailsPageComponent {
         this.loadData();
       },
       error: (err: any) => {
-        this.toastService.error(err?.message || 'No se pudo marcar como entregada');
+        this.showDeliveryStockError(err, 'No se pudo marcar como entregada');
       },
     });
   }
@@ -5354,18 +5991,17 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * ¿Ya existe una NC viva que cubra este reembolso? Misma regla que el
-   * operador aplicaría a ojo: NC de tipo crédito, no anulada/rechazada, por
-   * al menos el monto devuelto y creada después del reembolso.
+   * ¿Ya existe una NC viva que cubra este reembolso? El vínculo lo pone el
+   * backend (`invoices.refund_id`, paso A2): basta comparar ids, sin la
+   * heurística anterior de montos/fechas que fallaba con devoluciones
+   * parciales y redondeos.
    */
   private refundCoveredByNote(refund: RefundRecord): boolean {
-    const since = refund.processed_at ?? refund.created_at;
     return this.invoiceNotes().some(
       (n) =>
         n.invoice_type === 'credit_note' &&
         !['cancelled', 'voided', 'rejected'].includes(n.status) &&
-        Number(n.total_amount) >= Number(refund.amount) - 0.5 &&
-        n.created_at >= since,
+        n.refund_id === refund.id,
     );
   }
 
@@ -5436,48 +6072,23 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * Mapea `refund_items` → líneas de NC con importes YA calculados (ADR-03):
-   * cantidad y montos del reembolso, precio y descripción de la línea de la
-   * orden. Nunca re-deriva impuestos. Sin líneas pero con envío → línea libre
-   * de envío. Sin detalle → se omite `items` (nota total).
+   * La NC de 1 clic NO arma líneas (paso A2): envía `{related_invoice_id,
+   * refund_id, reason, note_concept_code}` y el backend deriva las líneas del
+   * reembolso (`resolveRefundLink`, productos + envío). Enviar `items`
+   * explícitos junto a `refund_id` lo rechaza el backend con 422.
    */
   private buildRefundNoteDto(
     refund: RefundRecord,
     invoiceId: number,
   ): CreateCreditNoteDto {
-    const orderItems = this.order()?.order_items ?? [];
-    const items: CreateInvoiceItemDto[] = [];
-    for (const ri of refund.refund_items ?? []) {
-      if (!(Number(ri.quantity) > 0)) continue;
-      const oi = orderItems.find((o) => o.id === ri.order_item_id);
-      if (!oi) continue;
-      items.push({
-        ...(oi.product_id > 0 ? { product_id: oi.product_id } : {}),
-        ...(oi.product_variant_id ? { product_variant_id: oi.product_variant_id } : {}),
-        description: oi.product_name ?? `Ítem ${oi.id}`,
-        quantity: Number(ri.quantity),
-        unit_price: Number(oi.unit_price),
-        discount_amount: Number(ri.discount_amount ?? 0),
-        tax_amount: Number(ri.tax_amount ?? 0),
-      });
-    }
-    if (!items.length && Number(refund.shipping_refund ?? 0) > 0) {
-      items.push({
-        description: `Reembolso de envío — orden #${this.orderId}`,
-        quantity: 1,
-        unit_price: Number(refund.shipping_refund),
-        discount_amount: 0,
-        tax_amount: 0,
-      });
-    }
     const reason =
       `Reembolso #${refund.id} de la orden #${this.orderId}` +
       (refund.reason ? ` — ${refund.reason}` : '');
     return {
       related_invoice_id: invoiceId,
+      refund_id: refund.id,
       reason: reason.slice(0, 500),
       note_concept_code: this.refundCoversWholeOrder(refund) ? '2' : '1',
-      ...(items.length ? { items } : {}),
     };
   }
 
@@ -5564,6 +6175,17 @@ export class OrderDetailsPageComponent {
   isEmittingInvoice = signal(false);
 
   /**
+   * B5 — La guarda de facturación rechazó por copia incoherente del impuesto
+   * del envío (`INVOICING_CALC_006` + `details.detail = 'shipping_tax:*'`).
+   * Mientras esté en `true`, el operador ve la acción «Reparar impuesto del
+   * envío» (toast con acción al momento del rechazo; `repairShippingTax`
+   * queda público para bindear un botón persistente en la tarjeta de
+   * factura). Se apaga al reparar con éxito o al emitir la factura.
+   */
+  readonly shippingTaxRepairNeeded = signal(false);
+  readonly isRepairingShippingTax = signal(false);
+
+  /**
    * Emite la factura electrónica de venta a partir de ESTA orden.
    *
    * `createFromOrder`, no `createFromSalesOrder`: son endpoints distintos sobre
@@ -5595,6 +6217,7 @@ export class OrderDetailsPageComponent {
             return;
           }
           this.toastService.success('Factura de venta emitida');
+          this.shippingTaxRepairNeeded.set(false);
           this.loadData();
         },
         error: (err: unknown) => {
@@ -5604,12 +6227,92 @@ export class OrderDetailsPageComponent {
           // for …: 500 Internal Server Error"), nunca el mensaje del backend.
           const parsed = parseApiError(err);
           const invoiceNumber = parsed.details?.invoice_number;
+          // B5 — La guarda rechazó por copia incoherente del impuesto del
+          // envío: ofrecer la reparación. Solo este rechazo la muestra.
+          const guardDetail: unknown = parsed.details?.detail;
+          const shippingTaxRejected =
+            parsed.errorCode === 'INVOICING_CALC_006' &&
+            typeof guardDetail === 'string' &&
+            guardDetail.startsWith('shipping_tax:');
+          this.shippingTaxRepairNeeded.set(shippingTaxRejected);
+          if (shippingTaxRejected) {
+            this.toastService.show({
+              description: parsed.userMessage,
+              variant: 'error',
+              duration: 8000,
+              action: {
+                label: 'Reparar impuesto del envío',
+                onClick: () => this.repairShippingTax('complete_rate'),
+              },
+            });
+            return;
+          }
           this.toastService.error(
             invoiceNumber
               ? `Esta orden ya tiene la factura ${invoiceNumber}. Anúlala antes de emitir otra.`
               : parsed.userMessage,
           );
         },
+      });
+  }
+
+  /**
+   * B5 — Repara la copia del impuesto del envío de esta orden
+   * (`POST /store/orders/:id/shipping-tax/repair`).
+   *
+   * Pide el motivo (auditoría) con un prompt global y repara: por defecto
+   * `complete_rate` (completa desde la tarifa conservando el monto); `clear`
+   * vacía la copia y el backend la niega con 409 si el impuesto ya está
+   * contabilizado. Al terminar con éxito recarga el detalle para que el
+   * operador facture de nuevo.
+   */
+  repairShippingTax(action: RepairShippingTaxAction = 'complete_rate'): void {
+    const orderId = this.orderId;
+    if (!orderId || this.isRepairingShippingTax()) return;
+    void this.dialogService
+      .prompt({
+        title: 'Reparar impuesto del envío',
+        message:
+          action === 'clear'
+            ? 'Vacía la copia del impuesto del envío de esta orden. Falla si el impuesto ya está contabilizado. Escribe el motivo:'
+            : 'Completa la copia del impuesto del envío desde su tarifa, conservando el monto cobrado. Escribe el motivo:',
+        placeholder: 'Motivo de la reparación',
+        confirmText: 'Reparar',
+      })
+      .then((reason) => {
+        const trimmed = (reason ?? '').trim();
+        if (trimmed.length < 3 || trimmed.length > 500) return;
+        this.isRepairingShippingTax.set(true);
+        this.ordersService
+          .repairShippingTax(Number(orderId), action, trimmed)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: () => {
+              this.isRepairingShippingTax.set(false);
+              this.shippingTaxRepairNeeded.set(false);
+              this.toastService.success(
+                'Impuesto del envío reparado. Ya puedes facturar de nuevo.',
+              );
+              this.loadData();
+            },
+            error: (err: unknown) => {
+              this.isRepairingShippingTax.set(false);
+              // 409 (ya contabilizado, `clear` rechazado): el aviso fijo
+              // sigue visible — `shippingTaxRepairNeeded` no se toca aquí.
+              //
+              // `repairShippingTax` (store-orders.service) envuelve el
+              // error con `buildApiError`: mismo patrón que
+              // `flowPayOrder`/`flowCreditPayment` arriba — se lee
+              // `err.cause` (el `HttpErrorResponse` crudo) para que
+              // `parseApiError` muestre el mensaje del backend tal cual,
+              // en vez del `Error` ya envuelto.
+              const wrapped = err as { cause?: unknown } | null;
+              this.toastService.error(
+                parseApiError(wrapped?.cause ?? err).userMessage ||
+                  'No se pudo reparar el impuesto del envío',
+              );
+            },
+          });
       });
   }
 }

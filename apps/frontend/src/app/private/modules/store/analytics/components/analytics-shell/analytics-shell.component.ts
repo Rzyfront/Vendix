@@ -100,6 +100,7 @@ export class AnalyticsShellComponent {
     // Purchases
     '/admin/analytics/purchases/summary': '/admin/reports/purchases/purchase-summary',
     '/admin/analytics/purchases/by-supplier': '/admin/reports/purchases/purchase-by-supplier',
+    '/admin/analytics/purchases/trends': '/admin/reports/purchases/purchase-trends',
     '/admin/analytics/purchases/payable-aging': '/admin/reports/purchases/payable-aging',
     // Reviews
     '/admin/analytics/reviews/summary': '/admin/reports/reviews/reviews-summary',
@@ -113,6 +114,9 @@ export class AnalyticsShellComponent {
     '/admin/analytics/dispatch/summary': '/admin/reports/dispatch',
     '/admin/analytics/dispatch/fulfillment': '/admin/reports/dispatch',
     '/admin/analytics/dispatch/collections': '/admin/reports/dispatch',
+    // Payments — Paso 4 PLAN-reporte-analitica-pagos-2026-09-28
+    '/admin/analytics/payments/overview': '/admin/reports/payments/payments-list',
+    '/admin/analytics/payments/by-method': '/admin/reports/payments/payments-list',
   };
 
   onActivate(componentRef: any): void {

@@ -17,6 +17,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
   let settingsService: any;
   let prismaMock: any;
   let context: any;
+  let orderHistory: { record: jest.Mock };
 
   const STORE_ID = 100;
   const USER_ID = 42;
@@ -112,9 +113,30 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       emitTicketCancelledEvent: jest.fn(),
     };
     const stockLevelManager = {
-      getDefaultLocationForProduct: jest.fn(),
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(1),
+      reserveStock: jest.fn().mockResolvedValue(undefined),
       updateStock: jest.fn(),
     };
+    const stockValidator = {
+      assertLinesAvailable: jest.fn().mockResolvedValue([]),
+      resolveEffectiveTracking: jest.fn((product, variant) =>
+        variant?.track_inventory_override ?? product?.track_inventory ?? false),
+      // docs/plans/no-overselling-stock-guard-plan.md step 9 — strict default
+      // (allowOversell=false) preserves every pre-existing assertion
+      // byte-for-byte; the oversell-path tests override this per-case.
+      resolveInventoryPolicy: jest.fn().mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: true,
+      }),
+    };
+    const sellableStockAllocator = {
+      allocateForLine: jest.fn(async (_storeId, _productId, _variantId, quantity) => ({
+        slices: [{ location_id: 1, quantity }], allocated: quantity,
+        available: quantity, shortfall: 0,
+      })),
+    };
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    orderHistory = { record: jest.fn().mockResolvedValue(null) };
 
     service = new TableSessionsService(
       prismaMock as any,
@@ -128,6 +150,9 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       kitchenFireService as any,
       stockLevelManager as any,
       { markItemDelivered: jest.fn() } as any,
+      orderHistory as any,
+      stockValidator as any,
+      sellableStockAllocator as any,
     );
   });
 
@@ -323,6 +348,20 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       expect((service as any).notificationsSseService.push).toHaveBeenCalledWith(
         STORE_ID,
         expect.objectContaining({ type: 'session_paid' }),
+      );
+
+      // Plan order-truth-and-invoice-tz (Step 6) — payment_registered dentro
+      // de la MISMA tx que confirma el pago y suma el saldo de la orden.
+      expect(orderHistory.record).toHaveBeenCalledWith(
+        prismaMock,
+        expect.objectContaining({
+          orderId,
+          storeId: STORE_ID,
+          organizationId: 1,
+          type: 'payment_registered',
+          paymentId,
+          amount: 60,
+        }),
       );
     });
 
@@ -615,6 +654,105 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
   });
 
   describe('addItems', () => {
+    const openSession = () => ({
+      id: 1, order_id: 100, closed_at: null, table_id: 5,
+      order: { id: 100, state: 'draft', order_items: [] },
+      table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
+    });
+    const trackedProduct = () => ({
+      id: 51, name: 'MODELO', base_price: 100,
+      is_sellable: true, state: 'active', product_type: 'physical', track_inventory: true,
+      product_variants: [], price_unit_quantity: null,
+    });
+
+    it('rejects an insufficient tracked item before creating a table line', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+      prismaMock.products.findMany.mockResolvedValue([trackedProduct()]);
+      const shortage = new VendixHttpException(
+        ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+        'MODELO sin existencias',
+        { items: [{ product_id: 51, product_variant_id: null, product_name: 'MODELO', kind: 'product', requested: 1, available: 0 }] },
+      );
+      (service as any).stockValidator.assertLinesAvailable.mockRejectedValueOnce(shortage);
+
+      await expect(service.addItems(1, { items: [{ product_id: 51, quantity: 1 }] } as any))
+        .rejects.toMatchObject({ errorCode: 'INV_STOCK_INSUFFICIENT_LINES' });
+      expect(prismaMock.order_items.create).not.toHaveBeenCalled();
+      expect((service as any).stockLevelManager.reserveStock).not.toHaveBeenCalled();
+    });
+
+    it('reserves a physical item in the table transaction', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+      prismaMock.products.findMany.mockResolvedValue([trackedProduct()]);
+      prismaMock.order_items.create.mockResolvedValue({ id: 707 });
+      prismaMock.orders.update.mockResolvedValue({});
+
+      await service.addItems(1, { items: [{ product_id: 51, quantity: 2 }] } as any);
+
+      expect((service as any).stockValidator.assertLinesAvailable).toHaveBeenCalledWith(
+        [expect.objectContaining({ product_id: 51, quantity: 2 })],
+        { tx: prismaMock, allowOversell: false },
+      );
+      expect((service as any).stockLevelManager.reserveStock).toHaveBeenCalledWith(
+        51, undefined, 1, 2, 'order', 100, USER_ID,
+        true, prismaMock, undefined, false, undefined, false,
+      );
+    });
+
+    it('reserves a table item split across two locations without overselling either', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+      prismaMock.products.findMany.mockResolvedValue([trackedProduct()]);
+      prismaMock.order_items.create.mockResolvedValue({ id: 708 });
+      prismaMock.orders.update.mockResolvedValue({});
+      (service as any).sellableStockAllocator.allocateForLine.mockResolvedValueOnce({
+        slices: [{ location_id: 1, quantity: 1 }, { location_id: 2, quantity: 1 }],
+        allocated: 2, available: 2, shortfall: 0,
+      });
+
+      await service.addItems(1, { items: [{ product_id: 51, quantity: 2 }] } as any);
+
+      expect((service as any).stockLevelManager.reserveStock).toHaveBeenCalledTimes(2);
+      expect((service as any).stockLevelManager.reserveStock).toHaveBeenNthCalledWith(1,
+        51, undefined, 1, 1, 'order', 100, USER_ID,
+        true, prismaMock, undefined, false, undefined, false,
+      );
+      expect((service as any).stockLevelManager.reserveStock).toHaveBeenNthCalledWith(2,
+        51, undefined, 2, 1, 'order', 100, USER_ID,
+        true, prismaMock, undefined, false, undefined, false,
+      );
+    });
+
+    it('preserves the list-error contract if stock disappears before allocation', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+      prismaMock.products.findMany.mockResolvedValue([trackedProduct()]);
+      prismaMock.order_items.create.mockResolvedValue({ id: 709 });
+      (service as any).sellableStockAllocator.allocateForLine.mockResolvedValueOnce({
+        slices: [], allocated: 0, available: 0, shortfall: 1,
+      });
+
+      await expect(service.addItems(1, { items: [{ product_id: 51, quantity: 1 }] } as any))
+        .rejects.toMatchObject({
+          errorCode: ErrorCodes.INV_STOCK_INSUFFICIENT_LINES.code,
+          response: { details: { items: [expect.objectContaining({
+            product_name: 'MODELO', requested: 1, available: 0,
+          })] } },
+        });
+      expect((service as any).stockLevelManager.reserveStock).not.toHaveBeenCalled();
+    });
+
+    it('rechaza un producto inactivo antes de crear la línea', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+      prismaMock.products.findMany.mockResolvedValue([
+        { ...trackedProduct(), state: 'inactive' },
+      ]);
+
+      await expect(service.addItems(1, { items: [{ product_id: 51, quantity: 1 }] } as any))
+        .rejects.toMatchObject({
+          errorCode: ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID.code,
+        });
+      expect(prismaMock.order_items.create).not.toHaveBeenCalled();
+    });
+
     it('rejects adding items to a closed session', async () => {
       prismaMock.table_sessions.findFirst.mockResolvedValue({
         id: 1,
@@ -642,6 +780,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         name: 'Servicio QA',
         base_price: 10000,
         is_sellable: true,
+        state: 'active',
         product_type: 'service',
         track_inventory: false,
       }]);
@@ -679,6 +818,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           name: 'Hamburguesa',
           base_price: 25000,
           is_sellable: true,
+          state: 'active',
           product_type: 'prepared',
           track_inventory: false,
         },
@@ -726,6 +866,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           name: 'Camiseta',
           base_price: 50000,
           is_sellable: true,
+          state: 'active',
           product_type: 'physical',
           track_inventory: false,
           product_variants: [{ id: 61 }],
@@ -753,6 +894,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           name: 'Camiseta',
           base_price: 50000,
           is_sellable: true,
+          state: 'active',
           product_type: 'physical',
           track_inventory: false,
           product_variants: [{ id: 61 }],
@@ -814,6 +956,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
             is_on_sale: true,
             sale_price: new Prisma.Decimal(8000),
             is_sellable: true,
+            state: 'active',
             product_type: 'physical',
             track_inventory: false,
             product_variants: [],
@@ -843,6 +986,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
             is_on_sale: false,
             sale_price: new Prisma.Decimal(8000),
             is_sellable: true,
+            state: 'active',
             product_type: 'physical',
             track_inventory: false,
             product_variants: [],
@@ -870,6 +1014,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
             is_on_sale: true,
             sale_price: new Prisma.Decimal(40000),
             is_sellable: true,
+            state: 'active',
             product_type: 'physical',
             track_inventory: false,
             product_variants: [{ id: 61 }],
@@ -906,6 +1051,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
             is_on_sale: true,
             sale_price: new Prisma.Decimal(40000),
             is_sellable: true,
+            state: 'active',
             product_type: 'physical',
             track_inventory: false,
             product_variants: [{ id: 61 }],
@@ -961,6 +1107,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           name: 'Pizza',
           base_price: 8403,
           is_sellable: true,
+          state: 'active',
           product_type: 'prepared',
           track_inventory: false,
         },
@@ -1025,6 +1172,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           name: 'Bandeja paisa',
           base_price: 1000,
           is_sellable: true,
+          state: 'active',
           product_type: 'prepared',
           track_inventory: false,
         },

@@ -36,6 +36,7 @@ import { WompiProcessor } from './processors/wompi/wompi.processor';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 import { OrderStockCommitService } from '../inventory/shared/services/order-stock-commit.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
@@ -48,6 +49,8 @@ import { AuditService } from '@common/audit/audit.service';
 import { mockRequestContext } from 'src/testing/prisma-mock';
 import { buildOrder } from 'src/testing/money-fixtures';
 import * as tipUtil from '../../../common/utils/tip.util';
+// Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 /**
  * Tests for PaymentsService focused on the POS sale recalculation flow:
@@ -69,6 +72,15 @@ describe('PaymentsService', () => {
   let couponsService: CouponsService;
   let fiscalThreshold: FiscalInvoiceThresholdService;
   let kitchenFire: KitchenFireService;
+  // Cobro multimétodo (paso 2b): handles para cablear la caja post-commit
+  // (`recordSaleMovement` por tramo) en los casos de ejecución completa.
+  // Mismo patrón que `fiscalThreshold`: `module.get` + `as jest.Mock` al
+  // configurar o assertar (ver los casos de mesa existentes).
+  let settingsService: SettingsService;
+  let sessionsService: SessionsService;
+  let movementsService: MovementsService;
+  // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+  let orderHistory: { record: jest.Mock };
   // F-157/F-166: handles tipados CONCRETOS del mock de TaxesService,
   // declarados en el ámbito del describe para que los tests los usen
   // DIRECTO por closure — nunca recuperados con `as jest.Mock` (eso
@@ -92,6 +104,21 @@ describe('PaymentsService', () => {
   // con `as jest.Mock` desde `eventEmitter.emit` pasaría incluso si el handle
   // dejara de ser el que el servicio inyecta.
   let emitMock: jest.MockedFunction<EventEmitter2['emit']>;
+  // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+  // step 4): same F-157 pattern — created once per test in `beforeEach`,
+  // used DIRECTLY by closure so a test can override its resolution and
+  // assert calls without retyping through `as jest.Mock`.
+  let assertLinesAvailableMock: jest.MockedFunction<
+    StockValidatorService['assertLinesAvailable']
+  >;
+  // docs/plans/no-overselling-stock-guard-plan.md step 9 — strict default
+  // (allowOversell=false) preserves every pre-existing assertion byte-for-
+  // byte; the oversell-path tests override this per-case.
+  let resolveInventoryPolicyMock: jest.MockedFunction<
+    StockValidatorService['resolveInventoryPolicy']
+  >;
+  let reserveStockMock: jest.MockedFunction<StockLevelManager['reserveStock']>;
+  let allocateForLineMock: jest.MockedFunction<SellableStockAllocator['allocateForLine']>;
 
   const mockUser = {
     id: 1,
@@ -227,6 +254,27 @@ describe('PaymentsService', () => {
 
     emitMock = jest.fn() as jest.MockedFunction<EventEmitter2['emit']>;
 
+    // Default: no shortage (resolves) so the rest of this large suite is
+    // unaffected. Tests exercising the no-overselling guard itself override
+    // this per-case with `.mockRejectedValueOnce(...)`.
+    assertLinesAvailableMock = jest
+      .fn()
+      .mockResolvedValue([]) as jest.MockedFunction<
+      StockValidatorService['assertLinesAvailable']
+    >;
+    resolveInventoryPolicyMock = jest
+      .fn()
+      .mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: true,
+      }) as jest.MockedFunction<StockValidatorService['resolveInventoryPolicy']>;
+    reserveStockMock = jest.fn().mockResolvedValue(undefined) as jest.MockedFunction<
+      StockLevelManager['reserveStock']
+    >;
+    allocateForLineMock = jest.fn() as jest.MockedFunction<
+      SellableStockAllocator['allocateForLine']
+    >;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
@@ -236,7 +284,7 @@ describe('PaymentsService', () => {
         { provide: WebhookHandlerService, useValue: {} },
         {
           provide: StockLevelManager,
-          useValue: { updateStock: jest.fn() },
+          useValue: { updateStock: jest.fn(), reserveStock: reserveStockMock },
         },
         {
           provide: TaxesService,
@@ -261,7 +309,10 @@ describe('PaymentsService', () => {
         { provide: CouponsService, useValue: mockCouponsService },
         {
           provide: SessionsService,
-          useValue: { getActiveSession: jest.fn() },
+          useValue: {
+            getActiveSession: jest.fn(),
+            assertSessionForSales: jest.fn(),
+          },
         },
         {
           provide: MovementsService,
@@ -305,7 +356,17 @@ describe('PaymentsService', () => {
         // these instead of relying on the empty shape.
         {
           provide: SellableStockAllocator,
-          useValue: { allocateForOrderItem: jest.fn() },
+          useValue: { allocateForOrderItem: jest.fn(), allocateForLine: allocateForLineMock },
+        },
+        // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+        // step 4) — see `assertLinesAvailableMock` declared at describe level.
+        {
+          provide: StockValidatorService,
+          useValue: {
+            assertLinesAvailable: assertLinesAvailableMock,
+            assertIngredientsAvailable: jest.fn().mockResolvedValue(undefined),
+            resolveInventoryPolicy: resolveInventoryPolicyMock,
+          },
         },
         {
           provide: PriceResolverService,
@@ -323,6 +384,16 @@ describe('PaymentsService', () => {
           useValue: {
             applyToOrder: jest.fn(),
             resolveSuffered: jest.fn().mockResolvedValue({
+              lines: [],
+              uvt_value_used: 0,
+              counterparty_type: null,
+            }),
+            // El cobro POS ahora agrupa por bien/servicio y llama a este
+            // método (Step 1, plan pago-multimetodo-pendientes) en vez de
+            // `resolveSuffered` directo. Mismo motivo que arriba: sin este
+            // stub, cualquier caso que llegue al bloque de retenciones muere
+            // con "is not a function" bajo el try/catch.
+            resolveSufferedByOperation: jest.fn().mockResolvedValue({
               lines: [],
               uvt_value_used: 0,
               counterparty_type: null,
@@ -359,6 +430,13 @@ describe('PaymentsService', () => {
             log: jest.fn(),
           },
         },
+        // Plan order-truth-and-invoice-tz (Step 6) — writer único de
+        // order_events. Requerido (no @Optional en PaymentsService): sin
+        // este provider el módulo de test no compila.
+        {
+          provide: OrderHistoryService,
+          useValue: { record: jest.fn().mockResolvedValue(null) },
+        },
       ],
     }).compile();
 
@@ -371,6 +449,10 @@ describe('PaymentsService', () => {
       FiscalInvoiceThresholdService,
     );
     kitchenFire = module.get<KitchenFireService>(KitchenFireService);
+    settingsService = module.get<SettingsService>(SettingsService);
+    sessionsService = module.get<SessionsService>(SessionsService);
+    movementsService = module.get<MovementsService>(MovementsService);
+    orderHistory = module.get<any>(OrderHistoryService);
   });
 
   it('should be defined', () => {
@@ -1351,6 +1433,123 @@ describe('PaymentsService', () => {
     });
   });
 
+  /**
+   * Gate único de caja en `processPosPayment`: guardar un borrador
+   * (`is_draft=true`, `requires_payment!==true`) no recibe dinero y no exige
+   * caja; ventas, crédito y envío sí. La lógica del helper
+   * (`enabled && require_session_for_sales` + sesión propia) se prueba en
+   * `sessions.service.spec.ts`; aquí se prueba CUÁNDO se invoca.
+   */
+  describe('processPosPayment — borrador sin caja vs venta con gate (CASH_SESSION_REQUIRED_001)', () => {
+    const STOP_AFTER_GATE = 'stop-after-cash-gate';
+    const CONTEXT_STORE_ID = 1;
+
+    let contextSpy: jest.SpyInstance;
+
+    const posUser: any = {
+      id: 7,
+      email: 'auxiliar@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+
+    const buildDto = (overrides: any = {}): any => ({
+      store_id: CONTEXT_STORE_ID,
+      currency: 'COP',
+      items: [{ product_id: 1, quantity: 1, unit_price: 1000 }],
+      payments: [],
+      total_amount: 1000,
+      ...overrides,
+    });
+
+    const arrange = () => {
+      contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({
+          store_id: CONTEXT_STORE_ID,
+          organization_id: 1,
+        } as any);
+
+      // Si el gate deja pasar, la transacción se abre: el sentinel hace
+      // visible ese cruce sin ejecutar el cobro real.
+      (prisma as any).$transaction = jest.fn(async () => {
+        throw new Error(STOP_AFTER_GATE);
+      });
+    };
+
+    afterEach(() => {
+      contextSpy?.mockRestore();
+    });
+
+    it('borrador puro sin caja: NO invoca el gate y llega a la transacción', async () => {
+      arrange();
+
+      await expect(
+        service.processPosPayment(buildDto({ is_draft: true }), posUser),
+      ).rejects.toThrow(STOP_AFTER_GATE);
+
+      expect((prisma as any).$transaction).toHaveBeenCalledTimes(1);
+      expect(sessionsService.assertSessionForSales).not.toHaveBeenCalled();
+    });
+
+    it('venta sin caja: invoca el gate con user.id y propaga CASH_SESSION_REQUIRED_001 sin abrir transacción', async () => {
+      arrange();
+      (sessionsService.assertSessionForSales as jest.Mock).mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+      );
+
+      const error = await service
+        .processPosPayment(buildDto({}), posUser)
+        .catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe(
+        ErrorCodes.CASH_SESSION_REQUIRED_001.code,
+      );
+      expect(sessionsService.assertSessionForSales).toHaveBeenCalledWith(
+        posUser.id,
+      );
+      expect(sessionsService.assertSessionForSales).toHaveBeenCalledTimes(1);
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
+    });
+
+    it('venta con caja: el gate resuelve y el cobro continúa a la transacción', async () => {
+      arrange();
+
+      await expect(
+        service.processPosPayment(buildDto({}), posUser),
+      ).rejects.toThrow(STOP_AFTER_GATE);
+
+      expect(sessionsService.assertSessionForSales).toHaveBeenCalledWith(
+        posUser.id,
+      );
+      expect((prisma as any).$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('borrador + requires_payment mantiene POS_DRAFT_REQUIRES_PAYMENT_001 aunque falte la caja', async () => {
+      arrange();
+      // El gate rechazaría, pero el invariante B.2 corre primero: el payload
+      // contradictorio es un bug del cliente, no un problema de caja.
+      (sessionsService.assertSessionForSales as jest.Mock).mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+      );
+
+      const error = await service
+        .processPosPayment(
+          buildDto({ is_draft: true, requires_payment: true }),
+          posUser,
+        )
+        .catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe(
+        ErrorCodes.POS_DRAFT_REQUIRES_PAYMENT_001.code,
+      );
+      expect(sessionsService.assertSessionForSales).not.toHaveBeenCalled();
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
+    });
+  });
+
   describe('createOrUpdateOrderFromPos — adopted order', () => {
     const user = { id: 1, roles: ['super_admin'] };
     const item = {
@@ -1377,6 +1576,11 @@ describe('PaymentsService', () => {
       },
       payments: { findFirst: jest.fn().mockResolvedValue(paid) },
       bookings: { updateMany: jest.fn() },
+      order_items: {
+        findMany: jest.fn().mockResolvedValue([]),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      order_item_taxes: { update: jest.fn().mockResolvedValue({}) },
     });
 
     afterEach(() => jest.restoreAllMocks());
@@ -1469,6 +1673,53 @@ describe('PaymentsService', () => {
         }),
       }));
       expect(client.orders.update.mock.calls[0][0].data.order_items).toBeUndefined();
+    });
+
+    describe.each([
+      // [cupón bruto, base neta esperada, impuesto, descuento base, total]
+      ['100 % coupon', 1190, 0, 0, 1000, 0],
+      ['10 % coupon', 119, 900, 171, 100, 1071],
+    ])('adopted order with %s on a 19 %% line', (_n, coupon, newBase, tax, baseDisc, total) => {
+      it('retaxes persisted lines on the discounted base and writes discount_amount', async () => {
+        const client: any = tx({ ...order, subtotal_amount: 1000, tax_amount: 190 });
+        // Fila ya guardada con impuesto POST-descuento rancio: debe ignorarse.
+        const persisted = [{
+          id: 7, quantity: 1, total_price: 1000, tax_amount_item: 12,
+          order_item_taxes: [{ id: 70, tax_rate: 0.19, tax_amount: 12,
+            tax_type: 'VAT', tax_rate_id: 1, tax_name: 'IVA' }],
+        }];
+        client.order_items = {
+          findMany: jest.fn().mockResolvedValue(persisted),
+          update: jest.fn().mockResolvedValue({}),
+        };
+        client.order_item_taxes = { update: jest.fn().mockResolvedValue({}) };
+        jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+        jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+          product_name: 'Artículo', quantity: 1, total_price: 9999, tax_amount_item: 0,
+        });
+        jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+          total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+        });
+        jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+          coupon_id: 3, coupon_code: 'C', discount_amount: coupon,
+        });
+
+        await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+
+        const data = client.orders.update.mock.calls[0][0].data;
+        expect(data.subtotal_amount).toBe(1000);
+        expect(data.tax_amount).toBe(tax);
+        expect(data.discount_amount).toBe(baseDisc);
+        expect(data.grand_total).toBe(total);
+        expect(client.order_items.update).toHaveBeenCalledWith({
+          where: { id: 7 },
+          data: expect.objectContaining({ discount_amount: baseDisc }),
+        });
+        expect(client.order_item_taxes.update).toHaveBeenCalledWith({
+          where: { id: 70 }, data: { tax_amount: tax },
+        });
+        void newBase;
+      });
     });
 
     it('F.2 creates an alias shipping address in the same order transaction and links its FK', async () => {
@@ -1601,7 +1852,12 @@ describe('PaymentsService', () => {
     });
 
     it('E.6 retail: delegates 10% of gross products to resolveTip without taxing the tip', async () => {
-      const client = tx({ ...order, subtotal_amount: 100000, tax_amount: 19000 });
+      const client: any = tx({ ...order, subtotal_amount: 100000, tax_amount: 19000 });
+      client.order_items.findMany.mockResolvedValue([{
+        id: 7, quantity: 1, total_price: 100000, tax_amount_item: 19000,
+        order_item_taxes: [{ id: 70, tax_rate: 0.19, tax_amount: 19000,
+          tax_type: 'VAT', tax_rate_id: 1, tax_name: 'IVA' }],
+      }]);
       const resolveTipSpy = jest.spyOn(tipUtil, 'resolveTip');
       jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
       jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
@@ -1625,8 +1881,10 @@ describe('PaymentsService', () => {
       );
       expect(client.orders.update).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({
-          subtotal_amount: 100000, tax_amount: 19000,
-          discount_amount: 2000, shipping_cost: 5000,
+          // Carrito adoptado: contrato nuevo (descuento trasladado a la base,
+          // IVA sobre la base descontada).
+          subtotal_amount: 100000, tax_amount: 18680.67,
+          discount_amount: 1680.67, shipping_cost: 5000,
           tip_amount: 11900, tip_type: 'fixed', tip_value: 11900,
           grand_total: 133900,
         }),
@@ -1707,6 +1965,11 @@ describe('PaymentsService', () => {
         order_items: {
           findMany: jest.fn().mockResolvedValue([]), // existing draft items
           findFirst: jest.fn().mockResolvedValue(null), // KDS candidate scan (line ~3033)
+          // Retax post-descuento de líneas ya persistidas (cierre de mesa).
+          update: jest.fn().mockResolvedValue({}),
+        },
+        order_item_taxes: {
+          update: jest.fn().mockResolvedValue({}),
         },
         // Guard de re-entrada del cierre de mesa: busca un pago ya
         // `succeeded` sobre la misma orden antes de re-cobrar. Sin este mock
@@ -1886,6 +2149,83 @@ describe('PaymentsService', () => {
       expect(result.order).toBeDefined();
     });
 
+    it('cupón 100% en cierre de mesa: impuesto 0, descuento base-only, total 0 y filas persistidas recalculadas', async () => {
+      const { tx, posUser } = arrangeCashSale();
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: 5, coupon_code: 'FREE', discount_amount: 11900,
+      });
+      tx.order_items.findMany.mockResolvedValue([{
+        id: 17, product_id: 425, quantity: 1, total_price: 10000,
+        tax_amount_item: 1900,
+        order_item_taxes: [{ id: 90, tax_rate_id: 501, tax_type: TaxFiscalType.IVA, tax_rate: 0.19, tax_amount: 1900 }],
+      }]);
+
+      const result = await (service as any).applyPosPaymentToTableSession(
+        tx, buildDto({ items: [] }), posUser, CONTEXT_STORE_ID,
+      );
+
+      expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal_amount: 10000,
+          tax_amount: 0,
+          discount_amount: 10000,
+          grand_total: 0,
+        }),
+      }));
+      expect(tx.order_items.update).toHaveBeenCalledWith({
+        where: { id: 17 }, data: { tax_amount_item: 0, discount_amount: 10000 },
+      });
+      expect(tx.order_item_taxes.update).toHaveBeenCalledWith({
+        where: { id: 90 }, data: { tax_amount: 0 },
+      });
+      expect(result.discount_already_applied_to_lines).toBe(true);
+    });
+
+    it('P1-2: cerrar la mesa 3 veces con cupón fijo no compone el descuento (107.100 idéntico) y el mínimo de compra ve siempre el bruto 119.000', async () => {
+      const { tx, posUser } = arrangeCashSale();
+      const couponSpy = jest
+        .spyOn(service as any, 'calculatePosCouponDiscount')
+        .mockResolvedValue({
+          coupon_id: 5, coupon_code: 'FIJO', discount_amount: 11900,
+        });
+      // Línea persistida con estado mutable: cada `update` del cierre la
+      // sobrescribe como haría la base, y `findMany` la relee.
+      const line: any = {
+        id: 17, product_id: 425, quantity: 1, total_price: 100000,
+        tax_rate: 0.19, tax_amount_item: 19000, discount_amount: null,
+        order_item_taxes: [{
+          id: 90, tax_rate_id: 501, tax_type: TaxFiscalType.IVA,
+          tax_rate: 0.19, tax_amount: 19000,
+        }],
+      };
+      tx.order_items.findMany.mockImplementation(async () => [line]);
+      tx.order_items.update.mockImplementation(async ({ data }: any) => {
+        Object.assign(line, data);
+        return line;
+      });
+      tx.order_item_taxes.update.mockImplementation(async ({ data }: any) => {
+        Object.assign(line.order_item_taxes[0], data);
+        return line.order_item_taxes[0];
+      });
+
+      const grandTotals: number[] = [];
+      for (let attempt = 0; attempt < 3; attempt++) {
+        tx.orders.update.mockClear();
+        await (service as any).applyPosPaymentToTableSession(
+          tx, buildDto({ items: [] }), posUser, CONTEXT_STORE_ID,
+        );
+        const data = tx.orders.update.mock.calls[0][0].data;
+        grandTotals.push(data.grand_total);
+        expect(data.tax_amount).toBe(17100);
+        expect(data.discount_amount).toBe(10000);
+      }
+
+      expect(grandTotals).toEqual([107100, 107100, 107100]);
+      expect(line.discount_amount).toBe(10000);
+      // El mínimo de compra del cupón se evalúa contra el bruto ORIGINAL.
+      couponSpy.mock.calls.forEach((call) => expect(call[1]).toBe(119000));
+    });
+
     it('conserva el impuesto persistido de una línea antigua aunque el catálogo actual no tenga asignación', async () => {
       const { tx, posUser } = arrangeCashSale();
       const oldTaxSnapshot = {
@@ -1939,8 +2279,9 @@ describe('PaymentsService', () => {
       );
       expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({
-          subtotal_amount: 100000, tax_amount: 19000,
-          discount_amount: 2000, shipping_cost: 5000,
+          // Contrato 2026-09-28: promo 2000 bruto => descuento base 1680.67, IVA 18680.67.
+          subtotal_amount: 100000, tax_amount: 18680.67,
+          discount_amount: 1680.67, shipping_cost: 5000,
           tip_amount: 11900, tip_type: 'fixed', tip_value: 11900,
           grand_total: 133900,
         }),
@@ -3427,6 +3768,59 @@ describe('PaymentsService', () => {
       jest.restoreAllMocks();
     });
 
+    it('un borrador POS con faltante falla antes de reservar o cobrar', async () => {
+      const { order, tx } = arrangePosSale('cash');
+      order.order_items.push({
+        id: 901, product_id: 501, product_variant_id: null,
+        quantity: 1, stock_units_consumed: null, skip_kds: true,
+      } as any);
+      tx.products = { findMany: jest.fn().mockResolvedValue([
+        { id: 501, name: 'MODELO', track_inventory: true, product_type: 'physical' },
+      ]) };
+      assertLinesAvailableMock.mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+          'Sin stock para MODELO', { items: [{ product_name: 'MODELO', requested: 1, available: 0 }] }),
+      );
+
+      await expect(service.processPosPayment(
+        buildPosDto({ is_draft: true, requires_payment: false }), posUser,
+      )).rejects.toMatchObject({ errorCode: 'INV_STOCK_INSUFFICIENT_LINES' });
+      expect(assertLinesAvailableMock).toHaveBeenCalledWith(
+        [expect.objectContaining({ product_id: 501, quantity: 1 })],
+        { orderId: 4242, tx, allowOversell: false },
+      );
+      expect(tx.order_items.findMany).not.toHaveBeenCalled();
+    });
+
+    it('un borrador POS con stock reserva en el mismo tx antes de salir', async () => {
+      const { order, tx } = arrangePosSale('cash');
+      order.order_items.push({
+        id: 902, product_id: 501, product_variant_id: null,
+        quantity: 1, stock_units_consumed: null, skip_kds: true,
+      } as any);
+      tx.products = { findMany: jest.fn().mockResolvedValue([
+        { id: 501, name: 'MODELO', track_inventory: true, product_type: 'physical' },
+      ]) };
+      tx.stock_reservations = { aggregate: jest.fn().mockResolvedValue({ _sum: { quantity: 0 } }) };
+      const afterReserve = new Error('stop-after-reserve');
+      tx.$executeRawUnsafe = jest.fn(async (sql: string) => {
+        if (sql === 'RELEASE SAVEPOINT stock_reserve_sp') throw afterReserve;
+        return 0;
+      });
+      allocateForLineMock.mockResolvedValueOnce({
+        slices: [{ location_id: 77, quantity: 1 }], allocated: 1,
+        available: 1, shortfall: 0,
+      });
+
+      await expect(service.processPosPayment(
+        buildPosDto({ is_draft: true, requires_payment: false }), posUser,
+      )).rejects.toThrow('stop-after-reserve');
+      expect(reserveStockMock).toHaveBeenCalledWith(
+        501, undefined, 77, 1, 'order', 4242, expect.anything(),
+        true, tx, undefined, false, 1, false,
+      );
+    });
+
     it('un cobro Wompi en mostrador deja el stock quieto: el pago está prometido, no cobrado', async () => {
       arrangePosSale('wompi');
 
@@ -3447,6 +3841,80 @@ describe('PaymentsService', () => {
       ).rejects.toThrow(STOP_AFTER_INVENTORY);
 
       expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+    });
+
+    // BUG 2 (no-overselling-stock-guard-plan.md, 2026-09-26):
+    // `updateInventoryFromOrder` hardcodeaba `blockOnInsufficient: true` sin
+    // mirar el switch de tienda "Permitir sobreventa"
+    // (`store_settings.inventory.allow_negative_stock`). Con el switch en
+    // `true`, una venta POS de mostrador de un producto en 0 disponible
+    // seguía rechazando 409 `INV_STOCK_002` — la MISMA reserva de la línea
+    // (§1.5, más arriba en este archivo) ya toleraba el negativo bajo el
+    // mismo switch, pero el commit de entrega lo ignoraba. El campo
+    // `allow_oversell` del DTO público sigue intencionalmente ignorado: esto
+    // lo gobierna solo el ajuste de tienda, resuelto server-side dentro del
+    // mismo tx (`resolveInventoryPolicyMock`, ya inyectado a nivel de
+    // describe con default `allowOversell:false` para el resto de la suite).
+    it('BUG 2: con allow_negative_stock=true, la entrega directa NO bloquea (INV_STOCK_002 evitado)', async () => {
+      const { order } = arrangePosSale('cash');
+      resolveInventoryPolicyMock.mockResolvedValue({
+        allowOversell: true,
+        allowIngredientOveruse: true,
+      });
+
+      jest
+        .spyOn(service as any, 'processPosPaymentTransaction')
+        .mockResolvedValue({ id: 7, state: 'succeeded' });
+      jest
+        .spyOn(service as any, 'hasPendingKitchenItemsTx')
+        .mockResolvedValue(false);
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_INVENTORY);
+
+      expect(commitOrderDeliveryMock).toHaveBeenCalledTimes(1);
+      expect(commitOrderDeliveryMock).toHaveBeenCalledWith(
+        order.id,
+        expect.objectContaining({
+          blockOnInsufficient: false,
+          allowNegativeOnShortfall: true,
+          onShortfall: expect.any(Function),
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('BUG 2: default (allow_negative_stock=false) sigue bloqueando igual que antes (no-regresión)', async () => {
+      const { order } = arrangePosSale('cash');
+      // resolveInventoryPolicyMock ya resuelve allowOversell:false por
+      // default (beforeEach) — se deja explícito para que el intento no
+      // dependa de la resolución.
+      resolveInventoryPolicyMock.mockResolvedValue({
+        allowOversell: false,
+        allowIngredientOveruse: true,
+      });
+
+      jest
+        .spyOn(service as any, 'processPosPaymentTransaction')
+        .mockResolvedValue({ id: 7, state: 'succeeded' });
+      jest
+        .spyOn(service as any, 'hasPendingKitchenItemsTx')
+        .mockResolvedValue(false);
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_INVENTORY);
+
+      expect(commitOrderDeliveryMock).toHaveBeenCalledWith(
+        order.id,
+        expect.objectContaining({
+          blockOnInsufficient: true,
+          allowNegativeOnShortfall: false,
+          onShortfall: undefined,
+        }),
+        expect.anything(),
+      );
     });
 
     it('el efectivo SÍ consume en el acto: el dinero ya entró (no-regresión)', async () => {
@@ -3549,6 +4017,66 @@ describe('PaymentsService', () => {
       }), posUser)).rejects.toThrow();
       expect(order.state).toBe('draft');
       expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+    });
+
+    // no-overselling-stock-guard-plan.md, BUG 1 (2026-09-26): una mesa con
+    // un ítem YA entregado (`inventory_committed=true` — su stock ya se
+    // descontó en `deliverOrderItem`, la reserva que lo cubría ya fue
+    // consumida) volvía a demandarse en el precheck previo a
+    // `assertLinesAvailable`. El precheck solo excluía las líneas que van a
+    // cocina (`isFiredToKitchenLine`); una línea entregada y una cancelada
+    // colaban igual y el pago moría con un 409 falso incluso con stock 0
+    // disponible siendo exactamente lo esperado (ya no queda nada que
+    // reclamar: la unidad ya salió).
+    it('BUG 1: una línea ya entregada (inventory_committed) no se vuelve a demandar antes de cobrar', async () => {
+      const { order, tx } = arrangePosSale('cash');
+      order.order_items.push({
+        id: 950,
+        product_id: 501,
+        product_variant_id: null,
+        quantity: 2,
+        stock_units_consumed: null,
+        skip_kds: false,
+        inventory_committed: true,
+        cancelled_at: null,
+      } as any);
+      tx.products = {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 501, name: 'MODELO', track_inventory: true, product_type: 'physical' },
+        ]),
+      };
+      // Sonda: si el precheck todavía incluyera la línea entregada en la
+      // demanda, `assertLinesAvailable` se llamaría con ella y este mock la
+      // rechaza (mismo 409 que produciría un stock realmente en 0). Con el
+      // fix, la demanda queda vacía y el mock NUNCA se invoca.
+      assertLinesAvailableMock.mockImplementation((lines: any[]) => {
+        if (lines.length > 0) {
+          throw new VendixHttpException(
+            ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+            'Stock insuficiente para MODELO',
+            { items: [{ product_name: 'MODELO', requested: 2, available: 0 }] },
+          );
+        }
+        return Promise.resolve([]);
+      });
+      // Con la única línea del pedido ya asentada (entregada), no queda
+      // nada que reservar ni ningún gasto de inventario que aplicar —
+      // `is_draft`+`requires_payment:false` saltan también el bloque de
+      // eventos/impuestos/retenciones/cupón (`!is_draft`). La transacción
+      // llega limpia hasta el refresh final de `orders` (§ respuesta,
+      // justo antes del `return`); un stub que revienta ahí es la señal
+      // determinista de que nada de lo anterior — en particular la
+      // demanda de stock — disparó un 409.
+      const REACHED_END_OF_TX = 'reached-end-of-tx';
+      tx.orders.findUnique = jest
+        .fn()
+        .mockRejectedValue(new Error(REACHED_END_OF_TX));
+
+      await expect(service.processPosPayment(
+        buildPosDto({ is_draft: true, requires_payment: false }), posUser,
+      )).rejects.toThrow(REACHED_END_OF_TX);
+
+      expect(assertLinesAvailableMock).not.toHaveBeenCalled();
     });
   });
 
@@ -4005,6 +4533,878 @@ describe('PaymentsService', () => {
       );
     });
   });
+
+  describe('recordCashRegisterMovement — el POS no registra en caja cobros digitales pending (paso 7)', () => {
+    // Casos directos sobre el helper privado: el fan-out post-commit le pasa
+    // la proyección (`status`, no `state`) y el `store_payment_method_id` del
+    // tramo en el DTO. Caja habilitada con rastreo de no-efectivo para que
+    // solo los guards bajo prueba puedan omitir el movimiento.
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+    };
+
+    const arrangeCashRegister = (methodType: string) => {
+      (settingsService.getSettings as jest.Mock).mockResolvedValue({
+        checkout: { require_customer_data: false },
+        pos: { cash_register: { enabled: true, track_non_cash_payments: true } },
+      });
+      (sessionsService.getActiveSession as jest.Mock).mockResolvedValue({
+        id: 5,
+      });
+      (prisma as any).store_payment_methods = {
+        findFirst: jest.fn(async () => ({
+          id: 9,
+          system_payment_method: {
+            type: methodType,
+            processing_mode: payment_processing_mode_enum.DIRECT,
+          },
+        })),
+      };
+    };
+
+    const recordSaleMovement = () =>
+      movementsService.recordSaleMovement as jest.Mock;
+
+    it('POS wompi pendiente → recordSaleMovement no se llama', async () => {
+      arrangeCashRegister('wompi');
+
+      await (service as any).recordCashRegisterMovement(
+        { store_id: 1, store_payment_method_id: 9 },
+        { id: 4242 },
+        { id: 7, amount: 100000, status: 'pending' },
+        posUser,
+      );
+
+      expect(recordSaleMovement()).not.toHaveBeenCalled();
+    });
+
+    it('wallet succeeded → tampoco escribe: la pasarela queda fuera de caja', async () => {
+      // Fila cruda (`state`, no `status`): p. ej. el débito wallet de un
+      // cobro multimétodo que sí liquidó en banda.
+      arrangeCashRegister('wallet');
+
+      await (service as any).recordCashRegisterMovement(
+        { store_id: 1, store_payment_method_id: 11 },
+        { id: 4242 },
+        { id: 8, amount: 80000, state: 'succeeded' },
+        posUser,
+      );
+
+      expect(recordSaleMovement()).not.toHaveBeenCalled();
+    });
+
+    it('efectivo pendiente → no escribe: la promesa no es dinero en caja', async () => {
+      arrangeCashRegister('cash');
+
+      await (service as any).recordCashRegisterMovement(
+        { store_id: 1, store_payment_method_id: 9 },
+        { id: 4242 },
+        { id: 7, amount: 100000, status: 'pending' },
+        posUser,
+      );
+
+      expect(recordSaleMovement()).not.toHaveBeenCalled();
+    });
+
+    it('POS efectivo succeeded → sí escribe el sale (no-regresión)', async () => {
+      arrangeCashRegister('cash');
+
+      await (service as any).recordCashRegisterMovement(
+        { store_id: 1, store_payment_method_id: 9 },
+        { id: 4242 },
+        { id: 7, amount: 100000, status: 'succeeded' },
+        posUser,
+      );
+
+      expect(recordSaleMovement()).toHaveBeenCalledTimes(1);
+      expect(recordSaleMovement()).toHaveBeenCalledWith(
+        5,
+        expect.objectContaining({
+          amount: 100000,
+          payment_method: 'cash',
+          order_id: 4242,
+          payment_id: 7,
+        }),
+      );
+    });
+  });
+
+  /**
+   * Cobro multimétodo de contado en el POS (paso 2 del plan de pago
+   * multimétodo): `payments[]` con 2 tramos crea 2 filas `succeeded` en la
+   * misma transacción, emite un `payment.received` por tramo con su porción
+   * de venta y registra un movimiento de caja por tramo. La guarda QUI-704
+   * sigue rechazando un segundo cobro de mesa antes de crear filas, y el
+   * contrato escalar conserva su comportamiento histórico.
+   *
+   * A diferencia de los bloques anteriores (que cortan con un STOP), estos
+   * casos corren `processPosPayment` COMPLETO —incluido el post-commit— para
+   * observar la respuesta `payments[]` y los movimientos de caja. El `tx`
+   * es un fake con estado (saldo que acumula, pagos creados visibles como
+   * previos) para que `resolvePaymentReceivedSaleFields` (real, no mockeada)
+   * reparta con la misma aritmética que en producción.
+   */
+  describe('processPosPayment — cobro multimétodo de contado (2 tramos)', () => {
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+
+    const CASH_METHOD_ID = 9;
+    const TRANSFER_METHOD_ID = 10;
+    const WALLET_METHOD_ID = 11;
+
+    const cashMethodRow = {
+      id: CASH_METHOD_ID,
+      display_name: 'Efectivo',
+      custom_config: {},
+      system_payment_method: {
+        type: 'cash',
+        processing_mode: payment_processing_mode_enum.DIRECT,
+        display_name: 'Efectivo',
+      },
+    };
+    const transferMethodRow = {
+      id: TRANSFER_METHOD_ID,
+      display_name: 'Transferencia',
+      custom_config: {},
+      system_payment_method: {
+        type: 'bank_transfer',
+        processing_mode: payment_processing_mode_enum.DIRECT,
+        display_name: 'Transferencia',
+      },
+    };
+    const methodsById: Record<number, any> = {
+      [CASH_METHOD_ID]: cashMethodRow,
+      [TRANSFER_METHOD_ID]: transferMethodRow,
+      [WALLET_METHOD_ID]: {
+        id: WALLET_METHOD_ID,
+        display_name: 'Saldo Wallet',
+        system_payment_method: {
+          type: 'wallet', processing_mode: payment_processing_mode_enum.DIRECT,
+          display_name: 'Saldo Wallet', is_active: true,
+        },
+      },
+    };
+
+    /**
+     * @param tableSessionOrderId orden de mesa adoptada (proyección B.1);
+     *   `null` = venta retail sin mesa.
+     * @param spyOrderCreation `false` para dejar correr el
+     *   `createOrUpdateOrderFromPos` real (casos de guarda QUI-704).
+     */
+    const arrangeMultiLegSale = (
+      tableSessionOrderId: number | null = null,
+      spyOrderCreation = true,
+    ) => {
+      mockRequestContext({ store_id: 1, organization_id: 1 });
+
+      // Venta de $100.000: subtotal 84.034 + IVA 15.966. Sin descuento,
+      // envío ni propina para que Σ porciones = totales sea exacto.
+      const order = buildOrder({
+        id: 4242,
+        store_id: 1,
+        customer_id: 77,
+        order_number: 'POS-MULTI-1',
+        delivery_type: 'direct_delivery',
+        subtotal_amount: new Prisma.Decimal(84034),
+        tax_amount: new Prisma.Decimal(15966),
+        discount_amount: new Prisma.Decimal(0),
+        tip_amount: new Prisma.Decimal(0),
+        shipping_cost: new Prisma.Decimal(0),
+        shipping_tax_amount: new Prisma.Decimal(0),
+        grand_total: new Prisma.Decimal(100000),
+        total_paid: new Prisma.Decimal(0),
+        remaining_balance: new Prisma.Decimal(100000),
+        stores: { id: 1, organization_id: 1 },
+        order_items: [],
+      });
+
+      // Estado vivo del fake: lo que `create`/`update` escriben, los
+      // `find*` posteriores lo ven — igual que dentro de un `tx` real.
+      let nextPaymentId = 7;
+      const createdPayments: any[] = [];
+      let fakeTotalPaid = 0;
+      let fakeOrderState: string = order.state;
+
+      const tx: any = {
+        wallets: { findFirst: jest.fn().mockResolvedValue({ id: 91 }) },
+        kitchen_tickets: { findMany: jest.fn().mockResolvedValue([]) },
+        // Tienda NO restaurante → el auto-fire (B5) no corre.
+        stores: {
+          findUnique: jest.fn().mockResolvedValue({ industries: ['retail'] }),
+        },
+        store_payment_methods: {
+          findMany: jest.fn(async ({ where }: any) => {
+            const ids: number[] = where?.id?.in ?? [];
+            return ids
+              .filter((id) => methodsById[id])
+              .map((id) => methodsById[id]);
+          }),
+          findFirst: jest.fn(async ({ where }: any) =>
+            where?.id != null ? (methodsById[where.id] ?? null) : cashMethodRow,
+          ),
+        },
+        payments: {
+          create: jest.fn(async ({ data, include }: any) => {
+            const row = {
+              id: nextPaymentId++,
+              ...data,
+              store_payment_method:
+                methodsById[data.store_payment_method_id] ?? null,
+            };
+            void include;
+            createdPayments.push(row);
+            return row;
+          }),
+          update: jest.fn(async ({ where, data }: any) => {
+            const row = createdPayments.find((payment) => payment.id === where.id);
+            Object.assign(row, data);
+            return row;
+          }),
+          // `resolvePaymentReceivedSaleFields` lee los OTROS pagos
+          // liquidados como previos del reparto.
+          findMany: jest.fn(async ({ where }: any) =>
+            createdPayments.filter((row) => row.id !== where?.id?.not),
+          ),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        orders: {
+          update: jest.fn(async ({ data }: any) => {
+            if (data.total_paid != null) {
+              fakeTotalPaid = Number(data.total_paid);
+            }
+            if (typeof data.state === 'string') {
+              fakeOrderState = data.state;
+            }
+            return { id: order.id };
+          }),
+          // Una sola respuesta con TODOS los campos que leen los distintos
+          // consumidores (`applyOrderBalanceOnPayment`,
+          // `resolvePaymentReceivedSaleFields`, refresco de estado).
+          findUnique: jest.fn(async () => ({
+            id: order.id,
+            order_number: order.order_number,
+            state: fakeOrderState,
+            subtotal_amount: order.subtotal_amount,
+            discount_amount: order.discount_amount,
+            tax_amount: order.tax_amount,
+            shipping_cost: order.shipping_cost,
+            // `buildOrder` no declara esta columna: el fixture la pasa en 0.
+            shipping_tax_amount: new Prisma.Decimal(0),
+            tip_amount: order.tip_amount,
+            grand_total: order.grand_total,
+            total_paid: new Prisma.Decimal(fakeTotalPaid),
+            order_items: [],
+          })),
+        },
+        order_items: { findMany: jest.fn().mockResolvedValue([]) },
+        table_sessions: { findUnique: jest.fn().mockResolvedValue(null) },
+      };
+
+      (prisma as any).$transaction = jest.fn(async (cb: any) => cb(tx));
+
+      if (spyOrderCreation) {
+        jest
+          .spyOn(service as any, 'createOrUpdateOrderFromPos')
+          .mockResolvedValue({
+            order,
+            hasSerialized: false,
+            promotionsSnapshot: [],
+            appliedPromotions: [],
+            couponInfo: {
+              coupon_id: null,
+              coupon_code: null,
+              discount_amount: 0,
+            },
+            kitchenFire: null,
+            closedSessionId: null,
+            tableSessionOrderId,
+          });
+      }
+      jest
+        .spyOn(service as any, 'hasPendingKitchenItemsTx')
+        .mockResolvedValue(false);
+
+      (
+        fiscalThreshold.assertInvoiceNotRequired as jest.Mock
+      ).mockResolvedValue(undefined);
+
+      return { order, tx, createdPayments };
+    };
+
+    const buildMultiDto = (overrides: any = {}): any => ({
+      store_id: 1,
+      currency: 'COP',
+      customer_id: 77,
+      items: [],
+      requires_payment: true,
+      payments: [
+        {
+          store_payment_method_id: CASH_METHOD_ID,
+          amount: 20000,
+          amount_received: 50000,
+        },
+        { store_payment_method_id: TRANSFER_METHOD_ID, amount: 80000 },
+      ],
+      ...overrides,
+    });
+
+    /** Payloads de `payment.received` emitidos, en orden. */
+    const receivedPayloads = (): any[] =>
+      emitMock.mock.calls
+        .filter((call) => call[0] === 'payment.received')
+        .map((call) => call[1]);
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('crea una fila succeeded por tramo y responde payments[] con payment como primero', async () => {
+      const { tx } = arrangeMultiLegSale();
+
+      const result = await service.processPosPayment(buildMultiDto(), posUser);
+
+      expect(tx.payments.create).toHaveBeenCalledTimes(2);
+      expect(tx.payments.create).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          data: expect.objectContaining({
+            order_id: 4242,
+            store_payment_method_id: CASH_METHOD_ID,
+            amount: 20000,
+            state: 'succeeded',
+          }),
+        }),
+      );
+      expect(tx.payments.create).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          data: expect.objectContaining({
+            order_id: 4242,
+            store_payment_method_id: TRANSFER_METHOD_ID,
+            amount: 80000,
+            state: 'succeeded',
+          }),
+        }),
+      );
+      // El vuelto del acto (50.000 − 20.000) vive sólo en el tramo en
+      // efectivo; el otro tramo nace con vuelto 0.
+      const legRows = tx.payments.create.mock.calls.map(
+        (call: any) => call[0].data,
+      );
+      expect(legRows[0].gateway_response.change).toBe(30000);
+      expect(legRows[1].gateway_response.change).toBe(0);
+
+      // El saldo cierra a cero dentro del mismo acto (todo o nada).
+      expect(tx.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            total_paid: 100000,
+            remaining_balance: 0,
+          }),
+        }),
+      );
+
+      // Respuesta: `payments[]` por tramo, `payment` = el primero (móvil).
+      expect(result.payments).toHaveLength(2);
+      expect(result.payments![0]).toMatchObject({
+        id: result.payment!.id,
+        amount: 20000,
+        payment_method: 'Efectivo',
+        change: 30000,
+      });
+      expect(result.payments![1]).toMatchObject({
+        amount: 80000,
+        payment_method: 'Transferencia',
+        change: 0,
+      });
+      expect(result.payment).toMatchObject({
+        amount: 20000,
+        payment_method: 'Efectivo',
+        change: 30000,
+      });
+      expect(result.order).toMatchObject({ id: 4242, status: 'finished' });
+      expect(result).not.toHaveProperty('_leg_payments');
+
+      // Plan order-truth-and-invoice-tz (Step 6) — un payment_registered por
+      // tramo, dentro de la MISMA tx que crea la fila de pago.
+      expect(orderHistory.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          orderId: 4242,
+          storeId: 1,
+          organizationId: 1,
+          type: 'payment_registered',
+          amount: 20000,
+        }),
+      );
+      expect(orderHistory.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          orderId: 4242,
+          storeId: 1,
+          organizationId: 1,
+          type: 'payment_registered',
+          amount: 80000,
+        }),
+      );
+    });
+
+    it('Wallet + efectivo debita el ledger dentro de la misma tx y emite ambos pagos liquidados', async () => {
+      const { tx } = arrangeMultiLegSale();
+      (prisma as any).payments = { findFirst: jest.fn().mockResolvedValue(null) };
+      const debitInTransaction = jest.fn().mockResolvedValue({
+        transaction: { id: 305 }, balance_after: 10000,
+      });
+      (service as any).walletBalanceService = { debitInTransaction };
+      const result = await service.processPosPayment(buildMultiDto({
+        idempotency_key: 'wallet-combined-1',
+        payments: [
+          { store_payment_method_id: CASH_METHOD_ID, amount: 20000, amount_received: 20000 },
+          { store_payment_method_id: WALLET_METHOD_ID, amount: 80000 },
+        ],
+      }), posUser);
+
+      expect(tx.payments.create.mock.calls[1][0].data).toMatchObject({
+        state: 'pending', amount: 80000,
+        financial_idempotency_key: 'pos_wallet_multi_1_wallet-combined-1',
+      });
+      expect(debitInTransaction).toHaveBeenCalledWith(tx, 91, 80000,
+        expect.objectContaining({ reference_type: 'payment', expected_store_id: 1,
+          expected_customer_id: 77 }));
+      expect(tx.payments.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ state: 'succeeded', transaction_id: 'wallet_305' }),
+      }));
+      expect(result.payments).toHaveLength(2);
+      expect(result.payments![1]).toMatchObject({ status: 'succeeded', transaction_id: 'wallet_305' });
+      expect(receivedPayloads()).toHaveLength(2);
+    });
+
+    it('saldo Wallet insuficiente aborta antes del fan-out de pagos', async () => {
+      arrangeMultiLegSale();
+      (prisma as any).payments = { findFirst: jest.fn().mockResolvedValue(null) };
+      (service as any).walletBalanceService = {
+        debitInTransaction: jest.fn().mockRejectedValue(new BadRequestException('Insufficient wallet balance')),
+      };
+      await expect(service.processPosPayment(buildMultiDto({
+        idempotency_key: 'wallet-combined-2',
+        payments: [
+          { store_payment_method_id: CASH_METHOD_ID, amount: 20000, amount_received: 20000 },
+          { store_payment_method_id: WALLET_METHOD_ID, amount: 80000 },
+        ],
+      }), posUser)).rejects.toMatchObject({
+        errorCode: ErrorCodes.PAY_MULTI_TENDER_WALLET_INSUFFICIENT.code,
+      });
+      expect(receivedPayloads()).toHaveLength(0);
+    });
+
+    it('reintento con la misma llave devuelve la venta ya pagada sin nuevo débito', async () => {
+      arrangeMultiLegSale();
+      const dto = buildMultiDto({
+        idempotency_key: 'wallet-combined-retry',
+        payments: [
+          { store_payment_method_id: CASH_METHOD_ID, amount: 20000, amount_received: 20000 },
+          { store_payment_method_id: WALLET_METHOD_ID, amount: 80000 },
+        ],
+      });
+      const fingerprint = (service as any).posWalletAttemptFingerprint(dto);
+      const rows = [
+        { id: 7, amount: new Prisma.Decimal(20000), state: 'succeeded',
+          transaction_id: 'cash_7', store_payment_method: cashMethodRow,
+          gateway_response: { change: 0, metadata: { pos_multi_attempt_key: 'wallet-combined-retry' } } },
+        { id: 8, amount: new Prisma.Decimal(80000), state: 'succeeded',
+          transaction_id: 'wallet_305', store_payment_method: methodsById[WALLET_METHOD_ID],
+          gateway_response: { change: 0, metadata: { pos_multi_attempt_key: 'wallet-combined-retry' } } },
+      ];
+      (prisma as any).payments = { findFirst: jest.fn().mockResolvedValue({
+        ...rows[1],
+        gateway_response: { metadata: { pos_attempt_fingerprint: fingerprint,
+          pos_multi_attempt_key: 'wallet-combined-retry' } },
+        orders: { id: 4242, store_id: 1, customer_id: 77, customer_alias: null,
+          order_number: 'POS-MULTI-1', state: 'finished', grand_total: new Prisma.Decimal(100000),
+          payments: rows },
+      }) };
+
+      const result = await service.processPosPayment(dto, posUser);
+      expect(result.success).toBe(true);
+      expect(result.order?.id).toBe(4242);
+      expect(result.payments?.map((payment) => payment.transaction_id))
+        .toEqual(['cash_7', 'wallet_305']);
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
+    });
+
+    it('emite un payment.received por tramo que suma el total y cuadra subtotal+impuesto', async () => {
+      arrangeMultiLegSale();
+
+      await service.processPosPayment(buildMultiDto(), posUser);
+
+      const received = receivedPayloads();
+      expect(received).toHaveLength(2);
+      // Mismo orden de creación que las filas.
+      expect(received.map((event) => event.amount)).toEqual([20000, 80000]);
+      expect(
+        received.reduce((sum, event) => sum + Number(event.amount), 0),
+      ).toBe(100000);
+      // Cada tramo cae en su cuenta y la Σ de los asientos cuadra con la
+      // venta: subtotal + impuesto de las porciones = los de la orden.
+      expect(
+        received.reduce(
+          (sum, event) =>
+            sum + Number(event.subtotal_amount) + Number(event.tax_amount),
+          0,
+        ),
+      ).toBe(84034 + 15966);
+      for (const event of received) {
+        expect(event.order_id).toBe(4242);
+        expect(Number(event.subtotal_amount)).toBeGreaterThan(0);
+        expect(Number(event.tax_amount)).toBeGreaterThan(0);
+      }
+      // `order.paid` lleva todos los ids del acto y conserva el primero.
+      const orderPaid = emitMock.mock.calls.find(
+        (call) => call[0] === 'order.paid',
+      )?.[1];
+      expect(orderPaid.payment_ids).toHaveLength(2);
+      expect(orderPaid.payment_id).toBe(orderPaid.payment_ids[0]);
+    });
+
+    it('registra un movimiento de caja por tramo, cada uno contra su método', async () => {
+      arrangeMultiLegSale();
+      // Caja habilitada con rastreo de no-efectivo: sin el flag, el tramo
+      // de transferencia se omite por diseño (no es under-test aquí).
+      (settingsService.getSettings as jest.Mock).mockResolvedValue({
+        checkout: { require_customer_data: false },
+        pos: { cash_register: { enabled: true, track_non_cash_payments: true } },
+      });
+      (sessionsService.getActiveSession as jest.Mock).mockResolvedValue({
+        id: 5,
+      });
+      // Post-commit: la resolución del tipo sale por el prisma real, no el tx.
+      (prisma as any).store_payment_methods = {
+        findFirst: jest.fn(async ({ where }: any) =>
+          where?.id != null ? (methodsById[where.id] ?? null) : null,
+        ),
+      };
+
+      await service.processPosPayment(buildMultiDto(), posUser);
+      // `recordCashRegisterMovement` es fire-and-forget (`.catch`, sin await):
+      // vaciar la cola de microtareas antes de assertar sus efectos.
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const recordSaleMovement =
+        movementsService.recordSaleMovement as jest.Mock;
+      expect(recordSaleMovement).toHaveBeenCalledTimes(2);
+      expect(recordSaleMovement).toHaveBeenNthCalledWith(
+        1,
+        5,
+        expect.objectContaining({
+          amount: 20000,
+          payment_method: 'cash',
+          order_id: 4242,
+        }),
+      );
+      expect(recordSaleMovement).toHaveBeenNthCalledWith(
+        2,
+        5,
+        expect.objectContaining({
+          amount: 80000,
+          payment_method: 'bank_transfer',
+          order_id: 4242,
+        }),
+      );
+      // Cada movimiento apunta a su propia fila de pago.
+      const movementPaymentIds = recordSaleMovement.mock.calls.map(
+        (call: any) => call[1].payment_id,
+      );
+      expect(new Set(movementPaymentIds).size).toBe(2);
+    });
+
+    it('mesa con cobro previo rechaza 409 POS_TABLE_SESSION_ALREADY_CHARGED sin crear filas (QUI-704)', async () => {
+      // Sin espía de orden: la guarda vive en el
+      // `applyPosPaymentToTableSession` real, que corre ANTES de crear los
+      // tramos dentro de la misma transacción.
+      const { tx } = arrangeMultiLegSale(null, false);
+      tx.table_sessions.findUnique.mockResolvedValue({
+        id: 99,
+        store_id: 1,
+        order_id: 4242,
+        closed_at: null,
+        order: { id: 4242, store_id: 1 },
+      });
+      tx.payments.findFirst.mockResolvedValue({
+        id: 5,
+        transaction_id: 'txn_previo',
+        amount: new Prisma.Decimal(100000),
+      });
+
+      const error = await service
+        .processPosPayment(
+          buildMultiDto({ table_session_id: 99 }),
+          posUser,
+        )
+        .catch((caught) => caught);
+
+      expect(error).toMatchObject({
+        errorCode: 'POS_TABLE_SESSION_ALREADY_CHARGED',
+      });
+      expect(error.getStatus()).toBe(409);
+      expect(tx.payments.create).not.toHaveBeenCalled();
+      expect(tx.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('mesa multimétodo proyecta TODOS los ids del acto y emite una sola vez', async () => {
+      const { order, tx } = arrangeMultiLegSale(4242);
+      const emitFirst = jest.fn();
+      const emitSecond = jest.fn();
+      const project = (service as any).tableSessionsService
+        .projectOrderPaymentToTableSession as jest.Mock;
+      project
+        .mockResolvedValueOnce({ sessionId: 99, emitAfterCommit: emitFirst })
+        .mockResolvedValueOnce({ sessionId: 99, emitAfterCommit: emitSecond });
+
+      const result = await service.processPosPayment(buildMultiDto(), posUser);
+
+      const legIds = tx.payments.create.mock.calls.map(
+        (_call: any, index: number) => 7 + index,
+      );
+      expect(project).toHaveBeenCalledTimes(2);
+      expect(project).toHaveBeenNthCalledWith(1, order.id, legIds[0], tx);
+      expect(project).toHaveBeenNthCalledWith(2, order.id, legIds[1], tx);
+      expect((result as any).paid_session_id).toBe(99);
+      // First-wins: sólo el primer tramo fija el emit post-commit.
+      expect(emitFirst).toHaveBeenCalledTimes(1);
+      expect(emitSecond).not.toHaveBeenCalled();
+    });
+
+    it('regresión escalar: un método crea 1 fila, 1 evento con totales plenos y respuesta sin payments[]', async () => {
+      const { tx } = arrangeMultiLegSale();
+
+      const result = await service.processPosPayment(
+        buildMultiDto({
+          payments: undefined,
+          store_payment_method_id: CASH_METHOD_ID,
+          amount_received: 120000,
+        }),
+        posUser,
+      );
+
+      expect(tx.payments.create).toHaveBeenCalledTimes(1);
+      expect(tx.payments.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            order_id: 4242,
+            store_payment_method_id: CASH_METHOD_ID,
+            amount: 100000,
+            state: 'succeeded',
+          }),
+        }),
+      );
+
+      // Payload contable histórico: totales de la orden, sin prorrateo.
+      const received = receivedPayloads();
+      expect(received).toHaveLength(1);
+      expect(received[0]).toMatchObject({
+        order_id: 4242,
+        amount: 100000,
+        subtotal_amount: 84034,
+        tax_amount: 15966,
+        discount_amount: 0,
+        tip_amount: 0,
+      });
+
+      // Respuesta histórica: sin clave `payments`… salvo el fix ordenado por
+      // el plan (el vuelto ahora sí viaja en `payment.change`: antes era
+      // `undefined` porque la rama directa nunca lo fijaba top-level).
+      expect(result).not.toHaveProperty('payments');
+      expect(result.payment).toMatchObject({ amount: 100000, change: 20000 });
+      expect(result.order).toMatchObject({ status: 'finished' });
+      expect(tx.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            total_paid: 100000,
+            remaining_balance: 0,
+          }),
+        }),
+      );
+    });
+
+    it('regresión escalar: efectivo insuficiente conserva su error histórico (no el multimétodo)', async () => {
+      const { tx } = arrangeMultiLegSale();
+
+      const error = await service
+        .processPosPayment(
+          buildMultiDto({
+            payments: undefined,
+            store_payment_method_id: CASH_METHOD_ID,
+            amount_received: 50000,
+          }),
+          posUser,
+        )
+        .catch((caught) => caught);
+
+      // El carril escalar NO se renruta por el normalizador: mismo
+      // `BadRequestException` y mismo mensaje de siempre.
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(error.message).toBe(
+        'El monto recibido no puede ser menor al total de la orden.',
+      );
+      expect(tx.payments.create).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Paso 3 del plan de pago multimétodo — la retención sufrida se
+     * reconoce UNA vez por orden: antes, cada tramo emitía `wh.lines`
+     * completo y la retención se contabilizaba N veces. Ahora se prorratea
+     * (`splitWithholdingLines`) proporcional al monto del tramo (20.000 /
+     * 80.000 ⇒ 1:4), con el residuo en el ÚLTIMO tramo.
+     */
+    describe('retención sufrida (cliente agente retenedor)', () => {
+      // Base 84.034 (subtotal de la venta): retefuente 2,5 % = 2.100,85;
+      // reteica 0,7 % = 588,24. `resolveSuffered` no se recalcula aquí — se
+      // mockea con el resultado que produciría la cadena de retenciones.
+      const WH_LINES = [
+        {
+          withholding_type: 'retefuente',
+          concept_code: 'RF-COMPRAS',
+          rate: 0.025,
+          base: 84034,
+          amount: 2100.85,
+          role: 'suffered',
+          account_role: 'withholding.suffered.retefuente_receivable',
+        },
+        {
+          withholding_type: 'reteica',
+          concept_code: 'RI-COMERCIO',
+          rate: 0.007,
+          base: 84034,
+          amount: 588.24,
+          role: 'suffered',
+          account_role: 'withholding.suffered.reteica_receivable',
+        },
+      ];
+
+      it('2 tramos: cada evento lleva su porción y Σ de los dos = wh.lines, al centavo', async () => {
+        arrangeMultiLegSale();
+        (service as any).withholdingFlow.resolveSufferedByOperation.mockResolvedValueOnce(
+          { lines: WH_LINES, uvt_value_used: 47065, counterparty_type: 'legal' },
+        );
+
+        await service.processPosPayment(buildMultiDto(), posUser);
+
+        const received = receivedPayloads();
+        expect(received).toHaveLength(2);
+
+        // Tramo 1 (efectivo, 20.000 de 100.000 ⇒ 1/5): floor hacia abajo.
+        expect(received[0].withholding_breakdown).toEqual([
+          expect.objectContaining({
+            concept_code: 'RF-COMPRAS',
+            withholding_type: 'retefuente',
+            amount: 420.17,
+          }),
+          expect.objectContaining({
+            concept_code: 'RI-COMERCIO',
+            withholding_type: 'reteica',
+            amount: 117.64,
+          }),
+        ]);
+        // Tramo 2 (transferencia, 80.000 ⇒ último): remanente exacto.
+        expect(received[1].withholding_breakdown).toEqual([
+          expect.objectContaining({
+            concept_code: 'RF-COMPRAS',
+            amount: 1680.68,
+          }),
+          expect.objectContaining({
+            concept_code: 'RI-COMERCIO',
+            amount: 470.6,
+          }),
+        ]);
+
+        // Σ por concepto entre los dos tramos = la línea original de wh.lines.
+        const cents = (n: number) => Math.round(n * 100);
+        const sumConcept = (concept: string) =>
+          received.reduce(
+            (sum, event) =>
+              sum +
+              cents(
+                (event.withholding_breakdown ?? []).find(
+                  (row: any) => row.concept_code === concept,
+                )?.amount ?? 0,
+              ),
+            0,
+          );
+        expect(sumConcept('RF-COMPRAS')).toBe(cents(2100.85));
+        expect(sumConcept('RI-COMERCIO')).toBe(cents(588.24));
+
+        // Σ total (las dos líneas, los dos tramos) = Σ wh.lines: la
+        // retención se reconoce una sola vez por orden, no N veces.
+        const totalReceived = received.reduce(
+          (sum, event) =>
+            sum +
+            (event.withholding_breakdown ?? []).reduce(
+              (lineSum: number, row: any) => lineSum + cents(row.amount),
+              0,
+            ),
+          0,
+        );
+        expect(totalReceived).toBe(cents(2100.85) + cents(588.24));
+
+        // La retención NO altera el reparto de venta ya garantizado por
+        // `resolvePaymentReceivedSaleFields`: cada evento sigue cumpliendo
+        // amount == (subtotal − descuento) + impuesto + flete + propina.
+        for (const event of received) {
+          expect(
+            cents(event.amount) + cents(event.discount_amount ?? 0),
+          ).toBe(
+            cents(event.subtotal_amount) +
+              cents(event.tax_amount) +
+              cents(event.shipping_amount ?? 0) +
+              cents(event.tip_amount ?? 0),
+          );
+        }
+
+        // Persistencia de `withholding_calculations`: UNA sola vez, con las
+        // líneas completas de la orden (no las porciones por tramo).
+        expect(
+          (service as any).withholdingFlow.persistWithholdingLines,
+        ).toHaveBeenCalledTimes(1);
+        expect(
+          (service as any).withholdingFlow.persistWithholdingLines,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({ lines: WH_LINES }),
+        );
+        // PR #858 hallazgo 2 — la fila lleva la orden para que la factura la
+        // enlace en vez de duplicarla.
+        const persistCtx = (service as any).withholdingFlow.persistWithholdingLines
+          .mock.calls[0][0];
+        expect(persistCtx.invoice_id).toBeNull();
+        expect(typeof persistCtx.order_id).toBe('number');
+      });
+
+      it('regresión escalar: un solo tramo sigue enviando wh.lines intacto (sin prorratear)', async () => {
+        arrangeMultiLegSale();
+        (service as any).withholdingFlow.resolveSufferedByOperation.mockResolvedValueOnce(
+          { lines: WH_LINES, uvt_value_used: 47065, counterparty_type: 'legal' },
+        );
+
+        await service.processPosPayment(
+          buildMultiDto({
+            payments: undefined,
+            store_payment_method_id: CASH_METHOD_ID,
+            amount_received: 120000,
+          }),
+          posUser,
+        );
+
+        const received = receivedPayloads();
+        expect(received).toHaveLength(1);
+        expect(received[0].withholding_breakdown).toEqual(WH_LINES);
+      });
+    });
+  });
 });
 
 /**
@@ -4040,6 +5440,7 @@ describe('PaymentsService — resolveDeclaredGrossUnitPrice (B.1/F-186)', () => 
         { provide: FiscalInvoiceThresholdService, useValue: {} },
         { provide: OrderStockCommitService, useValue: {} },
         { provide: SellableStockAllocator, useValue: {} },
+        { provide: StockValidatorService, useValue: {} },
         { provide: PriceResolverService, useValue: {} },
         { provide: WithholdingFlowService, useValue: {} },
         { provide: KitchenFireService, useValue: {} },
@@ -4048,6 +5449,9 @@ describe('PaymentsService — resolveDeclaredGrossUnitPrice (B.1/F-186)', () => 
         { provide: InventorySerialNumbersService, useValue: {} },
         { provide: RequestContextService, useValue: {} },
         { provide: AuditService, useValue: {} },
+        // Plan order-truth-and-invoice-tz (Step 6) — requerido en el
+        // constructor de PaymentsService.
+        { provide: OrderHistoryService, useValue: { record: jest.fn() } },
       ],
     }).compile();
     service = module.get<PaymentsService>(PaymentsService);
