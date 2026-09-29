@@ -94,12 +94,19 @@ export class PayrollModule implements OnModuleInit {
     private readonly payrollRunsService: PayrollRunsService,
     private readonly payrollFlowService: PayrollFlowService,
     private readonly pilaReportService: PilaReportService,
+    private readonly employeesService: EmployeesService,
+    private readonly employeeFiscalProfileService: EmployeeFiscalProfileService,
+    private readonly noveltiesService: NoveltiesService,
+    private readonly advancesService: AdvancesService,
+    private readonly settlementsService: SettlementsService,
+    private readonly settlementFlowService: SettlementFlowService,
+    private readonly payrollBankExportService: PayrollBankExportService,
   ) {}
 
   /**
-   * Registra la familia payroll (F-50, F-51, F-56, F-68) para el agente. Vive
-   * aquí y no en `AIEngineModule` porque ese módulo es `@Global()`: importar
-   * un dominio por familia genera ciclos de dependencia. `AIToolRegistry` se
+   * Registra la familia payroll (F-50..F-70) para el agente. Vive aquí y no
+   * en `AIEngineModule` porque ese módulo es `@Global()`: importar un
+   * dominio por familia genera ciclos de dependencia. `AIToolRegistry` se
    * exporta global, así que la dependencia apunta del dominio al motor y este
    * módulo no importa nada extra.
    */
@@ -109,6 +116,13 @@ export class PayrollModule implements OnModuleInit {
         payrollRunsService: this.payrollRunsService,
         payrollFlowService: this.payrollFlowService,
         pilaReportService: this.pilaReportService,
+        employeesService: this.employeesService,
+        employeeFiscalProfileService: this.employeeFiscalProfileService,
+        noveltiesService: this.noveltiesService,
+        advancesService: this.advancesService,
+        settlementsService: this.settlementsService,
+        settlementFlowService: this.settlementFlowService,
+        payrollBankExportService: this.payrollBankExportService,
       }),
     );
   }

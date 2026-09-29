@@ -139,12 +139,16 @@ export class SubscriptionsModule implements OnModuleInit {
     private readonly toolRegistry: AIToolRegistry,
     private readonly subscriptionAccessService: SubscriptionAccessService,
     private readonly subscriptionBillingService: SubscriptionBillingService,
+    private readonly subscriptionPaymentService: SubscriptionPaymentService,
+    private readonly subscriptionStateService: SubscriptionStateService,
+    private readonly subscriptionProrationService: SubscriptionProrationService,
+    private readonly subscriptionResolverService: SubscriptionResolverService,
   ) {}
 
   /**
-   * Registra la familia subscriptions (F-71, F-72, F-73) para el agente. Vive
-   * aquí y no en `AIEngineModule` porque ese módulo es `@Global()`: importar
-   * un dominio por familia genera ciclos de dependencia. `AIToolRegistry` se
+   * Registra la familia subscriptions (F-71..F-81) para el agente. Vive aquí
+   * y no en `AIEngineModule` porque ese módulo es `@Global()`: importar un
+   * dominio por familia genera ciclos de dependencia. `AIToolRegistry` se
    * exporta global, así que la dependencia apunta del dominio al motor y este
    * módulo no importa nada extra.
    */
@@ -153,6 +157,10 @@ export class SubscriptionsModule implements OnModuleInit {
       createSubscriptionTools({
         subscriptionAccessService: this.subscriptionAccessService,
         subscriptionBillingService: this.subscriptionBillingService,
+        subscriptionPaymentService: this.subscriptionPaymentService,
+        subscriptionStateService: this.subscriptionStateService,
+        subscriptionProrationService: this.subscriptionProrationService,
+        subscriptionResolverService: this.subscriptionResolverService,
       }),
     );
   }

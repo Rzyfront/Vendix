@@ -10,6 +10,7 @@ import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
 // Vexi (AI agent) — familia de herramientas contables de sólo lectura.
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createAccountingTools } from '../../../ai-engine/tools/domains/accounting.tools';
+import { createFinanceOpsTools } from '../../../ai-engine/tools/domains/finance-ops.tools';
 
 // Chart of Accounts
 import { ChartOfAccountsController } from './chart-of-accounts/chart-of-accounts.controller';
@@ -184,6 +185,11 @@ export class AccountingModule implements OnModuleInit {
     private readonly prisma: StorePrismaService,
     private readonly accountMappingService: AccountMappingService,
     private readonly entryFailureService: AccountingEntryFailureService,
+    private readonly fixedAssetsService: FixedAssetsService,
+    private readonly budgetVarianceService: BudgetVarianceService,
+    private readonly reconciliationService: ReconciliationService,
+    private readonly reconciliationMatchingService: ReconciliationMatchingService,
+    private readonly consolidationService: ConsolidationService,
   ) {}
 
   /**
@@ -210,6 +216,17 @@ export class AccountingModule implements OnModuleInit {
         prisma: this.prisma,
         accountMappingService: this.accountMappingService,
         entryFailureService: this.entryFailureService,
+      }),
+    );
+    // Paso 12 track B: familia finance-ops (F-95..F-100). Mismo módulo dueño,
+    // sin imports nuevos: los 5 services ya se proveen aquí.
+    this.toolRegistry.registerMany(
+      createFinanceOpsTools({
+        fixedAssetsService: this.fixedAssetsService,
+        budgetVarianceService: this.budgetVarianceService,
+        reconciliationService: this.reconciliationService,
+        reconciliationMatchingService: this.reconciliationMatchingService,
+        consolidationService: this.consolidationService,
       }),
     );
   }

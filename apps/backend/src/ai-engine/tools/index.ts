@@ -12,6 +12,7 @@ export { createWithholdingTools } from './domains/withholding.tools';
 export { createPayrollTools } from './domains/payroll.tools';
 export { createSubscriptionTools } from './domains/subscriptions.tools';
 export { createSettingsAdminTools } from './domains/settings-admin.tools';
+export { createFinanceOpsTools } from './domains/finance-ops.tools';
 export { createCustomerTools } from './domains/customers.tools';
 export { createProductTools } from './domains/products.tools';
 export { createVariantTools } from './domains/variants.tools';

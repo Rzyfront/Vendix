@@ -19,6 +19,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { AuditModule } from '../../../common/audit/audit.module';
 import { EmailModule } from '../../../email/email.module';
 import { FiscalStatusService } from '@common/services/fiscal-status.service';
+import { FiscalScopeMigrationService } from '@common/services/fiscal-scope-migration.service';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 
 @Module({
@@ -42,6 +43,12 @@ import { CashRegistersModule } from '../cash-registers/cash-registers.module';
   providers: [
     SettingsService,
     FiscalStatusService,
+    // Paso 12 track B (F-94): se provee directo en vez de importar el módulo
+    // de settings de organización, que arrastraría OrgInventoryModule y
+    // NotificationsModule al grafo de tienda. El servicio es stateless y sus
+    // dependencias (GlobalPrisma, FiscalScope vía PrismaModule; Audit vía
+    // AuditModule) ya están importadas aquí.
+    FiscalScopeMigrationService,
     ScheduleValidationService,
     SettingsMigratorService,
     PosSearchPathService,
@@ -65,11 +72,13 @@ export class SettingsModule implements OnModuleInit {
     private readonly rolesService: StoreRolesService,
     private readonly fiscalScope: FiscalScopeService,
     private readonly operatingScope: OperatingScopeService,
+    private readonly fiscalScopeMigration: FiscalScopeMigrationService,
   ) {}
 
   /**
-   * Registra la familia settings-admin de Vexi (F-82, F-83, F-85, F-87,
-   * F-88, F-92) desde el dominio que posee los datos. Vive aquí y no en
+   * Registra la familia settings-admin de Vexi (F-82..F-94: 6 reads P0
+   * + F-89/F-93 + writes F-84/F-86/F-90/F-91/F-94) desde el dominio que
+   * posee los datos. Vive aquí y no en
    * `AIEngineModule` porque ese módulo es `@Global()`: importar un dominio
    * por familia genera ciclos de dependencia. `StoreRolesModule` no importa
    * a `SettingsModule`, así que esta arista no cierra un ciclo.
@@ -84,6 +93,7 @@ export class SettingsModule implements OnModuleInit {
         rolesService: this.rolesService,
         fiscalScopeService: this.fiscalScope,
         operatingScopeService: this.operatingScope,
+        fiscalScopeMigrationService: this.fiscalScopeMigration,
       }),
     );
   }
