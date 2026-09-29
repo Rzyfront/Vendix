@@ -1,4 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createMenuTools } from '../../../ai-engine/tools/domains/menus.tools';
 import { ResponseModule } from '@common/responses/response.module';
 import { S3Module } from '@common/services/s3.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
@@ -51,4 +53,29 @@ import { MenuAvailabilityCheckerService } from './menu-availability-checker.serv
     MenuAvailabilityCheckerService,
   ],
 })
-export class MenusModule {}
+export class MenusModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly menusService: MenusService,
+    private readonly menuSectionsService: MenuSectionsService,
+    private readonly menuAvailabilityService: MenuAvailabilityService,
+    private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
+    private readonly menuEngineeringService: MenuEngineeringService,
+  ) {}
+
+  /**
+   * K-13/K-14: registro descentralizado en el módulo dueño, no en
+   * `AIEngineModule` (ciclo DI). `AIToolRegistry` viene del módulo global.
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createMenuTools({
+        menusService: this.menusService,
+        menuSectionsService: this.menuSectionsService,
+        menuAvailabilityService: this.menuAvailabilityService,
+        menuAvailabilityChecker: this.menuAvailabilityChecker,
+        menuEngineeringService: this.menuEngineeringService,
+      }),
+    );
+  }
+}

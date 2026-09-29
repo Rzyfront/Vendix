@@ -1,5 +1,9 @@
-import { Component, computed, effect, inject } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
+import {
+  VexiUiHost,
+  VexiUiHostRegistry,
+} from '../../../../../core/services/vexi-ui-host.registry';
 import {
   ActivatedRoute,
   NavigationEnd,
@@ -41,6 +45,8 @@ import { GeneralSettingsStore } from './services/general-settings.store';
 export class GeneralSettingsComponent {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
+  private readonly vexiHosts = inject(VexiUiHostRegistry);
+  private readonly destroyRef = inject(DestroyRef);
 
   protected readonly store = inject(GeneralSettingsStore);
 
@@ -86,6 +92,11 @@ export class GeneralSettingsComponent {
   });
 
   constructor() {
+    this.vexiHosts.register(this.vexiHostAdapter);
+    this.destroyRef.onDestroy(() =>
+      this.vexiHosts.unregister(this.vexiHostAdapter),
+    );
+
     this.store.init();
 
     // El store no puede navegar por sí mismo (se provee en la ruta, así que su
@@ -107,6 +118,42 @@ export class GeneralSettingsComponent {
     if (!target) return;
     void this.router.navigate([target.path], { relativeTo: this.route });
   }
+
+  // ── Host de Vexi (G8) ─────────────────────────────────────────────────
+  //
+  // Read-only shell: settings are edited through the tab forms with their
+  // own validation, so the chat never writes here. `refresh` reloads from
+  // the server only when there is no unsaved draft — reloading over a draft
+  // would wipe what the person typed, so that answers honestly instead.
+  private readonly vexiHostAdapter: VexiUiHost = {
+    vexiModuleKey: 'settings_general',
+    readScreen: () => {
+      const active = SETTINGS_TABS.find(
+        (tab) => tab.id === this.activeTabId(),
+      );
+      return {
+        module_key: 'settings_general',
+        title: 'Configuración general',
+        filters: { tab: this.activeTabId() },
+        notes: this.store.isSaving()
+          ? 'Se están guardando los ajustes.'
+          : this.store.hasUnsavedChanges()
+            ? `La persona está en "${active?.label ?? this.activeTabId()}" y tiene cambios sin guardar.`
+            : `La persona está en "${active?.label ?? this.activeTabId()}", sin cambios pendientes.`,
+      };
+    },
+    refresh: () => {
+      if (this.store.hasUnsavedChanges()) {
+        return {
+          status: 'needs_user_input' as const,
+          message:
+            'No recargué porque hay cambios sin guardar y se perderían. La persona tiene que guardar o descartar primero.',
+        };
+      }
+      this.store.loadSettings();
+      return { status: 'ok' as const, message: 'Recargué los ajustes.' };
+    },
+  };
 
   protected onHeaderAction(actionId: string): void {
     if (actionId === 'reset') this.store.resetToDefaults();

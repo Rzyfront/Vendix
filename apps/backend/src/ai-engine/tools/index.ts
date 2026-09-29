@@ -6,8 +6,34 @@ export { createSalesTools } from './domains/sales.tools';
 export { createOrdersTools } from './domains/orders.tools';
 export { createInventoryTools } from './domains/inventory.tools';
 export { createAccountingTools } from './domains/accounting.tools';
+export { createFiscalTools } from './domains/fiscal.tools';
+export { createInvoicingTools } from './domains/invoicing.tools';
+export { createWithholdingTools } from './domains/withholding.tools';
+export { createPayrollTools } from './domains/payroll.tools';
+export { createSubscriptionTools } from './domains/subscriptions.tools';
+export { createSettingsAdminTools } from './domains/settings-admin.tools';
+export { createFinanceOpsTools } from './domains/finance-ops.tools';
 export { createCustomerTools } from './domains/customers.tools';
 export { createProductTools } from './domains/products.tools';
+export { createVariantTools } from './domains/variants.tools';
+export { createPaymentTools } from './domains/payments.tools';
+export { createPurchasingTools } from './domains/purchasing.tools';
+export { createSupplierTools } from './domains/suppliers.tools';
+export { createReservationsTools } from './domains/reservations.tools';
+export { createPricingTools } from './domains/pricing.tools';
+export { createReturnTools } from './domains/returns.tools';
+export { createEcommerceSupportTools } from './domains/ecommerce-support.tools';
+export { createReportingTools } from './domains/reporting.tools';
+export { createKitchenTools } from './domains/kitchen.tools';
+export { createTablesTools, createComensalTools } from './domains/tables.tools';
+export {
+  createRecipeTools,
+  createMenuTools,
+  createProductionTools,
+} from './domains/menus.tools';
+export { createDispatchTools } from './domains/dispatch.tools';
+export { createShippingTools } from './domains/shipping.tools';
+export { createNotificationTools } from './domains/notifications.tools';
 export { createSearchTools } from './domains/search.tools';
 export { createBusinessTools } from './domains/business.tools';
 export { createApiBridgeTools } from './bridge/api-bridge.tools';

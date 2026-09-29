@@ -1549,4 +1549,38 @@ describe('PosCartService — loadFromOrder repone shippingContext (flete del bor
     });
   });
 
+  it('cupón sobre la base: 100% deja impuesto 0 y total 0; 10% recalcula impuesto sobre la base descontada', () => {
+    const items: any[] = [
+      { quantity: 1, unitPrice: 59000, totalPrice: 63720, taxAmount: 4720 },
+      { quantity: 1, unitPrice: 18500, totalPrice: 19980, taxAmount: 1480 },
+    ];
+    const full = (service as any).calculateSummary(items, [{ amount: 83700 }]);
+    expect(full.subtotal).toBe(77500);
+    expect(full.taxAmount).toBe(0);
+    expect(full.discountAmount).toBe(77500);
+    expect(full.total).toBe(0);
+
+    const tenPct = (service as any).calculateSummary(items, [{ amount: 8370 }]);
+    expect(tenPct.taxAmount).toBe(5580);
+    expect(tenPct.discountAmount).toBe(7750);
+    expect(tenPct.total).toBe(75330);
+  });
+
+  it('59.000 / 18.500 / 10.000 IVA incluido con cupón 10%: el total es bruto − descuento = 78.750,00 (igual al cierre a centavo del backend)', () => {
+    const items: any[] = [
+      { quantity: 1, unitPrice: 49579.83, totalPrice: 59000, taxAmount: 9420.17 },
+      { quantity: 1, unitPrice: 15546.22, totalPrice: 18500, taxAmount: 2953.78 },
+      { quantity: 1, unitPrice: 8403.36, totalPrice: 10000, taxAmount: 1596.64 },
+    ];
+    const summary = (service as any).calculateSummary(items, [{ amount: 8750 }]);
+
+    // Lo que ve el cliente es SOLO el total con IVA incluido.
+    expect(summary.total).toBe(78750);
+    // El backend suma base y tarifa redondeadas por línea (78.749,99) y
+    // absorbe el centavo en el descuento de la línea mayor: mismo total.
+    expect(summary.total).toBe(
+      Math.round((87500 - 8750) * 100) / 100,
+    );
+  });
+
 });

@@ -8,6 +8,7 @@ export interface BulkProductAnalysisItem {
   row_number: number;
   name: string;
   sku: string;
+  barcode?: string;
   product_type: 'physical' | 'service';
   base_price: number;
   cost_price: number;
@@ -51,6 +52,9 @@ export interface BulkProductAnalysisResult {
 export interface BulkProductUploadItemResult {
   product_name?: string;
   sku?: string;
+  barcode?: string;
+  /** Fila real del archivo (absoluta, la calcula el backend). */
+  row_number?: number;
   action?: 'create' | 'update';
   product: any;
   status: 'success' | 'error' | 'skipped';
@@ -64,4 +68,24 @@ export interface BulkProductUploadResult {
   failed: number;
   skipped: number;
   results: BulkProductUploadItemResult[];
+}
+
+/** Máximo de filas por página del commit de sesión (contrato del backend). */
+export const BULK_UPLOAD_PAGE_SIZE = 100;
+
+/** Respuesta de una página del commit de sesión paginado. */
+export interface BulkProductUploadPage extends BulkProductUploadResult {
+  total: number;
+  offset: number;
+  limit: number;
+  done: boolean;
+}
+
+/** Progreso determinista del commit por lotes (clon de BulkEditProgress). */
+export interface BulkUploadProgress {
+  phase: 'idle' | 'uploading' | 'done';
+  totalBatches: number;
+  doneBatches: number;
+  totalRows: number;
+  doneRows: number;
 }

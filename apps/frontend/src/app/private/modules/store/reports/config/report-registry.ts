@@ -11,6 +11,7 @@ export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'financial', label: 'Financiero', description: 'Reportes de gastos, perdidas y ganancias, caja y cuentas por pagar', icon: 'wallet', color: 'var(--color-destructive)' },
   { id: 'accounting', label: 'Contabilidad', description: 'Reportes contables: balance de prueba, balance general, libro mayor e impuestos', icon: 'scale', color: 'var(--color-info)' },
   { id: 'payroll', label: 'Nómina', description: 'Reportes de nómina: resumen por período, detalle por empleado y provisiones laborales', icon: 'banknote', color: 'var(--color-primary)' },
+  { id: 'payments', label: 'Pagos', description: 'Reporte de pagos recibidos: método, estado, reembolsos, caja y comprobante', icon: 'credit-card', color: 'var(--color-primary)' },
   { id: 'dispatch', label: 'Despachos', description: 'Reportes de remisiones, planillas y vehículos de reparto', icon: 'truck', color: 'var(--color-warning)', panelUiKey: 'reports_dispatch' },
 ];
 
@@ -1685,6 +1686,51 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/dispatch/vehiculos',
     exportEndpoint: 'store/analytics/dispatch/vehiculos/export',
+  },
+  // ─── PAGOS (1) ───────────────────────────────────────────────────────────────────
+
+  {
+    // Página propia (`pages/payments/`): columnas ricas, filtros multi-select
+    // fijables y paginación de servidor. NO usa el viewer genérico; el registry
+    // aporta catálogo + endpoints.
+    id: 'payments-list',
+    category: 'payments',
+    title: 'Pagos',
+    description:
+      'Listado de pagos recibidos con orden, cliente, método, estado, reembolsos, caja y comprobante.',
+    detailedDescription:
+      'Filtra por período, estado y método de pago; busca por orden, cliente o referencia; fija tus filtros por tienda y exporta el detalle completo a XLSX.',
+    icon: 'credit-card',
+    route: '/admin/reports/payments/payments-list',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    serverPagination: true,
+    columns: [
+      { key: 'effective_date', header: 'Fecha de pago', type: 'date' },
+      { key: 'order_number', header: '# Orden', type: 'text' },
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'customer_document', header: 'Documento', type: 'text' },
+      { key: 'payment_method', header: 'Método', type: 'text' },
+      { key: 'state', header: 'Estado', type: 'text' },
+      { key: 'amount', header: 'Monto', type: 'currency', footer: 'sum' },
+      { key: 'refunded_amount', header: 'Reembolsado', type: 'currency', footer: 'sum' },
+      { key: 'net_amount', header: 'Neto', type: 'currency', footer: 'sum' },
+      { key: 'reference', header: 'Referencia', type: 'text' },
+      { key: 'register_name', header: 'Caja', type: 'text' },
+      { key: 'bank_account', header: 'Cuenta bancaria', type: 'text' },
+      { key: 'has_receipt', header: 'Comprobante', type: 'text' },
+    ],
+    exportFilename: 'reporte_pagos',
+    stats: [
+      { key: 'total_collected', label: 'Recaudado', type: 'currency', icon: 'wallet' },
+      { key: 'payments_count', label: '# Pagos', type: 'number', icon: 'credit-card' },
+      { key: 'average_payment', label: 'Ticket promedio', type: 'currency', icon: 'receipt' },
+      { key: 'total_refunded', label: 'Reembolsado', type: 'currency', icon: 'undo-2' },
+    ],
+    dataEndpoint: 'store/analytics/payments',
+    exportEndpoint: 'store/analytics/payments/export',
   },
 ];
 

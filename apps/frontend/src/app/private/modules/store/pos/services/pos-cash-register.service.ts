@@ -92,6 +92,61 @@ export interface CashSessionSummary {
 }
 
 /**
+ * Reporte consolidado de una sesión de caja (abierta o cerrada).
+ * Solo totales: nunca líneas individuales. Envelope crudo del backend
+ * (`GET /store/cash-registers/sessions/:id/close-report`).
+ */
+export interface CashSessionCloseReport {
+  session: {
+    id: number;
+    status: string;
+    register: { id: number; name: string; code: string | null } | null;
+    opened_by: { id: number; name: string } | null;
+    closed_by: { id: number; name: string } | null;
+    opened_at: string;
+    closed_at: string | null;
+    closing_notes: string | null;
+  };
+  currency: { code: string; symbol: string };
+  cash: {
+    opening: number;
+    cash_sales: number;
+    cash_in: { count: number; total: number };
+    cash_out: { count: number; total: number };
+    cash_refunds: { count: number; total: number };
+    expected: number;
+    declared: number | null;
+    difference: number | null;
+  };
+  payment_methods: { method: string; count: number; total: number }[];
+  sales: {
+    orders_count: number;
+    payments_count: number;
+    subtotal: number;
+    discounts: number;
+    taxes: number;
+    shipping: number;
+    tips: number;
+    grand_total: number;
+    average_ticket: number;
+  };
+  refunds: {
+    count: number;
+    total: number;
+    by_method: { method: string; count: number; total: number }[];
+    payment_cancellations: { count: number; total: number };
+  };
+  discounts: {
+    orders_with_discount: number;
+    total: number;
+    promotions: { name: string; count: number; total: number }[];
+    coupons: { code: string; count: number; total: number }[];
+    other: { count: number; total: number };
+  };
+  generated_at: string;
+}
+
+/**
  * Centralized service for cash register operations.
  * Replaces direct localStorage access for register_id when the feature is enabled.
  */
@@ -233,6 +288,16 @@ export class PosCashRegisterService {
   getCashSummary(session_id: number): Observable<CashSessionSummary> {
     return this.http
       .get<any>(`${this.baseUrl}/sessions/${session_id}/cash-summary`)
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Reporte consolidado de la sesión (resumen por método, efectivo, ventas,
+   * reembolsos y descuentos). Mismo dato para el cierre y para Sesiones.
+   */
+  getCloseReport(session_id: number): Observable<CashSessionCloseReport> {
+    return this.http
+      .get<any>(`${this.baseUrl}/sessions/${session_id}/close-report`)
       .pipe(map((res) => res.data));
   }
 

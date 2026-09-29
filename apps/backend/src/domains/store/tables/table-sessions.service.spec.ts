@@ -661,7 +661,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
     });
     const trackedProduct = () => ({
       id: 51, name: 'MODELO', base_price: 100,
-      is_sellable: true, product_type: 'physical', track_inventory: true,
+      is_sellable: true, state: 'active', product_type: 'physical', track_inventory: true,
       product_variants: [], price_unit_quantity: null,
     });
 
@@ -740,6 +740,19 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       expect((service as any).stockLevelManager.reserveStock).not.toHaveBeenCalled();
     });
 
+    it('rechaza un producto inactivo antes de crear la línea', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+      prismaMock.products.findMany.mockResolvedValue([
+        { ...trackedProduct(), state: 'inactive' },
+      ]);
+
+      await expect(service.addItems(1, { items: [{ product_id: 51, quantity: 1 }] } as any))
+        .rejects.toMatchObject({
+          errorCode: ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID.code,
+        });
+      expect(prismaMock.order_items.create).not.toHaveBeenCalled();
+    });
+
     it('rejects adding items to a closed session', async () => {
       prismaMock.table_sessions.findFirst.mockResolvedValue({
         id: 1,
@@ -767,6 +780,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         name: 'Servicio QA',
         base_price: 10000,
         is_sellable: true,
+        state: 'active',
         product_type: 'service',
         track_inventory: false,
       }]);
@@ -804,6 +818,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           name: 'Hamburguesa',
           base_price: 25000,
           is_sellable: true,
+          state: 'active',
           product_type: 'prepared',
           track_inventory: false,
         },
@@ -851,6 +866,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           name: 'Camiseta',
           base_price: 50000,
           is_sellable: true,
+          state: 'active',
           product_type: 'physical',
           track_inventory: false,
           product_variants: [{ id: 61 }],
@@ -878,6 +894,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           name: 'Camiseta',
           base_price: 50000,
           is_sellable: true,
+          state: 'active',
           product_type: 'physical',
           track_inventory: false,
           product_variants: [{ id: 61 }],
@@ -939,6 +956,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
             is_on_sale: true,
             sale_price: new Prisma.Decimal(8000),
             is_sellable: true,
+            state: 'active',
             product_type: 'physical',
             track_inventory: false,
             product_variants: [],
@@ -968,6 +986,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
             is_on_sale: false,
             sale_price: new Prisma.Decimal(8000),
             is_sellable: true,
+            state: 'active',
             product_type: 'physical',
             track_inventory: false,
             product_variants: [],
@@ -995,6 +1014,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
             is_on_sale: true,
             sale_price: new Prisma.Decimal(40000),
             is_sellable: true,
+            state: 'active',
             product_type: 'physical',
             track_inventory: false,
             product_variants: [{ id: 61 }],
@@ -1031,6 +1051,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
             is_on_sale: true,
             sale_price: new Prisma.Decimal(40000),
             is_sellable: true,
+            state: 'active',
             product_type: 'physical',
             track_inventory: false,
             product_variants: [{ id: 61 }],
@@ -1086,6 +1107,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           name: 'Pizza',
           base_price: 8403,
           is_sellable: true,
+          state: 'active',
           product_type: 'prepared',
           track_inventory: false,
         },
@@ -1150,6 +1172,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           name: 'Bandeja paisa',
           base_price: 1000,
           is_sellable: true,
+          state: 'active',
           product_type: 'prepared',
           track_inventory: false,
         },

@@ -1495,6 +1495,31 @@ export class OrdersListComponent {
     }
   }
 
+  /**
+   * Snapshot of the list's pagination for the parent's Vexi host (G3).
+   *
+   * Read-only: the host reports it in `readScreen`, and every change still
+   * goes through this component's own handlers (`onSearchChange`,
+   * `onFilterChange`, `onPageChange`, `onSort`).
+   */
+  vexiPaginationState(): {
+    page: number;
+    limit: number;
+    total: number;
+    total_pages: number;
+    sort: string;
+  } {
+    const limit = this._filters.limit || 10;
+    const total = this.totalItems();
+    return {
+      page: this._filters.page || 1,
+      limit,
+      total,
+      total_pages: Math.max(1, Math.ceil(total / limit)),
+      sort: `${this._filters.sort_by || 'created_at'}:${this._filters.sort_order || 'desc'}`,
+    };
+  }
+
   // Pagination and sorting
   onPageChange(page: number): void {
     this._filters.page = page;

@@ -67,6 +67,9 @@ export interface AcquirerIdentitySnapshot {
   customer_fiscal_responsibilities?: unknown;
   customer_email?: string | null;
   customer_phone?: string | null;
+  /** Tipo de persona congelado en la factura ('NATURAL'/'JURIDICA'). Único
+   *  respaldo para facturas MANUALES sin `customer_id` — ver Task D. */
+  customer_person_type?: string | null;
 }
 
 /**
@@ -322,8 +325,19 @@ export function resolveAcquirerIdentity(params: {
     orNullIfEmpty(snapshot.customer_verification_digit) ??
     null;
 
+  // Task D — sin ficha vinculada (factura manual, `customer_id IS NULL`),
+  // `customer?.person_type` es siempre `undefined` y el default de
+  // `resolveAcquirerPersonType` (derivar de `document_type_code === '31'`)
+  // resolvía JURIDICA para CUALQUIER persona natural con NIT. El snapshot
+  // (`customer_person_type`) es el respaldo que faltaba: mismo orden de
+  // precedencia que el resto de esta función — ficha → snapshot → derivado.
+  const raw_person_type =
+    orNullIfEmpty(customer?.person_type) ??
+    orNullIfEmpty(snapshot.customer_person_type) ??
+    null;
+
   const { person_type, declared_raw } = resolveAcquirerPersonType(
-    customer?.person_type,
+    raw_person_type,
     document_type_code,
   );
 

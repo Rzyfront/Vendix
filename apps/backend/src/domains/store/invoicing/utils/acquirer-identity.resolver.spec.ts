@@ -227,6 +227,61 @@ describe('resolveAcquirerIdentity', () => {
     expect(result.person_type_raw).toBe('garbage-value'); // crudo, sin perder
   });
 
+  // Task D — MARIA BEATRIZ FERNANDEZ (NIT 27003183-1), factura manual sin
+  // customer_id: sin el respaldo del snapshot, el default (código 31 ⇒
+  // JURIDICA) la resolvía como persona jurídica.
+  it('Task D: factura manual (sin ficha) con NIT y customer_person_type=NATURAL en el snapshot NO deriva JURIDICA', () => {
+    const result = resolveAcquirerIdentity({
+      snapshot: {
+        customer_name: 'MARIA BEATRIZ FERNANDEZ',
+        customer_tax_id: '27003183',
+        customer_document_type: '31',
+        customer_verification_digit: '1',
+        customer_person_type: 'NATURAL',
+      },
+      customer: undefined,
+    });
+
+    expect(result.person_type).toBe('NATURAL');
+    expect(result.person_type_raw).toBe('NATURAL');
+  });
+
+  it('Task D: sin ficha, sin customer_person_type en el snapshot, sigue derivando JURIDICA del código 31 (comportamiento previo intacto)', () => {
+    const result = resolveAcquirerIdentity({
+      snapshot: {
+        customer_tax_id: '800214345',
+        customer_document_type: '31',
+      },
+      customer: undefined,
+    });
+
+    expect(result.person_type).toBe('JURIDICA');
+    expect(result.person_type_raw).toBeNull();
+  });
+
+  it('Task D: person_type de la ficha vinculada gana sobre customer_person_type del snapshot', () => {
+    const result = resolveAcquirerIdentity({
+      snapshot: {
+        customer_document_type: '31',
+        customer_person_type: 'JURIDICA',
+      },
+      customer: { person_type: 'NATURAL' },
+    });
+
+    expect(result.person_type).toBe('NATURAL');
+    expect(result.person_type_raw).toBe('NATURAL');
+  });
+
+  it('Task D: customer_person_type del snapshot respalda cuando la ficha vinculada no declara person_type', () => {
+    const result = resolveAcquirerIdentity({
+      snapshot: { customer_document_type: '31', customer_person_type: 'NATURAL' },
+      customer: { legal_name: 'Sin person_type propio' },
+    });
+
+    expect(result.person_type).toBe('NATURAL');
+    expect(result.person_type_raw).toBe('NATURAL');
+  });
+
   // P1-B — ficha antigua sin document_type, sin señal de riesgo: infiere CC.
   it('ficha con document_type NULL, número SIN forma de NIT y sin legal_name/person_type ⇒ infiere CC (no bloquea)', () => {
     const result = resolveAcquirerIdentity({

@@ -1,11 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
+import { ToolDeprecation } from '../../../../ai-engine/tools/interfaces/tool.interface';
 import { RequestContextService } from '@common/context/request-context.service';
 
 export interface McpToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, any>;
+  /** T2: versión del contrato del tool (`RegisteredTool.version`). */
+  version: string;
+  /** T5: marcador de deprecación, presente solo en tools deprecados. */
+  deprecated?: ToolDeprecation;
 }
 
 export interface McpToolResult {
@@ -23,11 +28,25 @@ export class McpToolProvider {
       context?.permissions || context?.roles,
     );
 
-    return definitions.map((d) => ({
-      name: d.function.name,
-      description: d.function.description,
-      inputSchema: d.function.parameters,
-    }));
+    return definitions.map((d) => {
+      const deprecated = this.toolRegistry.getDeprecation(d.function.name);
+      // T5: el sunset viaja como campo Y como línea en la descripción: el
+      // campo lo leen los clientes que conocen la extensión, la línea la lee
+      // todo el mundo (los SDK de MCP pueden pelar claves extra).
+      const sunsetLine = deprecated
+        ? `\n\n(DEPRECADO desde v${deprecated.since}` +
+          (deprecated.sunset ? `; se retira en ${deprecated.sunset}` : '') +
+          (deprecated.replacedBy ? `; usa ${deprecated.replacedBy}` : '') +
+          '.)'
+        : '';
+      return {
+        name: d.function.name,
+        description: `${d.function.description}${sunsetLine}`,
+        inputSchema: d.function.parameters,
+        version: this.toolRegistry.getToolVersion(d.function.name),
+        ...(deprecated ? { deprecated } : {}),
+      };
+    });
   }
 
   async callTool(

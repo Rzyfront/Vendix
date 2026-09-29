@@ -1532,6 +1532,171 @@ export class CustomersService {
     };
   }
 
+  /**
+   * T1 agent reads: narrow projections owned by this service so Vexi tools
+   * never touch Prisma directly. `users` is NOT auto-scoped by
+   * `StorePrismaService` — callers pass a `where` that already carries the
+   * store filter (`store_users.some.store_id` + role customer), same shape as
+   * `findAll`/`findOne`. `orders`/`bookings`/`order_items` rely on the scoped
+   * client like everywhere else in this service.
+   */
+
+  private static readonly AGENT_CARD_SELECT = {
+    id: true,
+    first_name: true,
+    last_name: true,
+    email: true,
+    phone: true,
+    document_type: true,
+    document_number: true,
+    state: true,
+    created_at: true,
+  } as const;
+
+  /** `find_customer` SQL pass + fuzzy pool: card projection, newest first. */
+  async searchCustomerCardsForAgent(where: any, take: number) {
+    return this.prisma.users.findMany({
+      where,
+      select: { ...CustomersService.AGENT_CARD_SELECT },
+      orderBy: { created_at: 'desc' },
+      take,
+    }) as Promise<any[]>;
+  }
+
+  /**
+   * Shipping city per customer id. Read through the `users` relation on
+   * purpose: a top-level `addresses` query is store-scoped and would silently
+   * drop POS-saved addresses with `store_id = null`.
+   */
+  async findCustomerCitiesForAgent(ids: number[]) {
+    return this.prisma.users.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        addresses: {
+          where: { type: 'shipping' },
+          orderBy: { is_primary: 'desc' },
+          take: 1,
+          select: { city: true },
+        },
+      },
+    }) as Promise<any[]>;
+  }
+
+  /** Display names for segment examples, store-scoped (archived included). */
+  async findCustomerNamesForAgent(storeId: number, ids: number[]) {
+    return this.prisma.users.findMany({
+      where: {
+        id: { in: ids },
+        store_users: { some: { store_id: storeId } },
+        user_roles: { some: { roles: { name: 'customer' } } },
+      },
+      select: { id: true, first_name: true, last_name: true },
+    }) as Promise<any[]>;
+  }
+
+  /** Finished-order aggregates per customer id (revenue = `finished` only). */
+  async getPurchaseStatsForAgent(customerIds: number[]) {
+    if (!customerIds.length) return [];
+    return this.prisma.orders.groupBy({
+      by: ['customer_id'],
+      where: { customer_id: { in: customerIds }, state: 'finished' },
+      _count: { _all: true },
+      _sum: { grand_total: true },
+      _max: { created_at: true },
+    }) as Promise<any[]>;
+  }
+
+  /** Recent orders for the history card, newest first. */
+  async getRecentOrdersForAgent(customerId: number, take: number) {
+    return this.prisma.orders.findMany({
+      where: { customer_id: customerId },
+      orderBy: { created_at: 'desc' },
+      take,
+      select: {
+        id: true,
+        order_number: true,
+        state: true,
+        channel: true,
+        grand_total: true,
+        total_paid: true,
+        remaining_balance: true,
+        currency: true,
+        created_at: true,
+        completed_at: true,
+      },
+    }) as Promise<any[]>;
+  }
+
+  /** Lifetime finished aggregate for the history card. */
+  async getFinishedAggregateForAgent(customerId: number) {
+    return this.prisma.orders.aggregate({
+      where: { customer_id: customerId, state: 'finished' },
+      _count: { _all: true },
+      _sum: { grand_total: true },
+      _max: { created_at: true },
+      _min: { created_at: true },
+    }) as Promise<any>;
+  }
+
+  /** Live balance aggregate (excludes cancelled/refunded/draft). */
+  async getOpenBalanceForAgent(customerId: number) {
+    return this.prisma.orders.aggregate({
+      where: {
+        customer_id: customerId,
+        state: { notIn: ['cancelled', 'refunded', 'draft'] },
+        remaining_balance: { gt: 0 },
+      },
+      _count: { _all: true },
+      _sum: { remaining_balance: true },
+    }) as Promise<any>;
+  }
+
+  async getBookingsCountForAgent(customerId: number) {
+    return this.prisma.bookings.count({ where: { customer_id: customerId } });
+  }
+
+  /** Top-5 products by units on finished orders. */
+  async getTopProductsForAgent(customerId: number) {
+    return this.prisma.order_items.groupBy({
+      by: ['product_name'],
+      where: { orders: { customer_id: customerId, state: 'finished' } },
+      _sum: { quantity: true, total_price: true },
+      orderBy: { _sum: { quantity: 'desc' } },
+      take: 5,
+    }) as Promise<any[]>;
+  }
+
+  /** Finished-order population for segmentation (capped at 5000). */
+  async getSegmentPopulationForAgent(since: Date) {
+    return this.prisma.orders.groupBy({
+      by: ['customer_id'],
+      where: {
+        state: 'finished',
+        customer_id: { not: null },
+        created_at: { gte: since },
+      },
+      _count: { _all: true },
+      _sum: { grand_total: true },
+      _max: { created_at: true },
+      orderBy: { _sum: { grand_total: 'desc' } },
+      take: 5000,
+    }) as Promise<any[]>;
+  }
+
+  /**
+   * Store currency read off its own orders instead of settings: avoids
+   * coupling to `SettingsModule` and matches the recorded amounts.
+   */
+  async resolveCurrencyFromOrdersForAgent() {
+    const latest = await this.prisma.orders.findFirst({
+      where: { currency: { not: null } },
+      orderBy: { created_at: 'desc' },
+      select: { currency: true },
+    });
+    return latest?.currency ?? null;
+  }
+
   async update(storeId: number, id: number, dto: UpdateCustomerDto) {
     const user = await this.findOne(storeId, id);
 
@@ -1794,6 +1959,42 @@ export class CustomersService {
           orderBy: { is_primary: 'desc' },
         },
       },
+    });
+  }
+
+  /**
+   * Organización de una tienda para `upsert_customer`. `stores` NO está
+   * scopeado: el filtro por id es obligatorio y va escrito a mano, igual que
+   * lo hacía la tool antes del paso 15. Lectura pura.
+   */
+  async findOrganizationIdByStoreForAgent(
+    storeId: number,
+  ): Promise<number | null> {
+    const store = await this.prisma.stores.findFirst({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+    return store?.organization_id ?? null;
+  }
+
+  /**
+   * Conflicto de correo para `upsert_customer` (réplica de lectura de la
+   * unicidad que `update`/`create` exigen). `users` NO está scopeado, así que
+   * el filtro `organization_id` va escrito a mano; `excludeUserId` excluye al
+   * cliente que se está editando. El correo llega ya en minúsculas.
+   */
+  async findUserByEmailInOrganizationForAgent(
+    email: string,
+    organizationId: number,
+    excludeUserId?: number | null,
+  ): Promise<any> {
+    return this.prisma.users.findFirst({
+      where: {
+        email,
+        organization_id: organizationId,
+        ...(excludeUserId ? { NOT: { id: excludeUserId } } : {}),
+      },
+      select: { id: true, first_name: true, last_name: true },
     });
   }
 

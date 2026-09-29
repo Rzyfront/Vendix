@@ -1,7 +1,15 @@
 import { Injectable, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
+import { Actions, ofType } from '@ngrx/effects';
+import { firstValueFrom, map, race, timer } from 'rxjs';
 import { MenuFilterService } from './menu-filter.service';
+import { ReportsActions } from '../../private/modules/store/reports/state/reports.actions';
+import { selectSelectedReport } from '../../private/modules/store/reports/state/reports.selectors';
+import { getReportById } from '../../private/modules/store/reports/config/report-registry';
+import { DialogService } from '../../shared/components/dialog/dialog.service';
+import { TourService } from '../../shared/components/tour/services/tour.service';
+import { VEXI_TOUR_CONFIGS } from '../../shared/components/tour/configs/tour-registry';
 import {
   VexiPosBridgeService,
   VexiPosActionResult,
@@ -32,6 +40,18 @@ const DEFAULT_WAIT_MS = 5000;
 const MAX_WAIT_MS = 15000;
 
 /**
+ * How long `ui_export` waits for the download to resolve.
+ *
+ * The backend builds the XLSX over the full dataset, which routinely takes
+ * longer than a screen transition; past this budget the turn reports
+ * `in_progress` instead of hanging, and the file still lands in downloads.
+ */
+const EXPORT_TIMEOUT_MS = 30000;
+
+/** Conventional id of the host action that downloads the current view (U-1). */
+const HOST_EXPORT_ACTION_ID = 'export';
+
+/**
  * Executes Vexi's `ui_*` commands against the running application.
  *
  * These never reach the server: `AIToolRegistry.executeTool()` refuses them by
@@ -53,6 +73,10 @@ export class VexiUiCommandService {
   private pos = inject(VexiPosBridgeService);
   private hosts = inject(VexiUiHostRegistry);
   private store = inject(Store);
+  private actions$ = inject(Actions);
+  private dialogs = inject(DialogService);
+  private tours = inject(TourService);
+  private tourConfigs = inject(VEXI_TOUR_CONFIGS);
 
   /** True for names this service owns. Callers use it to intercept. */
   handles(toolName: string): boolean {
@@ -125,6 +149,34 @@ export class VexiUiCommandService {
             args['module_key'] ? String(args['module_key']) : undefined,
             Number(args['timeout_ms'] ?? 0),
           );
+        case 'ui_export':
+          return await this.exportContext({
+            reportId: args['report_id'] ? String(args['report_id']) : undefined,
+            format: args['format'] ? String(args['format']) : undefined,
+            dateFrom: args['date_from'] ? String(args['date_from']) : undefined,
+            dateTo: args['date_to'] ? String(args['date_to']) : undefined,
+          });
+        case 'ui_list_tours':
+          return this.listTours();
+        case 'ui_start_tour':
+          return this.startTour(String(args['tour_id'] ?? ''));
+        case 'ui_reset_tour':
+          return this.resetTour(String(args['tour_id'] ?? ''));
+        case 'ui_close_modal':
+          return await this.hostAction('closeModal', (host) =>
+            host.closeModal!(),
+          );
+        case 'ui_confirm_dialog':
+          return this.confirmDialog(
+            args['accept'] === true,
+            typeof args['consequence'] === 'string'
+              ? args['consequence']
+              : undefined,
+          );
+        case 'ui_read_selection':
+          return this.readSelection();
+        case 'ui_explain_screen':
+          return this.explainScreen();
         default:
           return JSON.stringify({
             error: `El comando de interfaz "${toolName}" no existe en este navegador.`,
@@ -494,7 +546,7 @@ export class VexiUiCommandService {
    * messages instead of one generic "no puedo".
    */
   private async hostAction(
-    capability: 'fillForm' | 'setFilter' | 'openModal',
+    capability: 'fillForm' | 'setFilter' | 'openModal' | 'closeModal',
     run: (host: NonNullable<ReturnType<VexiUiHostRegistry['current']>>) => Promise<VexiUiActionResult>,
   ): Promise<string> {
     const host = this.hosts.current();
@@ -503,6 +555,7 @@ export class VexiUiCommandService {
       fillForm: 'llenar formularios',
       setFilter: 'aplicar filtros',
       openModal: 'abrir formularios',
+      closeModal: 'cerrar el modal abierto',
     }[capability];
 
     if (!host || typeof host[capability] !== 'function') {
@@ -514,14 +567,25 @@ export class VexiUiCommandService {
       'La pantalla está esperando algo de la persona.',
     );
 
+    // A host answers `not_found` through its own vocabulary; the close
+    // contract names the honest state `no_open_modal` so the model can branch
+    // on it instead of parsing a sentence.
+    const status =
+      capability === 'closeModal' && result.status === 'not_found'
+        ? 'no_open_modal'
+        : result.status;
+
     return JSON.stringify({
       ...result,
+      status,
       next_step:
         capability === 'fillForm'
           ? 'Los campos quedaron puestos pero NADA se guardó. Dile qué dejaste listo y qué falta que revise o decida antes de guardar.'
-          : result.status === 'ok'
-            ? 'Cuéntale qué quedó en pantalla, con el número de registros si lo tienes.'
-            : 'Dile qué no se pudo y por qué.',
+          : capability === 'closeModal' && status === 'no_open_modal'
+            ? 'No había ningún modal abierto. Si la persona ve un diálogo de confirmación, ese se responde con ui_confirm_dialog, no se cierra.'
+            : result.status === 'ok'
+              ? 'Cuéntale qué quedó en pantalla, con el número de registros si lo tienes.'
+              : 'Dile qué no se pudo y por qué.',
     });
   }
 
@@ -563,19 +627,32 @@ export class VexiUiCommandService {
       });
     }
 
-    const ready = await Promise.race([
-      host.whenReady().then(() => true),
-      new Promise<boolean>((resolve) =>
-        setTimeout(() => resolve(false), timeout),
+    // A rejecting `whenReady` is the host's own honest timeout (see
+    // `vexiWhenReady`): the load is still running, which deserves its own
+    // status rather than the generic wait timeout or, worse, a thrown error.
+    const outcome = await Promise.race([
+      host
+        .whenReady()
+        .then(() => 'ready' as const)
+        .catch(() => 'still_loading' as const),
+      new Promise<'timeout'>((resolve) =>
+        setTimeout(() => resolve('timeout'), timeout),
       ),
     ]);
 
+    if (outcome === 'ready') {
+      return JSON.stringify({
+        status: 'ok',
+        module: host.vexiModuleKey,
+        next_step: 'La pantalla ya cargó, puedes seguir.',
+      });
+    }
+
     return JSON.stringify({
-      status: ready ? 'ok' : 'timeout',
+      status: outcome === 'still_loading' ? 'still_loading' : 'timeout',
       module: host.vexiModuleKey,
-      next_step: ready
-        ? 'La pantalla ya cargó, puedes seguir.'
-        : 'La pantalla sigue cargando. No afirmes nada sobre lo que muestra; dile que está tardando.',
+      next_step:
+        'La pantalla sigue cargando. No afirmes nada sobre lo que muestra; dile que está tardando y vuelve a intentarlo.',
     });
   }
 
@@ -586,6 +663,506 @@ export class VexiUiCommandService {
       next_step:
         'Hazlo por la vía de datos si puedes, o llévalo al módulo correspondiente y dile qué hacer allí.',
     });
+  }
+
+  // ── Exportación (U-1) ───────────────────────────────────────────────────
+
+  /**
+   * Downloads the existing export of the current context (U-1).
+   *
+   * Two rungs, both dispatching flows that already exist — this never builds a
+   * file: on a report screen it dispatches the domain's own `exportReport`
+   * action (the effect owns the blob, per `vendix-report-xlsx`); anywhere else
+   * it asks the host for its conventional `export` action. Either way the
+   * filename reported is the one the browser actually downloaded, and a
+   * context with no export answers `no_export` instead of inventing one.
+   */
+  private async exportContext(args: {
+    reportId?: string;
+    format?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<string> {
+    if (args.format && args.format.toLowerCase() !== 'xlsx') {
+      return JSON.stringify({
+        status: 'unsupported_format',
+        requested: args.format,
+        next_step:
+          'Vendix solo exporta XLSX. Ofrécele el XLSX o resuelve lo que necesita por la vía de datos.',
+      });
+    }
+
+    if (args.reportId) {
+      return await this.exportReportById(args);
+    }
+
+    if (this.router.url.startsWith('/admin/reports')) {
+      const selected = await firstValueFrom(
+        this.store.select(selectSelectedReport),
+      );
+      if (selected) {
+        return await this.exportSelectedReport(selected.id, args);
+      }
+      return this.noExport(
+        'Está en reportes pero no tiene ningún reporte abierto.',
+      );
+    }
+
+    return await this.exportViaHost();
+  }
+
+  private async exportReportById(args: {
+    reportId?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<string> {
+    const definition = args.reportId ? getReportById(args.reportId) : undefined;
+
+    if (!definition) {
+      return JSON.stringify({
+        status: 'unknown_report',
+        requested: args.reportId,
+        next_step:
+          'Ese reporte no existe en el catálogo. Léele la pantalla con ui_read_screen para ver cuál tiene abierto y exporta ese.',
+      });
+    }
+
+    const selected = await firstValueFrom(
+      this.store.select(selectSelectedReport),
+    );
+
+    // The effect exports whatever the page selected, so exporting a different
+    // id from here would download one file while reporting another.
+    if (selected?.id !== definition.id) {
+      return JSON.stringify({
+        status: 'wrong_context',
+        requested: definition.title,
+        route: definition.route,
+        next_step: `La persona no está viendo "${definition.title}". Ofrécele llevarla a ${definition.route} con ui_navigate y exporta cuando esté ahí.`,
+      });
+    }
+
+    return await this.exportSelectedReport(definition.id, args);
+  }
+
+  private async exportSelectedReport(
+    reportId: string,
+    args: { dateFrom?: string; dateTo?: string },
+  ): Promise<string> {
+    const definition = getReportById(reportId);
+
+    if (!definition?.exportEndpoint) {
+      return this.noExport(
+        `El reporte "${definition?.title ?? reportId}" no tiene exportación.`,
+      );
+    }
+
+    let rangeNote: string | undefined;
+    if (args.dateFrom && args.dateTo) {
+      if (definition.requiresDateRange) {
+        this.store.dispatch(
+          ReportsActions.setDateRange({
+            dateRange: { start_date: args.dateFrom, end_date: args.dateTo },
+          }),
+        );
+      } else {
+        rangeNote = 'Este reporte no usa rango de fechas, así que lo ignoré.';
+      }
+    }
+
+    const outcome = this.awaitExportOutcome();
+    this.store.dispatch(ReportsActions.exportReport());
+    const result = await outcome;
+    const filename = `${definition.exportFilename}.xlsx`;
+
+    if (result.status === 'ok') {
+      return JSON.stringify({
+        status: 'ok',
+        filename,
+        report: definition.title,
+        note: rangeNote,
+        next_step: 'Dile que el archivo ya se descargó, con su nombre.',
+      });
+    }
+
+    if (result.status === 'failed') {
+      return JSON.stringify({
+        status: 'error',
+        report: definition.title,
+        message: result.error,
+        next_step:
+          'La exportación falló en el servidor. Dile qué pasó y ofrécele intentarlo de nuevo o abrir el reporte para revisar el rango.',
+      });
+    }
+
+    return JSON.stringify({
+      status: 'in_progress',
+      report: definition.title,
+      next_step:
+        'La exportación sigue en curso y el archivo caerá en sus descargas. No afirmes que ya la tiene; ofrécele avisarte cuando la vea.',
+    });
+  }
+
+  /**
+   * Waits for the effect's own verdict instead of assuming the download.
+   *
+   * Dispatching `exportReport` only starts the work; success or failure
+   * arrives as a separate action, and reporting `ok` on dispatch would credit
+   * a file that may never land.
+   */
+  private awaitExportOutcome(): Promise<
+    { status: 'ok' } | { status: 'failed'; error: string } | { status: 'timeout' }
+  > {
+    return firstValueFrom(
+      race(
+        this.actions$.pipe(
+          ofType(ReportsActions.exportReportSuccess),
+          map(() => ({ status: 'ok' as const })),
+        ),
+        this.actions$.pipe(
+          ofType(ReportsActions.exportReportFailure),
+          map((action) => ({ status: 'failed' as const, error: action.error })),
+        ),
+        timer(EXPORT_TIMEOUT_MS).pipe(map(() => ({ status: 'timeout' as const }))),
+      ),
+    );
+  }
+
+  /**
+   * Second rung: the on-screen module's own export action, if it declares one.
+   *
+   * A host answers `not_found` for ids it never published, so an unlisted
+   * `export` degrades to `no_export` through the host's own honesty rather
+   * than through an id list kept here that would drift.
+   */
+  private async exportViaHost(): Promise<string> {
+    const host = this.hosts.current();
+
+    if (!host?.runAction) {
+      return this.noExport('Esta pantalla no expone acciones que disparar.');
+    }
+
+    const result = await host.runAction(HOST_EXPORT_ACTION_ID);
+
+    if (result.status === 'not_found') {
+      return this.noExport(result.message);
+    }
+
+    if (result.status === 'ok') {
+      const detail = result.detail as { filename?: unknown } | undefined;
+      const filename =
+        typeof detail?.filename === 'string' ? detail.filename : undefined;
+      return JSON.stringify({
+        status: 'ok',
+        filename,
+        message: result.message,
+        next_step: 'Dile que el archivo ya se descargó, con su nombre.',
+      });
+    }
+
+    return JSON.stringify({
+      ...result,
+      next_step: 'Dile en qué quedó la exportación y qué falta de su parte.',
+    });
+  }
+
+  private noExport(message: string): string {
+    return JSON.stringify({
+      status: 'no_export',
+      message,
+      next_step:
+        'No hay un export que disparar desde aquí. Si necesita los datos, consúltelos con las herramientas de datos y preséntaselos en el chat.',
+    });
+  }
+
+  // ── Tours (U-2/U-3/U-4) ───────────────────────────────────────────────
+  //
+  // Vexi offers to guide but never forces: listing reads the injectable map
+  // plus `user_settings.config.tours` state, starting sets the signal the
+  // layout shell observes (the shell stays the owner of `isOpen`), and reset
+  // only touches this user's own skipped/completed flags.
+
+  private listTours(): string {
+    const tours = Object.values(this.tourConfigs).map((config) => {
+      const active = this.tours.getCurrentTourId() === config.id;
+      const status = active
+        ? 'en_curso'
+        : this.tours.isTourCompleted(config.id)
+          ? 'completado'
+          : this.tours.isTourSkipped(config.id)
+            ? 'saltado'
+            : 'disponible';
+      return {
+        id: config.id,
+        name: config.name,
+        steps: config.steps.length,
+        status,
+      };
+    });
+
+    return JSON.stringify({
+      status: 'ok',
+      tours,
+      total: tours.length,
+      next_step:
+        'Ofrécele uno disponible con ui_start_tour pasando su `id`. Los completados o saltados solo se reinician si la persona lo pide.',
+    });
+  }
+
+  private startTour(tourId: string): string {
+    const config = tourId ? this.tourConfigs[tourId] : undefined;
+
+    if (!config) {
+      return JSON.stringify({
+        status: 'unknown_tour',
+        requested: tourId,
+        available: Object.keys(this.tourConfigs),
+        next_step:
+          'Ese tour no existe. Elige uno de los disponibles o pregúntale a la persona qué pantalla quiere recorrer.',
+      });
+    }
+
+    if (!this.tours.canShowTour(tourId)) {
+      const state = this.tours.isTourCompleted(tourId)
+        ? 'ya lo completó'
+        : 'lo saltó antes';
+      return JSON.stringify({
+        status: 'already_done',
+        tour: config.name,
+        next_step: `La persona ${state}. Solo reinícialo con ui_reset_tour si te lo pide explícitamente; nunca reabras un tour sin su sí.`,
+      });
+    }
+
+    this.tours.startTour(tourId);
+
+    // Verified, not assumed: `startTour` no-ops when the tour cannot show,
+    // and reporting `ok` over that would narrate a modal that never opened.
+    if (this.tours.getCurrentTourId() !== tourId) {
+      return JSON.stringify({
+        status: 'error',
+        tour: config.name,
+        next_step:
+          'El tour no se activó. Dile que no pudiste abrirlo y ofrécele guiarla por el chat paso a paso.',
+      });
+    }
+
+    return JSON.stringify({
+      status: 'ok',
+      tour: config.name,
+      steps: config.steps.length,
+      next_step:
+        'El tour se abrió en paso 1. Confírmalo con ui_read_screen y acompaña cada paso sin adelantarte.',
+    });
+  }
+
+  private resetTour(tourId: string): string {
+    const config = tourId ? this.tourConfigs[tourId] : undefined;
+
+    if (!config) {
+      return JSON.stringify({
+        status: 'unknown_tour',
+        requested: tourId,
+        available: Object.keys(this.tourConfigs),
+        next_step:
+          'Ese tour no existe. Elige uno de los disponibles con ui_list_tours.',
+      });
+    }
+
+    if (
+      !this.tours.isTourCompleted(tourId) &&
+      !this.tours.isTourSkipped(tourId)
+    ) {
+      return JSON.stringify({
+        status: 'nothing_to_reset',
+        tour: config.name,
+        next_step:
+          'Ese tour está disponible, no hay nada que resetear. Ábrelo directo con ui_start_tour.',
+      });
+    }
+
+    this.tours.resetTour(tourId);
+
+    return JSON.stringify({
+      status: 'ok',
+      tour: config.name,
+      next_step:
+        'El tour quedó disponible de nuevo. Ábrelo con ui_start_tour si la persona te lo pidió.',
+    });
+  }
+
+  // ── Diálogos (U-6) ──────────────────────────────────────────────────────
+
+  /**
+   * Answers the pending `DialogService.confirm` from the chat.
+   *
+   * Nothing here self-approves: the tool contract requires the person's
+   * explicit say-so in the conversation before this is even called, and a
+   * `danger` dialog additionally requires the consequence in their own words
+   * — the same one-sentence pattern as `IRREVERSIBLE_DOMAINS`. Answering
+   * resolves the promise the host code is awaiting, so the turn reports the
+   * real outcome instead of `result_unknown`.
+   */
+  private confirmDialog(accept: boolean, consequence?: string): string {
+    const pending = this.dialogs.pendingConfirm();
+
+    if (!pending) {
+      return JSON.stringify({
+        status: 'no_pending_confirm',
+        next_step:
+          'No hay ningún diálogo de confirmación esperando respuesta. Si la persona ve uno, pídele que te diga qué dice.',
+      });
+    }
+
+    if (pending.danger && accept && !consequence?.trim()) {
+      return JSON.stringify({
+        status: 'confirmation_required',
+        dialog: pending.message,
+        danger: true,
+        next_step:
+          'Ese diálogo es peligroso: antes de aceptar, la persona tiene que escribir con sus palabras qué consecuencia acepta. Pídeselo y vuelve a llamar con `consequence`. El diálogo sigue abierto.',
+      });
+    }
+
+    const resolved = this.dialogs.vexiResolvePending(accept);
+
+    if (!resolved) {
+      return JSON.stringify({
+        status: 'no_pending_confirm',
+        next_step:
+          'El diálogo se resolvió por otro lado (la persona clicó). Lee la pantalla para ver en qué quedó.',
+      });
+    }
+
+    return JSON.stringify({
+      status: 'ok',
+      accepted: accept,
+      dialog: pending.message,
+      next_step: accept
+        ? 'El diálogo quedó aceptado. Lee la pantalla para confirmar qué cambió.'
+        : 'El diálogo quedó cancelado. Dile que no se hizo nada.',
+    });
+  }
+
+  // ── Selección (U-7) ─────────────────────────────────────────────────────
+
+  /**
+   * Reads the record the person has selected or open, by human name.
+   *
+   * Precision over ids: acting "on this" needs "Orden 1046 de Acme", not a
+   * row index. An empty selection is `no_selection`, never a guess at the
+   * first row.
+   */
+  private readSelection(): string {
+    const host = this.hosts.current();
+
+    if (!host?.readScreen) {
+      return this.noHost('leer lo seleccionado');
+    }
+
+    const screen = host.readScreen();
+
+    if (!screen.selection) {
+      return JSON.stringify({
+        status: 'no_selection',
+        module: screen.module_key,
+        next_step:
+          'No hay nada seleccionado en esta pantalla. Pídele que abra o seleccione el registro, o selecciónalo con ui_set_filter pasando `selection` ("abre la orden 1046").',
+      });
+    }
+
+    return JSON.stringify({
+      status: 'ok',
+      module: screen.module_key,
+      selection: screen.selection,
+      next_step:
+        'Actúa sobre esa selección. Si la acción vive en otra pantalla, llévalo primero con ui_navigate.',
+    });
+  }
+
+  // ── Descubrimiento (U-8) ────────────────────────────────────────────────
+
+  /**
+   * Answers "¿qué puedo hacer aquí?" in one call (U-8).
+   *
+   * Composes `readScreen + listActions + diagnoseModule()`: what the screen
+   * shows, what it offers, and which catalog modules are hidden with the
+   * layer that blocks each and where to unblock it. Every hiding rule lives
+   * in `diagnose()` — this only reports its verdict, in Spanish, and never
+   * invites a click on something invisible.
+   */
+  private explainScreen(): string {
+    const host = this.hosts.current();
+    const hidden = this.hiddenCatalogModules();
+
+    if (!host?.readScreen) {
+      const route = this.router.url;
+      return JSON.stringify({
+        status: 'no_host',
+        route,
+        hidden_here: hidden.entries,
+        hidden_total: hidden.total,
+        next_step:
+          'Esta pantalla no expone su estado. Si necesita operar aquí, llévalo al módulo con ui_navigate y explícale qué botón buscar.',
+      });
+    }
+
+    const screen = host.readScreen();
+    const actions = host.listActions ? host.listActions() : [];
+
+    return JSON.stringify({
+      status: 'ok',
+      screen,
+      actions,
+      hidden_here: hidden.entries,
+      hidden_total: hidden.total,
+      next_step:
+        'Cuéntale qué tiene delante y qué puede hacer. Para lo oculto, explícale la causa y dónde se desbloquea; nunca lo invites a clicar lo que no ve.',
+    });
+  }
+
+  /**
+   * Catalog modules the user cannot see, with the blocking layer each.
+   *
+   * Capped so the discovery answer fits the turn: the total says how many
+   * are hidden, the sample carries the actionable ones. Diagnosed through
+   * `diagnoseModule()` so the reasons match the sidebar exactly.
+   */
+  private hiddenCatalogModules(): {
+    entries: Array<{
+      key: string;
+      label: string;
+      blocked_by: unknown;
+      detail: string;
+      fix_path: unknown;
+    }>;
+    total: number;
+  } {
+    const HIDDEN_SAMPLE = 10;
+    const entries: Array<{
+      key: string;
+      label: string;
+      blocked_by: unknown;
+      detail: string;
+      fix_path: unknown;
+    }> = [];
+    let total = 0;
+
+    for (const entry of STORE_MODULE_CATALOG) {
+      const diagnosis = this.menuFilter.diagnoseModule(entry.key);
+      if (diagnosis.visible) continue;
+      total += 1;
+      if (entries.length < HIDDEN_SAMPLE) {
+        entries.push({
+          key: entry.key,
+          label: entry.label,
+          blocked_by: diagnosis.blockedBy,
+          detail: diagnosis.detail,
+          fix_path: diagnosis.fixPath,
+        });
+      }
+    }
+
+    return { entries, total };
   }
 
   // ── Refresco ────────────────────────────────────────────────────────────

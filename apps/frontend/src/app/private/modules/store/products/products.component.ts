@@ -1,4 +1,4 @@
-import { Component, inject, DestroyRef, signal, computed } from '@angular/core';
+import { Component, inject, DestroyRef, signal, computed, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -16,6 +16,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import {
   VexiUiHost,
   VexiUiHostRegistry,
+  vexiWhenReady,
 } from '../../../../core/services/vexi-ui-host.registry';
 
 // Models
@@ -38,7 +39,10 @@ import { ProductListComponent } from './components/product-list/product-list.com
 // (`ProductsComponent`) y el hijo (`ProductListComponent`) escribian
 // el mismo literal en sus archivos, y desincronizarse era trivial.
 import { PRODUCT_LIST_DEFAULT_QUERY } from './components/product-list/product-list.constants';
-import { ProductCreateModalComponent } from './components/product-create-modal.component';
+import {
+  PRODUCT_CREATE_FILLABLE_FIELDS,
+  ProductCreateModalComponent,
+} from './components/product-create-modal.component';
 import { BulkUploadModalComponent } from './components/bulk-upload-modal/bulk-upload-modal.component';
 import { BulkImageUploadModalComponent } from './components/bulk-image-upload-modal/bulk-image-upload-modal.component';
 import { ArchiveWriteOffModalComponent } from './components/archive-write-off-modal/archive-write-off-modal.component';
@@ -228,6 +232,10 @@ export class ProductsComponent {
   // Estado de descarga de plantilla
   readonly isExporting = signal(false);
 
+  // The create form lives in the child modal, so fillForm reaches it through
+  // the child's own fill method — never by writing the service.
+  private readonly createForm = viewChild(ProductCreateModalComponent);
+
   // ───────────────────────────────────────────────────────────────────────────
   // CP-PURCHASE-TRANSPARENCY D.9 — estado del castigo por archivado
   // ───────────────────────────────────────────────────────────────────────────
@@ -372,10 +380,19 @@ export class ProductsComponent {
         module_key: 'products',
         title: 'Productos',
         visible_count: this.products().length,
+        selection: this.archiveTarget()?.name ?? null,
         filters: {
           search: this.searchTerm || undefined,
           ...this.currentFilters,
         },
+        form_fields: this.isCreateModalOpen
+          ? [...PRODUCT_CREATE_FILLABLE_FIELDS]
+          : undefined,
+        open_modal: this.vexiOpenModal(),
+        page: pagination.page,
+        limit: pagination.limit,
+        total: pagination.total,
+        total_pages: pagination.totalPages || 1,
         // Los dos números se nombran por separado a propósito: "61 productos" y
         // "10 en pantalla" son cosas distintas, y una nota que solo diga el total
         // hace que Vexi le diga a la persona que está viendo 61 filas.
@@ -391,6 +408,7 @@ export class ProductsComponent {
       { id: 'carga_masiva', label: 'Abrir la carga masiva de productos' },
       { id: 'carga_imagenes', label: 'Abrir la carga masiva de imágenes' },
       { id: 'edicion_masiva', label: 'Ir a la edición masiva' },
+      { id: 'export', label: 'Descargar el listado actual en XLSX' },
     ],
     runAction: async (id) => {
       switch (id) {
@@ -420,6 +438,21 @@ export class ProductsComponent {
             status: 'ok' as const,
             message: 'Lo llevé a la edición masiva de productos.',
           };
+        case 'export': {
+          // U-1: el mismo flujo del botón "descargar" del listado, con el
+          // filename real en el detalle para que el turno lo reporte.
+          const filename = await this.onDownloadCurrentProducts();
+          return filename
+            ? {
+                status: 'ok' as const,
+                message: `Descargué el listado actual de productos (${filename}).`,
+                detail: { filename },
+              }
+            : {
+                status: 'error' as const,
+                message: 'La descarga del listado falló. Dile que lo intente desde el botón de la pantalla.',
+              };
+        }
         default:
           return {
             status: 'not_found' as const,
@@ -428,11 +461,12 @@ export class ProductsComponent {
       }
     },
     setFilter: async (values) => {
-      // Delegated to `onSearch` / `onFilter`, the same handlers the list's own
-      // controls call. Setting `searchTerm` and reloading by hand would skip the
-      // page reset those do, so the person would land on page 4 of a filtered list
-      // that has one page.
+      // Delegated to `onSearch` / `onFilter` / `changePage`, the same handlers
+      // the list's own controls call. Setting `searchTerm` and reloading by
+      // hand would skip the page reset those do, so the person would land on
+      // page 4 of a filtered list that has one page.
       const applied: string[] = [];
+      let note: string | undefined;
 
       if (typeof values['search'] === 'string') {
         this.onSearch(values['search']);
@@ -440,34 +474,132 @@ export class ProductsComponent {
       }
 
       const rest = Object.fromEntries(
-        Object.entries(values).filter(([key]) => key !== 'search'),
+        Object.entries(values).filter(
+          ([key]) => !['search', 'page', 'limit', 'sort'].includes(key),
+        ),
       );
+
+      // `sort` se reporta como no soportado: el `ProductQueryDto` del
+      // backend no declara `sort_by`/`sort_order` y el ValidationPipe global
+      // (`forbidNonWhitelisted`) responde 400 si se envían. Fingir el orden
+      // rompería la lista con un error; mismo patrón honesto que Clientes.
+      let sortIgnored = false;
+      if (typeof values['sort'] === 'string') {
+        sortIgnored = true;
+      }
 
       if (Object.keys(rest).length) {
         this.onFilter(rest as Partial<ProductQueryDto>);
         applied.push(Object.keys(rest).join(', '));
       }
 
-      // Deliberadamente SIN conteo. `onSearch` dispara un refetch asíncrono, así
-      // que `products()` acá todavía tiene la página anterior: devolver su
+      if (values['limit'] !== undefined) {
+        const limit = Number(values['limit']);
+        if (Number.isInteger(limit) && limit > 0 && limit <= 100) {
+          this.changeLimit(limit);
+          applied.push(`${limit} por página`);
+        }
+      }
+
+      if (values['page'] !== undefined) {
+        const totalPages = this.pagination().totalPages || 1;
+        let page = Math.floor(Number(values['page']));
+        if (Number.isFinite(page)) {
+          // La página explícita se aplica DESPUÉS de filtros y límite: esos
+          // resetearon a 1 y el pedido es aterrizar en la pedida.
+          if (page < 1) page = 1;
+          if (page > totalPages) {
+            note = `Pediste la página ${page} pero solo hay ${totalPages}; te dejé en la última.`;
+            page = totalPages;
+          }
+          this.changePage(page);
+          applied.push(`página ${page}`);
+        }
+      }
+
+      // Deliberadamente SIN conteo. Los handlers disparan un refetch asíncrono,
+      // así que `products()` acá todavía tiene la página anterior: devolver su
       // longitud hacía que Vexi dijera "quedaron 10" sobre una lista que terminó
       // en 2. Si el conteo importa, el modelo llama ui_read_screen después, que
       // lee la lista ya asentada.
+      const sortNote = sortIgnored
+        ? ' No ordené porque el backend de productos no expone sort.'
+        : '';
       return applied.length
         ? {
             status: 'ok' as const,
-            message: `Filtré la lista por ${applied.join(' y ')}. La lista se está recargando; si necesitas el conteo, léelo de la pantalla después.`,
+            message:
+              `Filtré la lista por ${applied.join(' y ')}. La lista se está recargando; si necesitas el conteo, léelo de la pantalla después.` +
+              (note ? ` ${note}` : '') +
+              sortNote,
+            detail: note ? { note } : undefined,
           }
         : {
             status: 'not_found' as const,
-            message: 'No me pasaste ningún filtro que esta lista entienda.',
+            message:
+              'No me pasaste ningún filtro que esta lista entienda.' +
+              sortNote,
           };
     },
+    fillForm: async (values) => {
+      const form = this.createForm();
+      if (!form) {
+        return {
+          status: 'error' as const,
+          message: 'El formulario de producto no está montado en esta pantalla.',
+        };
+      }
+
+      if (!this.isCreateModalOpen) {
+        this.openCreateModal();
+      }
+
+      const result = form.vexiFillForm(values);
+      const unknownNote = result.unknown.length
+        ? ` No reconocí ${result.unknown.join(', ')}; las categorías, marcas e impuestos se eligen en el formulario.`
+        : '';
+
+      if (!result.valid) {
+        return {
+          status: 'needs_user_input' as const,
+          message:
+            `Dejé el formulario de producto lleno con ${result.applied.join(', ') || 'nada nuevo'}, pero todavía falta: ` +
+            result.validation_errors.map((e) => e.message).join('; ') +
+            `.${unknownNote} Nada se guardó.`,
+          detail: { validation_errors: result.validation_errors },
+        };
+      }
+
+      return {
+        status: 'ok' as const,
+        message:
+          `Dejé el formulario de producto lleno (${result.applied.join(', ')}) y válido, listo para revisar.` +
+          `${unknownNote} Nada se guardó.`,
+      };
+    },
     openModal: (id) => this.vexiHostAdapter.runAction!(id),
+    closeModal: async () => {
+      const open = this.vexiOpenModal();
+      if (!open) {
+        return {
+          status: 'not_found' as const,
+          message: 'No hay ningún modal abierto en Productos.',
+        };
+      }
+      this.onModalClose();
+      this.isBulkUploadModalOpen = false;
+      this.isBulkImageUploadModalOpen = false;
+      this.isArchiveWriteOffModalOpen.set(false);
+      return {
+        status: 'ok' as const,
+        message: `Cerré ${open.title}.`,
+      };
+    },
     refresh: () => {
       this.loadProducts();
       return { status: 'ok' as const, message: 'Recargué la lista de productos.' };
     },
+    whenReady: () => vexiWhenReady(() => this.isLoading()),
   };
 
   /** Nombra el modal abierto, para que Vexi no actúe como si la pantalla estuviera libre. */
@@ -475,6 +607,19 @@ export class ProductsComponent {
     if (this.isCreateModalOpen) return 'Hay un formulario de nuevo producto abierto.';
     if (this.isBulkUploadModalOpen) return 'La carga masiva está abierta.';
     if (this.isBulkImageUploadModalOpen) return 'La carga de imágenes está abierta.';
+    return undefined;
+  }
+
+  /** El modal abierto en forma accionable (U-5): `ui_close_modal` cierra este. */
+  private vexiOpenModal(): { id: string; title: string } | undefined {
+    if (this.isCreateModalOpen)
+      return { id: 'nuevo_producto', title: 'el formulario de nuevo producto' };
+    if (this.isBulkUploadModalOpen)
+      return { id: 'carga_masiva', title: 'la carga masiva' };
+    if (this.isBulkImageUploadModalOpen)
+      return { id: 'carga_imagenes', title: 'la carga de imágenes' };
+    if (this.isArchiveWriteOffModalOpen())
+      return { id: 'archivo_producto', title: 'el diálogo de archivado' };
     return undefined;
   }
 
@@ -493,6 +638,12 @@ export class ProductsComponent {
 
   changePage(page: number): void {
     this.pagination.update(p => ({ ...p, page }));
+    this.loadProducts();
+  }
+
+  /** Cambiar filas por página vuelve a la 1, igual que un cambio de filtro. */
+  changeLimit(limit: number): void {
+    this.pagination.update(p => ({ ...p, limit, page: 1 }));
     this.loadProducts();
   }
 
@@ -782,8 +933,10 @@ export class ProductsComponent {
   }
 
   // Descargar Plantilla con Productos Actuales
-  async onDownloadCurrentProducts(): Promise<void> {
-    if (this.isExporting()) return;
+  // Devuelve el filename descargado (o null si falló) para que `ui_export`
+  // reporte el archivo real en vez de inventarlo.
+  async onDownloadCurrentProducts(): Promise<string | null> {
+    if (this.isExporting()) return null;
     this.isExporting.set(true);
     try {
       const blob = await firstValueFrom(
@@ -793,12 +946,15 @@ export class ProductsComponent {
       const link = document.createElement('a');
       link.href = url;
       const dateStr = new Date().toISOString().split('T')[0];
-      link.download = `productos_actuales_${dateStr}.xlsx`;
+      const filename = `productos_actuales_${dateStr}.xlsx`;
+      link.download = filename;
       link.click();
       window.URL.revokeObjectURL(url);
       this.notifyDownloadResult(true);
+      return filename;
     } catch (err) {
       this.notifyDownloadResult(false, err);
+      return null;
     } finally {
       this.isExporting.set(false);
     }

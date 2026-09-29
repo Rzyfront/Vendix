@@ -758,6 +758,7 @@ export class TableSessionsService {
         is_on_sale: true,
         sale_price: true,
         is_sellable: true,
+        state: true,
         product_type: true,
         track_inventory: true,
         // QUI-648 / ADR-08 commit 5 (F-038/F-080) — escala de precio del
@@ -796,6 +797,12 @@ export class TableSessionsService {
         throw new VendixHttpException(
           ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
           `Producto "${p.name}" no es vendible (is_sellable=false)`,
+        );
+      }
+      if (p.state !== 'active') {
+        throw new VendixHttpException(
+          ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+          `Producto "${p.name}" no está activo`,
         );
       }
       // ERR-07 — un producto CON variantes exige que la línea declare cuál

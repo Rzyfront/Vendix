@@ -19,6 +19,7 @@ import { MovementsService } from '../movements/movements.service';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
 import type { SettingsService } from '../../settings/settings.service';
+import type { CashSessionCloseReport } from './interfaces/cash-session-close-report.interface';
 
 /**
  * QUI-784 — token de inyección para el `SettingsService` dentro del dominio de
@@ -543,6 +544,309 @@ export class SessionsService {
     });
 
     return this.computeCashSummary(session, movements);
+  }
+
+  /**
+   * Reporte consolidado de la sesión (cierre e historial). Solo agregados.
+   * El efectivo sale de `computeCashSummary` (QUI-572, fuente única); aquí solo
+   * se suman conteos y se agregan descuentos/reembolsos alrededor.
+   */
+  async getCloseReport(session_id: number): Promise<CashSessionCloseReport> {
+    const session = await this.prisma.cash_register_sessions.findFirst({
+      where: { id: session_id },
+      include: {
+        register: { select: { id: true, name: true, code: true } },
+        opened_by_user: {
+          select: { id: true, first_name: true, last_name: true },
+        },
+        closed_by_user: {
+          select: { id: true, first_name: true, last_name: true },
+        },
+      },
+    });
+    if (!session) {
+      throw new NotFoundException('Sesión de caja no encontrada');
+    }
+
+    const movements = await this.prisma.cash_register_movements.findMany({
+      where: { session_id },
+    });
+    const summary = this.computeCashSummary(session, movements);
+    const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    const fullName = (u: any) =>
+      u ? { id: u.id, name: `${u.first_name} ${u.last_name}`.trim() } : null;
+
+    // Conteos de efectivo: misma regla que computeCashSummary para el total.
+    const cnt = { cash_in: 0, cash_out: 0, cash_refunds: 0 };
+    const cancellations = { count: 0, total: 0 };
+    for (const m of movements) {
+      if (m.type === 'cash_in') cnt.cash_in++;
+      else if (m.type === 'cash_out') cnt.cash_out++;
+      else if (m.type === 'refund') {
+        if (m.payment_method === 'cash') cnt.cash_refunds++;
+        // Anulación de pago: cuenta en cash_refunds (si es efectivo) pero se
+        // reporta aparte y NO entra en refunds.count/total.
+        if (m.reference === 'payment_cancelled') {
+          cancellations.count++;
+          cancellations.total += Number(m.amount);
+        }
+      }
+    }
+
+    // --- Órdenes de la sesión ---
+    // Un pago dividido entre sesiones toca la misma orden en dos cajas: la
+    // orden se atribuye a la sesión de su PRIMER movimiento `sale`.
+    const sale_movements = movements.filter((m) => m.type === 'sale');
+    const candidate_ids: number[] = [
+      ...new Set<number>(
+        sale_movements.map((m) => m.order_id).filter((v): v is number => !!v),
+      ),
+    ];
+    let order_ids: number[] = [];
+    if (candidate_ids.length) {
+      const all_sales = await this.prisma.cash_register_movements.findMany({
+        where: { type: 'sale', order_id: { in: candidate_ids } },
+        select: { id: true, order_id: true, session_id: true, created_at: true },
+        orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+      });
+      const first_session = new Map<number, number>();
+      for (const m of all_sales) {
+        if (!first_session.has(m.order_id!)) {
+          first_session.set(m.order_id!, m.session_id);
+        }
+      }
+      order_ids = candidate_ids.filter(
+        (id) => first_session.get(id) === session_id,
+      );
+    }
+
+    const orders = order_ids.length
+      ? await this.prisma.orders.findMany({
+          where: { id: { in: order_ids } },
+          select: {
+            id: true,
+            subtotal_amount: true,
+            discount_amount: true,
+            tax_amount: true,
+            shipping_cost: true,
+            tip_amount: true,
+            grand_total: true,
+            coupon_code: true,
+          },
+        })
+      : [];
+
+    let subtotal = 0;
+    let discounts = 0;
+    let taxes = 0;
+    let shipping = 0;
+    let tips = 0;
+    let grand_total = 0;
+    for (const o of orders) {
+      subtotal += Number(o.subtotal_amount);
+      discounts += Number(o.discount_amount);
+      taxes += Number(o.tax_amount);
+      shipping += Number(o.shipping_cost ?? 0);
+      tips += Number(o.tip_amount ?? 0);
+      grand_total += Number(o.grand_total);
+    }
+
+    // --- Descuentos ---
+    const discounted = orders.filter((o) => Number(o.discount_amount) > 0);
+    const discounted_ids = discounted.map((o) => o.id);
+    const [order_promos, coupon_uses] = discounted_ids.length
+      ? await Promise.all([
+          this.prisma.order_promotions.findMany({
+            where: { order_id: { in: discounted_ids } },
+            select: {
+              order_id: true,
+              discount_amount: true,
+              promotions: { select: { name: true } },
+            },
+          }),
+          this.prisma.coupon_uses.findMany({
+            where: { order_id: { in: discounted_ids } },
+            select: {
+              order_id: true,
+              discount_applied: true,
+              coupon: { select: { code: true } },
+            },
+          }),
+        ])
+      : [[], []];
+
+    const promo_map = new Map<string, { count: number; total: number }>();
+    const explained = new Set<number>();
+    let promos_total = 0;
+    for (const p of order_promos as any[]) {
+      const name = p.promotions?.name ?? 'Promoción';
+      const b = promo_map.get(name) ?? { count: 0, total: 0 };
+      b.count++;
+      b.total += Number(p.discount_amount);
+      promo_map.set(name, b);
+      promos_total += Number(p.discount_amount);
+      explained.add(p.order_id);
+    }
+
+    // Cupones: monto real desde coupon_uses. Si la orden trae `coupon_code` sin
+    // coupon_use, se cuenta con monto 0 (no se inventa un monto).
+    const coupon_map = new Map<string, { count: number; total: number }>();
+    const with_use = new Set<number>();
+    let coupons_total = 0;
+    for (const c of coupon_uses as any[]) {
+      const code = c.coupon?.code ?? 'CUPÓN';
+      const b = coupon_map.get(code) ?? { count: 0, total: 0 };
+      b.count++;
+      b.total += Number(c.discount_applied);
+      coupon_map.set(code, b);
+      coupons_total += Number(c.discount_applied);
+      with_use.add(c.order_id);
+      explained.add(c.order_id);
+    }
+    for (const o of discounted) {
+      if (o.coupon_code && !with_use.has(o.id)) {
+        const b = coupon_map.get(o.coupon_code) ?? { count: 0, total: 0 };
+        b.count++;
+        coupon_map.set(o.coupon_code, b);
+        explained.add(o.id);
+      }
+    }
+
+    // --- Reembolsos ---
+    // Vínculo exacto por `refund:<id>` + heurística por ventana y cajero (no hay
+    // FK refunds→sesión; gap conocido). Dedupe por id.
+    const linked_ids = movements
+      .filter(
+        (m) => m.type === 'refund' && m.reference?.startsWith('refund:'),
+      )
+      .map((m) => Number(m.reference!.slice('refund:'.length)))
+      .filter((n) => Number.isInteger(n));
+    const cashier_ids = [
+      ...new Set([session.opened_by, session.closed_by].filter((v) => !!v)),
+    ] as number[];
+    const window_end = session.closed_at ?? new Date();
+    const refunds_rows = await this.prisma.refunds.findMany({
+      where: {
+        // Solo reembolsos con salida de dinero en curso o hecha: una solicitud
+        // pendiente de aprobación aún no sale de la caja ni del medio de pago.
+        state: { in: ['approved', 'processing', 'completed'] },
+        OR: [
+          ...(linked_ids.length ? [{ id: { in: linked_ids } }] : []),
+          {
+            processed_at: { gte: session.opened_at, lte: window_end },
+            processed_by_user_id: { in: cashier_ids },
+          },
+        ],
+      },
+      select: { id: true, amount: true, refund_method: true },
+    });
+    const refund_map = new Map<string, { count: number; total: number }>();
+    let refunds_total = 0;
+    for (const rf of refunds_rows) {
+      const method = rf.refund_method || 'unknown';
+      const b = refund_map.get(method) ?? { count: 0, total: 0 };
+      b.count++;
+      b.total += Number(rf.amount);
+      refund_map.set(method, b);
+      refunds_total += Number(rf.amount);
+    }
+
+    const closed = session.status === 'closed';
+    const currency_code = await this.settingsService.getStoreCurrency();
+    const groupOut = <K extends string>(
+      map: Map<string, { count: number; total: number }>,
+      key: K,
+    ) =>
+      [...map.entries()]
+        .map(([k, v]) => ({
+          [key]: k,
+          count: v.count,
+          total: r2(v.total),
+        }))
+        .sort((a: any, b: any) => b.total - a.total);
+
+    return {
+      session: {
+        id: session.id,
+        status: session.status,
+        register: session.register
+          ? {
+              id: session.register.id,
+              name: session.register.name,
+              code: session.register.code ?? null,
+            }
+          : null,
+        opened_by: fullName(session.opened_by_user),
+        closed_by: fullName(session.closed_by_user),
+        opened_at: session.opened_at.toISOString(),
+        closed_at: session.closed_at ? session.closed_at.toISOString() : null,
+        closing_notes: session.closing_notes ?? null,
+      },
+      currency: {
+        code: currency_code,
+        symbol: this.currencySymbolFor(currency_code),
+      },
+      cash: {
+        opening: r2(summary.opening),
+        cash_sales: r2(summary.cash_sales),
+        cash_in: { count: cnt.cash_in, total: r2(summary.cash_in) },
+        cash_out: { count: cnt.cash_out, total: r2(summary.cash_out) },
+        cash_refunds: {
+          count: cnt.cash_refunds,
+          total: r2(summary.cash_refunds),
+        },
+        // Cerrada: manda lo persistido en el arqueo, no un recálculo.
+        expected: r2(
+          closed && session.expected_closing_amount != null
+            ? Number(session.expected_closing_amount)
+            : summary.expected_cash_total,
+        ),
+        declared:
+          closed && session.actual_closing_amount != null
+            ? r2(Number(session.actual_closing_amount))
+            : null,
+        difference:
+          closed && session.difference != null
+            ? r2(Number(session.difference))
+            : null,
+      },
+      payment_methods: summary.sales_by_method.map((m) => ({
+        method: m.method,
+        count: m.count,
+        total: r2(m.total),
+      })),
+      sales: {
+        orders_count: orders.length,
+        payments_count: sale_movements.length,
+        subtotal: r2(subtotal),
+        discounts: r2(discounts),
+        taxes: r2(taxes),
+        shipping: r2(shipping),
+        tips: r2(tips),
+        grand_total: r2(grand_total),
+        average_ticket: orders.length ? r2(grand_total / orders.length) : 0,
+      },
+      refunds: {
+        count: refunds_rows.length,
+        total: r2(refunds_total),
+        by_method: groupOut(refund_map, 'method') as any,
+        payment_cancellations: {
+          count: cancellations.count,
+          total: r2(cancellations.total),
+        },
+      },
+      discounts: {
+        orders_with_discount: discounted.length,
+        total: r2(discounts),
+        promotions: groupOut(promo_map, 'name') as any,
+        coupons: groupOut(coupon_map, 'code') as any,
+        other: {
+          count: discounted.filter((o) => !explained.has(o.id)).length,
+          total: r2(Math.max(0, discounts - promos_total - coupons_total)),
+        },
+      },
+      generated_at: new Date().toISOString(),
+    };
   }
 
   streamClosingSummary(sessionId: number): Observable<MessageEvent> {

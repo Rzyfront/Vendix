@@ -120,6 +120,11 @@ import {
 } from '../../../customers/services/customers.service';
 import { CreateCustomerRequest, Customer } from '../../../customers/models/customer.model';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import {
+  VexiUiHost,
+  VexiUiHostRegistry,
+  vexiWhenReady,
+} from '../../../../../../core/services/vexi-ui-host.registry';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../../services/order-ticket.service';
 import { TicketData } from '../../../pos/models/ticket.model';
@@ -725,8 +730,43 @@ type RefundState =
 })
 export class OrderDetailsPageComponent {
   private destroyRef = inject(DestroyRef);
+  private vexiHosts = inject(VexiUiHostRegistry);
   orderId: string | null = null;
   order = signal<Order | null>(null);
+
+  // ── Host de Vexi ──────────────────────────────────────────────────────
+  //
+  // Same `orders` module key as the sales list: the two never mount together
+  // (list vs `:id` are sibling routes), so the registry always points at the
+  // screen actually on display. Read-only by choice — payments, refunds and
+  // dispatches on this page go through their own validated flows, and driving
+  // them blind from the chat would bypass the guards the page exists to show.
+  private readonly vexiHostAdapter: VexiUiHost = {
+    vexiModuleKey: 'orders',
+    readScreen: () => {
+      const order = this.order();
+      const label = order
+        ? `Orden ${order.order_number}${order.customer_alias ? ` de ${order.customer_alias}` : ''}`
+        : null;
+      return {
+        module_key: 'orders',
+        title: 'Detalle de orden',
+        visible_count: order?.order_items?.length,
+        selection: label,
+        filters: order ? { state: order.state } : undefined,
+        notes: this.isLoading()
+          ? 'El detalle todavía está cargando.'
+          : order
+            ? `${label} en estado ${order.state}, con ${order.order_items?.length ?? 0} línea(s).`
+            : 'El detalle todavía no cargó la orden.',
+      };
+    },
+    refresh: () => {
+      this.refreshOrder();
+      return { status: 'ok' as const, message: 'Recargué el detalle de la orden.' };
+    },
+    whenReady: () => vexiWhenReady(() => this.isLoading()),
+  };
   /**
    * QUI-886 — query params heredados del listado (página + filtros) para el
    * botón "Volver": se alimentan al sticky header vía `backQueryParams`.
@@ -962,6 +1002,8 @@ export class OrderDetailsPageComponent {
    * el operador elige un existente o salta al flujo crear actual.
    */
   showTitularSearchModal = signal(false);
+  /** Prellenado (RUES / documento digitado) para el alta de titular. */
+  changeCustomerInitialValues = signal<Partial<CreateCustomerRequest> | null>(null);
   /**
    * Dirección capturada en el modal (`addressData`, solo crear-mode). Se
    * persiste contra el cliente resuelto antes del PATCH titular; se limpia
@@ -2125,6 +2167,11 @@ export class OrderDetailsPageComponent {
   private readonly settingsFacade = inject(StoreSettingsFacade);
 
   constructor() {
+    this.vexiHosts.register(this.vexiHostAdapter);
+    this.destroyRef.onDestroy(() =>
+      this.vexiHosts.unregister(this.vexiHostAdapter),
+    );
+
     this.currencySymbol = this.currencyService.currencySymbol;
     this.isPrivilegedUser.set(this.authFacade.isAdmin() || this.authFacade.isOwner());
 
@@ -4081,10 +4128,29 @@ export class OrderDetailsPageComponent {
       this.dispatchNotes().find((n) => !!n.courier_name?.trim())
         ?.courier_name?.trim() || undefined;
 
+    // QUI-889 (rev 868) — instante real del despacho: última remisión no
+    // anulada por `confirmed_at` (luego su creación). NUNCA `emission_date`
+    // (solo-fecha: imprimiría el día anterior 7 p. m. en Bogotá). Sin
+    // despacho, hora de impresión (ahora), igual que el tiquete backend.
+    const instantOf = (n: { confirmed_at?: string; created_at: string }) =>
+      new Date(n.confirmed_at ?? n.created_at).getTime();
+    const latestDispatch = this.dispatchNotes()
+      .filter((n) => n.status !== 'draft' && n.status !== 'voided')
+      .sort((a, b) => instantOf(b) - instantOf(a))[0];
+    const dispatchAt = latestDispatch
+      ? new Date(
+          latestDispatch.confirmed_at ?? latestDispatch.created_at,
+        )
+      : null;
+
     return {
       orderId: order.id,
       orderNumber: order.order_number,
-      dateFormatted: this.formatDate(order.created_at),
+      dateFormatted: this.formatDate(
+        !dispatchAt || Number.isNaN(dispatchAt.getTime())
+          ? new Date().toISOString()
+          : dispatchAt.toISOString(),
+      ),
       storeName,
       customer: {
         name: customerName,
@@ -4832,7 +4898,8 @@ export class OrderDetailsPageComponent {
    * "Crear cliente nuevo" desde el buscar-primero: conserva el flujo actual
    * (lookup → resolve → PATCH en `onChangeCustomerSave`).
    */
-  onTitularSearchCreateNew(): void {
+  onTitularSearchCreateNew(prefill?: Partial<CreateCustomerRequest> | void): void {
+    this.changeCustomerInitialValues.set((prefill as Partial<CreateCustomerRequest> | undefined) ?? null);
     this.showTitularSearchModal.set(false);
     this.pendingChangeCustomerAddress.set(null);
     this.showChangeCustomerModal.set(true);
@@ -4864,6 +4931,7 @@ export class OrderDetailsPageComponent {
 
   closeChangeCustomer(): void {
     this.showChangeCustomerModal.set(false);
+    this.changeCustomerInitialValues.set(null);
     this.pendingChangeCustomerAddress.set(null);
   }
 
@@ -4921,6 +4989,7 @@ export class OrderDetailsPageComponent {
         next: () => {
           this.toastService.success('Titular de la orden actualizado');
           this.showChangeCustomerModal.set(false);
+          this.changeCustomerInitialValues.set(null);
           this.pendingChangeCustomerAddress.set(null);
           this.refreshOrder();
         },
