@@ -85,6 +85,7 @@ export function createReportTools({ s3 }: ReportToolDeps): RegisteredTool[] {
   return [
     {
       name: 'get_report',
+      version: '1',
       domain: 'reports',
       readOnly: true,
       description:

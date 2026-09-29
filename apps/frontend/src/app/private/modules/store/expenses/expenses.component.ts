@@ -1,4 +1,4 @@
-import { Component, OnDestroy, inject, signal } from '@angular/core';
+import { Component, OnDestroy, inject, signal, viewChild } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
 
@@ -19,11 +19,15 @@ import {
   VexiUiHost,
   VexiUiHostRegistry,
   VexiUiScreen,
+  vexiWhenReady,
 } from '../../../../core/services/vexi-ui-host.registry';
 
 import { ExpensesStatsComponent } from './components/expenses-stats/expenses-stats.component';
 import { ExpensesListComponent } from './components/expenses-list/expenses-list.component';
-import { ExpenseCreateComponent } from './components/expense-create/expense-create.component';
+import {
+  EXPENSE_CREATE_FILLABLE_FIELDS,
+  ExpenseCreateComponent,
+} from './components/expense-create/expense-create.component';
 import { ExpenseEditComponent } from './components/expense-edit/expense-edit.component';
 import { ExpenseCategoriesComponent } from './components/expense-categories/expense-categories.component';
 import { ExpenseScannerModalComponent } from './components/expense-scanner/expense-scanner-modal.component';
@@ -113,6 +117,11 @@ export class ExpensesComponent implements VexiUiHost, OnDestroy {
   readonly isScannerModalOpen = signal(false);
   readonly selectedExpense = signal<Expense | null>(null);
 
+  // The create form lives in the child modal (always mounted, opened via
+  // `isOpen`), so fillForm reaches it through the child's own fill method —
+  // never by writing the store or the service behind the form's back.
+  private readonly createForm = viewChild(ExpenseCreateComponent);
+
   constructor() {
     this.currencyService.loadCurrency();
     this.store.dispatch(loadExpenses());
@@ -135,6 +144,10 @@ export class ExpensesComponent implements VexiUiHost, OnDestroy {
       title: 'Gastos',
       visible_count: rows.length,
       selection: this.selectedExpense()?.description ?? null,
+      form_fields: this.isCreateModalOpen()
+        ? [...EXPENSE_CREATE_FILLABLE_FIELDS]
+        : undefined,
+      open_modal: this.vexiOpenModal(),
       notes: this.loading()
         ? 'La lista todavía está cargando.'
         : this.openModalNote(),
@@ -253,6 +266,67 @@ export class ExpensesComponent implements VexiUiHost, OnDestroy {
     return this.runAction(id);
   }
 
+  async closeModal(): Promise<VexiUiActionResult> {
+    const open = this.vexiOpenModal();
+    if (!open) {
+      return {
+        status: 'not_found',
+        message: 'No hay ningún modal abierto en Gastos.',
+      };
+    }
+    this.isCreateModalOpen.set(false);
+    this.isEditModalOpen.set(false);
+    this.isScannerModalOpen.set(false);
+    this.isCategoriesModalOpen.set(false);
+    return { status: 'ok', message: `Cerré ${open.title}.` };
+  }
+
+  whenReady(): Promise<void> {
+    return vexiWhenReady(() => this.loading() ?? false);
+  }
+
+  /**
+   * Fills the new-expense form (G1). Opens it first through the module's own
+   * handler when closed, fills through the child's own method, and NEVER
+   * saves: the person reviews and confirms in the modal.
+   */
+  async fillForm(values: Record<string, unknown>): Promise<VexiUiActionResult> {
+    const form = this.createForm();
+    if (!form) {
+      return {
+        status: 'error',
+        message: 'El formulario de gasto no está montado en esta pantalla.',
+      };
+    }
+
+    if (!this.isCreateModalOpen()) {
+      this.openCreateModal();
+    }
+
+    const result = form.vexiFillForm(values);
+    const unknownNote = result.unknown.length
+      ? ` No reconocí ${result.unknown.join(', ')}; los campos válidos son ${EXPENSE_CREATE_FILLABLE_FIELDS.join(', ')}.`
+      : '';
+
+    if (!result.valid) {
+      return {
+        status: 'needs_user_input',
+        message:
+          `Dejé el formulario de gasto lleno con ${result.applied.join(', ') || 'nada nuevo'}, pero todavía falta: ` +
+          result.validation_errors.map((e) => e.message).join('; ') +
+          `.${unknownNote} Nada se guardó.`,
+        detail: { validation_errors: result.validation_errors },
+      };
+    }
+
+    return {
+      status: 'ok',
+      message:
+        `Dejé el formulario de gasto lleno (${result.applied.join(', ')}) y válido, listo para revisar.` +
+        `${unknownNote} Nada se guardó.`,
+    };
+  }
+
   refresh(): VexiUiActionResult {
     this.refreshExpenses();
     return { status: 'ok', message: 'Recargué la lista de gastos.' };
@@ -264,6 +338,19 @@ export class ExpensesComponent implements VexiUiHost, OnDestroy {
     if (this.isEditModalOpen()) return 'Hay un gasto abierto en edición.';
     if (this.isScannerModalOpen()) return 'El escáner de recibos está abierto.';
     if (this.isCategoriesModalOpen()) return 'Las categorías están abiertas.';
+    return undefined;
+  }
+
+  /** El modal abierto en forma accionable (U-5): `ui_close_modal` cierra este. */
+  private vexiOpenModal(): { id: string; title: string } | undefined {
+    if (this.isCreateModalOpen())
+      return { id: 'nuevo_gasto', title: 'el formulario de nuevo gasto' };
+    if (this.isEditModalOpen())
+      return { id: 'editar_gasto', title: 'el gasto en edición' };
+    if (this.isScannerModalOpen())
+      return { id: 'escanear_recibo', title: 'el escáner de recibos' };
+    if (this.isCategoriesModalOpen())
+      return { id: 'categorias', title: 'las categorías' };
     return undefined;
   }
 

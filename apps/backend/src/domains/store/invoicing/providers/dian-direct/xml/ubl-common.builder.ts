@@ -1299,12 +1299,16 @@ export class UblCommonBuilder {
     if (municipality) {
       addr.ele(UBL_NAMESPACES.CBC, 'ID').txt(municipality.code);
       addr.ele(UBL_NAMESPACES.CBC, 'CityName').txt(municipality.name);
-      // El postal declarado gana al del catálogo: el del catálogo es el urbano
-      // de referencia del municipio, útil como respaldo pero menos preciso que
-      // el que el usuario informó. FAJ73 es notificación, no rechazo.
-      addr
-        .ele(UBL_NAMESPACES.CBC, 'PostalZone')
-        .txt(declared_postal_code || municipality.postal_code);
+      // Task B (2026-09-28): `cbc:PostalZone` es `0..1` (`UBL_CONTENT_MODEL`,
+      // `AddressType`) — OMITIRLO es válido. Antes se rellenaba con el postal
+      // «urbano de referencia» del catálogo (`municipality.postal_code`) cuando
+      // el usuario no declaró uno; para Bogotá ese valor es 110111, y eso es un
+      // dato INVENTADO viajando en un documento firmado, no un respaldo
+      // legítimo — nadie verificó que esa fuera la zona postal real. Sólo se
+      // emite cuando el propio address lo trae.
+      if (declared_postal_code) {
+        addr.ele(UBL_NAMESPACES.CBC, 'PostalZone').txt(declared_postal_code);
+      }
       addr
         .ele(UBL_NAMESPACES.CBC, 'CountrySubentity')
         .txt(municipality.department_name);

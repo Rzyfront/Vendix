@@ -249,6 +249,29 @@ describe('normalizePaymentLegs', () => {
     );
   });
 
+  it('venta de total $0 (cupón 100 %) ⇒ un tramo de 0 válido, sin vuelto', () => {
+    const { legs, change } = normalizePaymentLegs(
+      { store_payment_method_id: CASH },
+      0,
+      methodsById,
+    );
+    expect(legs).toHaveLength(1);
+    expect(legs[0].amount).toBe(0);
+    expect(change).toBe(0);
+  });
+
+  it('tramo de 0 con saldo por cobrar ⇒ PAY_INVALID_AMOUNT_001', () => {
+    expectRejection(
+      () =>
+        normalizePaymentLegs(
+          { payments: [{ store_payment_method_id: CASH, amount: 0 }] },
+          1000,
+          methodsById,
+        ),
+      ErrorCodes.PAY_INVALID_AMOUNT_001.code,
+    );
+  });
+
   // Plan PLAN-pago-multimetodo-fixes paso 2 — `display_name` del tramo sale
   // de `methodsById` (sin consultas nuevas) y alimenta `payments[].payment_method`
   // de la respuesta de `flow/pay`.

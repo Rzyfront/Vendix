@@ -550,6 +550,99 @@ describe('UblCommonBuilder.buildCustomerParty — Anexo Técnico 19 structural b
       customer_block.match(/<cbc:AdditionalAccountID>/g) || [];
     expect(additional_account_ids.length).toBe(1);
   });
+
+  /**
+   * Task B (2026-09-28) — DIAN Res. 000165/2023 art. 69: la dirección NO es
+   * un dato exigible al adquiriente, ni siquiera jurídico ni en factura
+   * manual. Estas pruebas cubren el patrón «mínimo legítimo» que reemplaza el
+   * bloqueo P1-A y el respaldo con la dirección de la TIENDA que existían
+   * antes (`baa9a4294` / `1109a03d7`).
+   */
+  describe('Task B — adquiriente sin dirección propia: mínimo legítimo, nunca la de la tienda', () => {
+    it('jurídica (NIT) SIN ninguna dirección: no emite cac:PhysicalLocation ni cac:RegistrationAddress, y no hay rastro de una dirección ajena', () => {
+      // `city_code` ausente — el mismo dato ausente que produce el fallback a
+      // la dirección de la tienda ANTES de este cambio. El builder no conoce
+      // ninguna tienda: si algún día alguien reintroduce un fallback, esta
+      // prueba fallaría por CONTENIDO (aparecería una dirección), no sólo por
+      // ausencia de aserción.
+      const xml = buildCustomerPartyXml({
+        document_type: 'NIT',
+        document_number: '900555666',
+        verification_digit: '1',
+        person_type: 'JURIDICA',
+        legal_name: 'Distribuidora Jurídica SAS',
+        tax_responsibilities: ['O-13'],
+        ciiu_code: null,
+        city_code: undefined,
+        address_line: undefined,
+        postal_code: undefined,
+      });
+
+      const customer_block = customerPartyXml(xml);
+      expect(customer_block).not.toContain('<cac:PhysicalLocation>');
+      expect(customer_block).not.toContain('<cac:RegistrationAddress>');
+      // Ninguna dirección — ni la de la tienda ni un municipio inventado —
+      // puede colarse por otro camino del mismo bloque.
+      expect(customer_block).not.toContain('110111');
+      expect(customer_block).not.toContain('<cbc:PostalZone>');
+      // La identidad jurídica sigue completa: esto no es un consumidor final.
+      expect(customer_block).toContain(
+        '<cbc:RegistrationName>Distribuidora Jurídica SAS</cbc:RegistrationName>',
+      );
+    });
+
+    it('Task B — municipio SIN código postal declarado: cbc:PostalZone se OMITE, nunca 110111 (el postal «urbano de referencia» del catálogo)', () => {
+      // Bug corregido: `buildAddressFields` rellenaba con
+      // `municipality.postal_code` (110111 para Bogotá) cuando el cliente no
+      // traía uno. `cbc:PostalZone` es `0..1` (UBL_CONTENT_MODEL) — omitirlo
+      // es válido; inventarlo es un dato firmado que nadie verificó.
+      const xml = buildCustomerPartyXml({
+        document_type: 'NIT',
+        document_number: '900555666',
+        verification_digit: '1',
+        person_type: 'JURIDICA',
+        legal_name: 'Cliente Con Municipio Sin Postal SAS',
+        tax_responsibilities: ['O-13'],
+        ciiu_code: null,
+        address_line: 'Calle 100 # 20-30',
+        city_code: '11001',
+        city_name: 'Bogotá, D.C.',
+        department_code: '11',
+        department_name: 'Bogotá',
+        country_code: 'CO',
+        postal_code: undefined,
+      });
+
+      const customer_block = customerPartyXml(xml);
+      expect(customer_block).toContain('<cac:PhysicalLocation>');
+      expect(customer_block).not.toContain('<cbc:PostalZone>');
+      expect(customer_block).not.toContain('110111');
+    });
+
+    it('municipio CON código postal declarado: cbc:PostalZone SÍ se emite, con el valor declarado', () => {
+      const xml = buildCustomerPartyXml({
+        document_type: 'NIT',
+        document_number: '900555666',
+        verification_digit: '1',
+        person_type: 'JURIDICA',
+        legal_name: 'Cliente Con Postal SAS',
+        tax_responsibilities: ['O-13'],
+        ciiu_code: null,
+        address_line: 'Calle 100 # 20-30',
+        city_code: '11001',
+        city_name: 'Bogotá, D.C.',
+        department_code: '11',
+        department_name: 'Bogotá',
+        country_code: 'CO',
+        postal_code: '110931',
+      });
+
+      const customer_block = customerPartyXml(xml);
+      expect(customer_block).toContain(
+        '<cbc:PostalZone>110931</cbc:PostalZone>',
+      );
+    });
+  });
 });
 
 describe('toDianTaxLevelCode — enumeración cerrada (FAJ26)', () => {

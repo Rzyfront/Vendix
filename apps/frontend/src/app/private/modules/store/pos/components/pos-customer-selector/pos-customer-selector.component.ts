@@ -31,6 +31,7 @@ import {
 } from '../../../../../../shared/components';
 import { computeDocumentFormatHint } from '../../utils/document-format-hint.util';
 import { computePhoneFormatHint } from '../../utils/phone-format-hint.util';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 import {
   extractFormIdentifiers,
   RawCustomerResolveForm,
@@ -400,6 +401,16 @@ export class PosCustomerSelectorComponent {
       });
   }
 
+  /**
+   * Nombre a mostrar en la chip de cliente seleccionado y en las filas de
+   * resultados/frecuentes. Un cliente JURIDICA sólo trae `legal_name`
+   * (first_name/last_name quedan vacíos); sin este fallback la fila salía en
+   * blanco.
+   */
+  displayName(customer: PosCustomer): string {
+    return customerDisplayName(customer, '');
+  }
+
   selectCustomer(customer: PosCustomer): void {
     // CP-pos-customer-stale (F-002) — an explicit click wins over any draft:
     // drop the form so a typed-but-discarded B can never override the
@@ -531,10 +542,9 @@ export class PosCustomerSelectorComponent {
             // the cashier sees confirmation that the existing customer was
             // reused (otherwise the wizard advances silently).
             const name =
-              [customer.first_name, customer.last_name]
-                .filter(Boolean)
-                .join(' ')
-                .trim() || customer.email || 'seleccionado';
+              customerDisplayName(customer, '') ||
+              customer.email ||
+              'seleccionado';
             this.toastService.success(`Cliente encontrado: ${name}`);
           }
           return true;

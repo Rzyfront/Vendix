@@ -29,6 +29,7 @@ export function createPlanningTools(): RegisteredTool[] {
   return [
     {
       name: PROPOSE_PLAN_TOOL,
+      version: '1',
       domain: 'planning',
       readOnly: true,
       description:

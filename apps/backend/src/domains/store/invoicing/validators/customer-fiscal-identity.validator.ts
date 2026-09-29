@@ -1398,8 +1398,8 @@ export class CustomerFiscalIdentityValidator {
         severity: 'warning',
         field: 'address.postal_code',
         problem:
-          'La dirección no tiene código postal. Hoy el documento sale con 110111, que es un código de Bogotá; el campo es opcional para la DIAN, pero el valor inventado no debería viajar.',
-        fix: `Carga el código postal del cliente en ${SCREEN_ADDRESS}, o déjalo vacío para que el documento no declare ninguno.`,
+          'La dirección no tiene código postal. El campo es opcional para la DIAN (cbc:PostalZone es 0..1); el documento se emite sin declarar ninguno en vez de inventar uno del catálogo.',
+        fix: `Si quieres declararlo, carga el código postal del cliente en ${SCREEN_ADDRESS}.`,
       });
     }
 

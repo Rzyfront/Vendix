@@ -1,4 +1,6 @@
 import { HttpException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { order_state_enum } from '@prisma/client';
 import { generateSlug } from '@common/utils/slug.util';
 import {
@@ -8,7 +10,6 @@ import {
 } from '@common/constants/document-types';
 import { VendixHttpException } from '../../../common/errors';
 import { RegisteredTool, ToolPreview } from '../interfaces/tool.interface';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { InventoryAdjustmentsService } from '../../../domains/store/inventory/adjustments/inventory-adjustments.service';
 import {
   AdjustmentType,
@@ -29,6 +30,7 @@ import {
   VALID_TRANSITIONS,
 } from '../../../domains/store/orders/order-flow/order-flow.service';
 import { DispatchNotesService } from '../../../domains/store/dispatch-notes/dispatch-notes.service';
+import { CreateFromOrderDto } from '../../../domains/store/dispatch-notes/dto/create-from-order.dto';
 
 /**
  * Las escrituras TIPADAS de Vexi: los seis dominios donde vale la pena una
@@ -114,11 +116,13 @@ import { DispatchNotesService } from '../../../domains/store/dispatch-notes/disp
  * módulo. `AIToolRegistry` viene del `AIEngineModule` `@Global()`: se inyecta
  * SIN importar ese módulo, que es justo lo que evita el ciclo.
  *
- * ## Doctrina: se reutiliza el servicio de dominio, nunca Prisma crudo
+ * ## Doctrina: se reutiliza el servicio de dominio, nunca la base cruda
  *
- * Prisma aquí es solo para LEER (previsualizar y re-verificar). Toda escritura
- * pasa por el servicio dueño de la regla, porque ahí viven efectos que un
- * `prisma.update` se saltaría en silencio:
+ * Ni siquiera para LEER: previsualizar y re-verificar también pasa por
+ * métodos `*ForAgent` del servicio dueño, que es quien conoce el scope tenant
+ * y la forma del schema. Toda escritura pasa por el servicio dueño de la
+ * regla, porque ahí viven efectos que una escritura directa se saltaría en
+ * silencio:
  *
  *  - `InventoryAdjustmentsService.createAdjustment` → `StockLevelManager`
  *    (costeo CPP/FIFO, `inventory_transactions`, `syncProductStock`) + evento
@@ -134,11 +138,11 @@ import { DispatchNotesService } from '../../../domains/store/dispatch-notes/disp
  *
  * ## Multi-tenant
  *
- * Siempre `StorePrismaService`. Dos trampas ya documentadas en el repo:
- * `stores` y `users` devuelven el cliente SIN scope (`vendix-prisma-scopes`),
- * así que toda consulta a esas dos tablas lleva su filtro de tienda escrito a
- * mano. `$transaction` también sale del `baseClient`, pero aquí no abrimos
- * ninguna: las transacciones viven dentro de los servicios de dominio.
+ * El scope tenant lo aplica el servicio dueño en cada método `*ForAgent`.
+ * Dos trampas ya documentadas en el repo (`vendix-prisma-scopes`): `stores`
+ * y `users` devuelven el cliente SIN scope, así que esos métodos llevan su
+ * filtro de tienda/organización escrito a mano. Las transacciones viven
+ * dentro de los servicios de dominio; aquí no se abre ninguna.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,6 +177,35 @@ function toolError(message: string, nextStep?: string): string {
     error: message,
     ...(nextStep && { next_step: nextStep }),
   });
+}
+
+/**
+ * Valida un DTO ya construido como lo haría el `ValidationPipe` global del
+ * HTTP (`whitelist` + `forbidNonWhitelisted`): las tools llaman a los
+ * servicios directo, sin pasar por el pipe, así que sin esto un payload
+ * inválido llegaba hasta Prisma y volvía como un error opaco post-aprobación.
+ * Devuelve la instancia transformada —la misma que recibiría el servicio por
+ * HTTP— o el mensaje en español para el `{error, next_step}`.
+ */
+function toValidatedDto<T extends object>(
+  DtoClass: new () => T,
+  plain: Record<string, unknown>,
+): { ok: true; dto: T } | { ok: false; message: string } {
+  const dto = plainToInstance(DtoClass, plain, {
+    enableImplicitConversion: true,
+  });
+  const errors = validateSync(dto, {
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  });
+  if (!errors.length) return { ok: true, dto };
+  const details = errors
+    .flatMap((entry) => Object.values(entry.constraints ?? {}))
+    .join('; ');
+  return {
+    ok: false,
+    message: `Los datos no pasaron la validación: ${details || 'revisa los campos enviados'}.`,
+  };
 }
 
 /**
@@ -259,11 +292,6 @@ function totalTaxRate(assignments: any[] | undefined | null): number {
 
 export interface InventoryWriteToolDeps {
   adjustmentsService: InventoryAdjustmentsService;
-  /**
-   * Siempre `StorePrismaService`: `products`, `product_variants` y
-   * `stock_levels` son datos de tienda y el cliente scopeado inyecta el filtro.
-   */
-  prisma: StorePrismaService;
 }
 
 const ADJUSTMENT_TYPES: readonly AdjustmentType[] = [
@@ -293,7 +321,7 @@ interface StockTarget {
 export function createInventoryWriteTools(
   deps: InventoryWriteToolDeps,
 ): RegisteredTool[] {
-  const { adjustmentsService, prisma } = deps;
+  const { adjustmentsService } = deps;
 
   /**
    * Resuelve producto + variante + bodega + cantidades contra la base.
@@ -344,21 +372,10 @@ export function createInventoryWriteTools(
     }
     const adjustmentType = rawType as AdjustmentType;
 
-    const product: any = await prisma.products.findFirst({
-      where: { id: productId },
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        state: true,
-        track_inventory: true,
-        product_variants: {
-          orderBy: { id: 'asc' },
-          take: 100,
-          select: { id: true, name: true, sku: true },
-        },
-      },
-    });
+    const product: any =
+      await adjustmentsService.findProductForStockAdjustmentForAgent(
+        productId,
+      );
 
     if (!product) {
       return failure(
@@ -443,19 +460,12 @@ export function createInventoryWriteTools(
       return failure(targetLabel, 'location_id inválido.');
     }
 
-    const levels: any[] = await prisma.stock_levels.findMany({
-      where: {
-        product_id: productId,
-        product_variant_id: variant ? variant.id : null,
-        ...(requestedLocationId ? { location_id: requestedLocationId } : {}),
-      },
-      select: {
-        location_id: true,
-        quantity_on_hand: true,
-        quantity_reserved: true,
-        inventory_locations: { select: { name: true, is_active: true } },
-      },
-    });
+    const levels: any[] =
+      await adjustmentsService.findStockLevelsForAdjustmentForAgent({
+        productId,
+        variantId: variant ? variant.id : null,
+        locationId: requestedLocationId,
+      });
 
     if (!levels.length) {
       return failure(
@@ -515,6 +525,7 @@ export function createInventoryWriteTools(
   return [
     {
       name: 'adjust_stock',
+      version: '1',
       domain: 'inventory',
       requiresConfirmation: true,
       description:
@@ -631,7 +642,20 @@ export function createInventoryWriteTools(
               cleanString(args.reason) ?? 'Ajuste registrado desde Vexi',
           };
 
-          const adjustment = await adjustmentsService.createAdjustment(dto);
+          const checked = toValidatedDto(
+            CreateAdjustmentDto,
+            dto as unknown as Record<string, unknown>,
+          );
+          if (!checked.ok) {
+            return toolError(
+              checked.message,
+              'Verifica con get_stock_levels que la bodega y la variante sean las correctas.',
+            );
+          }
+
+          const adjustment = await adjustmentsService.createAdjustment(
+            checked.dto,
+          );
 
           return JSON.stringify({
             summary: `${target.label}: ${adjustment.quantity_before} → ${adjustment.quantity_after} unidades en ${target.locationName}.`,
@@ -666,7 +690,6 @@ export function createInventoryWriteTools(
 
 export interface ProductWriteToolDeps {
   productsService: ProductsService;
-  prisma: StorePrismaService;
 }
 
 /** Qué campo de precio se está tocando. */
@@ -693,7 +716,7 @@ const PRICE_FIELD_LABELS: Record<PriceField, string> = {
 export function createProductWriteTools(
   deps: ProductWriteToolDeps,
 ): RegisteredTool[] {
-  const { productsService, prisma } = deps;
+  const { productsService } = deps;
 
   /**
    * Precondición replicada de `products.service.ts` (`update` y
@@ -704,15 +727,10 @@ export function createProductWriteTools(
     productId: number,
     variantId: number | null,
   ): Promise<boolean> {
-    const found = await prisma.stock_reservations.findFirst({
-      where: {
-        product_id: productId,
-        product_variant_id: variantId,
-        status: 'active',
-      },
-      select: { id: true },
-    });
-    return !!found;
+    return productsService.hasActiveStockReservationsForAgent(
+      productId,
+      variantId,
+    );
   }
 
   async function resolvePriceTarget(
@@ -770,37 +788,8 @@ export function createProductWriteTools(
       );
     }
 
-    const product: any = await prisma.products.findFirst({
-      where: { id: productId },
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        state: true,
-        base_price: true,
-        sale_price: true,
-        is_on_sale: true,
-        product_tax_assignments: {
-          select: {
-            tax_categories: {
-              select: { tax_rates: { select: { rate: true } } },
-            },
-          },
-        },
-        product_variants: {
-          orderBy: { id: 'asc' },
-          take: 100,
-          select: {
-            id: true,
-            name: true,
-            sku: true,
-            price_override: true,
-            sale_price: true,
-            is_on_sale: true,
-          },
-        },
-      },
-    });
+    const product: any =
+      await productsService.findProductForPriceChangeForAgent(productId);
 
     if (!product) {
       return failure(
@@ -1014,14 +1003,17 @@ export function createProductWriteTools(
     const sku = cleanString(args.sku);
     const barcode = cleanString(args.barcode);
 
-    // Réplicas de las precondiciones de `ProductsService.create`: slug, SKU y
-    // código de barras únicos dentro de la tienda (PROD_DUP_001 /
-    // PROD_BARCODE_DUP_001).
+    // Réplicas de lectura de las precondiciones de `ProductsService.create`:
+    // slug, SKU y código de barras únicos dentro de la tienda (PROD_DUP_001 /
+    // PROD_BARCODE_DUP_001). El servicio re-valida al aplicar.
     const slug = generateSlug(name);
-    const slugConflict: any = await prisma.products.findFirst({
-      where: { slug },
-      select: { id: true, name: true },
-    });
+    const conflicts =
+      await productsService.findProductUniquenessConflictsForAgent({
+        slug,
+        sku: sku ?? null,
+        barcode: barcode ?? null,
+      });
+    const slugConflict: any = conflicts.slug;
     if (slugConflict) {
       return failure(
         name,
@@ -1031,10 +1023,7 @@ export function createProductWriteTools(
     }
 
     if (sku) {
-      const skuConflict: any = await prisma.products.findFirst({
-        where: { sku },
-        select: { id: true, name: true },
-      });
+      const skuConflict: any = conflicts.sku;
       if (skuConflict) {
         return failure(
           name,
@@ -1044,20 +1033,14 @@ export function createProductWriteTools(
     }
 
     if (barcode) {
-      const barcodeProduct: any = await prisma.products.findFirst({
-        where: { barcode },
-        select: { id: true, name: true },
-      });
+      const barcodeProduct: any = conflicts.barcodeProduct;
       if (barcodeProduct) {
         return failure(
           name,
           `El código de barras "${barcode}" ya lo usa "${barcodeProduct.name}" (id ${barcodeProduct.id}).`,
         );
       }
-      const barcodeVariant: any = await prisma.product_variants.findFirst({
-        where: { barcode },
-        select: { id: true },
-      });
+      const barcodeVariant: any = conflicts.barcodeVariant;
       if (barcodeVariant) {
         return failure(
           name,
@@ -1097,9 +1080,18 @@ export function createProductWriteTools(
       ...(initialStock > 0 && { stock_quantity: initialStock }),
     };
 
+    // En el resolver para que el `preview` tampoco proponga lo inválido.
+    const checked = toValidatedDto(
+      CreateProductDto,
+      dto as unknown as Record<string, unknown>,
+    );
+    if (!checked.ok) {
+      return failure(name, checked.message);
+    }
+
     return {
       ok: true,
-      value: { dto, label: name, initialStock, costPrice },
+      value: { dto: checked.dto, label: name, initialStock, costPrice },
     };
   }
 
@@ -1107,6 +1099,7 @@ export function createProductWriteTools(
     // ─── Tool 2: update_product_price ────────────────────────────────
     {
       name: 'update_product_price',
+      version: '1',
       domain: 'products',
       requiresConfirmation: true,
       description:
@@ -1223,13 +1216,29 @@ export function createProductWriteTools(
               target.field === 'sale_price'
                 ? { sale_price: target.newPrice, is_on_sale: true }
                 : { price_override: target.newPrice };
-            await productsService.updateVariant(target.variantId, dto);
+            const checked = toValidatedDto(
+              UpdateProductVariantDto,
+              dto as unknown as Record<string, unknown>,
+            );
+            if (!checked.ok) {
+              return toolError(checked.message);
+            }
+            await productsService.updateVariant(target.variantId, checked.dto);
           } else {
             const dto: UpdateProductDto =
               target.field === 'sale_price'
                 ? { sale_price: target.newPrice, is_on_sale: true }
                 : { base_price: target.newPrice };
-            await productsService.update(target.productId, dto, { lean: true });
+            const checked = toValidatedDto(
+              UpdateProductDto,
+              dto as unknown as Record<string, unknown>,
+            );
+            if (!checked.ok) {
+              return toolError(checked.message);
+            }
+            await productsService.update(target.productId, checked.dto, {
+              lean: true,
+            });
           }
 
           return JSON.stringify({
@@ -1258,6 +1267,7 @@ export function createProductWriteTools(
     // ─── Tool 5: create_product ──────────────────────────────────────
     {
       name: 'create_product',
+      version: '1',
       domain: 'products',
       requiresConfirmation: true,
       description:
@@ -1448,18 +1458,13 @@ export function createProductWriteTools(
 
 export interface CustomerWriteToolDeps {
   customersService: CustomersService;
-  /**
-   * `StorePrismaService`. Ojo: su getter `users` devuelve el cliente SIN scope
-   * (`vendix-prisma-scopes`), así que toda consulta a `users` de este bloque
-   * lleva el filtro de tienda/organización escrito a mano.
-   */
-  prisma: StorePrismaService;
 }
 
 /** Campos que la herramienta sabe escribir, con su etiqueta para la propuesta. */
 const CUSTOMER_FIELD_LABELS: Record<string, string> = {
   first_name: 'Nombres',
   last_name: 'Apellidos',
+  legal_name: 'Razón social',
   email: 'Correo',
   phone: 'Teléfono',
   document_type: 'Tipo de documento',
@@ -1483,19 +1488,14 @@ interface CustomerUpsert {
 export function createCustomerWriteTools(
   deps: CustomerWriteToolDeps,
 ): RegisteredTool[] {
-  const { customersService, prisma } = deps;
+  const { customersService } = deps;
 
-  /** `stores` NO está scopeado: el filtro por id es obligatorio. */
   async function resolveOrganizationId(
     storeId: number,
     contextOrgId?: number,
   ): Promise<number | null> {
     if (contextOrgId) return contextOrgId;
-    const store: any = await prisma.stores.findFirst({
-      where: { id: storeId },
-      select: { organization_id: true },
-    });
-    return store?.organization_id ?? null;
+    return customersService.findOrganizationIdByStoreForAgent(storeId);
   }
 
   async function resolveUpsert(
@@ -1525,6 +1525,7 @@ export function createCustomerWriteTools(
 
     const firstName = cleanString(args.first_name);
     const lastName = cleanString(args.last_name);
+    const legalName = cleanString(args.legal_name);
     const email = cleanString(args.email);
     const phone = cleanString(args.phone);
     const documentType = cleanString(args.document_type)?.toUpperCase();
@@ -1586,24 +1587,43 @@ export function createCustomerWriteTools(
 
     // ── Alta ────────────────────────────────────────────────────────────────
     if (!customerId) {
-      if (!firstName || !lastName) {
-        return failure(
-          label,
-          'Para crear un cliente hacen falta al menos los nombres y los apellidos.',
-          'Pídeselos al usuario. El correo es opcional; el documento es necesario si se le va a facturar.',
-        );
+      // JURIDICA usa razón social EN VEZ DE nombres (regla DIAN JuridicaNameRule:
+      // legal_name presente + first/last vacíos). Sin esta rama el alta B2B era
+      // un dead-end: el DTO rechaza lo que la tool exigía.
+      let newLabel: string;
+      if (personType === 'JURIDICA') {
+        if (!legalName) {
+          return failure(
+            label,
+            'Para crear una empresa (persona jurídica) hace falta la razón social.',
+            'Pide la razón social y pásala como legal_name, sin first_name ni last_name.',
+          );
+        }
+        if (firstName || lastName) {
+          return failure(
+            label,
+            'Una persona jurídica se crea solo con razón social: los nombres pertenecen a persona natural.',
+            'Reintenta pasando únicamente legal_name (o quita person_type si en realidad es persona natural).',
+          );
+        }
+        newLabel = legalName;
+      } else {
+        if (!firstName || !lastName) {
+          return failure(
+            label,
+            'Para crear un cliente hacen falta al menos los nombres y los apellidos.',
+            'Pídeselos al usuario. El correo es opcional; el documento es necesario si se le va a facturar.',
+          );
+        }
+        newLabel = `${firstName} ${lastName}`.trim();
       }
 
-      const newLabel = `${firstName} ${lastName}`.trim();
-
       if (email) {
-        const emailConflict: any = await prisma.users.findFirst({
-          where: {
-            email: email.toLowerCase(),
-            organization_id: organizationId,
-          },
-          select: { id: true, first_name: true, last_name: true },
-        });
+        const emailConflict: any =
+          await customersService.findUserByEmailInOrganizationForAgent(
+            email.toLowerCase(),
+            organizationId,
+          );
         if (emailConflict) {
           return failure(
             newLabel,
@@ -1632,6 +1652,7 @@ export function createCustomerWriteTools(
       const payload: Record<string, unknown> = {
         first_name: firstName,
         last_name: lastName,
+        ...(legalName && { legal_name: legalName }),
         ...(email && { email }),
         ...(phone && { phone }),
         ...(documentType && { document_type: documentType }),
@@ -1652,13 +1673,23 @@ export function createCustomerWriteTools(
         }),
       );
 
+      // En el resolver para que el `preview` tampoco proponga lo inválido.
+      const checkedCreate = toValidatedDto(CreateCustomerDto, payload);
+      if (!checkedCreate.ok) {
+        return failure(
+          newLabel,
+          checkedCreate.message,
+          'Corrige el dato que indica el mensaje y reintenta; si es empresa usa legal_name sin first_name ni last_name.',
+        );
+      }
+
       return {
         ok: true,
         value: {
           mode: 'create',
           customerId: null,
           label: newLabel,
-          payload,
+          payload: checkedCreate.dto as unknown as Record<string, unknown>,
           changes,
         },
       };
@@ -1681,6 +1712,7 @@ export function createCustomerWriteTools(
     const candidate: Record<string, unknown> = {
       ...(firstName !== undefined && { first_name: firstName }),
       ...(lastName !== undefined && { last_name: lastName }),
+      ...(legalName !== undefined && { legal_name: legalName }),
       ...(email !== undefined && { email }),
       ...(phone !== undefined && { phone }),
       ...(documentType !== undefined && { document_type: documentType }),
@@ -1743,14 +1775,12 @@ export function createCustomerWriteTools(
     }
 
     if (payload.email && existing.organization_id) {
-      const emailConflict: any = await prisma.users.findFirst({
-        where: {
-          email: String(payload.email).toLowerCase(),
-          organization_id: existing.organization_id,
-          NOT: { id: customerId },
-        },
-        select: { id: true, first_name: true, last_name: true },
-      });
+      const emailConflict: any =
+        await customersService.findUserByEmailInOrganizationForAgent(
+          String(payload.email).toLowerCase(),
+          existing.organization_id,
+          customerId,
+        );
       if (emailConflict) {
         return failure(
           currentLabel,
@@ -1759,13 +1789,19 @@ export function createCustomerWriteTools(
       }
     }
 
+    // En el resolver para que el `preview` tampoco proponga lo inválido.
+    const checkedUpdate = toValidatedDto(UpdateCustomerDto, payload);
+    if (!checkedUpdate.ok) {
+      return failure(currentLabel, checkedUpdate.message);
+    }
+
     return {
       ok: true,
       value: {
         mode: 'update',
         customerId,
         label: currentLabel,
-        payload,
+        payload: checkedUpdate.dto as unknown as Record<string, unknown>,
         changes,
       },
     };
@@ -1774,10 +1810,11 @@ export function createCustomerWriteTools(
   return [
     {
       name: 'upsert_customer',
+      version: '1',
       domain: 'customers',
       requiresConfirmation: true,
       description:
-        'Crea un cliente nuevo o corrige los datos de uno existente. Sin customer_id crea (hacen falta nombres y apellidos); con customer_id edita solo los campos que le pases. Antes de crear, busca siempre con find_customer: si el cliente ya existe hay que editarlo, porque un cliente duplicado parte su historial de compras y su cartera en dos. El documento (tipo + número) es lo que permite facturarle y no se puede repetir en la organización. No borra clientes ni cambia contraseñas.',
+        'Crea un cliente nuevo o corrige los datos de uno existente. Sin customer_id crea: persona natural con nombres y apellidos, empresa (JURIDICA) con razón social (legal_name) sin nombres. Con customer_id edita solo los campos que le pases. Antes de crear, busca siempre con find_customer: si el cliente ya existe hay que editarlo, porque un cliente duplicado parte su historial de compras y su cartera en dos. El documento (tipo + número) es lo que permite facturarle y no se puede repetir en la organización. No borra clientes ni cambia contraseñas.',
       parameters: {
         type: 'object',
         properties: {
@@ -1788,11 +1825,18 @@ export function createCustomerWriteTools(
           },
           first_name: {
             type: 'string',
-            description: 'Nombres. Obligatorio al crear.',
+            description:
+              'Nombres. Obligatorio al crear persona natural; prohibido con person_type JURIDICA.',
           },
           last_name: {
             type: 'string',
-            description: 'Apellidos. Obligatorio al crear.',
+            description:
+              'Apellidos. Obligatorio al crear persona natural; prohibido con person_type JURIDICA.',
+          },
+          legal_name: {
+            type: 'string',
+            description:
+              'Razón social. Obligatoria al crear persona jurídica (JURIDICA), en vez de nombres y apellidos.',
           },
           email: {
             type: 'string',
@@ -1817,7 +1861,7 @@ export function createCustomerWriteTools(
             type: 'string',
             enum: ['NATURAL', 'JURIDICA'],
             description:
-              'Persona natural o jurídica. Determina cómo se le aplican las retenciones.',
+              'Persona natural o jurídica. Determina cómo se le aplican las retenciones. Con JURIDICA usa legal_name y omite first_name/last_name.',
           },
           tax_regime: {
             type: 'string',
@@ -1936,13 +1980,12 @@ export function createCustomerWriteTools(
 
 export interface OrderWriteToolDeps {
   /**
-   * `OrderFlowService` y NO `prisma.orders.update`: es el único escritor
+   * `OrderFlowService` y NO una escritura directa: es el único escritor
    * legítimo de `orders.state`. Escribir el estado a mano deja reservas de
    * stock huérfanas y se salta el evento `order.shipped` (QUI-557).
    */
   orderFlowService: OrderFlowService;
   dispatchNotesService: DispatchNotesService;
-  prisma: StorePrismaService;
 }
 
 /**
@@ -1996,7 +2039,7 @@ interface DispatchPlan {
 export function createOrderWriteTools(
   deps: OrderWriteToolDeps,
 ): RegisteredTool[] {
-  const { orderFlowService, dispatchNotesService, prisma } = deps;
+  const { orderFlowService, dispatchNotesService } = deps;
 
   async function resolveTransition(
     args: Record<string, any>,
@@ -2028,16 +2071,8 @@ export function createOrderWriteTools(
       );
     }
 
-    const order: any = await prisma.orders.findFirst({
-      where: { id: orderId },
-      select: {
-        id: true,
-        order_number: true,
-        state: true,
-        remaining_balance: true,
-        dispatch_fulfillment: true,
-      },
-    });
+    const order: any =
+      await orderFlowService.findOrderForStatusTransitionForAgent(orderId);
 
     if (!order) {
       return failure(
@@ -2124,20 +2159,8 @@ export function createOrderWriteTools(
       );
     }
 
-    const order: any = await prisma.orders.findFirst({
-      where: { id: orderId },
-      select: {
-        id: true,
-        order_number: true,
-        state: true,
-        delivery_type: true,
-        shipping_address_snapshot: true,
-        shipping_address_id: true,
-        order_items: {
-          select: { id: true, product_name: true, quantity: true },
-        },
-      },
-    });
+    const order: any =
+      await dispatchNotesService.findOrderForDispatchPlanForAgent(orderId);
 
     if (!order) {
       return failure(
@@ -2239,6 +2262,7 @@ export function createOrderWriteTools(
     // ─── Tool 4: update_order_status ─────────────────────────────────
     {
       name: 'update_order_status',
+      version: '1',
       domain: 'orders',
       requiresConfirmation: true,
       description:
@@ -2351,6 +2375,7 @@ export function createOrderWriteTools(
     // ─── Tool 6: create_dispatch_note ────────────────────────────────
     {
       name: 'create_dispatch_note',
+      version: '1',
       domain: 'orders',
       requiresConfirmation: true,
       description:
@@ -2440,15 +2465,26 @@ export function createOrderWriteTools(
 
           // `items: []` activa el carril "quick-accept" del servicio: despacha
           // todo lo pendiente calculado por él mismo, con su propia lectura.
+          const dispatchDto = {
+            items: [],
+            target_status: plan.targetStatus,
+            ...(cleanString(args.notes) && {
+              notes: cleanString(args.notes),
+            }),
+          };
+          const checkedDispatch = toValidatedDto(
+            CreateFromOrderDto,
+            dispatchDto as unknown as Record<string, unknown>,
+          );
+          if (!checkedDispatch.ok) {
+            return toolError(
+              checkedDispatch.message,
+              'Consulta get_dispatch_status para ver el estado real del despacho de esa orden.',
+            );
+          }
           const note: any = await dispatchNotesService.createFromOrder(
             plan.orderId,
-            {
-              items: [],
-              target_status: plan.targetStatus,
-              ...(cleanString(args.notes) && {
-                notes: cleanString(args.notes),
-              }),
-            },
+            checkedDispatch.dto,
           );
 
           return JSON.stringify({

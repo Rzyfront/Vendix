@@ -707,7 +707,9 @@ export class PosOrderService {
       errors.push({ field: 'items', message: 'El carrito está vacío' });
     }
 
-    if (cartState.summary.total <= 0) {
+    // Total 0 es válido cuando viene de descuentos (cupón 100 %): venta de $0
+    // con impuesto 0. Solo un total negativo es inválido.
+    if (cartState.summary.total < 0) {
       errors.push({ field: 'total', message: 'El total debe ser mayor a 0' });
     }
 

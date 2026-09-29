@@ -46,6 +46,8 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
     },
     payments: { findFirst: jest.fn().mockResolvedValue(null) },
     bookings: { updateMany: jest.fn() },
+    order_items: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
+    order_item_taxes: { update: jest.fn() },
     shipping_rates: { findFirst: jest.fn().mockResolvedValue(rate) },
   });
 

@@ -26,6 +26,7 @@ import {
 import { resolvePrintsVatBreakdownForPrint } from '../../print-formats/services/print-vat-breakdown.resolver';
 import { resolveAcquirerRail } from '../validators/acquirer-rail.resolver';
 import { normalizeAcquirerDocumentType } from '../utils/acquirer-identity.resolver';
+import { normalizeNit } from '@common/utils/nit.util';
 // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
 import { OrderHistoryService } from '../../orders/order-history/order-history.service';
 
@@ -1341,13 +1342,69 @@ export class InvoiceDataRequestsService {
     switch (originalInvoice.status) {
       case 'draft':
       case 'validated': {
-        // Not yet transmitted (no CUFE): the customer data can be fixed in place.
+        // Not yet transmitted (no CUFE): the customer data can be fixed in
+        // place. Task E — antes sólo copiaba nombre y NIT; el resto del
+        // snapshot (`customer_document_type`, `customer_verification_digit`,
+        // `customer_person_type`, correo, teléfono) quedaba NULL aunque el
+        // cliente recién vinculado (`customerId`) ya los tiene. Task D#4 — el
+        // NIT puede llegar con el DV pegado (`request.document_number` es
+        // texto libre del formulario del comprador invitado); se separa ANTES
+        // de persistir, igual que en `InvoicingService.splitInvoiceCustomerNitDv`.
+        const linked_customer = await this.prisma.users.findFirst({
+          where: { id: customerId },
+          select: {
+            document_type: true,
+            document_number: true,
+            verification_digit: true,
+            person_type: true,
+            email: true,
+            phone: true,
+          },
+        });
+
+        const raw_document_type = (
+          linked_customer?.document_type ?? ''
+        ).toString();
+        const raw_document_number =
+          request.document_number ?? linked_customer?.document_number ?? '';
+        const is_nit =
+          raw_document_type.trim().toUpperCase() === 'NIT' ||
+          raw_document_type.trim() === '31';
+
+        let final_document_number = raw_document_number;
+        let final_verification_digit: string | null =
+          linked_customer?.verification_digit ?? null;
+
+        if (is_nit && raw_document_number) {
+          const nit_result = normalizeNit(raw_document_number);
+          if (
+            nit_result.provided_dv !== null &&
+            nit_result.dv_mismatch
+          ) {
+            throw new VendixHttpException(
+              ErrorCodes.CUSTOMER_NIT_DV_MISMATCH,
+              `El dígito de verificación '${nit_result.provided_dv}' no corresponde al NIT '${nit_result.number}': el módulo 11 de la DIAN da '${nit_result.dv}'. Corrige el documento del comprador antes de continuar.`,
+              { field: 'document_number', invoice_id: originalInvoice.id },
+            );
+          }
+          final_document_number = nit_result.number || raw_document_number;
+          final_verification_digit =
+            nit_result.dv || final_verification_digit;
+        }
+
         await this.prisma.invoices.update({
           where: { id: originalInvoice.id },
           data: {
             customer_id: customerId,
             customer_name: `${request.first_name} ${request.last_name}`,
-            customer_tax_id: request.document_number,
+            customer_tax_id: final_document_number,
+            customer_document_type:
+              linked_customer?.document_type ?? undefined,
+            customer_verification_digit:
+              final_verification_digit ?? undefined,
+            customer_person_type: linked_customer?.person_type ?? undefined,
+            customer_email: linked_customer?.email ?? undefined,
+            customer_phone: linked_customer?.phone ?? undefined,
             updated_at: new Date(),
           },
         });

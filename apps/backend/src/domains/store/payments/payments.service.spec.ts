@@ -1576,6 +1576,11 @@ describe('PaymentsService', () => {
       },
       payments: { findFirst: jest.fn().mockResolvedValue(paid) },
       bookings: { updateMany: jest.fn() },
+      order_items: {
+        findMany: jest.fn().mockResolvedValue([]),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      order_item_taxes: { update: jest.fn().mockResolvedValue({}) },
     });
 
     afterEach(() => jest.restoreAllMocks());
@@ -1668,6 +1673,53 @@ describe('PaymentsService', () => {
         }),
       }));
       expect(client.orders.update.mock.calls[0][0].data.order_items).toBeUndefined();
+    });
+
+    describe.each([
+      // [cupón bruto, base neta esperada, impuesto, descuento base, total]
+      ['100 % coupon', 1190, 0, 0, 1000, 0],
+      ['10 % coupon', 119, 900, 171, 100, 1071],
+    ])('adopted order with %s on a 19 %% line', (_n, coupon, newBase, tax, baseDisc, total) => {
+      it('retaxes persisted lines on the discounted base and writes discount_amount', async () => {
+        const client: any = tx({ ...order, subtotal_amount: 1000, tax_amount: 190 });
+        // Fila ya guardada con impuesto POST-descuento rancio: debe ignorarse.
+        const persisted = [{
+          id: 7, quantity: 1, total_price: 1000, tax_amount_item: 12,
+          order_item_taxes: [{ id: 70, tax_rate: 0.19, tax_amount: 12,
+            tax_type: 'VAT', tax_rate_id: 1, tax_name: 'IVA' }],
+        }];
+        client.order_items = {
+          findMany: jest.fn().mockResolvedValue(persisted),
+          update: jest.fn().mockResolvedValue({}),
+        };
+        client.order_item_taxes = { update: jest.fn().mockResolvedValue({}) };
+        jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+        jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+          product_name: 'Artículo', quantity: 1, total_price: 9999, tax_amount_item: 0,
+        });
+        jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+          total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+        });
+        jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+          coupon_id: 3, coupon_code: 'C', discount_amount: coupon,
+        });
+
+        await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+
+        const data = client.orders.update.mock.calls[0][0].data;
+        expect(data.subtotal_amount).toBe(1000);
+        expect(data.tax_amount).toBe(tax);
+        expect(data.discount_amount).toBe(baseDisc);
+        expect(data.grand_total).toBe(total);
+        expect(client.order_items.update).toHaveBeenCalledWith({
+          where: { id: 7 },
+          data: expect.objectContaining({ discount_amount: baseDisc }),
+        });
+        expect(client.order_item_taxes.update).toHaveBeenCalledWith({
+          where: { id: 70 }, data: { tax_amount: tax },
+        });
+        void newBase;
+      });
     });
 
     it('F.2 creates an alias shipping address in the same order transaction and links its FK', async () => {
@@ -1800,7 +1852,12 @@ describe('PaymentsService', () => {
     });
 
     it('E.6 retail: delegates 10% of gross products to resolveTip without taxing the tip', async () => {
-      const client = tx({ ...order, subtotal_amount: 100000, tax_amount: 19000 });
+      const client: any = tx({ ...order, subtotal_amount: 100000, tax_amount: 19000 });
+      client.order_items.findMany.mockResolvedValue([{
+        id: 7, quantity: 1, total_price: 100000, tax_amount_item: 19000,
+        order_item_taxes: [{ id: 70, tax_rate: 0.19, tax_amount: 19000,
+          tax_type: 'VAT', tax_rate_id: 1, tax_name: 'IVA' }],
+      }]);
       const resolveTipSpy = jest.spyOn(tipUtil, 'resolveTip');
       jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
       jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
@@ -1824,8 +1881,10 @@ describe('PaymentsService', () => {
       );
       expect(client.orders.update).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({
-          subtotal_amount: 100000, tax_amount: 19000,
-          discount_amount: 2000, shipping_cost: 5000,
+          // Carrito adoptado: contrato nuevo (descuento trasladado a la base,
+          // IVA sobre la base descontada).
+          subtotal_amount: 100000, tax_amount: 18680.67,
+          discount_amount: 1680.67, shipping_cost: 5000,
           tip_amount: 11900, tip_type: 'fixed', tip_value: 11900,
           grand_total: 133900,
         }),
@@ -1906,6 +1965,11 @@ describe('PaymentsService', () => {
         order_items: {
           findMany: jest.fn().mockResolvedValue([]), // existing draft items
           findFirst: jest.fn().mockResolvedValue(null), // KDS candidate scan (line ~3033)
+          // Retax post-descuento de líneas ya persistidas (cierre de mesa).
+          update: jest.fn().mockResolvedValue({}),
+        },
+        order_item_taxes: {
+          update: jest.fn().mockResolvedValue({}),
         },
         // Guard de re-entrada del cierre de mesa: busca un pago ya
         // `succeeded` sobre la misma orden antes de re-cobrar. Sin este mock
@@ -2085,6 +2149,83 @@ describe('PaymentsService', () => {
       expect(result.order).toBeDefined();
     });
 
+    it('cupón 100% en cierre de mesa: impuesto 0, descuento base-only, total 0 y filas persistidas recalculadas', async () => {
+      const { tx, posUser } = arrangeCashSale();
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: 5, coupon_code: 'FREE', discount_amount: 11900,
+      });
+      tx.order_items.findMany.mockResolvedValue([{
+        id: 17, product_id: 425, quantity: 1, total_price: 10000,
+        tax_amount_item: 1900,
+        order_item_taxes: [{ id: 90, tax_rate_id: 501, tax_type: TaxFiscalType.IVA, tax_rate: 0.19, tax_amount: 1900 }],
+      }]);
+
+      const result = await (service as any).applyPosPaymentToTableSession(
+        tx, buildDto({ items: [] }), posUser, CONTEXT_STORE_ID,
+      );
+
+      expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal_amount: 10000,
+          tax_amount: 0,
+          discount_amount: 10000,
+          grand_total: 0,
+        }),
+      }));
+      expect(tx.order_items.update).toHaveBeenCalledWith({
+        where: { id: 17 }, data: { tax_amount_item: 0, discount_amount: 10000 },
+      });
+      expect(tx.order_item_taxes.update).toHaveBeenCalledWith({
+        where: { id: 90 }, data: { tax_amount: 0 },
+      });
+      expect(result.discount_already_applied_to_lines).toBe(true);
+    });
+
+    it('P1-2: cerrar la mesa 3 veces con cupón fijo no compone el descuento (107.100 idéntico) y el mínimo de compra ve siempre el bruto 119.000', async () => {
+      const { tx, posUser } = arrangeCashSale();
+      const couponSpy = jest
+        .spyOn(service as any, 'calculatePosCouponDiscount')
+        .mockResolvedValue({
+          coupon_id: 5, coupon_code: 'FIJO', discount_amount: 11900,
+        });
+      // Línea persistida con estado mutable: cada `update` del cierre la
+      // sobrescribe como haría la base, y `findMany` la relee.
+      const line: any = {
+        id: 17, product_id: 425, quantity: 1, total_price: 100000,
+        tax_rate: 0.19, tax_amount_item: 19000, discount_amount: null,
+        order_item_taxes: [{
+          id: 90, tax_rate_id: 501, tax_type: TaxFiscalType.IVA,
+          tax_rate: 0.19, tax_amount: 19000,
+        }],
+      };
+      tx.order_items.findMany.mockImplementation(async () => [line]);
+      tx.order_items.update.mockImplementation(async ({ data }: any) => {
+        Object.assign(line, data);
+        return line;
+      });
+      tx.order_item_taxes.update.mockImplementation(async ({ data }: any) => {
+        Object.assign(line.order_item_taxes[0], data);
+        return line.order_item_taxes[0];
+      });
+
+      const grandTotals: number[] = [];
+      for (let attempt = 0; attempt < 3; attempt++) {
+        tx.orders.update.mockClear();
+        await (service as any).applyPosPaymentToTableSession(
+          tx, buildDto({ items: [] }), posUser, CONTEXT_STORE_ID,
+        );
+        const data = tx.orders.update.mock.calls[0][0].data;
+        grandTotals.push(data.grand_total);
+        expect(data.tax_amount).toBe(17100);
+        expect(data.discount_amount).toBe(10000);
+      }
+
+      expect(grandTotals).toEqual([107100, 107100, 107100]);
+      expect(line.discount_amount).toBe(10000);
+      // El mínimo de compra del cupón se evalúa contra el bruto ORIGINAL.
+      couponSpy.mock.calls.forEach((call) => expect(call[1]).toBe(119000));
+    });
+
     it('conserva el impuesto persistido de una línea antigua aunque el catálogo actual no tenga asignación', async () => {
       const { tx, posUser } = arrangeCashSale();
       const oldTaxSnapshot = {
@@ -2138,8 +2279,9 @@ describe('PaymentsService', () => {
       );
       expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({
-          subtotal_amount: 100000, tax_amount: 19000,
-          discount_amount: 2000, shipping_cost: 5000,
+          // Contrato 2026-09-28: promo 2000 bruto => descuento base 1680.67, IVA 18680.67.
+          subtotal_amount: 100000, tax_amount: 18680.67,
+          discount_amount: 1680.67, shipping_cost: 5000,
           tip_amount: 11900, tip_type: 'fixed', tip_value: 11900,
           grand_total: 133900,
         }),
