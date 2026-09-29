@@ -793,6 +793,12 @@ export class StoreAdminLayoutComponent {
           alwaysVisible: true,
         },
         {
+          label: 'Pagos',
+          icon: 'circle',
+          route: '/admin/analytics/payments',
+          alwaysVisible: true,
+        },
+        {
           label: 'Despachos',
           icon: 'circle',
           route: '/admin/analytics/dispatch',
@@ -856,6 +862,12 @@ export class StoreAdminLayoutComponent {
           label: 'Financiero',
           icon: 'circle',
           route: '/admin/reports/financial',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Pagos',
+          icon: 'circle',
+          route: '/admin/reports/payments',
           alwaysVisible: true,
         },
         {
