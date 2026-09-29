@@ -4,7 +4,7 @@ import { DocumentPrintService } from '../../../../../shared/services/print';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { formatStoreDateTime } from '../../../../../shared/utils/date.util';
-import { cashMethodLabel } from '../components/cash-session-report.component';
+import { cashMethodLabel, cashReportReturns, cashReportTaxes } from '../components/cash-session-report.component';
 import type { CashSessionCloseReport } from './pos-cash-register.service';
 
 const CURRENCY_WAIT_TIMEOUT_MS = 1_000;
@@ -97,31 +97,55 @@ export class CashSessionReportPrintService {
         (diff != null ? row(diffLabel, fmt(Math.abs(diff)), 'strong') : ''),
     );
 
+    const tx = cashReportTaxes(r);
     const sales = table(
       row('Órdenes', String(r.sales.orders_count)) +
         row('Pagos', String(r.sales.payments_count)) +
         row('Subtotal', fmt(r.sales.subtotal)) +
         row('Descuentos', fmt(r.sales.discounts)) +
-        row('Impuestos', fmt(r.sales.taxes)) +
+        row(tx.hasSplit ? 'Impuestos productos' : 'Impuestos', fmt(tx.product)) +
+        (tx.shipping > 0 ? row('Impuesto domicilios', fmt(tx.shipping)) : '') +
         row('Envíos', fmt(r.sales.shipping)) +
         row('Propinas', fmt(r.sales.tips)) +
-        row('Total', fmt(r.sales.grand_total), 'strong') +
+        row('Total cobrado', fmt(r.sales.grand_total), 'strong') +
         row('Ticket promedio', fmt(r.sales.average_ticket)),
     );
 
-    const refundsRows =
-      row(`Total (${r.refunds.count})`, fmt(r.refunds.total), 'strong') +
-      r.refunds.by_method
-        .map((m) => row(`${cashMethodLabel(m.method)} (${m.count})`, fmt(m.total), 'sub'))
-        .join('') +
-      (r.refunds.payment_cancellations.count > 0
-        ? row(
-            `Anulaciones de pago (${r.refunds.payment_cancellations.count})`,
-            fmt(r.refunds.payment_cancellations.total),
-          )
-        : '');
-    const refunds =
-      table(refundsRows) + (r.refunds.by_method.length === 0 ? empty('Sin reembolsos') : '');
+    const ret = cashReportReturns(r);
+    const hasReturns =
+      ret.refundsCount > 0 || ret.refundsTotal > 0 || ret.refundsTax > 0 ||
+      ret.cancelledCount > 0 || ret.cancelledTotal > 0;
+    const returnsSection = hasReturns
+      ? section(
+          'Devoluciones',
+          table(
+            row(`Reembolsos (${ret.refundsCount})`, fmt(ret.refundsTotal)) +
+              r.refunds.by_method
+                .map((m) => row(`${cashMethodLabel(m.method)} (${m.count})`, fmt(m.total), 'sub'))
+                .join('') +
+              row('Impuesto reembolsado', fmt(ret.refundsTax)) +
+              row(`Pagos anulados (${ret.cancelledCount})`, fmt(ret.cancelledTotal)),
+          ),
+        )
+      : '';
+
+    const netSection = r.net
+      ? section(
+          'Neto',
+          table(
+            row('Ventas netas', fmt(r.net.net_sales), 'strong') +
+              row('Impuesto neto', fmt(r.net.net_taxes)),
+          ),
+        )
+      : '';
+
+    const pc = r.pending_collection;
+    const pendingSection =
+      pc && pc.count > 0
+        ? `<div class="notes"><b>${this.esc(
+            `${pc.count} ${pc.count === 1 ? 'orden entregada o despachada con saldo por cobrar' : 'órdenes entregadas o despachadas con saldo por cobrar'}: `,
+          )}${fmt(pc.total)}</b></div>`
+        : '';
 
     const d = r.discounts;
     const discountsRows =
@@ -148,8 +172,10 @@ export class CashSessionReportPrintService {
       header +
       section('Métodos de pago', methods) +
       section('Efectivo', cash) +
-      section('Ventas', sales) +
-      section('Reembolsos', refunds) +
+      section('Ventas cobradas', sales) +
+      returnsSection +
+      netSection +
+      pendingSection +
       section('Descuentos', discounts) +
       `<div class="meta" style="margin-top:8px">Impreso: ${this.esc(printedAt)}${printedBy !== '' ? ` · ${this.esc(printedBy)}` : ''}</div>` +
       `<div class="sign"><div>Firma cajero</div><div>Firma supervisor</div></div>` +

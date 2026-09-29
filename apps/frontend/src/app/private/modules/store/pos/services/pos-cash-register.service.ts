@@ -124,7 +124,13 @@ export interface CashSessionCloseReport {
     payments_count: number;
     subtotal: number;
     discounts: number;
+    /** Impuesto de productos. Ausente en backend viejo. */
+    product_taxes?: number;
+    /** Impuesto del domicilio. Ausente en backend viejo. */
+    shipping_taxes?: number;
+    /** Total de impuestos (productos + domicilio). */
     taxes: number;
+    /** Envíos netos de impuesto (backend viejo: bruto). */
     shipping: number;
     tips: number;
     grand_total: number;
@@ -136,6 +142,16 @@ export interface CashSessionCloseReport {
     by_method: { method: string; count: number; total: number }[];
     payment_cancellations: { count: number; total: number };
   };
+  /** Bloques nuevos: opcionales para tolerar backend viejo durante el deploy. */
+  returns?: {
+    refunds_count: number;
+    refunds_total: number;
+    refunds_tax: number;
+    payments_cancelled_count: number;
+    payments_cancelled_total: number;
+  };
+  net?: { net_sales: number; net_taxes: number };
+  pending_collection?: { count: number; total: number };
   discounts: {
     orders_with_discount: number;
     total: number;
