@@ -1132,21 +1132,16 @@ export class PopBulkDataModalComponent {
       wch: Math.max(14, header.length + 2),
     }));
 
-    // Código de barras como texto ('@') para preservar ceros iniciales.
+    // Código de barras como texto ('@') para preservar ceros iniciales. Solo
+    // las filas de ejemplo: una celda vacía de relleno la lee sheet_to_json
+    // como fila no vacía y el archivo re-subido trae cientos de filas fantasma.
     const barcodeCol = headers.indexOf('Código de barras');
-    const lastRow = rows.length;
-    for (let r = 1; r <= Math.max(lastRow, 500); r++) {
+    for (let r = 1; r <= rows.length; r++) {
       const addr = xlsx.utils.encode_cell({ r, c: barcodeCol });
       const cell = worksheet[addr];
-      worksheet[addr] = {
-        t: 's',
-        v: cell?.v !== undefined ? String(cell.v) : '',
-        z: '@',
-      };
+      if (cell?.v === undefined || cell.v === '') continue;
+      worksheet[addr] = { t: 's', v: String(cell.v), z: '@' };
     }
-    const range = xlsx.utils.decode_range(worksheet['!ref'] || 'A1');
-    range.e.r = Math.max(range.e.r, Math.max(lastRow, 500));
-    worksheet['!ref'] = xlsx.utils.encode_range(range);
 
     const workbook = xlsx.utils.book_new();
     xlsx.utils.book_append_sheet(workbook, worksheet, 'Pedido POP');
@@ -1379,7 +1374,12 @@ export class PopBulkDataModalComponent {
         const wb: XLSX.WorkBook = xlsx.read(bstr, { type: 'binary' });
         const wsname: string = wb.SheetNames[0];
         const ws: XLSX.WorkSheet = wb.Sheets[wsname];
-        const data = xlsx.utils.sheet_to_json(ws);
+        // Descarta filas cuyas celdas son todas vacías (formato sin datos).
+        const data = xlsx.utils
+          .sheet_to_json(ws)
+          .filter((row: any) =>
+            Object.values(row).some((v) => String(v ?? '').trim() !== ''),
+          );
 
         if (!data || data.length === 0) {
           this.toastService.error(

@@ -1789,6 +1789,8 @@ export class BulkUploadModalComponent {
           }),
         );
 
+    // Al destruir el componente se corta la cadena sin pasar por `complete`.
+    this.destroyRef.onDestroy(() => this.uploadSub?.unsubscribe());
     this.uploadSub = fetchPage(0)
       .pipe(
         expand((page) => {

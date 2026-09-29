@@ -685,7 +685,7 @@ export class ProductsBulkService {
           ? product[this.CELL_ERRORS_KEY]
           : [];
       const parsedBasePrice = parseMoneyCell(product.base_price);
-      const item: BulkProductAnalysisItemDto & { barcode?: string } = {
+      const item: BulkProductAnalysisItemDto = {
         row_number: i + 2, // +2 because row 1 is header, data starts at row 2
         name: product.name || '',
         sku: product.sku || '',
