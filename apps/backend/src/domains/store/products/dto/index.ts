@@ -2058,6 +2058,11 @@ export class BulkProductItemDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
+  barcode?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
 
   @IsOptional()

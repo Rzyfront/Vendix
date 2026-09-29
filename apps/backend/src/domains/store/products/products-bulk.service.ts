@@ -24,6 +24,7 @@ import { parseMoneyCell } from '@common/money-kernel';
 import { buildReportBuffer } from '@common/reports/report-builder';
 import type { ReportColumn } from '@common/reports/report-column.types';
 import * as XLSX from 'xlsx';
+import { Workbook } from 'exceljs';
 
 type BulkExcelTemplateRequest = 'products' | 'services';
 
@@ -39,6 +40,7 @@ type UomCatalogEntry = {
 export class ProductsBulkService {
   private readonly logger = new Logger(ProductsBulkService.name);
   private readonly MAX_BATCH_SIZE = 1000;
+  private readonly MAX_BARCODE_LENGTH = 64;
   private readonly NULL_MARKER = '__NULL__';
   private readonly CATALOG_ONLY_IGNORED_FIELDS = new Set([
     'stock_quantity',
@@ -136,6 +138,7 @@ export class ProductsBulkService {
     'Unidad de stock': 'stock_uom_code',
     'Unidad de compra': 'purchase_uom_code',
     'Precio por N unidades': 'price_unit_quantity',
+    'Código de barras': 'barcode',
   };
 
   private readonly HEADER_TRANSLATIONS: Record<string, string> = {
@@ -149,6 +152,13 @@ export class ProductsBulkService {
     'precio por n unidades': 'price_unit_quantity',
     'precio por n': 'price_unit_quantity',
     'escala de precio': 'price_unit_quantity',
+    // Código de barras: parseFile quita tildes antes de buscar, por eso las
+    // claves van sin ellas.
+    'codigo de barras': 'barcode',
+    'codigo barras': 'barcode',
+    barcode: 'barcode',
+    ean: 'barcode',
+    gtin: 'barcode',
     nombre: 'name',
     sku: 'sku',
     'precio base': 'base_price',
@@ -288,6 +298,33 @@ export class ProductsBulkService {
   }
 
   /**
+   * Convierte una celda de código de barras a texto exacto. Excel guarda los
+   * códigos numéricos como número: se rechaza la notación científica (pierde
+   * dígitos) en vez de persistir un código corrupto.
+   */
+  private coerceBarcodeCell(raw: unknown): { value?: string; error?: string } {
+    const sciError =
+      'Código de barras en notación científica: formatee la columna como texto';
+    let text: string;
+    if (typeof raw === 'number') {
+      if (!Number.isSafeInteger(raw)) return { error: sciError };
+      text = String(raw);
+    } else {
+      text = String(raw ?? '').trim();
+    }
+    if (!text) return {};
+    if (/^\d[\d.]*e[+-]?\d+$/i.test(text)) {
+      return { error: sciError };
+    }
+    if (text.length > this.MAX_BARCODE_LENGTH) {
+      return {
+        error: `El código de barras excede ${this.MAX_BARCODE_LENGTH} caracteres`,
+      };
+    }
+    return { value: text };
+  }
+
+  /**
    * Parsea archivo (Excel o CSV) a array de productos usando mapeo de español
    */
   parseFile(buffer: Buffer): any[] {
@@ -356,6 +393,23 @@ export class ProductsBulkService {
               strVal === '--'
             ) {
               product[key] = this.NULL_MARKER;
+              hasData = true;
+              return;
+            }
+
+            if (key === 'barcode') {
+              const coerced = this.coerceBarcodeCell(val);
+              if (coerced.error) {
+                const cellErrors = product[this.CELL_ERRORS_KEY] ?? [];
+                cellErrors.push({
+                  code: 'INVALID_BARCODE',
+                  message: coerced.error,
+                  field: 'barcode',
+                });
+                product[this.CELL_ERRORS_KEY] = cellErrors;
+              } else if (coerced.value) {
+                product.barcode = coerced.value;
+              }
               hasData = true;
               return;
             }
@@ -604,6 +658,17 @@ export class ProductsBulkService {
     // 5. Track duplicate SKUs in batch
     const seenSkus = new Map<string, number>(); // sku -> first row number
 
+    // 5b. Códigos de barras: UNA consulta por tabla sobre el set del archivo.
+    const barcodeOwners = await this.loadBarcodeOwners(
+      products
+        .map((p) => p.barcode)
+        .filter(
+          (b): b is string => typeof b === 'string' && b !== this.NULL_MARKER,
+        ),
+      storeId,
+    );
+    const seenBarcodes = new Map<string, { row: number; sku: string }>();
+
     // 6. Analyze each product
     const analysisItems: BulkProductAnalysisItemDto[] = [];
     let ready = 0;
@@ -618,10 +683,15 @@ export class ProductsBulkService {
           ? product[this.CELL_ERRORS_KEY]
           : [];
       const parsedBasePrice = parseMoneyCell(product.base_price);
-      const item: BulkProductAnalysisItemDto = {
+      const item: BulkProductAnalysisItemDto & { barcode?: string } = {
         row_number: i + 2, // +2 because row 1 is header, data starts at row 2
         name: product.name || '',
         sku: product.sku || '',
+        barcode:
+          typeof product.barcode === 'string' &&
+          product.barcode !== this.NULL_MARKER
+            ? product.barcode
+            : undefined,
         product_type: 'physical',
         base_price: parsedBasePrice ?? 0,
         cost_price: 0,
@@ -736,6 +806,41 @@ export class ProductsBulkService {
         if (existing) {
           item.action = 'update';
           item.existing_product_id = existing.id;
+        }
+      }
+
+      // Código de barras: duplicado en el archivo y choque con otro
+      // producto/variante/presentación de la tienda (misma regla que
+      // `assertBarcodeUnique` en el commit). Mismo SKU + mismo barcode = OK.
+      if (item.barcode) {
+        const skuLower = item.sku ? item.sku.toLowerCase() : '';
+        const first = seenBarcodes.get(item.barcode);
+        if (first && first.sku !== skuLower) {
+          item.errors.push({
+            code: 'DUPLICATE_BARCODE_IN_BATCH',
+            message: `Código de barras duplicado en el archivo (primera aparición en fila ${first.row})`,
+            field: 'barcode',
+          });
+        } else if (!first) {
+          seenBarcodes.set(item.barcode, {
+            row: item.row_number,
+            sku: skuLower,
+          });
+        }
+
+        const owner = barcodeOwners.get(item.barcode);
+        if (owner && owner.product_id !== item.existing_product_id) {
+          const where =
+            owner.kind === 'variant'
+              ? 'una variante'
+              : owner.kind === 'presentation'
+                ? 'una presentación de venta'
+                : 'otro producto';
+          item.errors.push({
+            code: 'BARCODE_IN_USE',
+            message: `El código de barras ya está en uso por ${where} de esta tienda`,
+            field: 'barcode',
+          });
         }
       }
 
@@ -863,6 +968,7 @@ export class ProductsBulkService {
       const FIELDS_TO_TRACK = [
         'name',
         'sku',
+        'barcode',
         'description',
         'base_price',
         'state',
@@ -943,6 +1049,55 @@ export class ProductsBulkService {
   }
 
   /**
+   * Resuelve a quién pertenece cada barcode del archivo dentro de la tienda
+   * (producto, variante o presentación): una consulta por tabla, no por fila.
+   */
+  private async loadBarcodeOwners(
+    barcodes: string[],
+    storeId: number,
+  ): Promise<
+    Map<
+      string,
+      { kind: 'product' | 'variant' | 'presentation'; product_id: number }
+    >
+  > {
+    const owners = new Map<
+      string,
+      { kind: 'product' | 'variant' | 'presentation'; product_id: number }
+    >();
+    const unique = Array.from(new Set(barcodes));
+    if (unique.length === 0) return owners;
+
+    const [productRows, variantRows, presentationRows] = await Promise.all([
+      this.prisma.products.findMany({
+        where: { store_id: storeId, barcode: { in: unique } },
+        select: { id: true, barcode: true },
+      }),
+      this.prisma.product_variants.findMany({
+        where: { barcode: { in: unique }, products: { store_id: storeId } },
+        select: { product_id: true, barcode: true },
+      }),
+      this.prisma.product_price_tier_assignments.findMany({
+        where: { barcode: { in: unique }, product: { store_id: storeId } },
+        select: { product_id: true, barcode: true },
+      }),
+    ]);
+
+    for (const r of presentationRows) {
+      if (r.barcode)
+        owners.set(r.barcode, { kind: 'presentation', product_id: r.product_id });
+    }
+    for (const r of variantRows) {
+      if (r.barcode)
+        owners.set(r.barcode, { kind: 'variant', product_id: r.product_id });
+    }
+    for (const r of productRows) {
+      if (r.barcode) owners.set(r.barcode, { kind: 'product', product_id: r.id });
+    }
+    return owners;
+  }
+
+  /**
    * Procesa la carga masiva desde una sesión de análisis previa.
    * Descarga el archivo temporal de S3, lo procesa y limpia.
    */
@@ -996,6 +1151,7 @@ export class ProductsBulkService {
     return [
       'Nombre',
       'SKU',
+      'Código de barras',
       'Tipo',
       'Estado',
       'Controla Inventario',
@@ -1031,6 +1187,7 @@ export class ProductsBulkService {
     const serviceHeaders = [
       'Nombre',
       'SKU',
+      'Código de barras',
       'Tipo',
       'Estado',
       'Precio Venta',
@@ -1066,6 +1223,7 @@ export class ProductsBulkService {
             {
               Nombre: 'Asesoría Tributaria',
               SKU: 'SVC-ASE-TRI-001',
+              'Código de barras': '',
               Tipo: 'servicio',
               Estado: 'activo',
               'Precio Venta': 150000,
@@ -1095,6 +1253,7 @@ export class ProductsBulkService {
             {
               Nombre: 'Consultoría Estratégica Virtual',
               SKU: 'SVC-CON-EST-001',
+              'Código de barras': '',
               Tipo: 'servicio',
               Estado: 'activo',
               'Precio Venta': 250000,
@@ -1126,6 +1285,7 @@ export class ProductsBulkService {
             {
               Nombre: 'Mantenimiento Preventivo Anual',
               SKU: 'SVC-MNT-PRE-001',
+              'Código de barras': '',
               Tipo: 'servicio',
               Estado: 'activo',
               'Precio Venta': 480000,
@@ -1159,6 +1319,7 @@ export class ProductsBulkService {
             {
               Nombre: 'Zapatillas Running Pro',
               SKU: 'ZAP-RUN-PRO-42',
+              'Código de barras': '7702001234567',
               Tipo: 'físico',
               Estado: 'activo',
               'Controla Inventario': 'sí',
@@ -1179,6 +1340,7 @@ export class ProductsBulkService {
             {
               Nombre: 'Leche Entera 1L',
               SKU: 'LEC-ENT-1L-COL',
+              'Código de barras': '0123456789012',
               Tipo: 'físico',
               Estado: 'activo',
               'Controla Inventario': 'sí',
@@ -1199,6 +1361,7 @@ export class ProductsBulkService {
             {
               Nombre: 'Frutas Orgánicas Mix 1kg',
               SKU: 'FRU-ORG-MIX-1KG',
+              'Código de barras': '',
               Tipo: 'físico',
               Estado: 'activo',
               'Controla Inventario': 'no',
@@ -1230,9 +1393,35 @@ export class ProductsBulkService {
         ? 'Plantilla Servicios'
         : 'Plantilla Productos';
 
-    return buildReportBuffer({
+    const buffer = await buildReportBuffer({
       sheets: [{ name: sheetName, columns, rows: exampleData }],
     });
+    // El builder escribe las celdas de texto pero no formatea la columna
+    // vacía: sin `@` Excel convierte 0123456789012 en número y pierde el cero.
+    return this.formatColumnAsText(buffer, headers.indexOf('Código de barras') + 1);
+  }
+
+  /**
+   * Marca una columna (1-based) como texto (`@`) en el primer hoja del XLSX,
+   * para que los códigos numéricos que el usuario escriba conserven ceros
+   * iniciales y no pasen a notación científica.
+   */
+  private async formatColumnAsText(
+    buffer: Buffer,
+    columnIndex: number,
+  ): Promise<Buffer> {
+    if (columnIndex < 1) return buffer;
+    const workbook = new Workbook();
+    await workbook.xlsx.load(buffer as any);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) return buffer;
+    const column = sheet.getColumn(columnIndex);
+    column.numFmt = '@';
+    column.eachCell({ includeEmpty: false }, (cell) => {
+      cell.numFmt = '@';
+    });
+    const out = await workbook.xlsx.writeBuffer();
+    return Buffer.from(out as ArrayBuffer);
   }
 
   /**
@@ -1376,6 +1565,7 @@ export class ProductsBulkService {
           rows.push({
           Nombre: p.name,
           SKU: p.sku ?? '',
+          'Código de barras': p.barcode ?? '',
           Tipo: p.product_type === 'service' ? 'servicio' : 'físico',
           Estado:
             p.state === 'active'
@@ -1440,6 +1630,20 @@ export class ProductsBulkService {
       wch: Math.max(h.length + 5, 20),
     }));
     ws['!cols'] = colWidths;
+
+    // Código de barras como texto puro: tipo 's' + formato '@' para que Excel
+    // no lo convierta a número ni pierda ceros iniciales al editar/re-cargar.
+    const barcodeCol = headers.indexOf('Código de barras');
+    if (barcodeCol >= 0) {
+      for (let r = 1; r <= rows.length; r++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c: barcodeCol })];
+        if (cell) {
+          cell.t = 's';
+          cell.z = '@';
+          cell.v = String(cell.v ?? '');
+        }
+      }
+    }
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Productos Actuales');
@@ -1563,6 +1767,17 @@ export class ProductsBulkService {
       const productData = products[rowIndex];
       const rowNumber = rowIndex + 2; // header = fila 1
       try {
+        // Celda de código de barras inválida (notación científica / >64):
+        // se rechaza la fila en vez de crearla sin el código.
+        const barcodeCellError = (
+          (productData as any)[this.CELL_ERRORS_KEY] as
+            | { field?: string; message: string }[]
+            | undefined
+        )?.find((e) => e.field === 'barcode');
+        if (barcodeCellError) {
+          throw new BadRequestException(barcodeCellError.message);
+        }
+
         const ignoredCatalogFields = this.stripCatalogOnlyIgnoredFields(
           productData as any,
         );
@@ -2172,6 +2387,7 @@ export class ProductsBulkService {
       name: product.name,
       base_price: product.base_price,
       sku: product.sku,
+      barcode: resolveValue(product.barcode) ?? undefined,
       description: resolveValue(product.description),
       slug: product.slug || generateSlug(product.name),
       store_id: storeId,
@@ -2250,6 +2466,10 @@ export class ProductsBulkService {
       if (product[field] !== undefined) {
         dto[field] = resolveValue(product[field]);
       }
+    }
+
+    if (product.barcode !== undefined) {
+      dto.barcode = resolveValue(product.barcode);
     }
 
     if (product.description !== undefined) {

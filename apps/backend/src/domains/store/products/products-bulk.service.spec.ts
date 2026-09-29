@@ -9,6 +9,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { LocationsService } from '../inventory/locations/locations.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { BulkProductUploadDto, BulkProductItemDto, ProductState } from './dto';
+import * as XLSX from 'xlsx';
 import {
   ConflictException,
   NotFoundException,
@@ -39,6 +40,12 @@ describe('ProductsBulkService', () => {
       findFirst: jest.fn(),
       findMany: jest.fn(),
       count: jest.fn(),
+    },
+    product_variants: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    product_price_tier_assignments: {
+      findMany: jest.fn().mockResolvedValue([]),
     },
     product_categories: {
       createMany: jest.fn(),
@@ -906,6 +913,256 @@ describe('ProductsBulkService', () => {
       const item = result.products[0];
       expect(item.base_price).toBe(5000);
       expect(item.status).toBe('ready');
+    });
+  });
+
+  describe('código de barras en carga masiva', () => {
+    // BOM UTF-8 como el que escribe Excel: sin él SheetJS lee el CSV como
+    // latin-1 y 'Código' llega corrupto.
+    const csv = (header: string, rows: string[]) =>
+      Buffer.from('\uFEFF' + [header, ...rows].join('\n'), 'utf-8');
+
+    it("mapea el encabezado 'Código de barras' (con tilde)", () => {
+      const [row] = service.parseFile(
+        csv('Nombre,SKU,Código de barras,Precio Venta', [
+          'P,S-1,7702001234567,1000',
+        ]),
+      );
+      expect((row as any).barcode).toBe('7702001234567');
+    });
+
+    it("mapea 'codigo de barras', 'barcode', 'ean' y 'gtin'", () => {
+      for (const h of ['codigo de barras', 'BARCODE', 'EAN', 'gtin']) {
+        const [row] = service.parseFile(
+          csv(`Nombre,SKU,${h},Precio Venta`, ['P,S-1,123456,1000']),
+        );
+        expect((row as any).barcode).toBe('123456');
+      }
+    });
+
+    it('convierte una celda numérica a texto exacto', () => {
+      const ws = XLSX.utils.aoa_to_sheet([
+        ['Nombre', 'SKU', 'Código de barras', 'Precio Venta'],
+        ['P', 'S-1', 7702001234567, 1000],
+      ]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Hoja1');
+      const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      const [row] = service.parseFile(buf);
+      expect((row as any).barcode).toBe('7702001234567');
+    });
+
+    it('conserva el cero inicial de un barcode de texto', () => {
+      const [row] = service.parseFile(
+        csv('Nombre,SKU,Código de barras,Precio Venta', [
+          'P,S-1,0123456789012,1000',
+        ]),
+      );
+      expect((row as any).barcode).toBe('0123456789012');
+    });
+
+    it('rechaza la notación científica con error de fila', () => {
+      const [row] = service.parseFile(
+        csv('Nombre,SKU,Código de barras,Precio Venta', [
+          'P,S-1,7.702E+12,1000',
+        ]),
+      );
+      expect((row as any).barcode).toBeUndefined();
+      expect((row as any).__cell_errors).toEqual([
+        expect.objectContaining({
+          field: 'barcode',
+          message: expect.stringContaining('formatee la columna como texto'),
+        }),
+      ]);
+    });
+
+    it('rechaza un número no entero seguro (notación científica en xlsx)', () => {
+      const ws = XLSX.utils.aoa_to_sheet([
+        ['Nombre', 'SKU', 'Código de barras', 'Precio Venta'],
+        ['P', 'S-1', 1.2345678901234567e21, 1000],
+      ]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Hoja1');
+      const [row] = service.parseFile(
+        XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }),
+      );
+      expect((row as any).__cell_errors?.[0]?.field).toBe('barcode');
+    });
+
+    it('rechaza un barcode de más de 64 caracteres', () => {
+      const [row] = service.parseFile(
+        csv('Nombre,SKU,Código de barras,Precio Venta', [
+          `P,S-1,${'1'.repeat(65)},1000`,
+        ]),
+      );
+      expect((row as any).barcode).toBeUndefined();
+      expect((row as any).__cell_errors?.[0]?.field).toBe('barcode');
+    });
+
+    it('celda vacía = sin barcode y sin error', () => {
+      const [row] = service.parseFile(
+        csv('Nombre,SKU,Código de barras,Precio Venta', ['P,S-1,,1000']),
+      );
+      expect((row as any).barcode).toBeUndefined();
+      expect((row as any).__cell_errors).toBeUndefined();
+    });
+
+    describe('analyzeProducts', () => {
+      const analyze = (rows: string[]) =>
+        service.analyzeProducts(
+          csv('Nombre,SKU,Código de barras,Precio Venta', rows),
+          1,
+        );
+      const codes = (item: any) => item.errors.map((e: any) => e.code);
+
+      beforeEach(() => {
+        mockPrismaService.products.findMany.mockReset();
+        mockPrismaService.products.findMany.mockResolvedValue([]);
+        mockPrismaService.product_variants.findMany.mockReset();
+        mockPrismaService.product_variants.findMany.mockResolvedValue([]);
+        mockPrismaService.product_price_tier_assignments.findMany.mockReset();
+        mockPrismaService.product_price_tier_assignments.findMany.mockResolvedValue(
+          [],
+        );
+      });
+
+      it('expone el barcode en el item y lo acepta cuando está libre', async () => {
+        const result = await analyze(['P,S-1,0123456789012,1000']);
+        const item = result.products[0] as any;
+        expect(item.barcode).toBe('0123456789012');
+        expect(item.status).toBe('ready');
+        expect(item.modified_fields).toContain('barcode');
+      });
+
+      it('marca error cuando el barcode se repite en el archivo con otro SKU', async () => {
+        const result = await analyze([
+          'A,S-1,111,1000',
+          'B,S-2,111,1000',
+        ]);
+        expect(result.products[0].status).toBe('ready');
+        expect(codes(result.products[1])).toContain('DUPLICATE_BARCODE_IN_BATCH');
+      });
+
+      it('marca error cuando el barcode pertenece a otro SKU de la tienda', async () => {
+        mockPrismaService.products.findMany.mockImplementation(
+          async (args: any) =>
+            args.where?.barcode
+              ? [{ id: 50, barcode: '111' }]
+              : [{ id: 7, sku: 'S-1', name: 'Uno' }],
+        );
+        const result = await analyze(['A,S-2,111,1000']);
+        expect(codes(result.products[0])).toContain('BARCODE_IN_USE');
+        expect(result.with_errors).toBe(1);
+      });
+
+      it('marca error cuando el barcode pertenece a una variante o presentación', async () => {
+        mockPrismaService.product_variants.findMany.mockResolvedValue([
+          { product_id: 60, barcode: '222' },
+        ]);
+        mockPrismaService.product_price_tier_assignments.findMany.mockResolvedValue(
+          [{ product_id: 61, barcode: '333' }],
+        );
+        const result = await analyze(['A,S-1,222,1000', 'B,S-2,333,1000']);
+        expect(codes(result.products[0])).toContain('BARCODE_IN_USE');
+        expect(codes(result.products[1])).toContain('BARCODE_IN_USE');
+      });
+
+      it('acepta el mismo SKU con su mismo barcode (update)', async () => {
+        mockPrismaService.products.findMany.mockImplementation(
+          async (args: any) =>
+            args.where?.barcode
+              ? [{ id: 7, barcode: '111' }]
+              : [{ id: 7, sku: 'S-1', name: 'Uno' }],
+        );
+        const result = await analyze(['A,S-1,111,1000']);
+        expect(result.products[0].action).toBe('update');
+        expect(codes(result.products[0])).not.toContain('BARCODE_IN_USE');
+        expect(result.products[0].status).toBe('ready');
+      });
+
+      it('consulta cada tabla una sola vez sobre el set de barcodes', async () => {
+        await analyze(['A,S-1,111,1000', 'B,S-2,222,1000', 'C,S-3,333,1000']);
+        const barcodeCalls = mockPrismaService.products.findMany.mock.calls.filter(
+          ([a]: any[]) => a.where?.barcode,
+        );
+        expect(barcodeCalls).toHaveLength(1);
+        expect(mockPrismaService.product_variants.findMany).toHaveBeenCalledTimes(1);
+        expect(
+          mockPrismaService.product_price_tier_assignments.findMany,
+        ).toHaveBeenCalledTimes(1);
+      });
+
+      it('la notación científica llega como error de fila', async () => {
+        const result = await analyze(['A,S-1,7.7E+12,1000']);
+        expect(codes(result.products[0])).toContain('INVALID_BARCODE');
+      });
+    });
+
+    describe('mapeo a DTOs', () => {
+      it('mapToCreateProductDto propaga el barcode', () => {
+        const dto = (service as any).mapToCreateProductDto(
+          { name: 'P', sku: 'S-1', base_price: 10, barcode: '0123' },
+          1,
+        );
+        expect(dto.barcode).toBe('0123');
+      });
+
+      it('mapToUpdateProductDto lo incluye solo si viene (sparse)', () => {
+        expect(
+          (service as any).mapToUpdateProductDto({ sku: 'S-1', barcode: '0123' })
+            .barcode,
+        ).toBe('0123');
+        expect(
+          'barcode' in (service as any).mapToUpdateProductDto({ sku: 'S-1' }),
+        ).toBe(false);
+      });
+    });
+
+    describe('plantillas', () => {
+      const headerRow = (buf: Buffer) => {
+        const wb = XLSX.read(buf, { type: 'buffer' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        return XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 })[0];
+      };
+
+      it('la plantilla de productos y la de servicios incluyen la columna', async () => {
+        expect(headerRow(await service.generateExcelTemplate('products'))).toContain(
+          'Código de barras',
+        );
+        expect(headerRow(await service.generateExcelTemplate('services'))).toContain(
+          'Código de barras',
+        );
+      });
+
+      it('el ejemplo con cero inicial sobrevive como texto', async () => {
+        const wb = XLSX.read(await service.generateExcelTemplate('products'), {
+          type: 'buffer',
+        });
+        const rows = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
+        expect(
+          rows.map((r) => r['Código de barras']).filter(Boolean),
+        ).toContain('0123456789012');
+      });
+
+      it('el export actual llena el barcode del producto como texto', async () => {
+        mockPrismaService.products.count.mockResolvedValue(1);
+        mockPrismaService.products.findMany.mockReset();
+        mockPrismaService.products.findMany.mockResolvedValueOnce([
+          {
+            id: 1,
+            name: 'P',
+            sku: 'S-1',
+            barcode: '0123456789012',
+            state: 'active',
+            product_type: 'physical',
+            base_price: 10,
+          },
+        ]);
+        const buf = await service.exportCurrentProductsAsTemplate();
+        const wb = XLSX.read(buf, { type: 'buffer' });
+        const rows = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
+        expect(rows[0]['Código de barras']).toBe('0123456789012');
+      });
     });
   });
 });
