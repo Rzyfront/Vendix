@@ -962,6 +962,8 @@ export class OrderDetailsPageComponent {
    * el operador elige un existente o salta al flujo crear actual.
    */
   showTitularSearchModal = signal(false);
+  /** Prellenado (RUES / documento digitado) para el alta de titular. */
+  changeCustomerInitialValues = signal<Partial<CreateCustomerRequest> | null>(null);
   /**
    * Dirección capturada en el modal (`addressData`, solo crear-mode). Se
    * persiste contra el cliente resuelto antes del PATCH titular; se limpia
@@ -4851,7 +4853,8 @@ export class OrderDetailsPageComponent {
    * "Crear cliente nuevo" desde el buscar-primero: conserva el flujo actual
    * (lookup → resolve → PATCH en `onChangeCustomerSave`).
    */
-  onTitularSearchCreateNew(): void {
+  onTitularSearchCreateNew(prefill?: Partial<CreateCustomerRequest> | void): void {
+    this.changeCustomerInitialValues.set((prefill as Partial<CreateCustomerRequest> | undefined) ?? null);
     this.showTitularSearchModal.set(false);
     this.pendingChangeCustomerAddress.set(null);
     this.showChangeCustomerModal.set(true);
@@ -4883,6 +4886,7 @@ export class OrderDetailsPageComponent {
 
   closeChangeCustomer(): void {
     this.showChangeCustomerModal.set(false);
+    this.changeCustomerInitialValues.set(null);
     this.pendingChangeCustomerAddress.set(null);
   }
 
@@ -4940,6 +4944,7 @@ export class OrderDetailsPageComponent {
         next: () => {
           this.toastService.success('Titular de la orden actualizado');
           this.showChangeCustomerModal.set(false);
+          this.changeCustomerInitialValues.set(null);
           this.pendingChangeCustomerAddress.set(null);
           this.refreshOrder();
         },

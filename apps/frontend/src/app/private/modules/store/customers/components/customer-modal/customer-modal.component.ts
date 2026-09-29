@@ -8,6 +8,7 @@ import {
   effect,
   signal,
   computed,
+  untracked,
 } from '@angular/core';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
@@ -476,6 +477,11 @@ export class CustomerModalComponent {
 
   readonly isOpen = input(false);
   readonly customer = input<Customer | null>(null);
+  /**
+   * Prellenado para el modo alta (ej. identidad RUES, documento digitado).
+   * Sólo se aplica al abrir con `customer === null`; nunca en edición.
+   */
+  readonly initialValues = input<Partial<CreateCustomerRequest> | null>(null);
   readonly loadingInput = input(false, { alias: 'loading' });
   private readonly internalLoading = signal(false);
   readonly loading = computed(() => this.loadingInput() || this.internalLoading());
@@ -877,6 +883,12 @@ export class CustomerModalComponent {
           is_withholding_agent: false,
           fiscal_responsibilities: [],
         });
+        // Prellenado opcional (sin tracking: cambiar `initialValues` con el
+        // modal abierto no debe pisar lo que el operador ya digitó).
+        const initial = untracked(() => this.initialValues());
+        if (initial) {
+          this.form.patchValue(initial);
+        }
         // Reset de estado de dirección en alta.
         this.existingAddressId.set(null);
         this.addressPayload.set(null);

@@ -3047,13 +3047,14 @@
       [isOpen]="showTitularSearchModal()"
       (closed)="closeTitularSearch()"
       (selected)="onTitularSearchSelected($event)"
-      (createNew)="onTitularSearchCreateNew()"
+      (createNew)="onTitularSearchCreateNew($event)"
     ></app-change-titular-search-modal>
 
     <!-- Paso 5: CAMBIO DE TITULAR (reutiliza app-customer-modal en crear-mode) -->
     <app-customer-modal
       [isOpen]="showChangeCustomerModal()"
       [customer]="null"
+      [initialValues]="changeCustomerInitialValues()"
       [loading]="changingCustomer()"
       (closed)="closeChangeCustomer()"
       (save)="onChangeCustomerSave($event)"
