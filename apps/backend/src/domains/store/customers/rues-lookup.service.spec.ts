@@ -215,6 +215,27 @@ describe('RuesLookupService', () => {
     const res = await service.lookup('900123456');
     expect(res).toEqual({ found: false, unavailable: true });
     expect(redis.set).not.toHaveBeenCalled();
+    // 1 intento + 2 reintentos ante 5xx persistente.
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it('5xx transitorio: reintenta y resuelve con el 200 siguiente', async () => {
+    const unavailable = { ok: false, status: 503, json: async () => ({}) } as unknown as Response;
+    fetchSpy
+      .mockResolvedValueOnce(unavailable)
+      .mockResolvedValueOnce({ ...unavailable, status: 500 } as Response)
+      .mockResolvedValueOnce(okResponse([nitRow()]));
+    const res = await service.lookup('900123456');
+    expect(res.found).toBe(true);
+    expect(res.identity?.legal_name).toBe('TECH SOLUTIONS SAS');
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it('4xx no se reintenta', async () => {
+    fetchSpy.mockResolvedValue({ ok: false, status: 400, json: async () => ({}) } as unknown as Response);
+    const res = await service.lookup('900123456');
+    expect(res).toEqual({ found: false, unavailable: true });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it('JSON malformado (lanza o no es arreglo): unavailable y NO cachea', async () => {

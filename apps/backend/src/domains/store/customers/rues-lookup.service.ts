@@ -23,6 +23,7 @@ import { computeNitDv, normalizeNit, onlyDigits } from '@common/utils/nit.util';
 const RUES_DATASET_URL = 'https://www.datos.gov.co/resource/c82u-588k.json';
 const RUES_FETCH_TIMEOUT_MS = 5_000;
 const RUES_ROW_LIMIT = 20;
+const RUES_MAX_5XX_RETRIES = 2;
 const RUES_MIN_DIGITS = 5;
 const RUES_CACHE_TTL_FOUND_S = 86_400;
 const RUES_CACHE_TTL_NOT_FOUND_S = 21_600;
@@ -147,7 +148,13 @@ export class RuesLookupService {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), RUES_FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch(url, { headers, signal: controller.signal });
+      // Socrata alterna 500/503 transitorios con 200 para la misma URL: se
+      // reintenta un 5xx dentro del mismo presupuesto de 5 s (el abort corta
+      // cualquier intento que se pase).
+      let res = await fetch(url, { headers, signal: controller.signal });
+      for (let retry = 0; retry < RUES_MAX_5XX_RETRIES && res.status >= 500; retry++) {
+        res = await fetch(url, { headers, signal: controller.signal });
+      }
       if (!res.ok) {
         this.logger.warn(`RUES respondió HTTP ${res.status} para ${doc}`);
         return null;
