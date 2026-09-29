@@ -518,7 +518,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           tax_amount: taxAmount,
           base_amount: baseAmount,
           // QUI-890 — mismo arrastre que `aggregateTaxes`.
-          tax_type: (t as any).tax_type || undefined,
+          tax_type: t.tax_type || undefined,
         });
       }
     }
@@ -1090,7 +1090,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             base_amount: rowBase,
             // QUI-890 — se arrastra el tipo de la primera fila del grupo
             // (sin tipo = IVA por contrato fiscal, lo resuelve el lector).
-            tax_type: (t as any).tax_type || undefined,
+            tax_type: t.tax_type || undefined,
           });
         }
       });
