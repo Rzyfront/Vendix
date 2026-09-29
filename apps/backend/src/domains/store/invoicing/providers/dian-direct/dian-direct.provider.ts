@@ -40,7 +40,10 @@ import {
 import { resolveIssuerFiscalIdentity } from '../../utils/fiscal-issuer.util';
 import { DianSoapClient, WsSecurityCredentials } from './dian-soap.client';
 import { DianXmlSignerService } from './dian-xml-signer.service';
-import { DianResponseParserService } from './dian-response-parser.service';
+import {
+  DianResponseParserService,
+  describeDianVerdict,
+} from './dian-response-parser.service';
 import {
   certificateNitMatches,
   normalizeNitDigits,
@@ -452,11 +455,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         cufe: parsed.document_key || cufe,
         qr_code,
         xml_document: signed_xml,
-        message: parsed.is_valid
-          ? 'Documento aceptado por la DIAN'
-          : dian_response.contingency_eligible
+        message:
+          dian_response.contingency_eligible && !parsed.is_valid
             ? `La DIAN no está disponible: ${dian_response.status_message}`
-            : `Documento rechazado: ${parsed.errors.map((e) => e.message).join(', ')}`,
+            : describeDianVerdict(
+                parsed,
+                'Documento aceptado por la DIAN',
+                'Documento rechazado',
+              ),
         // Carried up so the flow can tell "the DIAN is down" (→ contingency Type
         // 04) apart from "the document is invalid" (→ rejected). Without this the
         // flow marked an outage as a rejection and blocked the accounting entry.
@@ -466,6 +472,9 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           dian_status_code: parsed.status_code,
           dian_status_description: parsed.status_description,
           dian_errors: parsed.errors,
+          rule_messages: parsed.rule_messages,
+          already_processed: parsed.already_processed,
+          timed_out: dian_response.timed_out,
           environment: config.environment,
           // Escalón de la cascada del que salió la dirección declarada para el
           // adquiriente ('fiscal' | 'shipping' | 'store'). Sube para que la
@@ -623,12 +632,17 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           environment: config.environment === 'production' ? '1' : '2',
         }),
         xml_document: signed_xml,
-        message: parsed.is_valid
-          ? 'Nota crédito aceptada por la DIAN'
-          : `Nota crédito rechazada: ${parsed.errors.map((e) => e.message).join(', ')}`,
+        message: describeDianVerdict(
+          parsed,
+          'Nota crédito aceptada por la DIAN',
+          'Nota crédito rechazada',
+        ),
         provider_data: {
           dian_status_code: parsed.status_code,
           dian_errors: parsed.errors,
+          rule_messages: parsed.rule_messages,
+          already_processed: parsed.already_processed,
+          timed_out: dian_response.timed_out,
           environment: config.environment,
           // Escalón de la cascada del que salió la dirección declarada para el
           // adquiriente ('fiscal' | 'shipping' | 'store'). Sube para que la
@@ -774,12 +788,17 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           environment: config.environment === 'production' ? '1' : '2',
         }),
         xml_document: signed_xml,
-        message: parsed.is_valid
-          ? 'Nota débito aceptada por la DIAN'
-          : `Nota débito rechazada: ${parsed.errors.map((e) => e.message).join(', ')}`,
+        message: describeDianVerdict(
+          parsed,
+          'Nota débito aceptada por la DIAN',
+          'Nota débito rechazada',
+        ),
         provider_data: {
           dian_status_code: parsed.status_code,
           dian_errors: parsed.errors,
+          rule_messages: parsed.rule_messages,
+          already_processed: parsed.already_processed,
+          timed_out: dian_response.timed_out,
           environment: config.environment,
           // Escalón de la cascada del que salió la dirección declarada para el
           // adquiriente ('fiscal' | 'shipping' | 'store'). Sube para que la
@@ -923,13 +942,18 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           environment: config.environment === 'production' ? '1' : '2',
         }),
         xml_document: signed_xml,
-        message: parsed.is_valid
-          ? 'Documento soporte aceptado por la DIAN'
-          : `Documento soporte rechazado: ${parsed.errors.map((e) => e.message).join(', ')}`,
+        message: describeDianVerdict(
+          parsed,
+          'Documento soporte aceptado por la DIAN',
+          'Documento soporte rechazado',
+        ),
         provider_data: {
           dian_status_code: parsed.status_code,
           dian_status_description: parsed.status_description,
           dian_errors: parsed.errors,
+          rule_messages: parsed.rule_messages,
+          already_processed: parsed.already_processed,
+          timed_out: dian_response.timed_out,
           environment: config.environment,
           // Escalón de la cascada del que salió la dirección declarada para el
           // adquiriente ('fiscal' | 'shipping' | 'store'). Sube para que la
@@ -1068,13 +1092,18 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           environment: config.environment === 'production' ? '1' : '2',
         }),
         xml_document: signed_xml,
-        message: parsed.is_valid
-          ? 'Nota de ajuste de documento soporte aceptada por la DIAN'
-          : `Nota de ajuste de documento soporte rechazada: ${parsed.errors.map((e) => e.message).join(', ')}`,
+        message: describeDianVerdict(
+          parsed,
+          'Nota de ajuste de documento soporte aceptada por la DIAN',
+          'Nota de ajuste de documento soporte rechazada',
+        ),
         provider_data: {
           dian_status_code: parsed.status_code,
           dian_status_description: parsed.status_description,
           dian_errors: parsed.errors,
+          rule_messages: parsed.rule_messages,
+          already_processed: parsed.already_processed,
+          timed_out: dian_response.timed_out,
           environment: config.environment,
           // Escalón de la cascada del que salió la dirección declarada para el
           // adquiriente ('fiscal' | 'shipping' | 'store'). Sube para que la
@@ -1242,11 +1271,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           environment: config.environment === 'production' ? '1' : '2',
         }),
         xml_document: signed_xml,
-        message: parsed.is_valid
-          ? 'Documento equivalente aceptado por la DIAN'
-          : dian_response.contingency_eligible
+        message:
+          dian_response.contingency_eligible && !parsed.is_valid
             ? `La DIAN no está disponible: ${dian_response.status_message}`
-            : `Documento equivalente rechazado: ${parsed.errors.map((e) => e.message).join(', ')}`,
+            : describeDianVerdict(
+                parsed,
+                'Documento equivalente aceptado por la DIAN',
+                'Documento equivalente rechazado',
+              ),
         // Same distinction the invoice path carries: an outage is not a rejection.
         // A POS ticket handed to the customer during a DIAN outage is valid and
         // owes a transmission, so it must not land in a terminal `rejected`.
@@ -1256,6 +1288,9 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           dian_status_code: parsed.status_code,
           dian_status_description: parsed.status_description,
           dian_errors: parsed.errors,
+          rule_messages: parsed.rule_messages,
+          already_processed: parsed.already_processed,
+          timed_out: dian_response.timed_out,
           environment: config.environment,
           // Escalón de la cascada del que salió la dirección declarada para el
           // adquiriente ('fiscal' | 'shipping' | 'store'). Sube para que la
@@ -1318,13 +1353,21 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
 
     return {
       tracking_id,
-      status: parsed.is_valid ? 'accepted' : 'rejected',
+      // Solo `IsValid` o el código 00 aceptan; una notificación no es aceptación.
+      status:
+        parsed.is_valid === true || parsed.status_code === '00'
+          ? 'accepted'
+          : 'rejected',
       message: parsed.status_description,
       cufe: parsed.document_key,
       cude: parsed.document_key,
       provider_data: {
         dian_status_code: parsed.status_code,
         dian_errors: parsed.errors,
+        rule_messages: parsed.rule_messages,
+        already_processed: parsed.already_processed,
+        application_response_xml: dian_response.raw_response,
+        timed_out: dian_response.timed_out,
       },
     };
   }
@@ -1482,11 +1525,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         cude,
         tracking_id: parsed.document_key || cude,
         status_code: parsed.status_code,
-        message: parsed.is_valid
-          ? `Evento ${event.event_code} registrado en RADIAN`
-          : `Evento ${event.event_code} rechazado: ${parsed.errors
-              .map((e) => e.message)
-              .join(', ')}`,
+        message: describeDianVerdict(
+          parsed,
+          `Evento ${event.event_code} registrado en RADIAN`,
+          `Evento ${event.event_code} rechazado`,
+        ),
         request_xml: signed_xml,
         response_xml: dian_response.raw_response,
         errors: parsed.errors.map((e) => ({

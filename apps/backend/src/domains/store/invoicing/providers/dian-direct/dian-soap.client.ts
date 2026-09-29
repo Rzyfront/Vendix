@@ -6,6 +6,14 @@ import { ExclusiveCanonicalization } from 'xml-crypto';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { DIAN_ENDPOINTS, DIAN_SOAP_ACTIONS } from './constants/dian-endpoints';
 import { DianSendBillResponse } from './interfaces/dian-response.interface';
+
+/**
+ * Resultado de una llamada SOAP: el veredicto más `timed_out`, que separa "la DIAN
+ * no contestó a tiempo" (el documento pudo haberse procesado) de cualquier otro
+ * fallo. `contingency_eligible` se conserva por compatibilidad, pero un timeout
+ * NO prueba indisponibilidad: quien decide contingencia debe consultar antes.
+ */
+export type DianSoapResult = DianSendBillResponse & { timed_out: boolean };
 import { XadesSigner } from './xades/xades-signer';
 
 export interface WsSecurityCredentials {
@@ -85,7 +93,7 @@ export class DianSoapClient {
     file_name: string,
     environment: 'test' | 'production',
     credentials?: WsSecurityCredentials,
-  ): Promise<DianSendBillResponse> {
+  ): Promise<DianSoapResult> {
     const endpoint = DIAN_ENDPOINTS[environment].url;
     const soap_action = DIAN_SOAP_ACTIONS.SendBillSync;
 
@@ -109,7 +117,7 @@ export class DianSoapClient {
     test_set_id: string,
     environment: 'test' | 'production',
     credentials?: WsSecurityCredentials,
-  ): Promise<DianSendBillResponse> {
+  ): Promise<DianSoapResult> {
     const endpoint = DIAN_ENDPOINTS[environment].url;
     const soap_action = DIAN_SOAP_ACTIONS.SendTestSetAsync;
 
@@ -140,7 +148,7 @@ export class DianSoapClient {
     file_name: string,
     environment: 'test' | 'production',
     credentials?: WsSecurityCredentials,
-  ): Promise<DianSendBillResponse> {
+  ): Promise<DianSoapResult> {
     const endpoint = DIAN_ENDPOINTS[environment].url;
     const soap_action = DIAN_SOAP_ACTIONS.SendEventUpdateStatus;
 
@@ -162,7 +170,7 @@ export class DianSoapClient {
     tracking_id: string,
     environment: 'test' | 'production',
     credentials?: WsSecurityCredentials,
-  ): Promise<DianSendBillResponse> {
+  ): Promise<DianSoapResult> {
     const endpoint = DIAN_ENDPOINTS[environment].url;
     const soap_action = DIAN_SOAP_ACTIONS.GetStatus;
 
@@ -186,7 +194,7 @@ export class DianSoapClient {
     zip_key: string,
     environment: 'test' | 'production',
     credentials?: WsSecurityCredentials,
-  ): Promise<DianSendBillResponse> {
+  ): Promise<DianSoapResult> {
     const endpoint = DIAN_ENDPOINTS[environment].url;
     const soap_action = DIAN_SOAP_ACTIONS.GetStatusZip;
 
@@ -207,7 +215,7 @@ export class DianSoapClient {
     endpoint: string,
     soap_action: string,
     soap_body: string,
-  ): Promise<DianSendBillResponse> {
+  ): Promise<DianSoapResult> {
     let last_error: Error | null = null;
 
     // Debug: optionally persist the SOAP envelope header for offline analysis.
@@ -265,11 +273,14 @@ export class DianSoapClient {
         }
 
         // Parse the SOAP response
-        return this.parseSoapResponse(
-          response_text,
-          response.status,
-          duration_ms,
-        );
+        return {
+          ...this.parseSoapResponse(
+            response_text,
+            response.status,
+            duration_ms,
+          ),
+          timed_out: false,
+        };
       } catch (error) {
         const duration_ms = Date.now() - start_time;
         last_error = error as Error;
@@ -289,6 +300,7 @@ export class DianSoapClient {
             duration_ms,
             failure_class,
             contingency_eligible: true,
+            timed_out: true,
           };
         }
 
@@ -317,6 +329,7 @@ export class DianSoapClient {
           duration_ms,
           failure_class,
           contingency_eligible: false,
+          timed_out: false,
         };
       }
     }
@@ -331,6 +344,7 @@ export class DianSoapClient {
       duration_ms: 0,
       failure_class: 'dian_error',
       contingency_eligible: true,
+      timed_out: false,
     };
   }
 
