@@ -32,6 +32,7 @@ import { createOrdersTools } from '../../../ai-engine/tools/domains/orders.tools
 import { createSalesTools } from '../../../ai-engine/tools/domains/sales.tools';
 import { createOrderWriteTools } from '../../../ai-engine/tools/domains/writes.tools';
 import { OrderFlowService } from './order-flow/order-flow.service';
+import { RefundFlowService } from './order-flow/services/refund-flow.service';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 import { SalesAnalyticsService } from '../analytics/services/sales-analytics.service';
@@ -105,6 +106,12 @@ export class OrdersModule implements OnModuleInit {
     // Único escritor legítimo de `orders.state` (QUI-557). Viene de
     // `OrderFlowModule`, que este módulo ya importa y reexporta.
     private readonly orderFlowService: OrderFlowService,
+    // Dueño de preview/create de reembolsos (O-25/O-26). También lo exporta
+    // `OrderFlowModule`, ya importado arriba: cero imports nuevos.
+    private readonly refundFlowService: RefundFlowService,
+    // Guarda no-overselling para crear/editar órdenes (O-19/O-20).
+    // Provider local de este módulo (ver `providers`).
+    private readonly stockValidatorService: StockValidatorService,
   ) {}
 
   onModuleInit(): void {
@@ -120,6 +127,9 @@ export class OrdersModule implements OnModuleInit {
         ordersService: this.ordersService,
         dispatchNotesService: this.dispatchNotesService,
         sessionsService: this.sessionsService,
+        orderFlowService: this.orderFlowService,
+        refundFlowService: this.refundFlowService,
+        stockValidatorService: this.stockValidatorService,
       }),
     );
 

@@ -29,6 +29,7 @@ describe('customers.tools · contrato T4', () => {
   function baseDeps() {
     return {
       customersService: {
+        findAll: jest.fn(),
         findOne: jest.fn(),
         searchCustomerCardsForAgent: jest.fn(),
         findCustomerCitiesForAgent: jest.fn(),
@@ -64,15 +65,17 @@ describe('customers.tools · contrato T4', () => {
 
   // ─── (d)+(e) Registro: permisos, categoría y forma ────────────────────
   describe('registro', () => {
-    it('expone exactamente los 3 tools del dominio customers', () => {
+    it('expone exactamente los 4 tools del dominio customers', () => {
       const { tools } = buildTools();
       expect(tools.map((tool) => tool.name)).toEqual([
         'find_customer',
         'get_customer_history',
         'get_customer_segments',
+        'lookup_customer',
       ]);
       for (const tool of tools) {
         expect(tool.domain).toBe('customers');
+        expect(tool.version).toBe('1');
         expect(tool.description.length).toBeGreaterThan(20);
       }
     });
@@ -111,6 +114,12 @@ describe('customers.tools · contrato T4', () => {
         byName.get('get_customer_segments')!.parameters.properties.criteria
           .enum,
       ).toEqual(['rfm', 'spending', 'frequency']);
+      expect(
+        byName.get('lookup_customer')!.parameters.required ?? [],
+      ).toEqual([]);
+      expect(
+        Object.keys(byName.get('lookup_customer')!.parameters.properties),
+      ).toEqual(['documento', 'telefono', 'email']);
     });
   });
 
@@ -530,6 +539,115 @@ describe('customers.tools · contrato T4', () => {
       expect(
         deps.customersService.findCustomerNamesForAgent,
       ).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── O-42 lookup_customer ────────────────────────────────────────────────
+  describe('lookup_customer', () => {
+    const USER_ROW = {
+      id: 501,
+      first_name: 'Marcela',
+      last_name: 'Ríos',
+      document_type: 'CC',
+      document_number: '12345678',
+      phone: '3001234567',
+      email: 'marcela@example.com',
+      state: 'active',
+      addresses: [{ city: 'Medellín' }],
+    };
+
+    it('(b) happy: resuelve por teléfono sin crear nada', async () => {
+      const { deps, tools } = buildTools();
+      deps.customersService.findAll.mockResolvedValue({
+        data: [USER_ROW],
+        meta: { total: 1, page: 1, limit: 5, totalPages: 1 },
+      });
+
+      const answer = await run(tools, 'lookup_customer', {
+        telefono: '3001234567',
+      });
+
+      expect(answer).toEqual({
+        match_count: 1,
+        ambiguous: false,
+        customers: [
+          {
+            customer_id: 501,
+            name: 'Marcela Ríos',
+            document: 'CC 12345678',
+            phone: '3001234567',
+            email: 'marcela@example.com',
+            city: 'Medellín',
+            state: 'active',
+            matched_by: '3001234567',
+          },
+        ],
+        next_step:
+          'Usa customer_id con get_customer_history para ver su ficha completa.',
+      });
+      expect(deps.customersService.findAll).toHaveBeenCalledWith(STORE_ID, {
+        search: '3001234567',
+        limit: 5,
+      });
+    });
+
+    it('(b) varias llaves mezclan y deduplican por id', async () => {
+      const { deps, tools } = buildTools();
+      deps.customersService.findAll
+        .mockResolvedValueOnce({ data: [USER_ROW], meta: {} })
+        .mockResolvedValueOnce({ data: [USER_ROW], meta: {} });
+
+      const answer = await run(tools, 'lookup_customer', {
+        documento: '12345678',
+        telefono: '3001234567',
+      });
+
+      expect(answer.match_count).toBe(1);
+      expect(answer.customers[0].matched_by).toBe('12345678');
+      expect(deps.customersService.findAll).toHaveBeenCalledTimes(2);
+    });
+
+    it('(b) sin coincidencias → match_count 0 con guía de registro', async () => {
+      const { deps, tools } = buildTools();
+      deps.customersService.findAll.mockResolvedValue({ data: [], meta: {} });
+
+      const answer = await run(tools, 'lookup_customer', {
+        documento: '99999999',
+      });
+
+      expect(answer).toEqual({
+        match_count: 0,
+        customers: [],
+        next_step:
+          'No existe un cliente con esos datos en esta tienda. Si el usuario quiere registrarlo, créalo desde el módulo de clientes (esta lectura nunca crea duplicados).',
+      });
+    });
+
+    it('(a) sad: sin llaves → error y cero queries', async () => {
+      const { deps, tools } = buildTools();
+
+      const answer = await run(tools, 'lookup_customer', {});
+
+      expect(answer.error).toContain('documento, telefono o email');
+      expect(answer.next_step).toBeDefined();
+      expect(deps.customersService.findAll).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: sin tienda → error y cero queries', async () => {
+      const { deps, tools } = buildTools();
+
+      const answer = await run(
+        tools,
+        'lookup_customer',
+        { telefono: '300' },
+        {},
+      );
+
+      expect(answer).toEqual({
+        error:
+          'Sin tienda en contexto: los clientes se resuelven siempre dentro de una tienda.',
+      });
+      expect(deps.customersService.findAll).not.toHaveBeenCalled();
     });
   });
 });

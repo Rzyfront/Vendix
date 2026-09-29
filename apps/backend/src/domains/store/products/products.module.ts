@@ -1,6 +1,7 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createProductTools } from '../../../ai-engine/tools/domains/products.tools';
+import { createVariantTools } from '../../../ai-engine/tools/domains/variants.tools';
 import { createProductWriteTools } from '../../../ai-engine/tools/domains/writes.tools';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { SettingsService } from '../settings/settings.service';
@@ -97,6 +98,14 @@ export class ProductsModule implements OnModuleInit {
         productsService: this.productsService,
         priceResolver: this.priceResolver,
         settingsService: this.settingsService,
+      }),
+    );
+
+    // O-9..O-11 — `create/update/delete_variant`. Delegan en
+    // `ProductsService`, que ya es propiedad de este módulo.
+    this.toolRegistry.registerMany(
+      createVariantTools({
+        productsService: this.productsService,
       }),
     );
 

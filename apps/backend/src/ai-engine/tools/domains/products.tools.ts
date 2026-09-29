@@ -1,5 +1,10 @@
-import { RegisteredTool } from '../interfaces/tool.interface';
+import { HttpException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
+import { RegisteredTool, ToolPreview } from '../interfaces/tool.interface';
+import { VendixHttpException } from '../../../common/errors';
 import { ProductsService } from '../../../domains/store/products/products.service';
+import { UpdateProductDto } from '../../../domains/store/products/dto';
 import { PriceResolverService } from '../../../domains/store/products/services/price-resolver.service';
 import { SettingsService } from '../../../domains/store/settings/settings.service';
 import { resolvePricedUnits } from '../../../domains/store/products/services/tier-margin.util';
@@ -102,6 +107,130 @@ function variantLabel(variant: any): string {
 
 const PRODUCT_STATES = ['active', 'inactive', 'archived'] as const;
 const PRODUCT_TYPES = ['physical', 'service', 'prepared'] as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Doctrina de escritura de O-1 `update_product` (misma que `writes.tools.ts`:
+// el `preview` es proyección, no transacción; el `handler` re-verifica; los
+// handlers NO lanzan, devuelven `{error, next_step}`; cero `prisma.` aquí).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Resultado uniforme de una resolución previa a escribir. */
+type WriteResolution<T> =
+  | { ok: true; value: T }
+  | { ok: false; label: string; message: string; nextStep?: string };
+
+function writeFailure(
+  label: string,
+  message: string,
+  nextStep?: string,
+): { ok: false; label: string; message: string; nextStep?: string } {
+  return { ok: false, label, message, nextStep };
+}
+
+/** `ToolPreview` de error: el registry aborta sin acuñar token. */
+function writePreviewError(
+  label: string,
+  message: string,
+  domain: string,
+): ToolPreview {
+  return { status: 'error', target: label, changes: [], message, domain };
+}
+
+/** Respuesta de fallo de un handler. Nunca se lanza: el modelo debe poder leerla. */
+function writeToolError(message: string, nextStep?: string): string {
+  return JSON.stringify({
+    error: message,
+    ...(nextStep && { next_step: nextStep }),
+  });
+}
+
+/**
+ * Valida un DTO ya construido como lo haría el `ValidationPipe` global del
+ * HTTP (`whitelist` + `forbidNonWhitelisted`): las tools llaman a los
+ * servicios directo, sin pasar por el pipe.
+ */
+function toValidatedWriteDto<T extends object>(
+  DtoClass: new () => T,
+  plain: Record<string, unknown>,
+): { ok: true; dto: T } | { ok: false; message: string } {
+  const dto = plainToInstance(DtoClass, plain, {
+    enableImplicitConversion: true,
+  });
+  const errors = validateSync(dto, {
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  });
+  if (!errors.length) return { ok: true, dto };
+  const details = errors
+    .flatMap((entry) => Object.values(entry.constraints ?? {}))
+    .join('; ');
+  return {
+    ok: false,
+    message: `Los datos no pasaron la validación: ${details || 'revisa los campos enviados'}.`,
+  };
+}
+
+/** Traduce una excepción del dominio a texto que el modelo pueda narrar. */
+function describeWriteError(error: unknown): { code?: string; message: string } {
+  if (error instanceof VendixHttpException) {
+    const response = error.getResponse() as { message?: string } | string;
+    const message =
+      typeof response === 'string'
+        ? response
+        : (response?.message ?? error.message);
+    return { code: error.errorCode, message };
+  }
+  if (error instanceof HttpException) {
+    const response = error.getResponse() as
+      | { message?: unknown; error_code?: string }
+      | string;
+    if (typeof response === 'string') return { message: response };
+    const raw = response?.message;
+    const message = Array.isArray(raw)
+      ? raw.join('; ')
+      : typeof raw === 'string'
+        ? raw
+        : error.message;
+    return {
+      ...(response?.error_code && { code: response.error_code }),
+      message,
+    };
+  }
+  if (error instanceof Error) return { message: error.message };
+  return { message: 'Error desconocido' };
+}
+
+function toWritePositiveInt(value: unknown): number | null {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+/** Texto limpio o `undefined`. Nunca cadena vacía: eso confunde a los DTOs. */
+function cleanWriteString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
+}
+
+/** Campos que `update_product` sabe escribir, con su etiqueta para la propuesta. */
+const PRODUCT_EDIT_FIELD_LABELS: Record<string, string> = {
+  name: 'Nombre',
+  description: 'Descripción',
+  sku: 'SKU',
+  barcode: 'Código de barras',
+  base_price: 'Precio base (sin impuestos)',
+  cost_price: 'Costo',
+  profit_margin: 'Margen (%)',
+  is_on_sale: 'En oferta',
+  sale_price: 'Precio de oferta',
+  track_inventory: 'Control de inventario',
+  is_sellable: 'Vendible',
+  available_for_ecommerce: 'Publicado en tienda en línea',
+  is_featured: 'Destacado',
+  allow_pos_price_override: 'Precio manual en POS',
+  brand_id: 'Marca',
+};
 
 export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
   const { productsService, priceResolver, settingsService } = deps;
@@ -229,6 +358,196 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
           has_multiple_price_tiers: product.has_multiple_price_tiers === true,
         };
       });
+  }
+
+  /** Datos ya validados para editar un producto existente (O-1). */
+  interface ProductEdit {
+    dto: UpdateProductDto;
+    productId: number;
+    label: string;
+    changes: ToolPreview['changes'];
+  }
+
+  async function resolveProductEdit(
+    args: Record<string, any>,
+    storeId: number | undefined,
+  ): Promise<WriteResolution<ProductEdit>> {
+    const label = 'Edición de producto';
+
+    if (!storeId) {
+      return writeFailure(
+        label,
+        'Sin tienda en contexto: los productos se editan siempre dentro de una tienda.',
+      );
+    }
+
+    const productId = toWritePositiveInt(args.product_id);
+    if (!productId) {
+      return writeFailure(
+        label,
+        'product_id inválido.',
+        'Usa find_product para obtener el product_id antes de editar.',
+      );
+    }
+
+    // `final_price` es un calculado de lectura (precio + impuestos asignados),
+    // no un campo persistido: el DTO ni siquiera lo declara y el servicio lo
+    // ignoraría en silencio. Se rechaza en voz alta para que el modelo corrija
+    // el precio que sí se persiste (`base_price` o `sale_price`).
+    if (args.final_price !== undefined) {
+      return writeFailure(
+        label,
+        'final_price no se puede editar: es el precio calculado con impuestos que muestran las lecturas.',
+        'Para cambiar lo que paga el cliente edita base_price (precio normal) o sale_price con is_on_sale (oferta).',
+      );
+    }
+
+    let product: any;
+    try {
+      // `findOne` excluye archivados: un producto archivado cae al mismo error
+      // guiado que uno inexistente.
+      product = await productsService.findOne(productId);
+    } catch {
+      return writeFailure(
+        label,
+        `No existe un producto activo con id ${productId} en esta tienda (los archivados no se editan).`,
+        'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
+      );
+    }
+
+    const targetLabel = product.sku
+      ? `${product.name} (${product.sku})`
+      : String(product.name);
+
+    // Se arma el DTO solo con los campos que viajaron: semántica PATCH.
+    const dto: Record<string, unknown> = {};
+    const name = cleanWriteString(args.name);
+    if (name) {
+      if (name.length < 2 || name.length > 255) {
+        return writeFailure(
+          targetLabel,
+          'El nombre del producto debe tener entre 2 y 255 caracteres.',
+        );
+      }
+      dto.name = name;
+    }
+    const description = cleanWriteString(args.description);
+    if (description) dto.description = description;
+    const sku = cleanWriteString(args.sku);
+    if (sku) dto.sku = sku;
+    const barcode = cleanWriteString(args.barcode);
+    if (barcode) dto.barcode = barcode;
+    if (toNumberOrNull(args.base_price) !== null) {
+      const basePrice = toNumberOrNull(args.base_price)!;
+      if (basePrice < 0) {
+        return writeFailure(targetLabel, 'El precio base no puede ser negativo.');
+      }
+      dto.base_price = round2(basePrice);
+    }
+    if (toNumberOrNull(args.cost_price) !== null) {
+      const costPrice = toNumberOrNull(args.cost_price)!;
+      if (costPrice < 0) {
+        return writeFailure(targetLabel, 'El costo no puede ser negativo.');
+      }
+      dto.cost_price = round2(costPrice);
+    }
+    if (toNumberOrNull(args.profit_margin) !== null) {
+      const margin = toNumberOrNull(args.profit_margin)!;
+      if (margin < 0) {
+        return writeFailure(targetLabel, 'El margen no puede ser negativo.');
+      }
+      dto.profit_margin = round2(margin);
+    }
+    if (typeof args.is_on_sale === 'boolean') dto.is_on_sale = args.is_on_sale;
+    if (toNumberOrNull(args.sale_price) !== null) {
+      dto.sale_price = round2(toNumberOrNull(args.sale_price)!);
+    }
+    if (typeof args.track_inventory === 'boolean')
+      dto.track_inventory = args.track_inventory;
+    if (typeof args.is_sellable === 'boolean')
+      dto.is_sellable = args.is_sellable;
+    if (typeof args.available_for_ecommerce === 'boolean')
+      dto.available_for_ecommerce = args.available_for_ecommerce;
+    if (typeof args.is_featured === 'boolean')
+      dto.is_featured = args.is_featured;
+    if (typeof args.allow_pos_price_override === 'boolean')
+      dto.allow_pos_price_override = args.allow_pos_price_override;
+    if (args.brand_id !== undefined) {
+      const brandId = toWritePositiveInt(args.brand_id);
+      if (!brandId) {
+        return writeFailure(targetLabel, 'brand_id inválido.');
+      }
+      dto.brand_id = brandId;
+    }
+
+    if (!Object.keys(dto).length) {
+      return writeFailure(
+        targetLabel,
+        'No hay cambios: indica al menos un campo a editar (name, base_price, sale_price, sku…).',
+      );
+    }
+
+    // Regla de `vendix-product-pricing`: la oferta solo tiene sentido por
+    // debajo del precio normal y con un precio de oferta vigente.
+    const effectiveOnSale =
+      (dto.is_on_sale as boolean | undefined) ?? product.is_on_sale === true;
+    const effectiveSale =
+      (dto.sale_price as number | undefined) ??
+      toNumberOrNull(product.sale_price);
+    const effectiveBase =
+      (dto.base_price as number | undefined) ?? toNumber(product.base_price);
+    if (effectiveOnSale) {
+      if (effectiveSale === null || effectiveSale <= 0) {
+        return writeFailure(
+          targetLabel,
+          'El producto queda en oferta pero no tiene un sale_price mayor que cero.',
+          'Envía sale_price junto con is_on_sale, o apaga la oferta.',
+        );
+      }
+      if (effectiveBase > 0 && effectiveSale >= effectiveBase) {
+        return writeFailure(
+          targetLabel,
+          `El precio de oferta (${effectiveSale}) debe ser menor que el precio normal (${effectiveBase}).`,
+        );
+      }
+    }
+
+    const checked = toValidatedWriteDto(UpdateProductDto, dto);
+    if (!checked.ok) {
+      return writeFailure(targetLabel, checked.message);
+    }
+
+    const current: Record<string, unknown> = {
+      name: product.name,
+      description: product.description ?? null,
+      sku: product.sku ?? null,
+      barcode: product.barcode ?? null,
+      base_price: toNumberOrNull(product.base_price),
+      cost_price: toNumberOrNull(product.cost_price),
+      profit_margin: toNumberOrNull(product.profit_margin),
+      is_on_sale: product.is_on_sale === true,
+      sale_price: toNumberOrNull(product.sale_price),
+      track_inventory: product.track_inventory === true,
+      is_sellable: product.is_sellable,
+      available_for_ecommerce: product.available_for_ecommerce,
+      is_featured: product.is_featured,
+      allow_pos_price_override: product.allow_pos_price_override,
+      brand_id: product.brand_id ?? product.brand?.id ?? null,
+    };
+
+    const changes: ToolPreview['changes'] = Object.entries(checked.dto).map(
+      ([field, to]) => ({
+        field,
+        label: PRODUCT_EDIT_FIELD_LABELS[field] ?? field,
+        from: current[field] ?? null,
+        to: to as unknown,
+      }),
+    );
+
+    return {
+      ok: true,
+      value: { dto: checked.dto, productId, label: targetLabel, changes },
+    };
   }
 
   return [
@@ -1062,6 +1381,129 @@ export function createProductTools(deps: ProductToolDeps): RegisteredTool[] {
               ? 'Un producto con variantes no tiene un precio único: price es el del producto base y variant_prices trae el de cada variante. Al vender hay que elegir variante.'
               : 'unit_price es el precio final al público (impuestos incluidos); net_price es sin impuestos.',
         });
+      },
+    },
+
+    // ─── Tool 5: update_product (O-1, write) ────────────────────────────
+    {
+      name: 'update_product',
+      version: '1',
+      domain: 'products',
+      requiresConfirmation: true,
+      description:
+        'Edita un producto existente del catálogo: nombre, descripción, SKU, código de barras, precio base, costo, margen, oferta, control de inventario y banderas de venta. Solo se cambian los campos enviados (semántica PATCH). Requiere product_id: obtenlo con find_product. Nunca acepta final_price: ese es un calculado de lectura (precio + impuestos); para cambiar lo que paga el cliente edita base_price o sale_price. No edita stock (eso es adjust_stock), ni variantes (create/update/delete_variant), ni archiva (eso se hace en el módulo de productos).',
+      parameters: {
+        type: 'object',
+        properties: {
+          product_id: {
+            type: 'number',
+            description: 'ID del producto, obtenido con find_product.',
+          },
+          name: {
+            type: 'string',
+            description: 'Nuevo nombre comercial (2 a 255 caracteres).',
+          },
+          description: { type: 'string', description: 'Nueva descripción.' },
+          sku: {
+            type: 'string',
+            description:
+              'Nuevo SKU. Debe seguir siendo único en la tienda.',
+          },
+          barcode: { type: 'string', description: 'Nuevo código de barras.' },
+          base_price: {
+            type: 'number',
+            description: 'Nuevo precio de venta SIN impuestos.',
+          },
+          cost_price: {
+            type: 'number',
+            description: 'Nuevo costo unitario.',
+          },
+          profit_margin: {
+            type: 'number',
+            description: 'Nuevo margen de ganancia en porcentaje sobre el costo.',
+          },
+          is_on_sale: {
+            type: 'boolean',
+            description: 'Si el producto queda en promoción.',
+          },
+          sale_price: {
+            type: 'number',
+            description:
+              'Nuevo precio de oferta SIN impuestos. Debe ser menor que el precio normal.',
+          },
+          track_inventory: {
+            type: 'boolean',
+            description: 'Si el producto lleva control de existencias.',
+          },
+          is_sellable: {
+            type: 'boolean',
+            description: 'Si se puede vender directamente.',
+          },
+          available_for_ecommerce: {
+            type: 'boolean',
+            description: 'Si se publica en la tienda en línea.',
+          },
+          is_featured: {
+            type: 'boolean',
+            description: 'Si se marca como destacado.',
+          },
+          allow_pos_price_override: {
+            type: 'boolean',
+            description:
+              'Si el cajero puede cambiarle el precio a mano en el POS.',
+          },
+          brand_id: { type: 'number', description: 'Nueva marca.' },
+        },
+        required: ['product_id'],
+      },
+      requiredPermissions: ['store:products:update'],
+      preview: async (args, context) => {
+        const resolved = await resolveProductEdit(args, context.store_id);
+        if (!resolved.ok) {
+          return writePreviewError(
+            resolved.label,
+            [resolved.message, resolved.nextStep].filter(Boolean).join(' '),
+            'products',
+          );
+        }
+
+        return {
+          status: 'ok',
+          target: resolved.value.label,
+          changes: resolved.value.changes,
+          domain: 'products',
+        };
+      },
+      handler: async (args, context) => {
+        try {
+          // Re-verificación: el producto pudo cambiar (u otro usuario pudo
+          // tomar el mismo SKU) entre la propuesta y la confirmación.
+          const resolved = await resolveProductEdit(args, context.store_id);
+          if (!resolved.ok) {
+            return writeToolError(resolved.message, resolved.nextStep);
+          }
+
+          await productsService.update(
+            resolved.value.productId,
+            resolved.value.dto,
+            { lean: true },
+          );
+
+          return JSON.stringify({
+            summary: `${resolved.value.label}: ${resolved.value.changes.length} campo(s) actualizado(s).`,
+            data: {
+              product_id: resolved.value.productId,
+              updated_fields: resolved.value.changes.map(
+                (change) => change.field,
+              ),
+            },
+          });
+        } catch (error) {
+          const { code, message } = describeWriteError(error);
+          return writeToolError(
+            `No se pudo editar el producto${code ? ` (${code})` : ''}: ${message}`,
+          );
+        }
       },
     },
   ];

@@ -1,6 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { ReservationsService } from './reservations.service';
 import { AvailabilityService } from './availability.service';
+// Vexi tool family owned by this domain (O-46..O-50). AIToolRegistry comes
+// from the @Global() AIEngineModule, so it is injectable WITHOUT importing
+// that module here — importing it would risk a DI cycle.
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createReservationsTools } from '../../../ai-engine/tools/domains/reservations.tools';
 import { BookingConfirmationService } from './booking-confirmation.service';
 import { AppointmentQueueModule } from './appointment-queue/appointment-queue.module';
 import { BusinessHoursService } from './business-hours/business-hours.service';
@@ -54,4 +59,19 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     ProviderAvailabilityService,
   ],
 })
-export class ReservationsModule {}
+export class ReservationsModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly reservationsService: ReservationsService,
+    private readonly availabilityService: AvailabilityService,
+  ) {}
+
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createReservationsTools({
+        reservationsService: this.reservationsService,
+        availabilityService: this.availabilityService,
+      }),
+    );
+  }
+}

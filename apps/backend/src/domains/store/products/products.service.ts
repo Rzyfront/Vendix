@@ -6223,6 +6223,131 @@ export class ProductsService {
     return { tiers, overrides };
   }
 
+  /**
+   * O-9 agent write context: everything `create_variant` needs to preview and
+   * re-verify without touching Prisma (T1). Tenant scope comes from the
+   * injected `StorePrismaService`.
+   *
+   * Returns the product (or null), its current variants (for the SKU-uniqueness
+   * pre-check), whether the BASE line has active reservations (the service
+   * rejects variantizing over them with `PROD_HAS_RESERVATIONS_001`), and how
+   * many recipes use the product as a component (the service rejects
+   * variantizing a recipe component with
+   * `PRODUCT_VARIANT_BLOCKED_IS_RECIPE_COMPONENT`).
+   */
+  async findProductVariantWriteContextForAgent(productId: number) {
+    const product: any = await this.prisma.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        state: true,
+        product_type: true,
+        track_inventory: true,
+        product_variants: {
+          orderBy: { id: 'asc' },
+          select: { id: true, name: true, sku: true },
+        },
+      },
+    });
+    if (!product) {
+      return {
+        product: null,
+        variants: [],
+        baseHasActiveReservations: false,
+        recipeComponentCount: 0,
+      };
+    }
+    const [baseReservation, recipeComponentCount] = await Promise.all([
+      this.prisma.stock_reservations.findFirst({
+        where: {
+          product_id: productId,
+          product_variant_id: null,
+          status: 'active',
+        },
+        select: { id: true },
+      }),
+      this.prisma.recipe_items.count({
+        where: { component_product_id: productId },
+      }),
+    ]);
+    return {
+      product,
+      variants: product.product_variants ?? [],
+      baseHasActiveReservations: !!baseReservation,
+      recipeComponentCount,
+    };
+  }
+
+  /**
+   * O-10/O-11 agent write target: the variant plus its product, sibling SKUs
+   * (for the uniqueness pre-check), whether the variant has active
+   * reservations, and its on-hand units summed across locations.
+   *
+   * The stock figure mirrors `ProductVariantService.removeVariant`, which sums
+   * `quantity_on_hand` — not available — because the physical units are what a
+   * delete would destroy. Returns null when the variant does not exist.
+   */
+  async findVariantWriteTargetForAgent(variantId: number) {
+    const variant: any = await this.prisma.product_variants.findFirst({
+      where: { id: variantId },
+      select: {
+        id: true,
+        product_id: true,
+        name: true,
+        sku: true,
+        barcode: true,
+        price_override: true,
+        cost_price: true,
+        profit_margin: true,
+        is_on_sale: true,
+        sale_price: true,
+        stock_quantity: true,
+        track_inventory_override: true,
+        service_duration_minutes: true,
+        service_pricing_type: true,
+        buffer_minutes: true,
+        preparation_time_minutes: true,
+        attributes: true,
+        products: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            state: true,
+            product_type: true,
+            track_inventory: true,
+            product_variants: {
+              orderBy: { id: 'asc' },
+              select: { id: true, name: true, sku: true },
+            },
+          },
+        },
+      },
+    });
+    if (!variant) return null;
+    const [variantReservation, stockAggregate] = await Promise.all([
+      this.prisma.stock_reservations.findFirst({
+        where: { product_variant_id: variantId, status: 'active' },
+        select: { id: true },
+      }),
+      this.prisma.stock_levels.aggregate({
+        where: { product_variant_id: variantId },
+        _sum: { quantity_on_hand: true },
+      }),
+    ]);
+    return {
+      variant,
+      product: variant.products,
+      siblings: (variant.products?.product_variants ?? []).filter(
+        (row: any) => row.id !== variantId,
+      ),
+      hasActiveReservations: !!variantReservation,
+      onHandUnits: Number(stockAggregate._sum.quantity_on_hand ?? 0),
+    };
+  }
+
   private async resolvePosScope(
     // B.2 (F-089) — single-flight opcional: `findAll` pasa su promesa de
     // settings para no leer `store_settings` 2 veces por request. Ausente ⇒

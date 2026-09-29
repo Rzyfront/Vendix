@@ -2,6 +2,10 @@ import { order_channel_enum, order_state_enum } from '@prisma/client';
 import { SORTABLE_COLUMNS } from '../../../domains/store/orders/orders.service';
 import { createOrdersTools, OrdersToolDeps } from './orders.tools';
 import { RegisteredTool } from '../interfaces/tool.interface';
+import {
+  ErrorCodes,
+  VendixHttpException,
+} from '../../../common/errors';
 
 /**
  * T4 — Spec de contrato de la familia orders. Copia el patrón canónico
@@ -28,6 +32,8 @@ describe('orders.tools · contrato T4', () => {
         findOne: jest.fn(),
         findOrderByIdForAgent: jest.fn(),
         findDispatchStatusForAgent: jest.fn(),
+        create: jest.fn(),
+        updateOrderItems: jest.fn(),
       } as any,
       dispatchNotesService: {
         getByOrder: jest.fn(),
@@ -38,6 +44,18 @@ describe('orders.tools · contrato T4', () => {
         findAll: jest.fn(),
         getActiveSession: jest.fn(),
         countOpenSessions: jest.fn(),
+      } as any,
+      orderFlowService: {
+        payOrder: jest.fn(),
+        shipOrder: jest.fn(),
+        cancelOrder: jest.fn(),
+      } as any,
+      refundFlowService: {
+        previewRefund: jest.fn(),
+        createRefund: jest.fn(),
+      } as any,
+      stockValidatorService: {
+        findInsufficientLines: jest.fn(),
       } as any,
     } satisfies OrdersToolDeps;
   }
@@ -52,12 +70,25 @@ describe('orders.tools · contrato T4', () => {
     return tool.handler;
   }
 
+  function getPreview(tools: RegisteredTool[], name: string) {
+    const tool = tools.find((registered) => registered.name === name);
+    if (!tool?.preview) throw new Error(`${name} sin preview`);
+    return tool.preview;
+  }
+
   const run = async (
     tools: RegisteredTool[],
     name: string,
     args: Record<string, any>,
     context: Record<string, any> = { store_id: STORE_ID, user_id: 9 },
   ) => JSON.parse(await getHandler(tools, name)(args, context as any));
+
+  const preview = async (
+    tools: RegisteredTool[],
+    name: string,
+    args: Record<string, any>,
+    context: Record<string, any> = { store_id: STORE_ID, user_id: 9 },
+  ) => getPreview(tools, name)(args, context as any);
 
   const ORDER_ROW = {
     id: 301,
@@ -97,7 +128,7 @@ describe('orders.tools · contrato T4', () => {
 
   // ─── (d)+(e) Registro: permisos, categoría y forma ────────────────────
   describe('registro', () => {
-    it('expone exactamente los 5 tools del dominio orders', () => {
+    it('expone exactamente los 12 tools del dominio orders', () => {
       const { tools } = buildTools();
       expect(tools.map((tool) => tool.name)).toEqual([
         'find_order',
@@ -105,9 +136,17 @@ describe('orders.tools · contrato T4', () => {
         'get_order',
         'get_cash_session_status',
         'get_dispatch_status',
+        'create_order',
+        'manage_order_items',
+        'pay_order',
+        'ship_order',
+        'cancel_order',
+        'preview_refund',
+        'refund_order',
       ]);
       for (const tool of tools) {
         expect(tool.domain).toBe('orders');
+        expect(tool.version).toBe('1');
         expect(tool.description.length).toBeGreaterThan(20);
       }
     });
@@ -130,14 +169,61 @@ describe('orders.tools · contrato T4', () => {
       expect(byName.get('get_dispatch_status')!.requiredPermissions).toEqual([
         'store:dispatch_notes:read',
       ]);
+      expect(byName.get('create_order')!.requiredPermissions).toEqual([
+        'store:orders:create',
+      ]);
+      expect(byName.get('manage_order_items')!.requiredPermissions).toEqual([
+        'store:orders:update',
+      ]);
+      expect(byName.get('pay_order')!.requiredPermissions).toEqual([
+        'store:orders:order_flow:create',
+      ]);
+      expect(byName.get('ship_order')!.requiredPermissions).toEqual([
+        'store:orders:order_flow:create',
+      ]);
+      expect(byName.get('cancel_order')!.requiredPermissions).toEqual([
+        'store:orders:order_flow:create',
+      ]);
+      expect(byName.get('preview_refund')!.requiredPermissions).toEqual([
+        'store:orders:order_flow:read',
+      ]);
+      expect(byName.get('refund_order')!.requiredPermissions).toEqual([
+        'store:orders:order_flow:create',
+      ]);
     });
 
-    it('familia 100% readOnly: ningún write sin circuito de confirmación', () => {
+    it('reads readOnly y writes con confirmación+preview (cero aprobación ciega)', () => {
       const { tools } = buildTools();
-      for (const tool of tools) {
+      const byName = new Map(tools.map((tool) => [tool.name, tool]));
+      const reads = [
+        'find_order',
+        'list_orders',
+        'get_order',
+        'get_cash_session_status',
+        'get_dispatch_status',
+        'preview_refund',
+      ];
+      const writes = [
+        'create_order',
+        'manage_order_items',
+        'pay_order',
+        'ship_order',
+        'cancel_order',
+        'refund_order',
+      ];
+      for (const name of reads) {
+        const tool = byName.get(name)!;
         expect(tool.readOnly).toBe(true);
         expect(tool.requiresConfirmation ?? false).toBe(false);
         expect(tool.preview).toBeUndefined();
+      }
+      for (const name of writes) {
+        const tool = byName.get(name)!;
+        expect(tool.readOnly ?? false).toBe(false);
+        expect(tool.requiresConfirmation).toBe(true);
+        expect(typeof tool.preview).toBe('function');
+      }
+      for (const tool of tools) {
         expect(tool.clientSide ?? false).toBe(false);
         expect(typeof tool.handler).toBe('function');
       }
@@ -170,6 +256,41 @@ describe('orders.tools · contrato T4', () => {
         byName.get('get_cash_session_status')!.parameters.properties.scope
           .enum,
       ).toEqual(['me', 'store']);
+      expect(byName.get('create_order')!.parameters.required).toEqual([
+        'items',
+      ]);
+      expect(byName.get('manage_order_items')!.parameters.required).toEqual([
+        'order_id',
+        'items',
+      ]);
+      expect(byName.get('pay_order')!.parameters.required).toEqual([
+        'order_id',
+        'store_payment_method_id',
+      ]);
+      expect(
+        byName.get('pay_order')!.parameters.properties.payment_type.enum,
+      ).toEqual(['direct', 'online']);
+      expect(byName.get('ship_order')!.parameters.required).toEqual([
+        'order_id',
+      ]);
+      expect(byName.get('cancel_order')!.parameters.required).toEqual([
+        'order_id',
+        'reason',
+      ]);
+      expect(byName.get('preview_refund')!.parameters.required).toEqual([
+        'order_id',
+        'items',
+      ]);
+      expect(byName.get('refund_order')!.parameters.required).toEqual([
+        'order_id',
+        'items',
+        'refund_method',
+        'reason',
+        'techo_preview',
+      ]);
+      expect(
+        byName.get('refund_order')!.parameters.properties.refund_method.enum,
+      ).toEqual(['original_payment', 'cash', 'bank_transfer', 'store_credit']);
     });
   });
 
@@ -793,6 +914,761 @@ describe('orders.tools · contrato T4', () => {
         error: 'No existe la orden 404 en esta tienda.',
       });
       expect(deps.dispatchNotesService.getByOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── O-19 create_order ──────────────────────────────────────────────────
+  describe('create_order', () => {
+    const ITEMS = [
+      {
+        product_id: 11,
+        product_name: 'Coca Cola 1L',
+        quantity: 2,
+        unit_price: 5000,
+      },
+    ];
+
+    it('(b) happy: crea con stock reservado + total calculado', async () => {
+      const { deps, tools } = buildTools();
+      deps.stockValidatorService.findInsufficientLines.mockResolvedValue([]);
+      deps.ordersService.create.mockResolvedValue({
+        id: 301,
+        order_number: 'ORD260800301',
+        state: 'created',
+        grand_total: 10000,
+      });
+
+      const answer = await run(tools, 'create_order', {
+        customer_id: 501,
+        items: ITEMS,
+      });
+
+      expect(answer).toEqual({
+        orden_creada: {
+          order_id: 301,
+          numero: 'ORD260800301',
+          estado: 'created',
+          total: 10000,
+        },
+        next_step:
+          'La orden quedó creada con stock reservado. Usa pay_order para cobrarla.',
+      });
+      expect(
+        deps.stockValidatorService.findInsufficientLines,
+      ).toHaveBeenCalledWith(
+        [
+          {
+            product_id: 11,
+            product_variant_id: null,
+            quantity: 2,
+            product_name: 'Coca Cola 1L',
+          },
+        ],
+        { kind: 'product' },
+      );
+      const [dto, user] = deps.ordersService.create.mock.calls[0];
+      expect(dto.subtotal).toBe(10000);
+      expect(dto.items[0].total_price).toBe(10000);
+      expect(user).toEqual({ id: 9 });
+    });
+
+    it('(e) preview ok: sujeto humano + dominio de refresh', async () => {
+      const { deps, tools } = buildTools();
+      deps.stockValidatorService.findInsufficientLines.mockResolvedValue([]);
+
+      const result = await preview(tools, 'create_order', { items: ITEMS });
+
+      expect(result.status).toBe('ok');
+      expect(result.target).toBe('Nueva orden: 2× Coca Cola 1L');
+      expect(result.domain).toBe('orders');
+      expect(result.changes).toEqual([
+        {
+          field: 'items',
+          label: 'Renglones',
+          from: null,
+          to: '2× Coca Cola 1L',
+        },
+        { field: 'subtotal', label: 'Subtotal', from: null, to: 10000 },
+        {
+          field: 'cliente',
+          label: 'Cliente',
+          from: null,
+          to: 'Mostrador (sin cliente)',
+        },
+      ]);
+    });
+
+    it('(a) sad: sin stock → {error, next_step} ES con líneas insuficientes', async () => {
+      const { deps, tools } = buildTools();
+      const short = [
+        {
+          product_id: 11,
+          product_variant_id: null,
+          product_name: 'Coca Cola 1L',
+          kind: 'product',
+          requested: 2,
+          available: 1,
+        },
+      ];
+      deps.stockValidatorService.findInsufficientLines.mockResolvedValue(short);
+
+      const answer = await run(tools, 'create_order', { items: ITEMS });
+
+      expect(answer.error).toContain('Coca Cola 1L: pide 2, hay 1 disponibles');
+      expect(answer.next_step).toContain('check_stock_availability');
+      expect(deps.ordersService.create).not.toHaveBeenCalled();
+    });
+
+    it('(c) carrera: el service rechaza por stock y el handler re-cotiza líneas', async () => {
+      const { deps, tools } = buildTools();
+      const short = [
+        {
+          product_id: 11,
+          product_variant_id: null,
+          product_name: 'Coca Cola 1L',
+          kind: 'product',
+          requested: 2,
+          available: 0,
+        },
+      ];
+      deps.stockValidatorService.findInsufficientLines
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce(short);
+      deps.ordersService.create.mockRejectedValue(
+        new VendixHttpException(
+          ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+          'Stock insuficiente',
+          { items: short },
+        ),
+      );
+
+      const answer = await run(tools, 'create_order', { items: ITEMS });
+
+      expect(answer.error).toContain('Coca Cola 1L: pide 2, hay 0 disponibles');
+      expect(answer.next_step).toContain('check_stock_availability');
+      expect(deps.ordersService.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('(a) sad: preview sin stock no acuña (status error)', async () => {
+      const { deps, tools } = buildTools();
+      deps.stockValidatorService.findInsufficientLines.mockResolvedValue([
+        {
+          product_id: 11,
+          product_variant_id: null,
+          product_name: 'Coca Cola 1L',
+          kind: 'product',
+          requested: 5,
+          available: 0,
+        },
+      ]);
+
+      const result = await preview(tools, 'create_order', {
+        items: [{ ...ITEMS[0], quantity: 5 }],
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('no permite sobreventa');
+      expect(deps.ordersService.create).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: renglón sin nombre → error sin tocar services', async () => {
+      const { deps, tools } = buildTools();
+
+      const answer = await run(tools, 'create_order', {
+        items: [{ quantity: 1, unit_price: 100 }],
+      });
+
+      expect(answer.error).toContain('falta product_name');
+      expect(answer.next_step).toBeDefined();
+      expect(
+        deps.stockValidatorService.findInsufficientLines,
+      ).not.toHaveBeenCalled();
+      expect(deps.ordersService.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── O-20 manage_order_items ────────────────────────────────────────────
+  describe('manage_order_items', () => {
+    const EDITABLE = {
+      ...ORDER_ROW,
+      state: 'created',
+      order_items: [{ quantity: 1, product_name: 'Pan viejo' }],
+    };
+
+    it('(b) happy: reemplaza la lista y acredita la reserva propia', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(EDITABLE);
+      deps.stockValidatorService.findInsufficientLines.mockResolvedValue([]);
+      deps.ordersService.updateOrderItems.mockResolvedValue({
+        id: 301,
+        order_number: 'ORD260800301',
+        state: 'created',
+        grand_total: 5000,
+      });
+
+      const answer = await run(tools, 'manage_order_items', {
+        order_id: 301,
+        items: [
+          { product_id: 11, product_name: 'Coca Cola 1L', quantity: 1, unit_price: 5000 },
+        ],
+      });
+
+      expect(answer.orden_actualizada).toEqual({
+        order_id: 301,
+        numero: 'ORD260800301',
+        estado: 'created',
+        total: 5000,
+      });
+      expect(
+        deps.stockValidatorService.findInsufficientLines,
+      ).toHaveBeenCalledWith(expect.anything(), {
+        kind: 'product',
+        orderId: 301,
+      });
+    });
+
+    it('(e) preview ok: muestra de→a con el número de orden', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(EDITABLE);
+      deps.stockValidatorService.findInsufficientLines.mockResolvedValue([]);
+
+      const result = await preview(tools, 'manage_order_items', {
+        order_id: 301,
+        items: [
+          { product_name: 'Coca Cola 1L', quantity: 1, unit_price: 5000 },
+        ],
+      });
+
+      expect(result.status).toBe('ok');
+      expect(result.target).toContain('ORD260800301');
+      expect(result.target).toContain('Marcela Ríos');
+      expect(result.changes[0]).toEqual({
+        field: 'items',
+        label: 'Renglones (la lista se reemplaza completa)',
+        from: '1× Pan viejo',
+        to: '1× Coca Cola 1L',
+      });
+    });
+
+    it('(a) sad: orden fuera de created/draft → error', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue({
+        ...ORDER_ROW,
+        state: 'finished',
+      });
+
+      const result = await preview(tools, 'manage_order_items', {
+        order_id: 301,
+        items: [{ product_name: 'X', quantity: 1, unit_price: 1 }],
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain("'finished'");
+      expect(deps.ordersService.updateOrderItems).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── O-21 pay_order ─────────────────────────────────────────────────────
+  describe('pay_order', () => {
+    const PENDING = {
+      ...ORDER_ROW,
+      state: 'pending_payment',
+      remaining_balance: 59500,
+    };
+
+    it('(b) happy: cobra y relee totales autoritativos', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne
+        .mockResolvedValueOnce(PENDING)
+        .mockResolvedValueOnce({ ...PENDING, state: 'processing', remaining_balance: 0 });
+      deps.orderFlowService.payOrder.mockResolvedValue({});
+
+      const answer = await run(tools, 'pay_order', {
+        order_id: 301,
+        store_payment_method_id: 4,
+      });
+
+      expect(answer.cobro).toEqual({
+        order_id: 301,
+        numero: 'ORD260800301',
+        estado: 'processing',
+        total: 59500,
+        pagado: 59500,
+        saldo_pendiente: 0,
+      });
+      expect(deps.orderFlowService.payOrder).toHaveBeenCalledWith(
+        301,
+        expect.objectContaining({
+          store_payment_method_id: 4,
+          payment_type: 'direct',
+        }),
+      );
+    });
+
+    it('(e) preview warning sin turno de caja, ok con turno', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(PENDING);
+      deps.sessionsService.getActiveSession.mockResolvedValue(null);
+
+      const without = await preview(tools, 'pay_order', {
+        order_id: 301,
+        store_payment_method_id: 4,
+      });
+      expect(without.status).toBe('warning');
+      expect(without.target).toContain('Cobrar orden ORD260800301');
+      expect(without.target).toContain('Marcela Ríos');
+
+      deps.sessionsService.getActiveSession.mockResolvedValue({ id: 1 });
+      const withSession = await preview(tools, 'pay_order', {
+        order_id: 301,
+        store_payment_method_id: 4,
+      });
+      expect(withSession.status).toBe('ok');
+    });
+
+    it('(a) sad: orden terminada → error sin cobrar', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue({
+        ...ORDER_ROW,
+        state: 'finished',
+      });
+
+      const result = await preview(tools, 'pay_order', {
+        order_id: 301,
+        store_payment_method_id: 4,
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain("'finished'");
+      expect(deps.orderFlowService.payOrder).not.toHaveBeenCalled();
+    });
+
+    it('(c) el cobro se mueve de estado entre preview y apply → error', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue({
+        ...ORDER_ROW,
+        state: 'cancelled',
+      });
+
+      const answer = await run(tools, 'pay_order', {
+        order_id: 301,
+        store_payment_method_id: 4,
+      });
+
+      expect(answer.error).toContain("'cancelled'");
+      expect(deps.orderFlowService.payOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── O-22 ship_order ────────────────────────────────────────────────────
+  describe('ship_order', () => {
+    const PROCESSING = {
+      ...ORDER_ROW,
+      state: 'processing',
+      delivery_type: 'delivery',
+      shipping_method_id: 3,
+    };
+
+    it('(b) happy: despacha desde processing', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne
+        .mockResolvedValueOnce(PROCESSING)
+        .mockResolvedValueOnce({ ...PROCESSING, state: 'shipped' });
+      deps.orderFlowService.shipOrder.mockResolvedValue({});
+
+      const answer = await run(tools, 'ship_order', {
+        order_id: 301,
+        tracking_number: 'GUIA-1',
+      });
+
+      expect(answer.despacho).toEqual({
+        order_id: 301,
+        numero: 'ORD260800301',
+        estado: 'shipped',
+      });
+      expect(answer.nota).toContain('reservas de stock se consumieron');
+      expect(deps.orderFlowService.shipOrder).toHaveBeenCalledWith(
+        301,
+        expect.objectContaining({ tracking_number: 'GUIA-1' }),
+      );
+    });
+
+    it('(e) preview advierte si falta método de envío a domicilio', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue({
+        ...PROCESSING,
+        shipping_method_id: null,
+      });
+
+      const result = await preview(tools, 'ship_order', { order_id: 301 });
+
+      expect(result.status).toBe('warning');
+      expect(result.message).toContain('shipping_method_id');
+    });
+
+    it('(a) sad: solo se despacha desde processing', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue({
+        ...ORDER_ROW,
+        state: 'created',
+      });
+
+      const result = await preview(tools, 'ship_order', { order_id: 301 });
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain("'created'");
+      expect(deps.orderFlowService.shipOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── O-24 cancel_order ──────────────────────────────────────────────────
+  describe('cancel_order', () => {
+    it('(b) happy: cancela y libera reservas', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue({
+        ...ORDER_ROW,
+        state: 'processing',
+        total_paid: 0,
+      });
+      deps.orderFlowService.cancelOrder.mockResolvedValue({});
+
+      const answer = await run(tools, 'cancel_order', {
+        order_id: 301,
+        reason: 'El cliente desistió',
+      });
+
+      expect(answer.cancelacion).toEqual({
+        order_id: 301,
+        estado: 'cancelled',
+      });
+      expect(answer.nota).toContain('disponible se restauró');
+      expect(deps.orderFlowService.cancelOrder).toHaveBeenCalledWith(
+        301,
+        expect.objectContaining({ reason: 'El cliente desistió' }),
+      );
+    });
+
+    it('(e) preview warning cuando ya hay pagos', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue({
+        ...ORDER_ROW,
+        state: 'processing',
+        total_paid: 59500,
+      });
+
+      const result = await preview(tools, 'cancel_order', {
+        order_id: 301,
+        reason: 'Duplicada',
+      });
+
+      expect(result.status).toBe('warning');
+      expect(result.target).toContain('Cancelar orden ORD260800301');
+      expect(result.changes).toContainEqual({
+        field: 'reservas',
+        label: 'Reservas de stock',
+        from: 'retenidas',
+        to: 'liberadas (disponible restaurado, físico intacto)',
+      });
+    });
+
+    it('(a) sad: motivo corto → error de validación', async () => {
+      const { deps, tools } = buildTools();
+
+      const result = await preview(tools, 'cancel_order', {
+        order_id: 301,
+        reason: 'no',
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('validación');
+      expect(deps.orderFlowService.cancelOrder).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: ya cancelada → error', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue({
+        ...ORDER_ROW,
+        state: 'cancelled',
+      });
+
+      const answer = await run(tools, 'cancel_order', {
+        order_id: 301,
+        reason: 'Otra vez',
+      });
+
+      expect(answer.error).toContain("'cancelled'");
+      expect(deps.orderFlowService.cancelOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── O-25 preview_refund ────────────────────────────────────────────────
+  describe('preview_refund', () => {
+    const CALC = {
+      total_refund: 10000,
+      max_refundable: 59500,
+      already_refunded: 0,
+      is_full_refund: false,
+      items: [
+        {
+          order_item_id: 1,
+          product_name: 'Coca Cola 1L',
+          quantity: 1,
+          refund_amount: 10000,
+          inventory_action: 'restock',
+        },
+      ],
+    };
+    const FINISHED = {
+      ...ORDER_ROW,
+      state: 'finished',
+      customer_id: 501,
+      payments: [{ state: 'succeeded' }],
+    };
+
+    it('(b) happy: snapshot de cobertura + métodos + techo', async () => {
+      const { deps, tools } = buildTools();
+      deps.refundFlowService.previewRefund.mockResolvedValue(CALC);
+      deps.ordersService.findOne.mockResolvedValue(FINISHED);
+
+      const answer = await run(tools, 'preview_refund', {
+        order_id: 301,
+        items: [{ order_item_id: 1, quantity: 1 }],
+      });
+
+      expect(answer.orden).toEqual({
+        order_id: 301,
+        numero: 'ORD260800301',
+        estado: 'finished',
+        cliente: 'Marcela Ríos',
+        total: 59500,
+        pagado: 59500,
+      });
+      expect(answer.cobertura).toEqual({
+        total_reembolso: 10000,
+        techo_maximo: 59500,
+        ya_reembolsado: 0,
+        es_total: false,
+        por_renglon: [
+          {
+            order_item_id: 1,
+            producto: 'Coca Cola 1L',
+            cantidad: 1,
+            monto_reembolso: 10000,
+            accion_inventario: 'restock',
+          },
+        ],
+      });
+      expect(answer.techo_preview).toBe(59500);
+      expect(answer.metodos).toEqual([
+        {
+          value: 'original_payment',
+          label: 'Pago original',
+          available: true,
+        },
+        { value: 'cash', label: 'Efectivo', available: true },
+        { value: 'bank_transfer', label: 'Transferencia', available: true },
+        {
+          value: 'store_credit',
+          label: 'Billetera del cliente',
+          available: true,
+        },
+      ]);
+      expect(answer.next_step).toContain('techo_preview');
+    });
+
+    it('(b) invitado sin pagos: original_payment y store_credit no disponibles', async () => {
+      const { deps, tools } = buildTools();
+      deps.refundFlowService.previewRefund.mockResolvedValue(CALC);
+      deps.ordersService.findOne.mockResolvedValue({
+        ...FINISHED,
+        customer_id: null,
+        users: null,
+        payments: [],
+      });
+
+      const answer = await run(tools, 'preview_refund', {
+        order_id: 301,
+        items: [{ order_item_id: 1, quantity: 1 }],
+      });
+
+      const byValue = new Map<string, any>(
+        answer.metodos.map((option: any) => [option.value, option]),
+      );
+      expect(byValue.get('original_payment').available).toBe(false);
+      expect(byValue.get('store_credit').available).toBe(false);
+      expect(byValue.get('cash').available).toBe(true);
+      expect(answer.orden.cliente).toBe('Invitado (sin cliente registrado)');
+    });
+
+    it('(a) sad: order_id inválido → error y cero queries', async () => {
+      const { deps, tools } = buildTools();
+
+      const answer = await run(tools, 'preview_refund', {
+        order_id: 0,
+        items: [{ order_item_id: 1, quantity: 1 }],
+      });
+
+      expect(answer.error).toContain('order_id inválido');
+      expect(deps.refundFlowService.previewRefund).not.toHaveBeenCalled();
+      expect(deps.ordersService.findOne).not.toHaveBeenCalled();
+    });
+
+    it('(c) estado no reembolsable → {error, next_step}', async () => {
+      const { deps, tools } = buildTools();
+      deps.refundFlowService.previewRefund.mockRejectedValue(
+        new Error("Cannot refund order in state 'processing'"),
+      );
+      deps.ordersService.findOne.mockResolvedValue(FINISHED);
+
+      const answer = await run(tools, 'preview_refund', {
+        order_id: 301,
+        items: [{ order_item_id: 1, quantity: 1 }],
+      });
+
+      expect(answer.error).toContain("'processing'");
+      expect(answer.next_step).toContain('delivered/finished');
+    });
+  });
+
+  // ─── O-26 refund_order ─────────────────────────────────────────────────
+  describe('refund_order', () => {
+    const CALC = {
+      total_refund: 10000,
+      max_refundable: 59500,
+      already_refunded: 0,
+      is_full_refund: false,
+      items: [
+        {
+          order_item_id: 1,
+          product_name: 'Coca Cola 1L',
+          quantity: 1,
+          refund_amount: 10000,
+          inventory_action: 'restock',
+        },
+      ],
+    };
+    const FINISHED = {
+      ...ORDER_ROW,
+      state: 'finished',
+      customer_id: 501,
+      payments: [{ state: 'succeeded' }],
+    };
+    const ARGS = {
+      order_id: 301,
+      items: [{ order_item_id: 1, quantity: 1, inventory_action: 'restock' }],
+      refund_method: 'cash',
+      reason: 'Producto vencido',
+      techo_preview: 59500,
+    };
+
+    it('(b) happy: reembolsa con techo verificado', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(FINISHED);
+      deps.refundFlowService.previewRefund.mockResolvedValue(CALC);
+      deps.refundFlowService.createRefund.mockResolvedValue({
+        id: 9,
+        total_refund: 10000,
+        state: 'completed',
+      });
+
+      const answer = await run(tools, 'refund_order', ARGS);
+
+      expect(answer.reembolso).toEqual({
+        refund_id: 9,
+        order_id: 301,
+        monto: 10000,
+        estado: 'completed',
+        metodo: 'cash',
+      });
+      expect(deps.refundFlowService.createRefund).toHaveBeenCalledWith(
+        301,
+        expect.objectContaining({ refund_method: 'cash' }),
+      );
+    });
+
+    it('(e) preview cita cobertura y método (lo que porta el AI_AGENT_005)', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(FINISHED);
+      deps.refundFlowService.previewRefund.mockResolvedValue(CALC);
+
+      const result = await preview(tools, 'refund_order', ARGS);
+
+      expect(result.status).toBe('ok');
+      expect(result.target).toContain('ORD260800301');
+      expect(result.target).toContain('Marcela Ríos');
+      expect(result.target).toContain('cash');
+      expect(result.changes).toContainEqual({
+        field: 'cobertura',
+        label: 'Cobertura (techo / ya reembolsado)',
+        from: null,
+        to: 'techo 59500, ya reembolsado 0',
+      });
+      expect(result.changes).toContainEqual({
+        field: 'metodo',
+        label: 'Método',
+        from: null,
+        to: 'cash',
+      });
+      expect(deps.refundFlowService.createRefund).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: sin techo_preview → exige preview_refund primero', async () => {
+      const { deps, tools } = buildTools();
+      const { techo_preview: _dropped, ...withoutCeiling } = ARGS;
+
+      const result = await preview(tools, 'refund_order', withoutCeiling);
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('preview_refund primero');
+      expect(deps.refundFlowService.createRefund).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: techo movido → pide repetir el preview', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(FINISHED);
+      deps.refundFlowService.previewRefund.mockResolvedValue({
+        ...CALC,
+        max_refundable: 49500,
+      });
+
+      const answer = await run(tools, 'refund_order', ARGS);
+
+      expect(answer.error).toContain('El techo se movió');
+      expect(answer.next_step).toContain('preview_refund');
+      expect(deps.refundFlowService.createRefund).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: método no disponible → error', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue({
+        ...FINISHED,
+        customer_id: null,
+        users: null,
+      });
+      deps.refundFlowService.previewRefund.mockResolvedValue(CALC);
+
+      const result = await preview(tools, 'refund_order', {
+        ...ARGS,
+        refund_method: 'store_credit',
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('store_credit');
+      expect(deps.refundFlowService.createRefund).not.toHaveBeenCalled();
+    });
+
+    it('(c) createRefund lanza → {error, next_step}', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(FINISHED);
+      deps.refundFlowService.previewRefund.mockResolvedValue(CALC);
+      deps.refundFlowService.createRefund.mockRejectedValue(
+        new Error('processor caído'),
+      );
+
+      const answer = await run(tools, 'refund_order', ARGS);
+
+      expect(answer.error).toContain('processor caído');
+      expect(answer.next_step).toContain('preview_refund');
     });
   });
 });

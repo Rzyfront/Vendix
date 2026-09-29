@@ -764,5 +764,103 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
         });
       },
     },
+
+    // ─── O-42 lookup_customer ──────────────────────────────────────────
+    {
+      name: 'lookup_customer',
+      version: '1',
+      domain: 'customers',
+      readOnly: true,
+      description:
+        'Verifica si un documento, teléfono o correo YA es cliente de la tienda, para soporte POS ("¿este número ya es cliente?") sin crear duplicados. Es solo resolución de identidad: no crea, no edita. Si hay varias coincidencias las devuelve todas para que el usuario confirme; si no hay ninguna, lo dice y sugiere crearlo desde el módulo de clientes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          documento: {
+            type: 'string',
+            description:
+              'Número de documento a buscar. Al menos uno de documento, telefono o email es obligatorio.',
+          },
+          telefono: {
+            type: 'string',
+            description: 'Teléfono a buscar.',
+          },
+          email: {
+            type: 'string',
+            description: 'Correo a buscar.',
+          },
+        },
+      },
+      requiredPermissions: ['store:customers:read'],
+      handler: async (args, context) => {
+        const storeId = context.store_id;
+        if (!storeId) {
+          return JSON.stringify({
+            error:
+              'Sin tienda en contexto: los clientes se resuelven siempre dentro de una tienda.',
+          });
+        }
+
+        const keys = [args.documento, args.telefono, args.email]
+          .map((key) => String(key ?? '').trim())
+          .filter((key) => key.length > 0)
+          .slice(0, 3);
+        if (!keys.length) {
+          return JSON.stringify({
+            error:
+              'Pasa al menos uno: documento, telefono o email del cliente a buscar.',
+            next_step:
+              'Pide al usuario el documento o el teléfono y vuelve a llamar.',
+          });
+        }
+
+        const seen = new Map<number, { matched_by: string; user: any }>();
+        try {
+          for (const key of keys) {
+            const result = await customersService.findAll(storeId, {
+              search: key,
+              limit: 5,
+            });
+            for (const user of result?.data ?? []) {
+              if (!seen.has(user.id)) seen.set(user.id, { matched_by: key, user });
+            }
+          }
+        } catch (error: any) {
+          return JSON.stringify({
+            error: `No se pudo buscar el cliente: ${error?.message ?? 'error desconocido'}`,
+          });
+        }
+
+        const customers = Array.from(seen.values()).map(({ matched_by, user }) => ({
+          customer_id: user.id,
+          name: fullName(user),
+          document: formatDocument(user),
+          phone: user.phone ?? null,
+          email: user.email ?? null,
+          city: user.addresses?.[0]?.city ?? null,
+          state: user.state,
+          matched_by,
+        }));
+
+        if (!customers.length) {
+          return JSON.stringify({
+            match_count: 0,
+            customers: [],
+            next_step:
+              'No existe un cliente con esos datos en esta tienda. Si el usuario quiere registrarlo, créalo desde el módulo de clientes (esta lectura nunca crea duplicados).',
+          });
+        }
+
+        return JSON.stringify({
+          match_count: customers.length,
+          ambiguous: customers.length > 1,
+          customers,
+          next_step:
+            customers.length > 1
+              ? 'Hay más de un posible cliente. Muéstraselos al usuario (nombre + documento + teléfono) y pídele que confirme cuál antes de seguir.'
+              : 'Usa customer_id con get_customer_history para ver su ficha completa.',
+        });
+      },
+    },
   ];
 }

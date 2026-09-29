@@ -148,9 +148,9 @@ describe('products.tools · get_product_pricing (QUI-648 escalas)', () => {
  *     `.snap` que derive en silencio);
  * (c) forma `{error, next_step}` en español en los fallos guiados;
  * (d) permiso declarado por tool;
- * (e) circuito de escritura: esta familia es 100% `readOnly`, así que el
- *     bloque de registro pinnea que NINGÚN tool declara
- *     `requiresConfirmation`. Si mañana se agrega un write, este bloque falla
+ * (e) circuito de escritura: los 4 reads son `readOnly` y O-1
+ *     `update_product` es el único write, con `requiresConfirmation` +
+ *     `preview`. Si mañana se agrega otro write, el bloque de registro falla
  *     a propósito y obliga a extender la spec con sus casos de
  *     confirmación + `preview` antes de que el CI pase.
  */
@@ -186,6 +186,7 @@ describe('products.tools · contrato canónico T4', () => {
       productsService: {
         findAll: jest.fn(),
         findOne: jest.fn(),
+        update: jest.fn(),
         findProductIdsForAgent: jest.fn(),
         findProductFuzzyPoolForAgent: jest.fn(),
         findProductCardsForAgent: jest.fn(),
@@ -225,36 +226,62 @@ describe('products.tools · contrato canónico T4', () => {
 
   // ─── (d)+(e) Registro: permisos, categoría y forma ────────────────────
   describe('registro', () => {
-    it('expone exactamente los 4 tools del dominio products', () => {
+    it('expone exactamente los 5 tools del dominio products', () => {
       const { tools } = buildTools();
       expect(tools.map((tool) => tool.name)).toEqual([
         'find_product',
         'get_product',
         'list_products',
         'get_product_pricing',
+        'update_product',
       ]);
       for (const tool of tools) {
         expect(tool.domain).toBe('products');
+        expect(tool.version).toBe('1');
         expect(tool.description.length).toBeGreaterThan(20);
       }
     });
 
-    it('todos exigen store:products:read', () => {
+    it('reads exigen store:products:read y el write exige store:products:update', () => {
       const { tools } = buildTools();
-      for (const tool of tools) {
-        expect(tool.requiredPermissions).toEqual(['store:products:read']);
+      const byName = new Map(tools.map((tool) => [tool.name, tool]));
+      for (const name of [
+        'find_product',
+        'get_product',
+        'list_products',
+        'get_product_pricing',
+      ]) {
+        expect(byName.get(name)!.requiredPermissions).toEqual([
+          'store:products:read',
+        ]);
       }
+      expect(byName.get('update_product')!.requiredPermissions).toEqual([
+        'store:products:update',
+      ]);
     });
 
-    it('familia 100% readOnly: ningún write sin circuito de confirmación', () => {
+    it('reads 100% readOnly; update_product es el único write y trae circuito completo', () => {
       const { tools } = buildTools();
-      for (const tool of tools) {
+      const byName = new Map(tools.map((tool) => [tool.name, tool]));
+      for (const name of [
+        'find_product',
+        'get_product',
+        'list_products',
+        'get_product_pricing',
+      ]) {
+        const tool = byName.get(name)!;
         expect(tool.readOnly).toBe(true);
         expect(tool.requiresConfirmation ?? false).toBe(false);
         expect(tool.preview).toBeUndefined();
         expect(tool.clientSide ?? false).toBe(false);
         expect(typeof tool.handler).toBe('function');
       }
+      const write = byName.get('update_product')!;
+      expect(write.readOnly ?? false).toBe(false);
+      expect(write.requiresConfirmation).toBe(true);
+      expect(typeof write.preview).toBe('function');
+      expect(write.clientSide ?? false).toBe(false);
+      expect(typeof write.handler).toBe('function');
     });
 
     it('declara requeridos y enums del JSON Schema', () => {
@@ -272,6 +299,14 @@ describe('products.tools · contrato canónico T4', () => {
       expect(byName.get('get_product_pricing')!.parameters.required).toEqual([
         'product_id',
       ]);
+      expect(byName.get('update_product')!.parameters.required).toEqual([
+        'product_id',
+      ]);
+      // O-1 nunca acepta `final_price`: es un calculado de lectura, no un
+      // campo persistido.
+      expect(
+        byName.get('update_product')!.parameters.properties.final_price,
+      ).toBeUndefined();
       expect(
         byName.get('list_products')!.parameters.properties.product_type.enum,
       ).toEqual(['physical', 'service', 'prepared']);
@@ -754,6 +789,219 @@ describe('products.tools · contrato canónico T4', () => {
           'Llama a get_product para ver las variantes válidas y sus product_variant_id.',
       });
       expect(deps.priceResolver.resolvePrice).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── update_product (O-1, write) ────────────────────────────────────
+  describe('update_product', () => {
+    const PRODUCT_ROW = {
+      id: 101,
+      name: 'Coca Cola 1L',
+      sku: 'COCA-1L',
+      barcode: '7701234567890',
+      description: 'Gaseosa familiar',
+      base_price: 5000,
+      cost_price: 3000,
+      profit_margin: 66.67,
+      is_on_sale: false,
+      sale_price: null,
+      track_inventory: true,
+      is_sellable: true,
+      available_for_ecommerce: true,
+      is_featured: false,
+      allow_pos_price_override: false,
+      brand_id: null,
+      brand: null,
+    };
+
+    function editDeps() {
+      const deps = baseDeps();
+      deps.productsService.findOne.mockResolvedValue(PRODUCT_ROW);
+      deps.productsService.update.mockResolvedValue({
+        ...PRODUCT_ROW,
+        base_price: 5500,
+      });
+      return deps;
+    }
+
+    const preview = async (
+      tools: RegisteredTool[],
+      args: Record<string, any>,
+      context: Record<string, any> = { store_id: STORE_ID },
+    ) => {
+      const tool = tools.find(
+        (registered) => registered.name === 'update_product',
+      );
+      if (!tool?.preview) throw new Error('update_product sin preview');
+      return tool.preview(args, context as any);
+    };
+
+    it('(b) happy: snapshot exacto + delega en productsService.update', async () => {
+      const deps = editDeps();
+      const { tools } = buildTools(deps);
+
+      const answer = await run(tools, 'update_product', {
+        product_id: 101,
+        name: 'Coca Cola 1.5L',
+        base_price: 5500,
+      });
+
+      expect(deps.productsService.findOne).toHaveBeenCalledWith(101);
+      expect(deps.productsService.update).toHaveBeenCalledWith(
+        101,
+        { name: 'Coca Cola 1.5L', base_price: 5500 },
+        { lean: true },
+      );
+      expect(answer).toEqual({
+        summary: 'Coca Cola 1L (COCA-1L): 2 campo(s) actualizado(s).',
+        data: {
+          product_id: 101,
+          updated_fields: ['name', 'base_price'],
+        },
+      });
+    });
+
+    it('(e) preview ok nombra al sujeto humano con from→to y dominio', async () => {
+      const deps = editDeps();
+      const { tools } = buildTools(deps);
+
+      const result = await preview(tools, {
+        product_id: 101,
+        base_price: 5500,
+      });
+
+      expect(result).toEqual({
+        status: 'ok',
+        target: 'Coca Cola 1L (COCA-1L)',
+        changes: [
+          {
+            field: 'base_price',
+            label: 'Precio base (sin impuestos)',
+            from: 5000,
+            to: 5500,
+          },
+        ],
+        domain: 'products',
+      });
+      // El preview es solo lectura: no escribe.
+      expect(deps.productsService.update).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: sin tienda → error y cero llamadas', async () => {
+      const { deps, tools } = buildTools();
+
+      const answer = await run(
+        tools,
+        'update_product',
+        { product_id: 101, base_price: 5500 },
+        {},
+      );
+
+      expect(answer).toEqual({
+        error:
+          'Sin tienda en contexto: los productos se editan siempre dentro de una tienda.',
+      });
+      expect(deps.productsService.findOne).not.toHaveBeenCalled();
+      expect(deps.productsService.update).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: final_price → rechazo explícito sin tocar el service', async () => {
+      const { deps, tools } = buildTools();
+
+      const answer = await run(tools, 'update_product', {
+        product_id: 101,
+        final_price: 5950,
+      });
+
+      expect(answer).toEqual({
+        error:
+          'final_price no se puede editar: es el precio calculado con impuestos que muestran las lecturas.',
+        next_step:
+          'Para cambiar lo que paga el cliente edita base_price (precio normal) o sale_price con is_on_sale (oferta).',
+      });
+      expect(deps.productsService.findOne).not.toHaveBeenCalled();
+      expect(deps.productsService.update).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: sin cambios → error sin escribir', async () => {
+      const deps = editDeps();
+      const { tools } = buildTools(deps);
+
+      const answer = await run(tools, 'update_product', { product_id: 101 });
+
+      expect(answer).toEqual({
+        error:
+          'No hay cambios: indica al menos un campo a editar (name, base_price, sale_price, sku…).',
+      });
+      expect(deps.productsService.update).not.toHaveBeenCalled();
+    });
+
+    it('(c) producto inexistente → {error, next_step} hacia find_product', async () => {
+      const { deps, tools } = buildTools();
+      deps.productsService.findOne.mockRejectedValue(new Error('no existe'));
+
+      const answer = await run(tools, 'update_product', {
+        product_id: 999,
+        base_price: 5500,
+      });
+
+      expect(answer).toEqual({
+        error:
+          'No existe un producto activo con id 999 en esta tienda (los archivados no se editan).',
+        next_step:
+          'Usa find_product con el nombre o el SKU para obtener el product_id correcto.',
+      });
+      expect(deps.productsService.update).not.toHaveBeenCalled();
+    });
+
+    it('(c) oferta inválida (sale >= base) → {error} sin escribir', async () => {
+      const deps = editDeps();
+      const { tools } = buildTools(deps);
+
+      const answer = await run(tools, 'update_product', {
+        product_id: 101,
+        is_on_sale: true,
+        sale_price: 6000,
+      });
+
+      expect(answer).toEqual({
+        error:
+          'El precio de oferta (6000) debe ser menor que el precio normal (5000).',
+      });
+      expect(deps.productsService.update).not.toHaveBeenCalled();
+    });
+
+    it('(c) preview imposible → status error sin token (no escribe)', async () => {
+      const deps = editDeps();
+      const { tools } = buildTools(deps);
+
+      const result = await preview(tools, {
+        product_id: 101,
+        final_price: 5950,
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.target).toBe('Edición de producto');
+      expect(result.changes).toEqual([]);
+      expect(result.message).toContain('final_price no se puede editar');
+      expect(deps.productsService.update).not.toHaveBeenCalled();
+    });
+
+    it('(c) el service lanza → {error} con mensaje, nunca throw', async () => {
+      const deps = editDeps();
+      deps.productsService.update.mockRejectedValue(
+        new Error('El SKU ya está en uso'),
+      );
+      const { tools } = buildTools(deps);
+
+      const answer = await run(tools, 'update_product', {
+        product_id: 101,
+        sku: 'DUPLICADO',
+      });
+
+      expect(answer).toEqual({
+        error: 'No se pudo editar el producto: El SKU ya está en uso',
+      });
     });
   });
 });
