@@ -19,6 +19,7 @@ import {
   ProviderInvoiceData,
   ProviderInvoiceTax,
   ProviderResponse,
+  StatusResponse,
 } from '../providers/invoice-provider.interface';
 import {
   absorbInclusiveLine,
@@ -81,13 +82,15 @@ import { resolveInvoiceControl } from '../../../../common/helpers/invoice-contro
 // declara piezas donde hubo kilos. La versión que devuelve `null` permite
 // rechazar el documento en vez de emitirlo con una unidad inventada.
 import { resolveUneceUnitCodeStrict } from '../../products/services/uom-uncefact.util';
+import { CUSTOMER_FOR_INVOICE_SELECT } from '../utils/customer-invoice-data.adapter';
 import {
-  CUSTOMER_FOR_INVOICE_SELECT,
-  toCustomerInvoiceData,
-} from '../utils/customer-invoice-data.adapter';
+  resolveAcquirerIdentity,
+  ResolvedAcquirerIdentity,
+} from '../utils/acquirer-identity.resolver';
 import { onlyDigits } from '../../../../common/utils/nit.util';
 import {
   AcquirerIdentificationMode,
+  CustomerFiscalAddressInput,
   CustomerFiscalIdentityFinding,
   CustomerFiscalIdentityInput,
   CustomerFiscalIdentityReport,
@@ -106,6 +109,11 @@ import {
   isFiscalDocumentType,
   toFiscalDocumentType,
 } from '../fiscal-document-requirements';
+import {
+  resolveIncResponsibility,
+  resolveVatResponsibility,
+} from '../../../../common/helpers/vat-responsibility.helper';
+import { normalizeFiscalResponsibilityCode } from '../../../../common/constants/fiscal-responsibilities';
 import type {
   DraftEmitReadinessReport,
   EmitReadinessFinding,
@@ -1578,6 +1586,106 @@ export class InvoiceFlowService {
     });
   }
 
+  /**
+   * Gate de identidad del EMISOR para la emisión agéntica (F-30, paso 11).
+   *
+   * Responde «¿puede este comercio emitir este documento?» desde la única
+   * fuente válida — la casilla 53 declarada en `fiscal_data` — sin leer jamás
+   * `tax_regime` como autoridad (vocabulario derogado; la lista manda y el
+   * régimen solo se consulta cuando la lista viene vacía, dentro del propio
+   * resolver). Fail-closed: sin señal fiscal, `can_emit` es `false`.
+   *
+   * Lectura parametrizada por la factura (org/tienda del documento, no del
+   * contexto ciego): `store_settings` primero y `organization_settings` como
+   * respaldo, el mismo patrón de `WithholdingFlowService`. No lanza por causa
+   * fiscal — devuelve los flags y es la tool quien bloquea con CTA al wizard;
+   * solo lanza `INVOICING_FIND_001` si la factura no existe.
+   */
+  async getIssuerEmissionGate(invoice_id: number): Promise<{
+    invoice_id: number;
+    invoice_number: string | null;
+    status: string;
+    tax_responsibilities: string[];
+    vat_responsible: boolean;
+    vat_indeterminate: boolean;
+    vat_reason: string;
+    vat_message: string;
+    inc_responsible: boolean;
+    inc_indeterminate: boolean;
+    can_emit: boolean;
+  }> {
+    const invoice = await this.getInvoice(invoice_id);
+
+    let fiscal: Record<string, unknown> | null = null;
+    if (invoice.store_id) {
+      fiscal = await this.readSettingsFiscalData('store', invoice.store_id);
+    }
+    if (!fiscal) {
+      fiscal = await this.readSettingsFiscalData(
+        'organization',
+        invoice.organization_id,
+      );
+    }
+
+    const vat = resolveVatResponsibility(fiscal);
+    const inc = resolveIncResponsibility(fiscal);
+    const declared = Array.isArray(
+      (fiscal as { tax_responsibilities?: unknown } | null)
+        ?.tax_responsibilities,
+    )
+      ? (
+          (fiscal as { tax_responsibilities: unknown[] }).tax_responsibilities ??
+          []
+        )
+          .map((code) =>
+            typeof code === 'string'
+              ? normalizeFiscalResponsibilityCode(code)
+              : null,
+          )
+          .filter((code): code is string => code !== null)
+      : [];
+
+    return {
+      invoice_id: invoice.id,
+      invoice_number: invoice.invoice_number ?? null,
+      status: invoice.status,
+      tax_responsibilities: declared,
+      vat_responsible: vat.responsible,
+      vat_indeterminate: vat.indeterminate,
+      vat_reason: vat.reason,
+      vat_message: vat.message,
+      inc_responsible: inc.responsible,
+      inc_indeterminate: inc.indeterminate,
+      can_emit: vat.responsible,
+    };
+  }
+
+  /** Lee `settings.fiscal_data` de store u organización (scope-safe). */
+  private async readSettingsFiscalData(
+    scope: 'store' | 'organization',
+    scope_id: number,
+  ): Promise<Record<string, unknown> | null> {
+    const row =
+      scope === 'store'
+        ? await this.prisma.store_settings.findFirst({
+            where: { store_id: scope_id },
+            select: { settings: true },
+          })
+        : await this.prisma.organization_settings.findFirst({
+            where: { organization_id: scope_id },
+            select: { settings: true },
+          });
+    const settings = row?.settings;
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      return null;
+    }
+    const fiscal = (settings as Record<string, unknown>).fiscal_data;
+    if (!fiscal || typeof fiscal !== 'object' || Array.isArray(fiscal)) {
+      return null;
+    }
+    return fiscal as Record<string, unknown>;
+  }
+
   async validate(id: number) {
     let invoice = await this.getInvoice(id);
     this.validateTransition(invoice.status, 'validated');
@@ -2224,15 +2332,28 @@ export class InvoiceFlowService {
   private buildAcquirerIdentityInput(
     invoice: any,
   ): CustomerFiscalIdentityInput {
-    const customer = invoice.customer
-      ? toCustomerInvoiceData(invoice.customer)
-      : undefined;
+    // Fuente ÚNICA de identidad — la MISMA función que `send()` llama para
+    // armar `provider_data.customer_*` (ver Step 8 más abajo), con los MISMOS
+    // dos argumentos. Ver el JSDoc de `acquirer-identity.resolver.ts` para el
+    // incidente que esto cierra: antes, `document_type`/`verification_digit`/
+    // `email`/`phone`/`tax_regime`/`tax_responsibilities`/`person_type` sólo
+    // tenían fallback al snapshot AQUÍ (en el validador) pero no en `send()`
+    // (en la emisión) — así que el gate podía aprobar un documento con datos
+    // que la transmisión real nunca llegaba a declarar.
+    const identity: ResolvedAcquirerIdentity = resolveAcquirerIdentity({
+      snapshot: invoice,
+      customer: invoice.customer ?? undefined,
+    });
 
+    // El `supplier` (documento soporte / factura legacy sin `customer`) NO es
+    // parte de la regla ficha↔snapshot que resuelve `resolveAcquirerIdentity`
+    // —es una tercera fuente, histórica, y sólo aplica cuando ni la ficha ni
+    // el snapshot dijeron nada— así que se aplica COMO CAPA ADICIONAL encima
+    // del resultado ya resuelto, nunca dentro del resolver compartido.
+    const document_type =
+      identity.document_type_literal ?? invoice.supplier?.document_type ?? null;
     const document_number =
-      customer?.customer_tax_id ??
-      invoice.customer_tax_id ??
-      invoice.supplier?.tax_id ??
-      null;
+      identity.document_number ?? invoice.supplier?.tax_id ?? null;
 
     // El número oficial de Consumidor Final cuenta como «sin identificar» aun
     // cuando SÍ viaja un valor: desde que `InvoicingService.createFromOrder`
@@ -2267,67 +2388,101 @@ export class InvoiceFlowService {
     // reporte en vez de leer propiedades de un `string` y obtener `undefined`
     // silencioso en cada campo.
     const raw_address =
-      customer?.customer_address ??
+      invoice.customer?.addresses?.[0] ??
       invoice.customer_address ??
       invoice.supplier?.addresses?.[0] ??
       null;
-    const address =
-      typeof raw_address === 'string'
-        ? { address_line: raw_address }
-        : (raw_address as Record<string, any> | null);
+    const address = this.normalizeCustomerAddressForFiscalCheck(raw_address);
+
+    // `other_addresses` — el UNIVERSO de direcciones reales del cliente,
+    // aparte de la ya intentada como `address` (la primaria/`[0]`). Cuando se
+    // popula, `CustomerFiscalIdentityValidator.checkAddress` escala el aviso
+    // `ADDRESS_REQUIRED` a un bloqueante `ADDRESS_UNRESOLVABLE` si ninguna
+    // candidata rescata la emisión.
+    //
+    // Task B (2026-09-28) — DIAN Res. 000165/2023 art. 69, modificado por el
+    // art. 3 de la Res. 000202/2025: lo MÁXIMO que el emisor puede exigirle
+    // al adquiriente para facturar a su nombre es nombre/razón social, tipo y
+    // número de identificación, y correo (para la entrega; la DIAN ofrece su
+    // propia base de consulta). La DIRECCIÓN NO está en esa lista — ni
+    // siquiera para persona jurídica, ni para factura manual — así que no es
+    // un dato cuya ausencia pueda bloquear la emisión de NINGÚN adquiriente.
+    // (El art. 11 num. 12 sólo pide «dirección del lugar de entrega» cuando
+    // la venta ocurre FUERA del establecimiento del vendedor — un supuesto
+    // distinto, de despacho, no de identificación fiscal.)
+    //
+    // P1-A (`baa9a4294`) había convertido esto en bloqueante para JURÍDICA
+    // (código DIAN 31) y factura MANUAL (sin `order_id`/`sales_order_id`),
+    // razonando que la DIAN cruza el municipio del adquiriente jurídico en
+    // exógena/retenciones. Cierto, pero ese cruce es sobre un dato que la ley
+    // le prohíbe al comerciante exigir; bloquear la NUMERACIÓN por su
+    // ausencia deja sin poder facturar a un adquiriente legítimo (ej.
+    // borrador PAVS14: persona natural con NIT, factura manual, sin
+    // dirección). Se revierte aquí para TODO carril — jurídica, manual y
+    // POS/ecommerce por igual —, siempre en `undefined`: `checkAddress` cae
+    // al aviso no bloqueante `ADDRESS_REQUIRED`, nunca a `ADDRESS_UNRESOLVABLE`.
+    // El aviso sigue existiendo para que la UI ofrezca capturarla cuando el
+    // cliente la dé voluntariamente. La emisión (`acquirer-address.resolver
+    // .ts`) declara sólo lo que exista realmente del cliente — nunca la
+    // dirección de la tienda emisora (ver su JSDoc).
+    const other_addresses: CustomerFiscalAddressInput[] | undefined = undefined;
 
     return {
       identification_mode: mode,
-      document_type:
-        customer?.customer_document_type ??
-        invoice.customer_document_type ??
-        invoice.supplier?.document_type ??
-        null,
+      document_type,
       document_number,
       verification_digit:
-        customer?.customer_verification_digit ??
-        invoice.customer_verification_digit ??
-        invoice.supplier?.verification_digit ??
-        null,
-      person_type: customer?.customer_person_type ?? null,
-      legal_name:
-        customer?.customer_name ??
-        invoice.customer_name ??
-        invoice.supplier?.name ??
-        null,
-      first_name: invoice.customer?.first_name ?? null,
-      last_name: invoice.customer?.last_name ?? null,
-      tax_regime:
-        customer?.customer_regime ??
-        invoice.customer_tax_regime ??
-        invoice.supplier?.tax_regime ??
-        null,
-      tax_responsibilities:
-        customer?.customer_tax_responsibilities ??
-        (Array.isArray(invoice.customer_fiscal_responsibilities)
-          ? (invoice.customer_fiscal_responsibilities as string[])
-          : null),
-      email: customer?.customer_email ?? invoice.customer_email ?? null,
-      phone: customer?.customer_phone ?? invoice.customer_phone ?? null,
-      address: address
-        ? {
-            address_line: address.address_line1 ?? address.address_line ?? null,
-            // `municipality_code` es el DANE de 5 dígitos; el departamento son
-            // sus dos primeros. No se inventa: si el municipio no está, el
-            // departamento tampoco, y el validador lo reporta.
-            city_code: address.municipality_code ?? address.city_code ?? null,
-            city_name: address.city ?? address.city_name ?? null,
-            department_code:
-              address.department_code ??
-              (address.municipality_code
-                ? String(address.municipality_code).slice(0, 2)
-                : null),
-            department_name:
-              address.state_province ?? address.department_name ?? null,
-            country_code: address.country_code ?? null,
-            postal_code: address.postal_code ?? null,
-          }
+        identity.verification_digit ?? invoice.supplier?.verification_digit ?? null,
+      // CRUDO, sin derivar: si viene basura reconocible ni como '1'/'2' ni
+      // como 'NATURAL'/'JURIDICA', el validador debe poder avisarlo
+      // (`resolvePersonType`/`PERSON_TYPE_UNKNOWN`) en vez de que este método
+      // ya se lo trague resuelto.
+      person_type: identity.person_type_raw,
+      legal_name: identity.name ?? invoice.supplier?.name ?? null,
+      first_name: identity.first_name,
+      last_name: identity.last_name,
+      tax_regime: identity.tax_regime ?? invoice.supplier?.tax_regime ?? null,
+      tax_responsibilities: identity.tax_responsibilities.length
+        ? identity.tax_responsibilities
         : null,
+      email: identity.email,
+      phone: identity.phone,
+      address,
+      other_addresses,
+    };
+  }
+
+  /**
+   * Normaliza una fila de dirección (forma `users.addresses` /
+   * `invoice.customer_address` JSONB) al contrato de
+   * `CustomerFiscalIdentityInput.address` /
+   * `CustomerFiscalIdentityInput.other_addresses`. Extraído para que la
+   * dirección primaria Y cada una de las `other_addresses` compartan
+   * EXACTAMENTE el mismo mapeo de campos — antes sólo la primaria lo tenía.
+   */
+  private normalizeCustomerAddressForFiscalCheck(
+    raw: any,
+  ): CustomerFiscalAddressInput | null {
+    const record =
+      typeof raw === 'string'
+        ? { address_line: raw }
+        : (raw as Record<string, any> | null | undefined);
+    if (!record) return null;
+    return {
+      address_line: record.address_line1 ?? record.address_line ?? null,
+      // `municipality_code` es el DANE de 5 dígitos; el departamento son
+      // sus dos primeros. No se inventa: si el municipio no está, el
+      // departamento tampoco, y el validador lo reporta.
+      city_code: record.municipality_code ?? record.city_code ?? null,
+      city_name: record.city ?? record.city_name ?? null,
+      department_code:
+        record.department_code ??
+        (record.municipality_code
+          ? String(record.municipality_code).slice(0, 2)
+          : null),
+      department_name: record.state_province ?? record.department_name ?? null,
+      country_code: record.country_code ?? null,
+      postal_code: record.postal_code ?? null,
     };
   }
 
@@ -3828,43 +3983,33 @@ export class InvoiceFlowService {
 
     // Step 8 — customer-side wiring for the provider payload.
     //
-    // The customer_* fields used to read directly from `invoice.supplier`
-    // (the EMISOR's document_type/tax_regime — see the historical bug the
-    // plan documents), so the UBL builder emitted the issuer's ID under
-    // `cac:AccountingCustomerParty` for every invoice.
-    //
-    // Today the data path is:
-    //   invoice.customer ──► toCustomerInvoiceData() ──► customer_*
-    // `INVOICE_INCLUDE` (above) loads the customer row + primary address, the
-    // adapter does the 1:1 mapping to `ProviderInvoiceData.customer_*`, and
-    // `dian-direct.provider.ts:buildCustomerData` consumes the result. Each
-    // hop is a no-op on `invoice.customer` being null: sales invoices always
-    // have a customer, support documents don't — the support-document branch
-    // below keeps the historical supplier-fallback so the existing
-    // support-document fixture (no customer row) still passes its assertions.
-    const customerFieldsFromAdapter = invoice.customer
-      ? toCustomerInvoiceData(invoice.customer)
-      : {};
+    // MISMA función, MISMOS dos argumentos que `buildAcquirerIdentityInput`
+    // (arriba, para `validate()`): `resolveAcquirerIdentity` es la fuente
+    // ÚNICA de identidad del adquiriente, así que lo que este método juzga y
+    // lo que ESTE método transmite a la DIAN son exactamente lo mismo. Antes
+    // `customer_document_type`/`customer_verification_digit`/`customer_email`/
+    // `customer_phone`/`customer_regime`/`customer_tax_responsibilities`/
+    // `customer_person_type` sólo leían `customerFields.X` (vía
+    // `toCustomerInvoiceData`, `{}` cuando `invoice.customer` es null) SIN caer
+    // al snapshot de la factura — a diferencia de `customer_name`/
+    // `customer_tax_id`/`customer_address`, que sí lo hacían. Una factura
+    // manual (`customer_id` NULL) con NIT y DV persistidos en su propio
+    // snapshot transmitía sin tipo de documento ni DV, y
+    // `DianDirectProvider.buildCustomerData` completaba con Cédula + persona
+    // natural en silencio (incidente Óptica Panorama SAS / Pollo Árabe).
+    const acquirer_identity: ResolvedAcquirerIdentity = resolveAcquirerIdentity({
+      snapshot: invoice,
+      customer: invoice.customer ?? undefined,
+    });
     // Documento soporte: NO tiene `customer` (la contraparte es el
     // `supplier`). El comportamiento histórico copiaba `supplier.document_type`
     // y `supplier.tax_regime` a los campos `customer_*` para que el builder UBL
-    // recibiera datos. Lo preservamos AQUÍ para no romper el spec del support
-    // document, pero SOLO en este branch; ventas (donde sí hay customer) ya no
-    // toca supplier.
-    const supportDocSupplierFallback =
-      !invoice.customer && invoice.supplier
-        ? {
-            customer_document_type:
-              invoice.supplier.document_type || undefined,
-            customer_regime: invoice.supplier.tax_regime || undefined,
-            customer_verification_digit:
-              invoice.supplier.verification_digit || undefined,
-          }
-        : {};
-    const customerFields = {
-      ...customerFieldsFromAdapter,
-      ...supportDocSupplierFallback,
-    };
+    // recibiera datos. Se preserva AQUÍ, como capa ENCIMA de
+    // `resolveAcquirerIdentity` (que no conoce `supplier`), para no romper el
+    // spec del support document; ventas (donde sí hay `customer`) nunca tocan
+    // `supplier` porque `acquirer_identity` ya resolvió desde ficha o snapshot.
+    const support_doc_supplier_fallback_active =
+      !invoice.customer && !!invoice.supplier;
 
     // Las líneas del payload se arman APARTE y antes que el resto porque los
     // tributos por línea se reconstruyen sobre la base que estas mismas líneas
@@ -3962,44 +4107,63 @@ export class InvoiceFlowService {
       due_date: invoice.due_date
         ? this.formatIssueDate(invoice.due_date, timezone)
         : undefined,
-      // Step 8 — `customer_name` / `customer_tax_id` / `customer_address`
-      // prefieren el adapter; caen al valor persistido en la invoice para
-      // facturas creadas con la API legacy (esos `invoice.customer_*` siguen
-      // siendo la fuente del nombre/ID/dirección en `invoicing.service.ts`),
-      // y por último al `supplier` cuando son documentos soporte.
+      // Step 8 — `acquirer_identity` (ficha ⟶ snapshot, ver arriba) manda;
+      // `supplier` sólo entra cuando es documento soporte sin `customer`.
       customer_name:
-        customerFields.customer_name ??
-        invoice.customer_name ??
-        invoice.supplier?.name ??
-        undefined,
+        acquirer_identity.name ?? invoice.supplier?.name ?? undefined,
       customer_tax_id:
-        customerFields.customer_tax_id ??
-        invoice.customer_tax_id ??
+        acquirer_identity.document_number ??
         invoice.supplier?.tax_id ??
         undefined,
       customer_address:
-        customerFields.customer_address ??
+        invoice.customer?.addresses?.[0] ??
         invoice.customer_address ??
         invoice.supplier?.addresses ??
         undefined,
-      customer_email: customerFields.customer_email,
-      customer_phone: customerFields.customer_phone,
-      // Antes: `invoice.supplier?.document_type || undefined` — el bug del
-      // plan. Ahora viene del customer (o fallback de soporte).
-      customer_document_type: customerFields.customer_document_type,
-      customer_verification_digit: customerFields.customer_verification_digit,
-      customer_person_type: customerFields.customer_person_type,
-      // Antes: `invoice.supplier?.tax_regime || undefined` — el bug. Ahora
-      // viene del customer (o fallback de soporte).
-      customer_regime: customerFields.customer_regime,
-      customer_tax_responsibilities:
-        customerFields.customer_tax_responsibilities,
-      customer_ciiu_code: customerFields.customer_ciiu_code,
-      customer_is_withholding_agent:
-        customerFields.customer_is_withholding_agent,
+      customer_email: acquirer_identity.email ?? undefined,
+      customer_phone: acquirer_identity.phone ?? undefined,
+      // Antes: sólo `customerFields.customer_document_type` (ficha viva),
+      // SIN caer al snapshot de la factura — el bug del incidente. Ahora
+      // `acquirer_identity` ya resuelve ficha→snapshot; `supplier` sigue
+      // siendo el único respaldo adicional, y sólo para documento soporte.
+      customer_document_type:
+        acquirer_identity.document_type_literal ??
+        (support_doc_supplier_fallback_active
+          ? invoice.supplier?.document_type
+          : undefined) ??
+        undefined,
+      customer_verification_digit:
+        acquirer_identity.verification_digit ??
+        (support_doc_supplier_fallback_active
+          ? invoice.supplier?.verification_digit
+          : undefined) ??
+        undefined,
+      // SIEMPRE resuelto ('NATURAL'/'JURIDICA', nunca ambiguo): deriva del
+      // CÓDIGO DIAN del documento cuando no vino declarado explícitamente.
+      // `translatePersonTypeToStructural` ya no tiene que adivinar.
+      customer_person_type: acquirer_identity.person_type,
+      // Antes: sólo la ficha viva, SIN caer al snapshot — el mismo bug.
+      customer_regime:
+        acquirer_identity.tax_regime ??
+        (support_doc_supplier_fallback_active
+          ? invoice.supplier?.tax_regime
+          : undefined) ??
+        undefined,
+      customer_tax_responsibilities: acquirer_identity.tax_responsibilities,
+      customer_ciiu_code: acquirer_identity.ciiu_code,
+      customer_is_withholding_agent: acquirer_identity.is_withholding_agent,
       // Anexo §12.2: a document re-sent after contingency must keep its prefix and
       // number and declare InvoiceTypeCode 04, not 01. Absent on a first send.
-      contingency_type: invoice.contingency_type ?? undefined,
+      // Solo mientras la contingencia declarada siga VIGENTE (48 h desde
+      // `contingency_declared_at`). Vencida, o sin declaracion, se firma 01:
+      // heredar '04' fuera de plazo hace que la DIAN rechace con CTG01.
+      contingency_type:
+        invoice.contingency_type &&
+        invoice.contingency_declared_at &&
+        invoice.contingency_deadline &&
+        new Date(invoice.contingency_deadline).getTime() > Date.now()
+          ? invoice.contingency_type
+          : undefined,
       // dianAmount, not `.toString()`: Prisma.Decimal drops trailing zeros, so
       // a Decimal(12,2) holding 1000.00 serializes as '1000'. The CUFE hashed
       // that bare '1000' while the UBL XML emitted '1000.00', and the DIAN —
@@ -4139,9 +4303,14 @@ export class InvoiceFlowService {
     });
 
     // Send to provider
+    // RESERVA ATOMICA antes de tocar la DIAN. Punto unico por el que pasan todos
+    // los llamadores: si otro ya transmite esta factura, lanza
+    // FISCAL_SEND_IN_PROGRESS y se propaga tal cual — sin estado, sin
+    // contingencia, sin markError (la transmision ajena sigue en vuelo).
+    await this.fiscal_ledger.claimSubmission(transmission.id);
+
     let provider_response: ProviderResponse;
     try {
-      await this.fiscal_ledger.markSubmitted(transmission.id);
       if (invoice.invoice_type === 'credit_note') {
         provider_response = await provider.sendCreditNote(provider_data);
       } else if (invoice.invoice_type === 'debit_note') {
@@ -4221,19 +4390,91 @@ export class InvoiceFlowService {
       );
     }
 
-    // A DIAN OUTAGE IS NOT A REJECTION. Anexo Técnico 1.9 §12.2: when the
-    // validation service is unavailable, the document is expedited under
-    // contingency Type 04 — it keeps its prefix and number, is delivered to the
-    // acquirer without prior validation, and owes the DIAN a transmission within
-    // 48 h. Falling through to the rejection branch below (the previous
-    // behaviour) stamped `status: rejected` + `accounting_status: blocked` on a
-    // perfectly valid invoice, a terminal state that no retry could undo.
-    if (!provider_response.success && provider_response.contingency_eligible) {
-      await this.handleContingency(id, invoice, transmission.id, provider_response);
-      return this.prisma.invoices.findFirstOrThrow({
-        where: { id },
-        include: INVOICE_INCLUDE,
-      });
+    const sent_fiscal_key =
+      provider_response.cufe ||
+      provider_response.cude ||
+      provider_response.cuds ||
+      provider_response.cune ||
+      invoice.cufe ||
+      undefined;
+
+    // REGLA 90: la DIAN ya proceso este documento. No es un rechazo: se confirma
+    // con GetStatus y, si esta aceptado, se aplica la aceptacion.
+    if (
+      !provider_response.success &&
+      provider_response.provider_data?.already_processed === true
+    ) {
+      const status = await this.queryStatusSafely(provider, sent_fiscal_key, id);
+      if (status?.status === 'accepted') {
+        const resolved = this.buildResponseFromStatus(
+          provider_response,
+          status,
+          sent_fiscal_key,
+          'get_status_regla_90',
+          'Documento procesado anteriormente por la DIAN y confirmado válido vía GetStatus',
+        );
+        return this.applyDianAcceptance({
+          id,
+          invoice,
+          transmission_id: transmission.id,
+          provider_response: resolved,
+          provider_data,
+          acquirer_identity,
+          is_support_document,
+          withholding_batches,
+        });
+      }
+    }
+
+    // TIMEOUT / DIAN NO DISPONIBLE. Ya NO se declara contingencia automatica
+    // (el '04' heredado provocaba CTG01 en los reenvios). Se consulta GetStatus:
+    // si la DIAN alcanzo a aceptar, se aplica; si no, error reintentable normal.
+    if (
+      !provider_response.success &&
+      (provider_response.provider_data?.timed_out === true ||
+        provider_response.contingency_eligible)
+    ) {
+      const status = await this.queryStatusSafely(provider, sent_fiscal_key, id);
+      if (status?.status === 'accepted') {
+        const resolved = this.buildResponseFromStatus(
+          provider_response,
+          status,
+          sent_fiscal_key,
+          'get_status_timeout',
+          'Transmisión sin respuesta de la DIAN y confirmada válida vía GetStatus',
+        );
+        return this.applyDianAcceptance({
+          id,
+          invoice,
+          transmission_id: transmission.id,
+          provider_response: resolved,
+          provider_data,
+          acquirer_identity,
+          is_support_document,
+          withholding_batches,
+        });
+      }
+
+      const reason =
+        provider_response.message ||
+        `La DIAN no respondió (${provider_response.failure_class ?? 'timeout'})`;
+      await this.fiscal_ledger.markError(transmission.id, new Error(reason));
+      this.retry_queue
+        .enqueue(id, invoice.organization_id, invoice.store_id, reason)
+        .catch((e) =>
+          this.logger.error(
+            `Failed to enqueue invoice #${id} for retry: ${e.message}`,
+          ),
+        );
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROVIDER_001,
+        reason.trim().slice(0, PROVIDER_MESSAGE_MAX_LENGTH) || undefined,
+        {
+          invoice_id: id,
+          fiscal_transmission_id: transmission.id,
+          retry_scheduled: true,
+        },
+      );
     }
 
     if (!provider_response.success) {
@@ -4256,7 +4497,12 @@ export class InvoiceFlowService {
           qr_code: provider_response.qr_code,
           xml_document: provider_response.xml_document,
           pdf_url: provider_response.pdf_url,
-          provider_response: this.toProviderEvidence(provider_response),
+          provider_response: {
+            ...this.toProviderEvidence(provider_response),
+            ...(this.extractRuleRejections(provider_response).length
+              ? { errors: this.extractRuleRejections(provider_response) }
+              : {}),
+          },
         },
         include: INVOICE_INCLUDE,
       });
@@ -4267,6 +4513,7 @@ export class InvoiceFlowService {
       // —la misma lista que queda persistida en `provider_response`— para que el
       // frontend pueda enumerarla en vez de mostrar «documento rechazado» a secas.
       const rejection = this.extractDianRejection(provider_response);
+      const rule_rejections = this.extractRuleRejections(provider_response);
 
       this.logger.warn(
         `Invoice #${id} (${rejected.invoice_number}) rejected by provider: ${
@@ -4284,11 +4531,16 @@ export class InvoiceFlowService {
 
       throw new VendixHttpException(
         ErrorCodes.INVOICING_PROVIDER_004,
-        this.dianRejectionMessage(provider_response, rejection),
+        rule_rejections.length
+          ? `La DIAN rechazó el documento — ${rule_rejections
+              .map((r) => `${r.code}: ${r.text}`)
+              .join(' | ')}`
+          : this.dianRejectionMessage(provider_response, rejection),
         {
           invoice_id: id,
           tracking_id: provider_response.tracking_id,
           ...rejection,
+          ...(rule_rejections.length ? { errors: rule_rejections } : {}),
         },
       );
     }
@@ -4330,7 +4582,50 @@ export class InvoiceFlowService {
       );
     }
 
-    await this.fiscal_ledger.markAccepted(transmission.id, provider_response);
+    return this.applyDianAcceptance({
+      id,
+      invoice,
+      transmission_id: transmission.id,
+      provider_response,
+      provider_data,
+      acquirer_identity,
+      is_support_document,
+      withholding_batches,
+    });
+  }
+
+  /**
+   * Aplica una aceptacion de la DIAN: ledger, factura, CxP de documento soporte,
+   * retenciones y evento contable. Extraido de `send()`; lo comparten el camino
+   * directo y la resolucion por GetStatus (Regla 90 / timeout).
+   */
+  private async applyDianAcceptance(params: {
+    id: number;
+    invoice: any;
+    transmission_id: number;
+    provider_response: ProviderResponse;
+    provider_data: any;
+    acquirer_identity: ResolvedAcquirerIdentity;
+    is_support_document: boolean;
+    withholding_batches: WithholdingBatch[];
+  }) {
+    const {
+      id,
+      invoice,
+      transmission_id,
+      provider_response,
+      provider_data,
+      acquirer_identity,
+      is_support_document,
+      withholding_batches,
+    } = params;
+    const fiscal_key =
+      provider_response.cufe ||
+      provider_response.cude ||
+      provider_response.cuds ||
+      provider_response.cune;
+
+    await this.fiscal_ledger.markAccepted(transmission_id, provider_response);
 
     // Update invoice with provider response
     const updated = await this.prisma.invoices.update({
@@ -4349,6 +4644,21 @@ export class InvoiceFlowService {
         xml_document: provider_response.xml_document,
         pdf_url: provider_response.pdf_url,
         provider_response: this.toProviderEvidence(provider_response),
+        // Snapshot del adquirente que VIAJÓ a la DIAN: lo que el documento
+        // declaró es lo que queda en la fila (ficha viva → snapshot ya
+        // resueltos en `provider_data`). `?? undefined` = no pisar con null
+        // una columna que ya tenía valor cuando el resolvedor no aportó dato.
+        customer_name: provider_data.customer_name ?? undefined,
+        customer_tax_id: provider_data.customer_tax_id ?? undefined,
+        customer_document_type: provider_data.customer_document_type ?? undefined,
+        customer_verification_digit:
+          provider_data.customer_verification_digit ?? undefined,
+        customer_email: provider_data.customer_email ?? undefined,
+        customer_phone: provider_data.customer_phone ?? undefined,
+        customer_tax_regime: provider_data.customer_regime ?? undefined,
+        customer_fiscal_responsibilities:
+          provider_data.customer_tax_responsibilities ?? undefined,
+        customer_person_type: acquirer_identity.person_type ?? undefined,
       },
       include: INVOICE_INCLUDE,
     });
@@ -4404,6 +4714,63 @@ export class InvoiceFlowService {
       `Invoice #${id} (${updated.invoice_number}) accepted by provider`,
     );
     return updated;
+  }
+
+  private async queryStatusSafely(
+    provider: any,
+    fiscal_key: string | undefined,
+    invoice_id: number,
+  ): Promise<StatusResponse | null> {
+    if (!fiscal_key || typeof provider?.checkStatus !== 'function') return null;
+    try {
+      return await provider.checkStatus(fiscal_key);
+    } catch (error) {
+      this.logger.warn(
+        `GetStatus failed for invoice #${invoice_id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private buildResponseFromStatus(
+    sent: ProviderResponse,
+    status: StatusResponse,
+    sent_fiscal_key: string | undefined,
+    resolved_via: string,
+    message: string,
+  ): ProviderResponse {
+    const cufe = status.cufe || sent.cufe || sent_fiscal_key;
+    return {
+      ...sent,
+      success: true,
+      tracking_id: status.tracking_id || sent.tracking_id || cufe || '',
+      cufe: sent.cude || sent.cuds || sent.cune ? sent.cufe : cufe,
+      cude: status.cude || sent.cude,
+      cuds: status.cuds || sent.cuds,
+      cune: status.cune || sent.cune,
+      message,
+      contingency_eligible: false,
+      provider_data: {
+        ...(sent.provider_data ?? {}),
+        ...(status.provider_data ?? {}),
+        resolved_via,
+      },
+    };
+  }
+
+  private extractRuleRejections(
+    response: ProviderResponse,
+  ): { code: string; text: string }[] {
+    const raw = response.provider_data?.rule_messages;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter(
+        (m: any) =>
+          m && m.severity === 'rechazo' && typeof m.text === 'string' && m.text,
+      )
+      .map((m: any) => ({ code: String(m.code ?? ''), text: m.text }));
   }
 
   async accept(id: number) {

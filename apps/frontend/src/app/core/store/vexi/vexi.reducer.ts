@@ -1,6 +1,10 @@
 import { createReducer, on } from '@ngrx/store';
 import * as VexiActions from './vexi.actions';
-import type { ToolStep, VexiProposal } from './vexi.actions';
+import type {
+  ToolStep,
+  VexiContinuation,
+  VexiProposal,
+} from './vexi.actions';
 import {
   AIConversation,
   AIMessage,
@@ -43,7 +47,17 @@ export interface VexiState {
     content: string;
     attachmentIds?: string[];
     speak?: boolean;
+    continuation?: VexiContinuation;
   } | null;
+  /** `plan_continue` arrived in the current turn; consumed when it completes. */
+  planContinuePending: boolean;
+  /** Automatic `resume` turns chained since the person last wrote. Max 3. */
+  autoContinuations: number;
+  /**
+   * Whether the proposal just rejected belonged to a plan. The reducer clears
+   * `pendingProposal` before effects run, so the effect reads this instead.
+   */
+  rejectedPlanActive: boolean;
 }
 
 export const initialVexiState: VexiState = {
@@ -60,6 +74,9 @@ export const initialVexiState: VexiState = {
   activeTask: null,
   activeTaskId: null,
   lastTurn: null,
+  planContinuePending: false,
+  autoContinuations: 0,
+  rejectedPlanActive: false,
 };
 
 export const vexiReducer = createReducer(
@@ -126,14 +143,25 @@ export const vexiReducer = createReducer(
 
   on(
     VexiActions.sendMessage,
-    (state, { content, attachmentIds, speak, isRetry }) => {
+    (state, { content, attachmentIds, speak, isRetry, continuation }) => {
       if (!state.activeConversationId) return state;
+
+      // A message the person wrote resets the automatic chain; a `resume` counts
+      // once (a replay of it after a drop does not count again).
+      const autoContinuations = !continuation
+        ? 0
+        : continuation === 'resume' && !isRetry
+          ? state.autoContinuations + 1
+          : state.autoContinuations;
 
       const base = {
         ...state,
         isSending: true,
         streamingContent: '',
         isStreaming: true,
+        planContinuePending: false,
+        autoContinuations,
+        rejectedPlanActive: false,
         // Recorded on every send, retries included: the replay of a replay is
         // blocked by the `isRetry` flag on the action, not by forgetting the
         // payload, and keeping it means a later manual resend still works.
@@ -142,13 +170,15 @@ export const vexiReducer = createReducer(
           content,
           attachmentIds,
           speak,
+          continuation,
         },
       };
 
       // A retry re-uses the bubble that is already on screen. Appending again
       // would show the person's question twice for a turn they only asked once —
       // and the whole point of the retry is that they never find out it happened.
-      if (isRetry) return base;
+      // A continuation has no user turn at all: same rule, different reason.
+      if (isRetry || continuation) return base;
 
       return {
         ...base,
@@ -246,7 +276,10 @@ export const vexiReducer = createReducer(
 
   on(
     VexiActions.proposalReceived,
-    (state, { tool, arguments: args, confirmationToken, preview }) => ({
+    (
+      state,
+      { tool, arguments: args, confirmationToken, preview, planActive },
+    ) => ({
       ...state,
       pendingProposal: {
         tool,
@@ -254,6 +287,7 @@ export const vexiReducer = createReducer(
         confirmationToken,
         preview,
         applying: false,
+        planActive: planActive === true,
       },
     }),
   ),
@@ -280,6 +314,7 @@ export const vexiReducer = createReducer(
     return {
       ...state,
       pendingProposal: null,
+      rejectedPlanActive: state.pendingProposal?.planActive === true,
       messages: state.activeConversationId
         ? [
             ...state.messages,
@@ -344,7 +379,44 @@ export const vexiReducer = createReducer(
     };
   }),
 
+  on(VexiActions.planContinueReceived, (state) => ({
+    ...state,
+    planContinuePending: true,
+  })),
+
+  on(VexiActions.planContinueCapped, (state) => ({
+    ...state,
+    planContinuePending: false,
+    messages: state.activeConversationId
+      ? [
+          ...state.messages,
+          {
+            id: -Date.now(),
+            conversation_id: state.activeConversationId,
+            role: 'assistant' as const,
+            content:
+              'Voy avanzando pero esto está tomando más de lo normal. ¿Sigo?',
+            tool_calls: null,
+            tokens_used: 0,
+            cost_usd: 0,
+            metadata: null,
+            created_at: new Date().toISOString(),
+          },
+        ]
+      : state.messages,
+  })),
+
   on(VexiActions.streamComplete, (state) => {
+    // A turn that only ended to be chained may have said nothing; an empty
+    // bubble would be noise.
+    if (state.planContinuePending && !state.streamingContent.trim()) {
+      return {
+        ...state,
+        isStreaming: false,
+        isSending: false,
+        streamingContent: '',
+      };
+    }
     if (!state.activeConversationId) return { ...state, isStreaming: false, isSending: false, streamingContent: '' };
     return {
       ...state,

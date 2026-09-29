@@ -3,14 +3,16 @@ name: vendix-shipping-distance-pricing
 description: >
   Cobro de envío por distancia real (calles, no línea recta) en Vendix: escala de tramos por km
   en `shipping_rates.distance_tiers`, origen pineado por método (`shipping_methods.origin_*`),
-  ruteo compartido Valhalla/OSRM (`RoutingService`) y la regla de cobertura al confirmar el
-  checkout — rechazo estricto sin tolerancia (`ECOM_CHECKOUT_003`). Trigger: editar tramos de
-  distancia, tocar `resolveConfirmShippingCost`, tocar `RoutingService`, depurar
-  `ECOM_CHECKOUT_003`, o "cobro por km impreciso/inconsistente".
+  ruteo compartido Valhalla/OSRM (`RoutingService`), resolución compartida de coords del comprador
+  (`ShippingDistanceService.resolveBuyerCoords`) y la regla de cobertura al confirmar el checkout —
+  rechazo estricto sin tolerancia (`ECOM_CHECKOUT_003`) que desde 2026-09-27 también cubre "sin
+  coordenadas del comprador, sin tarifa" (ya no degrada a zona). Trigger: editar tramos de
+  distancia, tocar `resolveConfirmShippingCost`/`resolveBuyerCoords`, tocar `RoutingService`,
+  depurar `ECOM_CHECKOUT_003`, o "cobro por km impreciso/inconsistente".
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Editing distance tiers or shipping_rates.distance_tiers"
@@ -19,6 +21,8 @@ metadata:
     - "Debugging ECOM_CHECKOUT_003 errors on checkout"
     - "Debugging inaccurate or inconsistent distance-based shipping cost"
     - "Activating distance_pricing_enabled on a shipping method"
+    - "Working with ShippingDistanceService.resolveBuyerCoords"
+    - "Debugging a shipping rate excluded or missing because the buyer address could not be geocoded"
 ---
 
 ## Purpose
@@ -34,10 +38,13 @@ monta encima de esas dos.
 
 - Editar tramos de distancia (`shipping_rates.distance_tiers`, `DistanceTierDto`).
 - Tocar `CheckoutService.resolveConfirmShippingCost` (checkout normal o por WhatsApp).
+- Tocar `ShippingDistanceService.resolveBuyerCoords` (resolución compartida de coords del comprador).
 - Tocar `RoutingService` (Valhalla/OSRM) o su caché Redis.
 - Depurar un 400 `ECOM_CHECKOUT_003` en checkout.
 - "El cobro por km da un valor raro o inconsistente entre cotización y confirmación".
 - Activar `distance_pricing_enabled` en un método de envío (exige origen pineado).
+- Depurar una tarifa por distancia que desaparece de la cotización (`excluded`) o que rechaza el
+  checkout porque no se pudo ubicar la dirección del comprador.
 
 ## Core Rules (decisiones de negocio — Rafael, 2026-09-26)
 
@@ -45,31 +52,32 @@ monta encima de esas dos.
    de todos los tramos → 400 `ECOM_CHECKOUT_003`
    (`apps/backend/src/common/errors/error-codes.ts:545-549`). El matcher es el puro
    `ShippingDistanceService.matchTier`
-   (`apps/backend/src/domains/store/shipping/services/shipping-distance.service.ts:50-63`),
+   (`apps/backend/src/domains/store/shipping/services/shipping-distance.service.ts:79-92`),
    llamado tal cual en `CheckoutService.resolveConfirmShippingCost`
-   (`apps/backend/src/domains/ecommerce/checkout/checkout.service.ts:423`). **NO** agregar
+   (`apps/backend/src/domains/ecommerce/checkout/checkout.service.ts:499`). **NO** agregar
    ninguna "gracia" en el borde del último tramo cerrado: se probó una tolerancia de 0.2 km
    (`matchTierWithTolerance`) y se revirtió por decisión explícita. Ver el test
-   `apps/backend/src/domains/ecommerce/checkout/checkout-distance.spec.ts:492-523`
+   `apps/backend/src/domains/ecommerce/checkout/checkout-distance.spec.ts:513-544`
    ("rechazo estricto SIN tolerancia..."), que fija el `errorCode` exacto
    (`ECOM_CHECKOUT_003`), no solo la clase de la excepción, para que un futuro revert
    accidental a la tolerancia no pase la prueba con un código distinto. Si una tienda necesita
    cubrir más lejos, la solución es un tramo abierto (`to_km: null`), nunca una tolerancia
    oculta.
 2. **La consistencia cotización↔confirmación se logra normalizando coordenadas, no con
-   tolerancias.** `ShippingDistanceService.toCoords` (líneas 110-156 del mismo archivo) es el
+   tolerancias.** `ShippingDistanceService.toCoords` (líneas 139-185 del mismo archivo) es el
    ÚNICO punto de normalización de coords — redondea a 6 decimales y corrige swap lat/lng — y
    lo usan por igual el cotizador
-   (`apps/backend/src/domains/store/shipping/shipping-calculator.service.ts:380-467`,
-   `resolveQuoteDistances`) y la confirmación (`checkout.service.ts:386-395`). Un mismo punto
+   (`apps/backend/src/domains/store/shipping/shipping-calculator.service.ts:436-552`,
+   `resolveQuoteDistances`) y la confirmación (`checkout.service.ts:410-459`). Un mismo punto
    siempre produce la misma llave de caché de `RoutingService`, sin importar si viene del
    float de la cotización o del `Decimal(10,8)` persistido.
-3. **Degradación a tarifa de zona cuando no se puede medir** (sin coords, sin origen, motor de
-   ruteo caído), siempre con un log `warn` ESTRUCTURADO (`store_id`, `shipping_method_id`,
-   `reason`) — nunca en silencio. Ver `resolveQuoteDistances`
-   (`shipping-calculator.service.ts:416-421,436-441,458-463`) y
-   `resolveConfirmShippingCost` (`checkout.service.ts:396-421`, evento
-   `checkout.shipping_distance_unavailable`).
+3. **Degradación a tarifa de zona SOLO cuando la razón es infraestructura** (sin origen del
+   método, motor de ruteo caído/lanzando), siempre con un log `warn` ESTRUCTURADO (`store_id`,
+   `shipping_method_id`, `reason`) — nunca en silencio. Ver `resolveQuoteDistances`
+   (`shipping-calculator.service.ts:482-486,543-548`) y `resolveConfirmShippingCost`
+   (`checkout.service.ts:415-421,483-497`, evento `checkout.shipping_distance_unavailable`).
+   **Modificado por la regla 6**: sin coords del COMPRADOR (ni cliente ni geocodificables) ya
+   NO degrada a zona — ver abajo.
 4. **Nunca Haversine.** El precio se cobra por distancia REAL por calles, vía
    `RoutingService.directions()`
    (`apps/backend/src/domains/ecommerce/routing/routing.service.ts:141-156`), nunca por línea
@@ -80,6 +88,52 @@ monta encima de esas dos.
    no la de menor distancia entre alternativas. `shortest: true` se probó y se quitó: enviaba
    repartidores por vías no aptas (trochas, calles residenciales angostas) solo por ser unos
    metros más cortas.
+6. **Sin coordenadas del comprador, sin tarifa — regla de negocio (owner, 2026-09-27).** Antes,
+   sin coords del comprador (ni cliente ni geocode) el método con distancia degradaba a precio de
+   zona igual que un motor de ruteo caído. Ya NO: es un caso de **negocio** (no sabemos dónde
+   entregar), no de infraestructura, así que:
+   - **Cotización** (`ShippingCalculatorService.resolveQuoteDistances`,
+     `shipping-calculator.service.ts:436-552`): si `ShippingDistanceService.resolveBuyerCoords`
+     no resuelve nada, CADA tarifa con distancia activa se marca con el centinela
+     `'buyer_geocode_failed'` (visto por `applyDistancePrice`, `shipping-calculator.service.ts:562-592`)
+     y `calculateRates` la excluye — igual que "fuera de todos los tramos": la tarifa simplemente
+     no aparece entre las opciones.
+   - **Confirmación** (`CheckoutService.resolveConfirmShippingCost`, `checkout.service.ts:376-507`):
+     si `resolveBuyerCoords` no resuelve nada, se rechaza con el MISMO 400 `ECOM_CHECKOUT_003`
+     (`checkout.service.ts:462-479`), mensaje exacto: *"No pudimos ubicar la dirección de entrega.
+     Marca la ubicación en el mapa para calcular el envío."* Test que fija esta regla:
+     `checkout-distance.spec.ts:411-436` ("cambio de negocio 2026-09-27: ... buyer_geocode_failed
+     ... YA NO cobra zona").
+   - **Sin ORIGEN del método** o **motor de ruteo caído** siguen degradando a zona (regla 3, sin
+     cambios) — eso sigue siendo infraestructura, no la dirección del comprador.
+   - Ver `vendix-address-geocoding` para el contrato completo de `resolveBuyerCoords`/`forward` y
+     para las reglas de UX del frontend (bloqueo de Continuar, badge de precisión, GPS con consentimiento).
+
+7. **Sin ubicación del comprador + WhatsApp checkout activo → pedido "envío por asignar" (owner,
+   2026-09-27).** Cuando el comprador pide "Usar mi ubicación automática" y la geolocalización es
+   denegada / no soportada / falla, y la tienda tiene `ecommerce.checkout.whatsapp_checkout = true`
+   con `whatsapp_number` no vacío, el checkout ofrece mandar el pedido por WhatsApp SIN tarifa:
+   - **Contrato (sin migración):** `POST` checkout con `channel: 'whatsapp'` +
+     `pending_shipping_assignment: true`, sin `shipping_method_id`/`shipping_rate_id` y sin
+     `payment_method_id`. La orden queda `delivery_type='other'`, `shipping_method_id = NULL`,
+     `shipping_cost = 0`, `state='pending_payment'`, SIN fila en `payments` y SIN factura
+     automática; `orders.notes` explica que el envío está pendiente de asignar.
+   - **Guard servidor:** `CheckoutService.assertPendingShippingAssignmentAllowed`
+     (`checkout.service.ts:948`, llamado en `runCheckout`) exige canal whatsapp, sin
+     método/tarifa, y tienda con WhatsApp checkout activo + número; si no → 400
+     `ECOM_CHECKOUT_PENDING_SHIPPING_001`. El backend nunca confía en que el frontend haya
+     gateado el botón.
+   - **Compuertas que sostienen el estado:** `'other'` NO está en
+     `SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES`, así que cobrar (`ORD_SHIP_CHARGE_001`), despachar
+     (`ORD_SHIP_REQUIRED_001`) y remisionar (`dispatch-notes.service.ts` `createFromOrder` + pool,
+     `ORD_SHIP_REQUIRED_001`) quedan bloqueados hasta que la tienda asigne método y tarifa desde
+     el detalle de la orden (`assignShipping`). Si la orden ya tiene pagos, cambiar el costo de
+     envío se rechaza con `ORD_SHIP_CHARGED_COST_CHANGE_001`.
+   - **Cron:** `payment-timeout-cleanup.job.ts` excluye `delivery_type='other' AND
+     shipping_method_id IS NULL` del auto-cancel de 2 h — la tienda coordina por chat y puede
+     tardar más.
+   - Este fallback NO relaja la regla 6: sin WhatsApp checkout activo el comprador debe marcar el
+     mapa; no hay tarifa de zona como salida.
 
 ## Architecture
 
@@ -100,7 +154,7 @@ monta encima de esas dos.
 
 ### Origen — `shipping_methods.origin_latitude/longitude`
 
-- Schema (`apps/backend/prisma/schema.prisma:3309` modelo; campos en `3340-3342`):
+- Schema (`apps/backend/prisma/schema.prisma:3311` modelo; campos en `3342-3344`):
   `distance_pricing_enabled Boolean @default(false)`, `origin_latitude Decimal(10,8)?`,
   `origin_longitude Decimal(11,8)?`. Apagado por defecto, configurable POR MÉTODO (no por
   tienda).
@@ -115,14 +169,30 @@ monta encima de esas dos.
 `apps/backend/src/domains/store/shipping/services/shipping-distance.service.ts`. Es el único
 punto que usan tanto el cotizador como la confirmación:
 
-- `toCoords(lat, lng, label?)` (110-156): valida rango WGS84, detecta y corrige lat/lng
-  invertido vía el bbox aproximado de Colombia (`COLOMBIA_BBOX`, 37-42 — heurística
+- `toCoords(lat, lng, label?)` (139-185): valida rango WGS84, detecta y corrige lat/lng
+  invertido vía el bbox aproximado de Colombia (`COLOMBIA_BBOX`, 63-68 — heurística
   geográfica, NO un límite de cobertura de negocio), y redondea a 6 decimales (`round6`,
-  165-167, ~0.1 m de precisión GPS).
-- `resolveDistanceKm(origin, buyer)` (175-194): arma `"lng,lat;lng,lat"` y llama a
+  193-196, ~0.1 m de precisión GPS).
+- `resolveDistanceKm(origin, buyer)` (204-223): arma `"lng,lat;lng,lat"` y llama a
   `RoutingService.directions()`; devuelve `null` ante cualquier fallo (el llamador cobra
-  zona).
-- `resolveRatePrice(distanceTiers, distanceKm)` (201-212): `{ price }` si matchea, `{
+  zona — esto SÍ sigue siendo infraestructura, regla 3).
+- **`resolveBuyerCoords(address, bias?)` (243-282)** — resolución COMPARTIDA de las coords del
+  comprador, usada tanto por el cotizador como por la confirmación (mismos campos de entrada,
+  mismo `bias`):
+  1. El pin/coords que el comprador YA mandó **siempre gana** (`source: 'client'`) — puede ser un
+     pin confirmado a mano, más confiable que un forward-geocode.
+  2. Solo si no hay coords utilizables, intenta `GeocodingService.forward(address_line1, city,
+     state_province, { bias })` (`source: 'geocoded'`). Falla (retorna `null`) si: no hay
+     `GeocodingService` inyectado, `country_code` está presente y NO es `'CO'` (**CO only** — un
+     comprador de otro país nunca dispara el geocode Colombia-only), no hay `address_line1`, o el
+     geocoder no resuelve nada.
+  3. Usar el MISMO helper con el MISMO `bias` desde cotizador y confirmación es lo que las hace
+     medir desde el mismo punto: `GeocodingService.forward` cachea por dirección normalizada, así
+     que la llamada de la confirmación es normalmente un HIT del resultado que ya vio el
+     cotizador (ver `vendix-address-geocoding`, cache key `geocode:fwd:vN:`).
+  4. `null` cuando ninguna de las dos vías resuelve — el llamador YA NO cobra zona con esto
+     (regla 6): decide excluir la tarifa (cotizador) o rechazar 400 (confirmación).
+- `resolveRatePrice(distanceTiers, distanceKm)` (289-300): `{ price }` si matchea, `{
   excluded: true }` si cae fuera de todos los rangos (la tarifa NO se ofrece), `null` si rige
   zona.
 
@@ -131,36 +201,50 @@ punto que usan tanto el cotizador como la confirmación:
 `apps/backend/src/domains/store/shipping/shipping-calculator.service.ts` — **NO** está bajo
 `services/`, a diferencia de `shipping-distance.service.ts` y `shipping-tax.service.ts`.
 
-- `resolveQuoteDistances` (380-467): UNA llamada de ruteo por ORIGEN distinto, compartida por
+- `resolveQuoteDistances` (436-552): UNA llamada de ruteo por ORIGEN distinto, compartida por
   todas las tarifas de la cotización (agrupa métodos por `origin.lat,lng`). Sin coords de
-  destino o de origen, deja un `warn` con `store_id` + `shipping_method_id` + motivo
-  (416-421, 436-441) y ese método cobra zona.
-- `applyDistancePrice` (474-503): override del costo de zona por el precio del tramo. Si
-  `resolveRatePrice` devuelve `'excluded'`, la tarifa se salta con `continue` en el loop de
-  `calculateRates` (línea 270) — **fuera de rango en la COTIZACIÓN, la tarifa simplemente no
-  aparece en las opciones de envío**, sin error visible; el 400 solo ocurre al CONFIRMAR (regla
-  1).
+  ORIGEN (método sin pinear), deja un `warn` con `store_id` + `shipping_method_id` + motivo
+  (482-486) y ese origen cobra zona (infraestructura, regla 3, sin cambios). Sin coords del
+  COMPRADOR (ni cliente ni `resolveBuyerCoords`), CADA tarifa candidata con ese origen se marca
+  `'buyer_geocode_failed'` (516-530) — regla 6, ya NO cobra zona.
+- `applyDistancePrice` (562-592): override del costo de zona por el precio del tramo. Si
+  `distanceEntry === 'buyer_geocode_failed'` (583) o si `resolveRatePrice` devuelve
+  `'excluded'` (590), la tarifa se salta con `continue` en el loop de `calculateRates` (línea
+  277) — **fuera de rango o sin coords del comprador en la COTIZACIÓN, la tarifa simplemente no
+  aparece en las opciones de envío**, sin error visible; el 400 solo ocurre al CONFIRMAR (reglas
+  1 y 6).
+- `quoteRateGross` (390-405, doc en 366-389): `null` cuando la tarifa no aparece entre las
+  opciones — incluye ahora el caso "sin coords del comprador" (comentario explícito de 2026-09-27
+  en el doc de la función); el llamador (payments/orders/order-flow, ver abajo) YA NO debe
+  inventar un costo cuando la razón es la dirección del comprador.
 
 ### Confirmación — `CheckoutService.resolveConfirmShippingCost`
 
-`apps/backend/src/domains/ecommerce/checkout/checkout.service.ts:334-431`. El backend
+`apps/backend/src/domains/ecommerce/checkout/checkout.service.ts:376-507`. El backend
 **RECALCULA siempre** al confirmar — nunca confía en el costo de envío que mandó el frontend.
-Se llama desde AMBOS canales: checkout normal (línea 1908) y checkout por WhatsApp (línea 2804,
+Se llama desde AMBOS canales: checkout normal (línea 1984) y checkout por WhatsApp (línea 2880,
 `wa_distanced`).
 
-Orden de fallos (todos fail-open a zona, salvo el único caso de rechazo real):
+Orden de fallos (todos fail-open a zona salvo los DOS casos de rechazo real):
 
-1. Tarifa `free` → 0 sin rutear (línea 375).
+1. Tarifa `free` → 0 sin rutear (línea 399).
 2. Sin `ShippingDistanceService` inyectado o método sin `distance_pricing_enabled` → zona
-   (378).
-3. Escala corrupta/ausente → zona (379-380).
-4. Sin coords de origen o de destino (`toCoords` devuelve `null`) → zona + warn
-   `checkout.shipping_distance_unavailable` con `reason: origin_coords_missing` /
-   `buyer_coords_missing` (386-402).
-5. `resolveDistanceKm` lanza o devuelve `null` → zona + warn con `reason: routing_exception` /
-   `routing_failed` (404-421).
-6. Distancia fuera de todos los tramos (`matchTier` devuelve `null`) → **único caso que
-   rechaza**: 400 `ECOM_CHECKOUT_003` (423-429). Esta es la regla 1: sin tolerancia.
+   (402).
+3. Escala corrupta/ausente → zona (403-404).
+4. Sin coords de ORIGEN (`toCoords` devuelve `null`) → zona + warn
+   `checkout.shipping_distance_unavailable` con `reason: origin_coords_missing` (415-421).
+   Infraestructura — regla 3, sin cambios.
+5. **Sin coords del COMPRADOR** (snapshot vacío Y `resolveBuyerCoords` no resuelve nada) →
+   **YA NO zona (regla 6)**: 400 `ECOM_CHECKOUT_003` con
+   `reason: buyer_geocode_failed` en el warn (429-477), mensaje exacto: *"No pudimos ubicar la
+   dirección de entrega. Marca la ubicación en el mapa para calcular el envío."* Cuando el geocode
+   SÍ resuelve, el punto se escribe de vuelta en `address_snapshot.latitude/longitude` (mismo
+   objeto que luego persiste `orders.shipping_address_snapshot`) para que la orden quede con
+   coords aunque el comprador nunca las haya mandado (452-459).
+6. `resolveDistanceKm` lanza o devuelve `null` → zona + warn con `reason: routing_exception` /
+   `routing_failed` (483-497). Infraestructura — regla 3, sin cambios.
+7. Distancia fuera de todos los tramos (`matchTier` devuelve `null`) → **rechazo por regla 1**:
+   400 `ECOM_CHECKOUT_003` (499-505), mensaje distinto ("vuelve a cotizar el envío").
 
 ### Destino — coords del checkout (frontend)
 
@@ -172,6 +256,23 @@ cotizador las recibe vía `POST /shipping/calculate` (`CartService.getShippingEs
 (`address_snapshot.latitude/longitude`, `Decimal(10,8)` en BD) — de ahí la importancia de
 `toCoords` como normalizador único (regla 2): un float de cotización y su `Decimal(10,8)`
 persistido deben producir la MISMA llave de caché.
+
+**`address_line1` debe viajar en los objetos de cotización backend** — sin él,
+`resolveBuyerCoords` no tiene nada que geocodificar cuando faltan coords (regla 6). Los tres
+puntos donde el editor de órdenes arma la dirección para `quoteRateGross`
+(`ShippingCalculatorService.quoteRateGross`) ya la incluyen explícitamente:
+
+- `apps/backend/src/domains/store/payments/payments.service.ts:4905,4975` — DTO de dirección +
+  mapeo `address_line1: address.address_line1 || undefined`.
+- `apps/backend/src/domains/store/orders/orders.service.ts:3099-3154,4926` — dos puntos:
+  `shippingAddressForCalc` (edición de orden) y el bloque de cotización del checkout normal.
+- `apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:3171-3225` — mismo
+  patrón para el flujo de order-flow.
+
+Si un nuevo caller arma su propio objeto de dirección para cotizar/confirmar y omite
+`address_line1`, `resolveBuyerCoords` retorna `null` en cuanto falten coords explícitas — la
+tarifa se excluye o el checkout rechaza (regla 6) por un campo faltante que nada tiene que ver
+con la distancia real.
 
 ### Motor de ruteo — `RoutingService`
 
@@ -190,20 +291,45 @@ persistido deben producir la MISMA llave de caché.
 - Multi-leg: cada par consecutivo de waypoints se resuelve y cachea POR SEPARADO (`directions`,
   141-156) — mejora el reuso cuando solo cambia el primer tramo de la ruta.
 
+### Frontend — gating de "sin coords, sin tarifa" (regla 6)
+
+La UI bloquea el avance ANTES de llamar al backend, para no depender solo del 400 de confirmación:
+
+- **POS** — `pos-shipping-step.component.ts` (línea 282): `computed` `hasResolvedLocation` exige
+  coords válidas (del pin o del geocode) antes de dejar cotizar/cobrar distancia; mientras no
+  hay coords el total muestra literal "Pendiente" en vez de un monto o un cero engañoso. El
+  componente monta `app-address-form-fields` con `[allowGeolocation]="false"` (GPS del navegador
+  deshabilitado en punto de venta — el vendedor ubica al cliente en el mapa, no su propio
+  dispositivo).
+- **Checkout ecommerce** — `checkout.component.ts` (líneas 1631, 1650, 1669): tres `computed`
+  encadenados — `hasResolvedCoords` (¿hay lat/lng?), `shippingBlockedReason` (mensaje que explica
+  POR QUÉ no se puede cotizar: sin coords, sin mapa confirmado, etc.) y
+  `canProceedFromAddressStep` (gate final que habilita el botón "Continuar"). Igual que en POS,
+  esto es enforcement en la UI del mismo contrato que el backend aplica en
+  `resolveConfirmShippingCost` — un bypass de este gate (ej. saltar el step por routing) NO evita
+  el 400 `ECOM_CHECKOUT_003`, solo cambia dónde se entera el comprador.
+- El pin/badge de precisión y el resto de la UX de mapa (candado `pinConfirmed`, geolocalización
+  del navegador, badges de precisión) son genéricos y viven documentados en
+  `vendix-address-geocoding` — esta subsección cubre solo el gate de "no hay tarifa sin coords"
+  específico de esta skill.
+
 ## Decision Rules
 
 | Situación | Comportamiento |
 | --- | --- |
 | Distancia dentro de un tramo | Cobra el precio de ESE tramo (zona no aplica). |
 | Distancia fuera de TODOS los tramos, en cotización | La tarifa se excluye de las opciones (`excluded`); no se ofrece. |
-| Distancia fuera de TODOS los tramos, al confirmar | 400 `ECOM_CHECKOUT_003`. Sin tolerancia. |
+| Distancia fuera de TODOS los tramos, al confirmar | 400 `ECOM_CHECKOUT_003`. Sin tolerancia (regla 1). |
 | Tarifa `free` con o sin escala | Cobra 0, nunca rutea. |
 | Método sin `distance_pricing_enabled` | Cobra zona directamente, no rutea. |
-| Sin coords (origen o destino) | Cobra zona + warn estructurado. |
-| Motor de ruteo caído o lanza excepción | Cobra zona + warn estructurado. |
+| **Sin coords del COMPRADOR** (ni cliente ni `resolveBuyerCoords`), en cotización | **Regla 6** — la tarifa se marca `'buyer_geocode_failed'` y se excluye, igual que fuera de rango. |
+| **Sin coords del COMPRADOR** (ni cliente ni `resolveBuyerCoords`), al confirmar | **Regla 6** — 400 `ECOM_CHECKOUT_003`, "Marca la ubicación en el mapa...". YA NO cobra zona. |
+| Sin coords de ORIGEN (método sin pinear) | Cobra zona + warn estructurado (infraestructura, regla 3, sin cambios). |
+| Motor de ruteo caído o lanza excepción | Cobra zona + warn estructurado (infraestructura, regla 3, sin cambios). |
 | Escala (`distance_tiers`) corrupta o ausente | Cobra zona (fail-open), sin romper checkout. |
 | Activar `distance_pricing_enabled` sin origen pineado | 400 (`assertDistanceOriginPinned`). |
 | Tienda quiere cubrir "más lejos" | Configurar un tramo abierto (`to_km: null`), no pedir tolerancia. |
+| Falta `address_line1` en el objeto de dirección pasado a cotizar/confirmar | `resolveBuyerCoords` no puede geocodificar — mismo resultado que "sin coords del comprador" (regla 6). |
 
 ## Gotchas
 
@@ -234,14 +360,34 @@ persistido deben producir la MISMA llave de caché.
   pero el comprador tarda y la geometría de ruteo cambia levemente (redespliegue del
   proveedor, caché expirada), la confirmación puede rechazar una tarifa que sí se había
   mostrado. Es el trade-off consciente de la regla 1: rechazo estricto sobre tolerancia oculta.
+- **No confundir "sin coords del comprador" (regla 6, rechaza) con "sin coords de origen o motor
+  de ruteo caído" (regla 3, degrada a zona)** — son ramas DISTINTAS en
+  `resolveConfirmShippingCost` y en `resolveQuoteDistances`, con razones de negocio opuestas (no
+  sabemos dónde entregar vs. problema de infraestructura nuestro). Un refactor que las colapse en
+  un solo fail-open reintroduciría silenciosamente la degradación a zona que el owner pidió
+  eliminar el 2026-09-27.
+- **`resolveBuyerCoords` requiere `address_line1` explícito** en el objeto de dirección — un
+  objeto de cotización armado a mano que solo pasa `latitude`/`longitude` (sin fallback de texto)
+  pierde la capacidad de geocodificar cuando esas coords vienen vacías, cayendo directo en la
+  regla 6 por un campo omitido, no por una dirección realmente irresoluble.
+- **El `bias` pasado a `resolveBuyerCoords` debe ser el MISMO en cotizador y confirmación** (el
+  origen del primer método candidato en la cotización, el origen del método YA ELEGIDO en la
+  confirmación) — de lo contrario la llave de caché de `GeocodingService.forward` puede diferir
+  (ver `vendix-address-geocoding`, `bias` en la llave de caché solo sin `city`/`municipality_code`)
+  y cotización↔confirmación medirían desde puntos distintos, reabriendo el problema que la regla
+  2 existe para evitar.
 
 ## Related Skills
 
 - `vendix-ecommerce-checkout` — flujo de checkout completo (normal + WhatsApp);
   `resolveConfirmShippingCost` es un paso más del recálculo de totales en servidor.
 - `vendix-address-geocoding` — de dónde salen las coords del comprador (pin del mapa /
-  forward-geocode) y las del snapshot de dirección de la orden.
+  forward-geocode), el contrato de precisión (`GeocodePrecision`/`source`/`label`), el cascade
+  completo que consume `resolveBuyerCoords`, y las reglas de UX frontend (bloqueo de Continuar,
+  badge de precisión) que este cambio de negocio activó para envío a domicilio.
 - `vendix-error-handling` — `VendixHttpException` + `ErrorCodes` (`ECOM_CHECKOUT_003`).
 - `vendix-validation` — patrón de DTO + validador `class-validator` custom
   (`IsValidDistanceTiers`).
 - `vendix-backend-api` — convenciones de endpoints/servicios NestJS usadas en `shipping/*`.
+- `vendix-redis-quota` — patrón INCR+EXPIRE que también usa el tope mensual del fallback Google
+  de `vendix-address-geocoding` (mismo tipo de contador periódico).

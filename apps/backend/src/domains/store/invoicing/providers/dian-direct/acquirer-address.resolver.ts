@@ -17,25 +17,50 @@ import { DianAcquirerAddressSource } from './interfaces/dian-config.interface';
  *     ACEPTADO que afirma un municipio que nadie verificó. No se corrige: se
  *     anula con nota crédito y se reemite, gastando dos consecutivos.
  *  2. **Encallar.** Bloquear la emisión porque falta un dato que el negocio
- *     conoce por otra vía —el cliente sí tiene dirección de envío, o la venta
- *     ocurrió en el mostrador de la tienda— deja al comerciante sin poder
- *     facturar por un vacío que el sistema podía llenar con un dato REAL.
+ *     conoce por otra vía —el cliente sí tiene dirección de envío— deja al
+ *     comerciante sin poder facturar por un vacío que el sistema podía llenar
+ *     con un dato REAL.
  *
- * La salida no es elegir entre las dos: es agotar los domicilios reales que el
- * sistema ya conoce antes de rendirse, y DECIR cuál se usó.
+ * La salida no es elegir entre las dos: es agotar los domicilios REALES DEL
+ * CLIENTE que el sistema ya conoce antes de rendirse, y DECIR cuál se usó.
  *
  * ## El orden y por qué es ese
  *
  * ```
  *   1. fiscal   — dirección de facturación del cliente (`billing` / `legal`)
  *   2. shipping — cualquier otra dirección del cliente (envío, casa, trabajo…)
- *   3. store    — dirección fiscal de la tienda/organización que emite
  * ```
  *
- * Los tres son domicilios REALES tomados de la base de datos; ninguno es un
- * literal escrito en el código. El tercero es además el más defendible de los
- * respaldos: en una venta de mostrador la operación ocurrió, literalmente, en
- * el municipio del emisor.
+ * Los dos son domicilios del CLIENTE tomados de la base de datos; ninguno es
+ * un literal escrito en el código.
+ *
+ * ## Por qué el camino de facturación DIAN NO usa un tercer escalón «tienda»
+ *
+ * Task B (2026-09-28) — DIAN Res. 000165/2023 art. 69 dice que la dirección
+ * no es un dato que el emisor pueda exigirle al adquiriente para facturar a
+ * su nombre; declarar la dirección FISCAL DE LA TIENDA como si fuera la del
+ * comprador es tan falso como inventar Bogotá, sólo que con un municipio que
+ * sí existe en la base — la DIAN cruza el municipio del adquiriente y ese
+ * cruce mentiría igual. Hasta `baa9a4294`/Task B este módulo sí caía en la
+ * dirección de la tienda como tercer escalón (`source: 'store'`, anunciado
+ * por log); ESE respaldo es el que no debe volver PARA FACTURACIÓN DIAN.
+ * `DianDirectProvider.resolveAcquirerAddressForDocument` (el único llamador
+ * dentro de este dominio) dejó de pasar `store_address`, así que para él la
+ * cascada nunca produce `'store'`: cuando ningún domicilio REAL del cliente
+ * resuelve, devuelve `null` y el documento se emite SIN grupo de dirección —
+ * el mismo XML que la DIAN ya acepta hoy para Consumidor Final (FAK09-FAK12
+ * son `0..1`).
+ *
+ * El parámetro `store_address` SIGUE existiendo, opcional, sólo por
+ * compatibilidad hacia atrás con llamadores AJENOS a facturación DIAN que ya
+ * reutilizaban esta misma cascada antes de Task B —
+ * `subscriptions/services/subscription-billing-profile.service.ts` y
+ * `superadmin/subscriptions/fiscal/subscription-fiscal.service.ts—`, donde el
+ * "adquiriente" es el tenant y el "emisor" es Vendix (facturación SaaS, no
+ * DIAN). Esos cuatro sitios ya pasaban `store_address: null` de forma
+ * deliberada (uno de ellos lo documenta con el mismo razonamiento de este
+ * módulo), así que restaurar el parámetro no reintroduce el respaldo: sólo
+ * evita un cambio de firma que no le correspondía a ese dominio.
  *
  * ## Por qué la cascada es OBSERVABLE
  *
@@ -118,13 +143,18 @@ export function classifyAcquirerAddressType(
  *   devolvió. El orden interno no manda: primero se agotan todas las fiscales,
  *   después todas las de envío. Que la principal del cliente sea una de envío
  *   no debe ganarle a una fiscal que existe.
- * @param store_address dirección fiscal del emisor, ya normalizada. `null`
- *   cuando el emisor tampoco la tiene — caso en el que la cascada se queda sin
- *   escalones y devuelve `null` para que el llamador lance el error accionable.
+ *
+ * @param store_address OPCIONAL, sólo para compatibilidad hacia atrás con
+ *   llamadores AJENOS a facturación DIAN (ver la nota de arriba). Facturación
+ *   DIAN (`DianDirectProvider`) nunca lo pasa. Cuando SÍ se pasa y es
+ *   emitible por el EMISOR (`canEmitAddress(..., 'emisor')`), es el último
+ *   recurso tras agotar fiscal y envío del cliente.
  *
  * @returns la dirección elegida con su origen, o `null` si NINGÚN candidato es
- *   emitible. Nunca devuelve una dirección fabricada: `null` significa «no lo
- *   sé», y el llamador debe decirlo en voz alta, no rellenarlo.
+ *   emitible — ni del cliente ni (si se pasó) de la tienda. Para facturación
+ *   DIAN, `null` significa «el adquiriente no declaró domicilio», y eso es
+ *   legítimo (DIAN Res. 000165/2023 art. 69): el llamador emite el documento
+ *   sin grupo de dirección en vez de inventar o suplantar un domicilio.
  */
 export function resolveAcquirerAddress(params: {
   candidates: AcquirerAddressCandidate[];
@@ -145,11 +175,11 @@ export function resolveAcquirerAddress(params: {
   if (shipping) return { address: stripType(shipping), source: 'shipping' };
 
   const store = params.store_address;
-  // El emisor se prueba con su PROPIO rol. Un emisor tiene que estar en
-  // Colombia y con municipio Divipola (FAJ09, FAJ16); si su dirección no
-  // aguanta esa prueba no puede ser el respaldo de nadie, y el llamador debe
-  // mandar al usuario a configurarla en vez de emitir con ella.
-  if (store && hasAnyAddressData(store) && UblCommonBuilder.canEmitAddress(store, 'emisor')) {
+  if (
+    store &&
+    hasAnyAddressData(store) &&
+    UblCommonBuilder.canEmitAddress(store, 'emisor')
+  ) {
     return { address: store, source: 'store' };
   }
 

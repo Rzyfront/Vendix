@@ -120,6 +120,13 @@ export interface Invoice {
     id: number;
     first_name?: string | null;
     last_name?: string | null;
+    /**
+     * Razón social, para clientes persona JURIDICA (`first_name`/`last_name`
+     * quedan vacíos en ese caso). AÚN NO seleccionada por el `include` de
+     * `findAll`/`findOne` en `invoicing.service.ts` — ver
+     * `customerDisplayName()` (shared/utils) que ya la lee cuando llegue.
+     */
+    legal_name?: string | null;
     email?: string | null;
     phone?: string | null;
   } | null;

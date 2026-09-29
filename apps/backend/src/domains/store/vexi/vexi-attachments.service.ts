@@ -289,6 +289,37 @@ export class VexiAttachmentsService {
     }));
   }
 
+  /**
+   * Adjuntos recientes para `list_attachments` (conversación y/o usuario
+   * opcionales, 10 últimos). Mudada desde la tool en el paso 15: la tool ya
+   * inyectaba este servicio, así que el cableado no cambia. Lectura pura,
+   * scopeada por tienda.
+   */
+  async listRecentAttachments(params: {
+    conversationId?: number | null;
+    userId?: number | null;
+    take?: number;
+  }): Promise<any[]> {
+    return this.prisma.ai_attachments.findMany({
+      where: {
+        ...(params.conversationId
+          ? { conversation_id: params.conversationId }
+          : {}),
+        ...(params.userId ? { user_id: params.userId } : {}),
+      },
+      select: {
+        id: true,
+        original_name: true,
+        mime_type: true,
+        created_at: true,
+        linked_entity_type: true,
+        linked_entity_id: true,
+      },
+      orderBy: { id: 'desc' },
+      take: params.take ?? 10,
+    });
+  }
+
   // ── Internals ───────────────────────────────────────────────────────────
 
   private async requireRecord(handle: string) {

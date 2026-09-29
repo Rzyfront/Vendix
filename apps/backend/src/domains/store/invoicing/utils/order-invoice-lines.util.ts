@@ -73,6 +73,12 @@ export interface OrderInvoiceLineTaxRow {
 export interface OrderInvoiceLineSource {
   quantity?: unknown;
   total_price?: unknown;
+  /**
+   * `order_items.discount_amount`: descuento de BASE ya aplicado a la línea
+   * (contrato nuevo, POS). `null`/ausente en todas las líneas = contrato LEGADO
+   * (el descuento de la orden es bruto y se reparte aquí).
+   */
+  discount_amount?: unknown;
   tax_amount_item?: unknown;
   weight?: unknown;
   price_unit_quantity?: unknown;
@@ -297,6 +303,46 @@ export function projectOrderInvoiceLines(
     };
   };
   const lines = items.map(unchanged);
+
+  // --- Contrato NUEVO: el descuento ya viene aplicado por línea --------------
+  // Si alguna línea trae `discount_amount` no nulo, el descuento es de BASE y
+  // `order_item_taxes` ya salió post-descuento: la base neta es
+  // `total_price − discount_amount` y el impuesto es el persistido. NO se
+  // reparte `orders.discount_amount` otra vez. Una línea con NULL dentro de una
+  // orden del contrato nuevo cuenta como descuento 0.
+  if (items.some((item) => item.discount_amount != null)) {
+    let allocated = ZERO;
+    const applied = items.map((item, index) => {
+      const total_price = dec(item.total_price);
+      const d = dec(item.discount_amount);
+      if (d.isNegative() || d.greaterThan(total_price)) {
+        return {
+          lines,
+          allocated_discount: ZERO,
+          error: {
+            code: 'discount_exceeds_lines' as const,
+            discount: d.toFixed(2),
+            eligible_gross: total_price.toFixed(2),
+          },
+        } as OrderInvoiceProjection;
+      }
+      const base = unchanged(item);
+      lines[index] = d.isZero()
+        ? base
+        : {
+            ...base,
+            reason: 'order_discount',
+            base: total_price.minus(d),
+            discount: d,
+            order_discount_share: d,
+          };
+      allocated = allocated.plus(d);
+      return null;
+    });
+    const failed = applied.find((r) => r !== null);
+    if (failed) return failed;
+    return { lines, allocated_discount: allocated };
+  }
 
   // --- Reparto del descuento de orden ---------------------------------------
   const discount = dec(order_discount_amount);

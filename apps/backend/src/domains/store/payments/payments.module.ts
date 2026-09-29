@@ -1,4 +1,6 @@
 import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createPaymentTools } from '../../../ai-engine/tools/domains/payments.tools';
 import { KitchenFireModule } from '../kitchen-fire/kitchen-fire.module';
 import { PaymentsController } from './payments.controller';
 import { WebhookController } from './webhook.controller';
@@ -153,6 +155,9 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
 })
 export class PaymentsModule implements OnModuleInit {
   constructor(
+    private toolRegistry: AIToolRegistry,
+    private paymentsService: PaymentsService,
+    private storePaymentMethodsService: StorePaymentMethodsService,
     private paymentGateway: PaymentGatewayService,
     private cashProcessor: CashPaymentProcessor,
     private cashOnDeliveryProcessor: CashOnDeliveryPaymentProcessor,
@@ -177,5 +182,16 @@ export class PaymentsModule implements OnModuleInit {
     );
     this.paymentGateway.registerProcessor('wompi', this.wompiProcessor);
     this.paymentGateway.registerProcessor('wallet', this.walletProcessor);
+
+    // O-30..O-32: cobro POS y reembolsos vía `PaymentsService`. Registro
+    // descentralizado: vive aquí (módulo dueño) y no en `AIEngineModule`
+    // para no reintroducir el ciclo DI. `AIToolRegistry` viene del módulo
+    // global, así que no cuesta ningún import.
+    this.toolRegistry.registerMany(
+      createPaymentTools({
+        paymentsService: this.paymentsService,
+        storePaymentMethodsService: this.storePaymentMethodsService,
+      }),
+    );
   }
 }

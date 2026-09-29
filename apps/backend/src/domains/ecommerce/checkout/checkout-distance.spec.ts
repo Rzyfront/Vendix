@@ -4,6 +4,7 @@ import { CheckoutService } from './checkout.service';
 import { CheckoutIdempotencyService } from './checkout-idempotency.service';
 import { StorefrontPriceService } from '../shared/services/storefront-price.service';
 import { ShippingDistanceService } from '../../store/shipping/services/shipping-distance.service';
+import { ShippingCalculatorService } from '../../store/shipping/shipping-calculator.service';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CartService } from '../cart/cart.service';
@@ -118,6 +119,10 @@ describe('CheckoutService - recálculo por distancia al confirmar', () => {
 
     distance = {
       resolveDistanceKm: jest.fn().mockResolvedValue(8.5),
+      // Por defecto no hay geocode de respaldo (specs legacy que ya cubren
+      // "sin coords → zona"); el test de consistencia cotización↔confirmación
+      // sobrescribe esto delegando al `ShippingDistanceService` real.
+      resolveBuyerCoords: jest.fn().mockResolvedValue(null),
     };
 
     prisma = {
@@ -404,17 +409,33 @@ describe('CheckoutService - recálculo por distancia al confirmar', () => {
     expect(result.total).toBe(18000);
   });
 
-  it('sin coords en la dirección cobra precio de zona (5000)', async () => {
+  it('cambio de negocio 2026-09-27: sin coords Y sin poder geocodificar (buyer_geocode_failed) rechaza con 400 ECOM_CHECKOUT_003, YA NO cobra zona', async () => {
+    // Antes del cambio de negocio, esto degradaba a precio de zona (5000).
+    // Ahora: sin coords del comprador y con `resolveBuyerCoords` fallando
+    // (mock por defecto del `beforeEach`), no hay forma honesta de medir el
+    // envío por distancia — se rechaza igual que "fuera de todos los
+    // tramos", con el MISMO error_code (fijado, no solo la clase) para que
+    // un futuro revert accidental a la degradación no pase la prueba con un
+    // código distinto.
     const dto = buildDto();
     delete dto.shipping_address.latitude;
     delete dto.shipping_address.longitude;
 
-    const result: any = await service.checkout(dto);
+    let caught: unknown;
+    try {
+      await service.checkout(dto);
+    } catch (error) {
+      caught = error;
+    }
 
     expect(distance.resolveDistanceKm).not.toHaveBeenCalled();
-    const orderArgs = prisma.orders.create.mock.calls[0][0].data;
-    expect(orderArgs.shipping_cost).toBe(5000);
-    expect(result.total).toBe(15000);
+    expect(distance.resolveBuyerCoords).toHaveBeenCalled();
+    expect(caught).toBeInstanceOf(VendixHttpException);
+    expect((caught as VendixHttpException).errorCode).toBe(
+      'ECOM_CHECKOUT_003',
+    );
+    expect((caught as VendixHttpException).getStatus()).toBe(400);
+    expect(prisma.orders.create).not.toHaveBeenCalled();
   });
 
   it('motor caído cobra precio de zona sin romper el checkout', async () => {
@@ -520,5 +541,92 @@ describe('CheckoutService - recálculo por distancia al confirmar', () => {
     );
     expect((caught as VendixHttpException).getStatus()).toBe(400);
     expect(prisma.orders.create).not.toHaveBeenCalled();
+  });
+
+  it('cotización ≡ confirmación con coords geocodificadas por el backend (mismo tramo)', async () => {
+    // Sin `ShippingDistanceService` de por medio no hay forma de comparar
+    // cotizador↔confirmación: ambos deben delegar al MISMO resolver real
+    // (`resolveBuyerCoords`/`resolveDistanceKm`) para que el geocode cacheado
+    // y el `toCoords` normalizador produzcan la MISMA llave de ruteo.
+    const routingMock = {
+      directions: jest.fn().mockResolvedValue({ distance_m: 8500 }), // 8.5 km
+    };
+    const geocodingMock = {
+      forward: jest.fn().mockResolvedValue({
+        lat: BUYER.latitude,
+        lng: BUYER.longitude,
+        precision: 'exact',
+      }),
+    };
+    const realDistanceService = new ShippingDistanceService(
+      routingMock as any,
+      geocodingMock as any,
+    );
+
+    // Lado CONFIRMACIÓN: el mock inyectado por DI delega al resolver real
+    // para que `CheckoutService.resolveConfirmShippingCost` ejecute el mismo
+    // código de producción (`resolveBuyerCoords`/`resolveDistanceKm`) que el
+    // cotizador de más abajo.
+    distance.resolveBuyerCoords = jest.fn((address: any, bias: any) =>
+      realDistanceService.resolveBuyerCoords(address, bias),
+    );
+    distance.resolveDistanceKm = jest.fn((origin: any, buyer: any) =>
+      realDistanceService.resolveDistanceKm(origin, buyer),
+    );
+
+    const dto = buildDto();
+    delete dto.shipping_address.latitude;
+    delete dto.shipping_address.longitude;
+
+    const confirmResult: any = await service.checkout(dto);
+
+    const orderArgs = prisma.orders.create.mock.calls[0][0].data;
+    expect(orderArgs.shipping_cost).toBe(8000); // tramo [0,10) de TIERS
+    expect(confirmResult.total).toBe(18000);
+
+    // Lado COTIZADOR: mismo `ShippingDistanceService` real (mismo routing +
+    // geocoding mocks), misma dirección sin coords, mismo origen de método
+    // (bias). `resolveQuoteDistances` es privado — se invoca directo, sin
+    // levantar el TestingModule completo de `ShippingCalculatorService`
+    // (fuera del alcance de archivos permitido para este cambio).
+    const calculator = new ShippingCalculatorService(
+      {} as any,
+      {} as any,
+      {} as any,
+      realDistanceService,
+    );
+    const quoteDistances: Map<string, number | null> = await (
+      calculator as any
+    ).resolveQuoteDistances(
+      STORE_ID,
+      [buildRate({ type: 'flat' })],
+      {
+        country_code: 'CO',
+        city: 'Bogotá',
+        state_province: 'Cundinamarca',
+        address_line1: 'Calle 1 # 2-3',
+      },
+    );
+
+    const originKey = `${ORIGIN.latitude},${ORIGIN.longitude}`;
+    expect(quoteDistances.get(originKey)).toBe(8.5);
+    expect(
+      ShippingDistanceService.matchTier(TIERS, quoteDistances.get(originKey)!)
+        ?.price,
+    ).toBe(8000); // mismo tramo que cobró la confirmación
+
+    // Misma dirección normalizada ⇒ mismo forward geocode (cacheable) y
+    // misma llave de ruteo en ambos lados.
+    expect(geocodingMock.forward).toHaveBeenCalledTimes(2);
+    expect(geocodingMock.forward.mock.calls[0]).toEqual(
+      geocodingMock.forward.mock.calls[1],
+    );
+    expect(routingMock.directions).toHaveBeenCalledTimes(2);
+    expect(routingMock.directions.mock.calls[0]).toEqual(
+      routingMock.directions.mock.calls[1],
+    );
+    expect(routingMock.directions).toHaveBeenCalledWith(
+      `${ORIGIN.longitude},${ORIGIN.latitude};${BUYER.longitude},${BUYER.latitude}`,
+    );
   });
 });

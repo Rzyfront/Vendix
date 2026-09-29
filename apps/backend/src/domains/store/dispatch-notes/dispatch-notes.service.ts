@@ -56,7 +56,11 @@ import {
   RouteStopSequenceInput,
 } from '../dispatch-routes/utils/route-stop-calc';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { hasKitchenLinesAwaitingHandoff } from '../orders/order-flow/order-action-policy.util';
+import {
+  kitchenHandoffBlocker,
+  describeKitchenHandoffBlocker,
+} from '../orders/order-flow/order-action-policy.util';
+import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import {
   resolveOrderLineTaxTotal,
   roundMoney2,
@@ -1963,6 +1967,30 @@ export class DispatchNotesService {
   }
 
   /**
+   * Contexto de `create_dispatch_note`: orden + renglones para replicar en el
+   * preview las precondiciones de `createFromOrder` (estado, entrega
+   * inmediata, dirección). Devuelve `null` en vez de lanzar para que la tool
+   * conteste `{error, next_step}`. Misma proyección que la tool leía directa
+   * (paso 15). Lectura pura, scopeada por tienda.
+   */
+  async findOrderForDispatchPlanForAgent(orderId: number): Promise<any> {
+    return this.prisma.orders.findFirst({
+      where: { id: orderId },
+      select: {
+        id: true,
+        order_number: true,
+        state: true,
+        delivery_type: true,
+        shipping_address_snapshot: true,
+        shipping_address_id: true,
+        order_items: {
+          select: { id: true, product_name: true, quantity: true },
+        },
+      },
+    });
+  }
+
+  /**
    * Create a dispatch note (remisión) straight from an order, optionally
    * confirming it and/or attaching it to a route — all in ONE atomic
    * transaction. This is the "atajo de despacho COD" shortcut: a single call
@@ -2004,6 +2032,10 @@ export class DispatchNotesService {
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },
       include: {
+        // H3 fix: the kitchen hand-off guard below needs to know whether
+        // THIS store is currently a restaurant before requiring a
+        // never-fired prepared line to reach the kitchen.
+        stores: { select: { industries: true } },
         order_items: {
           include: {
             products: { select: { product_type: true } },
@@ -2052,8 +2084,20 @@ export class DispatchNotesService {
     const kitchenCandidates = requestedItemIds
       ? order.order_items.filter((item) => requestedItemIds.has(item.id))
       : order.order_items;
-    if (hasKitchenLinesAwaitingHandoff(kitchenCandidates)) {
-      throw new VendixHttpException(ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS);
+    // H3 fix: only require the kitchen hand-off when the store is CURRENTLY
+    // a restaurant — a store that dropped the industry but kept legacy
+    // prepared/skip_kds:false catalog rows must still be able to remisionar
+    // those orders. A line with a real (fired) ticket keeps blocking
+    // regardless of the flag; a `cancelled` ticket blocks with its own
+    // explanatory message instead of the generic one.
+    const kitchenBlocker = kitchenHandoffBlocker(kitchenCandidates, {
+      isRestaurant: storeIsRestaurant((order as any).stores?.industries),
+    });
+    if (kitchenBlocker) {
+      throw new VendixHttpException(
+        ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
+        describeKitchenHandoffBlocker(kitchenBlocker),
+      );
     }
 
     // A dispatch note (remisión) only makes sense for orders that are being
@@ -2074,6 +2118,12 @@ export class DispatchNotesService {
         ErrorCodes.DSP_ORDER_DELIVERY_001,
         `La orden #${order_id} tiene tipo de entrega "${order.delivery_type}", que se entrega en el acto y no requiere remisión. Si necesita envío, corrija el tipo de entrega antes de despacharla.`,
       );
+    }
+
+    // Envío por asignar (checkout por WhatsApp sin ubicación): sin método no
+    // hay con qué despachar ni qué cobrar de envío. Primero se asigna.
+    if (order.delivery_type === 'other' && order.shipping_method_id == null) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
     // Delivery address gate: a remisión needs a place to deliver. The address
@@ -3306,6 +3356,7 @@ export class DispatchNotesService {
         id: true,
         state: true,
         delivery_type: true,
+        shipping_method_id: true,
         dispatch_fulfillment: true,
         dispatch_pool_at: true,
       },
@@ -3351,6 +3402,10 @@ export class DispatchNotesService {
         ErrorCodes.DSP_ORDER_DELIVERY_001,
         `La orden #${order_id} tiene tipo de entrega "${order.delivery_type}", que se entrega en el acto y no va al pool de despacho. Si necesita envío, corrija el tipo de entrega antes de publicarla.`,
       );
+    }
+
+    if (order.delivery_type === 'other' && order.shipping_method_id == null) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
     // Ya remitida al 100% → sólo se rechaza si NO queda nada que un repartidor

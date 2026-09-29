@@ -104,7 +104,10 @@ import { StoreShippingMethod } from '../../../settings/shipping/interfaces/shipp
 import { ShippingRate } from '../../../settings/shipping/interfaces/shipping-zones.interface';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ItemCancellationModalComponent, previewItemCancellation, type ItemCancellationSubmit } from '../../../../../../shared/components';
-import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
+import {
+  OrderPaymentModalComponent,
+  type OrderPendingPaymentPreset,
+} from '../../components/order-payment-modal/order-payment-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
 // Paso 5: reutiliza el modal canónico de clientes (quick/advanced,
 // NATURAL/JURIDICA) para capturar el nuevo titular de la orden.
@@ -117,6 +120,11 @@ import {
 } from '../../../customers/services/customers.service';
 import { CreateCustomerRequest, Customer } from '../../../customers/models/customer.model';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import {
+  VexiUiHost,
+  VexiUiHostRegistry,
+  vexiWhenReady,
+} from '../../../../../../core/services/vexi-ui-host.registry';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../../services/order-ticket.service';
 import { TicketData } from '../../../pos/models/ticket.model';
@@ -244,6 +252,26 @@ export function isCodAwaitingConfirmation(order: Pick<Order, 'payments'> | null 
     (payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY' ||
       payment.store_payment_method?.system_payment_method?.type === 'cash_on_delivery'),
   );
+}
+
+/**
+ * Fase 2 (paso 8) — espejo de `requiresPaymentRegistration` del backend
+ * (`order-action-policy.util.ts`): `pending_payment` con pago `pending` de
+ * confirmación manual (todo lo que no es wallet/wompi ni ON_DELIVERY) o con
+ * saldo parcial por cobrar. El personal REGISTRA por `flow/pay` (monto +
+ * método), nunca confirma con un clic. UI advisory, API authoritative.
+ */
+export function isManualPaymentPending(
+  order: Pick<Order, 'state' | 'payments' | 'remaining_balance'> | null | undefined,
+): boolean {
+  if (!order || order.state !== 'pending_payment') return false;
+  if (Number(order.remaining_balance ?? 0) > 0) return true;
+  return !!order.payments?.some((payment) => {
+    if (!payment || payment.state !== 'pending') return false;
+    const system = payment.store_payment_method?.system_payment_method;
+    if (!system || system.processing_mode === 'ON_DELIVERY') return false;
+    return !['wallet', 'wompi'].includes(system.type ?? '');
+  });
 }
 
 export function isOrderEligibleForSplitCreation(order: Order | null, hasRefunds = false): boolean {
@@ -702,8 +730,51 @@ type RefundState =
 })
 export class OrderDetailsPageComponent {
   private destroyRef = inject(DestroyRef);
+  private vexiHosts = inject(VexiUiHostRegistry);
   orderId: string | null = null;
   order = signal<Order | null>(null);
+
+  // ── Host de Vexi ──────────────────────────────────────────────────────
+  //
+  // Same `orders` module key as the sales list: the two never mount together
+  // (list vs `:id` are sibling routes), so the registry always points at the
+  // screen actually on display. Read-only by choice — payments, refunds and
+  // dispatches on this page go through their own validated flows, and driving
+  // them blind from the chat would bypass the guards the page exists to show.
+  private readonly vexiHostAdapter: VexiUiHost = {
+    vexiModuleKey: 'orders',
+    readScreen: () => {
+      const order = this.order();
+      const label = order
+        ? `Orden ${order.order_number}${order.customer_alias ? ` de ${order.customer_alias}` : ''}`
+        : null;
+      return {
+        module_key: 'orders',
+        title: 'Detalle de orden',
+        visible_count: order?.order_items?.length,
+        selection: label,
+        filters: order ? { state: order.state } : undefined,
+        notes: this.isLoading()
+          ? 'El detalle todavía está cargando.'
+          : order
+            ? `${label} en estado ${order.state}, con ${order.order_items?.length ?? 0} línea(s).`
+            : 'El detalle todavía no cargó la orden.',
+      };
+    },
+    refresh: () => {
+      this.refreshOrder();
+      return { status: 'ok' as const, message: 'Recargué el detalle de la orden.' };
+    },
+    whenReady: () => vexiWhenReady(() => this.isLoading()),
+  };
+  /**
+   * QUI-886 — query params heredados del listado (página + filtros) para el
+   * botón "Volver": se alimentan al sticky header vía `backQueryParams`.
+   * `undefined` (deep-link sin params) = volver al listado limpio.
+   */
+  readonly listReturnQuery = signal<Record<string, string> | undefined>(
+    undefined,
+  );
   /**
    * C.9 CP-pos-exclusive-tax-double-charge — entrada del diccionario de alerta
    * fiscal para el `fiscal_alert_code` de la orden; `null` = sin banner. El
@@ -858,6 +929,8 @@ export class OrderDetailsPageComponent {
 
   // Flow modal visibility signals
   showPayModal = signal(false);
+  /** Último error del cobro del modal; el modal lo mapea a mensaje inline. */
+  payModalError = signal<unknown>(null);
   showShipModal = signal(false);
   showDeliverModal = signal(false);
   showCancelModal = signal(false);
@@ -929,6 +1002,8 @@ export class OrderDetailsPageComponent {
    * el operador elige un existente o salta al flujo crear actual.
    */
   showTitularSearchModal = signal(false);
+  /** Prellenado (RUES / documento digitado) para el alta de titular. */
+  changeCustomerInitialValues = signal<Partial<CreateCustomerRequest> | null>(null);
   /**
    * Dirección capturada en el modal (`addressData`, solo crear-mode). Se
    * persiste contra el cliente resuelto antes del PATCH titular; se limpia
@@ -1081,12 +1156,51 @@ export class OrderDetailsPageComponent {
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
   readonly isCodPending = computed(() => isCodAwaitingConfirmation(this.order()));
+  /** Fase 2 (paso 8): cobro manual pendiente → "Registrar pago" por `flow/pay`. */
+  readonly isManualPayPending = computed(() => isManualPaymentPending(this.order()));
   readonly codActualMethods = computed(() => this.paymentMethods().filter((method) => {
     const catalog = method.system_payment_method as { type?: string; processing_mode?: string } | null;
     if (!catalog || catalog.processing_mode === 'ON_DELIVERY') return false;
     return ['cash', 'bank_transfer', 'voucher'].includes(catalog.type ?? '') ||
       (catalog.type === 'card' && catalog.processing_mode === 'DIRECT');
   }));
+  /**
+   * Pago online manual `pending` que "Registrar pago" confirma en sitio (el
+   * backend lo pasa a `succeeded` en vez de anularlo): su método y la cuenta
+   * bancaria a la que el cliente transfirió se preseleccionan en el modal.
+   * Contra entrega no aplica (su marcador se anula y se crea el pago real).
+   */
+  readonly manualPendingPaymentPreset = computed<OrderPendingPaymentPreset | null>(() => {
+    if (!this.isManualPayPending() || this.isCodPending()) return null;
+    const pending = this.order()?.payments?.find((payment) => {
+      if (payment.state !== 'pending') return false;
+      const system = payment.store_payment_method?.system_payment_method as
+        | { type?: string; processing_mode?: string }
+        | null
+        | undefined;
+      if (!system || system.processing_mode === 'ON_DELIVERY') return false;
+      return !['wallet', 'wompi'].includes(system.type ?? '');
+    });
+    if (!pending) return null;
+    const rawMethodId = pending.store_payment_method_id ?? pending.store_payment_method?.id ?? null;
+    const methodId = rawMethodId != null ? Number(rawMethodId) : null;
+    const bankAccountId = (pending as { bank_account_id?: number | null }).bank_account_id ?? null;
+    return { store_payment_method_id: methodId, bank_account_id: bankAccountId };
+  });
+  /**
+   * Métodos del modal de cobro. En contra entrega / registro manual son los
+   * medios realmente recibidos (`codActualMethods`) MÁS el método original del
+   * pago online pendiente, aunque el filtro lo deje fuera, para poder
+   * registrarlo tal como el cliente lo pagó.
+   */
+  readonly payModalMethods = computed<StorePaymentMethod[]>(() => {
+    if (!this.isCodPending() && !this.isManualPayPending()) return this.paymentMethods();
+    const base = this.codActualMethods();
+    const originalId = this.manualPendingPaymentPreset()?.store_payment_method_id;
+    if (originalId == null || base.some((method) => Number(method.id) === originalId)) return base;
+    const original = this.paymentMethods().find((method) => Number(method.id) === originalId);
+    return original ? [...base, original] : base;
+  });
   readonly canCreateFinancialSplit = computed(() => {
     return isOrderEligibleForSplitCreation(this.order(), this.orderRefunds().length > 0) &&
       (this.hasNamedPermission('store:table_sessions:update') ||
@@ -1108,6 +1222,13 @@ export class OrderDetailsPageComponent {
 
   // Fast-track
   showFastTrackModal = signal(false);
+  /**
+   * QUI-885 — apertura explícita de la configuración de cuenta dividida. El
+   * panel `app-split-accounts-panel` ya NO se renderiza desplegado solo por
+   * ser la orden elegible: solo aparece con reparto activo o cuando el
+   * operador pulsa "Dividir cuenta". Se resetea al cambiar de orden.
+   */
+  readonly showSplitConfig = signal(false);
   fastTrackEnabled = signal(false);
   fastTrackForm!: FormGroup;
 
@@ -1567,12 +1688,19 @@ export class OrderDetailsPageComponent {
     // TODO el arreglo de botones; ahora el backend ya decide qué botón vive
     // habilitado/deshabilitado, esto solo avisa).
     if (this.blockedByMissingShipping()) {
+      // checkout-whatsapp-location-fallback: una orden 'other' sin metodo de
+      // envio casi siempre viene del fallback de WhatsApp (el comprador no
+      // pudo ubicarse en el mapa) en vez de un gate generico de envio.
+      const pendingFromWhatsappFallback =
+        order.delivery_type === 'other' && !order.shipping_method_id;
       alerts.push({
         id: 'shipping-required-info',
         type: 'alert',
         color: 'warning',
         icon: 'alert-triangle',
-        label: 'Asigna un metodo de envio para continuar con el flujo.',
+        label: pendingFromWhatsappFallback
+          ? 'Envío por asignar — el cliente no pudo ubicarse en el mapa. Asigna método y tarifa antes de cobrar o despachar.'
+          : 'Asigna un metodo de envio para continuar con el flujo.',
       } as OrderActionConfig);
     }
 
@@ -1622,7 +1750,21 @@ export class OrderDetailsPageComponent {
       } as OrderActionConfig);
     }
 
-    return [...alerts, ...buildOrderActionButtons(order)];
+    const buttons = [...buildOrderActionButtons(order)];
+
+    // QUI-885 — "Dividir cuenta" explícito: solo cuando la orden NO tiene
+    // reparto activo pero sí es elegible. El panel ya no se abre solo.
+    if (!order.active_financial_split_id && this.canCreateFinancialSplit()) {
+      buttons.push({
+        id: 'split-account',
+        label: 'Dividir cuenta',
+        icon: 'split',
+        variant: 'secondary',
+        enabled: true,
+      } as OrderActionConfig);
+    }
+
+    return [...alerts, ...buttons];
   });
 
   /**
@@ -2025,6 +2167,11 @@ export class OrderDetailsPageComponent {
   private readonly settingsFacade = inject(StoreSettingsFacade);
 
   constructor() {
+    this.vexiHosts.register(this.vexiHostAdapter);
+    this.destroyRef.onDestroy(() =>
+      this.vexiHosts.unregister(this.vexiHostAdapter),
+    );
+
     this.currencySymbol = this.currencyService.currencySymbol;
     this.isPrivilegedUser.set(this.authFacade.isAdmin() || this.authFacade.isOwner());
 
@@ -2158,6 +2305,17 @@ export class OrderDetailsPageComponent {
 
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       this.orderId = params.get('id');
+      // QUI-885: al cambiar de orden se cierra la configuración de reparto.
+      this.showSplitConfig.set(false);
+      // QUI-886: se capturan los query params que el listado preservó en la
+      // URL del detalle para devolverlos en "Volver".
+      const qp = this.route.snapshot.queryParamMap;
+      const back: Record<string, string> = {};
+      for (const key of qp.keys) {
+        const value = qp.get(key);
+        if (value != null) back[key] = value;
+      }
+      this.listReturnQuery.set(Object.keys(back).length > 0 ? back : undefined);
       if (this.orderId) {
         // Carril B - B3: abre el SSE del detalle filtrado por esta orden.
         // Idempotente: si navegamos a otra orden, connect() cierra la
@@ -2426,6 +2584,10 @@ export class OrderDetailsPageComponent {
       case 'credit-payment':
         this.openPayModal();
         break;
+      case 'split-account':
+        // QUI-885: abre la configuración de reparto bajo demanda.
+        this.showSplitConfig.set(true);
+        break;
       case 'generate-dispatch':
         this.openDispatchModal();
         break;
@@ -2446,6 +2608,7 @@ export class OrderDetailsPageComponent {
       this.loadPaymentMethods();
     }
     this.preSelectedInstallment.set(null);
+    this.payModalError.set(null);
     this.showPayModal.set(true);
   }
 
@@ -2485,11 +2648,15 @@ export class OrderDetailsPageComponent {
 
     const isCredit = this.isCreditOrder();
 
-    const dto: PayOrderDto = {
+    const dto: PayOrderDto & { bank_account_id?: number } = {
       store_payment_method_id: submit.storePaymentMethodId,
       payment_type: submit.methodType === 'wompi' ? 'online' : 'direct',
       ...(submit.amountReceived != null ? { amount_received: submit.amountReceived } : {}),
       ...(submit.reference ? { payment_reference: submit.reference } : {}),
+      // Cuenta bancaria del cobro escalar (transferencia): el backend la valida
+      // y la persiste; en el registro manual es la cuenta preseleccionada del
+      // pago online (o la que el cajero cambió).
+      ...(submit.bankAccountId != null ? { bank_account_id: submit.bankAccountId } : {}),
     };
 
     // Cobro multimétodo de contado: con 2+ tramos se envía `payments[]` y se
@@ -2515,10 +2682,15 @@ export class OrderDetailsPageComponent {
 
     // Credit abono: carry the amount (override ?? remaining balance) and, when the
     // operator picked one, the target installment. `flow/pay` ignores `amount`
-    // (it charges the full order total), so only attach it for the credit path.
+    // (it charges the full order total), so only attach it for the credit path…
     if (isCredit) {
       dto.amount = submit.amount;
       if (submit.installmentId != null) dto.installment_id = submit.installmentId;
+    } else if (this.isManualPayPending()) {
+      // …and for the Fase 2 (paso 8) manual-registration lane, where `flow/pay`
+      // charges `amount`: partial when below the balance, exact otherwise.
+      // Every other contado lane keeps omitting it (partial not allowed there).
+      dto.amount = submit.amount;
     }
 
     // Propina (T3). El collector la trae ya resuelta a monto en `tip`, mas los
@@ -2555,6 +2727,7 @@ export class OrderDetailsPageComponent {
         },
         error: (err: unknown) => {
           this.isProcessingAction.set(false);
+          this.payModalError.set(err);
           // `flowPayOrder`/`flowCreditPayment` lanzan `buildApiError`
           // (store-orders.service): un `Error` con el `errorCode` de
           // superficie en camelCase y el `HttpErrorResponse` crudo en
@@ -3137,7 +3310,10 @@ export class OrderDetailsPageComponent {
   confirmPayment(): void {
     if (!this.orderId) return;
 
-    if (this.isCodPending()) {
+    // Fase 2 (paso 8): un pago manual nunca se confirma con un clic — se
+    // REGISTRA (monto + método) por el modal de cobro (`flow/pay`). El backend
+    // rechaza al personal en `confirm-payment` con 409 en este caso.
+    if (this.isCodPending() || this.isManualPayPending()) {
       this.openPayModal();
       return;
     }
@@ -3952,10 +4128,29 @@ export class OrderDetailsPageComponent {
       this.dispatchNotes().find((n) => !!n.courier_name?.trim())
         ?.courier_name?.trim() || undefined;
 
+    // QUI-889 (rev 868) — instante real del despacho: última remisión no
+    // anulada por `confirmed_at` (luego su creación). NUNCA `emission_date`
+    // (solo-fecha: imprimiría el día anterior 7 p. m. en Bogotá). Sin
+    // despacho, hora de impresión (ahora), igual que el tiquete backend.
+    const instantOf = (n: { confirmed_at?: string; created_at: string }) =>
+      new Date(n.confirmed_at ?? n.created_at).getTime();
+    const latestDispatch = this.dispatchNotes()
+      .filter((n) => n.status !== 'draft' && n.status !== 'voided')
+      .sort((a, b) => instantOf(b) - instantOf(a))[0];
+    const dispatchAt = latestDispatch
+      ? new Date(
+          latestDispatch.confirmed_at ?? latestDispatch.created_at,
+        )
+      : null;
+
     return {
       orderId: order.id,
       orderNumber: order.order_number,
-      dateFormatted: this.formatDate(order.created_at),
+      dateFormatted: this.formatDate(
+        !dispatchAt || Number.isNaN(dispatchAt.getTime())
+          ? new Date().toISOString()
+          : dispatchAt.toISOString(),
+      ),
       storeName,
       customer: {
         name: customerName,
@@ -4198,6 +4393,7 @@ export class OrderDetailsPageComponent {
       this.loadPaymentMethods();
     }
     this.preSelectedInstallment.set(installment);
+    this.payModalError.set(null);
     this.showPayModal.set(true);
   }
 
@@ -4575,30 +4771,21 @@ export class OrderDetailsPageComponent {
   /**
    * Punto de entrada de "Cambiar cliente".
    *
-   * PRE-CHECK (espejo del guard backend `ORD_EDIT_NOT_ALLOWED_001` en
-   * `orders.service.ts`): el titular cambia en created/draft/pending_payment/
-   * processing/pending_delivery. En shipped/delivered/finished/cancelled/
-   * refunded se muestra el dialog informativo y no se abre ningún modal.
-   * Release-853 paso 10: también se bloquea si la orden tiene una
-   * `sales_invoice` vigente (espejo de `ORD_TITULAR_INVOICED_001`); el
-   * borrador sí deja pasar porque el backend le propaga el titular.
-   * En estado editable se abre el buscar-primero; el `app-customer-modal`
-   * en modo crear solo aparece vía "Crear cliente nuevo".
+   * Regla vigente (release-titular-any-state): el titular se puede cambiar
+   * en CUALQUIER estado de la orden (incluidos shipped/delivered/finished/
+   * cancelled/refunded) — ya no hay gate de estado. El único bloqueo es
+   * fiscal: si la orden tiene un documento electrónico TRANSMITIDO a la DIAN
+   * (`sent`/`accepted`) se muestra el dialog informativo (espejo de
+   * `ORD_TITULAR_INVOICED_001`) y no se abre ningún modal. Documentos no
+   * transmitidos (draft/validated/rejected) no bloquean aquí — el backend
+   * decide caso a caso (draft: propaga; validated/rejected: 409 con mensaje
+   * "en proceso"). En estado permitido se abre el buscar-primero; el
+   * `app-customer-modal` en modo crear solo aparece vía "Crear cliente
+   * nuevo".
    */
   async openChangeCustomer(): Promise<void> {
     const order = this.order();
     if (!order) return;
-    const TITULAR_LOCKED_STATES: readonly OrderState[] = [
-      'shipped',
-      'delivered',
-      'finished',
-      'cancelled',
-      'refunded',
-    ];
-    if (TITULAR_LOCKED_STATES.includes(order.state)) {
-      await this.notifyTitularLocked();
-      return;
-    }
     if (this.hasActiveSalesInvoice()) {
       await this.notifyTitularLocked('ORD_TITULAR_INVOICED_001');
       return;
@@ -4608,34 +4795,43 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * Release-854 follow-up — espejo local del gate backend
-   * `ORD_TITULAR_INVOICED_001`: decide con `active_sales_invoice` (calculado
-   * por el backend con el filtro de la guarda) en lugar de `invoices[0]`,
-   * que puede ser una NC aunque exista una `sales_invoice` aceptada. El
-   * borrador sí deja pasar porque el backend le propaga el titular.
-   * `orderInvoice` y la tarjeta de factura no cambian: siguen mostrando
-   * `invoices[0]`.
+   * Espejo local del gate backend `ORD_TITULAR_INVOICED_001`: decide con
+   * `active_sales_invoice` (calculado por el backend con el filtro de la
+   * guarda — incluye `sales_invoice`/`export_invoice`/
+   * `pos_equivalent_document`) en lugar de `invoices[0]`, que puede ser una
+   * NC aunque exista una factura aceptada. Solo bloquea si el documento fue
+   * TRANSMITIDO a la DIAN (`sent`/`accepted`); `draft`/`validated`/
+   * `rejected` no bloquean el pre-check local (el backend decide si
+   * propaga o responde 409 "en proceso"). `orderInvoice` y la tarjeta de
+   * factura no cambian: siguen mostrando `invoices[0]`.
    */
   private hasActiveSalesInvoice(): boolean {
     const active = this.order()?.active_sales_invoice;
     if (!active) return false;
-    return active.status !== 'draft';
+    return active.status === 'sent' || active.status === 'accepted';
   }
 
   /**
    * Dialog informativo (español) del titular bloqueado. Se usa tanto en el
    * pre-check local como al mapear 409/403 del PATCH titular.
    *
-   * Release-853 regresión (paso 10): recibe opcionalmente el `errorCode` que
-   * disparó el bloqueo para diferenciar el copy del caso factura vigente
-   * (`ORD_TITULAR_INVOICED_001`) del genérico de estado/tienda ajena.
+   * Regla vigente (release-titular-any-state): ya no hay gate de estado, así
+   * que se retiró la frase "orden en curso o finalizada" (dejó de aplicar).
+   * Copy por código: factura vigente (`ORD_TITULAR_INVOICED_001`), tienda
+   * ajena (`ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`) y un genérico neutro para
+   * cualquier otro código defensivo (p. ej. `ORD_EDIT_NOT_ALLOWED_001`, que
+   * el backend ya no lanza por titular pero se conserva reconocido por
+   * compatibilidad — ver `isTitularLockedError`).
    */
   private notifyTitularLocked(code?: string | null): Promise<boolean> {
     const message =
       code === 'ORD_TITULAR_INVOICED_001'
         ? 'La orden ya tiene una factura emitida; anúlala o emite una nota crédito para cambiar el titular.'
-        : 'Esta orden ya está en curso o finalizada, por lo que su titular no puede cambiarse. ' +
-          'El titular queda fijado al avanzar la orden y es inmutable por trazabilidad fiscal.';
+        : code === 'ORD_TITULAR_OPEN_RECEIVABLE_001'
+          ? 'La orden tiene saldo pendiente en cartera a nombre del cliente actual; salda o anula la cuenta por cobrar para cambiar el titular.'
+          : code === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001'
+            ? 'El cliente seleccionado pertenece a otra tienda; elige un cliente de esta tienda.'
+            : 'No se pudo cambiar el titular de esta orden.';
     return this.dialogService.confirm({
       title: 'No se puede cambiar el titular',
       message,
@@ -4646,12 +4842,16 @@ export class OrderDetailsPageComponent {
 
   /**
    * Devuelve el `errorCode` cuando el error del PATCH titular es uno de los
-   * tres bloqueos de titular: estado (409 `ORD_EDIT_NOT_ALLOWED_001`), tienda
-   * ajena (403 `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`) o factura vigente (409
-   * `ORD_TITULAR_INVOICED_001`); `null` en cualquier otro caso. Release-853
-   * paso 10: decide SOLO por `errorCode` — el fallback por status HTTP metía
-   * en el dialog de bloqueo cualquier 409/403 ajeno al titular (p. ej. un
-   * split financiero activo).
+   * bloqueos de titular reconocidos: tienda ajena (403
+   * `ORD_EDIT_CUSTOMER_STORE_MISMATCH_001`) o factura vigente (409
+   * `ORD_TITULAR_INVOICED_001`); `null` en cualquier otro caso.
+   * `ORD_EDIT_NOT_ALLOWED_001` se sigue reconociendo de forma defensiva
+   * (compatibilidad hacia atrás / otros llamadores del PATCH), pero el
+   * backend ya no lo lanza por razón de titular — el gate de estado se
+   * eliminó (regla vigente: el titular cambia en cualquier estado). Decide
+   * SOLO por `errorCode` — el fallback por status HTTP metía en el dialog de
+   * bloqueo cualquier 409/403 ajeno al titular (p. ej. un split financiero
+   * activo).
    *
    * `StoreOrdersService.updateOrderCustomer` lanza `buildApiError(error)`: un
    * `Error` con `errorCode` en camelCase y el `HttpErrorResponse` original en
@@ -4668,7 +4868,8 @@ export class OrderDetailsPageComponent {
       parseApiError((error as { cause?: unknown } | null)?.cause ?? error).errorCode;
     return code === 'ORD_EDIT_NOT_ALLOWED_001' ||
       code === 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001' ||
-      code === 'ORD_TITULAR_INVOICED_001'
+      code === 'ORD_TITULAR_INVOICED_001' ||
+      code === 'ORD_TITULAR_OPEN_RECEIVABLE_001'
       ? code
       : null;
   }
@@ -4697,7 +4898,8 @@ export class OrderDetailsPageComponent {
    * "Crear cliente nuevo" desde el buscar-primero: conserva el flujo actual
    * (lookup → resolve → PATCH en `onChangeCustomerSave`).
    */
-  onTitularSearchCreateNew(): void {
+  onTitularSearchCreateNew(prefill?: Partial<CreateCustomerRequest> | void): void {
+    this.changeCustomerInitialValues.set((prefill as Partial<CreateCustomerRequest> | undefined) ?? null);
     this.showTitularSearchModal.set(false);
     this.pendingChangeCustomerAddress.set(null);
     this.showChangeCustomerModal.set(true);
@@ -4729,6 +4931,7 @@ export class OrderDetailsPageComponent {
 
   closeChangeCustomer(): void {
     this.showChangeCustomerModal.set(false);
+    this.changeCustomerInitialValues.set(null);
     this.pendingChangeCustomerAddress.set(null);
   }
 
@@ -4786,6 +4989,7 @@ export class OrderDetailsPageComponent {
         next: () => {
           this.toastService.success('Titular de la orden actualizado');
           this.showChangeCustomerModal.set(false);
+          this.changeCustomerInitialValues.set(null);
           this.pendingChangeCustomerAddress.set(null);
           this.refreshOrder();
         },

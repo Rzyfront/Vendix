@@ -534,6 +534,7 @@ export class WebhookHandlerService {
         select: {
           total_price: true,
           // Descuento de orden: ver `buildOrderSaleTaxPayload`.
+          discount_amount: true,
           quantity: true,
           tax_amount_item: true,
           weight: true,

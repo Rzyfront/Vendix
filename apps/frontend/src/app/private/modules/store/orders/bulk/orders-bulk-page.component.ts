@@ -80,6 +80,7 @@ import { StoreOrdersService } from '../services/store-orders.service';
 import { OrdersBulkService } from './orders-bulk.service';
 import { OrdersBulkPrintService } from './orders-bulk-print.service';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import { customerDisplayName } from '../../../../../shared/utils/customer-display-name.util';
 import {
   MAX_BULK_ORDERS_IDS,
   type BulkOrderTransitionTarget,
@@ -651,8 +652,10 @@ export class OrdersBulkPageComponent {
                     normalizedOrders.map((order: any) => ({
                       ...order,
                       customer_name: order.customer_id
-                        ? `${customerMap.get(order.customer_id)?.first_name || ''} ${customerMap.get(order.customer_id)?.last_name || ''}`.trim() ||
-                          'N/A'
+                        ? customerDisplayName(
+                            customerMap.get(order.customer_id),
+                            'N/A',
+                          )
                         : 'Consumidor Final',
                     })),
                   );

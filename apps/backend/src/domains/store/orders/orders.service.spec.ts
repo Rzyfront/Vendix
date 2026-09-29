@@ -21,6 +21,7 @@ import { validateSync } from 'class-validator';
 import { Prisma, order_channel_enum, order_delivery_type_enum, order_state_enum } from '@prisma/client';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
+import { OrderQueryDto } from './dto/order-query.dto';
 
 /**
  * Fila de `products.findMany` con la forma que lee
@@ -567,6 +568,151 @@ describe('OrdersService', () => {
         notIn: ['direct_delivery', 'dine_in'],
       });
       expect(lastWhere().dispatch_fulfillment).toEqual({ not: 'full' });
+    });
+  });
+
+  /**
+   * Paso 3 (dashboard-sales-filters-pin-multiselect-sse) — Estado, Canal y
+   * Estado de Pago aceptan uno o varios valores. El DTO normaliza a array
+   * (params repetidos o coma) y `findAll` usa `in` para arrays e igualdad
+   * exacta para single, bajo el auto-scope de tienda existente.
+   */
+  describe('findAll — filtros multi-valor (paso 3)', () => {
+    beforeEach(() => {
+      mockPrismaService.orders.findMany.mockResolvedValue([]);
+      mockPrismaService.orders.count.mockResolvedValue(0);
+    });
+
+    const lastWhere = () =>
+      mockPrismaService.orders.findMany.mock.calls[0][0].where;
+
+    it('status array usa state: { in }', async () => {
+      await service.findAll({ status: ['processing', 'delivered'] } as any);
+
+      expect(lastWhere().state).toEqual({ in: ['processing', 'delivered'] });
+    });
+
+    it('channel array usa channel: { in }', async () => {
+      await service.findAll({ channel: ['whatsapp', 'ecommerce'] } as any);
+
+      expect(lastWhere().channel).toEqual({ in: ['whatsapp', 'ecommerce'] });
+    });
+
+    it('payment_status array usa payments.some.state: { in } (sin método)', async () => {
+      await service.findAll({
+        payment_status: ['succeeded', 'captured'],
+      } as any);
+
+      expect(lastWhere()).toEqual(
+        expect.objectContaining({
+          payments: { some: { state: { in: ['succeeded', 'captured'] } } },
+        }),
+      );
+    });
+
+    it('payment_status array usa { in } también en la rama con payment_method_id', async () => {
+      await service.findAll({
+        payment_method_id: 17,
+        payment_status: ['pending', 'failed'],
+      } as any);
+
+      expect(lastWhere().AND).toEqual([
+        { payments: { some: {
+          store_payment_method_id: 17,
+          state: { in: ['succeeded', 'captured', 'partially_refunded', 'refunded'] },
+        } } },
+        { payments: { some: { state: { in: ['pending', 'failed'] } } } },
+      ]);
+    });
+
+    it('array de un elemento usa in (equivalente a igualdad)', async () => {
+      await service.findAll({ status: ['finished'] } as any);
+
+      expect(lastWhere().state).toEqual({ in: ['finished'] });
+    });
+
+    it('compat single: strings conservan igualdad exacta', async () => {
+      await service.findAll({
+        status: 'finished',
+        channel: 'pos',
+        payment_status: 'succeeded',
+      } as any);
+
+      const where = lastWhere();
+      expect(where.state).toBe('finished');
+      expect(where.channel).toBe('pos');
+      expect(where.payments).toEqual({ some: { state: 'succeeded' } });
+    });
+
+    it('compat single: payment_status string en la rama con payment_method_id conserva igualdad', async () => {
+      await service.findAll({
+        payment_method_id: 17,
+        payment_status: 'pending',
+      } as any);
+
+      expect(lastWhere().AND[1]).toEqual({
+        payments: { some: { state: 'pending' } },
+      });
+    });
+
+    it('la guarda status && !dispatchable sobrevive con arrays (dispatchable gana)', async () => {
+      await service.findAll({
+        status: ['finished'],
+        dispatchable: true,
+      } as any);
+
+      expect(lastWhere().state).toEqual({
+        in: ['processing', 'pending_payment'],
+      });
+    });
+  });
+
+  describe('OrderQueryDto — normalización multi-valor (paso 3)', () => {
+    // page/limit como strings: replica el query-string real (el DTO los
+    // parsea a int) para que validateSync no reporte ruido ajeno al filtro.
+    const toDto = (query: Record<string, unknown>) =>
+      plainToInstance(OrderQueryDto, { page: '1', limit: '10', ...query });
+
+    it('string único → array de uno y valida', () => {
+      const dto = toDto({ status: 'finished' });
+
+      expect(dto.status).toEqual(['finished']);
+      expect(validateSync(dto)).toEqual([]);
+    });
+
+    it('string con coma → split+trim sin vacíos y valida', () => {
+      const dto = toDto({ channel: 'whatsapp, ecommerce ,,pos ' });
+
+      expect(dto.channel).toEqual(['whatsapp', 'ecommerce', 'pos']);
+      expect(validateSync(dto)).toEqual([]);
+    });
+
+    it('params repetidos (array) → tal cual y valida', () => {
+      const dto = toDto({ payment_status: ['succeeded', 'captured'] });
+
+      expect(dto.payment_status).toEqual(['succeeded', 'captured']);
+      expect(validateSync(dto)).toEqual([]);
+    });
+
+    it('ausente y string vacío → undefined sin errores', () => {
+      const missing = toDto({});
+
+      expect(missing.status).toBeUndefined();
+
+      const empty = toDto({ status: '', channel: '   ' });
+
+      expect(empty.status).toBeUndefined();
+      expect(empty.channel).toBeUndefined();
+      expect(validateSync(empty)).toEqual([]);
+    });
+
+    it('rechaza un valor fuera del enum dentro del array', () => {
+      const dto = toDto({ status: ['processing', 'nope'] });
+
+      const errors = validateSync(dto);
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0].property).toBe('status');
     });
   });
 

@@ -240,20 +240,34 @@ interface GuestOrderSummary {
             </div>
           }
 
-          <!-- LIVE PILL (paso 9: estado del stream SSE guest) -->
-          @if (sseLiveVisible()) {
-            <div
-              class="live-pill"
-              [class.live-pill--reduced]="sse.prefersReducedMotion()"
-              [attr.data-state]="sse.connectionState()"
-            >
-              <span
-                class="live-dot"
-                [class.is-open]="sse.connectionState() === 'open'"
-              ></span>
-              {{ sseLiveLabel() }}
+          <!-- TOOLBAR: acciones a la izquierda, estado del stream a la derecha -->
+          <div class="order-toolbar">
+            <div class="actions no-print">
+              <app-button variant="outline" (clicked)="print()">
+                <app-icon name="printer" [size]="16" slot="icon" />
+                Imprimir
+              </app-button>
+              @if (whatsappEnabled()) {
+                <app-button variant="primary" (clicked)="sendToWhatsApp(data)">
+                  <app-icon name="message-circle" [size]="16" slot="icon" />
+                  Preguntar por mi pedido
+                </app-button>
+              }
             </div>
-          }
+            @if (sseLiveVisible()) {
+              <div
+                class="live-pill"
+                [class.live-pill--reduced]="sse.prefersReducedMotion()"
+                [attr.data-state]="sse.connectionState()"
+              >
+                <span
+                  class="live-dot"
+                  [class.is-open]="sse.connectionState() === 'open'"
+                ></span>
+                {{ sseLiveLabel() }}
+              </div>
+            }
+          </div>
 
           <!-- META GRID -->
           <div class="meta-grid">
@@ -607,19 +621,6 @@ interface GuestOrderSummary {
             </div>
           </section>
 
-          <!-- ACTIONS -->
-          <div class="actions no-print">
-            <app-button variant="outline" (clicked)="print()">
-              <app-icon name="printer" [size]="16" slot="icon" />
-              Imprimir
-            </app-button>
-            @if (whatsappEnabled()) {
-              <app-button variant="primary" (clicked)="sendToWhatsApp(data)">
-                <app-icon name="message-circle" [size]="16" slot="icon" />
-                Preguntar por mi pedido
-              </app-button>
-            }
-          </div>
         </div>
 
         <!-- VISOR DE COMPROBANTE (paso 9, patrón admin order-details) -->
@@ -1255,6 +1256,25 @@ interface GuestOrderSummary {
         gap: 0.75rem;
       }
 
+      /* ---- Toolbar superior: acciones a la izquierda, pill en vivo a la derecha ---- */
+      .order-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .order-toolbar .actions {
+        flex: 1;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+      }
+
+      .order-toolbar .live-pill {
+        align-self: center;
+        margin-left: auto;
+        flex-shrink: 0;
+      }
+
       /* ---- Spinner ---- */
       .spinner {
         width: 42px;
@@ -1309,6 +1329,16 @@ interface GuestOrderSummary {
 
         .actions {
           flex-direction: column;
+        }
+
+        .order-toolbar {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .order-toolbar .live-pill {
+          align-self: flex-start;
+          margin-left: 0;
         }
 
         .order-header-hero {

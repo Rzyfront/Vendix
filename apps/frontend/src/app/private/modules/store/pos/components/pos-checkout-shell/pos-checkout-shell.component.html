@@ -295,6 +295,7 @@
                       <app-pos-customer-selector
                         [selectedCustomer]="cartState()?.customer ?? null"
                         [allowAnonymous]="canBeAnonymous()"
+                        [requiresElectronicInvoicing]="requiresElectronicInvoicing()"
                         [showTopSuggestions]="true"
                         [searchLimit]="3"
                         (customerSelected)="onSelectCustomerAndAdvance($event)"

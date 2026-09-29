@@ -207,6 +207,23 @@ export const reportsRoutes: Routes = [
         ],
       },
       {
+        path: 'payments',
+        loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
+        data: { categoryId: 'payments' },
+        children: [
+          {
+            path: '',
+            loadComponent: () => import('./pages/category-reports-catalog/category-reports-catalog.component').then(c => c.CategoryReportsCatalogComponent),
+            data: { categoryId: 'payments' },
+          },
+          // Pagos — página propia (columnas ricas, filtros fijables, paginación de servidor).
+          {
+            path: 'payments-list',
+            loadComponent: () => import('./pages/payments/payments-report-page.component').then(c => c.PaymentsReportPageComponent),
+          },
+        ],
+      },
+      {
         path: 'payroll',
         loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
         data: { categoryId: 'payroll' },

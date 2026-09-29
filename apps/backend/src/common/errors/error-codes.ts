@@ -398,6 +398,18 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Wallet balance does not cover the wallet legs in this atomic POS payment',
   },
+  // Fase 2 paso 5 (pos-draft-without-cash-session-plan) — carril "registrar
+  // pago": el parcial (`dto.amount` < saldo) sólo se admite sobre una orden en
+  // `pending_payment`. Sobre cualquier otro estado el operador debe cobrar el
+  // saldo completo; se rechaza en voz alta en vez de ignorar el monto y
+  // cobrar de más. 400 como el resto de la familia PAY_ (regla del carril,
+  // mismo criterio que PAY_MULTI_TENDER_METHOD_NOT_ALLOWED), sin envolver.
+  PAY_PARTIAL_NOT_ALLOWED_001: {
+    code: 'PAY_PARTIAL_NOT_ALLOWED_001',
+    httpStatus: 400,
+    devMessage:
+      'Partial registration is only allowed on orders in pending_payment; charge the full outstanding balance instead',
+  },
 
   // Payment Sources (Card-On-File / Wompi recurrent)
   PAYMENT_SOURCE_NOT_FOUND: {
@@ -571,6 +583,16 @@ export const ErrorCodes = {
     code: 'ECOM_CHECKOUT_006',
     httpStatus: 409,
     devMessage: 'Checkout already in progress for this Idempotency-Key, retry shortly',
+  },
+  // Checkout WhatsApp con envío por asignar (pending_shipping_assignment):
+  // exige channel='whatsapp', sin shipping_method_id/shipping_rate_id, y la
+  // tienda con ecommerce.checkout.whatsapp_checkout=true + whatsapp_number
+  // configurado. Cualquier violación cae en este único código 400.
+  ECOM_CHECKOUT_PENDING_SHIPPING_001: {
+    code: 'ECOM_CHECKOUT_PENDING_SHIPPING_001',
+    httpStatus: 400,
+    devMessage:
+      'pending_shipping_assignment requires channel=whatsapp, no shipping_method_id/shipping_rate_id, and store WhatsApp checkout enabled with a configured number',
   },
   ECOM_ACCOUNT_001: {
     code: 'ECOM_ACCOUNT_001',
@@ -1176,6 +1198,16 @@ export const ErrorCodes = {
     devMessage:
       'Shipping method is required to charge this order: assign it first (Elige el método de envío antes de cobrar)',
   },
+  // Paso 2 (checkout-whatsapp-location-fallback): una orden con pagos ya
+  // aplicados (total_paid > 0) no puede cambiar su shipping_cost vía
+  // assignShipping — desincroniza total_paid/remaining_balance porque el
+  // pago ya se aplicó sobre el grand_total anterior.
+  ORD_SHIP_CHARGED_COST_CHANGE_001: {
+    code: 'ORD_SHIP_CHARGED_COST_CHANGE_001',
+    httpStatus: 400,
+    devMessage:
+      'Cannot change shipping cost on an order with applied payments (assign a method with the same cost, or reverse the payment first)',
+  },
   // Impresión masiva (QUI-599). El bulk print es tolerante por diseño: omite
   // las órdenes no imprimibles y sigue con el resto. Este código solo se lanza
   // cuando NO queda ninguna orden imprimible en la selección — devolver un PDF
@@ -1443,6 +1475,14 @@ export const ErrorCodes = {
     devMessage:
       'This order already has an issued sales invoice and its holder cannot be changed',
   },
+  // El titular no cambia mientras la orden tenga saldo abierto en cartera:
+  // `accounts_receivable.customer_id` quedaría con el cliente anterior.
+  ORD_TITULAR_OPEN_RECEIVABLE_001: {
+    code: 'ORD_TITULAR_OPEN_RECEIVABLE_001',
+    httpStatus: 409,
+    devMessage:
+      'This order has an open accounts receivable balance and its holder cannot be changed',
+  },
   // CP-POS-CREAR-EDITAR-COBRAR-001 — dirección/método/rate de envío inválidos,
   // método inactivo, rate no pertenece al método, o costo negativo.
   ORD_EDIT_INVALID_SHIPPING_001: {
@@ -1507,6 +1547,18 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'La orden es a crédito (payment_form=2); registre el abono por el flujo de crédito, no por cobro de contado.',
+  },
+  // Fase 2 paso 5 (pos-draft-without-cash-session-plan) — lo consume el paso 6
+  // en `confirmPayment`: un pago `pending` de confirmación manual
+  // (`isManualConfirmationPending`) no se confirma con un clic; el personal lo
+  // REGISTRA por `flow/pay` (monto + método recibidos, con vuelto o saldo).
+  // Sólo el webhook (`source: 'webhook'`) sigue confirmando. 409: conflicto
+  // con el carril requerido.
+  ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001: {
+    code: 'ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001',
+    httpStatus: 409,
+    devMessage:
+      'El pago pendiente es de confirmación manual: regístralo por flow/pay con el monto y método recibidos; solo el webhook puede confirmarlo.',
   },
   // CP-POS-MODAL-SCOPE-001 / Phase C.4 — edit→pay sin cliente cuando el escape
   // hatch está apagado. 409: el cashier debe seleccionar cliente (vía
@@ -2173,6 +2225,20 @@ export const ErrorCodes = {
     code: 'INVOICING_VALIDATE_001',
     httpStatus: 400,
     devMessage: 'Invoice validation failed',
+  },
+  /**
+   * Adquiriente nominativo (tiene número Y nombre) sin tipo de identificación
+   * declarado. Antes se completaba con 'CC' en silencio en
+   * `acquirer-rail.resolver.ts` (persistencia) y `dian-direct.provider.ts`
+   * (emisión) — así se transmitió a la DIAN una Cédula de Ciudadanía para un
+   * NIT real (incidente Óptica Panorama SAS / Pollo Árabe). Ahora bloquea
+   * ANTES de tomar el consecutivo en vez de inventar el tipo.
+   */
+  INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED: {
+    code: 'INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED',
+    httpStatus: 400,
+    devMessage:
+      'Nominative acquirer (has document number and name) without a declared document type',
   },
   INVOICING_STATUS_001: {
     code: 'INVOICING_STATUS_001',
@@ -3178,6 +3244,21 @@ export const ErrorCodes = {
       'Invoice data request has already been submitted or completed; the link accepts data only once',
   },
   /**
+   * P1-B — mismo `document_number` ya existe en la organización con un
+   * `document_type` DECLARADO que difiere del que el comprador acaba de
+   * escribir en el formulario público del token. Reusar esa ficha
+   * sobrescribiendo en silencio inventaría un hecho sobre un cliente que la
+   * tienda ya conocía con otro tipo; crear un segundo usuario duplicaría el
+   * `document_number` bajo la misma organización. Se bloquea para que un
+   * humano decida — no hay una tercera opción segura.
+   */
+  INVOICING_DATA_REQUEST_005: {
+    code: 'INVOICING_DATA_REQUEST_005',
+    httpStatus: 409,
+    devMessage:
+      'Existing customer with this document_number already has a declared document_type that differs from the one submitted in the token form',
+  },
+  /**
    * REENVÍO DE FACTURA (E.6, `POST /store/invoicing/:id/deliver`).
    *
    * Los tres códigos cubren el ciclo del reenvío a un correo distinto del
@@ -3323,6 +3404,11 @@ export const ErrorCodes = {
     code: 'FISCAL_IDEMPOTENCY_CONFLICT',
     httpStatus: 409,
     devMessage: 'Fiscal retry is not idempotent',
+  },
+  FISCAL_SEND_IN_PROGRESS: {
+    code: 'FISCAL_SEND_IN_PROGRESS',
+    httpStatus: 409,
+    devMessage: 'Invoice is already being transmitted to DIAN',
   },
   FISCAL_ACCOUNTING_BLOCKED: {
     code: 'FISCAL_ACCOUNTING_BLOCKED',
@@ -6024,6 +6110,17 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'The expected cash amount changed after the client read it; refresh the summary before closing',
+  },
+
+  // Caja registradora — cobro sin sesión del operador
+  // (`assertSessionForSales`). 409 y no 403: el usuario SÍ tiene permiso para
+  // cobrar; lo que falta es que tenga su caja abierta. No es "no puedes", es
+  // "abre tu caja primero". Guardar un borrador POS no pasa por este gate
+  // (guardar ≠ cobrar).
+  CASH_SESSION_REQUIRED_001: {
+    code: 'CASH_SESSION_REQUIRED_001',
+    httpStatus: 409,
+    devMessage: 'Abre tu caja para registrar pagos.',
   },
 
   // Reporte "Stock Bajo por Proveedor" (CP-low-stock-by-supplier).

@@ -1012,7 +1012,9 @@ import {
          para evitar anidar app-modal dentro de app-modal. -->
     <app-pop-supplier-quick-create
       [(isOpen)]="showSupplierCreate"
+      [preload]="supplierCreatePreload() ?? null"
       (supplierCreated)="onSupplierCreated($event)"
+      (close)="onSupplierCreateClosed()"
     ></app-pop-supplier-quick-create>
   `,
   styles: [
@@ -1041,6 +1043,14 @@ export class InvoiceScannerModalComponent {
    * contains a pure-ingredient line (so the AI extracts UoM hints too).
    */
   readonly orderType = input<'retail' | 'ingredient'>('retail');
+  /**
+   * Proveedor ACTUAL del carrito (null si no hay). Fix revisión QUI-845: el
+   * quick-create solo debe abrirse cuando NO hay proveedor en ninguno de los
+   * dos lados. Si el carrito ya tiene uno y el OCR marca `is_new`, `onConfirm`
+   * emite `supplierId: null` y `pop.component` conserva el actual
+   * («null = no cambiar») en vez de forzar a crear/duplicar proveedor.
+   */
+  readonly currentSupplierId = input<number | null>(null);
   readonly isOpenChange = output<boolean>();
   readonly confirmed = output<{
     scanResult: InvoiceScanResult;
@@ -1192,6 +1202,20 @@ export class InvoiceScannerModalComponent {
   readonly selectedSupplierId = signal<number | null>(null);
   readonly selectedSupplierName = signal<string | null>(null);
   readonly showSupplierCreate = signal(false);
+  /** QUI-845: snapshot del proveedor OCR para precargar el quick-create. */
+  readonly supplierCreatePreload = signal<{
+    name?: string;
+    tax_id?: string;
+    phone?: string;
+  } | null>(null);
+  /** True cuando el quick-create fue abierto desde `onConfirm` (is_new): al
+   *  crearse el proveedor la confirmación continúa automáticamente. */
+  private pendingSupplierConfirm = false;
+  /** True cuando el usuario canceló el quick-create durante el flujo de confirm
+   *  (is_new sin proveedor en ningún lado). Re-confirmar no debe reabrir el
+   *  modal: confirma con `supplierId: null` (proveedor sin cambiar). Se
+   *  reinicia con cada escaneo nuevo y al elegir/crear un proveedor. */
+  private supplierConfirmDeclined = false;
   readonly supplierDropdownOpen = signal(false);
   private readonly suppliers = signal<Supplier[]>([]);
   readonly supplierSearchResults = signal<Supplier[]>([]);
@@ -1712,6 +1736,10 @@ export class InvoiceScannerModalComponent {
   startScan(): void {
     const file = this.selectedFile();
     if (!file) return;
+    // Escaneo nuevo ⇒ el confirm vuelve a poder pedir el quick-create si el
+    // OCR detecta proveedor nuevo y no hay proveedor en ningún lado.
+    this.supplierConfirmDeclined = false;
+    this.pendingSupplierConfirm = false;
 
     this.currentStep.set(2);
     this.isScanning.set(true);
@@ -1927,6 +1955,9 @@ export class InvoiceScannerModalComponent {
   }
 
   onSupplierCreated(supplier: Supplier): void {
+    // Un proveedor recién creado/escogido resuelve el decline previo: la
+    // confirmación vuelve a poder seguir normal.
+    this.supplierConfirmDeclined = false;
     // Añade el proveedor recién creado al pool y lo selecciona.
     this.suppliers.update((list) => [
       supplier,
@@ -1936,6 +1967,29 @@ export class InvoiceScannerModalComponent {
     this.selectedSupplierName.set(supplier.name);
     this.supplierDropdownOpen.set(false);
     this.showSupplierCreate.set(false);
+
+    // QUI-845: si el quick-create se abrió desde el confirm (is_new), el
+    // proveedor ya existe → completar la emisión que quedó pendiente.
+    if (this.pendingSupplierConfirm) {
+      this.pendingSupplierConfirm = false;
+      this.supplierCreatePreload.set(null);
+      this.onConfirm();
+    }
+  }
+
+  /** QUI-845: al cancelar el quick-create, el confirm vuelve a comportamiento
+   *  manual (el proveedor se deja sin cambiar). Si se canceló desde el flujo de
+   *  confirm (is_new sin proveedor en ningún lado), marca el decline para que
+   *  un re-confirm no vuelva a abrir el modal: confirma con `supplierId: null`.
+   *  También limpia la precarga: un quick-create abierto a mano después no debe
+   *  arrastrar datos del escaneo que se descartó. */
+  onSupplierCreateClosed(): void {
+    const wasPending = this.pendingSupplierConfirm;
+    this.pendingSupplierConfirm = false;
+    this.supplierCreatePreload.set(null);
+    if (wasPending) {
+      this.supplierConfirmDeclined = true;
+    }
   }
 
   // ============================================================
@@ -2024,6 +2078,29 @@ export class InvoiceScannerModalComponent {
     const kept = this.keptItems();
     if (kept.length === 0) return;
 
+    // QUI-845: proveedor nuevo del OCR sin seleccionar. El quick-create solo
+    // se abre cuando NO hay proveedor en ninguno de los dos lados: si el
+    // carrito ya trae proveedor (currentSupplierId), se emite `supplierId:
+    // null` y pop.component conserva el actual (regresión de revisión). Y si el
+    // usuario ya canceló el quick-create en este flujo (supplierConfirmDeclined),
+    // re-confirmar no debe volver a abrirlo: confirma sin proveedor (null).
+    const supplierMatch = match.supplier_match;
+    if (
+      supplierMatch.is_new &&
+      !this.selectedSupplierId() &&
+      !this.currentSupplierId() &&
+      !this.supplierConfirmDeclined
+    ) {
+      this.supplierCreatePreload.set({
+        name: scan.supplier?.name || supplierMatch.name,
+        tax_id: scan.supplier?.tax_id || supplierMatch.tax_id,
+        phone: scan.supplier?.phone,
+      });
+      this.pendingSupplierConfirm = true;
+      this.showSupplierCreate.set(true);
+      return;
+    }
+
     this.confirmed.emit({
       // El descuento de pie viaja EDITADO. `pop.component` lee
       // `scanResult.discount_amount` para fijar el descuento general del
@@ -2079,6 +2156,9 @@ export class InvoiceScannerModalComponent {
     this.selectedSupplierName.set(null);
     this.showSupplierCreate.set(false);
     this.supplierDropdownOpen.set(false);
+    this.supplierCreatePreload.set(null);
+    this.pendingSupplierConfirm = false;
+    this.supplierConfirmDeclined = false;
     this.supplierSearchResults.set([]);
     this.supplierSearchLoading.set(false);
     this.supplierSearchTerm.set('');

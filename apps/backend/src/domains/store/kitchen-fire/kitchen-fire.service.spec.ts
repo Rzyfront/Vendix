@@ -9,6 +9,13 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 
+// El servicio resuelve OrderFlowService con un require perezoso (evita el ciclo
+// de imports). Se sustituye el módulo para desacoplar estos tests de su
+// compilación; el token real no importa porque ModuleRef está mockeado.
+jest.mock('../orders/order-flow/order-flow.service', () => ({
+  OrderFlowService: class OrderFlowService {},
+}));
+
 interface FakeStockLevel {
   id: number;
   product_id: number;
@@ -28,8 +35,18 @@ describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', (
     };
     const tx: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'processing' }]),
-      kitchen_tickets: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      kitchen_ticket_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      kitchen_tickets: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        // H2 — `findTicketConsumedLeaves` reads the ticket's own `fired_at`
+        // as the consumption window's upper bound.
+        findFirst: jest.fn().mockResolvedValue({ fired_at: new Date('2026-01-01T00:00:00Z') }),
+      },
+      kitchen_ticket_items: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        // H2 — no sibling tickets for this order_item_id in this harness:
+        // the consumption window has no lower bound.
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       audit_logs: {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 9 }),
@@ -39,6 +56,7 @@ describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', (
         quantity_change: -2, unit_cost: 5, total_cost: 10,
       }]) },
       inventory_cost_layers: { create: jest.fn().mockResolvedValue({ id: 1 }) },
+      order_items: { findMany: jest.fn().mockResolvedValue([{ id: 77 }]) },
     };
     const prisma: any = {
       kitchen_tickets: {
@@ -52,16 +70,21 @@ describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', (
       updateStock: jest.fn().mockResolvedValue({}),
     };
     const accounting = { onPreparedDishDisposition: jest.fn().mockResolvedValue({ id: 7 }) };
+    const orderSync = {
+      isOrderPaidForKitchenCancel: jest.fn().mockResolvedValue(false),
+      cancelItemsFromKitchenInTx: jest.fn().mockResolvedValue(undefined),
+    };
+    const moduleRef = { get: jest.fn().mockReturnValue(orderSync) };
     const service = new KitchenFireService(
       prisma, {} as any, stock as any, {} as any,
       { emit: jest.fn() } as any, { push: jest.fn() } as any,
       { assertCanMutateStationTicket: jest.fn(), attributeOpenSessionToTicketConsumption: jest.fn() } as any,
-      undefined, accounting as any,
+      undefined, accounting as any, moduleRef as any,
     );
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
       store_id: 1, organization_id: 3, user_id: 9,
     } as any);
-    return { service, tx, stock, accounting };
+    return { service, tx, stock, accounting, orderSync, moduleRef };
   };
 
   afterEach(() => jest.restoreAllMocks());
@@ -77,6 +100,62 @@ describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', (
     expect(accounting.onPreparedDishDisposition).toHaveBeenCalledWith(expect.objectContaining({
       disposition: 'reuse', total_cost: 10,
     }));
+  });
+
+  it('R1 — cancelar ticket con orden sin pagar cancela las líneas vivas de la orden y omite las ya canceladas', async () => {
+    const { service, tx, orderSync } = harness('ready');
+    tx.order_items.findMany.mockResolvedValue([{ id: 77 }]);
+    await service.cancelTicket(55, 'waste');
+    expect(tx.order_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: { in: [77] }, order_id: 100, cancelled_at: null },
+    }));
+    expect(orderSync.cancelItemsFromKitchenInTx).toHaveBeenCalledWith(tx, {
+      orderId: 100, orderItemIds: [77], disposition: 'waste',
+      reason: 'Cancelado en cocina', ticketId: 55, wasPending: false,
+    });
+  });
+
+  it('R1 — si todas las líneas ya estaban canceladas en la orden no se vuelve a cancelar nada', async () => {
+    const { service, tx, orderSync } = harness('pending');
+    tx.order_items.findMany.mockResolvedValue([]);
+    await service.cancelTicket(55);
+    expect(orderSync.cancelItemsFromKitchenInTx).not.toHaveBeenCalled();
+  });
+
+  it('R1 — pending marca wasPending y reuse', async () => {
+    const { service, orderSync } = harness('pending');
+    await service.cancelTicket(55, 'waste');
+    expect(orderSync.cancelItemsFromKitchenInTx).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      disposition: 'reuse', wasPending: true,
+    }));
+  });
+
+  it('R1 — orden pagada: rechaza sin cancelar ni devolver inventario', async () => {
+    const { service, tx, stock, orderSync } = harness('pending');
+    orderSync.isOrderPaidForKitchenCancel.mockResolvedValue(true);
+    await expect(service.cancelTicket(55)).rejects.toMatchObject({ errorCode: 'KITCHEN_TICKET_INVALID_STATE' });
+    expect(tx.kitchen_tickets.updateMany).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(orderSync.cancelItemsFromKitchenInTx).not.toHaveBeenCalled();
+  });
+
+  it('R1 — pago concurrente: el re-chequeo bajo lock aborta la tx sin tocar inventario', async () => {
+    const { service, tx, stock, orderSync } = harness('pending');
+    orderSync.isOrderPaidForKitchenCancel
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    await expect(service.cancelTicket(55)).rejects.toMatchObject({ errorCode: 'KITCHEN_TICKET_INVALID_STATE' });
+    expect(orderSync.isOrderPaidForKitchenCancel).toHaveBeenLastCalledWith(100, tx);
+    expect(tx.kitchen_tickets.updateMany).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('R1 — OrderFlowService no resoluble: falla cerrado sin abrir transacción', async () => {
+    const { service, moduleRef, stock } = harness('pending');
+    moduleRef.get.mockImplementation(() => { throw new Error('not found'); });
+    await expect(service.cancelTicket(55)).rejects.toMatchObject({ errorCode: 'SYS_INTERNAL_001' });
+    expect((service as any).prisma.$transaction).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
   });
 
   it('in preparation requires a choice before any transaction starts', async () => {
@@ -114,6 +193,84 @@ describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', (
     expect(tx.kitchen_ticket_items.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { kitchen_ticket_id: 55, order_item_id: 77, status: 'pending' },
     }));
+  });
+
+  it('H2 — cancelling a remake ticket refunds only its own consumption, not the original ticket\'s', async () => {
+    const { service, tx, stock, accounting } = harness('pending');
+    // Two fires of the SAME order_item_id: ticket 54 (the original fire,
+    // already cancelled/disposed earlier) and ticket 55 (this remake —
+    // matches the harness's ticket id, fired_at 2026-01-01).
+    tx.kitchen_ticket_items.findMany.mockResolvedValue([
+      { kitchen_ticket: { fired_at: new Date('2025-12-31T00:00:00Z') } },
+    ]);
+    const allConsumption = [
+      // Ticket 54's own consumption — BEFORE the lower bound, must be excluded.
+      {
+        organization_id: 3, product_id: 400, product_variant_id: null,
+        quantity_change: -2, unit_cost: 5, total_cost: 10,
+        created_at: new Date('2025-12-30T12:00:00Z'),
+      },
+      // Ticket 55's own consumption — inside (prevFiredAt, thisFiredAt].
+      {
+        organization_id: 3, product_id: 400, product_variant_id: null,
+        quantity_change: -3, unit_cost: 5, total_cost: 15,
+        created_at: new Date('2025-12-31T12:00:00Z'),
+      },
+    ];
+    tx.inventory_transactions.findMany.mockImplementation(async ({ where }: any) => {
+      return allConsumption.filter((row) => {
+        if (row.created_at > where.created_at.lte) return false;
+        if (where.created_at.gt && row.created_at <= where.created_at.gt) return false;
+        return true;
+      });
+    });
+
+    await service.cancelTicket(55, 'waste');
+
+    // Only ticket 55's own 3-unit consumption is returned — ticket 54's
+    // 2-unit row (before the lower bound) never enters the disposition.
+    expect(stock.updateStock).toHaveBeenCalledTimes(1);
+    expect(stock.updateStock).toHaveBeenCalledWith(expect.objectContaining({
+      product_id: 400, quantity_change: 3, movement_type: 'return',
+    }), tx);
+    expect(tx.audit_logs.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        metadata: expect.objectContaining({ ticket_id: 55, consumed_cost: 15 }),
+      }),
+    }));
+    expect(accounting.onPreparedDishDisposition).toHaveBeenCalledWith(
+      expect.objectContaining({ total_cost: 15 }),
+    );
+  });
+
+  it('H2 — a second ticket of the same order_item_id is not swallowed by the first ticket\'s already-recorded disposition', async () => {
+    const { service, tx, stock } = harness('pending');
+    // A prior disposition row exists, but for a DIFFERENT ticket (54) of the
+    // same order_item_id — the idempotency key is (order_item_id, ticket_id),
+    // so this call (for ticket 55) must NOT match it.
+    tx.audit_logs.findFirst.mockImplementation(async ({ where }: any) => {
+      const ticketIdClause = (where.AND as any[]).find(
+        (c) => c.metadata?.path?.[0] === 'ticket_id',
+      );
+      return ticketIdClause?.metadata.equals === 54 ? { id: 1 } : null;
+    });
+
+    await service.cancelTicket(55, 'waste');
+
+    expect(tx.audit_logs.findFirst).toHaveBeenCalledWith({
+      where: {
+        action: 'order_item.prepared_disposition',
+        resource_id: 100,
+        AND: [
+          { metadata: { path: ['order_item_id'], equals: 77 } },
+          { metadata: { path: ['ticket_id'], equals: 55 } },
+        ],
+      },
+      select: { id: true },
+    });
+    // Not swallowed: ticket 55's own disposition still gets posted.
+    expect(stock.updateStock).toHaveBeenCalledTimes(1);
+    expect(tx.audit_logs.create).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -528,6 +685,14 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       eventEmitter as any,
       { push: jest.fn() } as any,
       { attributeOpenSessionToTicketConsumption: jest.fn() } as any,
+      undefined,
+      undefined,
+      {
+        get: jest.fn().mockReturnValue({
+          isOrderPaidForKitchenCancel: jest.fn().mockResolvedValue(false),
+          cancelItemsFromKitchenInTx: jest.fn().mockResolvedValue(undefined),
+        }),
+      } as any,
     );
   });
 
@@ -774,6 +939,56 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
 
     expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
     expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  // Orden #8513: una linea cancelada (`cancelled_at`) se disparo igual y
+  // consumio insumos. El fire debe excluirla en el where de Prisma.
+  it('excluye lineas canceladas: solo dispara y consume la linea viva', async () => {
+    const live = makeVariantOrderItem(10, 50);
+    const cancelled = { ...makeVariantOrderItem(11, 51), cancelled_at: new Date() };
+    setupFireableContext([live]);
+    // Mock fiel al where real: aplica `cancelled_at: null` sobre las lineas.
+    prismaMock.orders.findFirst.mockImplementation(async (args: any) => {
+      const w = args.select.order_items.where;
+      const rows = [live, { ...cancelled }].filter(
+        (i: any) =>
+          w.id.in.includes(i.id) &&
+          (w.cancelled_at === null ? !i.cancelled_at : true),
+      );
+      return { id: 100, store_id: 1, order_number: 'ORD-8513', order_items: rows };
+    });
+    const ticketCreate = setupFireTransaction(10);
+
+    await service.fireOrderItems({ order_id: 100, order_item_ids: [10, 11] });
+
+    const where = prismaMock.orders.findFirst.mock.calls[0][0].select.order_items.where;
+    expect(where.cancelled_at).toBeNull();
+    const created = ticketCreate.mock.calls[0][0].data.items.create;
+    expect(created).toHaveLength(1);
+    expect(created[0].order_item_id).toBe(10);
+    // Solo la linea viva consume insumos.
+    expect(recipesService.explodeBom).toHaveBeenCalledTimes(1);
+    expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(1);
+  });
+
+  it('un fire solo de lineas canceladas cae en KITCHEN_FIRE_ITEM_NOT_FOUND sin consumir', async () => {
+    // El where filtra la linea cancelada: la orden llega sin order_items.
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 100,
+      store_id: 1,
+      order_number: 'ORD-8513',
+      order_items: [],
+    });
+
+    await expect(
+      service.fireOrderItems({ order_id: 100, order_item_ids: [11] }),
+    ).rejects.toMatchObject({ errorCode: 'KITCHEN_FIRE_ITEM_NOT_FOUND' });
+
+    const where = prismaMock.orders.findFirst.mock.calls[0][0].select.order_items.where;
+    expect(where.cancelled_at).toBeNull();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
   // --------------------------------------------------------------------------
@@ -1393,6 +1608,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
           kitchen_ticket_items: {
             updateMany: jest.fn().mockResolvedValue({}),
           },
+          order_items: { findMany: jest.fn().mockResolvedValue([]) },
         }),
       );
 
@@ -1484,12 +1700,17 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
           $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'processing' }]),
           kitchen_tickets: {
             updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            // H2 — `findTicketConsumedLeaves` reads the ticket's own `fired_at`.
+            findFirst: jest.fn().mockResolvedValue({ fired_at: new Date('2026-01-01T00:00:00Z') }),
           },
           audit_logs: { findFirst: jest.fn().mockResolvedValue(null) },
           inventory_transactions: { findMany: jest.fn().mockResolvedValue([]) },
           kitchen_ticket_items: {
             updateMany: jest.fn().mockResolvedValue({}),
+            // H2 — no sibling tickets for this order_item_id in this harness.
+            findMany: jest.fn().mockResolvedValue([]),
           },
+          order_items: { findMany: jest.fn().mockResolvedValue([]) },
         }),
       );
     };
@@ -1701,8 +1922,11 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     it('clears only this delivered ticket’s line stamps inside the ticket transaction, then emits the reversal', async () => {
       await service.revertTicket(555);
 
+      // H1 — a 'delivered' ticket is not the 'cancelled' full-ticket case, so
+      // the item revert excludes any line that was individually cancelled
+      // (`cancelTicketItemInTx`) instead of resurrecting it.
       expect(tx.kitchen_ticket_items.updateMany).toHaveBeenCalledWith({
-        where: { kitchen_ticket_id: 555 },
+        where: { kitchen_ticket_id: 555, status: { not: 'cancelled' } },
         data: { status: 'ready', updated_at: expect.any(Date) },
       });
       expect(tx.order_items.updateMany).toHaveBeenCalledWith({
@@ -1745,6 +1969,179 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       });
       expect(prismaMock.$transaction).not.toHaveBeenCalled();
       expect(lines[0].deliveredAt).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('H1/H4 — cancelled-line isolation on delivery/revert and cross-path revert guard', () => {
+    it('H1 — markDelivered excludes a KDS-cancelled line from delivered status and from delivered_at', async () => {
+      (service as any).kdsSessionsService = {
+        assertCanMutateStationTicket: jest.fn().mockResolvedValue(undefined),
+        attributeOpenSessionToTicketConsumption: jest.fn().mockResolvedValue(undefined),
+      };
+      prismaMock.kitchen_tickets = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 555, store_id: 1, order_id: 100, kds_id: 1, status: 'ready',
+          items: [
+            { id: 11, order_item_id: 21, status: 'cancelled', order_item: { is_takeaway: false } },
+            { id: 12, order_item_id: 22, status: 'ready', order_item: { is_takeaway: false } },
+          ],
+        }),
+        update: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([{ status: 'delivered' }]),
+      };
+      prismaMock.kitchen_ticket_items = {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        // Only the non-cancelled line (order_item_id 22) comes back — the
+        // cancelled one (21) must never be selected for the delivered_at stamp.
+        findMany: jest.fn().mockResolvedValue([{ order_item_id: 22 }]),
+      };
+      prismaMock.order_items = {
+        findMany: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      };
+      prismaMock.table_sessions = { findFirst: jest.fn().mockResolvedValue(null) };
+
+      await service.markDelivered(555);
+
+      expect(prismaMock.kitchen_ticket_items.updateMany).toHaveBeenCalledWith({
+        where: { kitchen_ticket_id: 555, status: { notIn: ['delivered', 'cancelled'] } },
+        data: { status: 'delivered', updated_at: expect.any(Date) },
+      });
+      expect(prismaMock.kitchen_ticket_items.findMany).toHaveBeenCalledWith({
+        where: { kitchen_ticket_id: 555, status: { not: 'cancelled' } },
+        select: { order_item_id: true },
+      });
+      expect(prismaMock.order_items.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [22] }, delivered_at: null },
+        data: expect.objectContaining({ delivered_at: expect.any(Date) }),
+      });
+    });
+
+    it('H1 — revertTicket does not resurrect a line cancelled individually via cancelTicketItemInTx', async () => {
+      const items = [
+        { id: 11, order_item_id: 21, status: 'cancelled' },
+        { id: 12, order_item_id: 22, status: 'delivered' },
+      ];
+      (service as any).kdsSessionsService = {
+        assertCanMutateStationTicket: jest.fn().mockResolvedValue(undefined),
+      };
+      prismaMock.kitchen_tickets = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 555, store_id: 1, order_id: 100, kds_id: 1, status: 'delivered', items,
+        }),
+      };
+      prismaMock.orders = { findFirst: jest.fn().mockResolvedValue({ state: 'delivered' }) };
+      const tx = {
+        kitchen_tickets: { update: jest.fn().mockResolvedValue({}) },
+        kitchen_ticket_items: {
+          // Models Prisma's real filtering semantics against the `items` array
+          // so the assertion proves BEHAVIOR, not just the call args.
+          updateMany: jest.fn().mockImplementation(async ({ where, data }: any) => {
+            let count = 0;
+            for (const item of items) {
+              if (where.status?.not === 'cancelled' && item.status === 'cancelled') continue;
+              item.status = data.status;
+              count++;
+            }
+            return { count };
+          }),
+        },
+        order_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      };
+      prismaMock.$transaction = jest.fn((cb: any) => cb(tx));
+
+      await service.revertTicket(555);
+
+      expect(items.find((i) => i.order_item_id === 21)!.status).toBe('cancelled');
+      expect(items.find((i) => i.order_item_id === 22)!.status).toBe('ready');
+    });
+
+    it('H4 — revertTicket is blocked when the order-cancellation path already recorded THIS ticket\'s disposition', async () => {
+      (service as any).kdsSessionsService = {
+        assertCanMutateStationTicket: jest.fn().mockResolvedValue(undefined),
+      };
+      prismaMock.kitchen_tickets = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 555, store_id: 1, order_id: 100, kds_id: 1, status: 'cancelled',
+          items: [{ id: 11, order_item_id: 77, status: 'cancelled' }],
+        }),
+      };
+      // Written by `OrderFlowService.auditPreparedDispositionInTx` (order
+      // cancellation side), now carrying `ticket_id` per the H4 fix.
+      prismaMock.audit_logs = {
+        findMany: jest.fn().mockResolvedValue([
+          { metadata: { order_id: 100, order_item_id: 77, ticket_id: 555, destination: 'waste' } },
+        ]),
+      };
+
+      const err = await service.revertTicket(555).catch((e: any) => e);
+
+      expect(err).toMatchObject({ errorCode: 'KITCHEN_TICKET_CANNOT_REVERT' });
+      expect(prismaMock.audit_logs.findMany).toHaveBeenCalledWith({
+        where: {
+          action: 'order_item.prepared_disposition',
+          resource_id: 100,
+          OR: [{ metadata: { path: ['order_item_id'], equals: 77 } }],
+        },
+        select: { metadata: true },
+      });
+    });
+
+    it('revertTicket de un ticket cancelado se bloquea si su línea ya está cancelada en la orden', async () => {
+      (service as any).kdsSessionsService = {
+        assertCanMutateStationTicket: jest.fn().mockResolvedValue(undefined),
+      };
+      prismaMock.kitchen_tickets = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 555, store_id: 1, order_id: 100, kds_id: 1, status: 'cancelled',
+          items: [{ id: 11, order_item_id: 77, status: 'cancelled' }],
+        }),
+      };
+      prismaMock.audit_logs = { findMany: jest.fn().mockResolvedValue([]) };
+      prismaMock.order_items.count = jest.fn().mockResolvedValue(1);
+      prismaMock.$transaction = jest.fn();
+
+      const err = await service.revertTicket(555).catch((e: any) => e);
+
+      expect(err).toMatchObject({ errorCode: 'KITCHEN_TICKET_INVALID_STATE' });
+      expect(prismaMock.order_items.count).toHaveBeenCalledWith({
+        where: { id: { in: [77] }, order_id: 100, cancelled_at: { not: null } },
+      });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('H4 — a disposition tagged with a DIFFERENT ticket_id does not block reverting this ticket', async () => {
+      (service as any).kdsSessionsService = {
+        assertCanMutateStationTicket: jest.fn().mockResolvedValue(undefined),
+      };
+      prismaMock.kitchen_tickets = {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 555, store_id: 1, order_id: 100, kds_id: 1, status: 'cancelled',
+          items: [{ id: 11, order_item_id: 77, status: 'cancelled' }],
+        }),
+      };
+      // Belongs to a sibling ticket (999) of the same order_item_id — must
+      // NOT block THIS ticket's revert.
+      prismaMock.audit_logs = {
+        findMany: jest.fn().mockResolvedValue([
+          { metadata: { order_id: 100, order_item_id: 77, ticket_id: 999, destination: 'waste' } },
+        ]),
+      };
+      prismaMock.orders = { findFirst: jest.fn().mockResolvedValue({ state: 'processing' }) };
+      // Ticket legado: ninguna línea cancelada en la orden.
+      prismaMock.order_items.count = jest.fn().mockResolvedValue(0);
+      const tx = {
+        kitchen_tickets: { update: jest.fn().mockResolvedValue({}) },
+        kitchen_ticket_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        order_items: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      };
+      prismaMock.$transaction = jest.fn((cb: any) => cb(tx));
+
+      await service.revertTicket(555);
+
+      expect(tx.kitchen_tickets.update).toHaveBeenCalledWith({
+        where: { id: 555 }, data: { status: 'ready', updated_at: expect.any(Date) },
+      });
     });
   });
 

@@ -78,6 +78,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a Vexi UI command or confirmation card | `vendix-ai-chat` |
 | Adding a background task on the ai-agent queue | `vendix-vexi-agent` |
 | Adding a clientSide tool the browser dispatches | `vendix-ai-agent-tools` |
+| Adding a column to an XLSX/CSV bulk import template or its header map | `vendix-bulk-operations` |
 | Adding a document or photo flow that Vexi processes from the chat | `vendix-vexi-agent` |
 | Adding a fiscal declaration calculator or DIAN tax scheme code | `vendix-tax-typing` |
 | Adding a menu entry to the store module catalog | `vendix-panel-ui` |
@@ -172,6 +173,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Configuring MCP authentication | `vendix-mcp-server` |
 | Configuring middleware | `vendix-backend-middleware` |
 | Configuring panel_ui visibility | `vendix-panel-ui` |
+| Configuring the Google Geocoding fallback or its monthly cap | `vendix-address-geocoding` |
 | Configuring the Vendix Linear API key | `linear-connect` |
 | Confirming a production fix matches its requirement or reporting defects | `verify-ticket-prod` |
 | Consulting or updating keys/README.md production runbook | `vendix-cloud-operations` |
@@ -218,6 +220,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging a fire/resend/production block on insufficient tracked ingredient (INV_STOCK_INSUFFICIENT_LINES kind:'ingredient') | `vendix-restaurant-ops` |
 | Debugging a metric that disagrees between two screens | `vendix-analytics-metrics` |
 | Debugging a profit or margin that looks too high | `vendix-analytics-metrics` |
+| Debugging a shipping rate excluded or missing because the buyer address could not be geocoded | `vendix-shipping-distance-pricing` |
 | Debugging a tax posting to the wrong PUC account | `vendix-tax-typing` |
 | Debugging agent loop issues | `vendix-ai-agent-tools` |
 | Debugging an endpoint that answers HTTP 200 with success:false in the body | `vendix-error-handling` |
@@ -230,6 +233,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging records that appear one day or one month off in analytics | `vendix-analytics-metrics` |
 | Debugging route-map unlocated stops or resolveStopCoordinates cascade | `vendix-address-geocoding` |
 | Debugging stale templates, missing re-renders, or change detection issues | `vendix-zoneless-signals` |
+| Debugging why a forward-geocode resolves with low precision (street/area) instead of intersection/exact | `vendix-address-geocoding` |
 | Deciding whether a merchant may charge IVA or INC | `vendix-dian-issuer-identity` |
 | Deciding which Vendix skill owns a pattern | `vendix-core` |
 | Deciding which order or expense states count for a period | `vendix-analytics-metrics` |
@@ -348,7 +352,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Non-destructive production verification with the demo account | `verify-ticket-prod` |
 | Normalizing product names, volumes, prices, categories or brands for bulk upload | `product-catalog-normalizer` |
 | Onboarding a new developer to the team's Engram memory | `vendix-engram` |
+| Paging a bulk upload session commit (offset/limit) with a progress bar | `vendix-bulk-operations` |
 | Parsing date strings from query parameters | `vendix-date-timezone` |
+| Parsing or normalizing Colombian address nomenclature | `vendix-address-geocoding` |
 | Period-keyed counters YYYYMM / YYYYMMDD | `vendix-redis-quota` |
 | Picking concrete verification mechanisms (curl, build, audit, log inspection) per step | `how-to-plan` |
 | Planning structural changes, multi-file changes, broad refactors, or new features | `how-to-plan` |
@@ -432,6 +438,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | User explicitly asks for a massive, huge, or ultra-detailed plan (plan masivo, plan gigante, plan súper grande) | `how-to-critical-plan` |
 | User explicitly asks for a plan with checklists that tracks execution progress for handoff | `how-to-critical-plan` |
 | User explicitly asks for parallel multi-perspective auditing of a plan or its implementation | `how-to-critical-plan` |
+| User explicitly invokes sopus (big model orchestrates, small model codes) | `sopus` |
 | User explicitly requests business analysis | `vendix-business-analysis` |
 | User explicitly says the work cannot fail (esto no puede fallar, cero margen de error) | `how-to-critical-plan` |
 | User names or links the how-to-critical-plan skill | `how-to-critical-plan` |
@@ -497,6 +504,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with ReportDataAdapterService (summary/list/nested adaptation) | `vendix-report-xlsx` |
 | Working with RoutingService (Valhalla/OSRM directions) | `vendix-shipping-distance-pricing` |
 | Working with SSE endpoints for AI | `vendix-ai-streaming` |
+| Working with ShippingDistanceService.resolveBuyerCoords | `vendix-shipping-distance-pricing` |
 | Working with SubscriptionAccessService or SubscriptionResolverService | `vendix-subscription-gate` |
 | Working with SubscriptionBillingService or SubscriptionPaymentService | `vendix-saas-billing` |
 | Working with analytics-metrics.contract.ts, COMPLETED_SALE_STATES or RECOGNIZED_EXPENSE_STATES | `vendix-analytics-metrics` |

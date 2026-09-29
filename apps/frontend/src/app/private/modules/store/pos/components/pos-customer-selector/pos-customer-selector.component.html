@@ -9,7 +9,7 @@
         </div>
         <div class="customer-info">
           <span class="customer-name">
-            {{ customer.first_name }} {{ customer.last_name }}
+            {{ displayName(customer) }}
           </span>
           @if (customer.document_number) {
             <span class="customer-document">
@@ -115,7 +115,7 @@
                   (click)="selectCustomer(customer)"
                 >
                   <span class="result-name">
-                    {{ customer.first_name }} {{ customer.last_name }}
+                    {{ displayName(customer) }}
                   </span>
                   <span class="result-email">
                     {{ customer.email || customer.phone || '—' }}
@@ -146,7 +146,7 @@
               (click)="selectCustomer(customer)"
             >
               <span class="result-name">
-                {{ customer.first_name }} {{ customer.last_name }}
+                {{ displayName(customer) }}
               </span>
               <span class="result-email">
                 {{ customer.email || customer.phone || '—' }}
@@ -224,6 +224,13 @@
             }
           </app-document-identity-fields>
         </div>
+
+        @if (documentConflict()) {
+          <p class="sale-type-hint sale-type-hint--error" role="alert">
+            <app-icon name="info" [size]="14"></app-icon>
+            <span>El documento ingresado no coincide con la ficha del cliente; edita la ficha antes de facturar</span>
+          </p>
+        }
 
         <!-- En modo factura mínima el teléfono desaparece: la fila pasa a una
              sola columna para que el email no quede a media caja. -->

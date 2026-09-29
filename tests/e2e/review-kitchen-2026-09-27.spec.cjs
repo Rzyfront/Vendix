@@ -35,14 +35,22 @@ const BASE = process.env.QA_BASE_URL || 'https://vendix.com';
 const results = [];
 const observedCancelResponses = [];
 
-function parseFixtures() {
+function parseFixtures(group) {
   assert(process.env.QA_EMAIL && process.env.QA_PASSWORD,
     'QA_EMAIL and QA_PASSWORD must be supplied in the process environment.');
   assert(process.env.QA_KITCHEN_FIXTURES,
     'QA_KITCHEN_FIXTURES is required; fresh UI-created R6/pending/reuse/waste fixtures are not optional.');
   const fixtures = JSON.parse(process.env.QA_KITCHEN_FIXTURES);
+  const keysByGroup = {
+    all: ['r6', 'pending', 'reuse', 'waste'],
+    r6: ['r6'], r6_handoff: ['r6'], r6_dispatch: ['r6'],
+    r18: ['pending', 'reuse', 'waste'],
+    pending: ['pending'], reuse: ['reuse'], waste: ['waste'],
+  };
+  const requiredKeys = keysByGroup[group];
+  assert(requiredKeys, 'Unknown QA_KITCHEN_GROUP; choose all, r6, r6_handoff, r6_dispatch, r18, pending, reuse or waste.');
   const orderNumbers = [];
-  for (const key of ['r6', 'pending', 'reuse', 'waste']) {
+  for (const key of requiredKeys) {
     const row = fixtures[key];
     assert(row && typeof row.orderNumber === 'string' && /^POS-\d{4}-\d+$/.test(row.orderNumber),
       `${key}.orderNumber must be the UI-visible POS order number.`);
@@ -65,8 +73,8 @@ function parseFixtures() {
       }
     }
   }
-  assert.equal(new Set(orderNumbers).size, 4,
-    'All four fixture orders must be distinct to avoid cross-scenario mutation.');
+  assert.equal(new Set(orderNumbers).size, requiredKeys.length,
+    'Selected fixture orders must be distinct to avoid cross-scenario mutation.');
   return fixtures;
 }
 
@@ -206,10 +214,10 @@ async function run(name, reviewId, scheme, fn) {
 }
 
 async function main() {
-  const fixtures = parseFixtures(); // Fail before opening a browser or mutating anything.
   const group = process.env.QA_KITCHEN_GROUP || 'all';
   assert(['all', 'r6', 'r6_handoff', 'r6_dispatch', 'r18', 'pending', 'reuse', 'waste'].includes(group),
     'QA_KITCHEN_GROUP must be all, r6, r6_handoff, r6_dispatch, r18, pending, reuse or waste.');
+  const fixtures = parseFixtures(group); // Fail before opening a browser or mutating anything.
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const admin = await context.newPage();

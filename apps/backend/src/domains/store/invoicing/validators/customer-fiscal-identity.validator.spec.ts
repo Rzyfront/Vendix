@@ -724,17 +724,20 @@ describe('CustomerFiscalIdentityValidator', () => {
      *
      * Estos tres estaban arriba, entre los bloqueantes, y bajaron a propósito.
      * El emisor ya no inventa Bogotá: la cascada de dirección baja por los
-     * domicilios REALES —fiscal, luego envío, luego el de la tienda emisora—,
-     * declara cuál usó en `provider_data.acquirer_address_source`, y si no hay
-     * ninguno falla ella con un error tipado antes de firmar. Los nombres de
-     * municipio y departamento salen del catálogo DANE vía
-     * `resolveDianMunicipality`, no del cliente.
+     * domicilios REALES del cliente —fiscal, luego envío— y declara cuál usó
+     * en `provider_data.acquirer_address_source`. Task B (2026-09-28) quitó
+     * el tercer escalón «tienda» (DIAN Res. 000165/2023 art. 69: no es un dato
+     * exigible al adquiriente) y con él la posibilidad de fallar por falta de
+     * dirección: si no hay ninguna, el documento se emite SIN grupo de
+     * dirección (mismo patrón que Consumidor Final), nunca con un error
+     * tipado. Los nombres de municipio y departamento salen del catálogo DANE
+     * vía `resolveDianMunicipality`, no del cliente.
      *
      * Mantenerlos en `blocker` dejaba la cascada inalcanzable: el usuario veía
      * el modal de errores aunque el respaldo funcionara — el atasco reportado.
      *
-     * Siguen siendo hallazgos: el documento sale con el domicilio de otro, y eso
-     * hay que decirlo. Lo que ya no hacen es bloquear.
+     * Siguen siendo hallazgos: el documento sale sin domicilio del adquiriente
+     * (o con uno parcial), y eso hay que decirlo. Lo que ya no hacen es bloquear.
      */
     const escenariosSoloAviso: CustomerFiscalIdentityInput[] = [
       juridica({ address: null }),

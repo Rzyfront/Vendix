@@ -109,8 +109,7 @@ type CartWithTierLadder = Cart & {
                 size="sm"
                 customClasses="ci-remove"
                 [disabled]="updating()"
-                [attr.aria-label]="'Eliminar'"
-                [title]="'Eliminar'"
+                ariaLabel="Eliminar"
                 (clicked)="onRemove()"
               >
                 <app-icon slot="icon" name="trash-2" [size]="18"></app-icon>

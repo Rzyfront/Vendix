@@ -201,6 +201,156 @@ describe('ShippingDistanceService', () => {
     });
   });
 
+  describe('resolveBuyerCoords', () => {
+    const bias = { lat: 4.71, lng: -74.07 };
+
+    it('coords del cliente SIEMPRE ganan, sin intentar geocodificar', async () => {
+      const geocoding = { forward: jest.fn() } as any;
+      const service = new ShippingDistanceService(undefined, geocoding);
+      await expect(
+        service.resolveBuyerCoords({
+          latitude: 4.72,
+          longitude: -74.06,
+          address_line1: 'Cra 7 # 1-2',
+          city: 'Bogotá',
+          state_province: 'Cundinamarca',
+          country_code: 'CO',
+        }),
+      ).resolves.toEqual({
+        latitude: 4.72,
+        longitude: -74.06,
+        source: 'client',
+      });
+      expect(geocoding.forward).not.toHaveBeenCalled();
+    });
+
+    it('sin coords, geocodifica con address_line1/city/state y bias, y pasa el resultado por toCoords', async () => {
+      const geocoding = {
+        forward: jest.fn().mockResolvedValue({
+          lat: 4.7109894321,
+          lng: -74.0720901234,
+          precision: 'exact',
+        }),
+      } as any;
+      const service = new ShippingDistanceService(undefined, geocoding);
+      await expect(
+        service.resolveBuyerCoords(
+          {
+            address_line1: 'Cra 7 # 1-2',
+            city: 'Bogotá',
+            state_province: 'Cundinamarca',
+            country_code: 'CO',
+          },
+          bias,
+        ),
+      ).resolves.toEqual({
+        latitude: 4.710989,
+        longitude: -74.07209,
+        precision: 'exact',
+        source: 'geocoded',
+      });
+      expect(geocoding.forward).toHaveBeenCalledWith(
+        'Cra 7 # 1-2',
+        'Bogotá',
+        'Cundinamarca',
+        { bias },
+      );
+    });
+
+    it("precisión 'area' (centroide de ciudad) → null: sin punto real no hay tarifa por km", async () => {
+      const geocoding = {
+        forward: jest.fn().mockResolvedValue({
+          lat: 11.5444,
+          lng: -72.9072,
+          precision: 'area',
+        }),
+      } as any;
+      const service = new ShippingDistanceService(undefined, geocoding);
+      await expect(
+        service.resolveBuyerCoords({
+          address_line1: 'Vereda Inexistente Km 99',
+          city: 'Riohacha',
+          country_code: 'CO',
+        }),
+      ).resolves.toBeNull();
+    });
+
+    it("precisión 'street' se acepta", async () => {
+      const geocoding = {
+        forward: jest.fn().mockResolvedValue({
+          lat: 4.6052773,
+          lng: -74.0805474,
+          precision: 'street',
+        }),
+      } as any;
+      const service = new ShippingDistanceService(undefined, geocoding);
+      await expect(
+        service.resolveBuyerCoords({
+          address_line1: 'Calle 14 # 26-13',
+          city: 'Bogotá',
+          country_code: 'CO',
+        }),
+      ).resolves.toMatchObject({ precision: 'street', source: 'geocoded' });
+    });
+
+    it('forward devuelve lat/lng null → null (rige zona)', async () => {
+      const geocoding = {
+        forward: jest.fn().mockResolvedValue({ lat: null, lng: null }),
+      } as any;
+      const service = new ShippingDistanceService(undefined, geocoding);
+      await expect(
+        service.resolveBuyerCoords({
+          address_line1: 'Cra 7 # 1-2',
+          country_code: 'CO',
+        }),
+      ).resolves.toBeNull();
+    });
+
+    it('forward lanza → null (fail-open, no rompe el checkout)', async () => {
+      const geocoding = {
+        forward: jest.fn().mockRejectedValue(new Error('provider down')),
+      } as any;
+      const service = new ShippingDistanceService(undefined, geocoding);
+      await expect(
+        service.resolveBuyerCoords({
+          address_line1: 'Cra 7 # 1-2',
+          country_code: 'CO',
+        }),
+      ).resolves.toBeNull();
+    });
+
+    it('país distinto de Colombia → no geocodifica', async () => {
+      const geocoding = { forward: jest.fn() } as any;
+      const service = new ShippingDistanceService(undefined, geocoding);
+      await expect(
+        service.resolveBuyerCoords({
+          address_line1: 'Calle Falsa 123',
+          country_code: 'MX',
+        }),
+      ).resolves.toBeNull();
+      expect(geocoding.forward).not.toHaveBeenCalled();
+    });
+
+    it('sin GeocodingService inyectado → null sin intentar', async () => {
+      const service = new ShippingDistanceService(undefined, undefined);
+      await expect(
+        service.resolveBuyerCoords({
+          address_line1: 'Cra 7 # 1-2',
+          country_code: 'CO',
+        }),
+      ).resolves.toBeNull();
+    });
+
+    it('sin address_line1 → null sin intentar geocodificar', async () => {
+      const geocoding = { forward: jest.fn() } as any;
+      const service = new ShippingDistanceService(undefined, geocoding);
+      await expect(
+        service.resolveBuyerCoords({ country_code: 'CO' }),
+      ).resolves.toBeNull();
+      expect(geocoding.forward).not.toHaveBeenCalled();
+    });
+  });
+
   describe('resolveRatePrice', () => {
     const service = new ShippingDistanceService(undefined);
 

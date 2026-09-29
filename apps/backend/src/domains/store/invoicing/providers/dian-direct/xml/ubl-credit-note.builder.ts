@@ -180,6 +180,23 @@ export class UblCreditNoteBuilder {
     // `DeliveryTerms → PaymentMeans → PaymentTerms → TaxTotal → monetary total`.
     UblCommonBuilder.buildPaymentMeans(doc, credit_note_data);
 
+    // P2(b) — descuento de documento no explicado por las líneas (mismo grupo
+    // que `ubl-invoice.builder.ts`). La nota TOTAL (F-INC6) copia VERBATIM el
+    // `discount_amount` de cabecera de la factura que corrige, y ese
+    // descuento puede exceder lo que sus líneas copiadas explican (descuento
+    // a nivel de orden). Sin este grupo, `AllowanceTotalAmount > 0` sin
+    // `cac:AllowanceCharge` que lo respalde rechaza con `CAU08`
+    // (`ALLOWANCE_TOTAL_UNBACKED`) — con el consecutivo de la nota ya
+    // gastado. Va ANTES de `TaxTotal`, mismo orden que fija UBL para
+    // `InvoiceType` (`PaymentTerms → AllowanceCharge → TaxTotal →
+    // LegalMonetaryTotal`) y que ya sigue el builder de factura. No emite
+    // nada cuando el descuento es cero (caso normal: descuentos por línea).
+    UblCommonBuilder.buildDocumentAllowanceCharge(
+      doc,
+      credit_note_data,
+      currency,
+    );
+
     // Tax totals
     UblCommonBuilder.buildTaxTotals(doc, credit_note_data.taxes, currency);
 

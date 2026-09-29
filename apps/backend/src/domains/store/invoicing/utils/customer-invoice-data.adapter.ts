@@ -29,8 +29,19 @@ import { ProviderInvoiceData } from '../providers/invoice-provider.interface';
  * puerta de identidad juzgaba a un adquiriente sin documento, sin régimen y sin
  * responsabilidades fiscales: aprobaba borradores que la emisión rechaza.
  *
- * `addresses` trae SÓLO la principal: es la única que el adaptador copia a
- * `customer_address`, y pedir más sería alcance desperdiciado en cada `send()`.
+ * `addresses` YA NO trae sólo la principal (era `{ take: 1, ... }`): el
+ * adaptador (`toCustomerInvoiceData`) sigue copiando únicamente `[0]` a
+ * `customer_address`, pero `invoice-flow.service.ts::buildAcquirerIdentityInput`
+ * necesita el UNIVERSO completo de direcciones reales del cliente para poblar
+ * `CustomerFiscalIdentityInput.other_addresses` — sin él,
+ * `CustomerFiscalIdentityValidator.checkAddress` nunca puede distinguir «el
+ * cliente no tiene NINGUNA dirección propia» (bloqueo `ADDRESS_UNRESOLVABLE`)
+ * de «sí tiene, sólo que no es la primaria» (aviso `ADDRESS_REQUIRED`), y el
+ * caso real quedaba resuelto en `send()` por la cascada de
+ * `acquirer-address.resolver.ts` — que sí puede caer en la dirección fiscal de
+ * la TIENDA emisora — sin que nadie lo hubiera advertido antes de numerar.
+ * `orderBy` deja la principal en `[0]`, así que el comportamiento existente de
+ * `toCustomerInvoiceData` no cambia.
  */
 export const CUSTOMER_FOR_INVOICE_SELECT = {
   id: true,
@@ -47,7 +58,7 @@ export const CUSTOMER_FOR_INVOICE_SELECT = {
   fiscal_responsibilities: true,
   ciiu_code: true,
   is_withholding_agent: true,
-  addresses: { take: 1, orderBy: { is_primary: 'desc' } },
+  addresses: { orderBy: { is_primary: 'desc' } },
 } as const;
 
 export interface CustomerForInvoice {

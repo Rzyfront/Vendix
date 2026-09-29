@@ -419,3 +419,23 @@
     flex: 1;
   }
 }
+
+/* Aviso de bloqueo por document_conflict (facturación electrónica) — mismo
+   look que `.sale-type-hint--error` de pos-checkout-shell, duplicado acá
+   porque la encapsulación de estilos de Angular no cruza componentes. */
+.sale-type-hint--error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--color-error, #c2362f);
+
+  app-icon {
+    flex-shrink: 0;
+    margin-top: 1px;
+    color: var(--color-error, #c2362f);
+  }
+}

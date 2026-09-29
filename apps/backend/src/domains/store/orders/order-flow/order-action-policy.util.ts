@@ -355,6 +355,43 @@ export function canCreditPayment(
   return { enabled: false };
 }
 
+/** Fase 2 paso 6 (pos-draft-without-cash-session-plan) — en `pending_payment`
+ * no-crédito con pago manual pendiente O saldo parcial (`remaining_balance >
+ * 0`), el personal REGISTRA por `flow/pay` (`code: 'pay'`, la web lo rotula
+ * "Registrar Pago") en vez de `confirm_payment`: `confirmPayment` rechaza al
+ * personal en ese caso (`ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001`) y solo el
+ * webhook confirma. Booleano de enrutamiento, no `OrderActionResult`: la fila
+ * `pay` resultante sigue usando `...canPay(snapshot)` (gate de split y de
+ * ya-pagado), igual que la rama `draft`/`created`.
+ *
+ * La detección manual es espejo byte-por-byte de
+ * `isManualConfirmationPending` (`order-flow.service.ts`) — no se importa
+ * porque el servicio importa este archivo (ciclo). Misma regla fail-closed:
+ * sin método resoluble no clasifica. */
+export interface ManualRegistrationSnapshot {
+  state: string;
+  remaining_balance?: Prisma.Decimal | number | string | null;
+  payments?: ReadonlyArray<{
+    state?: string | null;
+    store_payment_method?: {
+      system_payment_method?: {
+        processing_mode?: string | null;
+        type?: string | null;
+      } | null;
+    } | null;
+  }>;
+}
+export function requiresPaymentRegistration(order: ManualRegistrationSnapshot): boolean {
+  if (order.state !== 'pending_payment') return false;
+  if (Number(order.remaining_balance ?? 0) > 0) return true;
+  return (order.payments ?? []).some((payment) => {
+    if (!payment || payment.state !== 'pending') return false;
+    const system = payment.store_payment_method?.system_payment_method;
+    if (!system || system.processing_mode === 'ON_DELIVERY') return false;
+    return !['wallet', 'wompi'].includes(system.type ?? '');
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch/fulfillment flow — `dispatch_order` / `manual_ship` /
 // `direct_deliver` / the `pending_payment`-side of `ready_for_pickup`.
@@ -381,22 +418,107 @@ export interface DispatchFlowSnapshot {
   hasPendingKitchen?: boolean;
 }
 
-/** A prepared line must reach the KDS hand-off before a whole-order dispatch.
- * A stocked prepared line explicitly sold with skip_kds bypasses the kitchen
- * only while it has no ticket. Once a ticket exists its latest status is
- * authoritative, even if skip_kds was subsequently changed. */
-export function hasKitchenLinesAwaitingHandoff(items: ReadonlyArray<{
+export interface KitchenHandoffLine {
   cancelled_at?: Date | null;
   skip_kds?: boolean | null;
   products?: { product_type?: string | null } | null;
   kitchen_ticket_items?: ReadonlyArray<{ status: string }>;
-}>): boolean {
-  return items.some((item) => {
-    if (item.cancelled_at) return false;
+  /** Order-item snapshot name, used only to build the `cancelled_ticket`
+   * human message. Optional so existing call sites that never selected it
+   * keep compiling — falls back to a generic label. */
+  product_name?: string | null;
+}
+
+export interface KitchenHandoffContext {
+  /** Whether the owning store currently has the `restaurant` industry
+   * enabled (`storeIsRestaurant(store.industries)`). Gates ONLY the
+   * "never fired" branch below — a line that already has a real kitchen
+   * ticket (any status) always keeps blocking regardless of the store's
+   * CURRENT industry flag, because a real kitchen ticket is historical
+   * fact, not a config toggle. Defaults to `true` (today's behavior) when
+   * a caller does not resolve it. */
+  isRestaurant?: boolean;
+}
+
+export type KitchenHandoffReason = 'pending' | 'cancelled_ticket';
+
+export interface KitchenHandoffBlocker {
+  reason: KitchenHandoffReason;
+  itemName: string;
+}
+
+/** H3 fix (kitchen hand-off gate regression): the whole-order dispatch/
+ * deliver/finish/remisión guard used to fire unconditionally the moment a
+ * `product_type='prepared'` line had no kitchen ticket, even for a store
+ * that no longer has the `restaurant` industry enabled — a store that
+ * dropped the industry but kept legacy `prepared`/`skip_kds:false` catalog
+ * rows could never ship/deliver/finish/remisionar those orders again, `force`
+ * included (the guard runs before any `force` check). Fix: the "never
+ * fired" branch below only blocks when the store IS a restaurant; once a
+ * real kitchen ticket exists for the line, its latest status is authoritative
+ * independent of the store's current industry flag (a real ticket already
+ * happened — turning the industry off after the fact does not un-fire it).
+ *
+ * Second, independent fix: a ticket whose latest status is `cancelled` used
+ * to block with the same generic reason as a merely pending one. That is
+ * indistinguishable to the operator (a KDS-cancelled ticket is a dead end —
+ * resending or cancelling the item are the only ways out, not "wait for the
+ * kitchen"). This now reports a distinct `cancelled_ticket` reason with the
+ * item name so callers can render the specific message.
+ *
+ * Returns the FIRST blocking line found (order-scan order), or `null` when
+ * nothing blocks. `hasKitchenLinesAwaitingHandoff` below is a boolean-only
+ * wrapper kept for existing callers that only need the yes/no signal. */
+export function kitchenHandoffBlocker(
+  items: ReadonlyArray<KitchenHandoffLine>,
+  ctx: KitchenHandoffContext = {},
+): KitchenHandoffBlocker | null {
+  const isRestaurant = ctx.isRestaurant ?? true;
+  for (const item of items) {
+    if (item.cancelled_at) continue;
     const latestTicketStatus = item.kitchen_ticket_items?.[0]?.status;
-    if (latestTicketStatus != null) return latestTicketStatus !== 'delivered';
-    return item.products?.product_type === 'prepared' && item.skip_kds !== true;
-  });
+    if (latestTicketStatus != null) {
+      if (latestTicketStatus === 'delivered') continue;
+      const itemName = item.product_name || 'este producto';
+      if (latestTicketStatus === 'cancelled') {
+        return { reason: 'cancelled_ticket', itemName };
+      }
+      return { reason: 'pending', itemName };
+    }
+    if (isRestaurant && item.products?.product_type === 'prepared' && item.skip_kds !== true) {
+      return { reason: 'pending', itemName: item.product_name || 'este producto' };
+    }
+  }
+  return null;
+}
+
+/** Human message for the `cancelled_ticket` reason — the one case that needs
+ * wording distinct from the error entry's generic `devMessage`. `pending`
+ * keeps using the entry's own default message (`undefined` here means "no
+ * override"). Centralized so `order-flow.service.ts` and
+ * `dispatch-notes.service.ts` don't hand-duplicate the copy. */
+export function describeKitchenHandoffBlocker(
+  blocker: KitchenHandoffBlocker,
+): string | undefined {
+  if (blocker.reason === 'cancelled_ticket') {
+    return `El plato "${blocker.itemName}" tiene su comanda cancelada en cocina: reenvíala a cocina o cancela el ítem antes de despachar.`;
+  }
+  return undefined;
+}
+
+/** A prepared line must reach the KDS hand-off before a whole-order dispatch.
+ * A stocked prepared line explicitly sold with skip_kds bypasses the kitchen
+ * only while it has no ticket. Once a ticket exists its latest status is
+ * authoritative, even if skip_kds was subsequently changed. Boolean wrapper
+ * over `kitchenHandoffBlocker` — see it for the restaurant-gating and
+ * cancelled-ticket-reason rules. `ctx` is optional and defaults to
+ * `{ isRestaurant: true }`, matching this function's historic (pre-H3-fix)
+ * behavior for any caller that has not been updated to resolve the flag. */
+export function hasKitchenLinesAwaitingHandoff(
+  items: ReadonlyArray<KitchenHandoffLine>,
+  ctx: KitchenHandoffContext = {},
+): boolean {
+  return kitchenHandoffBlocker(items, ctx) !== null;
 }
 
 function normalizedDeliveryType(order: DispatchFlowSnapshot): string {
@@ -506,6 +628,7 @@ export interface OrderItemActionSnapshot {
   product_type?: string | null;
   skip_kds?: boolean | null;
   delivered_at?: Date | string | null;
+  cancelled_at?: Date | string | null;
   /** Latest (most recent) kitchen-ticket-item status for this order item,
    * when it was ever fired — mirrors `deliverOrderItem`'s
    * `kitchen_ticket_items[0].status` read. `undefined` for an item never
@@ -514,6 +637,10 @@ export interface OrderItemActionSnapshot {
   /** Whether the order has ANY settled payment — mirrors
    * `cancelOrderItem`'s `TABLE_SESSION_ITEM_NOT_REMOVABLE` guard. */
   orderHasSettledPayment?: boolean;
+  /** H3 fix — same restaurant gate as `kitchenHandoffBlocker`: only required
+   * when the caller resolves it AND the line has no kitchen ticket yet.
+   * Defaults to `true` (historic behavior) when unresolved. */
+  isRestaurant?: boolean;
 }
 
 const ITEM_UNDELIVERABLE_ORDER_STATES = new Set(['cancelled', 'refunded']);
@@ -535,10 +662,17 @@ export function canDeliverItem(item: OrderItemActionSnapshot): OrderActionResult
   }
   // `order_items.item_type` is normally `physical` even for a prepared
   // product. A stock-backed plate explicitly marked skip_kds may bypass the
-  // kitchen only if it has no ticket; an existing ticket always wins.
-  const requiresKitchen = item.item_type === 'prepared' ||
-    (item.product_type === 'prepared' && !item.skip_kds) ||
-    item.latestKitchenStatus != null;
+  // kitchen only if it has no ticket; an existing ticket always wins. H3 fix:
+  // the "no ticket yet" requirement (`item_type`/`product_type==='prepared'`)
+  // only applies to a restaurant store — a store that dropped the industry
+  // but kept legacy prepared/skip_kds:false catalog rows must still be able
+  // to deliver them. A line that already has a real ticket keeps requiring
+  // `ready` regardless of the store's current industry flag.
+  const isRestaurant = item.isRestaurant ?? true;
+  const requiresKitchen =
+    item.latestKitchenStatus != null ||
+    (isRestaurant &&
+      (item.item_type === 'prepared' || (item.product_type === 'prepared' && !item.skip_kds)));
   if (requiresKitchen && item.latestKitchenStatus !== 'ready') {
     return { enabled: false, reason: ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE.code };
   }
@@ -566,6 +700,9 @@ export function canCancelItem(item: OrderItemActionSnapshot): OrderActionResult 
 export function canReverseDeliveredItem(item: OrderItemActionSnapshot): OrderActionResult {
   if (['cancelled', 'refunded', 'finished'].includes(item.order_state)) {
     return { enabled: false, reason: 'ORD_ITEM_CANCEL_STATE_001' };
+  }
+  if (item.cancelled_at) {
+    return { enabled: false, reason: 'TABLE_SESSION_ITEM_NOT_REMOVABLE' };
   }
   if (item.orderHasSettledPayment) {
     return { enabled: false, reason: 'ORD_ITEM_CANCEL_PAID_001' };

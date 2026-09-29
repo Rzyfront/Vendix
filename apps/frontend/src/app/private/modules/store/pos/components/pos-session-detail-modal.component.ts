@@ -13,12 +13,16 @@ import {
   PosCashRegisterService,
   CashRegisterSession,
   CashRegisterMovement,
+  CashSessionCloseReport,
 } from '../services/pos-cash-register.service';
+import { CashSessionReportComponent } from './cash-session-report.component';
+import { CashSessionReportPrintService } from '../services/cash-session-report-print.service';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 
 @Component({
   selector: 'app-pos-session-detail-modal',
   standalone: true,
-  imports: [DatePipe, BadgeComponent, ButtonComponent, ModalComponent, IconComponent, CurrencyPipe],
+  imports: [DatePipe, BadgeComponent, ButtonComponent, ModalComponent, IconComponent, CurrencyPipe, CashSessionReportComponent],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -121,6 +125,24 @@ import {
           }
         </div>
 
+        <!-- Resumen consolidado (mismo componente y ticket que el cierre) -->
+        @if (reportLoading()) {
+          <div class="sd-loading">
+            <app-icon name="loader" [size]="20" class="sd-spin"></app-icon>
+            Cargando resumen...
+          </div>
+        } @else if (report(); as rep) {
+          <app-cash-session-report [report]="rep"></app-cash-session-report>
+        } @else {
+          <div class="sd-empty">
+            <p class="sd-empty-text">No pudimos cargar el resumen de la sesión</p>
+            <app-button variant="outline" size="sm" (clicked)="loadReport()">
+              <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
+              Reintentar
+            </app-button>
+          </div>
+        }
+
         <!-- Movements List -->
         @if (loading()) {
           <div class="sd-loading">
@@ -186,6 +208,15 @@ import {
 
       <!-- Footer -->
       <div slot="footer" class="sd-footer">
+        <app-button
+          variant="outline"
+          size="md"
+          (clicked)="printReport()"
+          [disabled]="!report() || printing()"
+        >
+          <app-icon name="printer" [size]="16" slot="icon"></app-icon>
+          Imprimir
+        </app-button>
         <app-button variant="secondary" size="md" (clicked)="onClose()">
           Cerrar
         </app-button>
@@ -544,10 +575,16 @@ export class PosSessionDetailModalComponent {
   readonly loading = signal(false);
   readonly renderedAiSummary = signal('');
 
+  readonly report = signal<CashSessionCloseReport | null>(null);
+  readonly reportLoading = signal(false);
+  readonly printing = signal(false);
+
   readonly totalSales = signal(0);
   readonly totalRefunds = signal(0);
 
   private cashRegisterService = inject(PosCashRegisterService);
+  private reportPrint = inject(CashSessionReportPrintService);
+  private toastService = inject(ToastService);
 
   constructor() {
     effect(() => {
@@ -555,9 +592,46 @@ export class PosSessionDetailModalComponent {
         untracked(() => {
           this.renderedAiSummary.set(markdownToHtml(this.session()?.ai_summary || ''));
           this.loadMovements();
+          this.loadReport();
         });
       }
     });
+  }
+
+  loadReport(): void {
+    const session = this.session();
+    if (!session) return;
+    const id = session.id;
+    this.report.set(null);
+    this.reportLoading.set(true);
+    this.cashRegisterService
+      .getCloseReport(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (report) => {
+          if (this.session()?.id !== id) return;
+          this.report.set(report);
+          this.reportLoading.set(false);
+        },
+        error: () => {
+          if (this.session()?.id !== id) return;
+          this.report.set(null);
+          this.reportLoading.set(false);
+        },
+      });
+  }
+
+  async printReport(): Promise<void> {
+    const report = this.report();
+    if (!report || this.printing()) return;
+    this.printing.set(true);
+    try {
+      await this.reportPrint.print(report);
+    } catch {
+      this.toastService.error('No se pudo imprimir el resumen de la sesión');
+    } finally {
+      this.printing.set(false);
+    }
   }
 
   private loadMovements(): void {

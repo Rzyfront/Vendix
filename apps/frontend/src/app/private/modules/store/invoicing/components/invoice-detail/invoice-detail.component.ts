@@ -63,6 +63,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 import {
   formatDateOnlyUTC,
   formatStoreDate,
@@ -1095,9 +1096,10 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
               <app-button
                 variant="outline"
                 size="sm"
+                [disabled]="sending()"
                 (clicked)="onSend()">
                 <app-icon slot="icon" name="send" [size]="14"></app-icon>
-                {{ sendLabel() }}
+                {{ sending() ? 'Enviando…' : sendLabel() }}
               </app-button>
             }
             <!-- REENVIAR. No hay endpoint de "resend": el reenvio es el MISMO
@@ -1109,9 +1111,10 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
               <app-button
                 variant="outline"
                 size="sm"
+                [disabled]="sending()"
                 (clicked)="onSend()">
                 <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
-                Reenviar a la DIAN
+                {{ sending() ? 'Enviando…' : 'Reenviar a la DIAN' }}
               </app-button>
             }
             <!-- El pie solo ofrece el atajo cuando la nota SE PUEDE crear; la
@@ -1255,6 +1258,9 @@ export class InvoiceDetailComponent {
    *  mutado dentro de un `subscribe` no repinta nada. */
   readonly pdfLoading = signal(false);
 
+  /** Envio a la DIAN en curso: deshabilita Enviar/Reenviar (evita doble transmision). */
+  readonly sending = signal(false);
+
   /** Impresión en curso. Misma razón que `pdfLoading`. */
   readonly printing = signal(false);
 
@@ -1317,6 +1323,17 @@ export class InvoiceDetailComponent {
         }
       });
     });
+
+    // Fin del envio a la DIAN (exito o fallo): libera los botones.
+    this.actions$
+      .pipe(
+        ofType(
+          InvoicingActions.sendInvoiceSuccess,
+          InvoicingActions.sendInvoiceFailure,
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(() => this.sending.set(false));
 
     // El PDF regenerado se abre cuando la respuesta llega con su URL firmada.
     // Se escucha la accion de exito en vez de suscribirse al HTTP desde aqui
@@ -1574,11 +1591,7 @@ export class InvoiceDetailComponent {
     const inv = this.detail();
     const snapshot = (inv?.customer_name ?? '').trim();
     if (snapshot) return snapshot;
-    const live = [inv?.customer?.first_name, inv?.customer?.last_name]
-      .map((part) => (part ?? '').trim())
-      .filter(Boolean)
-      .join(' ');
-    return live || '';
+    return customerDisplayName(inv?.customer, '');
   });
 
   readonly acquirerDocument = computed(() => {
@@ -2232,7 +2245,8 @@ export class InvoiceDetailComponent {
 
   onSend(): void {
     const inv = this.detail();
-    if (inv) {
+    if (inv && !this.sending()) {
+      this.sending.set(true);
       this.store.dispatch(InvoicingActions.sendInvoice({ id: inv.id }));
     }
   }

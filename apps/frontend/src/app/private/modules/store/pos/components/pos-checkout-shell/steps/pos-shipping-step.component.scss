@@ -61,6 +61,26 @@
   gap: 8px;
 }
 
+/* H6 — aviso de dirección guardada incompleta (state_province/phone_number
+   nulos) que precede el formulario precargado en #clientDeliveryDetails.
+   Mismos tokens de warning que .flash-banner. */
+.address-help--warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #92400e;
+  font-weight: 500;
+
+  app-icon {
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+}
+
 @media (max-width: 480px) {
   .client-delivery-details .method-grid {
     grid-template-columns: 1fr;

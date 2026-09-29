@@ -33,6 +33,8 @@ export interface InvoiceRetryEvent {
  * The whole handler is wrapped in try/catch: a retry failure must never crash
  * the process — it only feeds the backoff via `markFailed()`.
  */
+const IN_PROGRESS_RESCHEDULE_MS = 2 * 60 * 1000;
+
 @Injectable()
 export class InvoiceRetryListener {
   private readonly logger = new Logger(InvoiceRetryListener.name);
@@ -67,6 +69,30 @@ export class InvoiceRetryListener {
     } catch {
       return false;
     }
+  }
+
+  /** Best-effort reason for a send() that returned a non-accepted invoice. */
+  private extractReason(sent: any): string {
+    const pr = sent?.provider_response;
+    let detail: string | undefined;
+    if (typeof pr === 'string') detail = pr;
+    else if (pr && typeof pr === 'object') {
+      detail =
+        pr.message ??
+        pr.error ??
+        (Array.isArray(pr.errors) && pr.errors.length
+          ? pr.errors
+              .map((e: any) => (typeof e === 'string' ? e : e?.message ?? JSON.stringify(e)))
+              .join('; ')
+          : undefined);
+      if (detail !== undefined && typeof detail !== 'string') {
+        detail = JSON.stringify(detail);
+      }
+    }
+    return (
+      detail ||
+      `status=${sent?.status ?? 'unknown'} send_status=${sent?.send_status ?? 'unknown'}`
+    ).slice(0, 2000);
   }
 
   @OnEvent('invoice.retry')
@@ -108,14 +134,41 @@ export class InvoiceRetryListener {
           `Retrying DIAN transmission for invoice #${invoice.id} (${invoice.invoice_number}), attempt ${event.attempt}/${event.max_attempts}`,
         );
 
-        await this.invoice_flow.send(event.invoice_id);
-        await this.retry_queue.markSuccess(event.retry_queue_id);
+        const sent: any = await this.invoice_flow.send(event.invoice_id);
 
-        this.logger.log(
-          `Retry succeeded for invoice #${invoice.id} (${invoice.invoice_number})`,
+        if (sent?.status === 'accepted') {
+          await this.retry_queue.markSuccess(event.retry_queue_id);
+          this.logger.log(
+            `Retry succeeded for invoice #${invoice.id} (${invoice.invoice_number})`,
+          );
+          return;
+        }
+
+        const reason = this.extractReason(sent);
+        this.logger.warn(
+          `Retry did not succeed for invoice #${invoice.id}: status=${sent?.status} reason=${reason}`,
         );
+        await this.retry_queue.markFailed(event.retry_queue_id, reason);
       });
     } catch (error) {
+      if ((error as any)?.errorCode === 'FISCAL_SEND_IN_PROGRESS') {
+        try {
+          await this.retry_queue.reschedule(
+            event.retry_queue_id,
+            IN_PROGRESS_RESCHEDULE_MS,
+          );
+          this.logger.log(
+            `Invoice #${event.invoice_id} is already being transmitted; retry item #${event.retry_queue_id} rescheduled without consuming an attempt`,
+          );
+        } catch (resched_error) {
+          this.logger.error(
+            `Failed to reschedule retry item #${event.retry_queue_id}: ${
+              resched_error instanceof Error ? resched_error.message : resched_error
+            }`,
+          );
+        }
+        return;
+      }
       const message =
         error instanceof Error ? error.message : String(error ?? 'unknown');
       this.logger.warn(

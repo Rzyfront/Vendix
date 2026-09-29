@@ -29,6 +29,20 @@ export interface FilterCheckboxConfig {
 }
 
 /**
+ * Pin compacto renderizado en el `dropdown-header`, junto al botón "Limpiar".
+ * Misma semántica que `FilterCheckboxConfig`: escribe su propia key en
+ * `FilterValues` (`'true'` | `null`) y NO cuenta como filtro activo.
+ */
+export interface HeaderPinConfig {
+  /** Key del pin en `FilterValues` (valor `'true'` | `null`) */
+  key: string;
+  /** Texto visible junto al pin (p. ej. "Fijar") */
+  label: string;
+  /** Si true, el pin se deshabilita */
+  disabled?: boolean;
+}
+
+/**
  * Configuration for a single filter in the dropdown
  */
 export interface FilterConfig {

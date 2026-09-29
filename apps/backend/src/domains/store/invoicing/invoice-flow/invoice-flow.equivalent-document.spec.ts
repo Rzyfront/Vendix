@@ -148,7 +148,7 @@ describe('InvoiceFlowService POS equivalent document', () => {
     const retryQueue = { enqueue: jest.fn(), ...overrides.retryQueue };
     const fiscalLedger = {
       ensureInvoiceTransmission: jest.fn().mockResolvedValue({ id: 850 }),
-      markSubmitted: jest.fn().mockResolvedValue(undefined),
+      claimSubmission: jest.fn().mockResolvedValue(undefined),
       markAccepted: jest.fn().mockResolvedValue(undefined),
       markRejected: jest.fn(),
       markError: jest.fn(),
@@ -322,7 +322,7 @@ describe('InvoiceFlowService POS equivalent document', () => {
     ).rejects.toMatchObject({ errorCode: 'FISCAL_DOCUMENT_UNSUPPORTED' });
 
     expect(fiscalLedger.ensureInvoiceTransmission).not.toHaveBeenCalled();
-    expect(fiscalLedger.markSubmitted).not.toHaveBeenCalled();
+    expect(fiscalLedger.claimSubmission).not.toHaveBeenCalled();
   });
 
   it('refuses an adjustment note the provider cannot emit', async () => {

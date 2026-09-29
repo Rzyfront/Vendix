@@ -1078,6 +1078,162 @@ describe('CheckoutService - promotions and coupons', () => {
   });
 
   /**
+   * checkout-whatsapp-location-fallback (Paso 1) — `pending_shipping_assignment`.
+   * Cuando el comprador no pudo ser ubicado (sin GPS/geocode), el storefront
+   * ofrece confirmar por WhatsApp SIN método/tarifa de envío; la tienda lo
+   * asigna después vía `assignShipping`. El backend NUNCA confía en el
+   * frontend: revalida channel, ausencia de shipping_method_id/rate_id, y la
+   * configuración de la tienda (whatsapp_checkout + whatsapp_number).
+   */
+  describe('pending_shipping_assignment — pedido WhatsApp con envío por asignar (Paso 1)', () => {
+    function mockWhatsappCheckoutEnabled(
+      overrides: Partial<{ whatsapp_checkout: boolean; whatsapp_number: string }> = {},
+    ) {
+      storePrisma.store_settings.findUnique.mockResolvedValue({
+        settings: {
+          ecommerce: {
+            checkout: {
+              whatsapp_checkout: overrides.whatsapp_checkout ?? true,
+              whatsapp_number: overrides.whatsapp_number ?? '+573001234567',
+            },
+          },
+        },
+      });
+    }
+
+    function baseDto(over: Record<string, unknown> = {}) {
+      return {
+        channel: 'whatsapp',
+        pending_shipping_assignment: true,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        ...over,
+      };
+    }
+
+    it('crea la orden sin método/tarifa de envío, delivery_type=other, sin fila de payments ni factura', async () => {
+      mockWhatsappCheckoutEnabled();
+      let capturedOrderData: any;
+      prisma.orders.create.mockImplementation(({ data }: any) => {
+        capturedOrderData = data;
+        return Promise.resolve({
+          id: 1,
+          store_id: STORE_ID,
+          order_number: data.order_number,
+          grand_total: 10000,
+          currency: data.currency,
+          state: data.state,
+          order_items: [],
+        });
+      });
+      const createInvoiceSpy = jest.spyOn(
+        service as any,
+        'createInvoiceIfConfigured',
+      );
+
+      const result: any = await service.checkout(baseDto() as any);
+
+      expect(capturedOrderData.channel).toBe('whatsapp');
+      expect(capturedOrderData.delivery_type).toBe('other');
+      expect(capturedOrderData.shipping_cost).toBe(0);
+      expect(capturedOrderData.shipping_method_id).toBeNull();
+      expect(capturedOrderData.shipping_rate_id).toBeNull();
+      expect(capturedOrderData.state).toBe('pending_payment');
+      // Nota staff-only sin migración (columna `notes`, existente).
+      expect(capturedOrderData.notes).toEqual(
+        expect.stringContaining('envío pendiente de asignar'),
+      );
+      expect(prisma.payments.create).not.toHaveBeenCalled();
+      expect(createInvoiceSpy).not.toHaveBeenCalled();
+      expect(result.channel).toBe('whatsapp');
+      expect(result.payment_id).toBeNull();
+    });
+
+    it("rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001 si channel no es 'whatsapp'", async () => {
+      mockWhatsappCheckoutEnabled();
+
+      const err = await service
+        .checkout(baseDto({ channel: 'ecommerce' }) as any)
+        .then(
+          () => null,
+          (e) => e,
+        );
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_PENDING_SHIPPING_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001 si viene shipping_method_id', async () => {
+      mockWhatsappCheckoutEnabled();
+
+      const err = await service
+        .checkout(baseDto({ shipping_method_id: 1 }) as any)
+        .then(
+          () => null,
+          (e) => e,
+        );
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_PENDING_SHIPPING_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001 si viene shipping_rate_id', async () => {
+      mockWhatsappCheckoutEnabled();
+
+      const err = await service
+        .checkout(baseDto({ shipping_rate_id: 5 }) as any)
+        .then(
+          () => null,
+          (e) => e,
+        );
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_PENDING_SHIPPING_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001 si la tienda no activó whatsapp_checkout', async () => {
+      mockWhatsappCheckoutEnabled({ whatsapp_checkout: false });
+
+      const err = await service.checkout(baseDto() as any).then(
+        () => null,
+        (e) => e,
+      );
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_PENDING_SHIPPING_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001 si falta whatsapp_number', async () => {
+      mockWhatsappCheckoutEnabled({ whatsapp_number: '' });
+
+      const err = await service.checkout(baseDto() as any).then(
+        () => null,
+        (e) => e,
+      );
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_PENDING_SHIPPING_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('sin store_settings configurados (null), rechaza con ECOM_CHECKOUT_PENDING_SHIPPING_001', async () => {
+      storePrisma.store_settings.findUnique.mockResolvedValue(null);
+
+      const err = await service.checkout(baseDto() as any).then(
+        () => null,
+        (e) => e,
+      );
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_PENDING_SHIPPING_001');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * QUI-INC — el tipo fiscal se COPIA de la fila fuente; el punto de escritura
    * no lo fabrica.
    *
