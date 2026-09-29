@@ -13,6 +13,26 @@ import {
 } from '../dto/store-shipping-method.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
+/**
+ * Release-853 paso 11 — cobro por distancia: no se activa sin origen
+ * pineado. Valida valores EFECTIVOS (DTO + existente ya mezclados) y se
+ * comparte entre `updateStoreMethod` y `enableForStore`.
+ */
+function assertDistanceOriginPinned(effective: {
+  distance_pricing_enabled?: boolean | null;
+  origin_latitude?: unknown;
+  origin_longitude?: unknown;
+}): void {
+  if (
+    effective.distance_pricing_enabled &&
+    (effective.origin_latitude == null || effective.origin_longitude == null)
+  ) {
+    throw new BadRequestException(
+      'Para activar el cobro por distancia el método necesita un origen pineado (origin_latitude/origin_longitude)',
+    );
+  }
+}
+
 @Injectable()
 export class StoreShippingMethodsService {
   constructor(private prisma: StorePrismaService) {}
@@ -173,6 +193,19 @@ export class StoreShippingMethodsService {
       );
     }
 
+    // Release-853 paso 11 — habilitar no activa la distancia sin origen: se
+    // validan los mismos valores efectivos que la copia persistirá abajo
+    // (DTO gana, sistema hereda). Falla ANTES de abrir la transacción.
+    assertDistanceOriginPinned({
+      distance_pricing_enabled:
+        enable_dto.distance_pricing_enabled ??
+        system_method.distance_pricing_enabled,
+      origin_latitude:
+        enable_dto.origin_latitude ?? system_method.origin_latitude,
+      origin_longitude:
+        enable_dto.origin_longitude ?? system_method.origin_longitude,
+    });
+
     // NEW: Create a copy of the system method + copy zones/rates
     return base_client.$transaction(async (tx) => {
       // 1. Create a copy of the system method for this store
@@ -217,6 +250,19 @@ export class StoreShippingMethodsService {
             enable_dto.cost_settlement_timing ??
             system_method.cost_settlement_timing ??
             'immediate_on_close',
+          // Cobro por distancia: el DTO permite activar + pinear al habilitar.
+          distance_pricing_enabled:
+            enable_dto.distance_pricing_enabled ??
+            system_method.distance_pricing_enabled ??
+            false,
+          origin_latitude:
+            enable_dto.origin_latitude ??
+            system_method.origin_latitude ??
+            null,
+          origin_longitude:
+            enable_dto.origin_longitude ??
+            system_method.origin_longitude ??
+            null,
           copied_from_system_method_id: system_shipping_method_id,
         },
       });
@@ -302,6 +348,8 @@ export class StoreShippingMethodsService {
                 min_val: system_rate.min_val,
                 max_val: system_rate.max_val,
                 free_shipping_threshold: system_rate.free_shipping_threshold,
+                // El clonado copia el modo del impuesto de la tarifa.
+                tax_is_inclusive: system_rate.tax_is_inclusive,
                 is_active: true,
                 source_type: 'system_copy',
                 copied_from_system_rate_id: system_rate.id,
@@ -392,6 +440,21 @@ export class StoreShippingMethodsService {
     }
 
     // Validar que los ejecutores pertenezcan al tenant actual.
+    // Cobro por distancia: no se activa sin origen pineado. Se resuelven
+    // valores efectivos (DTO + existente) igual que la política de despacho.
+    assertDistanceOriginPinned({
+      distance_pricing_enabled:
+        update_dto.distance_pricing_enabled ?? method.distance_pricing_enabled,
+      origin_latitude:
+        update_dto.origin_latitude !== undefined
+          ? update_dto.origin_latitude
+          : method.origin_latitude,
+      origin_longitude:
+        update_dto.origin_longitude !== undefined
+          ? update_dto.origin_longitude
+          : method.origin_longitude,
+    });
+
     if (next_default_vehicle != null) {
       const v = await this.prisma.vehicles.findFirst({
         where: { id: next_default_vehicle, store_id: method.store_id ?? undefined },

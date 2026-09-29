@@ -1,7 +1,7 @@
 import { ArEventsListener } from './ar-events.listener';
 
 describe('ArEventsListener — financial account isolation from source-order AR', () => {
-  const ar = { registerPayment: jest.fn(), createFromEvent: jest.fn() };
+  const ar = { registerPayment: jest.fn(), createCreditSaleFromEvent: jest.fn() };
   const prisma = { accounts_receivable: { findFirst: jest.fn() } };
   const listener = new ArEventsListener(ar as any, prisma as any);
   const payment = {
@@ -36,7 +36,16 @@ describe('ArEventsListener — financial account isolation from source-order AR'
       store_id: 2,
       organization_id: 1,
     });
-    expect(ar.createFromEvent).not.toHaveBeenCalled();
+    expect(ar.createCreditSaleFromEvent).not.toHaveBeenCalled();
+  });
+  it('routes an order credit event through the lifecycle-safe writer', async () => {
+    await listener.handleCreditSaleCreated({
+      order_id: 9001, total_amount: 100, store_id: 2, customer_id: 8,
+      organization_id: 1,
+    });
+    expect(ar.createCreditSaleFromEvent).toHaveBeenCalledWith({
+      order_id: 9001, total_amount: 100, store_id: 2, due_date: undefined,
+    });
   });
   it('preserves the legacy order payment contract', async () => {
     await listener.handlePaymentReceived(payment);

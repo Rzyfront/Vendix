@@ -72,6 +72,7 @@ describe('DispatchNoteDataProvider', () => {
     carrier_name: 'Coordinadora',
     tracking_number: 'GUIA-1',
     notes: null,
+    customer_id: 42,
     customer_name: 'Ferretería El Tornillo',
     customer_phone: '+57 320 111 2233',
     customer_tax_id: '800222333',
@@ -366,6 +367,23 @@ describe('DispatchNoteDataProvider', () => {
 
     expect(data.customer!.name).toBe('Ferretería El Tornillo');
     expect(data.customer!.tax_id).toBe('800222333');
+    expect(data.document.customer_alias).toBeUndefined();
+  });
+
+  it('expone el nombre de referencia desde la remisión sin consultar ni crear un cliente', async () => {
+    const row = {
+      ...partialDispatchNoteRow(),
+      customer_id: null,
+      customer_name: 'Portería Torre Norte',
+      customer_tax_id: null,
+      customer: null,
+    };
+    const { prisma, calls } = prismaWith(row);
+    const data = await new DispatchNoteDataProvider(prisma).fetchDocumentData(7, row.id);
+
+    expect(data.customer!.name).toBe('Portería Torre Norte');
+    expect(data.document.customer_alias).toBe('Portería Torre Norte');
+    expect(calls[0].include).not.toHaveProperty('order');
   });
 
   it('8. fila B en base: el discriminante suma el impuesto y la fila cuadra (hallazgo 1b)', async () => {

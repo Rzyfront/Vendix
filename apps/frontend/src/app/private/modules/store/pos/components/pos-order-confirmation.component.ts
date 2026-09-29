@@ -10,6 +10,7 @@ import {
   viewChild,
   DestroyRef } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { firstValueFrom, switchMap } from 'rxjs';
 
 
 import {
@@ -41,6 +42,19 @@ import {
 } from '../../../../../shared/services/print/dispatch-ticket-autoprint';
 import { DispatchTicketData } from '../../dispatch-ticket/models/dispatch-ticket-data.model';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import {
+  DispatchMethodSelectorModalComponent,
+  DispatchMethod,
+} from '../../orders/components/dispatch-method-selector-modal/dispatch-method-selector-modal.component';
+import { CourierNameModalComponent } from '../../orders/components/courier-name-modal/courier-name-modal.component';
+import { GenerateDispatchWizardComponent } from '../../orders/components/generate-dispatch-wizard/generate-dispatch-wizard.component';
+import { DispatchNotesService } from '../../dispatch-notes/services/dispatch-notes.service';
+import {
+  StoreOrdersService,
+  CreateAddressPayload,
+  UpdateAddressPayload,
+} from '../../orders/services/store-orders.service';
+import { ShippingAddressModalComponent } from '../../orders/components/shipping-address-modal/shipping-address-modal.component';
 
 @Component({
   selector: 'app-pos-order-confirmation',
@@ -51,11 +65,15 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
     ModalComponent,
     IconComponent,
     InvoicingNotConfiguredComponent,
-    PosFiscalStatusComponent
+    PosFiscalStatusComponent,
+    DispatchMethodSelectorModalComponent,
+    CourierNameModalComponent,
+    GenerateDispatchWizardComponent,
+    ShippingAddressModalComponent
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen()"
+      [isOpen]="isOpen() && !isDispatchFlowOpen()"
       [size]="'md'"
       [showCloseButton]="true"
       [title]="derivedModalTitle()"
@@ -187,7 +205,38 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
           </div>
     
           <!-- Payment Info -->
-          @if (paymentInfo) {
+          <!-- B15(3) — cobro multimétodo: antes solo se mostraba paymentInfo
+               (el primer tramo, data.payment); con 2+ tramos se muestra el
+               desglose completo (paymentBreakdown, ya calculado en
+               resetStaleInvoiceState pero nunca renderizado) más el total
+               pagado y, si hubo tramo en efectivo, recibido/vuelto reales. -->
+          @if (paymentBreakdown && paymentBreakdown.length > 1) {
+            <div class="confirm-payment">
+              @for (leg of paymentBreakdown; track $index) {
+                <div class="confirm-payment-row">
+                  <div class="confirm-payment-method">
+                    <app-icon name="credit-card" [size]="16"></app-icon>
+                    <span class="confirm-payment-method-name">{{ leg.label }}:</span>
+                  </div>
+                  <span class="confirm-payment-amount">{{ formatCurrency(leg.amount) }}</span>
+                </div>
+              }
+              <div class="confirm-payment-row confirm-payment-row--total">
+                <span class="confirm-payment-method-name">Total pagado:</span>
+                <span class="confirm-payment-amount">{{ formatCurrency(multiPaymentTotalPaid) }}</span>
+              </div>
+              @if (multiPaymentChange > 0) {
+                <div class="confirm-payment-row">
+                  <span class="confirm-payment-method-name">Efectivo recibido:</span>
+                  <span class="confirm-payment-amount">{{ formatCurrency(multiPaymentReceived) }}</span>
+                </div>
+                <div class="confirm-payment-row">
+                  <span class="confirm-payment-method-name">Vuelto:</span>
+                  <span class="confirm-payment-amount">{{ formatCurrency(multiPaymentChange) }}</span>
+                </div>
+              }
+            </div>
+          } @else if (paymentInfo) {
             <div class="confirm-payment">
               <div class="confirm-payment-row">
                 <div class="confirm-payment-method">
@@ -196,6 +245,12 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
                 </div>
                 <span class="confirm-payment-amount">{{ formatCurrency(paymentInfo.amount) }}</span>
               </div>
+              @if ((paymentInfo.change ?? 0) > 0) {
+                <div class="confirm-payment-row">
+                  <span class="confirm-payment-method-name">Vuelto:</span>
+                  <span class="confirm-payment-amount">{{ formatCurrency(paymentInfo.change) }}</span>
+                </div>
+              }
             </div>
           }
         </div>
@@ -270,7 +325,7 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
           <!-- Emite el documento de verdad (no sólo crea el borrador). Se apaga
                cuando la DIAN ya lo aceptó: reemitir un documento aceptado no es
                un reintento, es un hecho económico distinto. -->
-          <app-button variant="ghost" size="md" (clicked)="createInvoice()" [disabled]="!orderId || dianConfigsLoading() || alreadyIssued()" [loading]="creatingInvoice()" [title]="invoiceButtonTitle()">
+          <app-button variant="ghost" size="md" (clicked)="createInvoice()" [disabled]="!orderId || dianConfigsLoading() || alreadyIssued() || fiscalPending()" [loading]="creatingInvoice()" [title]="invoiceButtonTitle()">
             <app-icon name="file-text" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Factura</span>
           </app-button>
@@ -298,6 +353,45 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
         [(isOpen)]="isNotConfiguredModalOpen"
         [reason]="notConfiguredReason()"
       ></app-invoicing-not-configured>
+    }
+
+    <!-- QUI-844 — selector del método de despacho (solo opciones habilitadas) -->
+    <app-dispatch-method-selector-modal
+      [isOpen]="showDispatchSelector()"
+      [enabledMethods]="enabledDispatchMethods()"
+      (selected)="onDispatchMethodSelected($event)"
+      (closed)="showDispatchSelector.set(false)"
+    ></app-dispatch-method-selector-modal>
+
+    <!-- Nombre del domiciliario para "Entrega completa" -->
+    <app-courier-name-modal
+      [isOpen]="showCourierNameModal()"
+      (isOpenChange)="showCourierNameModal.set($event)"
+      (confirmed)="onCourierNameConfirmed($event)"
+      (closed)="onCourierNameClosed()"
+    ></app-courier-name-modal>
+
+    <!-- Wizard de remisión con ruta (orden completa con relaciones) -->
+    <app-generate-dispatch-wizard
+      [isOpen]="showDispatchModal()"
+      [order]="fullDispatchOrder()"
+      (generated)="onDispatchGenerated()"
+      (requestAddress)="onDispatchNeedsAddress()"
+      (closed)="showDispatchModal.set(false)"
+    ></app-generate-dispatch-wizard>
+
+    <!-- Dirección de envío dentro del flujo POS -->
+    @if (showShippingAddressModal()) {
+      <app-shipping-address-modal
+        [customerId]="fullDispatchOrder()?.customer_id ?? null"
+        [customerName]="derivedCustomerName()"
+        [saving]="savingShippingAddress()"
+        [addressId]="editingAddressId()"
+        [initialAddress]="editingInitialAddress()"
+        (close)="showShippingAddressModal.set(false)"
+        (submitForm)="onDispatchAddressSubmit($event)"
+        (submitEdit)="onDispatchAddressEdit($event)"
+      ></app-shipping-address-modal>
     }
 
     <!-- Aquí NO hay modal de requisitos fiscales, y es deliberado.
@@ -911,10 +1005,35 @@ export class PosOrderConfirmationComponent {
     discount_applied: number;
   }> = [];
   paymentInfo: any = null;
+  /**
+   * Cobro multimétodo: desglose por tramo para el tiquete local. Se deriva
+   * de `data.payments` junto a `paymentInfo`; `null` = cobro escalar.
+   * B15(3) — `change` viaja por tramo (0 en todos salvo el de efectivo,
+   * `payments.service.ts` así lo construye); sumarlos da el vuelto real sin
+   * tener que adivinar cuál tramo es el de efectivo.
+   */
+  paymentBreakdown: Array<{ label: string; amount: number; change: number }> | null = null;
+
+  /** B15(3) — total pagado sumando los tramos del desglose. */
+  get multiPaymentTotalPaid(): number {
+    return (this.paymentBreakdown ?? []).reduce((sum, leg) => sum + leg.amount, 0);
+  }
+
+  /** B15(3) — vuelto real: solo el tramo en efectivo aporta un valor != 0. */
+  get multiPaymentChange(): number {
+    return (this.paymentBreakdown ?? []).reduce((sum, leg) => sum + (leg.change || 0), 0);
+  }
+
+  /** B15(3) — recibido = pagado + vuelto (identidad, sin adivinar el tramo). */
+  get multiPaymentReceived(): number {
+    return this.multiPaymentTotalPaid + this.multiPaymentChange;
+  }
 private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
   private ticketService = inject(PosTicketService);
   private repartosService = inject(RepartosService);
+  private readonly dispatchNotesService = inject(DispatchNotesService);
+  private readonly storeOrdersService = inject(StoreOrdersService);
   private currencyService = inject(CurrencyFormatService);
   private store = inject(Store);
   // CP-DTLP Phase E.1/E.2 — disparador POS del tiquete de despacho.
@@ -948,8 +1067,8 @@ private authFacade = inject(AuthFacade);
 
   /**
    * Decisión del usuario 2026-08-31: opt-in por admin para que el tiquete
-   * de despacho funcione como tiquete de reclamo en ventas de mostrador
-   * (`direct_delivery`) y para llevar (`pickup`). Enmienda al ADR-6;
+   * de despacho funcione como tiquete de reclamo en ventas de mostrador,
+   * incluido Para llevar (`direct_delivery`), y en recogida diferida (`pickup`). Enmienda al ADR-6;
    * default false. Pasado al predicado compartido en
    * `shouldAutoPrintDispatchTicket`.
    */
@@ -1096,10 +1215,26 @@ private authFacade = inject(AuthFacade);
     this.orderTax = this.invoiceTaxSnapshotTotal(data) ?? Number(data?.invoice?.tax_amount ?? data?.tax_amount ?? data?.tax ?? 0);
     this.appliedPromotions = data?.applied_promotions || data?.appliedPromotions || [];
     this.appliedCoupons = data?.applied_coupons || data?.appliedCoupons || [];
+    // Multimétodo: `payments[]` (misma forma que `payment`) solo llega si
+    // el cobro usó tramos; alimenta el desglose del tiquete local. Se
+    // resetea en cada alimentación para no arrastrar el desglose anterior.
+    this.paymentBreakdown =
+      Array.isArray(data?.payments) && data.payments.length > 0
+        ? data.payments.map((p: any) => ({
+            label: String(p.payment_method ?? p.method ?? 'Pago'),
+            amount: Number(p.amount) || 0,
+            change: Number(p.change) || 0,
+          }))
+        : null;
     if (data.payment) {
       this.paymentInfo = {
         method: data.payment.payment_method || data.payment.method || 'Pago',
-        amount: Number(data.payment.amount || this.orderTotal) };
+        amount: Number(data.payment.amount || this.orderTotal),
+        // B15(3) — antes solo se leía `data.change` (raíz), que
+        // `pos.component.ts` nunca copia en `completedOrder`; el vuelto real
+        // vive en `payment.change` (mismo campo que ya usa `pos-payment.service.ts`).
+        change: Number(data.payment.change ?? data.change ?? 0),
+      };
     } else if (data.isCreditSale) {
       this.paymentInfo = {
         method: 'Venta a Crédito',
@@ -1226,6 +1361,9 @@ private authFacade = inject(AuthFacade);
   }
 
   onModalClosed(): void {
+    // Ocultamiento programático mientras despacha: el ticket vuelve al
+    // cerrar/cancelar el flujo, no es un cierre real de la pantalla.
+    if (this.isDispatchFlowOpen()) return;
     this.cleanupFiscalPrintTimeout();
     this.awaitingFiscalPrint.set(false);
     this.closed.emit();
@@ -1272,8 +1410,19 @@ private authFacade = inject(AuthFacade);
       discount: this.derivedOrderDiscount() ?? this.orderDiscount,
       total: this.derivedOrderTotal() ?? this.orderTotal,
       paymentMethod: this.paymentInfo?.method || 'Pago',
-      cashReceived: this.paymentInfo?.amount || (this.derivedOrderTotal() || this.orderTotal),
-      change: Number(this.orderData()?.change || 0),
+      paymentBreakdown: this.paymentBreakdown ?? undefined,
+      // B15(3)/(4) — multimétodo: recibido/vuelto del tiquete local salen del
+      // desglose (Σ tramos + Σ vuelto), no del primer tramo ni del total de
+      // la venta. Escalar: `paymentInfo.change` (ya trae `payment.change`,
+      // NO `orderData()?.change`, que `pos.component.ts` nunca puebla).
+      cashReceived:
+        this.paymentBreakdown && this.paymentBreakdown.length > 1
+          ? this.multiPaymentReceived
+          : this.paymentInfo?.amount || (this.derivedOrderTotal() || this.orderTotal),
+      change:
+        this.paymentBreakdown && this.paymentBreakdown.length > 1
+          ? this.multiPaymentChange
+          : Number(this.paymentInfo?.change ?? this.orderData()?.change ?? 0),
       customer: this.derivedCustomerName() ? {
         name: this.derivedCustomerName(),
         email: this.derivedCustomerEmail(),
@@ -1349,13 +1498,93 @@ private authFacade = inject(AuthFacade);
     this.viewDetail.emit(this.orderId);
   }
 
+  /** Chooser del método de despacho (QUI-844): solo ventas con envío. */
+  showDispatchSelector = signal(false);
   /**
-   * "Despachar" (solo ventas con envío): publica la orden al pool de reparto
-   * (`POST /store/dispatch-notes/orders/:orderId/send-to-dispatch`, idempotente)
-   * para que un repartidor la tome. En éxito arranca una nueva venta
-   * (`startNewSale()`), replicando el reinicio total de "Nueva compra".
+   * Mientras el flujo de despacho está abierto o ejecutándose (vía directa
+   * sin modal: pool/entrega), el ticket se oculta. Al cerrar/cancelar, el
+   * ticket vuelve; al completar, se va a nueva venta.
+   */
+  readonly isDispatchFlowOpen = computed(
+    () =>
+      this.showDispatchSelector() ||
+      this.showCourierNameModal() ||
+      this.showDispatchModal() ||
+      this.showShippingAddressModal() ||
+      this.dispatching(),
+  );
+  /** Nombre del domiciliario para "Entrega completa". */
+  showCourierNameModal = signal(false);
+  /** Wizard de remisión con ruta ("Crear remisión con ruta de despacho"). */
+  showDispatchModal = signal(false);
+  /**
+   * QUI-844 — métodos que la tienda ofrece, con `?? true` para tiendas
+   * persistidas antes de estos flags (todo habilitado, como antes).
+   */
+  readonly enabledDispatchMethods = computed<DispatchMethod[]>(() => {
+    const dispatch = this.settingsFacade.dispatch();
+    const methods: Array<{ method: DispatchMethod; flag: boolean }> = [
+      { method: 'with-note', flag: dispatch?.enable_dispatch_with_remision ?? true },
+      { method: 'direct', flag: dispatch?.enable_dispatch_direct_delivery ?? true },
+      { method: 'to-dispatch', flag: dispatch?.enable_dispatch_to_pool ?? true },
+    ];
+    return methods.filter((m) => m.flag).map((m) => m.method);
+  });
+
+  /**
+   * "Despachar" (solo ventas con envío): abre el selector con los métodos
+   * habilitados (QUI-844). Con uno solo activo se ejecuta directo sin modal.
    */
   dispatchOrder(): void {
+    if (!this.orderId || this.dispatching()) return;
+    const enabled = this.enabledDispatchMethods();
+    if (enabled.length === 1) {
+      this.onDispatchMethodSelected(enabled[0]);
+      return;
+    }
+    if (enabled.length === 0) {
+      this.toastService.warning(
+        'Esta tienda no tiene ningún método de despacho habilitado. Actívalo en Ajustes > Logística.',
+      );
+      return;
+    }
+    this.showDispatchSelector.set(true);
+  }
+
+  /**
+   * Orden completa con relaciones (`order_items`, dirección de envío) para el
+   * wizard. El resumen del POS (`orderData`) no trae esas relaciones y el
+   * wizard la rechazaría como "sin dirección / sin items despachables".
+   */
+  readonly fullDispatchOrder = signal<any>(null);
+  /** Modal de dirección de envío (crear/editar) dentro del flujo POS. */
+  showShippingAddressModal = signal(false);
+  savingShippingAddress = signal(false);
+  editingAddressId = signal<number | null>(null);
+  editingInitialAddress = signal<any>(null);
+
+  /** Enruta el método elegido a su flujo (misma matriz que order-details). */
+  onDispatchMethodSelected(method: DispatchMethod): void {
+    this.showDispatchSelector.set(false);
+    switch (method) {
+      case 'with-note':
+        this.openDispatchWizard();
+        break;
+      case 'direct':
+        this.showCourierNameModal.set(true);
+        break;
+      case 'to-dispatch':
+        this.publishOrderToPool();
+        break;
+      default: {
+        const _exhaustive: never = method;
+        return _exhaustive;
+      }
+    }
+  }
+
+  /** "Enviar a despacho": publica al pool (idempotente) y arranca nueva venta. */
+  private publishOrderToPool(): void {
     if (!this.orderId || this.dispatching()) return;
     this.dispatching.set(true);
     this.repartosService
@@ -1383,6 +1612,175 @@ private authFacade = inject(AuthFacade);
       });
   }
 
+  /** Confirm del modal de domiciliario: corre la entrega completa. */
+  onCourierNameConfirmed(name: string): void {
+    this.showCourierNameModal.set(false);
+    void this.directFullDelivery(name);
+  }
+
+  /** Cancel del modal de domiciliario: aborta sin crear nada. */
+  onCourierNameClosed(): void {
+    this.showCourierNameModal.set(false);
+  }
+
+  /**
+   * "Entrega completa": crea una remisión confirmada SIN ruta y la marca como
+   * entregada (mismos 2 endpoints que order-details). Al terminar arranca una
+   * nueva venta; ante un fallo se avisa y se aborta.
+   */
+  private async directFullDelivery(courierName: string): Promise<void> {
+    const orderId = this.orderId;
+    if (!orderId || this.dispatching()) return;
+    this.dispatching.set(true);
+    try {
+      const note = await firstValueFrom(
+        this.dispatchNotesService.createFromOrder(Number(orderId), {
+          target_status: 'confirmed',
+          route_assignment: { mode: 'none' },
+          items: [],
+        }),
+      );
+      await firstValueFrom(
+        this.dispatchNotesService.deliver(note.id, { courier_name: courierName }),
+      );
+      this.toastService.success('Orden entregada');
+      this.startNewSale();
+    } catch (err: any) {
+      this.toastService.error(
+        err?.error?.message ||
+          err?.message ||
+          'No se pudo completar la entrega directa',
+      );
+    } finally {
+      this.dispatching.set(false);
+    }
+  }
+
+  /** Remisión generada desde el wizard: avisa y arranca una nueva venta. */
+  onDispatchGenerated(): void {
+    this.showDispatchModal.set(false);
+    this.toastService.success('Remisión generada');
+    this.startNewSale();
+  }
+
+  /**
+   * "Crear remisión": carga la orden completa y abre el wizard. Sin las
+   * relaciones el wizard no puede validar dirección ni items.
+   */
+  private openDispatchWizard(): void {
+    const orderId = this.orderId;
+    if (!orderId || this.dispatching()) return;
+    this.dispatching.set(true);
+    this.storeOrdersService
+      .getOrderById(String(orderId))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (order: any) => {
+          this.dispatching.set(false);
+          const data = order && typeof order === 'object' && 'success' in order
+            ? (order.data ?? order)
+            : order;
+          if (!data) {
+            this.toastService.error('No se pudo cargar la orden para despachar');
+            return;
+          }
+          this.fullDispatchOrder.set(data);
+          this.showDispatchModal.set(true);
+        },
+        error: (err: any) => {
+          this.dispatching.set(false);
+          this.toastService.error(
+            err?.message || 'No se pudo cargar la orden para despachar',
+          );
+        },
+      });
+  }
+
+  /** El wizard pidió dirección: abre el modal de captura en modo crear. */
+  onDispatchNeedsAddress(): void {
+    if (!this.fullDispatchOrder()) return;
+    this.editingAddressId.set(null);
+    this.editingInitialAddress.set(null);
+    this.showShippingAddressModal.set(true);
+  }
+
+  /** Guarda la edición de la dirección y refresca la orden del wizard. */
+  onDispatchAddressEdit(event: { addressId: number; payload: UpdateAddressPayload }): void {
+    if (this.savingShippingAddress()) return;
+    this.savingShippingAddress.set(true);
+    this.storeOrdersService
+      .updateAddress(event.addressId, event.payload)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.savingShippingAddress.set(false);
+          this.showShippingAddressModal.set(false);
+          this.refreshDispatchOrder();
+          this.toastService.success('Dirección de entrega actualizada');
+        },
+        error: (err: unknown) => {
+          this.savingShippingAddress.set(false);
+          this.toastService.error(
+            err instanceof Error ? err.message : 'No se pudo actualizar la dirección',
+          );
+        },
+      });
+  }
+
+  /** Crea la dirección, la asigna a la orden y refresca el wizard. */
+  onDispatchAddressSubmit(payload: CreateAddressPayload): void {
+    const order = this.fullDispatchOrder();
+    if (!order || this.savingShippingAddress()) return;
+    this.savingShippingAddress.set(true);
+    this.storeOrdersService
+      .createCustomerAddress(payload)
+      .pipe(
+        switchMap((address: any) =>
+          this.storeOrdersService.updateOrderShippingAddress(
+            String(order.id),
+            Number(address.id),
+          ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (updated: any) => {
+          const data = updated?.data ?? updated;
+          if (data) this.fullDispatchOrder.set(data);
+          else this.refreshDispatchOrder();
+          this.savingShippingAddress.set(false);
+          this.showShippingAddressModal.set(false);
+          this.toastService.success('Dirección de entrega asignada a la orden');
+        },
+        error: (err: unknown) => {
+          this.savingShippingAddress.set(false);
+          this.toastService.error(
+            err instanceof Error ? err.message : 'No se pudo asignar la dirección',
+          );
+        },
+      });
+  }
+
+  /** Recarga la orden completa del wizard (tras guardar dirección). */
+  private refreshDispatchOrder(): void {
+    const order = this.fullDispatchOrder();
+    if (!order?.id) return;
+    this.storeOrdersService
+      .getOrderById(String(order.id))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (fresh: any) => {
+          const data = fresh && typeof fresh === 'object' && 'success' in fresh
+            ? (fresh.data ?? fresh)
+            : fresh;
+          if (data) this.fullDispatchOrder.set(data);
+        },
+        error: () => {
+          // La dirección ya quedó guardada; el wizard revalida con lo que tiene.
+        },
+      });
+  }
+
   /**
    * Emite el documento electrónico de esta venta BAJO DEMANDA.
    *
@@ -1405,7 +1803,7 @@ private authFacade = inject(AuthFacade);
    * habilitación. El resultado de la emisión NUNCA abre nada.
    */
   createInvoice(): void {
-    if (!this.orderId || this.creatingInvoice()) return;
+    if (!this.orderId || this.creatingInvoice() || this.fiscalPending()) return;
 
     // Con las configuraciones todavía cargando se rechaza en silencio, para no
     // pintar un modal de «falta configurar» que se desmiente medio segundo
@@ -1549,6 +1947,11 @@ private authFacade = inject(AuthFacade);
     }
   }
 
+  /** Envio a la DIAN en curso: el boton «Factura» no debe disparar otro. */
+  readonly fiscalPending = computed(
+    () => this.fiscalStatus()?.state === 'pending',
+  );
+
   /** La DIAN ya aceptó el documento de esta venta. */
   readonly alreadyIssued = computed(
     () => this.fiscalStatus()?.state === 'issued',
@@ -1628,8 +2031,8 @@ private authFacade = inject(AuthFacade);
    *
    * Con `trigger === 'automatic'`, exige además `print_dispatch_ticket_auto_with_pos`
    * (opt-in por admin). Con `trigger === 'explicit'`, sólo exige el switch
-   * global. `direct_delivery` se salta siempre. Sin envío no hay a quién
-   * despachar.
+   * global. Sin el opt-in de mostrador, `direct_delivery` no autoimprime;
+   * con él, Para llevar sí puede generar el tiquete de reclamo.
    */
   private async printDispatchTicketIfNeeded(
     trigger: 'automatic' | 'explicit',
@@ -1643,8 +2046,8 @@ private authFacade = inject(AuthFacade);
       printDispatchTicketEnabled: this.printDispatchTicketEnabled(),
       printDispatchTicketAuto:
         trigger === 'automatic' ? this.printDispatchTicketAutoWithPos() : undefined,
-      // Decisión del usuario 2026-08-31: tiquete de reclamo en mostrador
-      // y para llevar. Mismo flag, mismo origen que el detalle de orden.
+      // Decisión del usuario 2026-08-31: tiquete de reclamo para mostrador
+      // (incluido Para llevar) y pickup real. Mismo flag que el detalle.
       counterEnabled: this.printDispatchTicketOnCounter(),
       deliveryType: order.delivery_type,
       isShippingSale: order.isShippingSale,

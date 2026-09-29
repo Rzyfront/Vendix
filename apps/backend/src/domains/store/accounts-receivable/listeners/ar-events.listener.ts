@@ -39,64 +39,13 @@ export class ArEventsListener {
       // creates the AR row directly. Skip the duplicate here.
       if (event.source_type === 'dispatch_route' || event.financial_account_id) return;
 
-      let customerId = event.customer_id;
-      let documentNumber = event.document_number || event.order_number;
-      let organizationId = event.organization_id;
-      let storeId = event.store_id;
-
-      if ((!customerId || !organizationId || !storeId) && event.order_id) {
-        const order = await this.prisma.orders.findUnique({
-          where: { id: event.order_id },
-          select: {
-            customer_id: true,
-            order_number: true,
-            store_id: true,
-            stores: { select: { organization_id: true } },
-          },
-        });
-        if (order) {
-          if (!customerId && order.customer_id) customerId = order.customer_id;
-          if (!documentNumber && order.order_number) documentNumber = order.order_number;
-          if (!storeId) storeId = order.store_id;
-          if (!organizationId && order.stores?.organization_id) {
-            organizationId = order.stores.organization_id;
-          }
-        }
-      }
-
-      if (!customerId || !storeId || !organizationId) {
-        this.logger.warn(
-          `Cannot create AR for credit_sale order #${event.order_id}: missing customer_id (${customerId}), store_id (${storeId}), or organization_id (${organizationId})`,
-        );
-        return;
-      }
-
-      let dueDate = event.due_date;
-      if (!dueDate && event.order_id) {
-        const firstInst = await this.prisma.order_installments.findFirst({
-          where: { order_id: event.order_id },
-          orderBy: { installment_number: 'asc' },
-          select: { due_date: true },
-        });
-        if (firstInst?.due_date) {
-          dueDate = firstInst.due_date;
-        }
-      }
-
-      const ar = await this.ar_service.createFromEvent({
-        customer_id: customerId,
-        source_type: 'credit_sale',
-        source_id: event.order_id,
-        document_number: documentNumber,
-        original_amount: event.total_amount,
-        due_date: dueDate,
-        organization_id: organizationId,
-        store_id: storeId,
+      const ar = await this.ar_service.createCreditSaleFromEvent({
+        order_id: event.order_id,
+        total_amount: event.total_amount,
+        store_id: event.store_id,
+        due_date: event.due_date,
       });
-
-      this.logger.log(
-        `AR #${ar.id} created for credit_sale order #${event.order_id}`,
-      );
+      if (ar) this.logger.log(`AR #${ar.id} resolved for credit_sale order #${event.order_id}`);
     } catch (error) {
       this.logger.error(
         `Failed to create AR for credit_sale #${event.order_id}: ${error.message}`,

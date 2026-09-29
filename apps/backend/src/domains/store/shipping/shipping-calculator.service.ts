@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { address_type_enum, shipping_rate_type_enum } from '@prisma/client';
 import { SettingsService } from '../settings/settings.service';
@@ -10,12 +10,28 @@ import {
   normalizeGeoName,
   postalCodeInList,
 } from 'src/common/utils/geo-name.util';
+import {
+  DistanceCoords,
+  ShippingDistanceService,
+} from './services/shipping-distance.service';
+import { ShippingTaxService } from './services/shipping-tax.service';
+import type { RateTaxContext } from './services/shipping-tax.service';
+import { resolveShippingCharge } from './utils/shipping-tax.util';
 
 export interface AddressDTO {
   country_code: string;
   state_province?: string;
   city?: string;
+  /**
+   * Línea de dirección escrita. Solo se lee para el fallback de geocoding en
+   * `resolveQuoteDistances` (`ShippingDistanceService.resolveBuyerCoords`)
+   * cuando el comprador no manda `latitude`/`longitude` — `ShippingAddressDto`
+   * ya la trae.
+   */
+  address_line1?: string;
   postal_code?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface CartItemDTO {
@@ -32,7 +48,24 @@ export interface ShippingOption {
   method_id: number;
   method_name: string;
   method_type: string; // 'pickup' | 'own_fleet' | 'carrier' | etc.
+  /**
+   * Lo que paga el cliente por el envío: siempre el BRUTO (lote C). En modo
+   * agregado ya trae el impuesto sumado; el storefront muestra solo este valor.
+   */
   cost: number;
+  /**
+   * Base neta del envío (bruto − impuesto). Viaja solo para superficies del
+   * comerciante (wizard, POS); el storefront no la muestra.
+   */
+  base?: number;
+  /**
+   * Impuesto del envío incluido en `cost`. Solo superficies del comerciante.
+   */
+  shipping_tax_amount?: number;
+  /**
+   * Modo de la tarifa (`shipping_rates.tax_is_inclusive`). Solo comerciante.
+   */
+  tax_is_inclusive?: boolean;
   currency: string;
   estimated_days?: { min: number; max: number };
   /** Zona que originó la opción. Null cuando viene del fallback de retiro. */
@@ -69,6 +102,10 @@ export class ShippingCalculatorService {
   constructor(
     private prisma: StorePrismaService,
     private settingsService: SettingsService,
+    private readonly shippingTaxService: ShippingTaxService,
+    // `@Optional()` para no romper los TestingModule existentes; sin él (sólo
+    // en specs) el cotizador cobra zona como siempre.
+    @Optional() private readonly distanceService?: ShippingDistanceService,
   ) {}
 
   /**
@@ -129,8 +166,28 @@ export class ShippingCalculatorService {
       ],
     });
 
+    // Lote C (paso 13): una sola lectura fiscal por cotización. El modo de
+    // cada tarifa (incluido/agregado) se resuelve al final de la selección
+    // de precio, por opción, con el cálculo único `resolveShippingCharge`.
+    // `store_id` explícito: el endpoint es público (storefront) y puede no
+    // haber contexto de request con tienda.
+    const rateTaxContext = await this.shippingTaxService.loadRateTaxContext(
+      rates.map((r) => r.id),
+      { store_id: storeId },
+    );
+
     const cartTotals = this.getCartTotals(items);
     const storeCurrency = await this.settingsService.getStoreCurrency();
+
+    // Cobro por distancia: la zona autoriza (cobertura), la distancia precio.
+    // Una llamada de ruteo por origen distinto, compartida por todas las
+    // tarifas de la cotización; sin coords o ante cualquier fallo el mapa
+    // queda vacío y cada tarifa cobra su precio de zona.
+    const distanceKmByOrigin = await this.resolveQuoteDistances(
+      storeId,
+      rates,
+      address,
+    );
 
     // Determinar la máxima especificidad territorial para cada método de envío.
     // Si una zona de nivel ciudad (score >= 100) ya define tarifas para un método,
@@ -207,6 +264,20 @@ export class ShippingCalculatorService {
           break;
       }
 
+      // Cobro por distancia: override del costo de zona por el precio del
+      // tramo cuando el método lo tiene activo. Fuera de todos los rangos la
+      // tarifa no se ofrece; las tarifas `free` siempre salen gratis. Va ANTES
+      // del threshold para que el envío-gratis-sobre-X siga aplicando al costo
+      // final (sea de zona o de escala).
+      if (isApplicable && rate.type !== shipping_rate_type_enum.free) {
+        const override = this.applyDistancePrice(
+          rate,
+          distanceKmByOrigin,
+        );
+        if (override === 'excluded') continue;
+        if (override != null) cost = override;
+      }
+
       // ADR-04 (F-008): threshold 0 = envío gratis deliberado de la tienda.
       // Comparación explícita `>= 0`, nunca truthiness: el campo Prisma es
       // `Decimal` (objeto truthy incluso en 0), así que `if (threshold)` no
@@ -242,13 +313,19 @@ export class ShippingCalculatorService {
                rate.shipping_zone?.name?.trim() ||
                rate.shipping_method.name);
 
+        // El precio seleccionado (zona → distancia → peso → umbral de envío
+        // gratis) entra al cálculo único UNA sola vez: `cost` es el bruto.
+        // Umbral alcanzado o tarifa `free` ⇒ precio 0 ⇒ sin impuesto.
+        const charged = this.applyRateTax(rate.id, cost, rateTaxContext);
+
         options.push({
           id: rate.id,
           rate_id: rate.id,
           method_id: rate.shipping_method_id,
           method_name: optionName,
           method_type: rate.shipping_method.type,
-          cost: cost,
+          cost: charged.gross,
+          ...charged.fields,
           currency: storeCurrency,
           estimated_days: {
             min: rate.shipping_method.min_days || 0,
@@ -292,6 +369,264 @@ export class ShippingCalculatorService {
     );
 
     return options;
+  }
+
+  /**
+   * Cotiza UNA tarifa puntual (`rateId`) reutilizando `calculateRates` — el
+   * mismo cálculo único que arma las opciones del storefront (umbral de
+   * envío gratis, costo por unidad, distancia y agregado del impuesto).
+   * Punto de unificación para todos los llamadores que hoy recalculan el
+   * envío de una tarifa YA elegida (edición de orden, POS, `shipOrder`):
+   * ninguno debe reimplementar el atajo `flat = base_cost` por su cuenta.
+   *
+   * `null` cuando la tarifa no aparece entre las opciones calculadas (zona
+   * sin cobertura, tarifa inactiva, distancia fuera de todos los tramos, o
+   * — cambio de negocio 2026-09-27 — sin coords del comprador y sin poder
+   * geocodificar su dirección: ver `vendix-shipping-distance-pricing`). El
+   * llamador decide el fallback (zona/flat) en ese caso, EXCEPTO que ya no
+   * debe inventar un costo cuando la razón es la dirección del comprador
+   * (ver blockers reportados en payments.service.ts / orders.service.ts).
+   */
+  async quoteRateGross(
+    storeId: number,
+    rateId: number,
+    items: CartItemDTO[],
+    address: AddressDTO,
+  ): Promise<number | null> {
+    const normalizedAddress: AddressDTO = {
+      ...address,
+      latitude: address.latitude != null ? Number(address.latitude) : undefined,
+      longitude:
+        address.longitude != null ? Number(address.longitude) : undefined,
+    };
+    const options = await this.calculateRates(storeId, items, normalizedAddress);
+    const match = options.find((option) => option.rate_id === rateId);
+    return match ? match.cost : null;
+  }
+
+  /**
+   * Resuelve la distancia (km) por calles desde cada origen distinto con
+   * distancia activa hasta el comprador. Una llamada al motor por origen,
+   * compartida por todas las tarifas de la cotización. Tarifas sin escala ni
+   * siquiera rutean (su precio de zona rige igual).
+   *
+   * Cuando el ORIGEN del método falta/es inválido, o el motor de ruteo
+   * falla/lanza, el precio de zona rige igual (fail-open, sin cambios) —
+   * eso es infraestructura, no responsabilidad del comprador — pero se deja
+   * un warn ESTRUCTURADO con `store_id` + `shipping_method_id` + motivo
+   * para que el caso sea diagnosticable — antes fallaba en silencio y solo
+   * un `docker logs` con suerte de timing lo mostraba.
+   *
+   * Sin `latitude`/`longitude` del comprador, se intenta UNA vez
+   * `ShippingDistanceService.resolveBuyerCoords` (forward-geocode de
+   * `address_line1`/`city`/`state_province`) antes de rendirse, con el
+   * origen del PRIMER método candidato como `bias` — el mismo campo y el
+   * mismo bias que usa `CheckoutService.resolveConfirmShippingCost`, para
+   * que cotización y confirmación midan desde el mismo punto (el `forward`
+   * cachea por dirección normalizada).
+   *
+   * Cambio de negocio (2026-09-27): si esa dirección del comprador NO se
+   * puede resolver (ni coords del cliente ni geocode), el método con
+   * distancia activa YA NO degrada a zona — la tarifa se marca con el
+   * centinela `'buyer_geocode_failed'` (ver `applyDistancePrice`) y
+   * `calculateRates` la EXCLUYE de las opciones, igual que "fuera de todos
+   * los tramos": no hay forma honesta de cobrar por distancia sin saber
+   * dónde está el comprador, así que no se ofrece en vez de adivinar.
+   */
+  private async resolveQuoteDistances(
+    storeId: number,
+    rates: Array<{
+      shipping_method_id: number;
+      distance_tiers?: unknown;
+      shipping_method?: {
+        distance_pricing_enabled?: boolean | null;
+        origin_latitude?: unknown;
+        origin_longitude?: unknown;
+      } | null;
+    }>,
+    address: AddressDTO,
+  ): Promise<Map<string, number | null | 'buyer_geocode_failed'>> {
+    const distances = new Map<
+      string,
+      number | null | 'buyer_geocode_failed'
+    >();
+    if (!this.distanceService) return distances;
+
+    // Métodos con distancia activa Y escala utilizable: son los únicos cuyo
+    // fallo de distancia es diagnosticable con contexto (`shipping_method_id`).
+    const candidates: Array<{
+      methodId: number;
+      method: NonNullable<(typeof rates)[number]['shipping_method']>;
+    }> = [];
+    for (const rate of rates) {
+      const method = rate.shipping_method;
+      if (!method?.distance_pricing_enabled) continue;
+      if (!ShippingDistanceService.parseTiers(rate.distance_tiers)) continue;
+      candidates.push({ methodId: rate.shipping_method_id, method });
+    }
+    if (candidates.length === 0) return distances;
+
+    // Orígenes primero: hacen falta tanto para rutear como para el `bias`
+    // del geocode del comprador cuando no manda coords.
+    const origins = new Map<
+      string,
+      { coords: DistanceCoords; methodIds: number[] }
+    >();
+    for (const { methodId, method } of candidates) {
+      const origin = ShippingDistanceService.toCoords(
+        method.origin_latitude,
+        method.origin_longitude,
+        'origin',
+      );
+      if (!origin) {
+        this.logger.warn(
+          `Distancia no calculable (store_id=${storeId}, shipping_method_id=${methodId}): ` +
+            'coords de origen ausentes o inválidas; se cobra tarifa de zona.',
+        );
+        continue;
+      }
+      const key = `${origin.latitude},${origin.longitude}`;
+      const entry = origins.get(key);
+      if (entry) entry.methodIds.push(methodId);
+      else origins.set(key, { coords: origin, methodIds: [methodId] });
+    }
+
+    let buyer = ShippingDistanceService.toCoords(
+      address.latitude,
+      address.longitude,
+      'buyer',
+    );
+    if (!buyer) {
+      const bias = origins.values().next().value?.coords;
+      const resolved = await this.distanceService.resolveBuyerCoords(
+        {
+          address_line1: address.address_line1,
+          city: address.city,
+          state_province: address.state_province,
+          country_code: address.country_code,
+          latitude: address.latitude,
+          longitude: address.longitude,
+        },
+        bias ? { lat: bias.latitude, lng: bias.longitude } : undefined,
+      );
+      if (resolved) {
+        buyer = { latitude: resolved.latitude, longitude: resolved.longitude };
+      }
+    }
+    if (!buyer) {
+      // Cambio de negocio 2026-09-27: ya NO se cobra zona — la tarifa se
+      // excluye (centinela `'buyer_geocode_failed'`, leído por
+      // `applyDistancePrice`) para CADA origen candidato, así
+      // `calculateRates` la descarta como si estuviera fuera de rango.
+      for (const { methodId } of candidates) {
+        this.logger.warn(
+          `Distancia no calculable (store_id=${storeId}, shipping_method_id=${methodId}, reason=buyer_geocode_failed): ` +
+            'coords de destino ausentes o no geocodificables; la tarifa no se ofrece.',
+        );
+      }
+      for (const key of origins.keys()) {
+        distances.set(key, 'buyer_geocode_failed');
+      }
+      return distances;
+    }
+
+    for (const [key, { coords: origin, methodIds }] of origins) {
+      let distanceKm: number | null = null;
+      try {
+        distanceKm = await this.distanceService.resolveDistanceKm(
+          origin,
+          buyer,
+        );
+      } catch {
+        distanceKm = null;
+      }
+      if (distanceKm == null) {
+        this.logger.warn(
+          `Distancia no calculable (store_id=${storeId}, shipping_method_id=[${methodIds.join(',')}]): ` +
+            'el motor de ruteo no devolvió una distancia; se cobra tarifa de zona.',
+        );
+      }
+      distances.set(key, distanceKm);
+    }
+    return distances;
+  }
+
+  /**
+   * Override por distancia para UNA tarifa: precio del tramo, `'excluded'`
+   * cuando la distancia cae fuera de todos los rangos O cuando no se pudo
+   * resolver la dirección del comprador (`'buyer_geocode_failed'` —
+   * cambio de negocio 2026-09-27, ver `resolveQuoteDistances`), o `null`
+   * cuando rige el precio de zona (sin origen, o motor de ruteo caído —
+   * infraestructura, no la dirección).
+   */
+  private applyDistancePrice(
+    rate: {
+      distance_tiers?: unknown;
+      shipping_method?: {
+        distance_pricing_enabled?: boolean | null;
+        origin_latitude?: unknown;
+        origin_longitude?: unknown;
+      } | null;
+    },
+    distanceKmByOrigin: Map<string, number | null | 'buyer_geocode_failed'>,
+  ): number | 'excluded' | null {
+    if (!this.distanceService) return null;
+    const method = rate.shipping_method;
+    if (!method?.distance_pricing_enabled) return null;
+    const origin = ShippingDistanceService.toCoords(
+      method.origin_latitude,
+      method.origin_longitude,
+    );
+    if (!origin) return null;
+    const distanceEntry =
+      distanceKmByOrigin.get(`${origin.latitude},${origin.longitude}`) ?? null;
+    if (distanceEntry === 'buyer_geocode_failed') return 'excluded';
+    const distanceKm = distanceEntry;
+    const resolved = this.distanceService.resolveRatePrice(
+      rate.distance_tiers,
+      distanceKm,
+    );
+    if (!resolved) return null;
+    if ('excluded' in resolved) return 'excluded';
+    return resolved.price;
+  }
+
+  /**
+   * Aplica el cálculo único "precio de tarifa → bruto" a UNA opción ya
+   * seleccionada (lote C, paso 13). Sin contexto fiscal para la tarifa (ajena
+   * o inexistente) el precio sale tal cual y sin campos de comerciante: nunca
+   * se inventa un impuesto. Precio 0 (gratis o umbral alcanzado) ⇒ sin
+   * impuesto. `base`, `shipping_tax_amount` y `tax_is_inclusive` viajan solo
+   * para superficies del comerciante; el storefront muestra `cost`.
+   */
+  private applyRateTax(
+    rate_id: number,
+    ratePrice: number,
+    ctxByRateId: Map<number, RateTaxContext>,
+  ): {
+    gross: number;
+    fields: Pick<
+      ShippingOption,
+      'base' | 'shipping_tax_amount' | 'tax_is_inclusive'
+    >;
+  } {
+    const ctx = ctxByRateId.get(rate_id);
+    if (!ctx) return { gross: ratePrice, fields: {} };
+    const charge = resolveShippingCharge({
+      rate_price: ratePrice,
+      category: ctx.category,
+      tax_is_inclusive: ctx.tax_is_inclusive,
+      vat_responsible: ctx.vat_responsible,
+      inc_responsible: ctx.inc_responsible,
+    });
+    return {
+      gross: charge.gross,
+      fields: {
+        base: charge.base,
+        shipping_tax_amount: charge.tax,
+        tax_is_inclusive: ctx.tax_is_inclusive,
+      },
+    };
   }
 
   /**
@@ -367,6 +702,13 @@ export class ShippingCalculatorService {
       return [];
     }
 
+    // Mismo cálculo único que la ruta principal: el retiro también cotiza
+    // el bruto (una lectura fiscal para todo el fallback).
+    const rateTaxContext = await this.shippingTaxService.loadRateTaxContext(
+      pickupRates.map((r) => r.id),
+      { store_id: storeId },
+    );
+
     const storeCurrency = await this.settingsService.getStoreCurrency();
     const seenMethods = new Set<number>();
     const options: ShippingOption[] = [];
@@ -382,13 +724,20 @@ export class ShippingCalculatorService {
              rate.shipping_zone?.name?.trim() ||
              rate.shipping_method.name);
 
+      const ratePrice =
+        rate.type === shipping_rate_type_enum.free
+          ? 0
+          : Number(rate.base_cost);
+      const charged = this.applyRateTax(rate.id, ratePrice, rateTaxContext);
+
       options.push({
         id: rate.id,
         rate_id: rate.id,
         method_id: rate.shipping_method_id,
         method_name: optionName,
         method_type: rate.shipping_method.type,
-        cost: rate.type === shipping_rate_type_enum.free ? 0 : Number(rate.base_cost),
+        cost: charged.gross,
+        ...charged.fields,
         currency: storeCurrency,
         estimated_days: {
           min: rate.shipping_method.min_days || 0,

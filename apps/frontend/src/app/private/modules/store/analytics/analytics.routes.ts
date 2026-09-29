@@ -257,6 +257,13 @@ export const analyticsRoutes: Routes = [
                 (c) => c.PurchaseTrendsComponent,
               ),
           },
+          {
+            path: 'payable-aging',
+            loadComponent: () =>
+              import('./pages/purchases/payable-aging.component').then(
+                (c) => c.PayableAgingComponent,
+              ),
+          },
         ],
       },
       // Customers Analytics (shell)
@@ -370,6 +377,36 @@ export const analyticsRoutes: Routes = [
             loadComponent: () =>
               import('./pages/financial/refunds-summary.component').then(
                 (c) => c.RefundsSummaryComponent,
+              ),
+          },
+        ],
+      },
+      // Payments Analytics (shell) — Paso 4 PLAN-reporte-analitica-pagos-2026-09-28
+      {
+        path: 'payments',
+        loadComponent: () =>
+          import('./components/analytics-shell/analytics-shell.component').then(
+            (c) => c.AnalyticsShellComponent,
+          ),
+        data: { categoryId: 'payments' as AnalyticsCategoryId },
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'overview',
+          },
+          {
+            path: 'overview',
+            loadComponent: () =>
+              import('./pages/payments/payments-overview.component').then(
+                (c) => c.PaymentsOverviewComponent,
+              ),
+          },
+          {
+            path: 'by-method',
+            loadComponent: () =>
+              import('./pages/payments/payments-by-method.component').then(
+                (c) => c.PaymentsByMethodComponent,
               ),
           },
         ],

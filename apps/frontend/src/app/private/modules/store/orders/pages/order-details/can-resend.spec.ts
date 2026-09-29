@@ -150,6 +150,12 @@ describe('canResendOrderItem — remake post-cancelación con decisión', () => 
     ).toBe(true);
   });
 
+  it('reads historical delivered_* decisions without permitting unknown values', () => {
+    expect(canResendOrderItem(item(true, 0, 'delivered_restock'), 'cancelled')).toBe(true);
+    expect(canResendOrderItem(item(true, 0, 'delivered_waste'), 'cancelled')).toBe(true);
+    expect(canResendOrderItem(item(true, 0, 'before_fire'), 'cancelled')).toBe(false);
+  });
+
   it("order 'cancelled' + ítem delivered + decisión → true (el veto delivered también se levanta)", () => {
     expect(
       canResendOrderItem(item(true, 1, 'after_fire_waste'), 'cancelled'),

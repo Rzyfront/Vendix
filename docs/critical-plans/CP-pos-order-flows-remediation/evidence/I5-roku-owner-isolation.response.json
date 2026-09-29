@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "total": 1,
+  "rows": [
+    {
+      "id": 401,
+      "organization_id": 6,
+      "store_id": 10,
+      "resource_id": 1119,
+      "event_type": "pos_sale_without_fiscal_document",
+      "new_status": "failed"
+    }
+  ]
+}

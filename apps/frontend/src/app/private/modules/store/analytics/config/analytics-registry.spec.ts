@@ -11,14 +11,14 @@ import {
 
 describe('AnalyticsRegistry', () => {
   describe('ANALYTICS_CATEGORIES', () => {
-    it('should have 9 categories', () => {
-      expect(ANALYTICS_CATEGORIES).toHaveSize(9);
+    it('should have 10 categories', () => {
+      expect(ANALYTICS_CATEGORIES).toHaveSize(10);
     });
 
     it('should have all required category ids', () => {
       const expectedIds: AnalyticsCategoryId[] = [
         'overview', 'sales', 'inventory', 'products',
-        'purchases', 'customers', 'reviews', 'financial', 'dispatch',
+        'purchases', 'customers', 'reviews', 'financial', 'dispatch', 'payments',
       ];
       const actualIds = ANALYTICS_CATEGORIES.map(c => c.id);
       expect(actualIds).toEqual(expectedIds);
@@ -26,7 +26,10 @@ describe('AnalyticsRegistry', () => {
 
     it('should have valid panelUiKey for each category', () => {
       ANALYTICS_CATEGORIES.forEach(category => {
-        expect(category.panelUiKey).toMatch(/^analytics_/);
+        // Pagos no lleva panelUiKey (opcional); el resto sí.
+        if (category.id !== 'payments') {
+          expect(category.panelUiKey).toMatch(/^analytics_/);
+        }
         expect(category.icon).toBeTruthy();
         expect(category.color).toBeTruthy();
       });
@@ -34,8 +37,8 @@ describe('AnalyticsRegistry', () => {
   });
 
   describe('ANALYTICS_VIEWS', () => {
-    it('should have 32 views', () => {
-      expect(ANALYTICS_VIEWS).toHaveSize(32);
+    it('should have 35 views', () => {
+      expect(ANALYTICS_VIEWS).toHaveSize(35);
     });
 
     it('should have unique keys', () => {
@@ -69,6 +72,12 @@ describe('AnalyticsRegistry', () => {
     it('should have dispatch with 3 views', () => {
       const dispatchViews = getViewsByCategory('dispatch');
       expect(dispatchViews).toHaveSize(3);
+    });
+
+    it('should have payments with 2 views', () => {
+      const paymentsViews = getViewsByCategory('payments');
+      expect(paymentsViews).toHaveSize(2);
+      expect(paymentsViews.map(v => v.key)).toEqual(['payments_overview', 'payments_by_method']);
     });
   });
 
@@ -118,6 +127,10 @@ describe('AnalyticsRegistry', () => {
       expect(defaultView?.category).toBe('sales');
     });
 
+    it('should return payments_overview as the default view for payments', () => {
+      expect(getDefaultViewForCategory('payments')?.key).toBe('payments_overview');
+    });
+
     it('should return undefined for invalid category', () => {
       const defaultView = getDefaultViewForCategory('invalid' as AnalyticsCategoryId);
       expect(defaultView).toBeUndefined();
@@ -127,7 +140,7 @@ describe('AnalyticsRegistry', () => {
   describe('getSidebarEntries', () => {
     it('should return entries for all categories', () => {
       const entries = getSidebarEntries();
-      expect(entries).toHaveSize(9);
+      expect(entries).toHaveSize(10);
     });
 
     it('should have valid route, icon, and panelUiKey for each entry', () => {
@@ -135,7 +148,9 @@ describe('AnalyticsRegistry', () => {
       entries.forEach(entry => {
         expect(entry.route).toMatch(/^\/admin\/analytics\//);
         expect(entry.icon).toBeTruthy();
-        expect(entry.panelUiKey).toMatch(/^analytics_/);
+        if (entry.label !== 'Pagos') {
+          expect(entry.panelUiKey).toMatch(/^analytics_/);
+        }
         expect(entry.viewCount).toBeGreaterThan(0);
       });
     });

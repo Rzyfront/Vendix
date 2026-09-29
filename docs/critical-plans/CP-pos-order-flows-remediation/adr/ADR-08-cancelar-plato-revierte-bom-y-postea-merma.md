@@ -1,0 +1,16 @@
+---
+id: ADR-08
+title: "Cancelar un plato revierte el BOM o reclasifica COGS como merma"
+status: accepted
+reversibility: costly
+updated: 2026-09-23
+---
+# ADR-08 — Cancelar un plato revierte el BOM o reclasifica COGS como merma
+
+- **Context:** El dueño pidió elegir, al cancelar un plato, si se desechan o se reutilizan los insumos, y que ese costo no llegue a la cuenta del cliente. El código actual hace lo contrario de lo necesario: `cancelDeliveredOrderItem` devuelve stock del **producto vendido** (`order-flow.service.ts:2409-2431`), que en un plato preparado no consumió stock — lo consumieron sus hojas del BOM al disparar a cocina (`inventory_consumed_at_fire`). El resultado es inventario inflado del plato y hojas nunca devueltas. La reversa correcta existe, pero **solo para la orden completa**: la rama `reuse` de `cancelOrder` relee `inventory_transactions` del ítem con `quantity_change < 0` y devuelve cada consumo real (`:3199-3248`). **A nivel de línea no existe ningún camino de reuso, ni siquiera latente**: la rama de `cancelOrderItem` está condicionada a `resolvedType === 'before_fire' && wasFired` (`:2156`), combinación que la derivación nunca produce (`:2107`) y que el DTO no admite enviar. Y la rama que sí existe **no está probada**: `kitchenDisposition` tiene cero apariciones en cualquier `.spec.ts` del repo.
+- **Decision:** «Reusar» revierte las hojas del BOM **portando** ese seam al carril por línea — no lo reutiliza tal cual, porque ahí no hay camino que reutilizar — y nunca devuelve el producto vendido. «Desechar» no devuelve stock y reclasifica el costo ya reconocido al disparar cocina: **DR 5295 / CR 6135**, sin volver a tocar inventario ni volver a acreditar 1435. El dueño confirmó expresamente esta corrección el 2026-09-23, después de detectar que el ajuste de merma inicialmente propuesto duplicaría el descuento de stock. En ambos casos la línea se excluye del total cobrado. El vocabulario de `cancellation_type` se unifica con `POST_CANCEL_REMAKE_TYPES` (`kitchen-fire.service.ts:1259`).
+- **Consequences:** El primer trabajo de la fase D es probar la reversa antes de reutilizarla. **No usar `inventory_adjustments` ni `inventory.adjusted.shrinkage` para un plato ya disparado:** ese seam hace CR 1435 y decrementa nuevamente las hojas; cocina ya hizo DR 6135 / CR 1435. Se necesita un evento/asiento idempotente de reclasificación vinculado a la línea cancelada y a su costo de consumo original; si es cero, dejar rastro auditable sin asiento. El inventario no cambia al desechar, y 5295 refleja la pérdida sin duplicar costo. Si la reversa devuelve cantidades equivocadas exige ajuste manual; por eso «desechar» es el destino seguro por defecto. El `confirm()` nativo (`order-details-page.component.ts:4152-4157`) debe reemplazarse por modal con las dos opciones.
+- **Reversibility:** costly — los movimientos de inventario y los asientos emitidos quedan; revertir el código no los deshace.
+- **Revisit if:** el negocio quiere distinguir entre merma por calidad, error de cocina y devolución del cliente, lo que pediría un catálogo de motivos mapeado a cuentas distintas.
+
+- **Owner approval:** 2026-09-23 — el dueño autorizó expresamente las cuatro propuestas ADR-05/06/07/08 para completar el plan.

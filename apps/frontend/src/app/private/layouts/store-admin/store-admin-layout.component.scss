@@ -54,11 +54,7 @@
 
 /* Main content area styles */
 main {
-  /* Los 12px que se le quitaron de alto al header (84 → --admin-header-h)
-     reaparecen aquí para conservar la separación vertical original. Van en el
-     outlet y no como margen del header porque `main` es el contenedor con
-     scroll: el hueco se desplaza con el contenido en vez de quedar fijo. */
-  padding-top: var(--admin-header-gap);
+  /* Sin padding-top: las páginas pegan directo al header. */
   background-color: var(--color-background);
   min-width: 0;
   max-width: 100%;

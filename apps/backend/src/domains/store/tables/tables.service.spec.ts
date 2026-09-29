@@ -116,7 +116,9 @@ describe('TablesService — CRUD + floor map (Fase E smoke)', () => {
           table_id: 2,
           order_id: 9001,
           opened_by: 1,
+          opener: { id: 1, first_name: 'Ana', last_name: 'Rojas' },
           opened_at: new Date(),
+          paid_at: null,
           closed_at: null,
           guest_count: 3,
         },
@@ -128,6 +130,32 @@ describe('TablesService — CRUD + floor map (Fase E smoke)', () => {
       expect(map[0].active_session).toBeNull();
       expect(map[1].effective_status).toBe('occupied');
       expect(map[1].active_session?.id).toBe(50);
+      expect(map[1].active_session?.waiter).toEqual({ id: 1, first_name: 'Ana', last_name: 'Rojas' });
+      expect(prismaMock.table_sessions.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: { opener: { select: { id: true, first_name: true, last_name: true } } },
+        }),
+      );
+      expect(prismaMock.table_sessions.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves the waiter empty for anonymous QR sessions without another query', async () => {
+      prismaMock.tables.findMany.mockResolvedValueOnce([{
+        id: 3, store_id: STORE_ID, name: 'Mesa 3', zone: null,
+        capacity: 2, status: 'occupied', pos_x: null, pos_y: null,
+        created_at: null, updated_at: null,
+      }]);
+      prismaMock.table_sessions.findMany.mockResolvedValueOnce([{
+        id: 51, table_id: 3, order_id: 9002, opened_by: null,
+        opener: null, opened_at: new Date(), paid_at: null,
+        closed_at: null, guest_count: 2,
+      }]);
+
+      const map = await service.floorMap();
+
+      expect(map[0].active_session?.waiter).toBeNull();
+      expect(map[0].active_session?.opened_by).toBeNull();
+      expect(prismaMock.table_sessions.findMany).toHaveBeenCalledTimes(1);
     });
   });
 

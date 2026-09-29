@@ -111,7 +111,7 @@ export const INC_RESPONSIBLE_CODE = 'O-33';
 export const INC_NOT_RESPONSIBLE_CODE = 'O-50';
 
 /** Contexto de la operación bloqueada, viaja en `details.context` del error. */
-export type VatChargeContext = 'product' | 'sale';
+export type VatChargeContext = 'product' | 'sale' | 'shipping';
 
 /** Forma mínima de `fiscal_data` que consume la resolución de responsabilidad. */
 export interface VatFiscalDataInput {
@@ -619,7 +619,8 @@ export function isExplicitlyNotVatResponsible(
  * cuando el comercio NO es responsable de IVA, incluyendo el estado
  * indeterminado (fail-closed desde 2026-08-21). No-op sólo cuando hay
  * una declaración de responsabilidad POSITIVA (O-48 o régimen que la
- * implica). El `context` indica el origen ('product' | 'sale') y el CTA
+ * implica). El `context` indica el origen ('product' | 'sale' | 'shipping')
+ * y el CTA
  * apunta al wizard de activación fiscal.
  */
 export function assertCanChargeVat(
@@ -630,6 +631,36 @@ export function assertCanChargeVat(
   if (outcome.responsible) return;
   throw new VendixHttpException(
     ErrorCodes.FISCAL_VAT_NOT_RESPONSIBLE_001,
+    undefined,
+    {
+      context,
+      cta: '/admin/fiscal/wizard',
+      reason: outcome.reason,
+    },
+  );
+}
+
+/**
+ * Contexto de la operación bloqueada por INC. Solo `'shipping'`: el INC de
+ * productos no se toca en este plan.
+ */
+export type IncChargeContext = 'shipping';
+
+/**
+ * Enforcement de escritura: lanza `FISCAL_INC_NOT_RESPONSIBLE_001` (HTTP 412)
+ * cuando el comercio NO declara O-33 en su RUT, incluyendo el estado
+ * indeterminado (fail-closed: sin declaración no se puede afirmar el tributo
+ * ante la DIAN). No-op sólo con O-33 declarado. El `context` indica el origen
+ * ('shipping') y el CTA apunta al wizard de activación fiscal.
+ */
+export function assertCanChargeInc(
+  fiscalData: VatFiscalDataInput | null | undefined,
+  context: IncChargeContext,
+): void {
+  const outcome = resolveIncResponsibility(fiscalData);
+  if (outcome.responsible) return;
+  throw new VendixHttpException(
+    ErrorCodes.FISCAL_INC_NOT_RESPONSIBLE_001,
     undefined,
     {
       context,

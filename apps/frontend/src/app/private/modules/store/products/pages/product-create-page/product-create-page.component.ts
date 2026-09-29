@@ -76,6 +76,7 @@ import {
   PreselectedProduct,
 } from '../../../inventory/interfaces';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { taxCategoryBlockReason } from '../../utils/product-tax-combination.util';
 import {
   buildTaxInclusivePayload,
   catalogInclusiveDefault,
@@ -525,6 +526,21 @@ export class ProductCreatePageComponent {
   private inventoryService = inject(InventoryService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  /**
+   * Release-853 paso 12 — el back del header conserva `?page=` de origen
+   * con la misma fuente que `navigateAfterSave` (`fromPage`, que el
+   * listado manda al abrir el alta/edición). Sin `fromPage` no se mandan
+   * queryParams y el back queda como antes. Estático: el snapshot no
+   * cambia mientras la página vive, así que no necesita signal.
+   */
+  readonly listBackQueryParams: Params | undefined = (() => {
+    // `route` ya está inicializado (los fields corren en orden de
+    // declaración): se reutiliza en vez de inyectar dos veces.
+    const fromPage = this.route.snapshot.queryParams['fromPage'];
+    return fromPage === undefined || fromPage === null || fromPage === ''
+      ? undefined
+      : { page: fromPage };
+  })();
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
   private promotionsService = inject(PromotionsService);
@@ -1011,20 +1027,26 @@ export class ProductCreatePageComponent {
   readonly taxCategoryOptions = computed<MultiSelectorOption[]>(() => {
     const blocked = this.isVatBlocked();
     const ivaIds = this.ivaTaxCategoryIdSet();
-    return this.taxCategoriesSig().map((cat) => {
+    const all = this.taxCategoriesSig();
+    // P1-4 — combinación legal (espejo del 400 PROD_TAX_COMBO_001): lo que
+    // chocaría con la selección actual se muestra deshabilitado con el motivo.
+    const selectedIds = new Set(this.selectedTaxCategoryIds() || []);
+    const selected = all.filter((c) => selectedIds.has(c.id));
+    return all.map((cat) => {
       const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
       const rate = parseFloat(String(rawRate));
       const finalRate = isNaN(rate) ? 0 : rate;
       const isIva = ivaIds.has(cat.id);
       const lock = blocked && isIva;
+      const comboReason = lock ? null : taxCategoryBlockReason(cat, selected);
       return {
         value: cat.id,
         label: `${cat.name} (${(finalRate * 100).toFixed(0)}%)`,
         description: lock
           ? 'Requiere ser responsable de IVA ante la DIAN'
-          : cat.description,
-        disabled: lock,
-        icon: lock ? 'lock' : undefined,
+          : (comboReason ?? cat.description),
+        disabled: lock || !!comboReason,
+        icon: lock ? 'lock' : comboReason ? 'ban' : undefined,
       };
     });
   });
@@ -1284,6 +1306,7 @@ export class ProductCreatePageComponent {
   isBrandCreateOpen = false;
   isTaxCategoryCreateOpen = false;
   isImageSourceModalOpen = signal(false);
+  private pendingImagesScroll = false;
   readonly imageModalMode = signal<'add' | 'edit'>('add');
   readonly imageEditSourceUrl = signal<string | null>(null);
   readonly editingImageIndex = signal<number | null>(null);
@@ -1323,10 +1346,10 @@ export class ProductCreatePageComponent {
     this.formUpdateTrigger(); // Dependency
     return [
       {
-        id: 'cancel',
-        label: 'Cancelar',
-        icon: 'x',
-        variant: 'outline',
+        id: 'photos',
+        label: 'Fotos',
+        icon: 'image-plus',
+        variant: 'secondary',
       },
       {
         id: 'save',
@@ -2079,6 +2102,27 @@ export class ProductCreatePageComponent {
    */
   get priceWithTax(): number {
     const basePrice = Number(this.productForm.get('base_price')?.value || 0);
+    return this.estimateConfiguredPrice(basePrice);
+  }
+
+  get salePriceWithTax(): number {
+    const salePrice = Number(this.productForm.get('sale_price')?.value || 0);
+    return this.estimateConfiguredPrice(salePrice);
+  }
+
+  get saleTaxExplanation(): string {
+    const taxes = this.selectedTaxEstimateInputs().filter((tax) => tax.rateFraction > 0);
+    if (taxes.length === 0) return 'Sin impuestos configurados';
+    if (taxes.every((tax) => tax.inclusive)) return 'Impuestos incluidos en la oferta';
+    if (taxes.every((tax) => !tax.inclusive)) return 'Impuestos agregados a la oferta';
+    return 'Incluye algunos impuestos; otros se agregan a la oferta';
+  }
+
+  private estimateConfiguredPrice(price: number): number {
+    return estimatePriceWithTax(price, this.selectedTaxEstimateInputs());
+  }
+
+  private selectedTaxEstimateInputs(): Array<{ rateFraction: number; inclusive: boolean }> {
     const selectedTaxIds =
       this.productForm.get('tax_category_ids')?.value || [];
     // F4 — si el comercio no es responsable de IVA, el IVA nunca compone el
@@ -2086,22 +2130,19 @@ export class ProductCreatePageComponent {
     const ivaIds = this.ivaTaxCategoryIdSet();
     const blocked = this.isVatBlocked();
 
-    return estimatePriceWithTax(
-      basePrice,
-      selectedTaxIds
-        .filter((id: number) => !(blocked && ivaIds.has(id)))
-        .map((id: number) => {
-          const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
-          return {
-            rateFraction: taxCat
-              ? parseTaxRateFraction(
-                  taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0,
-                )
-              : 0,
-            inclusive: this.isTaxInclusive(id),
-          };
-        }),
-    );
+    return selectedTaxIds
+      .filter((id: number) => !(blocked && ivaIds.has(id)))
+      .map((id: number) => {
+        const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
+        return {
+          rateFraction: taxCat
+            ? parseTaxRateFraction(
+                taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0,
+              )
+            : 0,
+          inclusive: this.isTaxInclusive(id),
+        };
+      });
   }
 
   get taxBreakdown(): {
@@ -3366,6 +3407,16 @@ export class ProductCreatePageComponent {
     this.isImageSourceModalOpen.set(true);
   }
 
+  onProductImageModalOpenChange(open: boolean): void {
+    this.isImageSourceModalOpen.set(open);
+    if (!open && this.pendingImagesScroll) {
+      this.pendingImagesScroll = false;
+      const el = document.querySelector('#product-images-mobile') as HTMLElement | null;
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el?.focus?.({ preventScroll: true });
+    }
+  }
+
   openImageEditor(index = this.activeImageIndex): void {
     const sourceUrl = this.imageUrls[index];
     if (!sourceUrl) {
@@ -3711,16 +3762,13 @@ export class ProductCreatePageComponent {
     }
   }
 
-  onCancel(): void {
-    const returnPage = this.route.snapshot.queryParams['fromPage'] || 1;
-    this.router.navigate(['/admin/products'], {
-      queryParams: { page: returnPage },
-    });
-  }
-
   onHeaderAction(actionId: string): void {
-    if (actionId === 'cancel') this.onCancel();
-    else if (actionId === 'save') this.onSubmit();
+    if (actionId === 'photos') {
+      this.pendingImagesScroll =
+        this.imageUrls.length < 5 &&
+        window.matchMedia('(max-width: 1023.98px)').matches;
+      this.openImageSourceModal();
+    } else if (actionId === 'save') this.onSubmit();
   }
 
   preventNativeFormSubmit(event: SubmitEvent): void {

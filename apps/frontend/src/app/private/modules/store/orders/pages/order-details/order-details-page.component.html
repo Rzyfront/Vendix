@@ -100,6 +100,52 @@
     </div>
   }
 
+  <!-- B5 — aviso fijo de reparación del impuesto del envío. `shippingTaxRepairNeeded`
+       se enciende cuando la guarda de facturación rechaza por copia incoherente del
+       impuesto del envío (`createInvoiceFromOrder`, error `INVOICING_CALC_006` +
+       `details.detail = 'shipping_tax:*'`). El toast de 8s sigue existiendo como aviso
+       breve, pero este banner es la vía persistente: no depende de que el operador
+       lo haya visto o cerrado a tiempo. Se apaga al reparar con éxito; si el backend
+       responde 409 (impuesto ya contabilizado, `clear` rechazado), sigue visible. -->
+  @if (shippingTaxRepairNeeded()) {
+    <div
+      role="alert"
+      class="bg-warning-light border border-warning/30 rounded-lg p-4 mb-6 flex items-start gap-3"
+    >
+      <app-icon
+        name="alert-triangle"
+        [size]="18"
+        class="text-warning shrink-0 mt-0.5"
+      ></app-icon>
+      <div class="flex-1">
+        <p class="font-semibold text-text-primary text-sm">
+          El impuesto del envío de esta orden está incompleto y bloquea la
+          factura.
+        </p>
+        <div class="flex flex-wrap gap-2 mt-3">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            [disabled]="isRepairingShippingTax()"
+            (click)="repairShippingTax('complete_rate')"
+          >
+            <app-icon name="calculator" [size]="14"></app-icon>
+            Completar desde la tarifa
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-error text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            [disabled]="isRepairingShippingTax()"
+            (click)="repairShippingTax('clear')"
+          >
+            <app-icon name="ban" [size]="14"></app-icon>
+            Quitar impuesto del envío
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
   <!-- Loading State -->
   @if (isLoading()) {
     <div class="flex justify-center items-center h-64">
@@ -146,13 +192,14 @@
       backRoute="/admin/orders"
       [badgeText]="headerBadgeText()"
       [badgeColor]="headerBadgeColor()"
+      [backQueryParams]="listReturnQuery()"
       [actions]="headerActions()"
       (actionClicked)="onHeaderAction($event)"
     ></app-sticky-header>
 
-    @if (orderData.active_financial_split_id) {
+    @if (orderData.active_financial_split_id || (showSplitConfig() && canCreateFinancialSplit())) {
       <div class="max-w-[1600px] mx-auto mb-4">
-        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="false" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" />
+        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="canCreateFinancialSplit()" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" />
       </div>
     }
 
@@ -181,9 +228,10 @@
           <button
             type="button"
             (click)="focusGestionEnvio()"
-            title="Editar envío: ir a Gestión de Envío"
-            aria-label="Editar envío: ir a Gestión de Envío"
-            class="flex items-center gap-1.5 text-text-primary font-medium cursor-pointer hover:underline underline-offset-2"
+            [disabled]="orderData.delivery_type === 'dine_in'"
+            [title]="orderData.delivery_type === 'dine_in' ? 'Consumo en mesa: no requiere envío' : 'Editar envío: ir a Gestión de Envío'"
+            [attr.aria-label]="orderData.delivery_type === 'dine_in' ? 'Consumo en mesa: no requiere envío' : 'Editar envío: ir a Gestión de Envío'"
+            class="flex items-center gap-1.5 text-text-primary font-medium enabled:cursor-pointer enabled:hover:underline underline-offset-2"
           >
             <app-icon
               [name]="deliveryConfig().icon"
@@ -194,7 +242,9 @@
             <span class="text-text-secondary font-normal">{{
               deliveryConfig().label
             }}</span>
-            <app-icon name="pencil" size="11" class="text-text-secondary"></app-icon>
+            @if (orderData.delivery_type !== 'dine_in') {
+              <app-icon name="pencil" size="11" class="text-text-secondary"></app-icon>
+            }
           </button>
           <!-- T10 B2 — la sección "Mesa" sólo aparece en tiendas restaurante
                Y si la orden trae sesión de mesa. Hoy se pintaba con sólo
@@ -270,6 +320,18 @@
                   <p>Contacto, entrega y facturacion de esta orden</p>
                 </div>
               </div>
+              <div class="customer-card-header-actions">
+                <app-button
+                  variant="outline-secondary"
+                  size="sm"
+                  [loading]="changingCustomer()"
+                  (clicked)="openChangeCustomer()"
+                  ariaLabel="Cambiar titular de la orden"
+                >
+                  <app-icon slot="icon" name="repeat" size="13"></app-icon>
+                  Cambiar cliente
+                </app-button>
+              </div>
             </div>
 
             <div class="customer-card-content">
@@ -278,6 +340,7 @@
                   <div class="customer-avatar" aria-hidden="true">
                     {{
                       (
+                        orderData.users?.legal_name?.charAt(0) ||
                         orderData.users?.first_name?.charAt(0) ||
                         orderData.users?.last_name?.charAt(0) ||
                         "C"
@@ -291,7 +354,7 @@
                         <!-- si no hay alias ni nombre, customerDisplayName ya cae a "Consumidor Final"; el badge CF refuerza la marca fiscal -->
                       } @else if (
                         orderData.customer_alias?.trim() &&
-                        !(orderData.users?.first_name || orderData.users?.last_name)
+                        !(orderData.users?.legal_name?.trim() || orderData.users?.first_name || orderData.users?.last_name)
                       ) {
                         <span
                           class="cf-badge"
@@ -299,6 +362,11 @@
                         >CF</span>
                       }
                     </h2>
+                    @if (orderData.users?.document_number?.trim()) {
+                      <p class="customer-doc-line">
+                        {{ orderData.users?.document_type }} {{ orderData.users?.document_number }}@if (orderData.users?.person_type === 'JURIDICA') { · Jurídica }
+                      </p>
+                    }
                   </div>
                 </div>
 
@@ -690,6 +758,31 @@
                       <p class="text-[10px] font-mono text-gray-400 truncate">
                         SKU: {{ item.variant_sku || "N/A" }}@if (parseVariantAttributes(item.variant_attributes); as attrs) {@if (attrs.length) {@for (attr of attrs; track attr.name + attr.value) {<span class="variant-mini-badge">@if (attr.name) {<span>{{ attr.name }}: </span>}{{ attr.value }}</span>}}}
                       </p>
+                      <!-- CP-REFUND-FLOW-REDESIGN paso 8 — badge Reembolsado
+                           por línea (total o parcial con cantidades) desde la
+                           cobertura refund↔NC; la línea facturada no se toca. -->
+                      @if (lineRefundInfo(item); as ri) {
+                        @if (ri.refundedQty > 0) {
+                          <span
+                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 bg-orange-100 text-orange-800 border border-orange-200"
+                            [title]="
+                              ri.isNcCovered
+                                ? 'Reembolsado ' + ri.refundedQty + ' de ' + ri.quantity + ' — cubierto por nota crédito'
+                                : 'Reembolsado ' + ri.refundedQty + ' de ' + ri.quantity
+                            "
+                          >
+                            <app-icon name="rotate-ccw" [size]="10" />
+                            @if (ri.isFull) {
+                              Reembolsado
+                            } @else {
+                              Reembolsado parcial {{ ri.refundedQty }}/{{ ri.quantity }}
+                            }
+                            @if (ri.isNcCovered) {
+                              · NC
+                            }
+                          </span>
+                        }
+                      }
                       <!-- Restaurant Suite — Fase K Gap 2: per-item KDS
                            state badge. Renders only for items that were
                            actually fired to the kitchen. -->
@@ -815,6 +908,14 @@
                           <app-icon slot="icon" name="rotate-ccw" [size]="10" />
                           Reversar
                         </app-button>
+                      }
+                      @if ((item.delivered_at || !item.cancelled_at) && cancellationPaid() && lineHasRefundableBalance(item)) {
+                        <span class="text-xs text-amber-700">
+                          Orden cobrada: no se puede cancelar este plato.
+                          <button type="button" class="underline font-semibold" (click)="openRefundModal()">
+                            Abrir Reembolso
+                          </button>
+                        </span>
                       }
                       <!-- Paso 2 PLAN-order-detail-cancel-item — badge de
                            cancelado + motivo persistido (misma data que ya
@@ -1270,24 +1371,61 @@
                     <p class="text-sm font-bold text-gray-900">
                       {{ step.label }}
                     </p>
-                    @if (step.data) {
-                      <p class="text-xs text-gray-500 mt-1">
-                        Realizado por
-                        <span class="font-semibold text-gray-700"
-                          >{{ step.data.users?.first_name }}
-                          {{ step.data.users?.last_name }}</span
-                        >
-                      </p>
-                      @if (step.data.new_values?.state) {
-                        <div
-                          class="mt-2 text-xs bg-[var(--color-surface)] text-text-secondary px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-border"
-                        >
-                          <span
-                            class="w-1.5 h-1.5 rounded-full bg-primary-500"
-                          ></span>
-                          Nuevo estado:
-                          {{ formatStatus(step.data.new_values.state) }}
-                        </div>
+                    @if (isLegacyTimeline()) {
+                      <!-- órdenes anteriores al cambio (order-truth-and-invoice-tz):
+                           timeline audit_logs, sin tocar — mismo markup de siempre. -->
+                      @if (step.data) {
+                        <p class="text-xs text-gray-500 mt-1">
+                          Realizado por
+                          <span class="font-semibold text-gray-700"
+                            >{{ step.data.users?.first_name }}
+                            {{ step.data.users?.last_name }}</span
+                          >
+                        </p>
+                        @if (step.data.new_values?.state) {
+                          @if (isRefundStateValue(step.data.new_values.state)) {
+                            <div
+                              class="mt-2 text-xs bg-orange-50 text-orange-800 px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-orange-200"
+                            >
+                              <span
+                                class="w-1.5 h-1.5 rounded-full bg-orange-500"
+                              ></span>
+                              Reembolso:
+                              {{ refundStateLabel(step.data.new_values.state) }}
+                            </div>
+                          } @else {
+                            <div
+                              class="mt-2 text-xs bg-[var(--color-surface)] text-text-secondary px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-border"
+                            >
+                              <span
+                                class="w-1.5 h-1.5 rounded-full bg-primary-500"
+                              ></span>
+                              Nuevo estado:
+                              {{ formatStatus(step.data.new_values.state) }}
+                            </div>
+                          }
+                        }
+                      }
+                    } @else {
+                      <!-- timeline veraz desde order_events (plan order-truth-and-invoice-tz,
+                           Step 7): actor y badge "Reembolso" salen SOLO de event_type. -->
+                      @if (step.data) {
+                        <p class="text-xs text-gray-500 mt-1">
+                          Realizado por
+                          <span class="font-semibold text-gray-700">{{
+                            getOrderEventActorLabel(step.data)
+                          }}</span>
+                        </p>
+                        @if (isRefundOrderEvent(step.data)) {
+                          <div
+                            class="mt-2 text-xs bg-orange-50 text-orange-800 px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-orange-200"
+                          >
+                            <span
+                              class="w-1.5 h-1.5 rounded-full bg-orange-500"
+                            ></span>
+                            Reembolso
+                          </div>
+                        }
                       }
                     }
                   </div>
@@ -1929,6 +2067,42 @@
             </div>
           }
 
+          <!-- CP-REFUND-FLOW-REDESIGN paso 8 — aviso obligatorio FE→NC
+               (paso 7): con FE aceptada y reembolso sin NC que lo cubra, se
+               avisa e invita con 1 clic a emitir la nota (flujo B.3, nunca
+               automática). -->
+          @if (feNotice(); as notice) {
+            <div
+              role="alert"
+              class="bg-amber-50 rounded-xl border border-amber-200 p-4 shadow-sm flex items-start gap-3"
+            >
+              <app-icon
+                name="alert-triangle"
+                size="18"
+                class="text-amber-600 mt-0.5 flex-shrink-0"
+              ></app-icon>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-bold text-amber-900">
+                  Factura electrónica emitida — falta la nota crédito
+                </p>
+                <p class="text-xs text-amber-800 mt-1">
+                  {{ notice.message }}
+                </p>
+                <div class="mt-3">
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    [disabled]="refundNoteState() !== null"
+                    (clicked)="startFeNoticeNote()"
+                  >
+                    <app-icon slot="icon" name="file-text" size="14"></app-icon>
+                    Emitir nota crédito
+                  </app-button>
+                </div>
+              </div>
+            </div>
+          }
+
           <!-- Refund History (for partial refunds or detailed view) -->
           @if (orderRefunds() && orderRefunds().length > 0) {
             <app-card shadow="sm" [responsivePadding]="true">
@@ -2093,7 +2267,8 @@
                               : 'primary'
                       "
                       [fullWidth]="true"
-                      [disabled]="isProcessingAction()"
+                      [disabled]="isProcessingAction() || action.enabled === false"
+                      [ariaLabel]="action.enabled === false ? actionDisabledReason(action) : ''"
                       (clicked)="executeAction(action.id)"
                     >
                       <app-icon
@@ -2156,9 +2331,36 @@
               Resumen de Pago
             </h2>
 
+            @if (orderData.state === 'cancelled') {
+              <div class="space-y-2.5">
+                <p class="text-sm text-text-secondary">
+                  Orden cancelada: los importes originales se conservan para el historial, pero no hay saldo por cobrar.
+                </p>
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Importe original</span>
+                  <span class="font-semibold text-gray-900">{{ orderData.grand_total || 0 | currency }}</span>
+                </div>
+                @if (totalRefunded() > 0) {
+                  <div class="flex justify-between items-center text-sm">
+                    <span class="text-text-secondary">Reembolsado</span>
+                    <span class="font-semibold text-orange-600">-{{ totalRefunded() | currency }}</span>
+                  </div>
+                }
+                <div class="pt-3 mt-1 border-t border-border flex justify-between items-center">
+                  <span class="text-base font-bold text-gray-900">Saldo a cobrar</span>
+                  <span class="text-xl sm:text-2xl font-black text-gray-900 font-mono tracking-tighter">{{ 0 | currency }}</span>
+                </div>
+              </div>
+            } @else {
             <div class="space-y-2.5">
-              <!-- C.7 (§5.3, base gross): sin fila Subtotal — las líneas ya
-                   van en bruto y un Subtotal en base quedaría huérfano. -->
+              <!-- Desglose completo: valores persistidos tal cual (base gross).
+                   Subtotal = suma de líneas en bruto (grossSubtotal); IVA va incluido, no suma. -->
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-text-secondary">Subtotal</span>
+                <span class="font-semibold text-gray-900">{{
+                  grossSubtotal() | currency
+                }}</span>
+              </div>
 
               <!-- Applied promotions (persisted snapshot) -->
               @if (appliedPromotions().length > 0) {
@@ -2238,8 +2440,25 @@
                   orderData.shipping_cost || 0 | currency
                 }}</span>
               </div>
-              <!-- C.7 (§5.3, base gross): sin fila de impuesto que sume; con
-                   desglose respaldado, nota informativa fuera de la aritmética. -->
+              @if (shippingTaxAmount() > 0) {
+                <div class="flex justify-between items-center text-xs -mt-1">
+                  <span class="text-text-secondary pl-3"
+                    >{{ shippingTaxPrefix() }} {{ shippingTaxLabel() }}:</span
+                  >
+                  <span class="text-text-secondary">{{
+                    shippingTaxAmount() | currency
+                  }}</span>
+                </div>
+              }
+              @if (tipAmount() > 0) {
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Propina</span>
+                  <span class="font-semibold text-gray-900">{{
+                    tipAmount() | currency
+                  }}</span>
+                </div>
+              }
+              <!-- IVA incluido: informativo, fuera de la aritmética (base gross). -->
               @if (showDetailVatNote()) {
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">IVA incluido</span>
@@ -2258,7 +2477,27 @@
                   {{ orderData.grand_total || 0 | currency }}
                 </span>
               </div>
+              <!-- CP-REFUND-FLOW-REDESIGN paso 8 — filas derivadas: lo
+                   facturado (`grand_total`) intacto arriba; Reembolsado y Neto
+                   derivados de refunds `completed`. -->
+              @if (totalRefunded() > 0) {
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Reembolsado</span>
+                  <span class="font-semibold text-orange-600"
+                    >-{{ totalRefunded() | currency }}</span
+                  >
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-base font-bold text-gray-900">Neto</span>
+                  <span
+                    class="text-xl sm:text-2xl font-black text-gray-900 font-mono tracking-tighter"
+                  >
+                    {{ netTotal() | currency }}
+                  </span>
+                </div>
+              }
             </div>
+            }
 
             <!-- Credit Payment Progress -->
             @if (isCreditOrder()) {
@@ -2483,6 +2722,21 @@
          FLOW MODALS
          ═══════════════════════════════════════════════════════════ -->
 
+    <!-- D.4 — modal compartido "Destino del plato" (mismo componente que mesa). -->
+    <app-item-cancellation-modal
+      [isOpen]="cancellationModalOpen()"
+      (isOpenChange)="!$event && closeItemCancellationModal()"
+      [itemName]="cancellationTarget()?.item?.product_name || ''"
+      [showDestination]="cancellationTarget()?.mode === 'reverse' || cancellationNeedsDisposition()"
+      [canReuse]="canReuseCancellation()"
+      [autoRestorePending]="cancellationPreparedFired() && !cancellationNeedsDisposition()"
+      [inFlight]="cancellingItemId() !== null || reversingItemId() !== null"
+      [serverError]="cancellationError()"
+      [currentTotal]="order()?.grand_total || 0"
+      [preview]="cancellationPreview()"
+      (confirmed)="submitItemCancellation($event)"
+    />
+
     <app-modal
       [isOpen]="showPaymentReceiptModal()"
       (closed)="closePaymentReceiptModal()"
@@ -2526,13 +2780,16 @@
         <app-order-payment-modal
           [isOpen]="showPayModal()"
           [order]="orderData"
-          [paymentMethods]="paymentMethods()"
+          [paymentMethods]="payModalMethods()"
+          [manualPaymentPending]="isManualPayPending()"
+          [pendingPayment]="manualPendingPaymentPreset()"
           [isCreditOrder]="isCreditOrder()"
           [remainingBalance]="remainingBalance()"
           [installments]="orderData.order_installments || []"
           [creditType]="orderData.credit_type || ''"
           [preSelectedInstallment]="preSelectedInstallment()"
           [isProcessing]="isProcessingAction()"
+          [paymentError]="payModalError()"
           (isOpenChange)="showPayModal.set($event)"
           (closed)="showPayModal.set(false)"
           (paymentSubmitted)="onPaymentSubmitted($event)"
@@ -2706,6 +2963,7 @@
     <!-- DISPATCH METHOD CHOOSER (con remisión vs sin remisión) -->
     <app-dispatch-method-selector-modal
       [isOpen]="showDispatchSelector()"
+      [enabledMethods]="enabledDispatchMethods()"
       (selected)="onDispatchMethodSelected($event)"
       (closed)="showDispatchSelector.set(false)"
     ></app-dispatch-method-selector-modal>
@@ -2784,16 +3042,35 @@
       ></app-shipping-address-modal>
     }
 
+    <!-- CAMBIO DE TITULAR: buscar-primero (existentes) antes de crear -->
+    <app-change-titular-search-modal
+      [isOpen]="showTitularSearchModal()"
+      (closed)="closeTitularSearch()"
+      (selected)="onTitularSearchSelected($event)"
+      (createNew)="onTitularSearchCreateNew($event)"
+    ></app-change-titular-search-modal>
+
+    <!-- Paso 5: CAMBIO DE TITULAR (reutiliza app-customer-modal en crear-mode) -->
+    <app-customer-modal
+      [isOpen]="showChangeCustomerModal()"
+      [customer]="null"
+      [initialValues]="changeCustomerInitialValues()"
+      [loading]="changingCustomer()"
+      (closed)="closeChangeCustomer()"
+      (save)="onChangeCustomerSave($event)"
+      (addressData)="onChangeCustomerAddress($event)"
+    ></app-customer-modal>
+
     <!-- DELIVER MODAL -->
     <app-modal
       [isOpen]="showDeliverModal()"
       (closed)="showDeliverModal.set(false); isManualDeliverMode.set(false)"
       [title]="
-        isManualDeliverMode()
-          ? orderData.delivery_type === 'pickup'
-            ? 'Entregar directamente al cliente'
-            : 'Entregar sin confirmar pago'
-          : 'Marcar como Entregado'
+        orderData.delivery_type === 'pickup'
+          ? 'Confirmar recogida en tienda'
+          : isManualDeliverMode()
+            ? 'Entregar sin confirmar pago'
+            : 'Marcar como Entregado'
       "
       size="md"
     >
@@ -2810,12 +3087,12 @@
             <div>
               @if (orderData.delivery_type === "pickup") {
                 <p class="text-sm font-bold text-orange-800">
-                  Entrega directa al cliente
+                  Recogida en tienda
                 </p>
                 <p class="text-xs text-orange-600 mt-0.5">
-                  Se omitira el paso "Lista para recoger" y la orden se marcara
-                  como entregada directamente. Si el pago esta confirmado, la
-                  orden se finalizara automaticamente.
+                  Se omitirá el estado "Lista para recogida" y la orden se
+                  marcará como recogida. Si el pago está confirmado, la orden
+                  se finalizará automáticamente.
                 </p>
               } @else {
                 <p class="text-sm font-bold text-orange-800">
@@ -2936,6 +3213,88 @@
       </div>
     </app-modal>
 
+    <!-- RESOLVE REFUND MODAL -->
+    <app-modal
+      [isOpen]="showResolveRefundModal()"
+      (closed)="closeResolveRefundModal()"
+      title="Resolver reembolso manualmente"
+      size="md"
+    >
+      <div class="p-4 space-y-4" [formGroup]="resolveRefundForm">
+        <div>
+          <label class="block text-sm font-bold text-gray-700 mb-1.5"
+            >Estado destino</label
+          >
+          <select
+            formControlName="target_state"
+            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          >
+            <option value="completed">Completado (el dinero salió)</option>
+            <option value="failed">Fallido (cerrar sin reversión)</option>
+          </select>
+        </div>
+
+        @if (resolveNeedsPayout()) {
+          <div>
+            <label class="block text-sm font-bold text-gray-700 mb-1.5"
+              >Canal del desembolso</label
+            >
+            <select
+              formControlName="payout_channel"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            >
+              <option value="" disabled>Selecciona el canal...</option>
+              <option value="cash">Efectivo</option>
+              <option value="bank_transfer">Transferencia bancaria</option>
+              <option value="store_credit">Crédito en tienda</option>
+              <option value="gateway">Pasarela de pago</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-bold text-gray-700 mb-1.5"
+              >Referencia del desembolso</label
+            >
+            <input
+              type="text"
+              formControlName="payout_reference"
+              placeholder="N° comprobante, referencia o folio verificable"
+              maxlength="255"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            />
+          </div>
+        }
+
+        <div>
+          <label class="block text-sm font-bold text-gray-700 mb-1.5"
+            >Nota de resolución (obligatoria)</label
+          >
+          <textarea
+            formControlName="resolution_notes"
+            rows="3"
+            placeholder="Quién confirma y por qué se cierra así..."
+            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
+          ></textarea>
+        </div>
+      </div>
+
+      <div
+        slot="footer"
+        class="flex items-center justify-end gap-2 p-4 border-t border-border"
+      >
+        <app-button variant="outline" (clicked)="closeResolveRefundModal()"
+          >Volver</app-button
+        >
+        <app-button
+          variant="primary"
+          (clicked)="submitResolveRefund()"
+          [disabled]="resolveRefundForm.invalid || isProcessingAction()"
+        >
+          {{ isProcessingAction() ? "Resolviendo..." : "Resolver reembolso" }}
+        </app-button>
+      </div>
+    </app-modal>
+
     <!-- CANCEL MODAL -->
     <app-modal
       [isOpen]="showCancelModal()"
@@ -2954,10 +3313,10 @@
           ></app-icon>
           <div>
             <p class="text-sm font-bold text-red-800">
-              Esta accion no se puede deshacer
+              Confirma la cancelación
             </p>
             <p class="text-xs text-red-600 mt-0.5">
-              La orden sera cancelada permanentemente.
+              La orden quedará cancelada y conservará su historial. Para reactivarla necesitarás permisos.
             </p>
           </div>
         </div>

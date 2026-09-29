@@ -189,9 +189,23 @@ export interface EcommerceSettings {
     create_account_after_order: boolean;
     terms_required: boolean;
     guest_newsletter_opt_in: boolean;
+    // Opt-in: cierra el pedido por WhatsApp en vez del checkout web.
+    whatsapp_checkout?: boolean;
+    // Número destino del pedido por WhatsApp (formato libre E.164-ish).
+    whatsapp_number?: string;
+    // Pitch que encabeza el mensaje de pedido. Acepta {tienda} y {web}.
+    whatsapp_pitch?: string;
     // Opt-in: comprobante obligatorio para bank_transfer/voucher en el
     // checkout ecommerce. Ausente ⇒ opcional (default `false`).
     require_payment_receipt?: boolean;
+  };
+  orders?: {
+    // Opt-out: oculta la barra de progreso de seguimiento en la vista
+    // pública del pedido (/pedido/:token). Ausente ⇒ visible (`!== true`).
+    hide_tracking_progress?: boolean;
+    // Opt-out: oculta el ETA de preparación en la vista pública del pedido.
+    // Ausente ⇒ visible (`!== true`).
+    hide_prep_eta?: boolean;
   };
   shipping?: {
     free_shipping_threshold?: number;
@@ -638,6 +652,15 @@ export interface InventorySettings {
   low_stock_threshold: number;
   out_of_stock_action: 'hide' | 'show' | 'disable' | 'allow_backorder';
   track_inventory: boolean;
+  /**
+   * "Permitir sobreventa" (docs/plans/no-overselling-stock-guard-plan.md, step
+   * 9). Default `false`. Read by `StockValidatorService.resolveInventoryPolicy`:
+   * ON lets product lines skip the no-overselling guard (`assertLinesAvailable`
+   * warns instead of throwing), reserves with `allow_negative_available=true`,
+   * and commits delivery with `blockOnInsufficient=false` writing NEGATIVE
+   * on_hand/available (no clamp to 0). OFF (default) keeps the strict guard
+   * every store had before this switch existed.
+   */
   allow_negative_stock: boolean;
   costing_method: 'cpp' | 'fifo';
   /**
@@ -654,6 +677,17 @@ export interface InventorySettings {
    * Default: `main_location`.
    */
   low_stock_alerts_scope: InventoryScope;
+  /**
+   * "Permitir sobre-uso de insumos" (docs/plans/no-overselling-stock-guard-plan.md,
+   * step 9). Default `true` — missing/null resolves to `true` (never `?? false`),
+   * so a store that never touched this key keeps the pre-switch kitchen
+   * behavior. ON: the tracked-ingredient guard in fire/resend/production warns
+   * (`logger.warn` + `stock_warnings`) instead of blocking, and the consumption
+   * is recorded in FULL, leaving the ingredient's stock NEGATIVE (no clamp to
+   * 0). OFF: the named 409 `INV_STOCK_INSUFFICIENT_LINES` guard blocks as
+   * before.
+   */
+  allow_ingredient_overuse: boolean;
 }
 
 export interface CheckoutSettings {
@@ -710,13 +744,7 @@ export interface PosSettings {
   /** QUI-727 (B.4) — ventas por alias (nombre/mesa) sin cliente formal. */
   allow_alias_sales?: boolean;
   alias_sales_as_default?: boolean;
-  /**
-   * F-127 — severidad de la compuerta fiscal por linea en el carril de cobro
-   * (`POS_TABLE_LINE_TAX_UNRESOLVABLE_001`). `'block'` (default, ausente
-   * incluido) lanza como siempre; `'warn'` deja pasar y registra; `'off'`
-   * deja pasar en silencio. Bajarla es una medida TEMPORAL de emergencia
-   * para que una tienda pueda seguir cobrando mientras corrige el catalogo.
-   */
+  /** @deprecated ADR-10: clave legacy aceptada en JSON, sin efecto en el cobro. */
   tax_line_gate?: 'block' | 'warn' | 'off';
   business_hours: Record<string, BusinessHours>;
   schedule_mode?: 'continuous' | 'custom';
@@ -1236,4 +1264,13 @@ export interface DispatchSettings {
   default_cost_settlement_timing?: 'immediate_on_close';
   default_origin_location_id?: number;
   requires_dispatch_address?: boolean;
+
+  /**
+   * Which dispatch methods the store offers in the order dispatch chooser
+   * (QUI-844). All default to `true`; the logistics settings form requires
+   * at least one to stay enabled. Missing keys merge to `true`.
+   */
+  enable_dispatch_with_remision?: boolean;
+  enable_dispatch_direct_delivery?: boolean;
+  enable_dispatch_to_pool?: boolean;
 }

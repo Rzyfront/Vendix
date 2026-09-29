@@ -1,0 +1,20 @@
+ product_id | quantity_on_hand | quantity_available 
+------------+------------------+--------------------
+        315 |             9400 |               9400
+(1 row)
+
+ layers315 
+-----------
+      8400
+(1 row)
+
+ dish316_rows 
+--------------
+            1
+(1 row)
+
+ prep_restock 
+--------------
+            0
+(1 row)
+

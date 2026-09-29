@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import {
   AfterViewInit,
   ChangeDetectionStrategy,
@@ -39,6 +40,44 @@ const LOAD_TIMEOUT_MS = 12000;
 const BASEMAP_STYLE = 'https://tiles.openfreemap.org/styles/bright';
 
 /**
+ * Custom "locate me" map control. Renders identically to MapLibre's native
+ * `GeolocateControl` (reuses its `.maplibregl-ctrl-geolocate` /
+ * `.maplibregl-ctrl-icon` classes from the already-loaded maplibre-gl.css) but
+ * NEVER calls `navigator.geolocation` itself — it only reports the click via
+ * `onClick`. This lets the parent decide whether to show a priming
+ * permission modal BEFORE the browser's own permission prompt, which the
+ * native control has no hook for. GPS must never fire without this explicit
+ * user gesture.
+ */
+class LocateButtonControl {
+  private container: HTMLDivElement | null = null;
+
+  constructor(private readonly onClick: () => void) {}
+
+  onAdd(): HTMLElement {
+    this.container = document.createElement('div');
+    this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'maplibregl-ctrl-geolocate';
+    button.setAttribute('aria-label', 'Ubicarme');
+    button.setAttribute('title', 'Ubicarme');
+    const icon = document.createElement('span');
+    icon.className = 'maplibregl-ctrl-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    button.appendChild(icon);
+    button.addEventListener('click', () => this.onClick());
+    this.container.appendChild(button);
+    return this.container;
+  }
+
+  onRemove(): void {
+    this.container?.parentNode?.removeChild(this.container);
+    this.container = null;
+  }
+}
+
+/**
  * MapLibre-based location picker shown ABOVE the shipping-address form. The map
  * is ALWAYS visible (it does not wait for GPS permission): with no located point
  * it frames Colombia, and it centers on a real coordinate whenever one arrives —
@@ -61,7 +100,7 @@ const BASEMAP_STYLE = 'https://tiles.openfreemap.org/styles/bright';
 @Component({
   selector: 'app-address-map-picker',
   standalone: true,
-  imports: [],
+  imports: [NgTemplateOutlet],
   templateUrl: './address-map-picker.component.html',
   styleUrls: ['./address-map-picker.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -70,6 +109,31 @@ const BASEMAP_STYLE = 'https://tiles.openfreemap.org/styles/bright';
 export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   /** Coordinate to center the map / marker on. Null → frame Colombia, no marker. */
   readonly center = input<LatLng | null>(null);
+  /**
+   * When `true`, the "locate me" control does NOT call
+   * `navigator.geolocation` itself — it only emits `locateRequested` so the
+   * parent can gate GPS behind its own priming/permission flow (checkout's
+   * pattern: geolocate directly if `granted`, show a modal if `prompt`, toast
+   * if `denied`/`unsupported`).
+   *
+   * When `false` (default), AMP uses MapLibre's native `GeolocateControl`
+   * exactly like before `locateRequested` existed: a click resolves GPS
+   * itself and emits `located` with the resulting coordinate. This keeps
+   * consumers that only listen to `(located)` (e.g. `app-address-form-fields`,
+   * the shipping-method origin picker) working without wiring
+   * `locateRequested` themselves.
+   */
+  readonly delegateLocate = input(false);
+  /**
+   * Where the drag/type hint (`.amp-hint`) renders relative to the map.
+   * Default `'bottom'` keeps every existing consumer (POS
+   * `app-address-form-fields`, the customer-modal, the dispatch-note editor)
+   * unchanged: hint below the map. Checkout passes `'top'` (owner directive,
+   * 2026-09-27) so the hint sits in the same "map column" rhythm as the
+   * warning/loading-chip/precision-badge indicators that live ABOVE the map
+   * in the parent template — aviso → hint → mapa, one flex column, one gap.
+   */
+  readonly hintPosition = input<'top' | 'bottom'>('bottom');
   /** Emitted with the new coordinate whenever the marker is moved. */
   readonly located = output<LatLng>();
   /**
@@ -78,6 +142,14 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
    * manual flow waiting for a map that will never load.
    */
   readonly mapReady = output<void>();
+  /**
+   * Emitted when the user clicks the "locate me" control AND `delegateLocate`
+   * is `true`. Reports the gesture only — the parent owns the actual
+   * `navigator.geolocation` call (and any priming permission modal) so GPS
+   * never fires without this explicit click. Ignored when `delegateLocate`
+   * is `false` (native `GeolocateControl` handles GPS itself in that mode).
+   */
+  readonly locateRequested = output<void>();
 
   readonly mapContainer =
     viewChild.required<ElementRef<HTMLDivElement>>('mapContainer');
@@ -100,6 +172,15 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   private loadTimer: ReturnType<typeof setTimeout> | null = null;
   /** Delays collapsing the map credit so it flashes briefly (~0.3s) on load. */
   private attribTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Owner directive (2026-09-27): a consumer (checkout) can now resize the
+   * map container purely via CSS (`--amp-map-aspect-ratio: 1 / 1`, see
+   * `.scss`) — a change MapLibre never sees on its own, since it only
+   * measures the canvas on window `resize` or an explicit `.resize()` call.
+   * Observing the container itself catches ANY size change (aspect-ratio,
+   * grid reflow, sidebar collapse, etc.), not just a viewport resize.
+   */
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor() {
     // Re-center the map + (lazily) create the marker when the parent pushes a
@@ -134,34 +215,60 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       );
       // Fullscreen: lets the customer expand the map to place the pin precisely.
       this.map.addControl(new this.maplibregl.FullscreenControl(), 'top-right');
-      // Geolocate ("recenter on me"): one click re-centers on the live GPS
-      // position, drops the delivery marker there and re-emits so the parent
-      // re-geocodes. showUserLocation/showAccuracyCircle OFF so the blue dot +
-      // accuracy circle do not sit on top of the map and block dragging the
-      // green marker.
-      const geolocate = new this.maplibregl.GeolocateControl({
-        // timeout + maximumAge keep the "locate me" button fast: reuse a recent
-        // fix and never hang waiting for a perfect one.
-        positionOptions: {
-          enableHighAccuracy: true,
-          timeout: 6000,
-          maximumAge: 30000,
-        },
-        trackUserLocation: false,
-        showUserLocation: false,
-        showAccuracyCircle: false,
-      });
-      this.map.addControl(geolocate, 'top-right');
-      geolocate.on('geolocate', (pos: any) => {
-        const coord = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        this.ensureMarker(coord);
-        this.map.flyTo({ center: [coord.lng, coord.lat], zoom: POINT_ZOOM });
-        this.emitFromMarker();
-      });
+      // "Ubicarme": behavior depends on `delegateLocate`.
+      if (this.delegateLocate()) {
+        // Delegated mode: reports the gesture via `locateRequested` only — it
+        // never calls navigator.geolocation itself. The parent owns the
+        // actual GPS request so it can show a priming permission modal first
+        // when the browser permission is still undecided. GPS must NEVER
+        // fire without this explicit click.
+        this.map.addControl(
+          new LocateButtonControl(() => this.locateRequested.emit()),
+          'top-right',
+        );
+      } else {
+        // Default mode (pre-`locateRequested` behavior): MapLibre's native
+        // GeolocateControl resolves GPS itself and drops/moves the marker,
+        // emitting `located` with the resulting coordinate. Used by
+        // consumers that only listen to `(located)` and never wired
+        // `locateRequested` (e.g. `app-address-form-fields`, the shipping
+        // origin picker).
+        const geolocate = new this.maplibregl.GeolocateControl({
+          // timeout + maximumAge keep the "locate me" button fast: reuse a
+          // recent fix and never hang waiting for a perfect one.
+          positionOptions: {
+            enableHighAccuracy: true,
+            timeout: 6000,
+            maximumAge: 30000,
+          },
+          trackUserLocation: false,
+          showUserLocation: false,
+          showAccuracyCircle: false,
+        });
+        this.map.addControl(geolocate, 'top-right');
+        geolocate.on('geolocate', (pos: any) => {
+          const coord = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          this.ensureMarker(coord);
+          this.map.flyTo({ center: [coord.lng, coord.lat], zoom: POINT_ZOOM });
+          this.emitFromMarker();
+        });
+      }
       this.map.addControl(
         new this.maplibregl.AttributionControl({ compact: true }),
         'bottom-right',
       );
+
+      // Keep the canvas in sync with a container whose size CSS controls
+      // (aspect-ratio, flex/grid reflow) rather than the viewport alone.
+      // Guarded by `this.map?.` so a resize firing after `ngOnDestroy` (the
+      // observer is disconnected there, but a queued callback can still run
+      // once) never throws on a null map.
+      if (typeof ResizeObserver !== 'undefined') {
+        this.resizeObserver = new ResizeObserver(() => {
+          this.map?.resize();
+        });
+        this.resizeObserver.observe(this.mapContainer().nativeElement);
+      }
 
       // A marker exists from the start ONLY if we already have a point.
       if (start) this.ensureMarker(start);
@@ -272,6 +379,8 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   ngOnDestroy(): void {
     this.clearLoadTimer();
     if (this.attribTimer) clearTimeout(this.attribTimer);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     try {
       this.marker?.remove?.();
       this.map?.remove?.();

@@ -387,8 +387,8 @@ describe('EcommerceTablesController — session_moved en el stream del comensal'
       target_table_id: TARGET_TABLE_ID,
       source_session_id: SOURCE_SESSION_ID,
       target_session_id: TARGET_SESSION_ID,
-      source_order_id: 901,
-      target_order_id: 902,
+      source_order_id: 888901,
+      target_order_id: 888902,
     },
     created_at: new Date().toISOString(),
   });
@@ -409,7 +409,7 @@ describe('EcommerceTablesController — session_moved en el stream del comensal'
         match(swapEvent(), {
           table_id: SOURCE_TABLE_ID,
           session_id: SOURCE_SESSION_ID,
-          order_id: 901,
+          order_id: 888901,
         }),
       ).toBe(true);
     });
@@ -488,8 +488,8 @@ describe('EcommerceTablesController — session_moved en el stream del comensal'
       expect(projected).not.toHaveProperty('target_session_id');
       // Ni anidados bajo `data` — la proyección aplana a nivel raíz.
       expect(projected).not.toHaveProperty('data');
-      expect(JSON.stringify(projected)).not.toContain('901');
-      expect(JSON.stringify(projected)).not.toContain('902');
+      expect(JSON.stringify(projected)).not.toContain('888901');
+      expect(JSON.stringify(projected)).not.toContain('888902');
     });
 
     it('proyecta sólo type + mode + las dos mesas + ts', () => {

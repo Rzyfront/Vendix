@@ -1,0 +1,17 @@
+apps/backend/src/domains/store/tables/tables.service.ts:157:   * `table_waiters` is therefore transitively scoped. Returns an empty
+apps/backend/src/domains/store/tables/tables.service.ts:167:        table_waiters: { select: { user_id: true } },
+apps/backend/src/domains/store/tables/tables.service.ts:173:    return table.table_waiters.map((tw) => tw.user_id);
+apps/backend/src/domains/store/tables/tables.service.ts:230:   * Synchronizes the `table_waiters` pivot for a given table inside an
+apps/backend/src/domains/store/tables/tables.service.ts:242:   * transaction. `table_waiters` is ALSO registered in the StorePrisma
+apps/backend/src/domains/store/tables/tables.service.ts:256:      await tx.table_waiters.deleteMany({ where: { table_id: tableId } });
+apps/backend/src/domains/store/tables/tables.service.ts:259:    await tx.table_waiters.deleteMany({
+apps/backend/src/domains/store/tables/tables.service.ts:262:    await tx.table_waiters.createMany({
+apps/backend/src/domains/store/tables/table-sessions.service.ts:164:    // El pivote `table_waiters` sólo representa asignaciones estáticas.
+apps/backend/src/domains/store/tables/table-sessions.service.ts:1260:   * `public_token` (physical QR), `table_waiters` (table assignment),
+apps/backend/src/domains/store/tables/table-sessions.service.ts:2065:    // El pivote table_waiters sigue sirviendo para asignación, pero ya no
+apps/frontend/src/app/private/modules/store/restaurant-ops/tables/interfaces/table.interface.ts:47:   * `table_waiters` pivot populated by the backend). Populated by
+apps/frontend/src/app/private/modules/store/restaurant-ops/tables/interfaces/table.interface.ts:291:   * Backend mirrors the input verbatim into `table_waiters` inside the
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:1404:        table_waiters: [],
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:1916:        table_waiters: [],
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:1955:    it('findOne proyecta table.waiter desde opener, no desde table_waiters', async () => {
+apps/backend/src/domains/store/tables/table-sessions.service.spec.ts:1962:          table_waiters: [{ user: { id: 99, first_name: 'Otro', last_name: 'Mesero' } }],

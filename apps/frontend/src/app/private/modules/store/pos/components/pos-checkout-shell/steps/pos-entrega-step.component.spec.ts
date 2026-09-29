@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { signal, WritableSignal } from '@angular/core';
+import { NO_ERRORS_SCHEMA, signal, WritableSignal } from '@angular/core';
 
 import { PosEntregaStepComponent } from './pos-entrega-step.component';
 import { PosRestaurantIntegrationService } from '../../../services/pos-restaurant-integration.service';
@@ -16,6 +16,7 @@ describe('PosEntregaStepComponent', () => {
     const integrationMock = {
       isRestaurantMode: () => isRestaurant(),
       currentTableSession: () => null,
+      hasOpenTableSession: () => false,
     };
 
     await TestBed.configureTestingModule({
@@ -26,7 +27,11 @@ describe('PosEntregaStepComponent', () => {
           useValue: integrationMock,
         },
       ],
-    }).compileComponents();
+    });
+    TestBed.overrideComponent(PosEntregaStepComponent, {
+      set: { imports: [], schemas: [NO_ERRORS_SCHEMA] },
+    });
+    await TestBed.compileComponents();
 
     fixture = TestBed.createComponent(PosEntregaStepComponent);
     component = fixture.componentInstance;
@@ -49,6 +54,9 @@ describe('PosEntregaStepComponent', () => {
       const options = fixture.debugElement.queryAll(By.css('.option-row'));
       expect(options.length).toBe(3);
       expect(component.availableChoices()).toEqual(['mesa', 'llevar', 'enviar']);
+      expect(fixture.nativeElement.querySelector('[role="radiogroup"]').getAttribute('aria-label')).toBe('Pedido');
+      expect(options.map((option) => option.nativeElement.querySelector('.option-row__title')?.textContent?.trim()))
+        .toEqual(['Para consumir en mesa', 'Para llevar', 'Domicilio']);
     });
 
     it('re-seleccionar opción mesa sin mesa abre el picker de mesa', () => {

@@ -1,0 +1,78 @@
+E.1-SA1 — shell spec (solo-lectura + specs)
+Spec: apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts
+Contrato: FB-19 (PUT /store/orders/:id/editor — «llevar» manda direct_delivery, ADR-01)
+
+NOTA DE RUNNER: la tarea pedía `npx jest --runInBand <spec>`, pero el repo no
+tiene harness jest para Angular (sin jest.config de frontend, sin
+jest-preset-angular/jsdom; el jest de apps/backend es testEnvironment=node con
+rootDir=src). El gate canónico de ESTE spec es el job `frontend-test` de CI,
+que lo corre con `ng test --include`. Se usa ese runner, un spec a la vez.
+
+Comando:
+  cd apps/frontend && npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox --progress=false --include='**/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts'
+
+--- salida ---
+start 2026-09-24T01:01:22Z
+2431a1152
+[build] start
+[build] ok
+spec-app-private-modules-store-pos-components-pos-checkout-shell-pos-checkout-shell.component.spec.js | spec-app-private-modules-store-pos-components-pos-checkout-shell-pos-checkout-shell.component.spec |  53.38 kB | 
+jasmine-cleanup-0.js                                                                                  | jasmine-cleanup-0                                                                                  | 525 bytes | 
+
+                                                                                                      | Initial total                                                                                      |  10.18 MB
+
+...and 666 more lazy chunks files. Use "--verbose" to show all the files.
+
+Application bundle generation complete. [16.988 seconds] - 2026-09-24T01:01:40.470Z
+
+23 09 2026 20:01:41.238:INFO [karma-server]: Karma v6.4.4 server started at http://localhost:9876/
+23 09 2026 20:01:41.238:INFO [launcher]: Launching browsers ChromeHeadlessNoSandbox with concurrency unlimited
+23 09 2026 20:01:41.247:INFO [launcher]: Starting browser ChromeHeadless
+23 09 2026 20:01:42.894:INFO [Chrome Headless 153.0.0.0 (Mac OS 10.15.7)]: Connected on socket FtlpNVNEhmA4ZJ-DAAAB with id 53098028
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 0 of 42 SUCCESS (0 secs / 0 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 1 of 42 SUCCESS (0 secs / 0.217 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 2 of 42 SUCCESS (0 secs / 0.246 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 3 of 42 SUCCESS (0 secs / 0.275 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 4 of 42 SUCCESS (0 secs / 0.299 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 5 of 42 SUCCESS (0 secs / 0.325 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 6 of 42 SUCCESS (0 secs / 0.349 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 7 of 42 SUCCESS (0 secs / 0.373 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 8 of 42 SUCCESS (0 secs / 0.396 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 9 of 42 SUCCESS (0 secs / 0.418 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 10 of 42 SUCCESS (0 secs / 0.442 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 11 of 42 SUCCESS (0 secs / 0.467 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 12 of 42 SUCCESS (0 secs / 0.49 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 13 of 42 SUCCESS (0 secs / 0.514 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 14 of 42 SUCCESS (0 secs / 0.537 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 15 of 42 SUCCESS (0 secs / 0.558 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 16 of 42 SUCCESS (0 secs / 0.581 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 17 of 42 SUCCESS (0 secs / 0.606 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 18 of 42 SUCCESS (0 secs / 0.633 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 19 of 42 SUCCESS (0 secs / 0.655 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 20 of 42 SUCCESS (0 secs / 0.677 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 21 of 42 SUCCESS (0 secs / 0.701 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 22 of 42 SUCCESS (0 secs / 0.723 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 23 of 42 SUCCESS (0 secs / 0.744 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 24 of 42 SUCCESS (0 secs / 0.767 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 25 of 42 SUCCESS (0 secs / 0.792 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 26 of 42 SUCCESS (0 secs / 0.815 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 27 of 42 SUCCESS (0 secs / 0.836 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 28 of 42 SUCCESS (0 secs / 0.856 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 29 of 42 SUCCESS (0 secs / 0.877 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 30 of 42 SUCCESS (0 secs / 0.899 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 31 of 42 SUCCESS (0 secs / 0.92 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 32 of 42 SUCCESS (0 secs / 0.943 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 33 of 42 SUCCESS (0 secs / 0.965 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 34 of 42 SUCCESS (0 secs / 0.985 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 35 of 42 SUCCESS (0 secs / 1.007 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 36 of 42 SUCCESS (0 secs / 1.029 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 37 of 42 SUCCESS (0 secs / 1.05 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 38 of 42 SUCCESS (0 secs / 1.072 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 39 of 42 SUCCESS (0 secs / 1.093 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 40 of 42 SUCCESS (0 secs / 1.115 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 41 of 42 SUCCESS (0 secs / 1.138 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 42 of 42 SUCCESS (0 secs / 1.168 secs)
+Chrome Headless 153.0.0.0 (Mac OS 10.15.7): Executed 42 of 42 SUCCESS (1.199 secs / 1.168 secs)
+TOTAL: 42 SUCCESS
+EXIT=0
+end 2026-09-24T01:01:45Z

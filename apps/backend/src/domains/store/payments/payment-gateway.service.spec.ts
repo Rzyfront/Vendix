@@ -13,14 +13,18 @@ import {
 } from './interfaces';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PaymentError, PaymentErrorCodes } from './utils';
+import { VendixHttpException } from 'src/common/errors';
 import { Prisma, payments_state_enum } from '@prisma/client';
 import { createPrismaMock, PrismaMock } from '../../../testing/prisma-mock';
 import { buildOrder, buildPayment } from '../../../testing/money-fixtures';
+// Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
 describe('PaymentGatewayService', () => {
   let service: PaymentGatewayService;
   let prisma: StorePrismaService;
   let validator: PaymentValidatorService;
+  let orderHistory: { record: jest.Mock };
 
   const mockPaymentData: PaymentData = {
     orderId: 1,
@@ -94,12 +98,17 @@ describe('PaymentGatewayService', () => {
           provide: S3Service,
           useValue: mockS3Service,
         },
+        {
+          provide: OrderHistoryService,
+          useValue: { record: jest.fn().mockResolvedValue(null) },
+        },
       ],
     }).compile();
 
     service = module.get<PaymentGatewayService>(PaymentGatewayService);
     prisma = module.get<StorePrismaService>(StorePrismaService);
     validator = module.get<PaymentValidatorService>(PaymentValidatorService);
+    orderHistory = module.get<any>(OrderHistoryService);
   });
 
   it('should be defined', () => {
@@ -152,6 +161,69 @@ describe('PaymentGatewayService', () => {
       expect(result.transactionId).toBe('txn_1234567890_abc123');
     });
 
+    it('registra state_changed con source webhook cuando la confirmación de la pasarela pone la orden al día', async () => {
+      const mockOrder = {
+        id: 1,
+        store_id: 1,
+        state: 'created',
+        grand_total: 100.0,
+      };
+
+      const mockPaymentMethod = {
+        id: 1,
+        type: 'card',
+      };
+
+      const mockCreatedPayment = {
+        id: 1,
+        transaction_id: 'txn_1234567890_abc123',
+      };
+
+      jest.spyOn(validator, 'validateOrder').mockResolvedValue({
+        valid: true,
+        order: mockOrder,
+      });
+      jest.spyOn(validator, 'validatePaymentMethod').mockResolvedValue(true);
+      jest.spyOn(validator, 'validatePaymentAmount').mockResolvedValue(true);
+      jest.spyOn(validator, 'validateCurrency').mockResolvedValue(true);
+      jest
+        .spyOn(prisma.store_payment_methods, 'findUnique')
+        .mockResolvedValue(mockPaymentMethod);
+      jest
+        .spyOn(prisma.payments, 'create')
+        .mockResolvedValue(mockCreatedPayment);
+      jest.spyOn(prisma.payments, 'update').mockResolvedValue({});
+      jest.spyOn(prisma.orders, 'findUnique').mockResolvedValue({
+        id: 1,
+        store_id: 1,
+        state: 'created',
+        grand_total: 100.0,
+        payments: [{ state: 'succeeded', amount: 100.0 }],
+        stores: { organization_id: 9 },
+      } as any);
+      jest.spyOn(prisma.orders, 'update').mockResolvedValue({} as any);
+
+      const mockProcessor = {
+        isEnabled: jest.fn().mockReturnValue(true),
+        processPayment: jest.fn().mockResolvedValue(mockPaymentResult),
+      };
+      service.registerProcessor('card', mockProcessor as any);
+
+      await service.processPayment(mockPaymentData);
+
+      expect(orderHistory.record).toHaveBeenCalledWith(
+        prisma,
+        expect.objectContaining({
+          orderId: 1,
+          storeId: 1,
+          organizationId: 9,
+          type: 'state_changed',
+          fromState: 'created',
+          toState: 'processing',
+        }),
+      );
+    });
+
     it('should throw error for invalid order', async () => {
       jest.spyOn(validator, 'validateOrder').mockResolvedValue({
         valid: false,
@@ -164,6 +236,39 @@ describe('PaymentGatewayService', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(PaymentError);
       }
+    });
+
+    it('propagates the typed already-paid order error before creating a payment', async () => {
+      jest.spyOn(validator, 'validateOrder').mockResolvedValue({
+        valid: false,
+        errors: ['Order is already fully paid'],
+        errorCode: 'ORD_PAY_ALREADY_PAID_001',
+      });
+
+      const error = await service.processPayment(mockPaymentData).catch((failure) => failure);
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe('ORD_PAY_ALREADY_PAID_001');
+      expect(error.getStatus()).toBe(409);
+      expect(prisma.payments.create).not.toHaveBeenCalled();
+    });
+
+    it('preserves the typed order error through processPaymentWithNewOrder', async () => {
+      jest.spyOn(service as any, 'createOrderFromPaymentData').mockResolvedValue({ id: 1 });
+      jest.spyOn(validator, 'validateOrder').mockResolvedValue({
+        valid: false,
+        errorCode: 'ORD_PAY_ALREADY_PAID_001',
+        errors: ['Order is already fully paid'],
+      });
+
+      const error = await service.processPaymentWithNewOrder({
+        ...mockPaymentData,
+        customerEmail: 'customer@example.com',
+        customerName: 'Customer',
+        items: [],
+      }).catch((failure) => failure);
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe('ORD_PAY_ALREADY_PAID_001');
+      expect(prisma.payments.create).not.toHaveBeenCalled();
     });
 
     it('should throw error for disabled payment method', async () => {
@@ -451,7 +556,7 @@ describe('PaymentGatewayService', () => {
 
     it('rechaza el segundo cobro de una orden ya pagada aunque el body traiga metadata.is_pos_payment', async () => {
       // grand_total 59.50 ya cubierto por un pago `succeeded` de 59.50:
-      // saldo pendiente = 0, así que un segundo cobro de 59.50 es sobrepago.
+      // saldo pendiente = 0, así que el validador devuelve el 409 tipado.
       prismaMock.orders.findUnique.mockResolvedValue(
         buildOrder({
           id: ORDER_ID,
@@ -472,7 +577,7 @@ describe('PaymentGatewayService', () => {
           posCharge({ metadata: { is_pos_payment: true } }),
         ),
       ).rejects.toMatchObject({
-        code: PaymentErrorCodes.INVALID_AMOUNT,
+        errorCode: 'ORD_PAY_ALREADY_PAID_001',
       });
 
       // Ninguna plata se mueve ni se persiste cuando la compuerta rechaza.

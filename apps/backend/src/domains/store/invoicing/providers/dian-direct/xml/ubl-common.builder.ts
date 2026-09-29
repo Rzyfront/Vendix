@@ -32,6 +32,7 @@ import {
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { resolveFiscalResponsibilityFlags } from 'src/common/helpers/vat-responsibility.helper';
 import { DIAN_FINAL_CONSUMER_NAME } from '../../../validators/customer-fiscal-identity.validator';
+import { normalizeAcquirerDocumentType } from '../../../utils/acquirer-identity.resolver';
 import { createHash } from 'crypto';
 import {
   DianNumericInput,
@@ -861,10 +862,17 @@ export class UblCommonBuilder {
       'AccountingCustomerParty',
     );
 
-    // Structural branch selector — see method JSDoc for the rule.
+    // Structural branch selector — see method JSDoc for the rule. Deriva del
+    // CÓDIGO DIAN del documento (31 ⇒ jurídica), no sólo del literal 'NIT':
+    // `customer.document_type` puede llegar como código sin normalizar, y
+    // compararlo contra el literal lo hacía caer siempre a 'NATURAL' — la
+    // mitad del incidente Óptica Panorama SAS / Pollo Árabe (NIT de persona
+    // jurídica transmitido como persona natural).
     const resolved_person_type: 'NATURAL' | 'JURIDICA' =
       customer.person_type ??
-      (customer.document_type === 'NIT' ? 'JURIDICA' : 'NATURAL');
+      (normalizeAcquirerDocumentType(customer.document_type).code === '31'
+        ? 'JURIDICA'
+        : 'NATURAL');
 
     const dian_scheme_id =
       DIAN_ID_TYPES[customer.document_type] || customer.document_type;
@@ -1002,7 +1010,18 @@ export class UblCommonBuilder {
 
     // `cac:TaxScheme` del adquirente: 01 (IVA) si es responsable, ZZ (No aplica)
     // para consumidor final o adquirente no responsable.
-    const is_customer_responsible = customer.tax_regime === '48';
+    //
+    // Antes comparaba `customer.tax_regime === '48'` — pero `tax_regime` en
+    // este objeto lo produce `DianDirectProvider.normalizePartyAccountType`,
+    // que SÓLO devuelve '1' o '2' (persona jurídica/natural), nunca '48'. La
+    // comparación era estructuralmente imposible: TODO adquiriente resolvía
+    // `ZZ`, sin importar su responsabilidad real de IVA. Se deriva ahora de
+    // `customer.tax_responsibilities` (RUT casilla 53 real del cliente, ya
+    // disponible en este mismo método para `cbc:TaxLevelCode` unas líneas
+    // arriba) con la misma jerarquía de evidencia que usa el emisor.
+    const is_customer_responsible = resolveFiscalResponsibilityFlags({
+      tax_responsibilities: responsibilities,
+    }).vat_responsible;
     const customer_scheme = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
     customer_scheme
       .ele(UBL_NAMESPACES.CBC, 'ID')
@@ -1280,12 +1299,16 @@ export class UblCommonBuilder {
     if (municipality) {
       addr.ele(UBL_NAMESPACES.CBC, 'ID').txt(municipality.code);
       addr.ele(UBL_NAMESPACES.CBC, 'CityName').txt(municipality.name);
-      // El postal declarado gana al del catálogo: el del catálogo es el urbano
-      // de referencia del municipio, útil como respaldo pero menos preciso que
-      // el que el usuario informó. FAJ73 es notificación, no rechazo.
-      addr
-        .ele(UBL_NAMESPACES.CBC, 'PostalZone')
-        .txt(declared_postal_code || municipality.postal_code);
+      // Task B (2026-09-28): `cbc:PostalZone` es `0..1` (`UBL_CONTENT_MODEL`,
+      // `AddressType`) — OMITIRLO es válido. Antes se rellenaba con el postal
+      // «urbano de referencia» del catálogo (`municipality.postal_code`) cuando
+      // el usuario no declaró uno; para Bogotá ese valor es 110111, y eso es un
+      // dato INVENTADO viajando en un documento firmado, no un respaldo
+      // legítimo — nadie verificó que esa fuera la zona postal real. Sólo se
+      // emite cuando el propio address lo trae.
+      if (declared_postal_code) {
+        addr.ele(UBL_NAMESPACES.CBC, 'PostalZone').txt(declared_postal_code);
+      }
       addr
         .ele(UBL_NAMESPACES.CBC, 'CountrySubentity')
         .txt(municipality.department_name);
@@ -2019,6 +2042,40 @@ export class UblCommonBuilder {
    * contablemente más justo — si la cabecera "corrigiera" el doble conteo, el
    * documento sería rechazado por declarar menos base de la que suman sus líneas.
    */
+  /**
+   * ¿La línea sin desglose propio calla su `cac:TaxTotal` en vez de heredar el
+   * primer tributo de la cabecera?
+   *
+   * Calla en dos casos:
+   *
+   * · no hay cabecera de la que heredar (documento sin ningún tributo, FAS01b);
+   * · la línea NO causó impuesto (`tax_amount = 0`) y la tarifa que heredaría NO
+   *   es cero. Es la línea sintética de envío (`product_id` null), la propina o
+   *   el envío de una cuenta dividida, o un ítem libre excluido dentro de una
+   *   factura gravada. Heredar publicaría `TaxAmount 0,00` sobre
+   *   `TaxableAmount × Percent / 100 ≠ 0` y la DIAN rechaza por FAX07
+   *   (`round(TaxAmount) = round(TaxableAmount × Percent / 100)`). El Anexo 1.9
+   *   (FAX01/FAX05) es explícito: una línea que no causa el tributo NO informa
+   *   `cac:TaxTotal`.
+   *
+   * Una línea con cuota 0 bajo una cabecera de tarifa 0 (exento IVA 0 %) SÍ
+   * hereda: `Percent 0.00` con cuota 0 cuadra FAX07 y es la forma aceptada del
+   * exento.
+   *
+   * La usan `buildLineTaxTotal` (qué emite la línea) y `lineTaxableContribution`
+   * (qué suma la cabecera para FAU04): una sola condición para los dos lados.
+   */
+  static inheritsNothingFromHeader(
+    item: ProviderInvoiceItem,
+    header_taxes: ProviderInvoiceTax[],
+  ): boolean {
+    if (header_taxes.length === 0) return true;
+    return (
+      toDecimal(item.tax_amount).isZero() &&
+      !toDecimal(header_taxes[0].tax_rate).isZero()
+    );
+  }
+
   static lineTaxableContribution(
     item: ProviderInvoiceItem,
     header_taxes: ProviderInvoiceTax[],
@@ -2028,10 +2085,14 @@ export class UblCommonBuilder {
 
     const line_taxes = line.taxes ?? [];
 
-    // MISMA guarda que `buildLineTaxTotal`: sin tributo propio NI de cabecera del
-    // que heredar, la línea calla, y una línea callada no tiene ningún
-    // `cbc:TaxableAmount` que sumar.
-    if (line_taxes.length === 0 && header_taxes.length === 0) return null;
+    // MISMA guarda que `buildLineTaxTotal`: sin tributo propio y sin nada que
+    // heredar de la cabecera (ver `inheritsNothingFromHeader`), la línea calla, y
+    // una línea callada no tiene ningún `cbc:TaxableAmount` que sumar.
+    if (
+      line_taxes.length === 0 &&
+      UblCommonBuilder.inheritsNothingFromHeader(line, header_taxes)
+    )
+      return null;
 
     // Sin desglose propio la línea emite UN subtotal cuya base es su importe.
     if (line_taxes.length === 0) return dianLineExtension(line);
@@ -2353,7 +2414,13 @@ export class UblCommonBuilder {
    * con `dianRate` sin el saneamiento por-mil del ICA, al contrario que el camino
    * nuevo. Cambiarlo alteraría documentos históricos.
    *
-   * ## 3. Sin desglose Y sin cabecera — la línea NO emite el grupo
+   * Excepción: la línea con cuota 0 bajo una tarifa de cabecera NO nula no
+   * hereda (cae al caso 3). Heredar publicaba `TaxAmount 0,00` sobre base ×
+   * tarifa ≠ 0, que la DIAN rechaza por FAX07 — ningún documento aceptado pudo
+   * tomar esa forma, así que callarla no altera nada emitido. Ver
+   * `inheritsNothingFromHeader`.
+   *
+   * ## 3. Sin desglose y nada que heredar — la línea NO emite el grupo
    *
    * Antes este caso caía a una tarifa cableada de IVA 19 % con cuota 0,00, así
    * que una factura sin ningún tributo salía afirmando un impuesto inexistente en
@@ -2381,7 +2448,15 @@ export class UblCommonBuilder {
     // Callar la línea la deja como las que ya usan `omit_tax_total` (FAX01), y es
     // coherente con la guarda de cabecera de `buildTaxTotals`. NO afecta al camino
     // histórico: ése hereda de `header_taxes[0]`, que acá por definición no existe.
-    if (line_taxes.length === 0 && header_taxes.length === 0) {
+    //
+    // La misma regla cubre la línea que NO causó impuesto bajo una cabecera de
+    // tarifa no nula (envío sintético, propina/envío de cuenta dividida): heredar
+    // publicaría cuota 0 sobre base × tarifa ≠ 0 → FAX07. Ver
+    // `inheritsNothingFromHeader`, que comparte con `lineTaxableContribution`.
+    if (
+      line_taxes.length === 0 &&
+      UblCommonBuilder.inheritsNothingFromHeader(item, header_taxes)
+    ) {
       return;
     }
 
@@ -2397,14 +2472,17 @@ export class UblCommonBuilder {
       // resolved tax_type-first for correctness on single-tax invoices (a pure
       // INC restaurant bill emits scheme 04, not 01).
       //
-      // UNA CUENTA MIXTA NO LLEGA ACÁ, y no porque la cabecera la concilie. Esa
-      // era la afirmación anterior de este comentario y era falsa: FAX02 es una
-      // regla POR LÍNEA y el `cac:TaxTotal` de cabecera es otra (FAS02), así que
-      // conciliar arriba no exime a la línea de nada. Lo que hace correcto este
-      // camino es que un documento con ≥2 tributos SIEMPRE persiste el desglose
-      // por línea (`InvoicingService.needsPersistedLineTaxes`), de modo que acá
-      // sólo cae el documento de un tributo único — donde heredar el primero es
-      // heredar el único.
+      // A ESTE CAMINO NO SÓLO LLEGA EL DOCUMENTO DE UN TRIBUTO ÚNICO. Un
+      // documento con desglose por línea también trae líneas sin filas propias:
+      // la línea sintética de envío (`product_id` null, cuota 0) y la propina o
+      // el envío de una cuenta dividida. Que una cuenta mixta persista su
+      // desglose (`InvoicingService.needsPersistedLineTaxes`) no impide que
+      // esas líneas aterricen acá con `header_taxes[0]` de cualquier tarifa.
+      // Lo que las saca es la guarda de arriba: una línea con cuota 0 bajo una
+      // tarifa no nula calla (FAX07). Acá sólo llega la línea que SÍ causó el
+      // tributo de cabecera —el documento histórico de un tributo único, donde
+      // heredar el primero es heredar el único— o la que hereda una tarifa 0
+      // (exento, `Percent 0.00`, cuota 0), que cuadra FAX07 por construcción.
       const tax_rate = header_taxes[0].tax_rate;
       const tax_code = UblCommonBuilder.resolveTaxCodeFromTax(header_taxes[0]);
 

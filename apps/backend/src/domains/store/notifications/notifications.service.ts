@@ -143,20 +143,42 @@ export class NotificationsService {
    * `data->>'target_user_id' = $userId` for the targeted branch) — no
    * in-memory filtering, no pagination regression.
    */
+  /**
+   * QUI-854 — fail-closed multi-tenant. Un consumidor sin `store_id` resuelto
+   * (token de tienda roto o viejo) NO debe ver absolutamente nada, ni
+   * broadcasts cross-store ni ítems ajenos. Devuelve un resultado vacío.
+   */
+  private isStaffContext(): boolean {
+    const context = RequestContextService.getContext();
+    // STORE_ADMIN / ORG_ADMIN / VENDIX_ADMIN son staff. Todo lo demás
+    // (STORE_ECOMMERCE, CUSTOMER, etc.) es cliente: solo ve sus propias
+    // notificaciones dirigidas, jamás broadcasts de la tienda.
+    return (
+      context?.app_type === 'STORE_ADMIN' ||
+      context?.app_type === 'ORG_ADMIN' ||
+      context?.app_type === 'VENDIX_ADMIN'
+    );
+  }
+
   async findAll(user_id: number, query_dto: NotificationQueryDto) {
     const { page = 1, limit = 20, type, is_read } = query_dto;
     const skip = (page - 1) * limit;
     const store_id = RequestContextService.getStoreId();
 
-    // Prisma 7 Json path filter with `equals: null` is broken — use raw SQL.
-    const conditions: string[] = [];
-    const params: any[] = [];
-    let idx = 1;
-
-    if (store_id) {
-      conditions.push(`n.store_id = $${idx++}`);
-      params.push(store_id);
+    // QUI-854 — fail-closed: sin store_id no se consulta nada.
+    if (!store_id) {
+      return {
+        data: [],
+        unread_count: 0,
+        meta: { total: 0, page, limit, total_pages: 0 },
+      };
     }
+
+    // Prisma 7 Json path filter with `equals: null` is broken — use raw SQL.
+    const conditions: string[] = [`n.store_id = $${1}`];
+    const params: any[] = [store_id];
+    let idx = 2;
+
     if (type) {
       conditions.push(`n.type = $${idx++}`);
       params.push(type);
@@ -166,13 +188,20 @@ export class NotificationsService {
       params.push(is_read);
     }
 
-    // Target-user bell filter: show broadcast OR self-targeted notifications.
-    conditions.push(`(
-      n.data IS NULL
-      OR n.data->>'target_user_id' IS NULL
-      OR (n.data->>'target_user_id')::int = $${idx++}
-    )`);
-    params.push(user_id);
+    if (this.isStaffContext()) {
+      // Staff: show broadcast OR self-targeted notifications.
+      conditions.push(`(
+        n.data IS NULL
+        OR n.data->>'target_user_id' IS NULL
+        OR (n.data->>'target_user_id')::int = $${idx++}
+      )`);
+      params.push(user_id);
+    } else {
+      // Cliente: SOLO notificaciones dirigidas a él (/ecommerce uso legítimo:
+      // booking reschedule, llamadas de mesa). Nunca broadcasts de la tienda.
+      conditions.push(`(n.data->>'target_user_id')::int = $${idx++}`);
+      params.push(user_id);
+    }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -219,22 +248,26 @@ export class NotificationsService {
    */
   async getUnreadCount(user_id: number) {
     const store_id = RequestContextService.getStoreId();
-    // Prisma 7 Json path filter with `equals: null` is broken — use raw SQL.
-    const conditions: string[] = ['n.is_read = false'];
-    const params: any[] = [];
-    let idx = 1;
-
-    if (store_id) {
-      conditions.push(`n.store_id = $${idx++}`);
-      params.push(store_id);
+    // QUI-854 — fail-closed: sin store_id no se cuenta nada.
+    if (!store_id) {
+      return { count: 0 };
     }
+    // Prisma 7 Json path filter with `equals: null` is broken — use raw SQL.
+    const conditions: string[] = ['n.is_read = false', `n.store_id = $${1}`];
+    const params: any[] = [store_id];
+    let idx = 2;
 
-    conditions.push(`(
-      n.data IS NULL
-      OR n.data->>'target_user_id' IS NULL
-      OR (n.data->>'target_user_id')::int = $${idx++}
-    )`);
-    params.push(user_id);
+    if (this.isStaffContext()) {
+      conditions.push(`(
+        n.data IS NULL
+        OR n.data->>'target_user_id' IS NULL
+        OR (n.data->>'target_user_id')::int = $${idx++}
+      )`);
+      params.push(user_id);
+    } else {
+      conditions.push(`(n.data->>'target_user_id')::int = $${idx++}`);
+      params.push(user_id);
+    }
 
     const where = `WHERE ${conditions.join(' AND ')}`;
     const result = await this.prisma.$queryRawUnsafe<any>(
@@ -246,11 +279,25 @@ export class NotificationsService {
   }
 
   async markRead(id: number) {
-    const notification = await this.notificationsModel.findFirst({
-      where: { id },
-    });
+    const store_id = RequestContextService.getStoreId();
+    const user_id = RequestContextService.getUserId();
+    // QUI-854 — fail-closed y scoped: solo se puede marcar leída una
+    // notificación de la propia tienda; un cliente solo la propia.
+    // Prisma 7 JSON path filters están rotos con equals:null — raw SQL.
+    const conditions: string[] = [`n.id = $${1}`, `n.store_id = $${2}`];
+    const params: any[] = [id, store_id ?? -1];
+    let next = 3;
 
-    if (!notification) {
+    if (!this.isStaffContext()) {
+      conditions.push(`(n.data->>'target_user_id')::int = $${next++}`);
+      params.push(user_id);
+    }
+
+    const found = await this.prisma.$queryRawUnsafe<any>(
+      `SELECT n.id FROM notifications n WHERE ${conditions.join(' AND ')}`,
+      ...params,
+    );
+    if (found.length === 0) {
       throw new NotFoundException(`Notification #${id} not found`);
     }
 
@@ -261,10 +308,28 @@ export class NotificationsService {
   }
 
   async markAllRead() {
-    return this.notificationsModel.updateMany({
-      where: { is_read: false },
-      data: { is_read: true, updated_at: new Date() },
-    });
+    const store_id = RequestContextService.getStoreId();
+    const user_id = RequestContextService.getUserId();
+    // QUI-854 — mark-all siempre scoped por tienda; un cliente solo marca
+    // sus propias notificaciones dirigidas, nunca broadcasts ni ítems ajenos.
+    if (!store_id) {
+      return { count: 0 };
+    }
+    const conditions: string[] = [`n.store_id = $${1}`];
+    const params: any[] = [store_id];
+    let next = 2;
+
+    if (!this.isStaffContext()) {
+      conditions.push(`(n.data->>'target_user_id')::int = $${next++}`);
+      params.push(user_id);
+    }
+
+    const result = await this.prisma.$executeRawUnsafe(
+      `UPDATE notifications n SET is_read = true, updated_at = NOW()
+       WHERE ${conditions.join(' AND ')}`,
+      ...params,
+    );
+    return { count: result ?? 0 };
   }
 
   async getSubscriptions(user_id: number) {

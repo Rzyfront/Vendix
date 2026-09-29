@@ -27,6 +27,7 @@ import { CreateProductDto } from '../../products/dto';
 import { FiscalResponsibilityInCatalogRule } from '../../../../common/validators/fiscal-responsibility.validator';
 import { NitDvMatches } from '../../../../common/validators/nit-dv.validator';
 import { DIAN_ID_TYPES } from '../providers/dian-direct/constants/dian-document-types';
+import { persona_type_enum } from '@prisma/client';
 import { InvoiceAddressDto, liftInvoiceAddress } from './invoice-address.dto';
 import { IsWithinFiscalIssueDateWindow } from './invoice-issue-date-window.validator';
 import { InvoiceWithholdingInputDto } from './invoice-withholding-input.dto';
@@ -682,6 +683,22 @@ export class CreateInvoiceDto {
     message: 'customer_tax_regime no puede superar 10 caracteres.',
   })
   customer_tax_regime?: string;
+
+  /**
+   * Tipo de persona del adquiriente ('NATURAL'/'JURIDICA'). Sólo tiene efecto
+   * en facturas MANUALES sin cliente vinculado (`customer_id` ausente): con
+   * ficha vinculada, `resolveAcquirerIdentity` siempre prefiere
+   * `users.person_type` y este valor queda ignorado (ver Task D,
+   * `acquirer-identity.resolver.ts`). Sin este campo, una persona natural con
+   * NIT (documento 31) se resolvía por default como JURIDICA — el error que
+   * este campo cierra al dar al emisor una forma explícita de declararlo.
+   */
+  @IsOptional()
+  @Transform(blankToUndefined)
+  @IsEnum(persona_type_enum, {
+    message: "customer_person_type debe ser 'NATURAL' o 'JURIDICA'.",
+  })
+  customer_person_type?: persona_type_enum;
 
   /**
    * Responsabilidades fiscales del RUT del adquiriente. Se validan contra el

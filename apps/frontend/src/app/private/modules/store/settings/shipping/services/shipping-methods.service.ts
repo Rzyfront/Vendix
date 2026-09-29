@@ -22,6 +22,7 @@ import {
   ShippingRateMethod,
   SystemZoneUpdate,
   SyncResult,
+  ShippingRateTaxOptions,
 } from '../interfaces/shipping-zones.interface';
 
 @Injectable({
@@ -376,6 +377,20 @@ export class ShippingMethodsService {
       );
   }
 
+  /**
+   * Categorías de impuesto que se pueden asignar a una tarifa, con su
+   * elegibilidad según la identidad fiscal del emisor, una sugerencia no
+   * vinculante y advertencias.
+   */
+  getRateTaxOptions(): Observable<ShippingRateTaxOptions> {
+    return this.http
+      .get<any>(`${this.api_base_url}/shipping-zones/rates/tax-options`)
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
+  }
+
   deleteRate(id: number): Observable<void> {
     return this.http
       .delete<any>(`${this.api_base_url}/shipping-zones/rates/${id}`)
@@ -407,6 +422,25 @@ export class ShippingMethodsService {
       free: 'Envío gratis',
     };
     return label_map[type] || type;
+  }
+
+  /**
+   * Etiqueta corta del impuesto de una tarifa: «INC 8%», «IVA 19%».
+   * Devuelve null cuando la tarifa no lleva impuesto.
+   */
+  getRateTaxLabel(
+    tax:
+      | { tax_type?: string | null; rate_percent?: number | null }
+      | null
+      | undefined,
+  ): string | null {
+    if (!tax || !tax.tax_type) return null;
+    const type = tax.tax_type.toUpperCase();
+    if (tax.rate_percent == null || isNaN(Number(tax.rate_percent))) return type;
+    const pct = Number(tax.rate_percent).toLocaleString('es-CO', {
+      maximumFractionDigits: 2,
+    });
+    return `${type} ${pct}%`;
   }
 
   getZoneRateTypeColor(type: string): string {

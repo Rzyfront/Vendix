@@ -389,20 +389,21 @@ describe('FAU04 — la base de la cabecera es la que declaran las líneas', () =
     });
 
     /**
-     * EL DEFECTO, y por qué NINGUNA compuerta aritmética lo veía.
+     * EL DEFECTO, y por qué NINGUNA compuerta DE TOTALES lo ve.
      *
      * Sin desglose por línea el emisor cae al camino histórico y escribe
      * `cbc:TaxableAmount = cbc:LineExtensionAmount`. Las cuatro identidades de
      * totales SIGUEN CUADRANDO —los dos lados de FAU04 salen de la misma
-     * función, así que se mueven juntos— y el documento pasa el validador
-     * entero. Lo que sale es un XML internamente consistente que declara
-     * $2.328.800 de base gravable con $13.274,16 de IVA: la DIAN lo ACEPTA, y
-     * el error sólo se corrige después con nota crédito.
+     * función, así que se mueven juntos—. Lo que sale es un XML que declara
+     * $2.328.800 de base gravable con $13.274,16 de IVA.
      *
      * Por eso la base tiene que venir del desglose de línea y no puede
-     * defenderse con una regla de totales.
+     * defenderse con una regla de totales. Quien SÍ lo ve es FAX07 —la cuota de
+     * cada subtotal de línea contra base × tarifa—: 19 % de 852.000 no es
+     * 4.856,40. Desde que el validador la implementa, este documento ya no pasa
+     * la compuerta previa a la firma.
      */
-    it('sin desglose de línea el documento es consistente Y declara 33 veces la base', () => {
+    it('sin desglose de línea los totales cuadran Y declara 33 veces la base — sólo FAX07 lo delata', () => {
       const { xml, totals } = emit({
         discount_amount: '0.00',
         tax_amount: '13274.16',
@@ -423,8 +424,17 @@ describe('FAU04 — la base de la cabecera es la que declaran las líneas', () =
 
       expect(totals.TaxExclusiveAmount).toBe('2328800.00');
       expect(lineTaxableSum(xml)).toBe(2328800);
-      // Y aun así: cero violaciones.
-      expectClean(xml);
+      // Las cuatro reglas de totales no objetan nada…
+      const result = DianTotalsValidator.validate(xml);
+      expect(
+        result.violations.filter((v) => v.rule !== 'FAX07').map((v) => v.rule),
+      ).toEqual([]);
+      // …y FAX07 rechaza las dos líneas: su cuota no es 19 % de su base.
+      expect(
+        result.violations
+          .filter((v) => v.rule === 'FAX07')
+          .map((v) => v.details?.line),
+      ).toEqual([1, 2]);
     });
   });
 });

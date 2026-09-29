@@ -123,6 +123,36 @@ export class WalletService {
   }
 
   /**
+   * CP-REFUND-FLOW-REDESIGN paso 4 — acredita un refund en la wallet del
+   * cliente. La fila de `wallet_balance` (`reference_type='refund'`,
+   * `reference_id=refund_id`) es la pista de auditoría durable.
+   *
+   * NO emite `wallet.credited` a propósito (corrección del orquestador):
+   * `onWalletCredited` postea con mapping de RECARGA (DR Caja/Banco) e
+   * idempotencia por `wallet_id`, lo cual es incorrecto para un refund
+   * (no entra caja) y colisionaría con recargas reales. El carril
+   * `refund.completed.store_credit` (2805/2335) ya cubre la contabilidad.
+   * Re-habilitar la emisión solo cuando el listener discrimine
+   * `reference_type='refund'` con mapping contable aprobado.
+   */
+  async creditForRefund(
+    customerId: number,
+    amount: number,
+    params: { refund_id: number; order_id: number; user_id?: number },
+  ) {
+    const wallet = await this.getOrCreateWallet(customerId);
+
+    const result = await this.walletBalance.credit(wallet.id, amount, {
+      reference_type: 'refund',
+      reference_id: params.refund_id,
+      description: `Refund #${params.refund_id} for order #${params.order_id}`,
+      created_by: params.user_id,
+    });
+
+    return { ...result, wallet_id: wallet.id };
+  }
+
+  /**
    * Admin adjustment: credit or debit a customer's wallet.
    */
   async adjust(customerId: number, dto: AdjustWalletDto, userId: number) {

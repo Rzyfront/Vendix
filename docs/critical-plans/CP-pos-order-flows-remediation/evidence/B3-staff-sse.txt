@@ -1,0 +1,2 @@
+id: 2
+data: {"id":0,"type":"session_paid","title":"Mesa pagada","body":"La cuenta de la mesa fue pagada","data":{"table_session_id":113,"order_id":1131,"payment_id":828},"created_at":"2026-09-23T09:14:27.625Z"}

@@ -306,6 +306,7 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
     <app-invoice-scanner-modal
       [isOpen]="showInvoiceScanner()"
       [orderType]="scannerOrderType()"
+      [currentSupplierId]="cartState()?.supplierId ?? null"
       (isOpenChange)="showInvoiceScanner.set($event)"
       (confirmed)="onInvoiceScanConfirmed($event)"
     ></app-invoice-scanner-modal>
@@ -1246,6 +1247,21 @@ export class PopComponent implements OnInit, OnDestroy {
     return undefined;
   }
 
+  /** Barcode a texto exacto; descarta notación científica / enteros inseguros / >64 chars. */
+  private parseBulkBarcode(value: unknown): string | undefined {
+    if (value === undefined || value === null) return undefined;
+    let text: string;
+    if (typeof value === 'number') {
+      if (!Number.isSafeInteger(value)) return undefined;
+      text = String(value);
+    } else {
+      text = String(value).trim();
+      if (/^[+-]?\d+(\.\d+)?e[+-]?\d+$/i.test(text)) return undefined;
+    }
+    if (!text || text.length > 64) return undefined;
+    return text;
+  }
+
   private parseBulkText(value: unknown, fallback = ''): string {
     if (value === undefined || value === null) return fallback;
     return String(value).trim();
@@ -1361,6 +1377,17 @@ export class PopComponent implements OnInit, OnDestroy {
       if (!name || !sku) {
         return;
       }
+
+      const barcode = this.parseBulkBarcode(
+        this.getBulkValue(
+          normalizedRow,
+          'código de barras',
+          'codigo de barras',
+          'barcode',
+          'ean',
+          'gtin',
+        ),
+      );
 
       const product_type = this.normalizeBulkProductType(
         this.getBulkValue(normalizedRow, 'product_type', 'tipo'),
@@ -1496,6 +1523,7 @@ export class PopComponent implements OnInit, OnDestroy {
           prebulk_data: {
             name: String(name),
             code: String(sku),
+            barcode,
             description: String(description),
             state: String(state),
             weight: weight,
@@ -2054,7 +2082,10 @@ export class PopComponent implements OnInit, OnDestroy {
 
   onNavigateToSettings(): void {
     this.showOrderConfirmModal.set(false);
-    this.router.navigate(['/store/settings/general']);
+    // QUI-859: la ruta `/store/settings/general` no existe en el admin y caía
+    // al catch-all (dashboard). La configuración logística real vive en
+    // `/admin/settings/general/logistica`.
+    this.router.navigate(['/admin/settings/general/logistica']);
   }
 
   /**

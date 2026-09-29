@@ -149,4 +149,5 @@ export interface OrderValidationResult {
   order?: any;
   errors?: string[];
   warnings?: string[];
+  errorCode?: string;
 }

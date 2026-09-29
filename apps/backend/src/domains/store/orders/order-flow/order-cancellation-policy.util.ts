@@ -1,6 +1,7 @@
 export type CancellationBlockerCode =
   | 'ORD_CANCEL_STOCK_COMMITTED_001'
-  | 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001';
+  | 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001'
+  | 'ORD_CANCEL_OPEN_TABLE_001';
 
 /** Structural snapshot: callers must load lines and payment-method relations. */
 export interface OrderCancellationSnapshot {
@@ -21,6 +22,7 @@ export interface OrderCancellationSnapshot {
       } | null;
     } | null;
   }>;
+  table_sessions?: ReadonlyArray<{ id: number; closed_at?: Date | string | null }>;
 }
 
 export interface OrderCancellationPolicy {
@@ -29,10 +31,18 @@ export interface OrderCancellationPolicy {
   reason_code: CancellationBlockerCode | null;
 }
 
-const CANCELABLE_STATES = new Set(['created', 'pending_payment', 'processing']);
-const PAYMENT_CANCELABLE_STATES = new Set(['pending_payment', 'processing']);
+export const CANCELABLE_ORDER_STATES = [
+  'draft', 'created', 'pending_payment', 'processing',
+] as const;
+const CANCELABLE_STATES = new Set<string>(CANCELABLE_ORDER_STATES);
+/** States where `cancelPayment` voids the payment and reverts the order to
+ * `created` (see {@link canCancelUnfulfilledPayment}). */
+export const PAYMENT_CANCELABLE_STATES: ReadonlySet<string> = new Set([
+  'pending_payment',
+  'processing',
+]);
 const DELIVERED_STATES = new Set(['delivered', 'finished', 'refunded']);
-const SETTLED_PAYMENT_STATES = new Set([
+export const SETTLED_PAYMENT_STATES: ReadonlySet<string> = new Set([
   'succeeded', 'captured', 'partially_refunded', 'refunded',
 ]);
 const LEGACY_DIRECT_METHOD_TYPES = new Set([
@@ -48,6 +58,60 @@ function hasDeliveryMetadata(notes?: string | null): boolean {
     return false;
   }
 }
+
+/**
+ * True when at least one SETTLED payment on the order was collected through
+ * a non-direct method (online gateway, wallet, or anything whose
+ * `processing_mode` is not `DIRECT`/`ON_DELIVERY` and whose legacy `type` is
+ * not a known direct one). `bank_transfer` is always locally voidable
+ * (manually confirmed, no gateway), whatever its `processing_mode`.
+ * Shared by {@link getCancellationBlocker} (full order cancellation) and
+ * B4's `cancelPayment()` on `delivered`/`finished` orders (release-855): both need the exact same "is this money reversible
+ * locally, or does it need a processor/reconciliation step" answer.
+ */
+export function hasNonDirectSettledPayment(
+  payments?: OrderCancellationSnapshot['payments'],
+): boolean {
+  return (payments ?? []).some((payment) => {
+    if (!SETTLED_PAYMENT_STATES.has(payment.state)) return false;
+    const method = payment.store_payment_method?.system_payment_method;
+    // Decisión del dueño: una transferencia bancaria es un cobro confirmado
+    // a mano por el operador — no hay pasarela que reversar, así que se anula
+    // localmente igual que el efectivo. Va ANTES del chequeo ONLINE porque el
+    // seed de `system_payment_methods` la siembra con `processing_mode:
+    // 'ONLINE'` en todas las tiendas. Wompi/wallet/otros ONLINE siguen
+    // exigiendo reversa en el procesador.
+    if (method?.type === 'bank_transfer') return false;
+    if (method?.processing_mode === 'ONLINE') return true;
+    if (method?.type === 'wompi' || method?.type === 'wallet') return true;
+    if (
+      method?.processing_mode === 'DIRECT' ||
+      method?.processing_mode === 'ON_DELIVERY'
+    ) return false;
+    // Legacy rows may lack processing_mode, but missing relations are never
+    // proof of a cash payment. Preserve known direct methods; fail closed otherwise.
+    return !method?.type || !LEGACY_DIRECT_METHOD_TYPES.has(method.type);
+  });
+}
+
+/** States where `cancelPayment` may void a settled, direct-only payment
+ * without collapsing the order back to `created` — the goods already left,
+ * so it lands back on the SAME state (`shipped` stays `shipped`, `delivered`
+ * stays `delivered`) so `payOrder` can re-charge it from there.
+ *
+ * B1b (order-truth-and-invoice-tz plan) widened this from B4 (release-855)'s
+ * original `{delivered, finished}`: `shipped` is now included (an unpaid
+ * shipped order — e.g. COD — must be able to void/re-collect its payment),
+ * and `finished` was REMOVED — once an order is finalized, a local payment
+ * void is no longer the right instrument; `cancelPayment` hard-rejects
+ * `finished` with `ORD_PAYMENT_CANCEL_FINISHED_001` and a refund is the only
+ * path back. Does not replace the invoice/direct-method checks that
+ * `OrderFlowService.cancelPayment` still runs — this is only the
+ * state-eligibility half of the guard. */
+export const FULFILLED_PAYMENT_CANCELABLE_STATES = new Set([
+  'shipped',
+  'delivered',
+]);
 
 /**
  * Safety blocker only: no state eligibility check, so a forced transition
@@ -69,34 +133,83 @@ export function getCancellationBlocker(
     return 'ORD_CANCEL_STOCK_COMMITTED_001';
   }
 
-  const requiresPaymentReversal = (order.payments ?? []).some((payment) => {
-    if (!SETTLED_PAYMENT_STATES.has(payment.state)) return false;
-    const method = payment.store_payment_method?.system_payment_method;
-    if (method?.processing_mode === 'ONLINE') return true;
-    if (method?.type === 'wompi' || method?.type === 'wallet') return true;
-    if (
-      method?.processing_mode === 'DIRECT' ||
-      method?.processing_mode === 'ON_DELIVERY'
-    ) return false;
-    // Legacy rows may lack processing_mode, but missing relations are never
-    // proof of a cash payment. Preserve known direct methods; fail closed otherwise.
-    return !method?.type || !LEGACY_DIRECT_METHOD_TYPES.has(method.type);
-  });
-
-  return requiresPaymentReversal
+  return hasNonDirectSettledPayment(order.payments)
     ? 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001'
     : null;
+}
+
+/**
+ * B4 (release-855) / B1b (order-truth-and-invoice-tz plan) — `shipped`/
+ * `delivered` money-only payment reversal (see `OrderFlowService
+ * .cancelPayment`'s fulfilled-state branch and
+ * `FULFILLED_PAYMENT_CANCELABLE_STATES`). `finished` is intentionally
+ * excluded here — it is a hard reject at the service (
+ * `ORD_PAYMENT_CANCEL_FINISHED_001`), never a policy `true`. This is
+ * intentionally advisory and NOT the full authority: it only knows the
+ * direct-vs-gateway method signal available on this synchronous snapshot. It
+ * does NOT know whether a sales invoice has already been issued to DIAN for
+ * the order — that requires an async `invoices` lookup this pure/list-
+ * friendly function cannot perform (it also backs the orders LIST endpoint,
+ * one call per order). `OrderFlowService.cancelPayment` re-checks both
+ * conditions authoritatively and can still reject with
+ * `ORD_PAYMENT_CANCEL_INVOICED_001` even when this returns `true`.
+ */
+function canCancelFulfilledPayment(
+  order: OrderCancellationSnapshot,
+): boolean {
+  if (!FULFILLED_PAYMENT_CANCELABLE_STATES.has(order.state)) {
+    return false;
+  }
+  const hasSettledPayment = (order.payments ?? []).some((payment) =>
+    SETTLED_PAYMENT_STATES.has(payment.state),
+  );
+  return hasSettledPayment && !hasNonDirectSettledPayment(order.payments);
+}
+
+/**
+ * Regla del dueño: «cancelar el pago» corrige un medio de pago mal
+ * registrado para volver a cobrarlo — se permite en cualquier estado salvo
+ * `finished` (ahí sólo cabe un reembolso). En `pending_payment`/`processing`
+ * NO lo bloquea el stock ya comprometido/entregado: ese bloqueo
+ * (`ORD_CANCEL_STOCK_COMMITTED_001`) es exclusivo de cancelar la ORDEN.
+ * Anular el pago no toca inventario, y volver a cobrar no descuenta dos
+ * veces: el commit de stock reclama cada línea con un UPDATE condicional
+ * sobre `order_items.inventory_committed` (`OrderStockCommitService
+ * .processLine`), así que una línea ya entregada se salta.
+ *
+ * Lo que sí bloquea: un cobro liquidado por pasarela/billetera (requiere
+ * reversa en el procesador). La factura DIAN emitida no está en este
+ * snapshot síncrono — `OrderFlowService.cancelPayment` la re-chequea
+ * (`ORD_PAYMENT_CANCEL_INVOICED_001`) y `canCancelPayment` la recibe
+ * ya resuelta. El candado de split financiero lo aplican el servicio y
+ * `canCancelPayment`.
+ */
+export function canCancelUnfulfilledPayment(
+  order: OrderCancellationSnapshot,
+): boolean {
+  return (
+    PAYMENT_CANCELABLE_STATES.has(order.state) &&
+    !hasNonDirectSettledPayment(order.payments)
+  );
 }
 
 /** Read-side policy; write callers must re-read under the lifecycle lock. */
 export function getOrderCancellationPolicy(
   order: OrderCancellationSnapshot,
 ): OrderCancellationPolicy {
-  const reason_code = getCancellationBlocker(order);
+  const reason_code = getCancellationBlocker(order) ?? (
+    order.state === 'draft' &&
+    (order.table_sessions ?? []).some((session) => session.closed_at == null)
+      ? 'ORD_CANCEL_OPEN_TABLE_001'
+      : null
+  );
   return {
     can_cancel: reason_code === null && CANCELABLE_STATES.has(order.state),
+    // `reason_code` describes the cancel-ORDER blocker only: a committed-
+    // stock order can still cancel its PAYMENT (see
+    // `canCancelUnfulfilledPayment`).
     can_cancel_payment:
-      reason_code === null && PAYMENT_CANCELABLE_STATES.has(order.state),
+      canCancelUnfulfilledPayment(order) || canCancelFulfilledPayment(order),
     reason_code,
   };
 }

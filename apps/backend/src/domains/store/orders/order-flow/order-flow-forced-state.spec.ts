@@ -78,6 +78,13 @@ describe('OrderFlowService — carril forzado (QUI-557)', () => {
       // vacía = ninguna línea disparada, que es el escenario que estos tests
       // miden (liberación de reservas + claim atómico), no la rama KDS.
       order_items: { findMany: jest.fn().mockResolvedValue([]) },
+      kitchen_ticket_items: { findMany: jest.fn().mockResolvedValue([]) },
+      // ADR-12 (I.2): `cancelOrder` interroga el gate fiscal y la CxC in-tx
+      // antes del claim. Vacíos = orden sin factura ni fiado, el escenario
+      // que estos tests miden (claim atómico + precondiciones forzadas).
+      invoices: { findMany: jest.fn().mockResolvedValue([]) },
+      accounts_receivable: { findMany: jest.fn().mockResolvedValue([]) },
+      order_installments: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
       $transaction: jest.fn((cb: any) => cb(prismaMock)),
     };
 
@@ -104,6 +111,64 @@ describe('OrderFlowService — carril forzado (QUI-557)', () => {
   afterEach(() => jest.restoreAllMocks());
 
   describe('la transición ilegal se escribe igual, pero por el único escritor', () => {
+    it('delivered -> processing por carril genérico exige motivo y se audita forced:true', async () => {
+      withOrder('delivered');
+      const updateState = jest.spyOn(service as any, 'updateOrderState')
+        .mockResolvedValue({ id: ORDER_ID, state: 'processing' });
+
+      await service.forceOrderState(ORDER_ID, 'processing', {
+        reason: '  Reabrir por entrega errónea  ',
+      });
+
+      expect(updateState).toHaveBeenCalledWith(
+        ORDER_ID, 'processing', {}, { deliveredReversalOwner: 'forced' },
+      );
+      const written = JSON.parse(
+        prismaMock.orders.update.mock.calls.at(-1)[0].data.internal_notes,
+      );
+      expect(written._flow_metadata.forced_transition).toEqual(
+        expect.objectContaining({
+          from: 'delivered', to: 'processing', forced: true,
+          reason: 'Reabrir por entrega errónea', user_id: 42,
+        }),
+      );
+    });
+
+    it('delivered -> processing sin motivo se rechaza antes de escribir', async () => {
+      withOrder('delivered');
+      const updateState = jest.spyOn(service as any, 'updateOrderState');
+      await expect(service.forceOrderState(ORDER_ID, 'processing', {
+        reason: '   ',
+      })).rejects.toMatchObject({
+        errorCode: 'ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001',
+      });
+      expect(updateState).not.toHaveBeenCalled();
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('no anuncia la arista reservada entre las transiciones genéricas', async () => {
+      withOrder('delivered');
+      await expect(service.getValidTransitions(ORDER_ID)).resolves.toEqual([
+        'finished', 'refunded',
+      ]);
+    });
+
+    it('bloquea el escritor interno sin dueño KDS ni forzado', async () => {
+      prismaMock.orders.findUnique.mockResolvedValueOnce({
+        state: 'delivered', store_id: STORE_ID, order_number: 'ORD607',
+      });
+      await expect((service as any).updateOrderState(ORDER_ID, 'processing'))
+        .rejects.toMatchObject({ errorCode: 'ORD_DELIVERED_REVERSAL_OWNER_001' });
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('validateTransition reconoce la arista sólo para el puente KDS', () => {
+      expect(() => (service as any).validateTransition('delivered', 'processing'))
+        .toThrow(VendixHttpException);
+      expect(() => (service as any).validateTransition('delivered', 'processing', 'kitchen_bridge'))
+        .not.toThrow();
+    });
+
     it('shipped -> created (arista inexistente) llega a updateOrderState', async () => {
       // VALID_TRANSITIONS.shipped === ['delivered'], así que 'created' es
       // imposible por el carril estricto.
@@ -273,7 +338,10 @@ describe('OrderFlowService — carril forzado (QUI-557)', () => {
 
       await expect(
         service.cancelOrder(ORDER_ID, { reason: 'nope' }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toMatchObject({
+        errorCode: 'ORD_STATUS_001',
+        status: 400,
+      });
       expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
     });
   });

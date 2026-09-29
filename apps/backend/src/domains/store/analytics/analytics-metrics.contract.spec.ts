@@ -3,6 +3,7 @@ import {
   RECOGNIZED_EXPENSE_STATES,
   PURCHASE_COMMITTED_STATES,
   computeOperatingRevenue,
+  OPERATING_REVENUE_SQL,
   computeGrowth,
   round2,
   sqlStateList,
@@ -119,6 +120,7 @@ describe('Analytics-metrics contract (Anchor regression)', () => {
           subtotal: 1000,
           discounts: 0,
           shipping: 0,
+          shipping_tax: 0,
           tax: 190,
         }),
       ).toBe(1000);
@@ -130,6 +132,7 @@ describe('Analytics-metrics contract (Anchor regression)', () => {
           subtotal: 1000,
           discounts: 100,
           shipping: 0,
+          shipping_tax: 0,
           tax: 171,
         }),
       ).toBe(900);
@@ -141,6 +144,7 @@ describe('Analytics-metrics contract (Anchor regression)', () => {
           subtotal: 1000,
           discounts: 100,
           shipping: 50,
+          shipping_tax: 0,
           tax: 180,
         }),
       ).toBe(950);
@@ -151,15 +155,38 @@ describe('Analytics-metrics contract (Anchor regression)', () => {
         subtotal: 500,
         discounts: 0,
         shipping: 0,
+        shipping_tax: 0,
         tax: 0,
       });
       const taxHigh = computeOperatingRevenue({
         subtotal: 500,
         discounts: 0,
         shipping: 0,
+        shipping_tax: 0,
         tax: 5000,
       });
       expect(taxZero).toBe(taxHigh);
+    });
+
+    it('enters taxed freight on its base: shipping tax is excluded from revenue', () => {
+      // Tarifa de envío $15.000 con INC 8 % incluido: base 13.888,89 + 1.111,11.
+      expect(
+        computeOperatingRevenue({
+          subtotal: 1000,
+          discounts: 0,
+          shipping: 15000,
+          shipping_tax: 1111.11,
+          tax: 190,
+        }),
+      ).toBeCloseTo(1000 + 13888.89, 2);
+    });
+
+    it('OPERATING_REVENUE_SQL subtracts the frozen shipping tax', () => {
+      const sql = (OPERATING_REVENUE_SQL as unknown as { strings: string[] })
+        .strings.join('');
+      expect(sql).toContain(
+        'o.shipping_cost - COALESCE(o.shipping_tax_amount, 0)',
+      );
     });
   });
 

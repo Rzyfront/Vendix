@@ -55,6 +55,7 @@ model users {
   addresses                  addresses[]                  @relation("user_addresses")
   api_keys                   api_keys[]
   audit_logs                 audit_logs[]
+  order_events                order_events[]
   email_verification_tokens  email_verification_tokens[]
   inventory_adjustments1     inventory_adjustments[]      @relation("inventory_adjustments_approved_by")
   inventory_adjustments      inventory_adjustments[]      @relation("inventory_adjustments_created_by")
@@ -516,6 +517,49 @@ model audit_logs {
   @@index([resource, resource_id, created_at(sort: Desc)])
 }
 
+/// Historial veraz de la orden (plan order-truth-and-invoice-tz, Objetivos 5-7).
+/// Tabla dedicada, escrita por un único servicio (`OrderHistoryService`) DENTRO
+/// de la misma transacción que el cambio que registra — a diferencia de
+/// `audit_logs`, que la escribe un interceptor HTTP y por eso ignora
+/// webhooks/jobs/listeners y nunca guarda el estado anterior de forma
+/// confiable. Solo aditiva: sin backfill desde `audit_logs`; las órdenes
+/// anteriores a este cambio simplemente no tienen filas aquí y el timeline cae
+/// a `audit_logs` como antes (ver Objetivo 7).
+model order_events {
+  id              Int                @id @default(autoincrement())
+  store_id        Int
+  organization_id Int?
+  order_id        Int
+  /// Unión cerrada en TypeScript (`OrderEventType`): state_changed |
+  /// payment_registered | payment_cancelled | refund_created | refund_resolved
+  /// | customer_changed | item_delivered | item_cancelled |
+  /// item_delivery_reverted | shipping_assigned | invoice_issued |
+  /// kitchen_fired.
+  event_type      String             @db.VarChar(50)
+  from_state      order_state_enum?
+  to_state        order_state_enum?
+  actor_user_id   Int?
+  /// 'http' | 'webhook' | 'job' | 'listener' | 'system' (`OrderEventSource`).
+  actor_source    String             @db.VarChar(20)
+  /// Sin FK a propósito (dato de correlación, no relación de integridad):
+  /// mismo criterio que `payment_id`/`order_item_id` — el evento debe seguir
+  /// existiendo aunque el pago o el ítem referenciado se borre/reescriba.
+  payment_id      Int?
+  order_item_id   Int?
+  amount          Decimal?           @db.Decimal(12, 2)
+  payload         Json?
+  request_id      String?            @db.VarChar(100)
+  created_at      DateTime           @default(now()) @db.Timestamptz(6)
+
+  organizations organizations? @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores        stores         @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  orders        orders         @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  users         users?         @relation(fields: [actor_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([order_id, created_at])
+  @@index([store_id, created_at])
+}
+
 model organizations {
   id                            Int                               @id @default(autoincrement())
   name                          String                            @db.VarChar(255)
@@ -566,6 +610,7 @@ model organizations {
   acm_cert_revision             Int                               @default(0)
   addresses                     addresses[]
   audit_logs                    audit_logs[]
+  order_events                  order_events[]
   domain_settings               domain_settings[]
   domain_roots                  domain_roots[]
   inventory_adjustments         inventory_adjustments[]
@@ -834,6 +879,7 @@ model stores {
   default_location            inventory_locations?          @relation("StoreDefaultLocation", fields: [default_location_id], references: [id])
   addresses                   addresses[]
   audit_logs                  audit_logs[]
+  order_events                order_events[]
   brands                      brands[]
   categories                  categories[]
   domain_settings             domain_settings[]
@@ -1334,6 +1380,11 @@ model order_items {
   quantity                         Int
   unit_price                       Decimal                  @db.Decimal(12, 2)
   total_price                      Decimal                  @db.Decimal(12, 2)
+  /// Descuento de BASE (antes de impuesto) ya aplicado a esta línea. `total_price`
+  /// sigue siendo la base ANTES del descuento; `order_item_taxes` ya salió
+  /// post-descuento. `null` = contrato LEGADO: el descuento de la orden es
+  /// BRUTO y se reparte por bruto entre las líneas al proyectar la factura.
+  discount_amount                  Decimal?                 @db.Decimal(12, 2)
   tax_rate                         Decimal?                 @db.Decimal(6, 5)
   tax_amount_item                  Decimal?                 @db.Decimal(12, 2)
   cost_price                       Decimal?                 @db.Decimal(12, 2)
@@ -1485,6 +1536,25 @@ model order_items {
   // POS ticket) never read the live serial pool. The strong link lives in
   // sales_document_serials (document_item_type = order_item).
   serial_numbers_snapshot          String?
+  // CP-REFUND-FLOW-REDESIGN paso 3 — caché reconciliable de cobertura por
+  // línea. La VERDAD es la agregación de `refund_items` por línea (estados
+  // LEDGER: completed/pending_approval/processing — M2 fix-forward, los
+  // fallidos/cancelados conservan sus ítems pero no marcan cobertura);
+  // este caché se escribe en la misma tx que inserta los `refund_items`
+  // (RefundFlowService.createRefund §2b) con valores absolutos
+  // re-agregados, por lo que es idempotente y auto-reparable.
+  // NULL ≡ 0 (línea sin cobertura calculada); el backfill deja 0/0.00 en
+  // todas las filas existentes. `grand_total` y las líneas facturadas jamás
+  // se mutan. Reconciliación caché↔ledger (debe retornar 0 filas):
+  //   SELECT oi.id, oi.refunded_qty, COALESCE(SUM(ri.quantity),0)
+  //   FROM order_items oi LEFT JOIN (
+  //     refund_items ri JOIN refunds r ON r.id = ri.refund_id
+  //       AND r.state IN ('completed','pending_approval','processing')
+  //   ) ON ri.order_item_id = oi.id
+  //   GROUP BY oi.id, oi.refunded_qty
+  //   HAVING COALESCE(oi.refunded_qty,0) IS DISTINCT FROM COALESCE(SUM(ri.quantity),0);
+  refunded_qty                     Int?
+  refunded_amount                  Decimal?                 @db.Decimal(12, 2)
   created_at                       DateTime?                @default(now()) @db.Timestamp(6)
   updated_at                       DateTime?                @default(now()) @db.Timestamp(6)
   inventory_transactions           inventory_transactions[]
@@ -1523,6 +1593,26 @@ model orders {
   discount_amount                                 Decimal                   @default(0.00) @db.Decimal(12, 2)
   tax_amount                                      Decimal                   @default(0.00) @db.Decimal(12, 2)
   shipping_cost                                   Decimal                   @default(0.00) @db.Decimal(12, 2)
+  // Copia CONGELADA del impuesto del envío al vender (shipping-tax.service.ts
+  // `snapshotForRate`). Sale de la tarifa (`shipping_rates.tax_category_id` +
+  // `tax_is_inclusive`) y no cambia si luego se edita la tarifa o la
+  // categoría. Costo digitado a mano ⇒ copia vacía. `shipping_cost` es
+  // siempre el BRUTO: base del envío = `shipping_cost - shipping_tax_amount`
+  // (no se guarda), sea el modo incluido o agregado.
+  //
+  // ASIMETRÍA DELIBERADA: `orders.tax_amount` NO incluye `shipping_tax_amount`
+  // (sigue siendo Σ order_item_taxes; el envío ya va bruto en shipping_cost y
+  // sumarlo dos veces rompería grand_total). `invoices.tax_amount` SÍ lo
+  // incluye, porque la DIAN exige cabecera = Σ impuestos de línea (FAU06).
+  shipping_tax_rate_id                            Int?
+  shipping_tax_name                               String?                   @db.VarChar(100)
+  shipping_tax_type                               tax_type_enum?
+  // Fracción (0.08000 = 8 %), misma unidad que `order_item_taxes.tax_rate`.
+  shipping_tax_rate                               Decimal?                  @db.Decimal(6, 5)
+  shipping_tax_amount                             Decimal                   @default(0) @db.Decimal(12, 2)
+  // Modo congelado de la tarifa al vender (null = histórico o sin impuesto).
+  shipping_tax_is_inclusive                       Boolean?
+  shipping_tax_rate_ref                           tax_rates?                @relation("orders_shipping_tax_rate", fields: [shipping_tax_rate_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   grand_total                                     Decimal                   @default(0.00) @db.Decimal(12, 2)
   // Plan Despacho Economía — FASE 6 paso 19. Estado de cumplimiento del
   // despacho (sin envío parcial del flujo de remisión). Mantenido por
@@ -1577,6 +1667,8 @@ model orders {
   @@index([created_by_user_id])
   order_items                                     order_items[]
   order_installments                              order_installments[]
+  order_events                                     order_events[]
+  withholding_calculations                         withholding_calculations[]
   addresses_orders_billing_address_idToaddresses  addresses?                @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   addresses_orders_shipping_address_idToaddresses addresses?                @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   stores                                          stores                    @relation(fields: [store_id], references: [id], onUpdate: NoAction)
@@ -1628,6 +1720,7 @@ model orders {
   @@index([store_id, channel])
   @@index([store_id, dispatch_pool_at])
   @@index([store_id, created_by_user_id])
+  @@index([shipping_tax_rate_id])
 }
 
 model order_installments {
@@ -2230,14 +2323,46 @@ model refund_items {
   created_at              DateTime?            @default(now()) @db.Timestamp(6)
   order_items             order_items          @relation(fields: [order_item_id], references: [id], onUpdate: NoAction)
   refunds                 refunds              @relation(fields: [refund_id], references: [id], onUpdate: NoAction)
+  credit_note_refund_items credit_note_refund_items[]
   inventory_locations     inventory_locations? @relation(fields: [location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   bank_accounts           bank_accounts?       @relation(fields: [bank_account_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+}
+
+/// CP-REFUND-FLOW-REDESIGN paso 7 — puente estructural refund↔NC POR LÍNEA.
+///
+/// Una NC vinculada (`invoices.refund_id`) acredita líneas concretas de
+/// `refund_items`, no un monto global: cada fila congela qué cantidad de
+/// qué línea del refund cubre la nota. Es lo que `GET
+/// /store/orders/:orderId/flow/refund/coverage` agrega como
+/// `nc_covered_qty` por `order_item_id` — nunca comparación floja por
+/// monto/fecha.
+///
+/// Sólo las NC `accepted` cuentan como cobertura (una `draft` aún no
+/// acreditó un peso — mismo criterio que el saldo acreditable en
+/// `credit-notes.service.ts`); las filas se escriben al crear la nota y
+/// NUNCA se reescriben (documento fiscal emitido es inmutable).
+///
+/// Restrict en ambas FK: ni la NC ni el refund se borran jamás (estados,
+/// no deletes), así que la restricción no bloquea ningún flujo vivo.
+model credit_note_refund_items {
+  id              Int          @id @default(autoincrement())
+  credit_note_id  Int
+  refund_item_id  Int
+  covered_qty     Int
+  covered_amount  Decimal?     @db.Decimal(12, 2)
+  created_at      DateTime?    @default(now()) @db.Timestamp(6)
+  credit_note     invoices     @relation(fields: [credit_note_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  refund_item     refund_items @relation(fields: [refund_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([credit_note_id, refund_item_id])
+  @@index([refund_item_id])
 }
 
 model refunds {
   id                    Int                @id @default(autoincrement())
   order_id              Int
   payment_id            Int?
+  ar_payment_id         Int?               @unique
   customer_id           Int?
   amount                Decimal            @db.Decimal(12, 2)
   subtotal_refund       Decimal?           @default(0) @db.Decimal(12, 2)
@@ -2264,8 +2389,12 @@ model refunds {
   resolved_by_user_id   Int?
   resolution_notes      String?            @db.Text
   refund_items          refund_items[]
+  /// CP-REFUND-FLOW-REDESIGN paso 7 — NCs vinculadas a este refund
+  /// (`invoices.refund_id`). Back-relation, sin columna propia.
+  invoices              invoices[]
   orders                orders             @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   payments              payments?          @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  ar_payments           ar_payments?       @relation(fields: [ar_payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users                 users?             @relation(fields: [processed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   resolvedByUser        users?             @relation("refunds_resolved_by", fields: [resolved_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
@@ -2354,6 +2483,9 @@ model tax_categories {
   stores                  stores?                   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   organizations           organizations?            @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   tax_rates               tax_rates[]
+  // Tarifas de envío que cobran este impuesto (FK RESTRICT). `TaxesService
+  // .remove` rechaza el borrado mientras alguna la use.
+  shipping_rates          shipping_rates[]
 
   @@index([organization_id])
 }
@@ -2377,6 +2509,8 @@ model tax_rates {
   stores              stores?            @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   tax_categories      tax_categories     @relation(fields: [tax_category_id], references: [id], onUpdate: NoAction)
   invoice_taxes       invoice_taxes[]
+  // Copias congeladas del impuesto del envío en órdenes (FK RESTRICT).
+  orders_shipping_tax orders[]           @relation("orders_shipping_tax_rate")
 }
 
 model api_keys {
@@ -3208,6 +3342,11 @@ model shipping_methods {
   default_driver_user_id       Int?
   default_carrier_supplier_id  Int?
   cost_settlement_timing       cost_settlement_timing_enum?  @default(immediate_on_close)
+  // Cobro por distancia (opcional por método, apagado por defecto). Origen =
+  // pin del método; escala de km vive en `shipping_rates.distance_tiers`.
+  distance_pricing_enabled     Boolean                       @default(false)
+  origin_latitude              Decimal?                      @db.Decimal(10, 8)
+  origin_longitude             Decimal?                      @db.Decimal(11, 8)
   created_at                   DateTime?                     @default(now()) @db.Timestamp(6)
   updated_at                   DateTime?                     @default(now()) @db.Timestamp(6)
 
@@ -3249,6 +3388,25 @@ model shipping_rates {
   copied_from_system_rate_id Int? // ID de tarifa del sistema de donde se copió
   source_type                zone_source_type_enum? // 'system_copy' | 'custom'
 
+  // Impuesto OPCIONAL del envío (null = sin impuesto). El modo vive en la
+  // tarifa (`tax_is_inclusive`): true = INCLUIDO en el precio de tarifa (lo
+  // que paga el cliente no cambia); false = AGREGADO encima (bruto = base +
+  // trunc(base·r), `resolveShippingCharge`). Se ignora
+  // `tax_categories.is_inclusive` en el cálculo (solo preselecciona en
+  // tarifas nuevas). Elegible: categoría de la tienda (u org si
+  // fiscal_scope=ORGANIZATION), tax_type iva|inc y exactamente UNA tasa > 0
+  // (`shipping/utils/shipping-tax.util.ts`). RESTRICT: borrar la categoría no
+  // debe quitar el impuesto del envío en silencio.
+  tax_category_id Int?
+  tax_category    tax_categories? @relation(fields: [tax_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  // Modo del impuesto de la tarifa: true = incluido en el precio de tarifa
+  // (default; filas existentes quedan incluidas), false = agregado encima.
+  tax_is_inclusive Boolean @default(true)
+
+  // Escala de km para cobro por distancia: [{from_km, to_km|null, price}].
+  // Null/vacío = rige el precio plano de la tarifa.
+  distance_tiers Json?
+
   // Relaciones
   shipping_zone   shipping_zones   @relation(fields: [shipping_zone_id], references: [id], onDelete: Cascade)
   shipping_method shipping_methods @relation(fields: [shipping_method_id], references: [id], onDelete: Cascade)
@@ -3257,6 +3415,7 @@ model shipping_rates {
   @@index([shipping_zone_id])
   @@index([shipping_method_id])
   @@index([copied_from_system_rate_id])
+  @@index([tax_category_id])
 }
 
 // Tracking de cambios en zonas del sistema para notificar a tiendas
@@ -3881,6 +4040,7 @@ enum order_installment_state_enum {
   partial
   overdue
   forgiven
+  cancelled
 }
 
 enum payment_method_state_enum {
@@ -5832,9 +5992,26 @@ model invoices {
   /// alinearse con `customer_address`, el otro snapshot del adquiriente en esta
   /// misma tabla; la fuente viva `users.fiscal_responsibilities` sí es String[].
   customer_fiscal_responsibilities Json?
+  /// Tipo de persona del adquiriente (NATURAL/JURIDICA), congelado como el
+  /// resto del snapshot `customer_*`. Es el ÚLTIMO eslabón de la precedencia
+  /// en `resolveAcquirerIdentity` (cliente vinculado → ESTE snapshot →
+  /// derivado del tipo de documento): sin él, una factura manual SIN cliente
+  /// vinculado para una persona natural con NIT (documento 31) se resolvía
+  /// como JURIDICA por default, invirtiendo el `cbc:AdditionalAccountID` que
+  /// viaja al XML. Reutiliza `persona_type_enum` (ya existe, ver `users`), no
+  /// se crea un enum nuevo.
+  customer_person_type             persona_type_enum?
   order_id                         Int?
   sales_order_id                   Int?
   related_invoice_id               Int?
+  /// CP-REFUND-FLOW-REDESIGN paso 7 — reembolso que esta NOTA CRÉDITO
+  /// acredita. Sólo `invoice_type = 'credit_note'` lo puebla, vía
+  /// `CreateCreditNoteDto.refund_id` (deriva ADR-03 en
+  /// `credit-notes.service.ts`); el detalle por línea vive en
+  /// `credit_note_refund_items`. NULL = nota manual sin vínculo a refund
+  /// (100 % del histórico). Restrict: un refund con NC vinculada no se
+  /// elimina — los refunds nunca se borran, sólo cambian de estado.
+  refund_id                        Int?
   /// D.1 (DB-05, ADR-03) — contrato de obra que origina ESTE documento
   /// (FB-08 `POST /contracts/:id/invoice`). Nullable: el 100 % del historico
   /// factura ordenes o captura manual y sigue intacto. La unicidad "un
@@ -5913,6 +6090,7 @@ model invoices {
   contract                 contracts?                 @relation(fields: [contract_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   related_invoice          invoices?                  @relation("invoice_credit_debit_notes", fields: [related_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   credit_debit_notes       invoices[]                 @relation("invoice_credit_debit_notes")
+  refund                   refunds?                   @relation(fields: [refund_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   resolution               invoice_resolutions?       @relation(fields: [resolution_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   /// `map` explícito: sin él Prisma esperaría el nombre
   /// `invoices_profile_id_profile_version_fkey` y cada `migrate diff` reportaría
@@ -5922,6 +6100,7 @@ model invoices {
   accounting_entry         accounting_entries?        @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   created_by_user          users?                     @relation("invoices_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   invoice_items            invoice_items[]
+  credit_note_refund_items credit_note_refund_items[]
   invoice_taxes            invoice_taxes[]
   withholding_calculations withholding_calculations[]
   invoice_retry_queue      invoice_retry_queue[]
@@ -5937,6 +6116,7 @@ model invoices {
   @@index([accounting_entity_id, fiscal_document_type])
   @@index([organization_id, issue_date])
   @@index([customer_id])
+  @@index([refund_id])
 }
 
 model invoice_items {
@@ -8728,6 +8908,7 @@ model withholding_calculations {
   store_id             Int?
   accounting_entity_id Int?
   invoice_id           Int?
+  order_id             Int?
   supplier_id          Int?
   customer_id          Int?
   concept_id           Int
@@ -8745,6 +8926,7 @@ model withholding_calculations {
   store             stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
   accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
   invoice           invoices?            @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order             orders?              @relation(fields: [order_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   supplier          suppliers?           @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   customer          users?               @relation("customer_withholdings", fields: [customer_id], references: [id], onDelete: SetNull)
   concept           withholding_concepts @relation(fields: [concept_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -8754,6 +8936,7 @@ model withholding_calculations {
   @@index([organization_id, customer_id, year])
   @@index([accounting_entity_id])
   @@index([store_id])
+  @@index([order_id])
 }
 
 // ── Información Exógena DIAN ──────────────────────────────
@@ -9182,25 +9365,28 @@ enum payment_agreement_state_enum {
 }
 
 model accounts_receivable {
-  id                Int       @id @default(autoincrement())
-  store_id          Int
-  organization_id   Int
-  customer_id       Int
-  source_type       String    @db.VarChar(50)
-  source_id         Int?
-  document_number   String?   @db.VarChar(100)
-  original_amount   Decimal   @db.Decimal(12, 2)
-  paid_amount       Decimal   @default(0.00) @db.Decimal(12, 2)
-  balance           Decimal   @db.Decimal(12, 2)
-  currency          String    @default("COP") @db.VarChar(10)
-  issue_date        DateTime  @db.Date
-  due_date          DateTime  @db.Date
-  status            String    @default("open") @db.VarChar(20)
-  days_overdue      Int       @default(0)
-  last_payment_date DateTime? @db.Timestamp(6)
-  notes             String?   @db.Text
-  created_at        DateTime  @default(now()) @db.Timestamp(6)
-  updated_at        DateTime  @default(now()) @db.Timestamp(6)
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  organization_id     Int
+  customer_id         Int
+  source_type         String    @db.VarChar(50)
+  source_id           Int?
+  document_number     String?   @db.VarChar(100)
+  original_amount     Decimal   @db.Decimal(12, 2)
+  paid_amount         Decimal   @default(0.00) @db.Decimal(12, 2)
+  cancelled_amount    Decimal   @default(0) @db.Decimal(12, 2)
+  balance             Decimal   @db.Decimal(12, 2)
+  currency            String    @default("COP") @db.VarChar(10)
+  issue_date          DateTime  @db.Date
+  due_date            DateTime  @db.Date
+  status              String    @default("open") @db.VarChar(20)
+  days_overdue        Int       @default(0)
+  last_payment_date   DateTime? @db.Timestamp(6)
+  cancelled_at        DateTime? @db.Timestamp(6)
+  cancellation_reason String?   @db.Text
+  notes               String?   @db.Text
+  created_at          DateTime  @default(now()) @db.Timestamp(6)
+  updated_at          DateTime  @default(now()) @db.Timestamp(6)
 
   stores             stores               @relation(fields: [store_id], references: [id])
   organizations      organizations        @relation(fields: [organization_id], references: [id])
@@ -9226,6 +9412,7 @@ model ar_payments {
   created_at             DateTime @default(now()) @db.Timestamp(6)
 
   accounts_receivable accounts_receivable @relation(fields: [accounts_receivable_id], references: [id])
+  refunds             refunds?
 
   @@index([accounts_receivable_id])
 }

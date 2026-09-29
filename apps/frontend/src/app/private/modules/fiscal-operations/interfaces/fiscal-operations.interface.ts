@@ -161,6 +161,9 @@ export interface FiscalOperationEvent {
   } | null;
 }
 
+/** Persisted when a paid POS order has no invoice row to enqueue. */
+export const POS_UNCOVERED_SALE_EVENT_TYPE = 'pos_sale_without_fiscal_document';
+
 export interface FiscalRuleSet {
   id?: number;
   country_code: string;

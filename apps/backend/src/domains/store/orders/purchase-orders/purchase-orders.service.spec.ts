@@ -2505,6 +2505,84 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
     expect(meta.shipping_cost_allocation_requested).toBe('expense');
     expect(meta.shipping_cost_allocation_applied).toBe('expense');
   });
+
+  /**
+   * P1-4 (auditoría impuestos por producto) — la OC escribe
+   * `product_tax_assignments` del producto de cada línea. Antes lo hacía sin
+   * validar la combinación: un producto podía nacer con IVA + INC o dos IVA y
+   * cobrarse dos veces en POS. Misma regla que products (PROD_TAX_COMBO_001).
+   */
+  describe('P1-4: combinación de impuestos del producto', () => {
+    const categories = [
+      { id: 1, name: 'IVA 19%', tax_type: 'iva', tax_rates: [{ store_id: null }] },
+      { id: 2, name: 'INC 8%', tax_type: 'inc', tax_rates: [{ store_id: null }] },
+      { id: 3, name: 'IVA 5%', tax_type: null, tax_rates: [{ store_id: STORE_ID }] },
+      {
+        id: 4,
+        name: 'Retefuente',
+        tax_type: 'withholding',
+        tax_rates: [{ store_id: null }],
+      },
+    ];
+    const arrangeCategories = () => {
+      const findMany = jest.fn(({ where }: any) =>
+        Promise.resolve(categories.filter((c) => where.id.in.includes(c.id))),
+      );
+      prismaService.withoutScope = jest
+        .fn()
+        .mockReturnValue({ tax_categories: { findMany } });
+      return findMany;
+    };
+    const dtoWithTaxes = (tax_category_ids: unknown) => ({
+      ...baseDto(),
+      items: [
+        {
+          product_id: PRODUCT_ID,
+          quantity: 1,
+          unit_price: 1000,
+          tax_category_ids,
+        },
+      ],
+    });
+    const expectComboRejection = async (dto: any, reason: string) => {
+      let caught: any = null;
+      try {
+        await service.create(dto);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).not.toBeNull();
+      expect(caught.errorCode).toBe('PROD_TAX_COMBO_001');
+      expect(caught.getStatus()).toBe(400);
+      expect(caught.getResponse().details.reason).toBe(reason);
+      // Rechazo ANTES de la transacción: ningún producto ni orden escrito.
+      expect(prismaService.$transaction).not.toHaveBeenCalled();
+    };
+
+    it('rechaza IVA + INC con 400 PROD_TAX_COMBO_001', async () => {
+      arrangeCategories();
+      await expectComboRejection(dtoWithTaxes([1, 2]), 'iva_inc_exclusive');
+    });
+
+    it('rechaza dos categorías IVA (tax_type NULL cuenta como IVA)', async () => {
+      arrangeCategories();
+      await expectComboRejection(dtoWithTaxes('1;3'), 'duplicate_tax_type');
+    });
+
+    it('rechaza una retención asignada al producto', async () => {
+      arrangeCategories();
+      await expectComboRejection(
+        dtoWithTaxes([4]),
+        'withholding_not_assignable',
+      );
+    });
+
+    it('acepta una sola categoría IVA: la orden nace', async () => {
+      arrangeCategories();
+      const tx: any = await runCreate(dtoWithTaxes([1]));
+      expect(tx.purchase_orders.create).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 /**

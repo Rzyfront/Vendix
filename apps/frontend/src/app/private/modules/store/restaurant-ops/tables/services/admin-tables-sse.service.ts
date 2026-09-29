@@ -76,6 +76,7 @@ interface AdminTablesSnapshotSession {
   table_id: number;
   order_id: number;
   opened_at: string | Date;
+  paid_at: string | Date | null;
   guest_count: number | null;
   table: {
     id: number;
@@ -108,6 +109,11 @@ interface AdminTablesSnapshotPayload {
  */
 export type AdminTablesEvent =
   | { type: 'snapshot'; data: AdminTablesSnapshotPayload; ts?: number }
+  | {
+      type: 'session_paid';
+      data: { table_session_id: number; order_id: number; payment_id?: number };
+      created_at: string;
+    }
   | { type: 'item_added'; data: Record<string, unknown>; ts?: number }
   | {
       type: 'comensal_joined' | 'comensal_left';
@@ -376,7 +382,7 @@ export class AdminTablesSseService {
    *                     desde `data.session_id` o `data.table_session_id`).
    *  - `comensal_*`   → ajusta `active_devices` (+1/-1).
    *  - `guest_count_changed` → reemplaza `guest_count`.
-   *  - `payment.*` / `table_payment_*` → ajusta `payment_state`.
+   *  - `payment.*` / `table_payment_*` / `session_paid` → ajusta `payment_state`.
    *  - `bill.requested` / `kitchen.*` → no mutan el estado del map;
    *    sólo disparan `lastEventAt` para que la UI sepa "algo se movió".
    *  - `table_call_waiter` → setea `waiterCall` (destello del plano);
@@ -510,6 +516,20 @@ export class AdminTablesSseService {
         });
         return;
       }
+      case 'session_paid': {
+        this.tablesLive.update((m) => {
+          const current = m.get(sessionId);
+          if (!current) return m;
+          const next = new Map(m);
+          next.set(sessionId, {
+            ...current,
+            payment_state: 'confirmed',
+            updated_at: Date.now(),
+          });
+          return next;
+        });
+        return;
+      }
       // Eventos puramente informativos — no mutan el map.
       case 'bill.requested':
       case 'kitchen.fired':
@@ -562,7 +582,7 @@ export class AdminTablesSseService {
         guest_count: s.guest_count ?? null,
         active_devices: 0,
         item_count: 0,
-        payment_state: 'none',
+        payment_state: s.paid_at ? 'confirmed' : 'none',
         subtotal: Number(s.order?.grand_total ?? 0) || 0,
         updated_at: now,
       });

@@ -1,5 +1,9 @@
 import { VendixHttpException } from 'src/common/errors';
-import { assertOrderLineTotalInvariant } from './order-arithmetic.guard';
+import { Logger } from '@nestjs/common';
+import {
+  assertOrderLineTotalInvariant,
+  getOrderLineInvariantViolationCount,
+} from './order-arithmetic.guard';
 
 /**
  * D.13 — Compuerta G3. Cubre SÓLO el archivo aislado (no está cableado a
@@ -101,21 +105,18 @@ describe('order-arithmetic.guard (G3, D.13)', () => {
     }
   });
 
-  it('bandera ON: dentro de tolerancia (0,01 de residuo) no lanza', () => {
-    // 0,02 exacto se evita a propósito: el residuo real de punto flotante
-    // (10000.02 - 10000) da 0.020000000000436557, un poco por encima de la
-    // tolerancia — no es un caso de borde estable para esta aserción.
-    expect(() =>
-      assertOrderLineTotalInvariant(
-        {
-          order_item_id: 6,
-          unit_price: 10000,
-          total_price: 10000.01,
-          quantity: 1,
-        },
-        { enabled: true },
-      ),
-    ).not.toThrow();
+  it('bandera ON: 2 ¢ exactos de residuo no lanzan (borde estable en centavos)', () => {
+    // P2-4: antes el borde de 0,02 era inestable en floats
+    // (10000.02 − 10000 = 0.020000000000436557 ⇒ "excedía"). En centavos
+    // enteros 2 ¢ se toleran siempre, en cualquier magnitud.
+    for (const [unit, total] of [[10000, 10000.02], [13603.12, 13603.14], [551.05, 551.07]]) {
+      expect(() =>
+        assertOrderLineTotalInvariant(
+          { order_item_id: 6, unit_price: unit, total_price: total, quantity: 1 },
+          { enabled: true },
+        ),
+      ).not.toThrow();
+    }
   });
 
   it('bandera ON: 0,03 de residuo SÍ excede la tolerancia por defecto', () => {
@@ -130,5 +131,37 @@ describe('order-arithmetic.guard (G3, D.13)', () => {
         { enabled: true },
       ),
     ).toThrow();
+  });
+
+  it('bandera OFF: la violación deja warn estructurado y suma a la métrica, sin lanzar', () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const before = getOrderLineInvariantViolationCount();
+    expect(() =>
+      assertOrderLineTotalInvariant(
+        { order_item_id: 8, unit_price: 10000, total_price: 10000.05, quantity: 1 },
+        { enabled: false, context: { store_id: 3, writer: 'test' } },
+      ),
+    ).not.toThrow();
+    expect(getOrderLineInvariantViolationCount()).toBe(before + 1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'orders.line_total_invariant_violation',
+        blocking: false,
+        order_item_id: 8,
+        residual: 0.05,
+        store_id: 3,
+        writer: 'test',
+      }),
+    );
+    warn.mockRestore();
+  });
+
+  it('línea sana: ni warn ni métrica', () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const before = getOrderLineInvariantViolationCount();
+    assertOrderLineTotalInvariant({ unit_price: 925.93, total_price: 2777.79, quantity: 3 });
+    expect(getOrderLineInvariantViolationCount()).toBe(before);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

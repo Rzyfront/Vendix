@@ -15,9 +15,9 @@ import type { PrintTrigger } from './document-print.service';
  *
  * ⚠️ Decisión del usuario, 2026-08-31: el MISMO documento `dispatch_ticket`
  * sirve como tiquete de reclamo cuando el cliente paga en mostrador y espera
- * a que le preparen la comida (`direct_delivery` y `pickup`). Eso es opt-in:
+ * a que le preparen la comida (`direct_delivery`). Eso es opt-in:
  * el setting `print_dispatch_ticket_on_counter` (default false) abre la
- * puerta para esos dos tipos de entrega, sin tocar `dine_in` (la comanda
+ * puerta para venta inmediata y para `pickup` de recogida diferida, sin tocar `dine_in` (la comanda
  * de cocina ya cubre ese caso) ni `other` (no definido). Esta es una
  * ENMIENDA al ADR-6: el guard original `direct_delivery → false` sigue
  * siendo el camino por defecto; el nuevo interruptor lo reemplaza solo
@@ -40,10 +40,10 @@ export interface ShouldAutoPrintDispatchTicketContext {
   /**
    * `print_dispatch_ticket_on_counter` — opt-in por admin para que el
    * tiquete de despacho se imprima también en ventas de MOSTRADOR
-   * (`direct_delivery`) y PARA LLEVAR (`pickup`). Default `false`.
+   * (`direct_delivery`, incluido PARA LLEVAR) y recogida real (`pickup`). Default `false`.
    * Con `false`, el predicado aplica los guards originales (ADR-6) y
    * devuelve `false` para esos dos tipos de entrega. Con `true`,
-   * `direct_delivery` y `pickup` pasan el guard 4; `dine_in` y `other`
+   * `direct_delivery` y `pickup` real pasan el guard 4; `dine_in` y `other`
    * siguen en `false` aunque el interruptor esté prendido.
    */
   counterEnabled?: boolean;
@@ -63,7 +63,7 @@ export interface ShouldAutoPrintDispatchTicketContext {
  *    - `direct_delivery` (mostrador) nunca imprime.
  *    - solo venta con envío (`home_delivery` o `isShippingSale`).
  *    con `counterEnabled === true` (enmienda, decisión del usuario 2026-08-31):
- *    - `direct_delivery` y `pickup` también imprimen (cliente que paga
+ *    - `direct_delivery` y el `pickup` legítimo imprimen (cliente que paga
  *      y espera, reclama con el tiquete).
  *    - `home_delivery` y `isShippingSale` siguen imprimiendo (sin cambio).
  *    - `dine_in` y `other` siguen en `false` (no se imprimen NUNCA en

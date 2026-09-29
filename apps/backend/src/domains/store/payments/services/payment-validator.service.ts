@@ -1,6 +1,70 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { OrderValidationResult } from '../interfaces';
+import { ErrorCodes } from '../../../../common/errors/error-codes';
+
+type TypedOrderValidationResult = OrderValidationResult & { errorCode?: string };
+
+type MonetaryValue = Prisma.Decimal | number | string;
+type OrderSettlementSnapshot = {
+  grand_total: MonetaryValue | null | undefined;
+  payments?: ReadonlyArray<{ state: string; amount: MonetaryValue }>;
+  refunds?: ReadonlyArray<{ state: string; amount: MonetaryValue }>;
+};
+
+/** Shared, exact-money settlement check for POS and the locked order-pay path.
+ *
+ * Step 2 (CP-REFUND-FLOW-REDESIGN): `partially_refunded`/`refunded` face
+ * values count as settled — the `amount` column keeps the money that
+ * arrived, and what left via refunds discounts the OWED side (see
+ * `isOrderFullyPaid`), never here. Dropping refunded-state legs from this
+ * sum is what let a refunded order look unpaid and accept a re-charge.
+ */
+export function getSettledOrderAmount(
+  order: Pick<OrderSettlementSnapshot, 'payments'>,
+): Prisma.Decimal {
+  return (order.payments ?? [])
+    .filter((payment) =>
+      payment.state === 'succeeded' ||
+      payment.state === 'captured' ||
+      payment.state === 'partially_refunded' ||
+      payment.state === 'refunded',
+    )
+    .reduce(
+      (sum, payment) => sum.plus(payment.amount),
+      new Prisma.Decimal(0),
+    );
+}
+
+/** Step 2 (CP-REFUND-FLOW-REDESIGN) — fiscal-aware refund discount. Only
+ * `completed` refunds count: they are the money that actually left the
+ * store. Pending/failed rows never moved money and must not reduce the
+ * owed total. Absent `refunds` (callers that do not include the relation)
+ * discounts zero — which preserves the pre-step-2 verdict ONLY for orders
+ * without completed refunds; for refunded legs the discount IS the
+ * intended step-2 fix (see the payOrder invariant in order-flow.service).
+ */
+export function getCompletedRefundAmount(
+  order: Pick<OrderSettlementSnapshot, 'refunds'>,
+): Prisma.Decimal {
+  return (order.refunds ?? [])
+    .filter((refund) => refund.state === 'completed')
+    .reduce(
+      (sum, refund) => sum.plus(refund.amount),
+      new Prisma.Decimal(0),
+    );
+}
+
+export function isOrderFullyPaid(
+  order: OrderSettlementSnapshot,
+  settledAmount = getSettledOrderAmount(order),
+): boolean {
+  const owed = new Prisma.Decimal(order.grand_total ?? 0).minus(
+    getCompletedRefundAmount(order),
+  );
+  return settledAmount.gte(owed);
+}
 
 @Injectable()
 export class PaymentValidatorService {
@@ -9,7 +73,7 @@ export class PaymentValidatorService {
   async validateOrder(
     orderId: number,
     storeId: number,
-  ): Promise<OrderValidationResult> {
+  ): Promise<TypedOrderValidationResult> {
     try {
       const order = await this.prisma.orders.findUnique({
         where: { id: orderId },
@@ -23,6 +87,12 @@ export class PaymentValidatorService {
           },
           payments: {
             orderBy: { created_at: 'desc' },
+          },
+          // Step 2 (CP-REFUND-FLOW-REDESIGN): `isOrderFullyPaid` discounts
+          // completed refunds from the owed total — without this include
+          // the discount would silently read zero here.
+          refunds: {
+            where: { state: 'completed' },
           },
         },
       });
@@ -56,12 +126,10 @@ export class PaymentValidatorService {
         warnings.push('Order is already finished');
       }
 
-      const totalPaid = order.payments
-        .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
-        .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+      const alreadyPaid = isOrderFullyPaid(order);
 
-      if (totalPaid >= Number(order.grand_total)) {
-        warnings.push('Order is already fully paid');
+      if (alreadyPaid) {
+        errors.push('Order is already fully paid');
       }
 
       if (order.order_items.length === 0) {
@@ -79,6 +147,9 @@ export class PaymentValidatorService {
         order,
         errors: errors.length > 0 ? errors : undefined,
         warnings: warnings.length > 0 ? warnings : undefined,
+        ...(alreadyPaid && {
+          errorCode: ErrorCodes.ORD_PAY_ALREADY_PAID_001.code,
+        }),
       };
     } catch (error) {
       return {

@@ -6,9 +6,14 @@ import { AILoggingService } from './ai-logging.service';
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { RequestContextService } from '../common/context/request-context.service';
 import { SubscriptionAccessService } from '../domains/store/subscriptions/services/subscription-access.service';
-import { VendixHttpException, ErrorCodes } from '../common/errors';
+import { VendixHttpException } from '../common/errors';
 import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
 import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
+import {
+  AgentPlan,
+  AgentPlanHook,
+  isAgentPlanTool,
+} from './interfaces/agent-plan.interface';
 import {
   AIMessage,
   AIResponse,
@@ -43,6 +48,13 @@ const PLANNED_MAX_ITERATIONS = 25;
  */
 const PLANNED_TIMEOUT_MS = 180_000;
 
+/**
+ * Max "keep going" nudges per turn when the model answers in prose while the
+ * internal plan still has open work. Bounded so a model that keeps refusing to
+ * act cannot spin the loop; past the cap the turn closes normally.
+ */
+const MAX_PLAN_NUDGES = 2;
+
 export interface AgentRunParams {
   goal: string;
   system_prompt?: string;
@@ -73,6 +85,18 @@ export interface AgentRunParams {
    * waiting on a result that will never arrive.
    */
   stream_id?: string;
+  /**
+   * Bridge to the conversation's persisted task list. When present the loop
+   * intercepts the plan tools (they never reach the registry nor the stream) and
+   * keeps the turn going while the plan has open work. Absent on surfaces with
+   * no conversation, where the plan tools keep using their stateless handlers.
+   */
+  plan?: AgentPlanHook;
+  /**
+   * Polled at the start of every iteration. True means another turn replaced
+   * this one, so it stops silently: no text, no error.
+   */
+  shouldAbort?: () => Promise<boolean>;
 }
 
 export interface AgentResult {
@@ -82,6 +106,13 @@ export interface AgentResult {
   total_tokens: number;
   success: boolean;
   error?: string;
+  /** The turn was superseded by a newer one (`shouldAbort`); nothing was emitted. */
+  aborted?: boolean;
+  /**
+   * The budget ran out with the plan still open: the client must fire another
+   * turn to continue. `content` is empty on purpose.
+   */
+  plan_continue?: boolean;
   /**
    * A write the agent proposed but did not execute, waiting on the user.
    *
@@ -309,6 +340,23 @@ export class AIAgentService {
   }
 
   /**
+   * What is still owed by the plan, phrased for the internal nudge, or null when
+   * the turn may end (no open step, everything verified, or the plan is waiting
+   * on the person).
+   */
+  private nextPlanObligation(plan: AgentPlan): string | null {
+    if (plan.steps.some((step) => step.status === 'waiting_user')) return null;
+    const open = plan.steps.find(
+      (step) => step.status === 'pending' || step.status === 'in_progress',
+    );
+    if (open) return `paso ${open.order}: ${open.title}`;
+    if (plan.deliverables.some((d) => !d.verified)) {
+      return 'verifica los entregables con verify_deliverables';
+    }
+    return null;
+  }
+
+  /**
    * Non-streaming entry point. Drains the streaming loop and keeps its return
    * value, so there is exactly one implementation of the agent protocol —
    * a second copy for the SSE path would drift the moment either is touched.
@@ -379,6 +427,33 @@ export class AIAgentService {
       ? toolDefinitions.filter((t) => params.tools!.includes(t.function.name))
       : toolDefinitions;
 
+    // The plan tools are the loop's own scaffolding, not tenant capability: with
+    // a hook present they must be offered even if the tenant allowlist or the
+    // caller's `tools` narrowing left them out, or the model could never close
+    // a plan. They come from the permission-filtered catalog so they still
+    // respect the caller's scopes.
+    if (params.plan) {
+      const present = new Set(
+        filteredTools.map((t) =>
+          this.toolRegistry.canonicalName(t.function.name),
+        ),
+      );
+      for (const def of permissionTools) {
+        const name = this.toolRegistry.canonicalName(def.function.name);
+        if (isAgentPlanTool(name) && !present.has(name)) {
+          filteredTools.push(def);
+          present.add(name);
+        }
+      }
+    }
+
+    // An already-active plan (a continuation turn) gets the wide budget from the
+    // first iteration instead of waiting for a propose_plan that will not come.
+    if (params.plan && (await params.plan.snapshot())) {
+      maxIterations = Math.max(maxIterations, PLANNED_MAX_ITERATIONS);
+      timeoutMs = Math.max(timeoutMs, PLANNED_TIMEOUT_MS);
+    }
+
     const messages: AIMessage[] = [];
 
     // With an app key the system prompt lives in the database and `run()`
@@ -403,12 +478,33 @@ export class AIAgentService {
     let pendingConfirmation: AgentResult['pending_confirmation'];
     let totalTokens = 0;
     let iteration = 0;
+    let timedOut = false;
+    let planNudges = 0;
+    // Time spent blocked on the browser (`ui_*` results). It is the person's
+    // screen latency, not the model's work, so it must not eat the turn budget.
+    let waitedMs = 0;
 
     try {
       while (iteration < maxIterations) {
-        // Timeout check
-        if (Date.now() - startTime > timeoutMs) {
-          throw new VendixHttpException(ErrorCodes.AI_AGENT_002);
+        // Another turn replaced this one: stop without a word.
+        if (params.shouldAbort && (await params.shouldAbort())) {
+          return {
+            content: '',
+            iterations: iteration,
+            tools_used: toolsUsed,
+            total_tokens: totalTokens,
+            success: false,
+            aborted: true,
+          };
+        }
+
+        // Timeout check. It used to throw AI_AGENT_002, which escaped the
+        // generator and cut the SSE mid-request; now it just leaves the loop
+        // and the code below decides how to close (plan_continue or a kind
+        // last answer).
+        if (Date.now() - startTime - waitedMs > timeoutMs) {
+          timedOut = true;
+          break;
         }
 
         iteration++;
@@ -479,11 +575,32 @@ export class AIAgentService {
           );
         }
 
-        // If no tool calls, we have the final answer
-        if (
-          !response.tool_calls?.length ||
-          response.finish_reason !== 'tool_calls'
-        ) {
+        // Tool calls are honoured whatever `finish_reason` says: several
+        // providers answer 'stop' with tool_calls attached, and closing the turn
+        // on that dropped the calls and left compound requests half done.
+        if (!response.tool_calls?.length) {
+          // The model spoke while the plan still has open work: push it back
+          // into the loop instead of ending the turn on a status sentence.
+          if (
+            params.plan &&
+            !pendingConfirmation &&
+            planNudges < MAX_PLAN_NUDGES
+          ) {
+            const snap = await params.plan.snapshot();
+            const next = snap ? this.nextPlanObligation(snap) : null;
+            if (next) {
+              planNudges++;
+              if (response.content) {
+                messages.push({ role: 'assistant', content: response.content });
+              }
+              messages.push({
+                role: 'user',
+                content: `(interno) Aún no terminas: ${next}. Continúa sin avisarle a la persona; solo detente para una escritura (tarjeta) o con ask_user.`,
+              });
+              continue;
+            }
+          }
+
           this.eventEmitter.emit('ai.agent.completed', {
             iterations: iteration,
             tools_used: toolsUsed.length,
@@ -548,6 +665,59 @@ export class AIAgentService {
             toolArgs = {};
           }
 
+          // Plan tools go to the hook: the task list is internal scaffolding,
+          // so no frame, no trace entry and no quota for them. Handled before
+          // any `tool_call` frame is emitted.
+          if (params.plan && isAgentPlanTool(toolName)) {
+            let planContent: string;
+            try {
+              const outcome = await params.plan.execute(toolName, toolArgs);
+              planContent = outcome.result;
+
+              if (toolName === PROPOSE_PLAN_TOOL) {
+                maxIterations = Math.max(maxIterations, PLANNED_MAX_ITERATIONS);
+                timeoutMs = Math.max(timeoutMs, PLANNED_TIMEOUT_MS);
+              }
+
+              if (outcome.endTurn) {
+                messages.push({
+                  role: 'tool',
+                  content: planContent,
+                  tool_call_id: toolCall.id,
+                });
+                this.eventEmitter.emit('ai.agent.completed', {
+                  iterations: iteration,
+                  tools_used: toolsUsed.length,
+                  total_tokens: totalTokens,
+                  store_id: context?.store_id,
+                });
+                const text = outcome.endTurn.text;
+                yield { type: 'text', content: text };
+                yield {
+                  type: 'done',
+                  usage: { promptTokens: 0, completionTokens: 0, totalTokens },
+                };
+                return {
+                  content: text,
+                  iterations: iteration,
+                  tools_used: toolsUsed,
+                  total_tokens: totalTokens,
+                  success: true,
+                };
+              }
+            } catch (planError: any) {
+              planContent = JSON.stringify({
+                error: `Plan tool error: ${planError?.message ?? 'unknown'}`,
+              });
+            }
+            messages.push({
+              role: 'tool',
+              content: planContent,
+              tool_call_id: toolCall.id,
+            });
+            continue;
+          }
+
           this.logger.log(
             `Agent iteration ${iteration}: executing tool "${toolName}"`,
           );
@@ -558,9 +728,30 @@ export class AIAgentService {
             store_id: context?.store_id,
           });
 
+          // T5: el deprecado se ejecuta igual (el sunset aún no vence) pero el
+          // frame lo dice en voz alta, para que la traza visible y el modelo
+          // migren a `replacedBy` antes de que el nombre desaparezca.
+          const deprecation = this.toolRegistry.getDeprecation(toolName);
+          const deprecatedWarning = deprecation
+            ? `La herramienta "${toolName}" está deprecada desde v${deprecation.since}` +
+              (deprecation.sunset
+                ? ` y se retira en ${deprecation.sunset}`
+                : '') +
+              (deprecation.replacedBy
+                ? `. Usa "${deprecation.replacedBy}" en su lugar.`
+                : '.')
+            : undefined;
+
           yield {
             type: 'tool_call',
-            tool: { id: toolCall.id, name: toolName, arguments: toolArgs },
+            tool: {
+              id: toolCall.id,
+              name: toolName,
+              arguments: toolArgs,
+              ...(deprecatedWarning
+                ? { deprecated_warning: deprecatedWarning }
+                : {}),
+            },
           };
 
           // A UI command is dispatched by the browser off the `tool_call`
@@ -581,9 +772,11 @@ export class AIAgentService {
             // success it had never observed. Now `ui_add_to_cart` on a product
             // with variants comes back `needs_user_input` and the same turn asks
             // which variant, because the answer arrived before the model spoke.
+            const waitStart = Date.now();
             const uiResult = params.stream_id
               ? await this.uiChannel.awaitResult(params.stream_id, toolCall.id)
               : null;
+            waitedMs += Date.now() - waitStart;
 
             const resultPayload =
               uiResult ??
@@ -811,7 +1004,36 @@ export class AIAgentService {
         }
       }
 
-      // Iterations exhausted.
+      // Budget exhausted (iterations or clock) with the plan still open: do not
+      // close with a summary the person did not ask for. Signal the client to
+      // fire another turn; the persisted plan carries the state over.
+      if (params.plan && (await params.plan.snapshot())) {
+        this.eventEmitter.emit('ai.agent.completed', {
+          iterations: iteration,
+          tools_used: toolsUsed.length,
+          total_tokens: totalTokens,
+          store_id: context?.store_id,
+        });
+        yield { type: 'plan_continue' };
+        yield {
+          type: 'done',
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens },
+        };
+        return {
+          content: '',
+          iterations: iteration,
+          tools_used: toolsUsed,
+          total_tokens: totalTokens,
+          success: true,
+          plan_continue: true,
+        };
+      }
+
+      if (timedOut) {
+        this.logger.warn(`Agent timed out after ${iteration} iterations`);
+      }
+
+      // Iterations exhausted (or timed out).
       //
       // This used to throw AI_AGENT_001, which surfaced to the person as a raw
       // error at the exact moment Vexi had worked hardest — ten rounds of

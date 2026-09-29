@@ -1195,24 +1195,28 @@ export class CustomerFiscalIdentityValidator {
     const findings: CustomerFiscalIdentityFinding[] = [];
 
     if (!address) {
-      // `other_addresses === undefined` ⇒ el llamador no corrió la cascada de
-      // respaldo. Se preserva el comportamiento histórico: sólo advertencia,
-      // confiando en que el emisor resuelva por su cuenta al transmitir.
+      // `other_addresses === undefined` ⇒ el llamador (`invoice-flow.service
+      // .ts::buildAcquirerIdentityInput`) decidió A PROPÓSITO no correr la
+      // cascada de rescate para ESTE documento: sólo advertencia
+      // (`ADDRESS_REQUIRED`), confiando en que el emisor resuelva por su
+      // cuenta al transmitir (`acquirer-address.resolver.ts`).
       //
-      // HOY NINGÚN LLAMADOR LO PUEBLA, y es deliberado. Poblarlo bien exige
-      // dos cosas que no están a mano en `invoice-flow`: ensanchar
-      // `INVOICE_INCLUDE` (que trae `addresses: { take: 1 }`) y cargar la
-      // dirección fiscal de la tienda emisora. Con datos PARCIALES —sólo las
-      // del cliente, sin la de la tienda— el bloqueante dispararía sobre
-      // documentos que la cascada del emisor SÍ habría rescatado: un bloqueo
-      // falso, que es peor que el aviso que sustituye.
+      // Desde P1-A (regresión de `1109a03d7`) el llamador NO poblaba
+      // `other_addresses` según hubiera ficha vinculada o no — lo poblaba
+      // SIEMPRE que había `customer_id`, así que una venta de mostrador con
+      // cliente de sólo nombre+documento (el carril legítimo del POS, que
+      // nunca pide dirección) quedaba bloqueada por `ADDRESS_UNRESOLVABLE`.
+      // La regla hoy es por CARRIL, no por "hay ficha o no":
       //
-      // Y el fallo que guarda es inalcanzable para un facturador HABILITADO:
-      // `resolveAcquirerAddress` sólo devuelve `null` cuando la dirección del
-      // propio emisor no es emitible, y un emisor sin municipio Divipola no
-      // pasa la habilitación ante la DIAN (FAJ09/FAJ16) — no llega a tener
-      // resolución con la que numerar. La regla queda escrita para el día en
-      // que un llamador SÍ pueda reunir el universo completo.
+      //   - Persona JURÍDICA (NIT/código 31), en cualquier documento, o
+      //   - Factura MANUAL (sin `order_id` ni `sales_order_id`, nacida en el
+      //     módulo de facturación electrónica con el cliente capturado a
+      //     mano — el incidente Óptica Panorama SAS/Pollo Árabe: NIT sin
+      //     ficha vinculada y sin `customer_address` en el snapshot).
+      //
+      // pobla el arreglo (bloqueante si ninguna dirección real rescata).
+      // Persona NATURAL facturada desde una orden (POS/ecommerce) preserva el
+      // aviso no bloqueante de siempre.
       //
       // `other_addresses` es un ARREGLO (vacío o no) ⇒ el llamador SÍ reunió
       // las direcciones reales que existen — el mismo universo que agota
@@ -1394,8 +1398,8 @@ export class CustomerFiscalIdentityValidator {
         severity: 'warning',
         field: 'address.postal_code',
         problem:
-          'La dirección no tiene código postal. Hoy el documento sale con 110111, que es un código de Bogotá; el campo es opcional para la DIAN, pero el valor inventado no debería viajar.',
-        fix: `Carga el código postal del cliente en ${SCREEN_ADDRESS}, o déjalo vacío para que el documento no declare ninguno.`,
+          'La dirección no tiene código postal. El campo es opcional para la DIAN (cbc:PostalZone es 0..1); el documento se emite sin declarar ninguno en vez de inventar uno del catálogo.',
+        fix: `Si quieres declararlo, carga el código postal del cliente en ${SCREEN_ADDRESS}.`,
       });
     }
 

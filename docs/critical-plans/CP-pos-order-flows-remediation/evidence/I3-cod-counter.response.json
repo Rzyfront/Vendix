@@ -1,0 +1,33 @@
+{
+  "success": true,
+  "message": "POS payment processed successfully",
+  "data": {
+    "success": true,
+    "message": "Payment processed successfully",
+    "order": {
+      "id": 1115,
+      "order_number": "POS-2026-0324",
+      "status": "pending_payment",
+      "payment_status": "pending",
+      "total_amount": "10000",
+      "subtotal": "10000",
+      "tax_amount": "0",
+      "discount_amount": "0",
+      "shipping_cost": "0",
+      "applied_promotions": [],
+      "applied_coupons": []
+    },
+    "kitchen_fire": null,
+    "closed_session_id": null,
+    "paid_session_id": null,
+    "applied_promotions": [],
+    "applied_coupons": [],
+    "payment": {
+      "id": 810,
+      "amount": "10000",
+      "payment_method": "Pago Contra Entrega",
+      "transaction_id": "POS-1790144711947-Q1RMN2BRK"
+    },
+    "_digitalPaymentPending": false
+  }
+}

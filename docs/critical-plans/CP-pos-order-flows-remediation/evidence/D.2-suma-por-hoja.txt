@@ -1,0 +1,13 @@
+ product_id | suma 
+------------+------
+        315 | -320
+(1 row)
+
+  id  | quantity | movement_type |      source_module      
+------+----------+---------------+-------------------------
+ 2028 |      320 | return        | order_item_cancellation
+ 2027 |      320 | consumption   | kitchen_fire
+ 1881 |      320 | consumption   | kitchen_fire
+ 1878 |      320 | consumption   | kitchen_fire
+(4 rows)
+

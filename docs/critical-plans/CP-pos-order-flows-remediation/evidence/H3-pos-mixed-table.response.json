@@ -1,0 +1,33 @@
+{
+  "success": true,
+  "message": "POS payment processed successfully",
+  "data": {
+    "success": true,
+    "message": "Payment processed successfully",
+    "order": {
+      "id": 1109,
+      "order_number": "T-1790137219707-815",
+      "status": "finished",
+      "payment_status": "succeeded",
+      "total_amount": "31900",
+      "subtotal": "30000",
+      "tax_amount": "1900",
+      "discount_amount": "0",
+      "shipping_cost": "0",
+      "applied_promotions": [],
+      "applied_coupons": []
+    },
+    "kitchen_fire": null,
+    "closed_session_id": null,
+    "paid_session_id": 104,
+    "applied_promotions": [],
+    "applied_coupons": [],
+    "payment": {
+      "id": 804,
+      "amount": "31900",
+      "payment_method": "Efectivo",
+      "transaction_id": "POS-1790137219782-CH3KG7NP5"
+    },
+    "_digitalPaymentPending": false
+  }
+}

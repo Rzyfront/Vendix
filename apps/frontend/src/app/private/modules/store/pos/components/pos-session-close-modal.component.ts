@@ -30,7 +30,13 @@ import {
   PosCashRegisterService,
   CashRegisterSession,
   CashSessionSummary,
+  CashSessionCloseReport,
 } from '../services/pos-cash-register.service';
+import {
+  CashSessionReportComponent,
+  CASH_METHOD_LABELS,
+} from './cash-session-report.component';
+import { CashSessionReportPrintService } from '../services/cash-session-report-print.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { extractApiError } from '../../../../../shared/utils/http-error.util';
@@ -71,11 +77,12 @@ function staleExpectedNow(err: unknown): number | null {
     InputComponent,
     IconComponent,
     CurrencyPipe,
+    CashSessionReportComponent,
   ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
-      (isOpenChange)="isOpenChange.emit($event)"
+      (isOpenChange)="onModalOpenChange($event)"
       (cancel)="onCancel()"
       [size]="'md'"
       [showCloseButton]="true"
@@ -87,16 +94,66 @@ function staleExpectedNow(err: unknown): number | null {
           <app-icon name="lock" [size]="20"></app-icon>
         </div>
         <div>
-          <h2 class="sc-title">Cerrar Caja</h2>
-          <p class="sc-subtitle">
-            {{ session()?.register?.name || 'Caja' }} — Abierta
-            {{ session()?.opened_at | date: 'shortTime' }}
-          </p>
+          @if (closedSession(); as closed) {
+            <h2 class="sc-title">Caja cerrada</h2>
+            <p class="sc-subtitle">Sesión #{{ closed.id }}</p>
+          } @else {
+            <h2 class="sc-title">Cerrar Caja</h2>
+            <p class="sc-subtitle">
+              {{ session()?.register?.name || 'Caja' }} — Abierta
+              {{ session()?.opened_at | date: 'shortTime' }}
+            </p>
+          }
         </div>
       </div>
 
       <!-- Body -->
       <div class="sc-body">
+        @if (closedSession()) {
+          <!-- Difference indicator -->
+          @if (difference() !== null) {
+            <div
+              class="sc-diff"
+              [class.sc-diff-plus]="(difference() ?? 0) >= 0"
+              [class.sc-diff-minus]="(difference() ?? 0) < 0"
+            >
+              <div class="sc-diff-icon">
+                <app-icon
+                  [name]="(difference() ?? 0) >= 0 ? 'trending-up' : 'trending-down'"
+                  [size]="18"
+                ></app-icon>
+              </div>
+              <div>
+                <p class="sc-diff-label">
+                  {{ (difference() ?? 0) >= 0 ? 'Sobrante' : 'Faltante' }}
+                </p>
+                <p class="sc-diff-amount">
+                  {{
+                    ((difference() ?? 0) >= 0 ? (difference() ?? 0) : -(difference() ?? 0))
+                      | currency: 0
+                  }}
+                </p>
+              </div>
+            </div>
+          }
+
+          @if (reportLoading()) {
+            <div class="sc-report-state">
+              <app-icon name="loader" [size]="18"></app-icon>
+              Cargando resumen del cierre...
+            </div>
+          } @else if (report(); as rep) {
+            <app-cash-session-report [report]="rep"></app-cash-session-report>
+          } @else {
+            <div class="sc-report-state" role="alert">
+              <p>No pudimos cargar el resumen del cierre. La caja ya quedó cerrada.</p>
+              <app-button variant="outline" size="sm" (clicked)="loadReport()">
+                <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
+                Reintentar
+              </app-button>
+            </div>
+          }
+        } @else {
         <!-- Session summary cards -->
         @if (session()) {
           <div class="sc-cards">
@@ -252,56 +309,46 @@ function staleExpectedNow(err: unknown): number | null {
           ></app-input>
         </form>
 
-        <!-- Difference indicator (shown after closing) -->
-        @if (difference() !== null) {
-          <div
-            class="sc-diff"
-            [class.sc-diff-plus]="(difference() ?? 0) >= 0"
-            [class.sc-diff-minus]="(difference() ?? 0) < 0"
-          >
-            <div class="sc-diff-icon">
-              <app-icon
-                [name]="(difference() ?? 0) >= 0 ? 'trending-up' : 'trending-down'"
-                [size]="18"
-              ></app-icon>
-            </div>
-            <div>
-              <p class="sc-diff-label">
-                {{ (difference() ?? 0) >= 0 ? 'Sobrante' : 'Faltante' }}
-              </p>
-              <p class="sc-diff-amount">
-                {{
-                  ((difference() ?? 0) >= 0 ? (difference() ?? 0) : -(difference() ?? 0))
-                    | currency: 0
-                }}
-              </p>
-            </div>
-          </div>
         }
       </div>
 
       <!-- Footer -->
       <div slot="footer" class="sc-footer">
-        <app-button variant="secondary" size="md" (clicked)="onCancel()">
-          Cancelar
-        </app-button>
-        <app-button
-          [variant]="expectedChanged() ? 'outline-warning' : 'primary'"
-          size="md"
-          (clicked)="onClose()"
-          [disabled]="!form.valid || submitting() || refreshing()"
-        >
-          <app-icon name="lock" [size]="16" slot="icon" ></app-icon>
-          @if (submitting()) {
-            Cerrando...
-          } @else if (refreshing()) {
-            Verificando...
-          } @else if (expectedChanged()) {
-            Confirmar cierre ({{ summary()?.expected_cash_total | currency: 0 }})
-          } @else {
-            Cerrar Caja
-          }
-        </app-button>
+        @if (closedSession()) {
+          <app-button
+            variant="outline"
+            size="md"
+            (clicked)="printReport()"
+            [disabled]="!report() || printing()"
+          >
+            <app-icon name="printer" [size]="16" slot="icon"></app-icon>
+            Imprimir
+          </app-button>
+          <app-button variant="primary" size="md" (clicked)="finish()">
+            Finalizar
+          </app-button>
+        } @else {
+          <app-button variant="secondary" size="md" (clicked)="onCancel()">
+            Cancelar
+          </app-button>
+          <app-button
+            [variant]="expectedChanged() ? 'outline-warning' : 'primary'"
+            size="md"
+            (clicked)="onClose()"
+            [disabled]="!form.valid || submitting() || refreshing()"
+          >
+            <app-icon name="lock" [size]="16" slot="icon" ></app-icon>
+            @if (submitting()) {
+              Cerrando...
+            } @else if (refreshing()) {
+              Verificando...
+            } @else if (expectedChanged()) {
+              Confirmar cierre ({{ summary()?.expected_cash_total | currency: 0 }})
+            } @else {
+              Cerrar Caja
+            }
+          </app-button>
+        }
       </div>
     </app-modal>
   `,
@@ -553,6 +600,17 @@ function staleExpectedNow(err: unknown): number | null {
       margin: 0;
     }
 
+    .sc-report-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 16px;
+      font-size: 13px;
+      color: var(--color-neutral-600);
+      text-align: center;
+    }
+
     .sc-footer {
       display: flex;
       justify-content: flex-end;
@@ -580,22 +638,23 @@ export class PosSessionCloseModalComponent {
   readonly refreshing = signal(false);
   readonly expectedChanged = computed(() => this.staleFrom() !== null);
 
-  /** Etiquetas de método de pago: el backend manda `method` crudo, sin label. */
-  readonly methodLabels: Record<string, string | undefined> = {
-    cash: 'Efectivo',
-    card: 'Tarjeta',
-    bank_transfer: 'Transferencia',
-    voucher: 'Voucher',
-    wompi: 'Wompi',
-    wallet: 'Wallet',
-    paypal: 'PayPal',
-  };
+  /** Etiquetas de método de pago: compartidas con el reporte y el ticket. */
+  readonly methodLabels = CASH_METHOD_LABELS;
+
+  /** Sesión ya cerrada: activa el estado Resultado (el `session` input puede volverse null). */
+  readonly closedSession = signal<CashRegisterSession | null>(null);
+  readonly report = signal<CashSessionCloseReport | null>(null);
+  readonly reportLoading = signal(false);
+  readonly printing = signal(false);
+  /** `sessionClosed` se emite una sola vez, al salir del estado Resultado. */
+  private finished = false;
 
   form: FormGroup;
 
   private fb = inject(FormBuilder);
   private cashRegisterService = inject(PosCashRegisterService);
   private toastService = inject(ToastService);
+  private reportPrint = inject(CashSessionReportPrintService);
 
   constructor() {
     this.form = this.fb.group({
@@ -606,6 +665,11 @@ export class PosSessionCloseModalComponent {
     effect(() => {
       if (this.isOpen()) {
         untracked(() => {
+          this.finished = false;
+          this.closedSession.set(null);
+          this.report.set(null);
+          this.reportLoading.set(false);
+          this.printing.set(false);
           this.difference.set(null);
           this.summary.set(null);
           this.countedAgainst.set(null);
@@ -629,7 +693,7 @@ export class PosSessionCloseModalComponent {
         switchMap((open) => (open ? interval(SUMMARY_POLL_MS) : EMPTY)),
         switchMap(() => {
           const session = this.session();
-          return session
+          return session && !this.closedSession()
             ? this.cashRegisterService
                 .getCashSummary(session.id)
                 .pipe(catchError(() => EMPTY))
@@ -663,6 +727,7 @@ export class PosSessionCloseModalComponent {
    * que el operario empieza a contar.
    */
   private applySummary(next: CashSessionSummary): void {
+    if (this.closedSession()) return;
     this.summary.set(next);
 
     const counted = this.countedAgainst();
@@ -794,8 +859,11 @@ export class PosSessionCloseModalComponent {
           this.refreshing.set(false);
           this.difference.set(Number(closedSession.difference || 0));
           this.toastService.success('Caja cerrada correctamente');
-          this.sessionClosed.emit(closedSession);
-          this.isOpenChange.emit(false);
+          // El modal NO se cierra: pasa al estado Resultado. `sessionClosed`
+          // se emite al salir (finish) para que el POS siga mostrando la
+          // diferencia y abriendo el Resumen IA después.
+          this.closedSession.set(closedSession);
+          this.loadReport();
         },
         error: (err) => this.onCloseError(err),
       });
@@ -840,7 +908,62 @@ export class PosSessionCloseModalComponent {
     this.toastService.error(extractApiErrorMessage(err));
   }
 
+  /** Carga (o reintenta) el reporte consolidado de la sesión recién cerrada. */
+  loadReport(): void {
+    const closed = this.closedSession();
+    if (!closed) return;
+    this.reportLoading.set(true);
+    this.cashRegisterService
+      .getCloseReport(closed.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (report) => {
+          if (this.closedSession()?.id !== report.session.id) return;
+          this.report.set(report);
+          this.reportLoading.set(false);
+        },
+        error: () => {
+          this.report.set(null);
+          this.reportLoading.set(false);
+        },
+      });
+  }
+
+  async printReport(): Promise<void> {
+    const report = this.report();
+    if (!report || this.printing()) return;
+    this.printing.set(true);
+    try {
+      await this.reportPrint.print(report);
+    } catch {
+      this.toastService.error('No se pudo imprimir el resumen del cierre');
+    } finally {
+      this.printing.set(false);
+    }
+  }
+
+  /** Sale del estado Resultado: emite `sessionClosed` una sola vez y cierra. */
+  finish(): void {
+    const closed = this.closedSession();
+    if (!closed || this.finished) return;
+    this.finished = true;
+    this.sessionClosed.emit(closed);
+    this.isOpenChange.emit(false);
+  }
+
+  onModalOpenChange(open: boolean): void {
+    if (!open && this.closedSession()) {
+      this.finish();
+      return;
+    }
+    this.isOpenChange.emit(open);
+  }
+
   onCancel() {
+    if (this.closedSession()) {
+      this.finish();
+      return;
+    }
     this.isOpenChange.emit(false);
   }
 }

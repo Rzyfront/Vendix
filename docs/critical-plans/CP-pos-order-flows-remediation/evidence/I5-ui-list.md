@@ -1,0 +1,7 @@
+# I.5 Listado de ventas cobradas sin documento fiscal
+
+QA local, tienda Tech Solutions #3, usuario dueño y constancia temporal etiquetada `pos_sale_without_fiscal_document` ligada a orden #1110. En `https://vendix.com/admin/fiscal/audit` → «Ventas sin documento (1)», Playwright mostró pedido, tienda, entidad fiscal, motivo y fecha; «Abrir orden» navegó a `/admin/orders/1110` (`I5-uncovered-desktop.png`). La API de historial devolvió el evento propio y excluyó el de tienda hermana incluso al pasar el ID ajeno de tienda/entidad como filtro. Sin autenticación respondió 401; paginación inválida, 400. Los fixtures QA #403/#404 se eliminaron por ID/tag y se comprobó su ausencia.
+
+En viewport 390px, la tarjeta con entidad y motivo largos cortaba Fecha (`I5-uncovered-mobile-before.png`). `a4ea58be5` añadió un override **solo** para la lista fiscal móvil: Entidad, Motivo y Fecha en una columna; textos largos envuelven. Playwright post-fix mostró Fecha completa, sin desbordamiento horizontal en 390px y 320px (`I5-uncovered-mobile-390-after.png`, `I5-uncovered-mobile-320-after.png`); desktop 1440px siguió en tabla normal. Watcher frontend OK. No se tocó el componente compartido de cards ni la base fuera de fixtures QA transitorios.
+
+Aún faltan prueba UI de paginación >25, un fallo real de emisión POS hasta constancia (el productor sí está cubierto por specs/API), y decisión del dueño de la cola automática diferida; este paso permanece `in-progress`.

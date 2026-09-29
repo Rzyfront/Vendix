@@ -44,7 +44,9 @@ import {
   TooltipComponent,
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
-import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
+import { formatStoreDate, formatStoreDateTime } from '../../../../../../shared/utils/date.util';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
 /**
  * COLOR DEL ESTADO DE LA FACTURA, en hexadecimal de 7 caracteres.
@@ -117,6 +119,7 @@ export class InvoiceListComponent {
 
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
 
   /** Custom cell template for the DIAN retry-status chip (Paso 13). */
   readonly retryStatusTemplate =
@@ -214,7 +217,7 @@ export class InvoiceListComponent {
       label: 'Cliente',
       sortable: true,
       priority: 1,
-      defaultValue: 'Sin cliente',
+      transform: (_val: any, row?: any) => this.resolveInvoiceCustomerName(row),
     },
     {
       key: 'total_amount',
@@ -230,7 +233,8 @@ export class InvoiceListComponent {
       sortable: true,
       align: 'center',
       priority: 2,
-      transform: (val: any) => (val ? formatDateOnlyUTC(val) : ''),
+      transform: (val: any) =>
+        val ? formatStoreDate(val, this.storeSettingsFacade.timezone()) : '',
     },
     {
       key: 'status',
@@ -264,7 +268,7 @@ export class InvoiceListComponent {
   // Card Config for mobile
   cardConfig: ItemListCardConfig = {
     titleKey: 'invoice_number',
-    subtitleTransform: (item: any) => item?.customer_name || 'Sin cliente',
+    subtitleTransform: (item: any) => this.resolveInvoiceCustomerName(item),
     badgeKey: 'status',
     badgeConfig: {
       type: 'custom',
@@ -281,7 +285,7 @@ export class InvoiceListComponent {
         label: 'Fecha',
         icon: 'calendar',
         transform: (val: any) =>
-          val ? formatDateOnlyUTC(val) : '-',
+          val ? formatStoreDate(val, this.storeSettingsFacade.timezone()) : '-',
       },
       {
         key: 'invoice_type',
@@ -344,6 +348,22 @@ export class InvoiceListComponent {
   }
 
   // Helpers
+
+  /**
+   * Nombre de cliente a mostrar en la lista, con cascada de fallback.
+   *
+   * `customer_name` es el SNAPSHOT congelado al emitir; queda en NULL cuando
+   * la factura se creó por `customer_id` sin escribir el nombre a mano (bug
+   * de persistencia en `invoicing.service.ts`, en corrección aparte). Sin
+   * este fallback la columna mostraba "Sin cliente" para facturas que sí
+   * tienen un cliente vinculado y emitido correctamente.
+   */
+  resolveInvoiceCustomerName(invoice: Invoice | null | undefined): string {
+    const snapshot = invoice?.customer_name?.trim();
+    if (snapshot) return snapshot;
+    return customerDisplayName(invoice?.customer, 'Sin cliente');
+  }
+
   getStatusLabel(status: string): string {
     const labels: Record<string, string> = {
       draft: 'Borrador',
@@ -420,14 +440,17 @@ export class InvoiceListComponent {
 
   /**
    * next_retry_at is a real timestamp (the time matters: backoff of
-   * minutes/hours), so local-timezone display with explicit options is
-   * the correct pattern per vendix-date-timezone (formatDateOnlyUTC is
-   * only for date-only fields).
+   * minutes/hours), so store-timezone display with explicit options is
+   * the correct pattern per vendix-date-timezone (formatStoreDate/
+   * formatDateOnlyUTC are for date-only fields). Previously rendered in the
+   * BROWSER's local timezone (`toLocaleString` with no `timeZone`); now
+   * sourced from `StoreSettingsFacade.timezone()` so the retry ETA agrees
+   * with the store's clock rather than whoever is viewing the screen.
    */
   private formatRetryDateTime(value: string): string {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString('es-CO', {
+    return formatStoreDateTime(value, this.storeSettingsFacade.timezone(), {
       day: '2-digit',
       month: 'short',
       year: 'numeric',

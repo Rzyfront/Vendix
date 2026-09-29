@@ -25,6 +25,7 @@ import {
   type VexiPosCartSnapshot,
 } from '../../../../core/services/vexi-pos-bridge.service';
 import { VexiUiContextService } from '../../../../core/services/vexi-ui-context.service';
+import { formatStockWarningSummary } from '../../../../core/utils/stock-shortage.util';
 import {
   VexiUiHostRegistry,
   type VexiUiAction,
@@ -129,7 +130,6 @@ import { BookingSchedulerModalComponent } from '../../../../shared/components/bo
 import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.component';
 import {
   PosRestaurantIntegrationService,
-  CounterOrderLine,
   PosFireItemNote,
 } from './services/pos-restaurant-integration.service';
 import { TaxesService } from '../products/services/taxes.service';
@@ -150,6 +150,19 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
   itemCount: 0,
   totalItems: 0,
 };
+
+export function resolvePosPaymentCustomerName(
+  order: { customer_alias?: string | null; customer_name?: string | null } | null | undefined,
+  selectedCustomer: Pick<PosCustomer, 'first_name' | 'last_name'> | null | undefined,
+  isAnonymousSale: boolean,
+): string {
+  // The persisted alias identifies a quick sale even when the payment event
+  // carries the anonymous flag; it must reach both confirmation and receipt.
+  if (order?.customer_alias) return order.customer_alias;
+  if (isAnonymousSale) return 'Consumidor Final';
+  return order?.customer_name ||
+    (selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : '');
+}
 
 @Component({
   selector: 'app-pos',
@@ -355,7 +368,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
             (cashOpenClicked)="showSessionOpenModal.set(true)"
             (cashCloseClicked)="showSessionCloseModal.set(true)"
             (cashMovementClicked)="showCashMovementModal.set(true)"
-            (detailClicked)="showSessionDetailModal.set(true)"
+            (cashDetailClicked)="showSessionDetailModal.set(true)"
             (create)="onOpenCreateModal()"
             (saveDraft)="onSaveDraft()"
             (checkout)="onCheckout()"
@@ -511,18 +524,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         </div>
       }
 
-      <!-- Modals -->
-      <app-pos-customer-modal
-        [isOpen]="showCustomerModal()"
-        [customer]="editingCustomer()"
-        [queueEnabled]="queueEnabled()"
-        [openInQueueMode]="openInQueueMode()"
-        (closed)="onCustomerModalClosed()"
-        (customerCreated)="onCustomerCreated($event)"
-        (customerUpdated)="onCustomerUpdated($event)"
-        (customerSelected)="onCustomerSelected($event)"
-      ></app-pos-customer-modal>
-
       <!-- Fase 5·B3: SHELL de checkout con stepper — único checkout del POS
            (cobro, cliente, envío y "Guardar borrador" en el footer). El paso
            Cobro autocarga sus métodos, por eso no se bindea [paymentMethods]. -->
@@ -666,6 +667,17 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       (closed)="onChargeModalClosed()"
       (paymentSubmitted)="onPaymentSubmitted($event)"
     ></app-order-payment-modal>
+
+    <app-pos-customer-modal
+      [isOpen]="showCustomerModal()"
+      [customer]="editingCustomer()"
+      [queueEnabled]="queueEnabled()"
+      [openInQueueMode]="openInQueueMode()"
+      (closed)="onCustomerModalClosed()"
+      (customerCreated)="onCustomerCreated($event)"
+      (customerUpdated)="onCustomerUpdated($event)"
+      (customerSelected)="onCustomerSelected($event)"
+    ></app-pos-customer-modal>
   `,
   styles: [
     `
@@ -1164,6 +1176,7 @@ export class PosComponent {
   private posSettingsHydrationRequested = false;
   private queueSubscriptionInitialized = false;
   private cashRegisterSessionInitialized = false;
+  private validatedAdoptedOrderId: number | null = null;
 
   private destroyRef = inject(DestroyRef);
   private cartService = inject(PosCartService);
@@ -1350,6 +1363,41 @@ export class PosComponent {
     this.setupSubscriptions();
     this.loadStoreSettings();
     this.checkEditMode();
+    // The cart can hydrate AFTER checkEditMode's initial queryParams emission.
+    // Observe the linked id itself so a cancelled order left in the root POS
+    // cart by another screen is cleared even on a fresh /admin/pos visit.
+    effect(() => {
+      const linkedId = this.cartService.cartState().linkedOrderId;
+      if (linkedId == null) {
+        this.validatedAdoptedOrderId = null;
+        return;
+      }
+      if (
+        this.route.snapshot.queryParamMap.has('editOrder') ||
+        this.validatedAdoptedOrderId === linkedId
+      ) return;
+      this.validatedAdoptedOrderId = linkedId;
+      this.ordersService.getOrderById(String(linkedId))
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (response: any) => {
+            const order: Order = response?.data ?? response;
+            if (
+              this.cartService.getCurrentState().linkedOrderId === linkedId &&
+              ['cancelled', 'refunded', 'finished'].includes(order?.state)
+            ) {
+              this.resetEditState();
+              this.cartService.clearCartAfterCompletedSale()
+                .pipe(takeUntilDestroyed(this.destroyRef))
+                .subscribe();
+              this.toastService.info(
+                `La orden #${order.order_number ?? linkedId} ya no se puede editar. Inicia una venta nueva.`,
+              );
+            }
+          },
+          error: () => { this.validatedAdoptedOrderId = null; },
+        });
+    });
     this.checkQuotationMode();
     this.checkLayawayMode();
     this.validateScheduleOnInit();
@@ -1801,6 +1849,14 @@ export class PosComponent {
       });
   }
 
+  /** Payment success must never reuse the abandonment path that cancels an adopted order. */
+  private clearCartAfterCompletedSale(): void {
+    this.cartService
+      .clearCartAfterCompletedSale()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
+  }
+
   /**
    * CP-POS-CREAR-EDITAR-COBRAR-001 — Guardar must open the customer-selection
    * modal (Venta Anónima / Con Cliente) before persisting the order, like
@@ -1821,6 +1877,15 @@ export class PosComponent {
       this.toastService.warning(EMPTY_CART_MESSAGE);
       return;
     }
+    // Guardar while editing is an update of the same order, not a second
+    // create-draft flow. In particular, do not show the initial customer /
+    // delivery wizard or call saveDraft (which cancels/recreates the draft).
+    if (this.isEditMode()) {
+      if (this.loading()) return;
+      this.showCartModal.set(false);
+      this.updateExistingOrder();
+      return;
+    }
     // Close the mobile cart modal so the checkout shell is the only
     // full-screen dialog open at a time.
     this.showCartModal.set(false);
@@ -1828,7 +1893,7 @@ export class PosComponent {
     // gate + saveDraft call; the parent just opens it. The (checkoutCompleted)
     // output stays reserved for the flow-pay path that Cobrar drives.
     this.mode.set('create-draft');
-    this.initialEntrega.set('llevar');
+    this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(true);
   }
 
@@ -1841,6 +1906,10 @@ export class PosComponent {
    */
   onOpenCreateModal(): void {
     if (!this.cartState() || this.isEmpty) return;
+    if (this.isEditMode()) {
+      this.onSaveDraft();
+      return;
+    }
     // Close the mobile cart modal so the checkout shell is the only
     // full-screen dialog open at a time.
     this.showCartModal.set(false);
@@ -1849,7 +1918,7 @@ export class PosComponent {
     // the flow-pay path; the draft path emits `(draftSaved)` and never opens
     // a payment collector.
     this.mode.set('create-draft');
-    this.initialEntrega.set('llevar');
+    this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(true);
   }
 
@@ -1877,6 +1946,7 @@ export class PosComponent {
     }
     const sc = this.selectedCustomer();
     const customerName =
+      result.order?.customer_alias ||
       result.order?.customer_name ||
       (result.order?.customer?.first_name
         ? `${result.order.customer.first_name} ${result.order.customer.last_name || ''}`.trim()
@@ -1913,6 +1983,14 @@ export class PosComponent {
       })) ?? [],
     });
     this.showOrderConfirmation.set(true);
+
+    // B12 — "Guardar" ya persistió el borrador (a mesa o a mostrador); soltar
+    // la sesión cacheada evita que la venta SIGUIENTE la reuse a ciegas y
+    // choque con TABLE_SESSION_ORDER_NOT_DRAFT si esa orden dejó de estar en
+    // draft. Una ronda legítima sobre la misma mesa la vuelve a traer del
+    // backend al seleccionarla de nuevo (mismo patrón que el cobro, QUI-535).
+    this.paymentTableId.set(null);
+    this.restaurantIntegration.clearTableSession();
   }
 
   onQuote(): void {
@@ -2156,6 +2234,11 @@ export class PosComponent {
                 this.toastService.success(
                   `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
                 );
+                if (fireResult.stock_warnings?.length) {
+                  this.toastService.warning(
+                    formatStockWarningSummary(fireResult.stock_warnings),
+                  );
+                }
                 this.cartService
                   .clearCart()
                   .pipe(takeUntilDestroyed(this.destroyRef))
@@ -2195,55 +2278,50 @@ export class PosComponent {
    */
   private fireCounterOrder(): void {
     const cart = this.cartState();
-    const preparedLines: CounterOrderLine[] = [];
-    for (const it of cart?.items ?? []) {
-      if (it.itemType === 'custom') continue;
-      if (it.product?.product_type !== 'prepared') continue;
-      const productId = parseInt(
-        typeof it.product.id === 'string'
-          ? it.product.id
-          : String(it.product.id),
-        10,
-      );
-      if (!Number.isFinite(productId)) continue;
-      const line: CounterOrderLine = {
-        product_id: productId,
-        product_name: it.product.name,
-        quantity: it.quantity,
-        unit_price: Number(it.unitPrice ?? 0),
-        total_price: Number(it.totalPrice ?? 0),
-        tax_rate: it.taxRate,
-      };
-      if (it.variant_id != null) {
-        line.product_variant_id = it.variant_id;
-      }
-      // Restaurant Suite — Fase K Gap 1: items flagged skipKds
-      // (cashier chose "Usar stock") are excluded from the kitchen
-      // dispatch list. Their product stock is consumed at payment.
-      if (it.skipKds) continue;
-      preparedLines.push(line);
-    }
+    // Solo los `prepared` que van a cocina: los que el cajero marcó "usar
+    // stock" (skipKds, Fase K Gap 1) se consumen al cobrar, no aquí.
+    const preparedItems = (cart?.items ?? []).filter(
+      (it) =>
+        it.itemType !== 'custom' &&
+        it.product?.product_type === 'prepared' &&
+        !it.skipKds &&
+        Number.isFinite(Number(it.product?.id)),
+    );
 
-    if (preparedLines.length === 0) {
+    if (!cart || preparedItems.length === 0) {
       this.toastService.warning(
         'No hay platos preparados en el carrito para enviar a cocina',
       );
       return;
     }
 
-    // Bug 4 (Fase K): orders.customer_id is optional. Only forward the
-    // id when the operator actually picked a customer; otherwise the
-    // integration service omits the field and the backend stores an
-    // anonymous Consumidor Final order.
-    const customer = this.selectedCustomer();
-    const customerId =
-      customer && Number.isFinite(Number(customer.id)) && Number(customer.id) > 0
-        ? Number(customer.id)
-        : 0;
+    // P0-3 — el borrador de mostrador viaja por `/store/payments/pos` con
+    // `is_draft` (ver `createCounterDraftOrder`), que resuelve en servidor el
+    // impuesto de catálogo y el precio de cada línea. La cabecera se recalcula
+    // en servidor; la que se manda aquí solo describe el subconjunto enviado.
+    // Sin promociones ni cupón: aplicarían sobre líneas que no viajan.
+    const taxAmount = preparedItems.reduce((sum, it) => sum + (it.taxAmount || 0), 0);
+    const total = preparedItems.reduce((sum, it) => sum + (it.totalPrice || 0), 0);
+    const counterState: CartState = {
+      ...cart,
+      items: preparedItems,
+      customer: this.selectedCustomer(),
+      appliedDiscounts: [],
+      appliedCoupon: undefined,
+      summary: {
+        ...cart.summary,
+        subtotal: total - taxAmount,
+        taxAmount,
+        discountAmount: 0,
+        total,
+        itemCount: preparedItems.length,
+        totalItems: preparedItems.reduce((sum, it) => sum + it.quantity, 0),
+      },
+    };
 
     this.loading.set(true);
     this.restaurantIntegration
-      .createCounterDraftOrder(customerId, preparedLines, cart?.notes)
+      .createCounterDraftOrder(counterState)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (order) => {
@@ -2261,6 +2339,11 @@ export class PosComponent {
                 this.toastService.success(
                   `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
                 );
+                if (fireResult.stock_warnings?.length) {
+                  this.toastService.warning(
+                    formatStockWarningSummary(fireResult.stock_warnings),
+                  );
+                }
                 this.cartService
                   .clearCart()
                   .pipe(takeUntilDestroyed(this.destroyRef))
@@ -2332,15 +2415,30 @@ export class PosComponent {
     return deliveryTypeToEntregaChoice(context);
   }
 
+  /**
+   * Resuelve el carril de entrega predeterminado al abrir el wizard o guardar borrador.
+   * Si la tienda es restaurante y hay una sesión de mesa abierta o activa, la entrega
+   * por defecto DEBE ser 'mesa', evitando que los platos se marquen como "para llevar".
+   */
+  private resolveDefaultEntrega(): EntregaChoice {
+    if (
+      this.restaurantIntegration.isRestaurantMode() &&
+      (this.restaurantIntegration.hasOpenTableSession() ||
+        this.restaurantIntegration.currentTableSession()?.table_id != null)
+    ) {
+      return 'mesa';
+    }
+    return 'llevar';
+  }
+
   onCheckout(): void {
     if (!this.cartState() || this.isEmpty) return;
 
     // CP-POS-MODAL-SCOPE-001 / Phase A.4 — edit mode now opens the shell
     // with `mode='edit'` (full wizard: Cliente + Cobro). The shell emits
     // `editorUpdated` after PUT /editor so the cashier can immediately
-    // Cobrar from the same modal without leaving the POS. The legacy
-    // `updateExistingOrder()` direct path (which produced "error al
-    // validar") is removed in favour of the shell handler.
+    // Cobrar from the same modal without leaving the POS. Guardar uses
+    // the direct editor path without reopening this wizard.
     if (this.isEditMode()) {
       this.mode.set('edit');
       this.initialEntrega.set(this.entregaChoiceForEditingOrder());
@@ -2351,7 +2449,7 @@ export class PosComponent {
     // Fase 5·B3: el checkout pasa por el SHELL con stepper — único checkout del POS.
     // mode='create-payment' so the shell skips Actualizar and shows only the Cobro CTA.
     this.mode.set('create-payment');
-    this.initialEntrega.set('llevar');
+    this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(true);
   }
 
@@ -2519,6 +2617,9 @@ export class PosComponent {
       ...(submit.amount != null ? { amount: Number(submit.amount) } : {}),
       ...(submit.reference ? { payment_reference: submit.reference } : {}),
       ...(submit.tip != null ? { tip_amount: Number(submit.tip) } : {}),
+      ...(submit.bankAccountId != null
+        ? { bank_account_id: Number(submit.bankAccountId) }
+        : {}),
       ...(submit.installmentId != null
         ? { installment_id: Number(submit.installmentId) }
         : {}),
@@ -2747,10 +2848,11 @@ export class PosComponent {
         discount_amount:
           paymentData.order?.discount_amount || csm.discountAmount,
         total_amount: paymentData.order?.total_amount || csm.total,
-        customer_name: paymentData.isAnonymousSale
-          ? 'Consumidor Final'
-          : paymentData.order?.customer_name ||
-            (sc ? `${sc.first_name} ${sc.last_name}` : ''),
+        customer_name: resolvePosPaymentCustomerName(
+          paymentData.order,
+          sc,
+          !!paymentData.isAnonymousSale,
+        ),
         customer_email:
           !paymentData.isAnonymousSale && sc?.email
             ? sc.email
@@ -2773,7 +2875,7 @@ export class PosComponent {
         : 'Venta procesada correctamente';
 
       this.toastService.success(successMessage);
-      this.onClearCart();
+      this.clearCartAfterCompletedSale();
       this.productRefreshCounter.update((v) => v + 1);
 
       if (sc?.fromQueue && sc?.queueEntryId && paymentData.order?.id) {
@@ -2804,7 +2906,7 @@ export class PosComponent {
       this.editingOrder.set(null);
       this.readyToPayOrder.set(null);
       this.mode.set('create-draft');
-      this.initialEntrega.set('llevar');
+      this.initialEntrega.set(this.resolveDefaultEntrega());
     }
 
     // CP-DTLP Phase E.2 / QUI-764 — encadenar tiquete de despacho
@@ -2846,8 +2948,16 @@ export class PosComponent {
     this.currentOrderNumber.set(null);
     this.readyToPayOrder.set(null);
     this.mode.set('create-draft');
-    this.initialEntrega.set('llevar');
+    this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(false);
+
+    // B12 — misma razón que en `onCreateOrderConfirmed`: "Nueva venta" no
+    // debe arrastrar la sesión de mesa de la venta anterior. Sin esto, la
+    // mesa quedaba preseleccionada (`[tableId]` lee este mismo signal) y el
+    // checkout siguiente reusaba a ciegas una sesión cuya orden ya no está
+    // en draft, chocando con TABLE_SESSION_ORDER_NOT_DRAFT.
+    this.paymentTableId.set(null);
+    this.restaurantIntegration.clearTableSession();
 
     // Drop the `editOrder` query param too so a browser refresh on the same
     // URL does not re-enter the edit flow.
@@ -3724,7 +3834,7 @@ export class PosComponent {
 
       this.showOrderConfirmation.set(true);
       this.toastService.success('Orden con envío creada correctamente');
-      this.onClearCart();
+      this.clearCartAfterCompletedSale();
       this.productRefreshCounter.update((v) => v + 1);
 
       if (sc?.fromQueue && sc?.queueEntryId && shippingData.order?.id) {
@@ -3913,6 +4023,11 @@ export class PosComponent {
                 this.editingOrderNumber.set(order.order_number);
                 this.editingOrder.set(order);
                 this.mode.set('edit');
+                // Modificar una orden de mesa sin cobrar: la orden ya trae su
+                // sesion de mesa abierta. Se hidrata en la integracion para que
+                // el checkout no vuelva a pedir mesa y el cobro use la MISMA
+                // sesion (table_session_id) en vez de abrir otra.
+                this.hydrateTableSessionFromOrder(order);
                 // CP-POS-MODAL-SCOPE-001 / Phase F.12 — Modificar must NOT
                 // auto-open the checkout shell. The cashier expects to
                 // see ONLY the cart with the order's items rehydrated
@@ -3958,7 +4073,32 @@ export class PosComponent {
    * bug by clearing the `editOrder` query param whenever the entry to edit
    * mode aborted.
    */
+  /**
+   * Hidrata `currentTableSession` con la sesion de mesa ABIERTA de la orden que
+   * se edita (`GET /store/orders/:id` incluye `table_sessions`, ultima primero).
+   * Sin sesion abierta limpia cualquier residuo, para no cobrar contra una mesa ajena.
+   */
+  private hydrateTableSessionFromOrder(order: any): void {
+    const open = (order?.table_sessions ?? []).find(
+      (s: any) => s && !s.closed_at,
+    );
+    if (!open) {
+      this.restaurantIntegration.clearTableSession();
+      return;
+    }
+    this.restaurantIntegration.currentTableSession.set({
+      ...open,
+      order_id: order.id,
+      store_id: order.store_id,
+    } as any);
+  }
+
   private resetEditState(): void {
+    const editingId = this.editingOrderId();
+    const cached = this.restaurantIntegration.currentTableSession();
+    if (editingId != null && cached && String(cached.order_id) === String(editingId)) {
+      this.restaurantIntegration.clearTableSession();
+    }
     this.isEditMode.set(false);
     this.editingOrder.set(null);
     this.editingOrderId.set(null);
@@ -4030,10 +4170,10 @@ export class PosComponent {
           // the server's authoritative snapshot.
           this.editingOrder.set(updatedOrder);
           this.readyToPayOrder.set(updatedOrder);
-          // Stay in POS: DO NOT navigate. DO NOT clear the cart. DO NOT close
-          // any modal — the cashier must see "Cobrar" now.
+          // Stay in POS and keep the original draft identity. The cashier may
+          // keep editing or choose Cobrar separately.
           this.toastService.success(
-            `Orden #${updatedOrder.order_number} actualizada — lista para cobrar`,
+            `Orden #${updatedOrder.order_number} guardada`,
           );
           this.fetchPaymentMethodsCatalog();
         },
@@ -4058,23 +4198,13 @@ export class PosComponent {
    * made Prisma 7 reject the request. The backend never received a clean
    * payload and the cashier never saw Cobrar.
    *
-   * Customer fallback: when the cart has no customer attached (the cashier
-   * didn't pick one during edit) we fall back to the order's existing
-   * `customer_id`. Sending `null` would let Prisma 7 drop the FK and break
-   * the next `flow/pay`. If both are missing we surface
-   * `POS_CUSTOMER_REQUIRED_001` locally — saves a round-trip and matches
-   * the backend's authoritative rejection.
+   * Customer fallback: a persisted customer or alias remains attached when
+   * Guardar is used without the checkout wizard. Anonymous drafts remain
+   * anonymous; the backend POS policy is authoritative.
    *
-   * Shipping fields: forwarded from `state.shippingContext`. Hasta F-FLETE
-   * esta nota mentía — decía "populated by `loadFromOrder`" cuando NADIE lo
-   * escribía y este bloque nunca podía emitir una sola clave de envío. Hoy el
-   * escritor existe (`PosCartService.buildShippingContextFromOrder`).
-   *
-   * OJO: este método es el carril LEGADO. Su único llamador,
-   * `updateExistingOrder()`, es privado y no lo invoca nadie — el carril vivo
-   * es `PosCheckoutShellComponent.buildEditorShippingPayload`, que consume el
-   * MISMO `state.shippingContext`. Si cambias la política de flete, cámbiala
-   * allí también o los dos carriles divergen.
+   * Shipping is intentionally omitted. Guardar has no shipping editor and
+   * resending its snapshot would trigger a new quote. Cobrar still uses the
+   * shell's buildEditorShippingPayload for explicit shipping edits.
    *
    * Undefined keys are omitted, not nulled — the editor endpoint treats
    * absent keys as "no change" and any explicit `null` could clear a value
@@ -4091,16 +4221,12 @@ export class PosComponent {
       ? Number(this.editingOrder()!.customer_id)
       : null;
     const customerId = cartCustomerId ?? orderCustomerId;
-    if (customerId == null || !Number.isFinite(customerId) || customerId < 1) {
-      // Defensive mirror of `POS_CUSTOMER_REQUIRED_001`. Backend would reject
-      // with that code; we throw the same shape so the cashier sees a real
-      // reason instead of a silent 422.
-      const err = new Error(
-        'Selecciona o crea un cliente antes de guardar la orden. (POS_CUSTOMER_REQUIRED_001)',
-      ) as Error & { errorCode: string };
-      err.errorCode = 'POS_CUSTOMER_REQUIRED_001';
-      throw err;
-    }
+    // A persisted anonymous/alias draft is already authorized by the POS
+    // policy. Requiring a customer here would make the no-wizard save path
+    // impossible for those orders; the editor endpoint is authoritative.
+    const customerAlias = customerId == null
+      ? this.editingOrder()?.customer_alias?.trim() || undefined
+      : undefined;
     const appliedCoupon = state.appliedCoupon;
     const promotionIds = (state.appliedDiscounts ?? [])
       .map((d: any) => Number(d.promotion_id))
@@ -4131,6 +4257,7 @@ export class PosComponent {
         this.cartBookingsFromChild?.()?.get?.(item?.id) ?? null;
 
       return {
+        item_type: isCustomItem ? 'custom' : (item?.itemType ?? 'product'),
         product_id: productIdNumeric,
         product_variant_id: variantIdNumeric,
         product_name: productName,
@@ -4167,7 +4294,9 @@ export class PosComponent {
             ? Number((taxAmount / lineUnits).toFixed(2))
             : 0;
         })(),
-        tax_rate: item?.taxRate ?? null,
+        ...(item?.taxRate != null && item.taxRate !== ''
+          ? { tax_rate: Number(item.taxRate) }
+          : {}),
         tax_category_id: item?.taxCategoryId ?? null,
         applied_price_tier_id: item?.applied_price_tier_id ?? null,
         notes: item?.notes ?? null,
@@ -4191,31 +4320,9 @@ export class PosComponent {
       };
     });
 
-    const shipping = state.shippingContext;
-    const shippingKeys: Record<string, unknown> = {};
-    if (shipping) {
-      if (shipping.deliveryType != null) {
-        shippingKeys['delivery_type'] = shipping.deliveryType;
-      }
-      if (shipping.shippingAddressId != null) {
-        shippingKeys['shipping_address_id'] = shipping.shippingAddressId;
-      }
-      if (shipping.billingAddressId != null) {
-        shippingKeys['billing_address_id'] = shipping.billingAddressId;
-      }
-      if (shipping.shippingMethodId != null) {
-        shippingKeys['shipping_method_id'] = shipping.shippingMethodId;
-      }
-      if (shipping.shippingRateId != null) {
-        shippingKeys['shipping_rate_id'] = shipping.shippingRateId;
-      }
-      if (shipping.shippingCost != null) {
-        shippingKeys['shipping_cost'] = shipping.shippingCost;
-      }
-    }
-
     return {
       customer_id: customerId,
+      customer_alias: customerAlias,
       coupon_code: appliedCoupon?.code ?? null,
       promotion_ids: promotionIds,
       items,
@@ -4227,7 +4334,9 @@ export class PosComponent {
       // for the cart path.
       ...(state.notes ? { notes: state.notes } : {}),
       ...(state.internalNotes ? { internal_notes: state.internalNotes } : {}),
-      ...shippingKeys,
+      // The cart only holds the persisted shipping snapshot here; there is no
+      // shipping editor in this direct Guardar path. Omit all shipping keys so
+      // PUT /editor preserves the existing quote instead of re-quoting it.
     };
   }
 

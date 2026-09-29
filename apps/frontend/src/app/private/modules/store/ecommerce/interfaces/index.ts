@@ -93,6 +93,12 @@ export interface EcommerceSettings {
     require_payment_receipt?: boolean;
   };
 
+  // Pedidos (vista pública /pedido/:token)
+  orders?: {
+    hide_tracking_progress?: boolean;
+    hide_prep_eta?: boolean;
+  };
+
   // Envíos
   shipping?: {
     free_shipping_threshold?: number | null;

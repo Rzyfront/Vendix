@@ -99,7 +99,11 @@ function toTableColumns(columns: ReportColumn[]): TableColumn[] {
     label: col.header,
     align: col.align,
     defaultValue: '—',
-    transform: (value: any) => formatCellValue(value, col.type, col.key),
+    badge: col.badge,
+    badgeConfig: col.badgeConfig,
+    transform: col.transform
+      ? col.transform
+      : (value: any) => formatCellValue(value, col.type, col.key),
   }));
 }
 
@@ -128,7 +132,7 @@ function formatStatValue(value: any, type: string): string | number {
  *      — strip de stats pegajoso en móvil, transparente en desktop.
  *   3. Banner de warning (cobertura de costo) — sibling del stats-container,
  *      nunca dentro de él, sin padding propio.
- *   4. `<app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">`
+ *   4. `<app-card shadow="none" [padding]="false" overflow="visible" customClasses="md:min-h-[400px]" [showHeader]="true">`
  *      con slot="header" (icono + título a la izquierda, controles a la derecha)
  *      y la paginación DENTRO de la card.
  *
@@ -184,7 +188,7 @@ function formatStatValue(value: any, type: string): string | number {
 
       <!-- 3. Data card — header con icono + título a la izquierda,
               controles (date-range + export) a la derecha. -->
-      <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+      <app-card shadow="none" [padding]="false" overflow="visible" customClasses="md:min-h-[400px]" [showHeader]="true">
         <div slot="header" class="results-header flex items-center justify-between gap-3 flex-wrap">
           <!-- Left: icon + heading -->
           <div class="flex items-center gap-2 min-w-0">

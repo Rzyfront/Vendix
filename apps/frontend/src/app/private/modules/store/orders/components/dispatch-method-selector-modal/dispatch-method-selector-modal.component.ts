@@ -37,6 +37,7 @@ export type DispatchMethod = 'with-note' | 'direct' | 'to-dispatch';
     >
       <div class="space-y-3">
         <!-- Con remisión -->
+        @if (enabledMethods().includes('with-note')) {
         <button
           type="button"
           (click)="selected.emit('with-note')"
@@ -56,8 +57,10 @@ export type DispatchMethod = 'with-note' | 'direct' | 'to-dispatch';
             </div>
           </div>
         </button>
+        }
 
         <!-- Entrega completa -->
+        @if (enabledMethods().includes('direct')) {
         <button
           type="button"
           (click)="selected.emit('direct')"
@@ -75,8 +78,10 @@ export type DispatchMethod = 'with-note' | 'direct' | 'to-dispatch';
             </div>
           </div>
         </button>
+        }
 
         <!-- Enviar a despacho (pool de repartidores) -->
+        @if (enabledMethods().includes('to-dispatch')) {
         <button
           type="button"
           (click)="selected.emit('to-dispatch')"
@@ -96,6 +101,7 @@ export type DispatchMethod = 'with-note' | 'direct' | 'to-dispatch';
             </div>
           </div>
         </button>
+        }
       </div>
 
       <div slot="footer" class="flex justify-end">
@@ -113,6 +119,16 @@ export type DispatchMethod = 'with-note' | 'direct' | 'to-dispatch';
 export class DispatchMethodSelectorModalComponent {
   /** Controls modal visibility from the parent. */
   readonly isOpen = input<boolean>(false);
+
+  /**
+   * QUI-844 — dispatch methods the store offers. Only these render as
+   * buttons. Defaults to all three so existing callers behave as before.
+   */
+  readonly enabledMethods = input<DispatchMethod[]>([
+    'with-note',
+    'direct',
+    'to-dispatch',
+  ]);
 
   /** Emitted with the chosen dispatch method. */
   readonly selected = output<DispatchMethod>();

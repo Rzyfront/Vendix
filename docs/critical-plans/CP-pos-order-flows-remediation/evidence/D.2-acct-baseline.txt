@@ -1,0 +1,66 @@
+D.2 accounting — baseline contable (SOLO LECTURA, SELECT)
+Fecha: 2026-09-24 UTC | DB: vendix_postgres/vendix_db (dev local, compartida)
+CMD base: docker exec -i -e PGPASSWORD=password vendix_postgres psql -U username -d vendix_db -c "<SELECT>"
+
+-- 1. Tienda 10 -> organizacion
+SELECT id, name, organization_id FROM stores WHERE id = 10;
+ id | name | organization_id
+----+------+-----------------
+ 10 | Roku |               6
+(1 row)
+
+-- 2. PUC 5295/6135/1435 en chart_of_accounts de org 6
+SELECT organization_id, code, name, is_active, accepts_entries, accounting_entity_id
+FROM chart_of_accounts
+WHERE organization_id = (SELECT organization_id FROM stores WHERE id = 10)
+  AND code IN ('5295','6135','1435') ORDER BY code;
+ organization_id | code |                  name                   | is_active | accepts_entries | accounting_entity_id
+-----------------+------+-----------------------------------------+-----------+-----------------+----------------------
+               6 | 1435 | Mercancías no Fabricadas por la Empresa | t         | f               |
+               6 | 1435 | Mercancías no Fabricadas por la Empresa | t         | f               |                   25
+               6 | 1435 | Mercancías no Fabricadas por la Empresa | t         | f               |                   26
+               6 | 5295 | Diversos                                | t         | f               |                   25
+               6 | 5295 | Diversos                                | t         | f               |                   26
+               6 | 5295 | Diversos                                | t         | f               |
+               6 | 6135 | Comercio al por Mayor y al por Menor    | t         | f               |                   26
+               6 | 6135 | Comercio al por Mayor y al por Menor    | t         | f               |                   25
+               6 | 6135 | Comercio al por Mayor y al por Menor    | t         | f               |
+(9 rows)
+=> Las 3 cuentas existen y estan activas (global + entidades 25/26).
+   accepts_entries=f es lo esperado en cuentas nivel-3 usadas como default
+   de mapping (el guard de accepts_entries solo aplica a overrides manuales).
+
+-- 3. Hoy en la DB
+SELECT CURRENT_DATE AS today;
+   today
+------------
+ 2026-09-24
+(1 row)
+
+-- 4. Periodo fiscal ABIERTO cubriendo hoy para org 6
+SELECT id, organization_id, accounting_entity_id, name, status, start_date, end_date
+FROM fiscal_periods
+WHERE organization_id = (SELECT organization_id FROM stores WHERE id = 10)
+  AND status = 'open' AND start_date <= CURRENT_DATE AND end_date >= CURRENT_DATE;
+ id  | organization_id | accounting_entity_id |  name   | status |     start_date      |        end_date
+-----+-----------------+----------------------+---------+--------+---------------------+-------------------------
+ 164 |               6 |                   25 | 2026-09 | open   | 2026-09-01 00:00:00 | 2026-09-30 23:59:59.999
+(1 row)
+
+-- 5. Entidades contables de org 6 (resolucion tienda->entidad)
+SELECT id, organization_id, store_id, scope, fiscal_scope, is_active
+FROM accounting_entities WHERE organization_id = 6 ORDER BY id;
+ id | organization_id | store_id |    scope     | fiscal_scope | is_active
+----+-----------------+----------+--------------+--------------+-----------
+ 25 |               6 |       10 | STORE        | STORE        | t
+ 26 |               6 |          | ORGANIZATION | STORE        | t
+(2 rows)
+=> Tienda 10 resuelve a entidad 25 (STORE), que es la duena del periodo
+   abierto 2026-09. postAutoEntry encontrara periodo fiscal valido.
+
+-- 6. Historial de periodos de entidad 25 (contexto)
+SELECT id, accounting_entity_id, name, status FROM fiscal_periods
+WHERE organization_id = 6 ORDER BY accounting_entity_id, start_date DESC LIMIT 12;
+(periodos 2026-06..2026-09 open; <=2026-05 closed. Sin solapes ni huecos.)
+
+CONCLUSION: baseline OK — PUC presentes y periodo abierto cubriendo hoy.

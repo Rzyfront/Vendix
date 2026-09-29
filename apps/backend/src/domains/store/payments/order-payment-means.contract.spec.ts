@@ -91,6 +91,28 @@ describe('order-payment-means.contract', () => {
       );
     });
 
+    it("efectivo + transferencia declara '1' con forma de pago contado '1'", () => {
+      const mixto = [
+        payment({
+          store_display_name: 'Efectivo',
+          dian_code: '10',
+          paid_at: new Date('2026-01-10T10:00:00Z'),
+        }),
+        payment({
+          store_display_name: 'Transferencia',
+          dian_code: '47',
+          paid_at: new Date('2026-01-10T10:05:00Z'),
+        }),
+      ];
+      expect(resolveOrderPaymentLabel(mixto)).toBe(
+        'Efectivo + Transferencia',
+      );
+      expect(resolveOrderDianPaymentMeans(ORDER_WITHOUT_FORM, mixto)).toEqual({
+        payment_form: '1',
+        payment_means_code: '1',
+      });
+    });
+
     it('ordena por paid_at aunque la consulta llegue desordenada', () => {
       expect(resolveOrderPaymentLabel([payments[1], payments[0]])).toBe(
         'Efectivo + Tarjeta de Crédito',

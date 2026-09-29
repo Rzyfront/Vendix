@@ -27,12 +27,16 @@ import {
   IconComponent,
   InputsearchComponent,
   ToggleComponent,
-  DialogService } from '../../../../../shared/components';
+  ToastService,
+  DialogService,
+  AlertBannerComponent,
+  type AddressPayload } from '../../../../../shared/components';
 import {
   DOCUMENT_TYPES,
   findDocumentType,
   DocumentTypeOption,
 } from '../../../../../shared/constants/document-types';
+import { computeNitDv } from '../../../../../shared/utils/nit.util';
 import { PosCustomerService } from '../services/pos-customer.service';
 import { PosQueueService, QueueEntry } from '../services/pos-queue.service';
 import {
@@ -40,11 +44,22 @@ import {
   CreatePosCustomerRequest,
   PaginatedCustomersResponse } from '../models/customer.model';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
+import { CustomerModalComponent } from '../../customers/components/customer-modal/customer-modal.component';
+import { CustomersService } from '../../customers/services/customers.service';
+import {
+  CreateCustomerRequest,
+  ExternalCustomerLookupResult,
+} from '../../customers/models/customer.model';
+import {
+  RuesIdentityCardComponent,
+  ruesIdentityToPrefill,
+} from '../../customers/components/rues-identity-card/rues-identity-card.component';
 
 @Component({
   selector: 'app-pos-customer-modal',
   standalone: true,
   imports: [
+    RuesIdentityCardComponent,
     FormsModule,
     NgClass,
     ReactiveFormsModule,
@@ -54,67 +69,25 @@ import { StoreContextService } from '../../../../../core/services/store-context.
     SelectorComponent,
     IconComponent,
     InputsearchComponent,
-    ToggleComponent
+    ToggleComponent,
+    AlertBannerComponent,
+    CustomerModalComponent
 ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
+      [title]="modalTitle()"
+      [subtitle]="modalSubtitle()"
       [size]="'md'"
-      [showCloseButton]="false"
+      [dialog]="true"
       class="cm-aa-scope"
       >
-      <!-- Modal Header -->
-      <div
-        class="relative flex items-center gap-3 p-6 border-b border-[var(--color-border)]"
-        >
-        <div
-          class="w-10 h-10 rounded-full bg-[var(--color-primary-light)] flex items-center justify-center"
-          >
-          <app-icon
-            name="user"
-            [size]="20"
-            color="var(--color-primary)"
-          ></app-icon>
-        </div>
-        <div>
-          <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
-            {{
-            customer()
-            ? 'Editar Cliente'
-            : currentStep() === 'search'
-            ? 'Buscar Cliente'
-            : currentStep() === 'queue'
-            ? 'Cola de Clientes'
-            : 'Crear Cliente Rápido'
-            }}
-          </h2>
-          <p class="text-sm text-[var(--color-neutral-600)]">
-            {{
-            customer()
-            ? 'Edita la información del cliente seleccionado'
-            : currentStep() === 'search'
-            ? 'Busca un cliente existente o crea uno nuevo'
-            : currentStep() === 'queue'
-            ? 'Selecciona un cliente de la cola de espera'
-            : 'Agrega un nuevo cliente para la venta actual'
-            }}
-          </p>
-        </div>
-        <button
-          type="button"
-          class="absolute top-4 right-4 min-w-11 min-h-11 flex items-center justify-center text-[var(--color-neutral-600)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-neutral-600)]/20 focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2"
-          (click)="onModalClosed()"
-          aria-label="Cerrar modal"
-          >
-          <app-icon name="x" [size]="20"></app-icon>
-        </button>
-      </div>
-    
       <!-- Tab Navigation -->
+      <!-- full-bleed calibrado al padding del body de app-modal (px-3 py-2.5 md:px-5 md:py-4): evita scroll horizontal -->
       @if (!customer()) {
-        <div class="flex border-b border-[var(--color-border)]" role="tablist" aria-label="Modo de cliente">
+        <div class="flex border-b border-[var(--color-border)] -mx-3 -mt-2.5 px-3 md:-mx-5 md:-mt-4 md:px-5 mb-6" role="tablist" aria-label="Modo de cliente">
           <button
             type="button"
             role="tab"
@@ -165,78 +138,9 @@ import { StoreContextService } from '../../../../../core/services/store-context.
       }
     
       <!-- Modal Content -->
-      <div class="p-6">
         <!-- Search Step -->
         @if (currentStep() === 'search') {
           <div class="space-y-4">
-            <!-- Document Quick Lookup -->
-            <div class="mb-4 p-4 bg-[var(--color-primary-light)]/30 rounded-lg border border-[var(--color-primary)]/20">
-              <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
-                Búsqueda rápida por documento
-              </label>
-              <div class="flex gap-2">
-                <div class="flex-1">
-                  <app-input
-                    [ngModel]="documentLookupQuery"
-                    (ngModelChange)="documentLookupQuery = $event"
-                    placeholder="Ingrese cédula o NIT..."
-                    type="text"
-                    [size]="'md'"
-                    (keydown.enter)="onDocumentLookup()"
-                  ></app-input>
-                </div>
-                <app-button
-                  variant="primary"
-                  size="md"
-                  (clicked)="onDocumentLookup()"
-                  [loading]="lookupLoading()"
-                  [disabled]="!documentLookupQuery || documentLookupQuery.length < 5"
-                  >
-                  <app-icon name="search" [size]="16" slot="icon" ></app-icon>
-                  Buscar
-                </app-button>
-              </div>
-              <!-- Lookup Result: Found -->
-              @if (lookupPerformed() && lookupResult(); as lr) {
-                <div class="mt-3 p-3 bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)]">
-                  <div class="flex items-center justify-between">
-                    <div>
-                      <p class="font-medium text-[var(--color-text-primary)]">
-                        {{ lr.first_name }} {{ lr.last_name }}
-                      </p>
-                      <p class="text-sm text-[var(--color-neutral-600)]">{{ lr.email }}</p>
-                      <p class="text-xs text-[var(--color-neutral-600)]">
-                        {{ lr.document_type || 'Doc' }}: {{ lr.document_number }}
-                      </p>
-                    </div>
-                    <app-button variant="primary" size="sm" customClasses="min-h-[44px]" (clicked)="selectCustomer(lr)">
-                      Seleccionar
-                    </app-button>
-                  </div>
-                </div>
-              }
-              <!-- Lookup Result: Not Found -->
-              @if (lookupPerformed() && !lookupResult() && !lookupLoading()) {
-                <div class="mt-3 text-center">
-                  <p class="text-sm text-[var(--color-neutral-600)] mb-2">
-                    No se encontró cliente con este documento
-                  </p>
-                  <app-button variant="outline" size="sm" customClasses="min-h-[44px]" (clicked)="createFromLookup()">
-                    <app-icon name="user-plus" [size]="16" slot="icon" ></app-icon>
-                    Crear con este documento
-                  </app-button>
-                </div>
-              }
-            </div>
-            <!-- Divider -->
-            <div class="relative my-4">
-              <div class="absolute inset-0 flex items-center">
-                <div class="w-full border-t border-[var(--color-border)]"></div>
-              </div>
-              <div class="relative flex justify-center text-sm">
-                <span class="px-2 bg-[var(--color-surface)] text-[var(--color-neutral-600)]">o buscar por nombre</span>
-              </div>
-            </div>
             <app-inputsearch
               placeholder="Buscar por nombre, email o documento..."
               (search)="onSearch($event)"
@@ -249,31 +153,29 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   Resultados de búsqueda:
                 </h3>
                 <div class="max-h-48 overflow-y-auto space-y-2">
-                  @for (customer of searchResults(); track customer) {
+                  @for (customer of searchResults(); track customer.id) {
                     <button
                       type="button"
                       (click)="selectCustomer(customer)"
-                      [attr.aria-label]="'Seleccionar ' + customer.first_name + ' ' + customer.last_name"
+                      [attr.aria-label]="'Seleccionar ' + displayName(customer)"
                       class="w-full min-h-[44px] p-3 border border-[var(--color-border)] rounded-lg text-left cursor-pointer hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-light)] transition-colors focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)]"
                       >
-                      <div class="flex items-center justify-between">
-                        <div>
-                          <p class="font-medium text-[var(--color-text-primary)]">
-                            {{ customer.first_name }} {{ customer.last_name }}
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="min-w-0">
+                          <p class="font-medium text-[var(--color-text-primary)] truncate">
+                            {{ displayName(customer) }}
                           </p>
-                          <p class="text-sm text-[var(--color-neutral-600)]">
+                          <p class="text-sm text-[var(--color-neutral-600)] truncate">
                             {{ customer.email }}
                           </p>
-                          @if (customer.document_number) {
-                            <p
-                              class="text-xs text-[var(--color-neutral-600)]"
-                              >
-                              {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
+                          @if (documentLine(customer)) {
+                            <p class="text-xs text-[var(--color-neutral-600)]">
+                              {{ documentLine(customer) }}
                             </p>
                           }
                         </div>
                         <app-icon
-                          name="chevron-right"
+                          [name]="customer.person_type === 'JURIDICA' ? 'building' : 'chevron'"
                           [size]="16"
                           color="var(--color-neutral-600)"
                         ></app-icon>
@@ -289,7 +191,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 class="text-center py-8"
                 >
                 <app-icon
-                  name="user-x"
+                  name="user"
                   [size]="48"
                   color="var(--color-neutral-600)"
                   class="mx-auto mb-4"
@@ -302,13 +204,13 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   size="sm"
                   (clicked)="switchToCreateMode()"
                   >
-                  <app-icon name="user-plus" [size]="16" slot="icon" ></app-icon>
-                  Crear Nuevo Cliente
+                  <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
+                  Crear cliente nuevo
                 </app-button>
               </div>
             }
             <!-- Quick Create Option -->
-            @if (!searchPerformed()) {
+            @if (!searchPerformed() && !lookupPerformed()) {
               <div
                 class="text-center py-4 border-t border-[var(--color-border)]"
                 >
@@ -321,17 +223,116 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   customClasses="min-h-[44px]"
                   (clicked)="switchToCreateMode()"
                   >
-                  <app-icon name="user-plus" [size]="16" slot="icon" ></app-icon>
-                  Crear Cliente Rápido
+                  <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
+                  Crear cliente nuevo
                 </app-button>
               </div>
             }
+            <!-- Búsqueda avanzada: lookup por documento (debajo de crear) -->
+            <div class="mb-4 p-4 bg-[var(--color-primary-light)]/30 rounded-lg border border-[var(--color-primary)]/20">
+              <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
+                Búsqueda avanzada
+              </label>
+              <div class="flex gap-2">
+                <div class="flex-1">
+                  <app-input
+                    [ngModel]="lookupQuery()"
+                    (ngModelChange)="onLookupQueryChange($event)"
+                    placeholder="Ingrese cédula o NIT..."
+                    type="text"
+                    [size]="'md'"
+                    (keydown.enter)="onDocumentLookup()"
+                  ></app-input>
+                </div>
+                <app-button
+                  variant="primary"
+                  size="md"
+                  (clicked)="onDocumentLookup()"
+                  [loading]="lookupLoading()"
+                  [disabled]="!lookupQuery() || lookupQuery().trim().length < 5"
+                  >
+                  <app-icon name="search" [size]="16" slot="icon" ></app-icon>
+                  Buscar
+                </app-button>
+              </div>
+              <!-- Lookup Result: Found -->
+              @if (lookupPerformed() && lookupResult(); as lr) {
+                <div class="mt-3 p-3 bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)]">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                      <p class="font-medium text-[var(--color-text-primary)] truncate">
+                        {{ displayName(lr) }}
+                      </p>
+                      <p class="text-sm text-[var(--color-neutral-600)] truncate">{{ lr.email }}</p>
+                      @if (documentLine(lr)) {
+                        <p class="text-xs text-[var(--color-neutral-600)]">{{ documentLine(lr) }}</p>
+                      }
+                    </div>
+                    <app-button variant="primary" size="sm" customClasses="min-h-[44px] shrink-0" (clicked)="selectCustomer(lr)">
+                      Seleccionar
+                    </app-button>
+                  </div>
+                </div>
+              }
+              <!-- Lookup Result: Not Found -->
+              @if (lookupPerformed() && !lookupResult() && !lookupLoading()) {
+                @if (externalLoading()) {
+                  <div class="mt-3 flex items-center justify-center gap-2 text-sm text-[var(--color-neutral-600)]">
+                    <app-icon name="loader-2" [size]="16" class="animate-spin"></app-icon>
+                    Consultando fuentes públicas…
+                  </div>
+                } @else if (externalResult()?.found && externalResult()?.identity) {
+                  <app-rues-identity-card
+                    [identity]="externalResult()!.identity!"
+                    (createWithData)="createFromExternal()"
+                    (createManual)="createFromLookup()"
+                  ></app-rues-identity-card>
+                } @else {
+                  <div class="mt-3 text-center">
+                    <p class="text-sm text-[var(--color-neutral-600)] mb-2">
+                      No se encontró cliente con este documento
+                    </p>
+                    @if (externalResult()?.unavailable) {
+                      <p class="text-xs text-[var(--color-neutral-500)] mb-2">
+                        Fuentes públicas no disponibles en este momento
+                      </p>
+                    } @else if (externalResult()) {
+                      <p class="text-xs text-[var(--color-neutral-500)] mb-2">
+                        Tampoco aparece en fuentes públicas
+                      </p>
+                    }
+                    <app-button variant="outline" size="sm" customClasses="min-h-[44px]" (clicked)="createFromLookup()">
+                      <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
+                      Crear con este documento
+                    </app-button>
+                  </div>
+                }
+              }
+            </div>
           </div>
         }
     
         <!-- Create Step -->
         @if (currentStep() === 'create') {
           <div class="space-y-4">
+            @if (!customer()) {
+              <div class="mb-4 p-4 bg-[var(--color-primary-light)]/30 rounded-lg border border-[var(--color-primary)]/20">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium text-[var(--color-text-primary)]">
+                      ¿Necesitas facturar? Usa la creación completa
+                    </p>
+                    <p class="text-xs text-[var(--color-neutral-600)]">
+                      Incluye razón social y datos fiscales DIAN (NATURAL/JURIDICA).
+                    </p>
+                  </div>
+                  <app-button variant="outline" size="sm" customClasses="min-h-[44px] shrink-0" (clicked)="showFullCreate.set(true)">
+                    <app-icon name="building" [size]="16" slot="icon" ></app-icon>
+                    Creación completa
+                  </app-button>
+                </div>
+              </div>
+            }
             @if (customer()) {
               <div class="flex items-center gap-2 mb-4">
                 <app-button
@@ -357,31 +358,45 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 (blur)="onFieldBlur('email')"
                 >
               </app-input>
-              <!-- Name -->
-              <div class="grid grid-cols-2 gap-4">
+              <!-- Name / Razón social (según tipo de persona) -->
+              @if (personTypeValue() !== 'JURIDICA') {
+                <div class="grid grid-cols-2 gap-4">
+                  <app-input
+                    formControlName="firstName"
+                    label="Nombre"
+                    placeholder="Juan"
+                    type="text"
+                    [size]="'md'"
+                    [required]="true"
+                    [error]="getFieldError('firstName')"
+                    (blur)="onFieldBlur('firstName')"
+                    >
+                  </app-input>
+                  <app-input
+                    formControlName="lastName"
+                    label="Apellido"
+                    placeholder="Pérez"
+                    type="text"
+                    [size]="'md'"
+                    [required]="true"
+                    [error]="getFieldError('lastName')"
+                    (blur)="onFieldBlur('lastName')"
+                    >
+                  </app-input>
+                </div>
+              } @else {
                 <app-input
-                  formControlName="firstName"
-                  label="Nombre"
-                  placeholder="Juan"
+                  formControlName="legalName"
+                  label="Razón social"
+                  placeholder="Acme S.A.S"
                   type="text"
                   [size]="'md'"
                   [required]="true"
-                  [error]="getFieldError('firstName')"
-                  (blur)="onFieldBlur('firstName')"
+                  [error]="getFieldError('legalName')"
+                  (blur)="onFieldBlur('legalName')"
                   >
                 </app-input>
-                <app-input
-                  formControlName="lastName"
-                  label="Apellido"
-                  placeholder="Pérez"
-                  type="text"
-                  [size]="'md'"
-                  [required]="true"
-                  [error]="getFieldError('lastName')"
-                  (blur)="onFieldBlur('lastName')"
-                  >
-                </app-input>
-              </div>
+              }
               <!-- Phone -->
               <app-input
                 formControlName="phone"
@@ -421,6 +436,36 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   >
                 </app-input>
               </div>
+              @if (selectedDocumentType()?.code === 'NIT') {
+                <!-- A.8 — el DV nunca viaja tecleado: se deriva del NIT con
+                     módulo 11 (misma regla de invoice-create-page) y sólo se
+                     muestra como referencia; el valor enviado se recalcula
+                     fresco al guardar. -->
+                <p class="text-xs text-[var(--color-text-secondary)] -mt-2">
+                  Dígito de verificación: <strong>{{ computedVerificationDigit() ?? '—' }}</strong> (calculado automáticamente)
+                </p>
+              }
+              @if (legalPersonDocumentTypeWarning()) {
+                <!--
+                  P2 — el candado JURIDICA→NIT normalmente fuerza y bloquea
+                  el tipo de documento, pero esta ficha ya existía como
+                  JURIDICA con un tipo distinto de NIT (dato guardado antes
+                  de esa regla, o corregido a mano). Se respeta lo guardado en
+                  vez de reescribirlo en silencio: el campo queda editable y
+                  el backend rechazará el guardado si la combinación sigue
+                  siendo incoherente.
+                -->
+                <app-alert-banner
+                  variant="warning"
+                  icon="alert-triangle"
+                  tone="token"
+                  heading="Persona jurídica debe usar NIT"
+                >
+                  Esta ficha es persona jurídica pero su tipo de documento no
+                  es NIT. Corrige el tipo de documento antes de guardar; de lo
+                  contrario el guardado será rechazado.
+                </app-alert-banner>
+              }
               <!-- Información fiscal -->
               <div class="pt-2 border-t border-[var(--color-border)]">
                 <h3 class="text-sm font-semibold text-[var(--color-text-primary)] mb-3">
@@ -551,7 +596,6 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             }
           </div>
         }
-      </div>
     
       <!-- Modal Footer -->
       @if (currentStep() === 'create') {
@@ -574,6 +618,16 @@ import { StoreContextService } from '../../../../../core/services/store-context.
         </div>
       }
     </app-modal>
+
+    <!-- Creación completa (canónica): razón social + datos fiscales DIAN -->
+    <app-customer-modal
+      [isOpen]="showFullCreate()"
+      [customer]="null"
+      [loading]="fullCreateLoading()"
+      (closed)="onFullCreateClosed()"
+      (save)="onFullCreateSave($event)"
+      (addressData)="pendingFullCreateAddress.set($event)"
+    ></app-customer-modal>
     `,
   styles: [`
     /* Stitch 11b (1)(2) — scope a11y del modal (shared/ fuera de alcance, se
@@ -633,6 +687,32 @@ export class PosCustomerModalComponent {
   /** Tipo de documento seleccionado (reactivo a cambios del FormControl). */
   readonly selectedDocumentType = signal<DocumentTypeOption | undefined>(undefined);
 
+  /** Tipo de persona (reactivo), para togglear nombre/apellido vs razón social. */
+  readonly personTypeValue = signal<string>('');
+
+  /**
+   * `true` cuando la ficha cargada es JURIDICA con un `document_type`
+   * distinto de NIT (dato guardado antes del candado, o corregido a mano).
+   * El candado JURIDICA→NIT normalmente fuerza el valor a NIT y bloquea el
+   * campo; en ese caso NO lo hace (ver el efecto que lo escribe, en el
+   * constructor) para no reescribir en silencio una ficha real. La plantilla
+   * usa esta señal para mostrar la advertencia visible.
+   */
+  readonly legalPersonDocumentTypeWarning = signal(false);
+
+  /** Número de documento (reactivo), para derivar el DV automáticamente. */
+  readonly documentNumberValue = signal<string>('');
+
+  /**
+   * DV derivado del NIT con módulo 11 (mismo criterio que
+   * `invoice-create-page.component.ts`: "el DV nunca viaja tecleado, se
+   * deriva del NIT"). Sólo aplica cuando el tipo elegido es NIT.
+   */
+  readonly computedVerificationDigit = computed(() => {
+    if (this.selectedDocumentType()?.code !== 'NIT') return null;
+    return computeNitDv(this.documentNumberValue());
+  });
+
   /** Placeholder dinámico para el input de número de documento. */
   readonly documentNumberPlaceholder = computed(() => {
     const type = this.selectedDocumentType();
@@ -678,15 +758,44 @@ export class PosCustomerModalComponent {
   });
 
   // Document lookup
-  documentLookupQuery = '';
+  readonly lookupQuery = signal('');
   readonly lookupResult = signal<PosCustomer | null>(null);
   readonly lookupPerformed = signal(false);
   readonly lookupLoading = signal(false);
+  /** Consulta en fuentes públicas (RUES, SECOP, RNT; sólo tras un no-encontrado local). */
+  readonly externalResult = signal<ExternalCustomerLookupResult | null>(null);
+  readonly externalLoading = signal(false);
+
+  /** Salto a creación completa (app-customer-modal canónico). */
+  readonly showFullCreate = signal(false);
+  readonly fullCreateLoading = signal(false);
+  readonly pendingFullCreateAddress = signal<AddressPayload | null>(null);
+
+  readonly modalTitle = computed(() =>
+    this.customer()
+      ? 'Editar Cliente'
+      : this.currentStep() === 'search'
+        ? 'Buscar Cliente'
+        : this.currentStep() === 'queue'
+          ? 'Cola de Clientes'
+          : 'Crear Cliente Rápido',
+  );
+  readonly modalSubtitle = computed(() =>
+    this.customer()
+      ? 'Edita la información del cliente seleccionado'
+      : this.currentStep() === 'search'
+        ? 'Busca un cliente existente o crea uno nuevo'
+        : this.currentStep() === 'queue'
+          ? 'Selecciona un cliente de la cola de espera'
+          : 'Agrega un nuevo cliente para la venta actual',
+  );
 private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
   private hostRef = inject(ElementRef);
   private dialogService = inject(DialogService);
   private fb = inject(FormBuilder);
   private customerService = inject(PosCustomerService);
+  private customersService = inject(CustomersService);
+  private toastService = inject(ToastService);
   private storeContextService = inject(StoreContextService);
   private queueService = inject(PosQueueService);
 
@@ -730,12 +839,68 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       ctrl.updateValueAndValidity({ emitEvent: false });
     });
 
-    // Live counter for the helper text — updates as the cashier types.
+    // Live counter for the helper text — updates as the cashier types. Se
+    // reutiliza para alimentar `documentNumberValue` (DV derivado en vivo).
     this.customerForm.controls['documentNumber'].valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((v: string | null) => {
         this.documentNumberLength.set((v ?? '').length);
+        this.documentNumberValue.set(v ?? '');
       });
+
+    // Bridge person_type valueChanges -> signal (para swap jurídica/natural).
+    const personTypeControl = this.customerForm.controls['personType'];
+    const personTypeSignalValue = toSignal(personTypeControl.valueChanges, {
+      initialValue: personTypeControl.value as string | null,
+    });
+
+    effect(() => {
+      this.personTypeValue.set(personTypeSignalValue() ?? '');
+      this.applyPersonTypeValidators();
+    });
+
+    // Persona jurídica en Colombia sólo tiene NIT (nunca CC): se fija y se
+    // bloquea el selector (mismo criterio que
+    // customer-modal.component.ts). Natural puede conservar un NIT si el
+    // usuario lo dejó así explícitamente (autónomo con RUT), así que sólo se
+    // libera el candado en esa dirección, nunca se cambia el valor.
+    effect(() => {
+      const isJuridica = this.personTypeValue() === 'JURIDICA';
+      const docTypeCtrl = this.customerForm.controls['documentType'];
+      const loadedCustomer = this.customer();
+      // P2 — una ficha JURIDICA vieja pudo quedar guardada con CC (dato de
+      // antes de este candado, o corregido a mano). Si el estado actual
+      // coincide EXACTO con lo que la ficha ya traía guardado, no es una
+      // elección en vivo — es el `patchValue` de `populateFormForEdit` — y
+      // forzar NIT aquí la reescribiría en silencio. Se respeta el dato, se
+      // avisa (`legalPersonDocumentTypeWarning`), y el campo queda editable
+      // para que el usuario lo corrija (el backend rechaza la combinación
+      // incoherente si se toca).
+      const isLoadedInconsistentJuridica =
+        isJuridica &&
+        docTypeCtrl.value !== 'NIT' &&
+        loadedCustomer?.person_type === 'JURIDICA' &&
+        loadedCustomer?.document_type === docTypeCtrl.value;
+
+      this.legalPersonDocumentTypeWarning.set(isLoadedInconsistentJuridica);
+
+      if (isJuridica) {
+        if (isLoadedInconsistentJuridica) {
+          if (docTypeCtrl.disabled) {
+            docTypeCtrl.enable({ emitEvent: false });
+          }
+        } else {
+          if (docTypeCtrl.value !== 'NIT') {
+            docTypeCtrl.setValue('NIT');
+          }
+          if (docTypeCtrl.enabled) {
+            docTypeCtrl.disable({ emitEvent: false });
+          }
+        }
+      } else if (docTypeCtrl.disabled) {
+        docTypeCtrl.enable({ emitEvent: false });
+      }
+    });
 
     // If customer is provided, populate form for editing
     effect(() => {
@@ -762,7 +927,39 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       documentNumber: ['', [Validators.required]],
       taxRegime: ['', [Validators.required]],
       personType: ['', [Validators.required]],
+      // Razón social (JURIDICA). Validators reales los pone
+      // `applyPersonTypeValidators()` según person_type — ver constructor.
+      legalName: ['', [Validators.maxLength(255)]],
       isWithholdingAgent: [false] });
+  }
+
+  /**
+   * Alterna requerido first_name/last_name <-> legal_name según person_type
+   * (mismo criterio que el backend `JuridicaNameRule`: jurídica exige razón
+   * social y prohíbe nombre/apellido; natural es al revés).
+   */
+  private applyPersonTypeValidators(): void {
+    const isJuridica = this.personTypeValue() === 'JURIDICA';
+    const first = this.customerForm.controls['firstName'];
+    const last = this.customerForm.controls['lastName'];
+    const legal = this.customerForm.controls['legalName'];
+
+    if (isJuridica) {
+      first.clearValidators();
+      last.clearValidators();
+      first.setValue(null, { emitEvent: false });
+      last.setValue(null, { emitEvent: false });
+      legal.setValidators([Validators.required, Validators.maxLength(255)]);
+    } else {
+      legal.clearValidators();
+      legal.setValue(null, { emitEvent: false });
+      first.setValidators([Validators.required, Validators.minLength(2)]);
+      last.setValidators([Validators.required, Validators.minLength(2)]);
+    }
+
+    first.updateValueAndValidity({ emitEvent: false });
+    last.updateValueAndValidity({ emitEvent: false });
+    legal.updateValueAndValidity({ emitEvent: false });
   }
 
   private setupSearchSubscription(): void {
@@ -810,32 +1007,73 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
   }
 
   onDocumentLookup(): void {
-    if (!this.documentLookupQuery || this.documentLookupQuery.length < 5) return;
+    const doc = this.lookupQuery().trim();
+    if (doc.length < 5 || this.lookupLoading()) return;
 
     this.lookupLoading.set(true);
     this.lookupPerformed.set(false);
     this.lookupResult.set(null);
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
 
     this.customerService
-      .lookupByDocument(this.documentLookupQuery.trim())
+      .lookupByDocument(doc)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
           this.lookupResult.set(result);
           this.lookupPerformed.set(true);
           this.lookupLoading.set(false);
+          if (!result) this.lookupExternal(doc);
         },
         error: () => {
           this.lookupResult.set(null);
           this.lookupPerformed.set(true);
           this.lookupLoading.set(false);
+          this.lookupExternal(doc);
         } });
+  }
+
+  onLookupQueryChange(value: string): void {
+    this.lookupQuery.set(value);
+    this.externalResult.set(null);
+    this.externalLoading.set(false);
+  }
+
+  /** Una sola consulta a fuentes públicas por búsqueda; el service nunca lanza. */
+  private lookupExternal(doc: string): void {
+    this.externalLoading.set(true);
+    this.customersService
+      .lookupExternalByDocument(doc)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res) => {
+        // Descarta respuesta rancia si el operador cambió el texto.
+        if (this.lookupQuery().trim() !== doc) return;
+        this.externalResult.set(res);
+        this.externalLoading.set(false);
+      });
+  }
+
+  createFromExternal(): void {
+    const identity = this.externalResult()?.identity;
+    if (!identity) return;
+    const prefill = ruesIdentityToPrefill(identity);
+    const juridica = identity.person_type === 'JURIDICA';
+    this.currentStep.set('create');
+    this.customerForm.patchValue({
+      documentType: prefill.document_type ?? '',
+      documentNumber: prefill.document_number ?? '',
+      personType: identity.person_type,
+      legalName: juridica ? (prefill.legal_name ?? '') : '',
+      firstName: juridica ? '' : (prefill.first_name ?? ''),
+      lastName: juridica ? '' : (prefill.last_name ?? ''),
+    });
   }
 
   createFromLookup(): void {
     this.currentStep.set('create');
     this.customerForm.patchValue({
-      documentNumber: this.documentLookupQuery });
+      documentNumber: this.lookupQuery() });
   }
 
   private populateFormForEdit(): void {
@@ -849,6 +1087,10 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
         documentNumber: this.customer()!.document_number || '',
         taxRegime: this.customer()!.tax_regime || '',
         personType: this.customer()!.person_type || '',
+        // Sin esto, editar un cliente JURIDICA lo degradaba a natural: el
+        // patch nunca traía legal_name, así que el submit salía sin razón
+        // social (root cause del incidente Óptica Panorama SAS).
+        legalName: this.customer()!.legal_name || '',
         isWithholdingAgent: this.customer()!.is_withholding_agent ?? false });
     }
   }
@@ -858,9 +1100,25 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
     this.customerForm.reset();
     this.searchResults.set([]);
     this.searchPerformed.set(false);
-    this.documentLookupQuery = '';
+    this.lookupQuery.set('');
     this.lookupResult.set(null);
     this.lookupPerformed.set(false);
+  }
+
+  /** Plain methods (not computed): read the row fresh on each CD run. */
+  displayName(customer: PosCustomer): string {
+    if (customer.person_type === 'JURIDICA' && customer.legal_name?.trim()) {
+      return customer.legal_name.trim();
+    }
+    const full = `${customer.first_name || ''} ${customer.last_name || ''}`.trim();
+    return full || customer.legal_name?.trim() || customer.email || 'Sin nombre';
+  }
+
+  documentLine(customer: PosCustomer): string {
+    const doc = [customer.document_type, customer.document_number]
+      .filter((part) => !!part?.trim())
+      .join(' ');
+    return doc.trim();
   }
 
   getFieldError(fieldName: string): string | undefined {
@@ -884,6 +1142,8 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
             return 'Selecciona un régimen tributario';
           case 'personType':
             return 'Selecciona un tipo de persona';
+          case 'legalName':
+            return 'La razón social es requerida';
           default:
             return 'Este campo es requerido';
         }
@@ -930,14 +1190,32 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
 
     this.loading.set(true);
 
-    const formData = this.customerForm.value;
+    // getRawValue() (no .value): documentType puede estar disabled+locked en
+    // NIT cuando person_type=JURIDICA (ver efecto de bloqueo en el
+    // constructor); .value la omitiría y el payload perdería el tipo.
+    const formData = this.customerForm.getRawValue();
+    const isJuridica = formData.personType === 'JURIDICA';
+    const documentType = formData.documentType || undefined;
+    const documentNumber = formData.documentNumber || undefined;
+    // A.8 — el DV nunca viaja tecleado: se recalcula fresco al guardar con
+    // el mismo módulo 11 compartido (computeNitDv), sólo para NIT.
+    const verificationDigit =
+      documentType === 'NIT' && documentNumber
+        ? (computeNitDv(documentNumber) ?? undefined)
+        : undefined;
+
     const customerData: CreatePosCustomerRequest = {
       email: formData.email,
-      first_name: formData.firstName,
-      last_name: formData.lastName || undefined,
+      // Jurídica: first_name vacío satisface el tipado no-opcional Y la
+      // regla backend JuridicaNameRule (exige legal_name, prohíbe
+      // first/last_name). Ver apps/backend/.../juridica-name.validator.ts.
+      first_name: isJuridica ? '' : formData.firstName,
+      last_name: isJuridica ? undefined : (formData.lastName || undefined),
+      legal_name: isJuridica ? formData.legalName || undefined : undefined,
       phone: formData.phone || undefined,
-      document_type: formData.documentType,
-      document_number: formData.documentNumber,
+      document_type: documentType,
+      document_number: documentNumber,
+      verification_digit: verificationDigit,
       // Mapeo camelCase (form) -> snake_case (request backend).
       tax_regime: formData.taxRegime || undefined,
       person_type: formData.personType || undefined,
@@ -1090,16 +1368,104 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
 
   // queueEnabled is now an @Input from the parent POS component
 
+  onFullCreateClosed(): void {
+    this.showFullCreate.set(false);
+    this.pendingFullCreateAddress.set(null);
+  }
+
+  /**
+   * Guarda lo capturado en la creación completa: mismo endpoint que el
+   * quick-create (`POST /store/customers`) con el DTO fiscal extendido →
+   * emite `customerCreated` (mismo output que el quick-create) y cierra.
+   * En error, toast + modal abierto para corregir.
+   */
+  onFullCreateSave(data: CreateCustomerRequest): void {
+    this.fullCreateLoading.set(true);
+    const request: CreatePosCustomerRequest = {
+      email: data.email,
+      first_name: data.first_name,
+      last_name: data.last_name || undefined,
+      phone: data.phone || undefined,
+      document_type: data.document_type || undefined,
+      document_number: data.document_number || undefined,
+      legal_name: data.legal_name || undefined,
+      verification_digit: data.verification_digit || undefined,
+      ciiu_code: data.ciiu_code || undefined,
+      fiscal_responsibilities: data.fiscal_responsibilities ?? undefined,
+      tax_regime: data.tax_regime ?? undefined,
+      person_type: data.person_type ?? undefined,
+      is_withholding_agent: data.is_withholding_agent ?? false,
+    };
+    this.customerService
+      .createCustomer(request)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (created) => {
+          this.fullCreateLoading.set(false);
+          this.persistFullCreateAddress(created.id);
+          this.showFullCreate.set(false);
+          this.pendingFullCreateAddress.set(null);
+          this.customerCreated.emit(created);
+          this.onModalClosed();
+        },
+        error: () => {
+          this.fullCreateLoading.set(false);
+          this.toastService.error(
+            'No se pudo crear el cliente. Revisa los datos e intenta de nuevo.',
+          );
+        },
+      });
+  }
+
+  /**
+   * Persiste la dirección capturada en la creación completa
+   * (`POST /store/addresses`). Best-effort y no bloqueante: el cliente ya
+   * quedó creado; un fallo aquí solo avisa por toast. Mismo mapeo que
+   * `order-details-page.persistChangeCustomerAddress`.
+   */
+  private persistFullCreateAddress(customerId: number): void {
+    const addr = this.pendingFullCreateAddress();
+    this.pendingFullCreateAddress.set(null);
+    if (!addr?.address_line1 || !addr.city) return;
+    this.customersService
+      .createCustomerAddress({
+        address_line_1: addr.address_line1,
+        address_line_2: addr.address_line2 ?? undefined,
+        city: addr.city,
+        state: addr.state_province ?? '',
+        country: addr.country_code ?? '',
+        postal_code: addr.postal_code ?? undefined,
+        municipality_code: addr.municipality_code ?? undefined,
+        type: 'shipping',
+        is_primary: true,
+        customer_id: customerId,
+        ...(addr.latitude != null ? { latitude: String(addr.latitude) } : {}),
+        ...(addr.longitude != null
+          ? { longitude: String(addr.longitude) }
+          : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        error: () => {
+          this.toastService.warning(
+            'Cliente creado, pero no se pudo guardar la dirección.',
+          );
+        },
+      });
+  }
+
   onModalClosed(): void {
     this.customerForm.reset();
     this.currentStep.set('search');
     this.searchResults.set([]);
     this.searchPerformed.set(false);
-    this.documentLookupQuery = '';
+    this.lookupQuery.set('');
     this.lookupResult.set(null);
     this.lookupPerformed.set(false);
     this.queueEntries.set([]);
     this.queueQrData.set(null);
+    this.showFullCreate.set(false);
+    this.pendingFullCreateAddress.set(null);
     this.closed.emit();
   }
 }

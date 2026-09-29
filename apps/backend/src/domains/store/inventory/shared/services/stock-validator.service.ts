@@ -2,9 +2,40 @@ import {
   Injectable,
   ConflictException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from './stock-level-manager.service';
+import { SellableStockAllocator } from './sellable-stock-allocator.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+
+/**
+ * Una unidad de demanda de stock: "necesito `quantity` de este
+ * producto/variante". Usada tanto para líneas de orden (kind='product') como
+ * para insumos de receta (kind='ingredient', resuelto por el caller antes de
+ * llegar aquí — este servicio no conoce `recipe_items`).
+ */
+export interface StockDemandLine {
+  product_id: number;
+  product_variant_id?: number | null;
+  quantity: number;
+  /** Nombre a mostrar si no se puede resolver desde catálogo. */
+  product_name?: string;
+  /** Para insumos compartidos: qué plato/línea generó esta demanda. */
+  used_by?: string;
+}
+
+/** Una identidad (producto/variante o insumo) que no alcanza para cubrir lo pedido. */
+export interface InsufficientStockItem {
+  product_id: number;
+  product_variant_id: number | null;
+  product_name: string;
+  kind: 'product' | 'ingredient';
+  requested: number;
+  available: number;
+  used_by?: string[];
+}
 
 export interface StockValidationParams {
   product_id: number;
@@ -50,11 +81,27 @@ export interface AvailabilityResult {
  * - Validates effective tracking before checking stock
  * - Returns detailed validation results for cart operations
  */
+/** Resolved per-store inventory overselling policy (plan step 9). */
+export interface InventoryPolicy {
+  /** "Permitir sobreventa" — `store_settings.inventory.allow_negative_stock`. Default `false`. */
+  allowOversell: boolean;
+  /** "Permitir sobre-uso de insumos" — `store_settings.inventory.allow_ingredient_overuse`. Default `true` (missing/null). */
+  allowIngredientOveruse: boolean;
+}
+
+const DEFAULT_INVENTORY_POLICY: InventoryPolicy = {
+  allowOversell: false,
+  allowIngredientOveruse: true,
+};
+
 @Injectable()
 export class StockValidatorService {
+  private readonly logger = new Logger(StockValidatorService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly stockLevelManager: StockLevelManager,
+    private readonly sellableStockAllocator: SellableStockAllocator,
   ) {}
 
   /**
@@ -297,5 +344,325 @@ export class StockValidatorService {
     }
 
     return this.resolveEffectiveTracking(product, variant);
+  }
+
+  /**
+   * Resolves the per-store inventory overselling policy (plan step 9,
+   * 2026-09-26). Reads `store_settings.settings.inventory` directly (not
+   * through `mergeStoreSettingsWithDefaults`, whose deep-merge only skips
+   * `undefined` — an explicit persisted `null` would leak through as `null`
+   * instead of resolving to the field's default). Both keys are read with the
+   * exact rule the plan requires:
+   *
+   *   - `allow_negative_stock` ("Permitir sobreventa"): only an explicit
+   *     `true` turns it on; missing/null/false all resolve to `false`.
+   *   - `allow_ingredient_overuse` ("Permitir sobre-uso de insumos"): missing
+   *     or `null` resolves to `true`; an explicit `false` (and only that)
+   *     turns it off. `?? true` gets this right because `??` only substitutes
+   *     on `null`/`undefined`, never on a persisted `false`.
+   *
+   * Pass `tx` when called from inside an open transaction (kitchen-fire,
+   * production, order commit) so the read observes the same snapshot the
+   * caller is writing against; `storeId` should come from the order/location
+   * being processed, not only the ambient request context, so a cross-store
+   * job resolves the right store's policy. Never throws — any read failure
+   * degrades to the safe default (strict no-overselling, ingredient overuse
+   * allowed, i.e. today's pre-switch kitchen behavior).
+   */
+  async resolveInventoryPolicy(
+    storeId: number,
+    tx?: Prisma.TransactionClient,
+  ): Promise<InventoryPolicy> {
+    try {
+      const db: any = tx ?? this.prisma;
+      const row = await db.store_settings.findFirst({
+        where: { store_id: storeId },
+        select: { settings: true },
+      });
+      const inventory = (row?.settings as any)?.inventory ?? {};
+      return {
+        allowOversell: inventory.allow_negative_stock === true,
+        allowIngredientOveruse: inventory.allow_ingredient_overuse ?? true,
+      };
+    } catch (err) {
+      this.logger.warn(
+        `Failed to resolve inventory policy for store ${storeId}: ${(err as Error).message}. Falling back to defaults (allowOversell=false, allowIngredientOveruse=true).`,
+      );
+      return { ...DEFAULT_INVENTORY_POLICY };
+    }
+  }
+
+  /**
+   * No-overselling guard for order lines (docs/plans/no-overselling-stock-guard-plan.md).
+   *
+   * Throws `INV_STOCK_INSUFFICIENT_LINES` naming every product that cannot
+   * cover its requested quantity. Untracked products/ingredients (effective
+   * tracking `false`) and services are never validated — they are unlimited
+   * by definition (`vendix-product-variants`).
+   *
+   * `opts.orderId`, when given, credits the order's OWN active reservation
+   * back into "available" — re-validating a line that already reserved its
+   * stock must not count that reservation as a shortfall against itself.
+   *
+   * `opts.allowOversell` (plan step 9): when `true`, the shortfall does NOT
+   * throw — it is logged with `logger.warn` and returned instead, so the
+   * caller can reserve with `allow_negative_available=true` and surface the
+   * list as `stock_warnings`. Default `false` preserves the strict guard.
+   * Always returns the list of insufficient items (empty when none).
+   */
+  async assertLinesAvailable(
+    lines: StockDemandLine[],
+    opts: {
+      orderId?: number;
+      locationId?: number;
+      tx?: Prisma.TransactionClient;
+      allowOversell?: boolean;
+    } = {},
+  ): Promise<InsufficientStockItem[]> {
+    const items = await this.findInsufficientLines(lines, {
+      ...opts,
+      kind: 'product',
+    });
+    if (items.length === 0) return [];
+
+    if (opts.allowOversell) {
+      this.logger.warn(
+        `Sobreventa permitida — ${this.buildProductInsufficientMessage(items)}`,
+      );
+      return items;
+    }
+
+    throw new VendixHttpException(
+      ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+      this.buildProductInsufficientMessage(items),
+      { items },
+    );
+  }
+
+  /**
+   * No-overselling guard for recipe ingredients. The caller (kitchen-fire /
+   * BOM explosion) already resolved recipe quantities into concrete
+   * ingredient product demands — this service only checks catalog stock, it
+   * never reads `recipe_items`.
+   *
+   * `opts.allowIngredientOveruse` (plan step 9): when `true`, a shortfall does
+   * NOT throw — it is logged with `logger.warn` and returned, so the caller
+   * can consume the FULL quantity anyway (via `updateStock({allow_negative:
+   * true})`) and surface the list as `stock_warnings`. Default `false`
+   * (callers must opt in via the resolved store policy) preserves the step-6
+   * blocking guard. Always returns the list of insufficient items.
+   */
+  async assertIngredientsAvailable(
+    demands: StockDemandLine[],
+    opts: {
+      locationId?: number;
+      tx?: Prisma.TransactionClient;
+      allowIngredientOveruse?: boolean;
+    } = {},
+  ): Promise<InsufficientStockItem[]> {
+    const items = await this.findInsufficientLines(demands, {
+      ...opts,
+      kind: 'ingredient',
+    });
+    if (items.length === 0) return [];
+
+    if (opts.allowIngredientOveruse) {
+      this.logger.warn(
+        `Sobre-uso de insumos permitido — ${this.buildIngredientInsufficientMessage(items)}`,
+      );
+      return items;
+    }
+
+    throw new VendixHttpException(
+      ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+      this.buildIngredientInsufficientMessage(items),
+      { items },
+    );
+  }
+
+  /**
+   * Non-throwing core shared by {@link assertLinesAvailable} and
+   * {@link assertIngredientsAvailable}. Aggregates demand by
+   * `(product_id, product_variant_id)`, skips untracked/service items, and
+   * compares the aggregated quantity against the SAME sellable scope used to
+   * reserve and commit stock (`SellableStockAllocator` /
+   * `sellableStockLevelsWhere`, QUI-559) — never a re-implemented aggregate.
+   */
+  async findInsufficientLines(
+    lines: StockDemandLine[],
+    opts: {
+      orderId?: number;
+      locationId?: number;
+      tx?: Prisma.TransactionClient;
+      kind: 'product' | 'ingredient';
+      /** Unused here — accepted so callers can spread their own opts object as-is. */
+      allowOversell?: boolean;
+      /** Unused here — accepted so callers can spread their own opts object as-is. */
+      allowIngredientOveruse?: boolean;
+    },
+  ): Promise<InsufficientStockItem[]> {
+    if (!lines || lines.length === 0) return [];
+
+    const db: any = opts.tx ?? this.prisma;
+
+    type Aggregate = {
+      product_id: number;
+      product_variant_id: number | null;
+      quantity: number;
+      used_by: string[];
+      product_name?: string;
+    };
+    const aggregates = new Map<string, Aggregate>();
+
+    for (const line of lines) {
+      if (!(line.quantity > 0)) continue;
+      const variantId = line.product_variant_id ?? null;
+      const key = `${line.product_id}-${variantId ?? 'null'}`;
+      const existing = aggregates.get(key);
+      if (existing) {
+        existing.quantity += line.quantity;
+        if (line.used_by && !existing.used_by.includes(line.used_by)) {
+          existing.used_by.push(line.used_by);
+        }
+        if (!existing.product_name && line.product_name) {
+          existing.product_name = line.product_name;
+        }
+      } else {
+        aggregates.set(key, {
+          product_id: line.product_id,
+          product_variant_id: variantId,
+          quantity: line.quantity,
+          used_by: line.used_by ? [line.used_by] : [],
+          product_name: line.product_name,
+        });
+      }
+    }
+
+    if (aggregates.size === 0) return [];
+
+    const productIds = [...new Set(
+      Array.from(aggregates.values()).map((a) => a.product_id),
+    )];
+    const variantIds = [...new Set(
+      Array.from(aggregates.values())
+        .map((a) => a.product_variant_id)
+        .filter((v): v is number => v != null),
+    )];
+
+    const [products, variants] = await Promise.all([
+      db.products.findMany({
+        where: { id: { in: productIds } },
+        select: {
+          id: true,
+          store_id: true,
+          track_inventory: true,
+          product_type: true,
+          name: true,
+        },
+      }),
+      variantIds.length > 0
+        ? db.product_variants.findMany({
+            where: { id: { in: variantIds } },
+            select: { id: true, track_inventory_override: true, name: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const productById = new Map<number, any>(products.map((p: any) => [p.id, p]));
+    const variantById = new Map<number, any>(variants.map((v: any) => [v.id, v]));
+
+    const insufficient: InsufficientStockItem[] = [];
+
+    for (const entry of aggregates.values()) {
+      const product = productById.get(entry.product_id);
+      // No podemos validar un producto que no existe; ese error es de otra
+      // capa (existencia), no de esta (suficiencia de stock).
+      if (!product) continue;
+      if (product.product_type === 'service') continue;
+
+      const variant =
+        entry.product_variant_id != null
+          ? variantById.get(entry.product_variant_id)
+          : undefined;
+
+      const effectiveTracking = this.resolveEffectiveTracking(product, variant);
+      if (effectiveTracking === false) continue;
+
+      const levels = await this.sellableStockAllocator.getSellableLevels(
+        product.store_id,
+        entry.product_id,
+        entry.product_variant_id ?? undefined,
+        opts.tx,
+      );
+      const scopedLevels =
+        opts.locationId != null
+          ? levels.filter((l) => l.location_id === opts.locationId)
+          : levels;
+
+      let available = scopedLevels.reduce(
+        (sum, l) => sum + Math.max(0, l.quantity_available),
+        0,
+      );
+
+      if (opts.kind === 'product' && opts.orderId != null) {
+        const ownReservation = await db.stock_reservations.aggregate({
+          where: {
+            reserved_for_type: 'order',
+            reserved_for_id: opts.orderId,
+            product_id: entry.product_id,
+            product_variant_id: entry.product_variant_id,
+            status: 'active',
+          },
+          _sum: { quantity: true },
+        });
+        available += Number(ownReservation?._sum?.quantity ?? 0);
+      }
+
+      if (entry.quantity > available) {
+        insufficient.push({
+          product_id: entry.product_id,
+          product_variant_id: entry.product_variant_id,
+          product_name:
+            (variant?.name && product.name
+              ? `${product.name} - ${variant.name}`
+              : null) ??
+            product.name ??
+            entry.product_name ??
+            `Producto ${entry.product_id}`,
+          kind: opts.kind,
+          requested: entry.quantity,
+          available,
+          used_by: entry.used_by.length > 0 ? entry.used_by : undefined,
+        });
+      }
+    }
+
+    return insufficient;
+  }
+
+  private buildProductInsufficientMessage(
+    items: InsufficientStockItem[],
+  ): string {
+    const list = items
+      .map(
+        (i) => `${i.product_name} (pedido ${i.requested}, disponible ${i.available})`,
+      )
+      .join('; ');
+    return `Sin stock suficiente: ${list}. Quítalo de la orden o desactiva «Maneja inventario» en el producto.`;
+  }
+
+  private buildIngredientInsufficientMessage(
+    items: InsufficientStockItem[],
+  ): string {
+    const list = items
+      .map((i) => {
+        const usedByClause =
+          i.used_by && i.used_by.length > 0
+            ? `, usado en ${i.used_by.join(', ')}`
+            : '';
+        return `${i.product_name} (requerido ${i.requested}, disponible ${i.available}${usedByClause})`;
+      })
+      .join('; ');
+    return `Insumo sin stock suficiente: ${list}. Ajusta la receta o reabastece el insumo antes de continuar.`;
   }
 }

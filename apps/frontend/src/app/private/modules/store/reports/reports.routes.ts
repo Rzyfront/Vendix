@@ -69,6 +69,7 @@ export const reportsRoutes: Routes = [
           { path: 'sales-by-payment',      data: { reportId: 'sales-by-payment' },      loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'sales-by-channel',      data: { reportId: 'sales-by-channel' },      loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'sales-by-user',         data: { reportId: 'sales-by-user' },         loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'sales-tips-by-waiter',  data: { reportId: 'sales-tips-by-waiter' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'sales-trends',          data: { reportId: 'sales-trends' },          loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
@@ -144,6 +145,7 @@ export const reportsRoutes: Routes = [
           { path: 'purchase-summary',      data: { reportId: 'purchase-summary' },      loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'purchase-by-supplier',  data: { reportId: 'purchase-by-supplier' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'purchase-trends',       data: { reportId: 'purchase-trends' },       loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'payable-aging',         data: { reportId: 'payable-aging' },         loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {
@@ -202,6 +204,23 @@ export const reportsRoutes: Routes = [
           { path: 'financial-refunds',   data: { reportId: 'financial-refunds' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'cash-sessions',       data: { reportId: 'cash-sessions' },       loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'expenses-summary',    data: { reportId: 'expenses-summary' },    loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+        ],
+      },
+      {
+        path: 'payments',
+        loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
+        data: { categoryId: 'payments' },
+        children: [
+          {
+            path: '',
+            loadComponent: () => import('./pages/category-reports-catalog/category-reports-catalog.component').then(c => c.CategoryReportsCatalogComponent),
+            data: { categoryId: 'payments' },
+          },
+          // Pagos — página propia (columnas ricas, filtros fijables, paginación de servidor).
+          {
+            path: 'payments-list',
+            loadComponent: () => import('./pages/payments/payments-report-page.component').then(c => c.PaymentsReportPageComponent),
+          },
         ],
       },
       {

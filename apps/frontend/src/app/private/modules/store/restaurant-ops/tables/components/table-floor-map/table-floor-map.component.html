@@ -71,7 +71,8 @@
             [attr.role]="editable() ? null : 'button'"
             [attr.tabindex]="editable() ? null : 0"
             [attr.aria-label]="
-              'Mesa ' + cell.table.name + ' - ' + cell.statusLabel
+              'Mesa ' + cell.table.name + ' - ' + cell.statusLabel + (cell.isPaid ? ' - Pagada' : '') +
+              (cell.table.active_session?.waiter ? ' - Mesero: ' + cell.table.active_session?.waiter?.first_name + ' ' + cell.table.active_session?.waiter?.last_name : '')
             "
           >
             <span class="table-name" [title]="cell.table.name">{{ cell.table.name }}</span>
@@ -101,7 +102,13 @@
                 <span class="status-label">{{ cell.statusLabel }}</span>
               </span>
               @if (cell.isOccupied && cell.table.active_session) {
-                <span class="footer-meta">#{{ cell.table.active_session.id }}</span>
+                @if (cell.table.active_session.waiter; as waiter) {
+                  <span class="footer-meta truncate max-w-[95px]" [title]="'Mesero: ' + waiter.first_name + ' ' + waiter.last_name">
+                    {{ waiter.first_name }} {{ waiter.last_name }}
+                  </span>
+                } @else {
+                  <span class="footer-meta">#{{ cell.table.active_session.id }}</span>
+                }
               } @else if (
                 cell.displayStatus === 'reserved' &&
                 (cell.table.pending_bookings?.length ?? 0) > 0
@@ -113,29 +120,32 @@
               }
             </div>
 
-            <!-- Live badges: alimentados por AdminTablesSseService.
-                 Se renderizan sólo si el componente padre pasó
-                 `liveCounts` y la mesa tiene sesión abierta. -->
-            @if (cell.live) {
+            <!-- La marca persistida de pago se muestra incluso sin liveCounts. -->
+            @if (cell.isPaid || cell.live) {
               <div class="live-strip" aria-live="polite">
-                @if (cell.live.active_devices > 0) {
+                @if (cell.live && cell.live.active_devices > 0) {
                   <span class="live-chip live-chip--devices" title="Comensales activos">
                     <app-icon name="smartphone" [size]="11"></app-icon>
                     {{ cell.live.active_devices }}
                   </span>
                 }
-                @if (cell.live.item_count > 0) {
+                @if (cell.live && cell.live.item_count > 0) {
                   <span class="live-chip live-chip--items" title="Ítems en la cuenta">
                     <app-icon name="utensils" [size]="11"></app-icon>
                     {{ cell.live.item_count }}
                   </span>
                 }
-                @if (cell.live.payment_state === 'pending') {
+                @if (cell.live && !cell.isPaid && cell.live.payment_state === 'pending') {
                   <span class="live-chip live-chip--pay-pending" title="Pago pendiente">
                     <app-icon name="clock" [size]="11"></app-icon>
                   </span>
                 }
-                @if (cell.live.payment_state === 'confirmed') {
+                @if (cell.isPaid) {
+                  <span class="live-chip live-chip--pay-confirmed" title="Cuenta pagada">
+                    <app-icon name="check" [size]="11"></app-icon>
+                    Pagada
+                  </span>
+                } @else if (cell.live?.payment_state === 'confirmed') {
                   <span class="live-chip live-chip--pay-confirmed" title="Pago confirmado">
                     <app-icon name="check" [size]="11"></app-icon>
                   </span>

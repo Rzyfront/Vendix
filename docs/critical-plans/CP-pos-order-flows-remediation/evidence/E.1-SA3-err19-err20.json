@@ -1,0 +1,30 @@
+{
+  "ERR_20_draft_1161": {
+    "http": "400",
+    "body": {
+      "statusCode": 400,
+      "error_code": "DSP_ORDER_STATE_001",
+      "message": "La orden #1161 está en estado \"draft\". Para generar la remisión debe estar en \"processing\" o \"pending_payment\". Revise el estado de la orden antes de despacharla.",
+      "timestamp": "2026-09-24T01:03:40.147Z",
+      "path": "/api/store/dispatch-notes/from-order/1161",
+      "devDetails": {
+        "name": "VendixHttpException",
+        "stack": "VendixHttpException: La orden #1161 está en estado \"draft\". Para generar la remisión debe estar en \"processing\" o \"pending_payment\". Revise el estado de la orden antes de despacharla.\n    at DispatchNotesService.createFromOrder (/app/src/domains/store/dispatch-notes/dispatch-notes.service.ts:2027:13)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async DispatchNotesController.createFromOrder (/app/src/domains/store/dispatch-notes/dispatch-notes.controller.ts:147:20)"
+      }
+    }
+  },
+  "ERR_19_direct_delivery_1176": {
+    "http": "400",
+    "body": {
+      "statusCode": 400,
+      "error_code": "DSP_ORDER_DELIVERY_001",
+      "message": "La orden #1176 tiene tipo de entrega \"direct_delivery\", que se entrega en el acto y no requiere remisión. Si necesita envío, corrija el tipo de entrega antes de despacharla.",
+      "timestamp": "2026-09-24T01:03:40.178Z",
+      "path": "/api/store/dispatch-notes/from-order/1176",
+      "devDetails": {
+        "name": "VendixHttpException",
+        "stack": "VendixHttpException: La orden #1176 tiene tipo de entrega \"direct_delivery\", que se entrega en el acto y no requiere remisión. Si necesita envío, corrija el tipo de entrega antes de despacharla.\n    at DispatchNotesService.createFromOrder (/app/src/domains/store/dispatch-notes/dispatch-notes.service.ts:2036:13)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async DispatchNotesController.createFromOrder (/app/src/domains/store/dispatch-notes/dispatch-notes.controller.ts:147:20)"
+      }
+    }
+  }
+}

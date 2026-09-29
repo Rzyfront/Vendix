@@ -8,6 +8,9 @@ import { InvoiceFlowService } from '../invoice-flow/invoice-flow.service';
 import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.service';
 import { FiscalDocumentFinding } from '../validators/fiscal-document.validator';
 import { PosFiscalState, PosFiscalStatus } from './pos-fiscal-status.interface';
+import { INVOICE_AUTO_SEND_FAILED_ALERT } from './presential-pos-sale';
+// Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+import { OrderHistoryService } from '../../orders/order-history/order-history.service';
 
 /**
  * El tipo de evento con el que queda anotada una venta cobrada que se quedó
@@ -23,6 +26,12 @@ const UNCOVERED_SALE_EVENT_TYPE = 'pos_sale_without_fiscal_document';
  * índice `[resource_type, resource_id]` no mezcle dos numeraciones distintas.
  */
 const UNCOVERED_SALE_RESOURCE_TYPE = 'order';
+
+/**
+ * Estados de factura sobre los que el banner «Factura sin emitir / Emitir
+ * manualmente» mentiría: el documento fue anulado a propósito.
+ */
+const DELIBERATELY_VOIDED_INVOICE_STATUSES = ['voided', 'cancelled'];
 
 /**
  * EL CARRIL DE EMISIÓN DEL POS.
@@ -74,6 +83,8 @@ export class PosFiscalEmissionService {
     private readonly invoice_flow: InvoiceFlowService,
     private readonly retry_queue: InvoiceRetryQueueService,
     private readonly fiscal_scope: FiscalScopeService,
+    // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
+    private readonly orderHistory: OrderHistoryService,
   ) {}
 
   /**
@@ -88,7 +99,139 @@ export class PosFiscalEmissionService {
     // mismo sitio. Registrarlo en cada `return this.failed(...)` era invitar a
     // que la próxima rama nueva se olvidara, y la rama olvidada sería
     // precisamente una venta sin documento de la que nadie se entera.
-    return this.registerFailure(await this.runEmission(order_id), order_id);
+    const status = await this.registerFailure(
+      await this.runEmission(order_id),
+      order_id,
+    );
+    // Emitido: si una emisión AUTOMÁTICA anterior había dejado el banner de
+    // fallo, ya no aplica. Vale para cualquier llamador (listener o el
+    // «Reintentar» manual del POS), igual que `autoSendOrderInvoice` limpia al
+    // encontrar la factura aceptada.
+    if (status.state === 'issued') {
+      await this.clearAutoSendFailedAlert(order_id);
+      await this.recordInvoiceIssued(order_id, status);
+    }
+    return status;
+  }
+
+  /**
+   * Registra `invoice_issued` en `order_events` la PRIMERA vez que este
+   * pedido queda `issued`. `emitForOrder` es idempotente y se reinvoca
+   * (cron de reintento, botón manual, listener), así que sin este guard cada
+   * reinvocación sobre una factura ya aceptada escribiría una fila duplicada.
+   * Nunca lanza: la venta ya está cobrada (misma regla que el resto del
+   * archivo).
+   */
+  private async recordInvoiceIssued(
+    order_id: number,
+    status: PosFiscalStatus,
+  ): Promise<void> {
+    try {
+      const already = await this.prisma.order_events.findFirst({
+        where: { order_id, event_type: 'invoice_issued' },
+        select: { id: true },
+      });
+      if (already) return;
+
+      const order = await this.prisma.orders.findFirst({
+        where: { id: order_id },
+        select: { store_id: true, stores: { select: { organization_id: true } } },
+      });
+      if (!order) return;
+
+      await this.orderHistory.record(this.prisma, {
+        orderId: order_id,
+        storeId: order.store_id,
+        organizationId: order.stores?.organization_id ?? undefined,
+        type: 'invoice_issued',
+        payload: {
+          invoice_id: status.invoice_id,
+          invoice_number: status.invoice_number,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `POS: no se pudo registrar invoice_issued en order_events para el pedido #${order_id}: ${this.describe(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Marca `orders.fiscal_alert_code = INVOICE_AUTO_SEND_FAILED` cuando la
+   * emisión AUTOMÁTICA (listener de `POS_SALE_COMPLETED_EVENT`) terminó en
+   * `failed`. Es la contraparte del carril POS de lo que
+   * `WebhookHandlerService.autoSendOrderInvoice` hace para tienda en línea;
+   * desde que el listener es el único dueño de la emisión de una venta
+   * presencial confirmada por webhook, sin esto el fallo sólo llegaba a la
+   * cola / `fiscal_operation_events` y el detalle de la orden no mostraba nada.
+   *
+   * Misma semántica que `autoSendOrderInvoice`:
+   *  - sólo `failed` marca. `pending` (reintento vivo), `contingency` y
+   *    `not_applicable` (tienda no habilitada) NO son un fallo que pida
+   *    intervención — el webhook tampoco marca por inelegibilidad.
+   *  - antes de marcar se relee la factura: si ya quedó `accepted` (un envío
+   *    manual concurrente ganó) se LIMPIA en vez de levantar una falsa alarma.
+   *
+   * Dos guardas que el webhook no tiene, a propósito:
+   *  - una factura `voided`/`cancelled` no se marca: «Emitir manualmente»
+   *    sobre una anulación deliberada sería una instrucción falsa.
+   *  - nunca pisa un código AJENO (p. ej. `POS_EXCLUSIVE_TAX_DOUBLE`, que
+   *    ordena NO emitir): sólo escribe sobre `null` o sobre su propio código.
+   *
+   * Nunca lanza: el cobro ya está confirmado.
+   */
+  async markAutoSendFailedAlert(
+    order_id: number,
+    status?: PosFiscalStatus,
+  ): Promise<void> {
+    try {
+      if (status && status.state !== 'failed') return;
+      const current = await this.findLatestSalesInvoice(order_id);
+      if (current?.status === 'accepted') {
+        await this.clearAutoSendFailedAlert(order_id);
+        return;
+      }
+      if (
+        current &&
+        DELIBERATELY_VOIDED_INVOICE_STATUSES.includes(current.status)
+      ) {
+        return;
+      }
+      await this.prisma.orders.updateMany({
+        where: {
+          id: order_id,
+          OR: [
+            { fiscal_alert_code: null },
+            { fiscal_alert_code: INVOICE_AUTO_SEND_FAILED_ALERT },
+          ],
+        },
+        data: { fiscal_alert_code: INVOICE_AUTO_SEND_FAILED_ALERT },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `POS: no se pudo marcar la alerta fiscal del pedido #${order_id}: ${this.describe(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Limpia el banner de auto-envío fallido. Sólo borra SU código: un
+   * `fiscal_alert_code` ajeno sigue en pie aunque el documento haya salido.
+   */
+  private async clearAutoSendFailedAlert(order_id: number): Promise<void> {
+    try {
+      await this.prisma.orders.updateMany({
+        where: {
+          id: order_id,
+          fiscal_alert_code: INVOICE_AUTO_SEND_FAILED_ALERT,
+        },
+        data: { fiscal_alert_code: null },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `POS: no se pudo limpiar la alerta fiscal del pedido #${order_id}: ${this.describe(error)}`,
+      );
+    }
   }
 
   private async runEmission(order_id: number): Promise<PosFiscalStatus> {
@@ -629,21 +772,41 @@ export class PosFiscalEmissionService {
       return;
     }
 
-    await this.prisma.fiscal_operation_events.create({
-      data: {
+    // La lectura y la escritura deben compartir transacción Y lock: dos
+    // listeners pueden fallar a la vez antes de que exista la primera fila.
+    // Sin índice único, este lock serializa sólo a los productores que usan
+    // esta ruta; una escritura ajena aún podría duplicar la constancia.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        `pos_uncovered_sale:${organization_id}:${store_id ?? 'none'}:${order_id}`,
+      );
+
+      const where = {
         organization_id,
         store_id,
         accounting_entity_id,
         event_type: UNCOVERED_SALE_EVENT_TYPE,
         resource_type: UNCOVERED_SALE_RESOURCE_TYPE,
         resource_id: order_id,
-        new_status: 'failed',
-        actor_user_id: RequestContextService.getUserId() ?? null,
-        metadata: {
-          error_code: ErrorCodes.INVOICING_FISCAL_COVERAGE_001.code,
-          error: message,
+      };
+      const existing = await tx.fiscal_operation_events.findFirst({
+        where,
+        select: { id: true },
+      });
+      if (existing) return;
+
+      await tx.fiscal_operation_events.create({
+        data: {
+          ...where,
+          new_status: 'failed',
+          actor_user_id: RequestContextService.getUserId() ?? null,
+          metadata: {
+            error_code: ErrorCodes.INVOICING_FISCAL_COVERAGE_001.code,
+            error: message,
+          },
         },
-      },
+      });
     });
   }
 

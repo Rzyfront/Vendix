@@ -45,10 +45,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       allow_public_access: false,
     },
 
-    // Ecommerce storefront — solo defaults del bloque checkout. Todo en
-    // `false` preserva el comportamiento actual (las lecturas usan `!!` o
-    // comparan contra `false`). `require_payment_receipt` es opt-in: ausente
-    // ⇒ comprobante opcional.
+    // Ecommerce storefront — solo defaults de los bloques checkout y orders.
+    // Todo en `false` preserva el comportamiento actual (las lecturas usan
+    // `!!` o comparan contra `false`). `require_payment_receipt` es opt-in:
+    // ausente ⇒ comprobante opcional. `orders.hide_*` es opt-out: ausente
+    // ⇒ sección visible (las lecturas comparan `!== true`).
     ecommerce: {
       enabled: false,
       checkout: {
@@ -58,6 +59,10 @@ export function getDefaultStoreSettings(): StoreSettings {
         terms_required: false,
         guest_newsletter_opt_in: false,
         require_payment_receipt: false,
+      },
+      orders: {
+        hide_tracking_progress: false,
+        hide_prep_eta: false,
       },
     },
 
@@ -98,6 +103,12 @@ export function getDefaultStoreSettings(): StoreSettings {
       // Low-stock alerts evaluate the main location only by default; override
       // to `all_locations` to aggregate stock across the entire store.
       low_stock_alerts_scope: 'main_location',
+      // docs/plans/no-overselling-stock-guard-plan.md (step 9, 2026-09-26) —
+      // default true so no store's kitchen changes behavior on deploy: Pollo
+      // Arabe (store 105) cooks today with 18 of 24 tracked ingredients at 0.
+      // Missing/null must resolve to `true` (see mergeStoreSettingsWithDefaults
+      // and StockValidatorService.resolveInventoryPolicy) — never `?? false`.
+      allow_ingredient_overuse: true,
     },
     checkout: {
       require_customer_data: true,
@@ -130,9 +141,6 @@ export function getDefaultStoreSettings(): StoreSettings {
       // DTO garantiza que nunca se guarde true con allow_alias_sales=false.
       allow_alias_sales: false,
       alias_sales_as_default: false,
-      // F-127 — la compuerta fiscal por linea nace BLOQUEANTE: sin esta
-      // clave configurada el comportamiento es identico al de siempre.
-      tax_line_gate: 'block' as const,
       business_hours: getDefaultBusinessHours(),
       schedule_mode: 'continuous',
       enable_schedule_validation: false,
@@ -455,6 +463,12 @@ export function getDefaultStoreSettings(): StoreSettings {
       default_settlement_type: 'none',
       default_cost_settlement_timing: 'immediate_on_close',
       requires_dispatch_address: true,
+      // QUI-844 — métodos ofrecidos en el selector de despacho. Opt-out: la
+      // tienda apaga los que no usa; el merge con defaults cubre tiendas
+      // existentes sin estos keys.
+      enable_dispatch_with_remision: true,
+      enable_dispatch_direct_delivery: true,
+      enable_dispatch_to_pool: true,
     },
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is

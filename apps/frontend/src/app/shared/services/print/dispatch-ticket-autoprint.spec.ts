@@ -14,8 +14,8 @@ import type { PrintTrigger } from './document-print.service';
  *     `direct_delivery`, `pickup`, `dine_in`, `other` → `false`.
  *
  *   - `counterEnabled === true` (enmienda): imprime además para
- *     `direct_delivery` y `pickup` (mostrador y para llevar; el cliente
- *     paga y espera, reclama con el tiquete).
+ *     `direct_delivery` (mostrador, incluido Para llevar) y `pickup`
+ *     (recogida diferida); el cliente reclama con el tiquete.
  *     `dine_in` y `other` SIGUEN en `false` aunque el interruptor
  *     esté prendido — ese es el borde que se rompe si la condición
  *     queda al revés.
@@ -69,7 +69,7 @@ describe('shouldAutoPrintDispatchTicket (predicado del tiquete de despacho)', ()
     }> = [
       { name: 'direct_delivery (mostrador) → false', deliveryType: 'direct_delivery', trigger: 'automatic', expected: false },
       { name: 'direct_delivery + isShippingSale → false', deliveryType: 'direct_delivery', isShippingSale: true, trigger: 'automatic', expected: false },
-      { name: 'pickup (para llevar) → false', deliveryType: 'pickup', trigger: 'automatic', expected: false },
+      { name: 'pickup (recogida diferida) → false', deliveryType: 'pickup', trigger: 'automatic', expected: false },
       { name: 'home_delivery → true', deliveryType: 'home_delivery', trigger: 'automatic', expected: true },
       { name: 'null + isShippingSale → true', deliveryType: null, isShippingSale: true, trigger: 'automatic', expected: true },
       { name: 'null sin shipping → false', deliveryType: null, trigger: 'automatic', expected: false },
@@ -92,7 +92,7 @@ describe('shouldAutoPrintDispatchTicket (predicado del tiquete de despacho)', ()
   // ─── counterEnabled = true (enmienda 2026-08-31) ─────────────────────
   // Comportamiento NUEVO. El borde a defender: `dine_in` y `other` siguen
   // en false aunque el interruptor esté prendido.
-  describe('counterEnabled = true (mostrador y para llevar)', () => {
+  describe('counterEnabled = true (mostrador y recogida diferida)', () => {
     const ON = true;
 
     const cases: ReadonlyArray<{
@@ -102,10 +102,10 @@ describe('shouldAutoPrintDispatchTicket (predicado del tiquete de despacho)', ()
       trigger: PrintTrigger;
       expected: boolean;
     }> = [
-      // ── nuevos: mostrador y para llevar imprimen ────────────────────
-      { name: 'direct_delivery (mostrador) → true', deliveryType: 'direct_delivery', trigger: 'automatic', expected: true },
+      // ── mostrador/Para llevar y recogida diferida imprimen ──────────
+      { name: 'direct_delivery (Para llevar inmediato) → true', deliveryType: 'direct_delivery', trigger: 'automatic', expected: true },
       { name: 'direct_delivery explicit → true', deliveryType: 'direct_delivery', trigger: 'explicit', expected: true },
-      { name: 'pickup (para llevar) → true', deliveryType: 'pickup', trigger: 'automatic', expected: true },
+      { name: 'pickup (recogida diferida) → true', deliveryType: 'pickup', trigger: 'automatic', expected: true },
       { name: 'pickup explicit → true', deliveryType: 'pickup', trigger: 'explicit', expected: true },
       { name: 'direct_delivery + isShippingSale → true', deliveryType: 'direct_delivery', isShippingSale: true, trigger: 'automatic', expected: true },
 

@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "message": "Session closed successfully",
+  "error_code": null,
+  "data": {
+    "id": 115,
+    "status": "closed",
+    "expected_closing_amount": "0",
+    "actual_closing_amount": "0",
+    "difference": "0"
+  }
+}

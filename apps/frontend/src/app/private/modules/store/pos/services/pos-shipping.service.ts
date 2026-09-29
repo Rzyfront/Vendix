@@ -1,10 +1,10 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
-import { PosShippingMethod, PosShippingOption } from '../models/shipping.model';
+import { PosManualShippingQuote, PosShippingMethod, PosShippingOption } from '../models/shipping.model';
 
 @Injectable({
   providedIn: 'root',
@@ -44,6 +44,9 @@ export class PosShippingService {
       state_province?: string;
       city?: string;
       address_line1?: string;
+      postal_code?: string;
+      latitude?: number;
+      longitude?: number;
     },
   ): Observable<PosShippingOption[]> {
     const storeId = this.storeContextService.getStoreIdOrThrow();
@@ -58,9 +61,19 @@ export class PosShippingService {
           const options = response.data || response;
           return Array.isArray(options) ? options : [];
         }),
-        catchError((error) => {
-          return of([]);
-        }),
+        catchError((error) => throwError(() => error)),
       );
+  }
+
+  quoteManualShipping(
+    shippingMethodId: number,
+    shippingRateId: number,
+    manualShippingPrice: number,
+  ): Observable<PosManualShippingQuote> {
+    return this.http.post<any>(`${this.apiUrl}/manual-quote`, {
+      shipping_method_id: shippingMethodId,
+      shipping_rate_id: shippingRateId,
+      manual_shipping_price: manualShippingPrice,
+    }).pipe(map((response) => response.data || response));
   }
 }

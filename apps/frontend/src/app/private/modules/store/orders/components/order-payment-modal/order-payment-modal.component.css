@@ -346,3 +346,28 @@
     gap: 16px;
   }
 }
+.payment-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.credit-cap,
+.credit-cap-error {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+}
+
+.credit-cap {
+  color: var(--color-text-secondary);
+  background: var(--color-background);
+}
+
+.credit-cap-error {
+  color: var(--color-error);
+  border: 1px solid var(--color-error);
+  background: var(--color-surface);
+}

@@ -1,0 +1,6 @@
+{
+  "statusCode": 409,
+  "error_code": "ORD_PAY_ALREADY_PAID_001",
+  "message": "Order is already fully paid",
+  "details": null
+}

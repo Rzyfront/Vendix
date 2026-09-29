@@ -16,6 +16,7 @@ export interface PrintFormatDefinitionSeed {
     title: string;
     enabled: boolean;
     order: number;
+    show_sku?: boolean;
     fields?: Array<{
       id: string;
       key: string;
@@ -64,7 +65,7 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
       },
       styles: {
         font_family: 'Arial, Helvetica, sans-serif',
-        font_size_base_pt: 9,
+        font_size_base_pt: 8.5,
         primary_color: '#000000',
         header_alignment: 'center',
         compact_mode: true,
@@ -115,6 +116,7 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
           title: 'Detalle de Productos',
           enabled: true,
           order: 4,
+          show_sku: false,
         },
         {
           id: 'sec_totals',
@@ -140,6 +142,7 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
           order: 6,
           fields: [
             { id: 'f_msg', key: 'receipts.receipt_footer', label: 'Mensaje de Despedida', enabled: true, position: 'center' },
+            { id: 'f_disclaimer', key: 'document.non_fiscal_disclaimer', label: 'Leyenda No Fiscal', enabled: true, position: 'center' },
             { id: 'f_powered', key: 'system.powered_by', label: 'Firma del Sistema', enabled: true, position: 'center' },
           ],
         },
@@ -147,8 +150,7 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
       columns: [
         { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 50, align: 'left', format: 'text' },
         { id: 'col_qty', key: 'quantity', label: 'Cant.', enabled: true, width_percent: 15, align: 'center', format: 'number' },
-        { id: 'col_price', key: 'unit_price', label: 'Precio', enabled: true, width_percent: 15, align: 'right', format: 'currency' },
-        { id: 'col_tot', key: 'total_price', label: 'Total', enabled: true, width_percent: 20, align: 'right', format: 'currency' },
+        { id: 'col_tot', key: 'total_price', label: 'Total', enabled: true, width_percent: 35, align: 'right', format: 'currency' },
       ],
     },
   },
@@ -175,7 +177,7 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
         { id: 'sec_dian_header', type: 'fiscal_header', title: 'Cabecera Fiscal Emisor y Resolución', enabled: true, order: 1 },
         { id: 'sec_doc_info', type: 'document_info', title: 'Datos de la Venta', enabled: true, order: 2 },
         { id: 'sec_dian_buyer', type: 'fiscal_buyer_info', title: 'Datos del Adquirente', enabled: true, order: 3 },
-        { id: 'sec_items', type: 'items_table', title: 'Detalle de Bienes / Servicios', enabled: true, order: 4 },
+        { id: 'sec_items', type: 'items_table', title: 'Detalle de Bienes / Servicios', enabled: true, order: 4, show_sku: false },
         { id: 'sec_totals', type: 'totals_summary', title: 'Liquidación Total', enabled: true, order: 5 },
         { id: 'sec_dian_taxes', type: 'fiscal_tax_breakdown', title: 'Discriminación de Impuestos (IVA/INC)', enabled: true, order: 6 },
         { id: 'sec_dian_cufe', type: 'fiscal_cufe_box', title: 'CUFE y Validación DIAN', enabled: true, order: 7 },
@@ -500,7 +502,7 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
       sections: [
         { id: 'sec_header', type: 'header', title: 'Encabezado Comanda', enabled: true, order: 1 },
         { id: 'sec_table_info', type: 'table_info', title: 'Mesa, Mesero y Turno', enabled: true, order: 2 },
-        { id: 'sec_items', type: 'kitchen_items', title: 'Platos y Modificadores', enabled: true, order: 3 },
+        { id: 'sec_items', type: 'kitchen_items', title: 'Platos y Modificadores', enabled: true, order: 3, show_sku: false },
         { id: 'sec_notes', type: 'custom_notes', title: 'Observaciones de Cocina', enabled: true, order: 4 },
       ],
       columns: [
@@ -544,7 +546,7 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
         { id: 'sec_header', type: 'header', title: 'Encabezado Despacho', enabled: true, order: 1 },
         { id: 'sec_doc_info', type: 'document_info', title: 'Datos de la Orden', enabled: true, order: 2 },
         { id: 'sec_customer', type: 'customer_info', title: 'Cliente y Dirección de Entrega', enabled: true, order: 3 },
-        { id: 'sec_items', type: 'items_table', title: 'Productos a Despachar', enabled: true, order: 4 },
+        { id: 'sec_items', type: 'items_table', title: 'Productos a Despachar', enabled: true, order: 4, show_sku: false },
         { id: 'sec_footer', type: 'footer', title: 'Despachado por', enabled: true, order: 5 },
       ],
       columns: [
@@ -555,8 +557,8 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
         //   - `dispatched_qty` (cant. despachada — items[].dispatched_qty, directo)
         // Antes P1.5 estas claves leían undefined y la tabla salía vacía.
         { id: 'col_idx', key: 'index', label: '#', enabled: true, width_percent: 8, align: 'center', format: 'number' },
-        { id: 'col_sku', key: 'variant_sku', label: 'SKU / Código', enabled: true, width_percent: 30, align: 'left', format: 'text' },
-        { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 32, align: 'left', format: 'text' },
+        { id: 'col_sku', key: 'variant_sku', label: 'SKU / Código', enabled: false, width_percent: 30, align: 'left', format: 'text' },
+        { id: 'col_desc', key: 'product_name', label: 'Descripción', enabled: true, width_percent: 62, align: 'left', format: 'text' },
         { id: 'col_qty', key: 'quantity', label: 'Cant. Pedida', enabled: true, width_percent: 15, align: 'center', format: 'number' },
         { id: 'col_disp', key: 'dispatched_qty', label: 'Cant. Despachada', enabled: true, width_percent: 15, align: 'center', format: 'number' },
       ],

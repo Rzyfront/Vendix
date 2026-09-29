@@ -1,0 +1,6 @@
+taxLineGateSeverity/payments.pos_table_line_tax_unresolvable in PaymentsService: 0
+tax_line_gate or POS_TABLE_LINE_TAX_UNRESOLVABLE_001 in frontend: 0
+tax_line_gate in defaults: 0
+POS_TABLE_LINE_TAX_UNRESOLVABLE_001 launcher in backend: 0 (catalog only)
+settings JSON semantic diff after full-section PATCH: equal
+payments.service.spec.ts: 104/104 passed

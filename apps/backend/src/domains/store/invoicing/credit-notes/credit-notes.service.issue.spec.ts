@@ -154,4 +154,27 @@ describe('CreditNotesService issue/notes (CP-nc-nd-auto-orden-reembolso)', () =>
       }),
     );
   });
+
+  it('notes incluye refund_id en el select: el frontend compara n.refund_id === refund.id (order-details-page.component.ts)', async () => {
+    const notes = [{ id: 21, invoice_type: 'credit_note', refund_id: 77 }];
+    const findMany = jest.fn().mockResolvedValue(notes);
+    const { service } = createService({
+      prisma: {
+        invoices: {
+          findFirst: jest.fn().mockResolvedValue({ id: 12, accounting_entity_id: 3 }),
+          findMany,
+        },
+      },
+    });
+
+    const result = await service.findNotesByRelatedInvoice(12);
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ refund_id: true }),
+      }),
+    );
+    expect(result).toEqual(notes);
+    expect(result[0]).toHaveProperty('refund_id', 77);
+  });
 });

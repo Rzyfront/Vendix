@@ -1,0 +1,8 @@
+{
+  "statusCode": 409,
+  "error_code": "ORD_CANCEL_OPEN_TABLE_001",
+  "message": "La orden pertenece a una mesa abierta; cierra la cuenta desde Mesas antes de cancelarla.",
+  "details": {
+    "table_session_id": 103
+  }
+}

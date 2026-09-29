@@ -35,6 +35,21 @@ import {
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
+  VexiFillFormResult,
+  vexiCollectValidationErrors,
+} from '../../../../../core/services/vexi-ui-host.registry';
+
+/** Field names `ui_fill_form` understands on this form (G1). */
+export const PRODUCT_CREATE_FILLABLE_FIELDS = [
+  'name',
+  'description',
+  'base_price',
+  'price',
+  'sku',
+  'barcode',
+  'state',
+] as const;
+import {
   Product,
   ProductState,
   ProductCategory,
@@ -57,6 +72,7 @@ import {
 } from '../utils/product-tax-inclusive.util';
 import { CategoryQuickCreateComponent } from './category-quick-create.component';
 import { TaxQuickCreateComponent } from './tax-quick-create.component';
+import { taxCategoryBlockReason } from '../utils/product-tax-combination.util';
 import { AccountCodeSelectComponent } from './account-code-select.component';
 
 @Component({
@@ -95,6 +111,13 @@ export class ProductCreateModalComponent {
   readonly isOpen = model<boolean>(false);
   readonly isSubmitting = input<boolean>(false);
   readonly product = input<Product | null>(null);
+  /**
+   * Release-853 regresión (paso 4): página actual del listado (`pagination().page`
+   * en `products.component.ts`), para que "Formulario avanzado" (creación) la
+   * propague igual que `navigateToEditPage` ya hace al editar. El modal no
+   * conoce la paginación por sí mismo — se la pasa el listado que lo abre.
+   */
+  readonly currentPage = input<number>(1);
   readonly submit = output<any>();
   readonly cancel = output<void>();
 
@@ -105,7 +128,7 @@ export class ProductCreateModalComponent {
   productForm: FormGroup = this.createForm();
   categoryOptions = signal<SelectorOption[]>([]);
   brandOptions = signal<SelectorOption[]>([]);
-  taxCategoryOptions = signal<MultiSelectorOption[]>([]);
+  private readonly baseTaxCategoryOptions = signal<MultiSelectorOption[]>([]);
 
   readonly taxInclusiveMap = signal<Record<number, boolean>>({});
 
@@ -122,6 +145,25 @@ export class ProductCreateModalComponent {
     return ids
       .map((id) => this.allTaxCategories.find((c) => c.id === id))
       .filter((c): c is TaxCategory => !!c);
+  });
+
+  /**
+   * P1-4 — opciones del selector con la combinación legal aplicada (espejo
+   * del 400 PROD_TAX_COMBO_001): lo que chocaría con la selección actual se
+   * deshabilita con el motivo. `allTaxCategories` no es señal, pero cambia
+   * siempre junto a `baseTaxCategoryOptions`, que sí invalida el computed.
+   */
+  readonly taxCategoryOptions = computed<MultiSelectorOption[]>(() => {
+    const base = this.baseTaxCategoryOptions();
+    const selectedIds = new Set(this.selectedTaxCategoryIds() || []);
+    const selected = this.allTaxCategories.filter((c) => selectedIds.has(c.id));
+    return base.map((opt) => {
+      const cat = this.allTaxCategories.find((c) => c.id === opt.value);
+      const reason = cat ? taxCategoryBlockReason(cat, selected) : null;
+      return reason
+        ? { ...opt, description: reason, disabled: true, icon: 'ban' }
+        : opt;
+    });
   });
 
   isTaxInclusive(taxId: number): boolean {
@@ -269,6 +311,7 @@ export class ProductCreateModalComponent {
 
     this.router.navigate(['/admin/products/create'], {
       state: { draft: draftData },
+      queryParams: { fromPage: this.currentPage() },
     });
     this.onCancel();
   }
@@ -381,7 +424,7 @@ export class ProductCreateModalComponent {
         this.taxInclusiveMap.set(map);
 
         if (taxCategories.length > 0) {
-          this.taxCategoryOptions.set(taxCategories.map((cat: TaxCategory) => {
+          this.baseTaxCategoryOptions.set(taxCategories.map((cat: TaxCategory) => {
             const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
             const rate = parseFloat(String(rawRate));
             const finalRate = isNaN(rate) ? 0 : rate;
@@ -451,7 +494,7 @@ export class ProductCreateModalComponent {
     const rawRate = taxCategory.rate ?? taxCategory.tax_rates?.[0]?.rate ?? 0;
     const rate = parseFloat(String(rawRate));
     const finalRate = isNaN(rate) ? 0 : rate;
-    this.taxCategoryOptions.update(options => [
+    this.baseTaxCategoryOptions.update(options => [
       ...options,
       {
         value: taxCategory.id,
@@ -591,5 +634,58 @@ export class ProductCreateModalComponent {
   formatStatus(status: string | undefined): string {
     if (!status) return 'Unknown';
     return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+
+  // --- Vexi fillForm (G1) ---
+
+  /**
+   * Fills this form on Vexi's behalf. NEVER submits: the person reviews and
+   * saves through the modal's own buttons.
+   *
+   * `price` is an alias for `base_price`. Multi-selects (`category_ids`,
+   * `brand_ids`, `tax_category_ids`) are deliberately not fillable: they need
+   * resolved ids the chat cannot guess, and a wrong tax assignment is worse
+   * than an empty one the person picks.
+   */
+  vexiFillForm(values: Record<string, unknown>): VexiFillFormResult {
+    const applied: string[] = [];
+    const unknown: string[] = [];
+
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined || value === null || value === '') continue;
+      const target = key === 'price' ? 'base_price' : key;
+      const control = this.productForm.get(target);
+      if (
+        !control ||
+        ['category_ids', 'brand_ids', 'tax_category_ids'].includes(target)
+      ) {
+        unknown.push(key);
+        continue;
+      }
+      if (target === 'base_price') {
+        const price = Number(value);
+        if (!Number.isFinite(price)) {
+          unknown.push(key);
+          continue;
+        }
+        control.setValue(price);
+      } else {
+        control.setValue(String(value));
+      }
+      control.markAsTouched();
+      applied.push(key);
+    }
+
+    this.productForm.updateValueAndValidity();
+    const validation_errors = vexiCollectValidationErrors(this.productForm, {
+      name: 'El nombre',
+      description: 'La descripción',
+      base_price: 'El precio base',
+      sku: 'El SKU',
+      barcode: 'El código de barras',
+      state: 'El estado',
+    });
+
+    return { applied, unknown, validation_errors, valid: this.productForm.valid };
   }
 }

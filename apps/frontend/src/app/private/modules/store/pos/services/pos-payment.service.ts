@@ -1,10 +1,13 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, of, throwError, Subject } from 'rxjs';
-import { catchError, map, timeout, delay } from 'rxjs/operators';
+import { catchError, map, switchMap, timeout, delay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
-import { parseApiError } from '../../../../../core/utils/parse-api-error';
+import {
+  parseApiError,
+  type InsufficientStockItem,
+} from '../../../../../core/utils/parse-api-error';
 import { PaymentMethodsCatalogService } from '../../../../../shared/services/payment-methods-catalog.service';
 import { PosCashRegisterService } from './pos-cash-register.service';
 import { CartItem, CartState } from '../models/cart.model';
@@ -18,8 +21,54 @@ import {
 import {
   PosShippingAddress,
   PosShippingSaleData,
+  posShippingRateIdForPayload,
 } from '../models/shipping.model';
 import { PosApiService } from './pos-api.service';
+import type { TableStatus } from '../../restaurant-ops/tables/interfaces';
+// B15(2) — cobro multimétodo sobre una orden adoptada: reusa el mismo
+// `flow/pay` que ya usa `pos-payment-step.component.ts` para el borrador
+// reabierto (`editingOrderId`). Servicio compartido, solo se CONSUME aquí
+// (no se edita `order-flow.service.ts` ni el controlador backend).
+import { StoreOrdersService } from '../../orders/services/store-orders.service';
+
+export interface PosSalePaymentResponse {
+  /** flow/pay reuses the checkout step but has no success flag. */
+  success?: boolean;
+  order?: any;
+  payment?: any;
+  /**
+   * Cobro multimétodo: un elemento por tramo, con la MISMA forma que
+   * `payment`. Solo presente cuando el cobro usó `payments[]`; el escalar
+   * no la trae y `payment` sigue siendo el primero.
+   */
+  payments?: PosPaymentLegResult[];
+  message?: string;
+  change?: number;
+  nextAction?: { type: 'redirect' | '3ds' | 'await' | 'none'; url?: string; data?: any };
+  previous_table_status?: TableStatus;
+}
+
+/**
+ * Tramo de un cobro multimétodo de contado (`PaymentLegDto` del backend).
+ * Claves snake_case EXACTAS: `forbidNonWhitelisted` rechaza cualquier otra.
+ */
+export interface PosPaymentLeg {
+  store_payment_method_id: number;
+  amount: number;
+  amount_received?: number;
+  payment_reference?: string;
+  bank_account_id?: number;
+}
+
+/** Tramo tal como lo devuelve `POST /store/payments/pos` (forma de `payment`). */
+export interface PosPaymentLegResult {
+  id: number;
+  amount: number;
+  payment_method: string;
+  status: string;
+  transaction_id?: string;
+  change?: number;
+}
 
 // Re-export types for component usage
 export type {
@@ -28,6 +77,29 @@ export type {
   PaymentResponse,
   Transaction,
 } from '../models/payment.model';
+
+/**
+ * B7 — la nota de envío viajaba SOLO en `internal_notes`, columna que
+ * `order-flow.service.ts` reescribe como metadata JSON (`_flow_metadata`) en
+ * la primera transición de estado; los proveedores de impresión (p.ej.
+ * `dispatch-ticket.provider.ts`) leen `order.notes`, una columna DISTINTA que
+ * el backend ya acepta (`CreatePosPaymentDto.notes`) pero que el POS nunca
+ * poblaba. Se arma aquí, en un solo lugar, para venta con envío y borrador:
+ * la nota de entrega (etiquetada, para no confundirla con la nota general
+ * del carrito) + la nota del carrito si también existe. `internal_notes` NO
+ * se toca — sigue recibiendo lo mismo que hoy.
+ */
+function buildShippingNotes(
+  cartNotes: string | null | undefined,
+  deliveryNotes: string | null | undefined,
+): string {
+  const parts: string[] = [];
+  const cart = (cartNotes || '').trim();
+  const delivery = (deliveryNotes || '').trim();
+  if (cart) parts.push(cart);
+  if (delivery) parts.push(`Nota de envío: ${delivery}`);
+  return parts.join(' | ');
+}
 
 /**
  * CP-POS-CREAR-EDITAR-COBRAR-001 / B.3 + vendix-error-handling:
@@ -42,6 +114,12 @@ export type {
  * backend `message`, and otherwise uses `DEFAULT_ERROR_MESSAGE`) and rethrows
  * an `Error` with `errorCode` and `details` attached as own properties so the
  * caller can do `if (err.errorCode === 'POS_CUSTOMER_REQUIRED_001') ...`.
+ *
+ * No-overselling guard (`INV_STOCK_INSUFFICIENT_LINES` / `INV_STOCK_002`):
+ * also attaches `stockShortages` — the same normalized list `parseApiError`
+ * already computes — so a caller can render the itemized product/insumo
+ * list instead of just the flat `userMessage` string, without re-parsing
+ * `details` itself.
  */
 function rethrowApiError<T = never>(error: unknown): Observable<T> {
   const parsed = parseApiError(error);
@@ -49,15 +127,27 @@ function rethrowApiError<T = never>(error: unknown): Observable<T> {
     errorCode: string | null;
     details: unknown;
     devMessage: string | null;
+    stockShortages?: InsufficientStockItem[];
   };
   wrapped.errorCode = parsed.errorCode;
   wrapped.details = parsed.details;
   wrapped.devMessage = parsed.devMessage;
+  if (parsed.stockShortages?.length) {
+    wrapped.stockShortages = parsed.stockShortages;
+  }
   // Preserve the original HttpErrorResponse so consumers that need the
   // raw status (network errors, retry policies) still have it.
   (wrapped as any).cause = error;
   return throwError(() => wrapped);
 }
+
+/**
+ * Contrato congelado con el backend (plan pos-draft-without-cash-session,
+ * paso 4): HTTP 409 cuando un cobro exige caja abierta y el usuario no
+ * tiene sesión (`require_session_for_sales` activo). Mensaje UX:
+ * "Abre tu caja para registrar pagos."
+ */
+const CASH_SESSION_REQUIRED_CODE = 'CASH_SESSION_REQUIRED_001';
 
 @Injectable({
   providedIn: 'root',
@@ -96,6 +186,36 @@ export class PosPaymentService {
     );
   }
 
+  /**
+   * Paso 4 del plan: cuando el backend rechaza un cobro con
+   * `CASH_SESSION_REQUIRED_001`, se reutiliza la UX de la validación local
+   * (emitir `_sessionRequired` para que `pos.component.ts` abra el modal de
+   * apertura de caja) y se relanza el error normalizado para que el
+   * llamador siga ramificando por `errorCode`.
+   */
+  private rethrowChargeError(error: unknown): Observable<never> {
+    this.emitSessionRequiredIfCashGate(error);
+    return rethrowApiError(error);
+  }
+
+  /**
+   * Emite `_sessionRequired` solo ante el gate de caja del backend.
+   * Tolera el `HttpErrorResponse` crudo (llamadas `http.post` directas) y
+   * el wrapper `buildApiError` (`StoreOrdersService.flowPayOrder`, que trae
+   * `errorCode` en camelCase y el crudo en `cause`): pasarle el wrapper tal
+   * cual a `parseApiError` siempre daría `errorCode: null`.
+   */
+  private emitSessionRequiredIfCashGate(error: unknown): void {
+    const wrapped = error as { errorCode?: unknown; cause?: unknown } | null;
+    const directCode =
+      typeof wrapped?.errorCode === 'string' ? wrapped.errorCode : null;
+    const code =
+      directCode ?? parseApiError(wrapped?.cause ?? error).errorCode;
+    if (code === CASH_SESSION_REQUIRED_CODE) {
+      this._sessionRequired.next();
+    }
+  }
+
   private transactions: Transaction[] = [];
 
   constructor(
@@ -104,6 +224,7 @@ export class PosPaymentService {
     private cashRegisterService: PosCashRegisterService,
     private paymentMethodsCatalog: PaymentMethodsCatalogService,
     private posApi: PosApiService,
+    private ordersService: StoreOrdersService,
   ) {}
 
   /**
@@ -216,6 +337,9 @@ export class PosPaymentService {
       price_override_reason: item.isPriceOverridden
         ? item.priceOverrideReason
         : undefined,
+      // E.1: exact cashier-confirmed units reach the transactional stock/serial seam.
+      ...(!isCustomItem && item.serial_ids?.length ? { serial_ids: item.serial_ids } : {}),
+      ...(!isCustomItem && item.serial_numbers?.length ? { serial_numbers: item.serial_numbers } : {}),
       // Plan KDS fire-flows (F1): forward the cashier's "usar stock" intent
       // from the cart so the backend can persist it on order_items and
       // route the line through the payment-side inventory decrement
@@ -354,7 +478,7 @@ export class PosPaymentService {
           };
         }
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -380,7 +504,11 @@ export class PosPaymentService {
     // QUI-653 — decisión "Para llevar" de la orden (el shell la computa como
     // `isTakeawayOrder`). Se estampa en las líneas sin mutar el carrito.
     takeawayOrder?: boolean | null,
-  ): Observable<any> {
+    /** Route a serialized adopted draft through the POS order transaction, not flow/pay. */
+    usePosOrderTransaction = false,
+    // QUI-653 (PR #840): delivery decision stamped on lines without mutating cart.
+    deliveryType?: string | null,
+  ): Observable<PosSalePaymentResponse> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
 
@@ -394,7 +522,7 @@ export class PosPaymentService {
     // QUI-649 — bifurcar al processor de orden adoptada: carga el
     // `linkedOrderId` directamente, con table session + restaurant table
     // propagados al backend para que el cierre de mesa refleje el cobro.
-    if (cartState.linkedOrderId != null) {
+    if (cartState.linkedOrderId != null && !usePosOrderTransaction) {
       return this.chargeAdoptedOrder(
         cartState,
         paymentRequest,
@@ -427,8 +555,23 @@ export class PosPaymentService {
     //   `CouponsService.validate`. Any locally computed `discount_amount` is
     //   intentionally omitted so the frontend cannot override the server
     //   calculation.
+    //
+    // Cobro multimétodo de contado: con 2+ tramos se envía `payments[]` tal
+    // cual y se OMITEN las claves escalares de método (el backend prefiere
+    // `payments[]` y el escalar de `CreatePosPaymentDto` es opcional).
+    const multiPayments = (
+      paymentRequest as { payments?: PosPaymentLeg[] }
+    ).payments;
+    const hasMultiPayments =
+      Array.isArray(multiPayments) && multiPayments.length >= 2;
     const sale_data: any = {
       store_id: this.getStoreId(),
+      ...(usePosOrderTransaction && cartState.linkedOrderId != null
+        ? { order_id: cartState.linkedOrderId }
+        : {}),
+      ...(tableSessionId == null && tableId == null
+        ? { delivery_type: 'direct_delivery' }
+        : {}),
       // QUI-653 — 'Para llevar' de la orden estampado por línea.
       items: this.mapCartItemsForPos(cartState, takeawayOrder === true),
       subtotal: Number(
@@ -441,23 +584,39 @@ export class PosPaymentService {
       total_amount: Number(
         parseFloat(cartState.summary.total.toString()).toFixed(2),
       ),
+      ...(paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0
+        ? {
+            tip_amount: paymentRequest.tip_amount,
+            tip_type: paymentRequest.tip_type,
+            tip_value: paymentRequest.tip_value,
+            tip_waiter_id: paymentRequest.tip_waiter_id,
+          }
+        : {}),
       requires_payment: true,
       payment_form: '1', // DIAN: contado
-      store_payment_method_id: parseInt(paymentRequest.paymentMethod.id),
-      amount_received: Number(
-        parseFloat(
-          (paymentRequest.cashReceived || cartState.summary.total).toString(),
-        ).toFixed(2),
-      ),
-      payment_reference: paymentRequest.reference || '',
-      // QUI-728 (E.1) — el selector de cuentas del collector emite
-      // `bankAccountId`; `pos-payment-step` lo pasa como `bank_account_id` y
-      // aquí viaja al backend, que lo valida y lo persiste en
-      // `payments.bank_account_id` (`processPosPaymentTransaction`). Omitir la
-      // clave cuando no hay cuenta: un `bank_account_id` ausente deja el pago
-      // en "Pagos sin asignar" (E.2), que es la degradación deliberada.
-      ...(paymentRequest.bank_account_id != null
-        ? { bank_account_id: paymentRequest.bank_account_id }
+      ...(hasMultiPayments
+        ? { payments: multiPayments }
+        : {
+            store_payment_method_id: parseInt(paymentRequest.paymentMethod.id),
+            amount_received: Number(
+              parseFloat(
+                (paymentRequest.cashReceived ||
+                  cartState.summary.total + (paymentRequest.tip_amount ?? 0)).toString(),
+              ).toFixed(2),
+            ),
+            payment_reference: paymentRequest.reference || '',
+            // QUI-728 (E.1) — el selector de cuentas del collector emite
+            // `bankAccountId`; `pos-payment-step` lo pasa como `bank_account_id` y
+            // aquí viaja al backend, que lo valida y lo persiste en
+            // `payments.bank_account_id` (`processPosPaymentTransaction`). Omitir la
+            // clave cuando no hay cuenta: un `bank_account_id` ausente deja el pago
+            // en "Pagos sin asignar" (E.2), que es la degradación deliberada.
+            ...(paymentRequest.bank_account_id != null
+              ? { bank_account_id: paymentRequest.bank_account_id }
+              : {}),
+          }),
+      ...(hasMultiPayments && paymentRequest.idempotencyKey
+        ? { idempotency_key: paymentRequest.idempotencyKey }
         : {}),
       wompi_payment_method: (paymentRequest.paymentMethod?.original as any)?.system_payment_method?.type === 'wompi'
         ? paymentRequest.metadata?.wompiPaymentMethod
@@ -483,6 +642,11 @@ export class PosPaymentService {
       // único momento en que el POS ocupa una mesa. Mutuamente excluyente con
       // `table_session_id`, que sigue siendo el camino del módulo de mesas y del QR.
       ...(tableId != null && tableSessionId == null ? { table_id: tableId } : {}),
+      ...(deliveryType
+        ? { delivery_type: deliveryType }
+        : tableId != null || tableSessionId != null
+          ? { delivery_type: 'dine_in' }
+          : {}),
     };
 
     // For anonymous sales, use "Consumidor Final" as customer name
@@ -515,8 +679,14 @@ export class PosPaymentService {
 
           return {
             success: true,
+            ...(data.previous_table_status != null
+              ? { previous_table_status: data.previous_table_status as TableStatus }
+              : {}),
             order: data.order,
             payment: mappedPayment,
+            // Multimétodo: el backend solo trae `payments[]` si el cobro
+            // usó tramos; se propaga tal cual para el tiquete local.
+            ...(data.payments != null ? { payments: data.payments } : {}),
             message: data.message,
             change: data.payment?.change,
             nextAction: data.payment?.nextAction || data.nextAction,
@@ -525,7 +695,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al procesar la venta');
         }
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -545,9 +715,15 @@ export class PosPaymentService {
       initial_payment: number;
       initial_payment_method_id?: number;
     },
+    editingOrderId?: number | null,
   ): Observable<any> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
+
+    if (shippingData.manualCostOverride && shippingData.shippingRateId != null &&
+      (shippingData.manualShippingPrice == null || !Number.isFinite(shippingData.manualShippingPrice))) {
+      return throwError(() => new Error('Calcula el costo manual de envío antes de cobrar.'));
+    }
 
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
@@ -556,9 +732,10 @@ export class PosPaymentService {
 
     const register_id = this.getRegisterId();
 
-    if (!cartState.customer) {
+    const customerAlias = shippingData.customerAlias?.trim() || undefined;
+    if (!cartState.customer && !customerAlias) {
       return throwError(
-        () => new Error('Debe seleccionar un cliente para órdenes con envío.'),
+        () => new Error('Indica un cliente o un nombre de referencia para el envío.'),
       );
     }
 
@@ -572,12 +749,19 @@ export class PosPaymentService {
     // `discount_amount`: the backend recalculates it from `promotion_ids` +
     // `coupon_code` and is the source of truth for the final `grand_total`.
     const sale_data: Record<string, any> = {
-      customer_id: cartState.customer.id,
-      customer_name:
-        `${cartState.customer.first_name} ${cartState.customer.last_name || ''}`.trim(),
-      customer_email: cartState.customer.email,
-      customer_phone: cartState.customer.phone,
+      ...(customerAlias
+        ? { customer_alias: customerAlias }
+        : { customer_id: cartState.customer!.id }),
+      customer_name: customerAlias ??
+        `${cartState.customer!.first_name} ${cartState.customer!.last_name || ''}`.trim(),
+      customer_email: customerAlias ? undefined : cartState.customer!.email,
+      customer_phone: customerAlias ? undefined : cartState.customer!.phone,
       store_id: this.getStoreId(),
+      // A reopened draft is already a persisted order. Reuse its id instead
+      // of materializing a second row when this shipping checkout charges it.
+      ...((editingOrderId ?? cartState.linkedOrderId) != null
+        ? { order_id: editingOrderId ?? cartState.linkedOrderId }
+        : {}),
       // QUI-653 — el envío (recoger en tienda o domicilio) siempre se empaca
       // para llevar: estampa `is_takeaway` en todas las líneas para que el
       // ticket KDS lo muestre. Esta función solo sirve al flujo de envío.
@@ -590,6 +774,14 @@ export class PosPaymentService {
       ),
       promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: totalWithShipping,
+      ...(paymentRequest?.tip_amount != null && paymentRequest.tip_amount > 0
+        ? {
+            tip_amount: paymentRequest.tip_amount,
+            tip_type: paymentRequest.tip_type,
+            tip_value: paymentRequest.tip_value,
+            tip_waiter_id: paymentRequest.tip_waiter_id,
+          }
+        : {}),
       // Shipping fields
       delivery_type: shippingData.deliveryType,
       shipping_method_id: shippingData.shippingMethodId,
@@ -597,13 +789,24 @@ export class PosPaymentService {
         parseFloat(shippingData.shippingCost.toString()).toFixed(2),
       ),
       shipping_address_snapshot: shippingData.shippingAddress,
-      ...(shippingData.shippingAddressId
+      ...(!customerAlias && shippingData.shippingAddressId
         ? { shipping_address_id: shippingData.shippingAddressId }
+        : {}),
+      ...(posShippingRateIdForPayload(shippingData) != null
+        ? { shipping_rate_id: posShippingRateIdForPayload(shippingData) }
+        : {}),
+      ...(paymentRequest?.idempotencyKey
+        ? { idempotency_key: paymentRequest.idempotencyKey }
+        : {}),
+      ...(shippingData.manualCostOverride && shippingData.shippingRateId != null
+        ? { manual_shipping_price: shippingData.manualShippingPrice }
         : {}),
       // POS meta
       register_id: register_id,
       seller_user_id: user_id,
       internal_notes: shippingData.deliveryNotes || cartState.notes || '',
+      // B7 — canal que SÍ sobrevive al ticket de despacho (`order.notes`).
+      notes: buildShippingNotes(cartState.notes, shippingData.deliveryNotes) || undefined,
       update_inventory: true,
       coupon_id: cartState.appliedCoupon?.id,
       coupon_code: cartState.appliedCoupon?.code,
@@ -623,25 +826,37 @@ export class PosPaymentService {
         initial_payment_method_id: creditConfig.initial_payment_method_id,
       };
     } else if (paymentRequest) {
-      // Pago del método elegido. Incluye cash_on_delivery: su
-      // `store_payment_method_id` se envía igual y el processor backend
-      // (cash-on-delivery.processor) devuelve 'pending', dejando la orden en
-      // pending_payment. Ya NO existe el eje "contra entrega" sin pago: siempre
-      // se envía el pago producido por el collector.
+      // Pago del método elegido. Incluye contra entrega: el backend usa el
+      // `processing_mode` del método para crear el pago `pending`, conservar
+      // el saldo y dejar la orden en `pending_payment` hasta el recaudo.
       sale_data['requires_payment'] = true;
       sale_data['payment_form'] = '1'; // DIAN: contado
-      sale_data['store_payment_method_id'] = parseInt(
-        paymentRequest.paymentMethod.id,
-      );
-      sale_data['amount_received'] = Number(
-        parseFloat(
-          (paymentRequest.cashReceived || totalWithShipping).toString(),
-        ).toFixed(2),
-      );
-      sale_data['payment_reference'] = paymentRequest.reference || '';
-      // QUI-728 (E.1) — misma cuenta de destino en la venta con envío.
-      if (paymentRequest.bank_account_id != null) {
-        sale_data['bank_account_id'] = paymentRequest.bank_account_id;
+      // B11 — cobro multimétodo de contado con envío: mismo patrón que
+      // `processSaleWithPayment` (2+ tramos ⇒ `payments[]`, se omiten las
+      // claves escalares de método). El collector ya impide que un tramo sea
+      // contra entrega (`directMethods` excluye `CASH_ON_DELIVERY`).
+      const multiPayments = (
+        paymentRequest as { payments?: PosPaymentLeg[] }
+      ).payments;
+      const hasMultiPayments =
+        Array.isArray(multiPayments) && multiPayments.length >= 2;
+      if (hasMultiPayments) {
+        sale_data['payments'] = multiPayments;
+      } else {
+        sale_data['store_payment_method_id'] = parseInt(
+          paymentRequest.paymentMethod.id,
+        );
+        sale_data['amount_received'] = Number(
+          parseFloat(
+            (paymentRequest.cashReceived ||
+              totalWithShipping + (paymentRequest.tip_amount ?? 0)).toString(),
+          ).toFixed(2),
+        );
+        sale_data['payment_reference'] = paymentRequest.reference || '';
+        // QUI-728 (E.1) — misma cuenta de destino en la venta con envío.
+        if (paymentRequest.bank_account_id != null) {
+          sale_data['bank_account_id'] = paymentRequest.bank_account_id;
+        }
       }
     }
 
@@ -669,7 +884,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al procesar el envío');
         }
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -751,7 +966,7 @@ export class PosPaymentService {
           );
         }
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -846,7 +1061,7 @@ export class PosPaymentService {
           );
         }
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -869,6 +1084,10 @@ export class PosPaymentService {
     shipping?: PosShippingSaleData | null,
   ): Observable<any> {
     // Drafts are NOT transactional — no cash register session required.
+    if (shipping?.manualCostOverride && shipping.shippingRateId != null &&
+      (shipping.manualShippingPrice == null || !Number.isFinite(shipping.manualShippingPrice))) {
+      return throwError(() => new Error('Calcula el costo manual de envío antes de guardar.'));
+    }
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
       return throwError(() => new Error('Usuario no identificado.'));
@@ -915,14 +1134,24 @@ export class PosPaymentService {
             shipping_method_id: shipping.shippingMethodId,
             shipping_cost: Number(shipping.shippingCost.toFixed(2)),
             shipping_address_snapshot: shipping.shippingAddress,
-            ...(shipping.shippingAddressId
+            ...(!effectiveAlias && shipping.shippingAddressId
               ? { shipping_address_id: shipping.shippingAddressId }
+              : {}),
+            ...(posShippingRateIdForPayload(shipping) != null
+              ? { shipping_rate_id: posShippingRateIdForPayload(shipping) }
+              : {}),
+            ...(shipping.manualCostOverride && shipping.shippingRateId != null
+              ? { manual_shipping_price: shipping.manualShippingPrice }
               : {}),
           }
         : {}),
       ...(register_id ? { register_id } : {}),
       seller_user_id: user_id,
       internal_notes: shipping?.deliveryNotes || cartState.notes || '',
+      // B7 — el borrador también debe conservar la nota de envío en el canal
+      // que el ticket de despacho lee (`order.notes`), no solo en
+      // `internal_notes` (reescrita luego como metadata JSON).
+      notes: buildShippingNotes(cartState.notes, shipping?.deliveryNotes) || undefined,
       update_inventory: false,
     };
 
@@ -939,7 +1168,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al guardar el borrador');
         }
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
     );
   }
 
@@ -1042,6 +1271,18 @@ export class PosPaymentService {
    * Response shape is normalized to match the legacy `/store/payments/pos`
    * envelope (`{ success, order, payment, message, change, nextAction }`) so
    * the POS UI doesn't need to know which branch ran.
+   *
+   * MULTIMÉTODO (B15.2) — `POST /store/payments` (`CreatePaymentDto`) NO
+   * declara `payments[]`; con 2+ tramos esta función ahora enruta a
+   * `POST /store/orders/:id/flow/pay` (`PayOrderDto.payments`, el MISMO
+   * endpoint que `pos-payment-step.component.ts` ya usa para el borrador
+   * reabierto — ver su rama `editingOrderId`). `OrderFlowService.payOrder`
+   * cierra la mesa por su cuenta (`projectPaidOrderToTable`, resuelto desde
+   * `table_sessions.findFirst({order_id, closed_at: null})`), así que NO
+   * hace falta reenviar `tableSessionId`/`tableId` en esta rama — a
+   * diferencia de `/store/payments`, que sí los necesita en `metadata`
+   * porque no conoce la orden por dentro.
+   * Con 1 tramo se conserva el camino escalar de siempre (sin cambios).
    */
   private chargeAdoptedOrder(
     cartState: CartState,
@@ -1050,9 +1291,139 @@ export class PosPaymentService {
     register_id: string | null,
     tableSessionId?: number | null,
     tableId?: number | null,
+    previousTipOnOrder?: boolean,
   ): Observable<any> {
     const orderId = cartState.linkedOrderId as number;
     const orderNumber = cartState.linkedOrderNumber;
+
+    // A failed digital attempt can leave both a persisted tip and a pending
+    // reservation while the POS cart still shows the untipped product total.
+    // Read the authoritative order before any zero-tip adopted charge: never
+    // start another tender against a pending provider charge, and clear an old
+    // tip through flow/pay rather than the legacy endpoint (which has no tip
+    // contract and could collect an invisible residual balance).
+    if (!(paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0) &&
+        previousTipOnOrder === undefined) {
+      return this.ordersService.getOrderById(String(orderId)).pipe(switchMap((order) => {
+        const pendingDigital = order.payments?.find((payment) =>
+          payment.state === 'pending' &&
+          ['wallet', 'wompi'].includes(
+            payment.store_payment_method?.system_payment_method?.type ?? '',
+          ));
+        if (pendingDigital) {
+          return throwError(() => new Error(
+            `El cobro digital #${pendingDigital.id} sigue pendiente. Confírmalo o cancélalo desde el detalle de la orden antes de cambiar la propina o el medio de pago.`,
+          ));
+        }
+        return this.chargeAdoptedOrder(cartState, paymentRequest, user_id,
+          register_id, tableSessionId, tableId, Number(order.tip_amount ?? 0) > 0);
+      }));
+    }
+
+    const multiPayments = (
+      paymentRequest as { payments?: PosPaymentLeg[] }
+    ).payments;
+    const tipFields = paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0
+      ? {
+          tip_amount: paymentRequest.tip_amount,
+          tip_type: paymentRequest.tip_type,
+          tip_value: paymentRequest.tip_value,
+          tip_waiter_id: paymentRequest.tip_waiter_id,
+        }
+      : { tip_amount: 0, tip_type: 'fixed' as const, tip_value: 0 };
+    if (Array.isArray(multiPayments) && multiPayments.length >= 2) {
+      return this.ordersService
+        .flowPayOrder(String(orderId), {
+          // Requerido por `PayOrderDto` aunque `payments[]` gana en el
+          // cálculo (`normalizePaymentLegs`): se manda el del primer tramo.
+          store_payment_method_id: multiPayments[0].store_payment_method_id,
+          payment_type: 'direct',
+          payments: multiPayments,
+          ...tipFields,
+        } as any)
+        .pipe(
+          map((response: any) => {
+            const data = response ?? {};
+            const payment = data.payment;
+            return {
+              success: true,
+              order: {
+                id: orderId,
+                order_number: orderNumber,
+                status: data.order?.state,
+              },
+              payment: payment
+                ? {
+                    ...payment,
+                    paymentMethod: paymentRequest.paymentMethod,
+                    transactionId: payment.transaction_id ?? payment.transactionId,
+                  }
+                : undefined,
+              payments: data.payments,
+              message: data.message ?? 'Pago aplicado a la orden adoptada',
+              change: payment?.change ?? data.change,
+              nextAction: payment?.nextAction ?? data.nextAction,
+            };
+          }),
+          // Sin gate de caja el `flow/pay` rechaza con
+          // `CASH_SESSION_REQUIRED_001`: se abre el modal de apertura pero el
+          // error se relanza intacto (el llamador ya lee el wrapper).
+          catchError((error) => {
+            this.emitSessionRequiredIfCashGate(error);
+            return throwError(() => error);
+          }),
+        );
+    }
+
+    if (((paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0) || previousTipOnOrder) &&
+        (paymentRequest.paymentMethod.type === 'wallet' ||
+          paymentRequest.paymentMethod.type === 'wompi')) {
+      return this.processExistingDigitalTip(cartState, paymentRequest, orderId);
+    }
+
+    // `/store/payments` has no tip contract. Direct methods can instead use
+    // flow/pay, which recalculates the order balance with the tip before charge.
+    // Gateway/ON_DELIVERY methods need the existing payment processor metadata,
+    // so never silently discard their tip or send it to an unsupported DTO.
+    if ((paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0) || previousTipOnOrder) {
+      const methodType = paymentRequest.paymentMethod.type;
+      const processingMode = (paymentRequest.paymentMethod.original as any)
+        ?.system_payment_method?.processing_mode;
+      if (processingMode != null && processingMode !== 'DIRECT') {
+        return throwError(() => new Error(
+          'Este método no permite agregar propina al cobrar una orden ya creada. Usa efectivo o tarjeta, o cobra la propina por separado.',
+        ));
+      }
+      const directTipPayment: Parameters<StoreOrdersService['flowPayOrder']>[1] & {
+        bank_account_id?: number;
+      } = {
+        store_payment_method_id: Number(paymentRequest.paymentMethod.id),
+        payment_type: 'direct',
+        amount_received: paymentRequest.cashReceived,
+        payment_reference: paymentRequest.reference,
+        ...(methodType === 'bank_transfer' && paymentRequest.bank_account_id != null
+          ? { bank_account_id: paymentRequest.bank_account_id }
+          : {}),
+        ...tipFields,
+      };
+      return this.ordersService.flowPayOrder(String(orderId), directTipPayment).pipe(map((response: any) => ({
+        success: true,
+        order: {
+          id: orderId,
+          order_number: orderNumber,
+          status: response?.order?.state,
+        },
+        payment: response?.payment,
+        message: response?.message ?? 'Pago aplicado a la orden',
+        change: response?.change ?? response?.payment?.change,
+      }),
+      // Igual que la rama multimétodo: abrir caja ante
+      // `CASH_SESSION_REQUIRED_001` sin alterar el error.
+      catchError((error) => {
+        this.emitSessionRequiredIfCashGate(error);
+        return throwError(() => error);
+      })));
+    }
 
     const amount = Number(cartState.summary.total.toFixed(2));
     // Hotfix post-PR-576: el valor hardcoded 'COP' rompía tiendas con
@@ -1142,7 +1513,120 @@ export class PosPaymentService {
           nextAction: payment?.nextAction ?? data?.nextAction,
         };
       }),
-      catchError((error) => rethrowApiError(error)),
+      catchError((error) => this.rethrowChargeError(error)),
+    );
+  }
+
+  /**
+   * flow/pay owns the existing order's tip, draft promotion and one pending
+   * payment reservation. The processor endpoint consumes THAT row only; a
+   * second gateway payment must never be created for this charge.
+   */
+  processExistingDigitalTip(
+    cartState: CartState,
+    paymentRequest: PaymentRequest,
+    orderId: number,
+  ): Observable<PosSalePaymentResponse> {
+    const methodType = paymentRequest.paymentMethod.type;
+    if (methodType !== 'wallet' && methodType !== 'wompi') {
+      return throwError(() => new Error('Este medio no usa cobro digital reservado.'));
+    }
+    const walletId = paymentRequest.metadata?.walletId;
+    if (methodType === 'wallet' && (!walletId || walletId <= 0)) {
+      return throwError(() => new Error('Selecciona el monedero del cliente antes de cobrar.'));
+    }
+    const wompiMethod = paymentRequest.metadata?.wompiPaymentMethod;
+    if (methodType === 'wompi' && !wompiMethod) {
+      return throwError(() => new Error('Selecciona cómo pagará el cliente con Wompi.'));
+    }
+
+    const tipFields = paymentRequest.tip_amount != null && paymentRequest.tip_amount > 0
+      ? {
+          tip_amount: paymentRequest.tip_amount,
+          tip_type: paymentRequest.tip_type,
+          tip_value: paymentRequest.tip_value,
+          tip_waiter_id: paymentRequest.tip_waiter_id,
+        }
+      : { tip_amount: 0, tip_type: 'fixed' as const, tip_value: 0 };
+    return this.ordersService.flowPayOrder(String(orderId), {
+      store_payment_method_id: Number(paymentRequest.paymentMethod.id),
+      payment_type: 'online',
+      ...tipFields,
+    }).pipe(
+      // A timeout after reservation is ambiguous: never create a second row.
+      // flow/pay returns the existing payment id in its typed conflict; resume
+      // that same server-owned reservation with the same payment method.
+      catchError((error: any) => {
+        this.emitSessionRequiredIfCashGate(error);
+        const details = error?.details as Record<string, unknown> | undefined;
+        const existingId = Number(details?.['payment_id']);
+        if (details?.['stage'] === 'digital_payment_pending' &&
+            Number.isSafeInteger(existingId) && existingId > 0) {
+          return this.ordersService.getOrderById(String(orderId)).pipe(switchMap((order) => {
+            const pending = order.payments?.find((payment) =>
+              payment.id === existingId && payment.state === 'pending');
+            const sameTip = Math.round(Number(order.tip_amount ?? 0) * 100) ===
+              Math.round(Number(paymentRequest.tip_amount ?? 0) * 100);
+            if (!pending || !sameTip ||
+                pending.store_payment_method_id !== Number(paymentRequest.paymentMethod.id)) {
+              return throwError(() => new Error(
+                `El cobro digital #${existingId} sigue pendiente con otro medio o importe. Consulta la orden antes de cambiar la propina o volver a cobrar.`,
+              ));
+            }
+            return of({ order: { state: 'pending_payment' },
+              payment: { id: existingId } } as any);
+          }));
+        }
+        return throwError(() => error);
+      }),
+      switchMap((reserved) => {
+        const reservedPayment = reserved?.payment as
+          | (typeof reserved.payment & { id?: number })
+          | undefined;
+        const paymentId = Number(reservedPayment?.id);
+        if (!Number.isSafeInteger(paymentId) || paymentId <= 0) {
+          return throwError(() => new Error(
+            'La orden quedó pendiente, pero no recibimos el identificador del cobro. Actualiza la orden antes de reintentar.',
+          ));
+        }
+        return this.posApi.processReservedPosPayment(paymentId, methodType === 'wallet'
+          ? { wallet_id: walletId }
+          : {
+              wompi_payment_method: wompiMethod,
+              returnUrl: window.location.origin + '/pos/payment-callback',
+        }).pipe(map((response) => {
+          const result = response?.data ?? response;
+          const payment = result?.payment;
+          const state = String(payment?.state ?? 'pending');
+          const pending = state === 'pending' || state === 'authorized';
+          const settled = state === 'succeeded' || state === 'captured';
+          const nextAction = pending && methodType === 'wompi'
+            ? result?.nextAction ?? { type: 'await' as const }
+            : result?.nextAction;
+          return {
+            success: settled || (pending && methodType === 'wompi'),
+            order: {
+              id: orderId,
+              order_number: cartState.linkedOrderNumber,
+              status: reserved?.order?.state,
+            },
+            payment: payment
+              ? { ...payment, paymentMethod: paymentRequest.paymentMethod,
+                  transactionId: payment.transaction_id }
+              : undefined,
+            nextAction,
+            message: pending && methodType === 'wallet'
+              ? 'El cobro del monedero está pendiente de conciliación. No intentes cobrar otra vez esta orden; consulta el detalle del pago.'
+              : result?.message,
+          } satisfies PosSalePaymentResponse;
+        }), catchError((error: unknown) => {
+          const wrapped = new Error(
+            `La orden tiene el cobro digital #${paymentId} reservado, pero no pudimos confirmar su resultado. Puedes reintentar Cobrar: se retomará ese mismo pago, sin crear otro. Si persiste, consulta el detalle de la orden antes de cobrar por otro medio.`,
+          ) as Error & { cause: unknown };
+          wrapped.cause = error;
+          return throwError(() => wrapped);
+        }));
+      }),
     );
   }
 

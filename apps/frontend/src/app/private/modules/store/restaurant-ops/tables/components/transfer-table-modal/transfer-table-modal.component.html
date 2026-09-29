@@ -5,7 +5,7 @@
   [size]="'md'"
   [dialog]="true"
   [title]="title()"
-  subtitle="Elige la mesa destino. Si está ocupada, ambas cuentas se intercambian."
+  [subtitle]="subtitle()"
 >
   @if (isLoadingTables()) {
     <div class="loading">
@@ -17,14 +17,14 @@
       <app-icon name="alert-triangle" [size]="32"></app-icon>
       <p class="mt-2 text-sm">{{ loadError() }}</p>
     </div>
-  } @else if (allTables().length === 0) {
+  } @else if (visibleTables().length === 0) {
     <div class="empty text-center text-text-secondary py-6">
       <app-icon name="table" [size]="32"></app-icon>
-      <p class="mt-2 text-sm">No hay mesas para elegir destino.</p>
+      <p class="mt-2 text-sm">{{ mode() === 'reassign' ? 'No hay mesas disponibles para reasignar.' : 'No hay mesas para elegir destino.' }}</p>
     </div>
   } @else {
     <ul class="transfer-list">
-      @for (t of allTables(); track trackById($index, t)) {
+      @for (t of visibleTables(); track trackById($index, t)) {
         <li>
           <button
             type="button"
@@ -32,7 +32,7 @@
             [class.selected]="isSelected(t)"
             [class.disabled]="!isSelectable(t)"
             [disabled]="!isSelectable(t)"
-            [title]="isReserved(t) ? 'Reservada — elige otra mesa' : ''"
+            [title]="destinationHint(t)"
             (click)="select(t)"
           >
             <span class="row-main">
@@ -48,7 +48,7 @@
             </span>
             <span class="row-badges">
               @if (isOrigin(t)) {
-                <span class="origin-pill">Origen</span>
+                <span class="origin-pill">{{ mode() === 'reassign' ? 'Anterior' : 'Origen' }}</span>
               }
               <span
                 class="status-pill"
@@ -82,7 +82,7 @@
       (clicked)="confirm()"
     >
       <app-icon slot="icon" name="arrow-right-left" [size]="16"></app-icon>
-      Confirmar
+      {{ mode() === 'reassign' ? 'Reasignar mesa' : 'Confirmar' }}
     </app-button>
   </div>
 </app-modal>

@@ -17,13 +17,14 @@
             placeholder="Buscar órdenes..."
             [debounceTime]="1000"
             [ngModel]="searchTerm()"
-            (ngModelChange)="onSearchChange($event)"
+            (searchChange)="onSearchChange($event)"
           ></app-inputsearch>
 
           <app-options-dropdown
             class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
             [filters]="filterConfigs()"
             [filterValues]="filterValues()"
+            [headerPin]="salesHeaderPin"
             [actions]="dropdownActions()"
             [isLoading]="loading()"
             (filterChange)="onFilterChange($event)"

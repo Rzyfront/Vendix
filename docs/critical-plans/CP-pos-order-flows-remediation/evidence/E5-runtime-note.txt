@@ -1,0 +1,1 @@
+POST /api/store/dispatch-notes/from-order/1119 -> 201; GET /api/store/dispatch-notes/by-order/1119 -> 200, one remisión #226. Local QA only.

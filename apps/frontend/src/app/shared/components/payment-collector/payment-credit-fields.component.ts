@@ -3,6 +3,7 @@ import {
   Component,
   computed,
   effect,
+  inject,
   input,
   model,
   signal,
@@ -13,7 +14,7 @@ import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent } from '../icon/icon.component';
 import type { IconName } from '../icon/icons.registry';
 import { CurrencyInputDirective } from '../../directives/currency-input.directive';
-import { CurrencyPipe } from '../../pipes/currency';
+import { CurrencyFormatService, CurrencyPipe } from '../../pipes/currency';
 import { toLocalDateString } from '../../utils/date.util';
 import {
   resolvePaymentIcon,
@@ -46,6 +47,8 @@ interface InstallmentPreview {
   styleUrl: './payment-credit-fields.component.scss',
 })
 export class PaymentCreditFieldsComponent {
+  private readonly currencyFormat = inject(CurrencyFormatService);
+  readonly currencySymbol = this.currencyFormat.currencySymbol;
   /** Two-way terms model; `null` until the plan is usable. */
   readonly terms = model<CreditTerms | null>(null);
 

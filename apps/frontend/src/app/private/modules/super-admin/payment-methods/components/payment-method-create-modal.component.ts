@@ -235,7 +235,7 @@ typeOptions = [
     { value: PaymentMethodType.CARD, label: 'Tarjeta' },
     { value: PaymentMethodType.PAYPAL, label: 'PayPal' },
     { value: PaymentMethodType.BANK_TRANSFER, label: 'Transferencia Bancaria' },
-    { value: PaymentMethodType.VOUCHER, label: 'Voucher' },
+    { value: PaymentMethodType.VOUCHER, label: 'Datáfono' },
   ];
 
   feeTypeOptions = [

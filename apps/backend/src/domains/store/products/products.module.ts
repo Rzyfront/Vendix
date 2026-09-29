@@ -1,8 +1,9 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createProductTools } from '../../../ai-engine/tools/domains/products.tools';
+import { createVariantTools } from '../../../ai-engine/tools/domains/variants.tools';
+import { createPricingTools } from '../../../ai-engine/tools/domains/pricing.tools';
 import { createProductWriteTools } from '../../../ai-engine/tools/domains/writes.tools';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
@@ -21,6 +22,8 @@ import { S3Module } from '@common/services/s3.module';
 import { AccessValidationService } from '@common/services/access-validation.service';
 import { QrService } from '@common/services/qr.service';
 import { PromotionsModule } from '../promotions/promotions.module';
+import { PriceTiersModule } from '../price-tiers/price-tiers.module';
+import { PriceTiersService } from '../price-tiers/price-tiers.service';
 import { SettingsModule } from '../settings/settings.module';
 // `AutoEntryService.validateProductAccountCodes()` — la subcuenta PUC escrita a
 // mano sobre un producto/variante se valida contra el `chart_of_accounts` de la
@@ -42,6 +45,9 @@ import { AccountingModule } from '../accounting/accounting.module';
     PrismaModule,
     S3Module,
     PromotionsModule,
+    // O-12/O-13 — `PriceTiersService` para `createPricingTools`. Sin ciclo:
+    // `PriceTiersModule` solo importa Response/Prisma.
+    PriceTiersModule,
     // F4 — SettingsService.getFiscalData() para el gate "no responsable de IVA".
     SettingsModule,
     // Exporta `AutoEntryService`: valida la subcuenta PUC del producto/variante.
@@ -81,7 +87,7 @@ export class ProductsModule implements OnModuleInit {
     private readonly productsService: ProductsService,
     private readonly priceResolver: PriceResolverService,
     private readonly settingsService: SettingsService,
-    private readonly prisma: StorePrismaService,
+    private readonly priceTiersService: PriceTiersService,
   ) {}
 
   /**
@@ -97,7 +103,25 @@ export class ProductsModule implements OnModuleInit {
         productsService: this.productsService,
         priceResolver: this.priceResolver,
         settingsService: this.settingsService,
-        prisma: this.prisma,
+      }),
+    );
+
+    // O-9..O-11 — `create/update/delete_variant`. Delegan en
+    // `ProductsService`, que ya es propiedad de este módulo.
+    this.toolRegistry.registerMany(
+      createVariantTools({
+        productsService: this.productsService,
+      }),
+    );
+
+    // O-12/O-13 — `manage_price_tiers` + `set_product_tier_override`.
+    // Delegan en `PriceTiersService` (dueño, importado vía
+    // `PriceTiersModule`) y `ProductsService` (contexto producto/variantes
+    // para la exclusión multi-tarifa ⊕ variantes).
+    this.toolRegistry.registerMany(
+      createPricingTools({
+        priceTiersService: this.priceTiersService,
+        productsService: this.productsService,
       }),
     );
 
@@ -107,7 +131,6 @@ export class ProductsModule implements OnModuleInit {
     this.toolRegistry.registerMany(
       createProductWriteTools({
         productsService: this.productsService,
-        prisma: this.prisma,
       }),
     );
   }

@@ -194,9 +194,9 @@ interface CartaBlock {
                 >
                   {{ dishPrice(dish) | currency }}
                 </span>
-                @if (dish.product?.is_on_sale) {
+                @if (dish.product?.is_on_sale && dish.product?.regular_final_price != null && dish.product.regular_final_price > dishPrice(dish)) {
                   <span class="original-price">
-                    {{ dish.product?.base_price | currency }}
+                    {{ dish.product.regular_final_price | currency }}
                   </span>
                 }
               </div>
@@ -738,7 +738,7 @@ export class MenusShowcaseComponent implements OnInit {
   dishPrice(item: MenuItem): number {
     const p = item.product;
     if (!p) return 0;
-    return p.is_on_sale && p.sale_price != null ? p.sale_price : p.base_price;
+    return p.final_price ?? (p.is_on_sale && p.sale_price != null ? p.sale_price : p.base_price);
   }
 
   /** Formatea `{día} HH:mm` a partir de un `MenuNextAvailable` (o "pronto"). */

@@ -1,0 +1,3 @@
+1119|processing|home_delivery|9||t
+1120|finished|direct_delivery|||f
+1121|finished|pickup|||f

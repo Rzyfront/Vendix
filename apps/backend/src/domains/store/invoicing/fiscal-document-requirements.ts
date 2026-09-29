@@ -177,12 +177,28 @@ export interface FiscalDocumentRequirements {
    * `cbc:AllowanceTotalAmount` sea igual a la suma de los `cac:AllowanceCharge`
    * con `ChargeIndicator = false`. Si el documento publica el total de descuento
    * pero NO publica el grupo que lo respalda, esa suma es 0 y la DIAN rechaza —
-   * gastando el consecutivo. Sólo `ubl-invoice.builder.ts` y
-   * `ubl-equivalent-document.builder.ts:162` llaman a
-   * `UblCommonBuilder.buildDocumentAllowanceCharge`; la nota crédito
-   * (`ubl-credit-note.builder.ts:172`), la nota débito
+   * gastando el consecutivo. `ubl-invoice.builder.ts`,
+   * `ubl-equivalent-document.builder.ts:162` y, desde P2(b), también
+   * `ubl-credit-note.builder.ts` llaman a
+   * `UblCommonBuilder.buildDocumentAllowanceCharge`; la nota débito
    * (`ubl-debit-note.builder.ts:194`) y el documento soporte
-   * (`ubl-support-document.builder.ts:318`) van directo al grupo de totales.
+   * (`ubl-support-document.builder.ts:318`) siguen yendo directo al grupo de
+   * totales.
+   *
+   * P2(b) — la nota crédito TOTAL (F-INC6) copia VERBATIM la cabecera de la
+   * factura que corrige, incluido un descuento de pie que la factura original
+   * tuviera y que sus líneas no expliquen del todo (descuento a nivel de
+   * orden). Antes de este fix `credit_note` declaraba
+   * `emits_document_allowance_charge: false`: la nota heredaba
+   * `AllowanceTotalAmount > 0` de la factura padre pero nunca emitía el grupo
+   * `cac:AllowanceCharge` que lo respalda, y `CAU08` rechazaba con
+   * `ALLOWANCE_TOTAL_UNBACKED` — con el consecutivo de la nota ya gastado.
+   * Repartir el descuento entre las líneas de la nota (la otra opción que
+   * baraja el validador) NO es viable aquí: reintroduciría exactamente el
+   * defecto de `HEADER_LINE_EXTENSION_MISMATCH` que el copiado VERBATIM de
+   * F-INC6 corrigió (Σlíneas debe cuadrar EXACTO contra el subtotal copiado).
+   * Emitir el mismo grupo `cac:AllowanceCharge` que ya usan la factura y el
+   * documento equivalente es la única opción que preserva ambas invariantes.
    */
   emits_document_allowance_charge: boolean;
 }
@@ -261,7 +277,10 @@ export const FISCAL_DOCUMENT_REQUIREMENTS: Readonly<
     monetary_total_element: 'LegalMonetaryTotal',
     uses_invoice_operation_types: false,
     ubl_root_document: 'CreditNote',
-    emits_document_allowance_charge: false,
+    // P2(b) — ver el JSDoc de `emits_document_allowance_charge` arriba:
+    // `ubl-credit-note.builder.ts` ya emite `cac:AllowanceCharge` de documento
+    // (mismo `UblCommonBuilder.buildDocumentAllowanceCharge` que la factura).
+    emits_document_allowance_charge: true,
   },
   debit_note: {
     document_type: 'debit_note',
@@ -1018,6 +1037,41 @@ export const DIAN_RULES = {
           'El valor del tributo informado no corresponde al producto del porcentaje aplicado sobre la base imponible',
         xpath: '../cac:TaxTotal/TaxSubtotal/cbc:TaxAmount',
         annex_line: 29359,
+      },
+    },
+  },
+
+  // --- Tributos de línea (§8.2.x TaxTotal de línea) -------------------------
+  line_tax_subtotal_amount: {
+    requirement:
+      'En cada línea, el valor de cada subtotal de tributo porcentual debe ser ' +
+      'el producto del porcentaje sobre su base imponible: ' +
+      'TaxAmount = TaxableAmount × Percent ÷ 100, con la holgura de ±2.00 del ' +
+      'Anexo 1.9 §5.2.1.1. Una línea que no ' +
+      'causa el tributo no informa el grupo; heredar la tarifa con cuota 0 lo ' +
+      'incumple.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAX07',
+        dian_message:
+          'El valor del tributo correspondiente a una de las tarifas correspondientes es diferente del producto del porcentaje aplicado sobre la base imponible',
+        xpath: '/Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount',
+        annex_line: 23077,
+      },
+      CreditNote: {
+        id: 'CAX07',
+        dian_message:
+          'El valor del tributo correspondiente a una de las tarifas correspondientes es diferente del producto del porcentaje aplicado sobre la base imponible.',
+        xpath: '../cac:TaxTotal/TaxSubtotal/cbc:TaxAmount',
+        annex_line: 26797,
+      },
+      DebitNote: {
+        id: 'DAX07',
+        dian_message:
+          'El valor del tributo correspondiente a una de las tarifas correspondientes, es diferente del producto del porcentaje aplicado sobre la base imponible.',
+        xpath: '../cac:TaxTotal/TaxSubtotal/cbc:TaxAmount',
+        annex_line: 30179,
       },
     },
   },

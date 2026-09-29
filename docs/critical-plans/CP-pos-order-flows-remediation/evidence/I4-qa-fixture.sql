@@ -1,0 +1,1 @@
+insert into orders(store_id,order_number,state,channel,delivery_type,customer_alias,subtotal_amount,tax_amount,grand_total,currency,total_paid,remaining_balance) values(10,'QA-I4-REVERSAL-20260923-01','delivered','pos','direct_delivery','QA I4 manual reversal',10000,0,10000,'COP',0,10000) returning id;

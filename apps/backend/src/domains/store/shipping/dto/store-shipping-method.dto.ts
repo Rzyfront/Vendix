@@ -8,10 +8,12 @@ import {
   IsEnum,
   IsArray,
   ValidateNested,
+  ValidateIf,
   Min,
+  Max,
   MaxLength,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import {
   settlement_type_enum,
   dispatch_payment_timing_enum,
@@ -82,6 +84,38 @@ export class EnableShippingMethodDto {
   @IsOptional()
   @IsEnum(cost_settlement_timing_enum)
   cost_settlement_timing?: cost_settlement_timing_enum;
+
+  // Cobro por distancia (opcional, apagado por defecto). El servicio exige
+  // origen pineado cuando se activa.
+  @IsOptional()
+  @IsBoolean()
+  distance_pricing_enabled?: boolean;
+
+  @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === undefined) return undefined;
+    if (raw === null || raw === '') return null;
+    return Number(raw);
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  origin_latitude?: number | null;
+
+  @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === undefined) return undefined;
+    if (raw === null || raw === '') return null;
+    return Number(raw);
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  origin_longitude?: number | null;
 }
 
 export class UpdateStoreShippingMethodDto {
@@ -147,6 +181,38 @@ export class UpdateStoreShippingMethodDto {
   @IsOptional()
   @IsEnum(cost_settlement_timing_enum)
   cost_settlement_timing?: cost_settlement_timing_enum;
+
+  // Cobro por distancia (opcional, apagado por defecto). El servicio exige
+  // origen pineado cuando se activa.
+  @IsOptional()
+  @IsBoolean()
+  distance_pricing_enabled?: boolean;
+
+  @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === undefined) return undefined;
+    if (raw === null || raw === '') return null;
+    return Number(raw);
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  origin_latitude?: number | null;
+
+  @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === undefined) return undefined;
+    if (raw === null || raw === '') return null;
+    return Number(raw);
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  origin_longitude?: number | null;
 }
 
 export class ShippingMethodOrderItem {

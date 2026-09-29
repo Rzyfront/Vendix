@@ -1,0 +1,17 @@
+HTTP/1.1 403 Forbidden
+X-Powered-By: Express
+Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate
+Pragma: no-cache
+Expires: 0
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Access-Control-Expose-Headers: Authorization,Cache-Control,Pragma,Content-Disposition
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 299
+X-RateLimit-Reset: 60
+Content-Type: application/json; charset=utf-8
+Content-Length: 775
+ETag: W/"307-t1hbJIaAixJx6dFIL7AscSXMZ2c"
+Date: Wed, 23 Sep 2026 06:23:10 GMT
+Connection: keep-alive
+Keep-Alive: timeout=65

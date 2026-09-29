@@ -33,4 +33,14 @@ describe('section-field-catalog', () => {
   it('tipo desconocido devuelve lista vacía (no rompe el editor)', () => {
     expect(catalogFieldsForSectionType('no_existe')).toEqual([]);
   });
+
+  it('document_info ofrece el nombre de referencia con la clave de impresión existente', () => {
+    expect(catalogFieldsForSectionType('document_info')).toContainEqual(
+      expect.objectContaining({
+        id: 'f_customer_alias',
+        key: 'document.customer_alias',
+        label: 'Nombre de referencia (venta rápida)',
+      }),
+    );
+  });
 });

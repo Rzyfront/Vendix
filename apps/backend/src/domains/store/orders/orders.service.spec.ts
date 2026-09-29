@@ -7,6 +7,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { OrderFlowService } from './order-flow/order-flow.service';
@@ -15,6 +16,37 @@ import { PromotionEngineService } from '../promotions/promotion-engine/promotion
 import { CouponsService } from '../coupons/coupons.service';
 import { AuditService } from '@common/audit/audit.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
+import { Prisma, order_channel_enum, order_delivery_type_enum, order_state_enum } from '@prisma/client';
+import { CreateOrderDto } from './dto/create-order.dto';
+import { UpdateOrderDto } from './dto/update-order.dto';
+import { OrderQueryDto } from './dto/order-query.dto';
+
+/**
+ * Fila de `products.findMany` con la forma que lee
+ * `resolveLineTaxesForOrder`: una asignación de catálogo con UNA tasa.
+ * P0-1/P0-4: el editor y `PUT /:id/items` resuelven el impuesto por esta vía
+ * (antes el editor leía `product_tax_assignments.findMany`).
+ */
+const productTaxRow = (
+  productId: number,
+  rate: { id: number; name: string; rate: number; is_inclusive: boolean },
+  taxType = 'iva',
+  extra: Record<string, unknown> = {},
+) => ({
+  id: productId,
+  ...extra,
+  product_tax_assignments: [
+    {
+      is_inclusive: rate.is_inclusive,
+      tax_categories: {
+        tax_type: taxType,
+        tax_rates: [{ ...rate, is_compound: false, priority: 1 }],
+      },
+    },
+  ],
+});
 
 describe('OrdersService', () => {
   let service: OrdersService;
@@ -32,7 +64,9 @@ describe('OrdersService', () => {
       aggregate: jest.fn(),
       deleteMany: jest.fn(),
     },
+    store_payment_methods: { findMany: jest.fn() },
     order_items: {
+      create: jest.fn(),
       createMany: jest.fn(),
       deleteMany: jest.fn(),
       findMany: jest.fn(),
@@ -41,7 +75,9 @@ describe('OrdersService', () => {
     // del `deleteMany` de `order_items` en `updateOrderItems` /
     // `updateOrderFromEditor`. Default `null` en el beforeEach (ninguna
     // orden de prueba tiene desglose fiscal salvo que un spec lo sobrescriba).
-    order_item_taxes: { findFirst: jest.fn() },
+    // P0-4: el editor y `updateOrderItems` borran el desglose previo
+    // (`deleteMany`) en la misma tx antes de recrearlo anidado por línea.
+    order_item_taxes: { findFirst: jest.fn(), deleteMany: jest.fn() },
     order_promotions: {
       createMany: jest.fn(),
       deleteMany: jest.fn(),
@@ -64,26 +100,28 @@ describe('OrdersService', () => {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
     },
-    product_variants: { findMany: jest.fn() },
+    product_variants: { findMany: jest.fn(), findUnique: jest.fn() },
     // C.8 — el editor ahora resuelve la tarifa de catálogo server-side
     // (ADR-05) en vez de confiar en `tax_amount_item` del DTO. Mock
     // explícito con default `[]` en el beforeEach para que las specs de
     // gates que no ejercitan impuestos no truenen por relación no mockeada.
     product_tax_assignments: { findMany: jest.fn() },
     store_users: { findFirst: jest.fn() },
+    store_settings: { findFirst: jest.fn() },
     shipping_methods: { findFirst: jest.fn() },
     shipping_rates: { findFirst: jest.fn() },
     addresses: { findFirst: jest.fn() },
     users: { findUnique: jest.fn() },
     stores: { findFirst: jest.fn() },
     payments: { findFirst: jest.fn() },
+    // Release-854 follow-up — `findOne` expone `active_sales_invoice` vía
+    // `findActiveSalesInvoice` (helper compartido con la guarda de `update`).
+    // Default `null` en el beforeEach: ninguna orden de prueba tiene factura
+    // de venta vigente salvo que un spec lo sobrescriba.
+    invoices: { findFirst: jest.fn() },
     table_sessions: {
-      // CP-POLLO-ARABE-727 · fix/table-close-order. El guard del editor
-      // (OrdersService.updateOrderFromEditor) consulta `table_sessions.findFirst`
-      // por `order_id` para saber si hay una sesión CERRADA vinculada a la
-      // orden. Mock explícito para que las specs del guard puedan simular
-      // los 3 caminos: cerrada → rechaza, abierta → permite, sin sesión
-      // (POS-only) → permite.
+      // ADR-07: los dos escritores de ítems consultan la sesión ABIERTA
+      // vigente, y solo sin ella preguntan por historial de mesa.
       findFirst: jest.fn(),
     },
     audit_logs: {
@@ -136,6 +174,18 @@ describe('OrdersService', () => {
     getStoreCurrency: jest.fn(async () => 'COP'),
   };
   const mockScheduleValidation = { validateOrThrow: jest.fn() };
+  const mockStockValidator = {
+    assertLinesAvailable: jest.fn().mockResolvedValue([]),
+    resolveEffectiveTracking: jest.fn((product, variant) =>
+      variant?.track_inventory_override ?? product?.track_inventory ?? false),
+    // docs/plans/no-overselling-stock-guard-plan.md step 9 — strict default
+    // (allowOversell=false) preserves every pre-existing assertion byte-for-
+    // byte; tests that want the oversell path override this per-test.
+    resolveInventoryPolicy: jest.fn().mockResolvedValue({
+      allowOversell: false,
+      allowIngredientOveruse: true,
+    }),
+  };
   const mockStockLevelManager = {
     reserveStock: jest.fn(),
     releaseReservation: jest.fn(),
@@ -143,14 +193,22 @@ describe('OrdersService', () => {
     getDefaultLocationForProduct: jest.fn(async () => 1),
   };
   const mockSellableStockAllocator = {
-    allocateForLine: jest.fn(async () => ({
-      slices: [{ location_id: 1, quantity: 1 }],
-      allocated: 1,
-      available: 1,
+    allocateForLine: jest.fn(async (_storeId, _productId, _variantId, quantity) => ({
+      slices: [{ location_id: 1, quantity }],
+      allocated: quantity,
+      available: quantity,
       shortfall: 0,
     })),
   };
-  const mockShippingCalculator = { calculateRates: jest.fn() };
+  const mockShippingCalculator = {
+    calculateRates: jest.fn(),
+    // Paso 2 (unificación de envío) — el editor delega en este método para
+    // la tarifa explícita cuando hay dirección resoluble; ningún test
+    // existente lo dispara (`addresses.findFirst` no está mockeado salvo
+    // donde se agrega explícitamente), así que un `jest.fn()` sin
+    // implementación por defecto es inofensivo para el resto del archivo.
+    quoteRateGross: jest.fn(),
+  };
   const mockOrderFlowService = {
     cancelOrder: jest.fn(),
     forceOrderState: jest.fn(),
@@ -215,6 +273,7 @@ describe('OrdersService', () => {
         { provide: SettingsService, useValue: mockSettingsService },
         { provide: ScheduleValidationService, useValue: mockScheduleValidation },
         { provide: StockLevelManager, useValue: mockStockLevelManager },
+        { provide: StockValidatorService, useValue: mockStockValidator },
         { provide: SellableStockAllocator, useValue: mockSellableStockAllocator },
         { provide: ShippingCalculatorService, useValue: mockShippingCalculator },
         { provide: OrderFlowService, useValue: mockOrderFlowService },
@@ -240,6 +299,11 @@ describe('OrdersService', () => {
     // guard nuevo no bloquea ninguna spec existente. El spec dedicado abajo
     // sobrescribe esto con una fila para probar el 409.
     mockPrismaService.order_item_taxes.findFirst.mockResolvedValue(null);
+    mockPrismaService.invoices.findFirst.mockResolvedValue(null);
+    mockPrismaService.order_item_taxes.deleteMany.mockResolvedValue({
+      count: 0,
+    } as any);
+    mockPrismaService.order_items.create.mockResolvedValue({} as any);
     // QUI-INC — defaults del carril sin scope que usa
     // `resolveDeclaredTaxCategories`. Sólo se tocan cuando una línea declara
     // `tax_category_id`; las specs que sí lo hacen los sobrescriben.
@@ -258,10 +322,116 @@ describe('OrdersService', () => {
     });
 
     jest.clearAllMocks();
+    mockStockValidator.assertLinesAvailable.mockReset().mockResolvedValue([]);
+    mockStockValidator.resolveInventoryPolicy
+      .mockReset()
+      .mockResolvedValue({ allowOversell: false, allowIngredientOveruse: true });
+    mockPrismaService.table_sessions.findFirst.mockReset().mockResolvedValue(null);
   });
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  describe('remove — conserva evidencia financiera (E.4)', () => {
+    let contextSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+      } as any);
+    });
+
+    afterEach(() => contextSpy.mockRestore());
+
+    const emptyOrder = () => ({
+      state: 'draft',
+      total_paid: new Prisma.Decimal(0),
+      active_financial_split_id: null,
+      order_items: [],
+      payments: [],
+      invoices: [],
+      refunds: [],
+      order_installments: [],
+      financial_splits: [],
+      cash_register_movements: [],
+      payment_links: [],
+    });
+
+    it.each(['draft', 'created'])('permite borrar orden %s sin evidencia financiera', async (state) => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({ ...emptyOrder(), state } as any);
+      mockPrismaService.orders.delete.mockResolvedValue({ id: 1 } as any);
+
+      await expect(service.remove(1)).resolves.toEqual({ id: 1 });
+      expect(mockPrismaService.orders.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 1, store_id: 1 },
+      }));
+      expect(mockPrismaService.orders.delete).toHaveBeenCalledWith({ where: { id: 1 } });
+    });
+
+    it.each([
+      ['payment', { payments: [{ id: 4 }] }],
+      ['cancelled payment', { payments: [{ id: 4, state: 'cancelled' }] }],
+      ['paid total', { total_paid: new Prisma.Decimal(100) }],
+      ['invoice', { invoices: [{ id: 5 }] }],
+      ['refund', { refunds: [{ id: 6 }] }],
+      ['installment', { order_installments: [{ id: 7 }] }],
+      ['financial split', { financial_splits: [{ id: 8 }] }],
+      ['cash movement', { cash_register_movements: [{ id: 9 }] }],
+      ['payment link', { payment_links: [{ id: 10 }] }],
+      ['active split', { active_financial_split_id: 11 }],
+    ])('rechaza %s sin borrar la fila', async (_caseName, evidence) => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        ...emptyOrder(), ...evidence,
+      } as any);
+
+      await expect(service.remove(1)).rejects.toMatchObject({
+        errorCode: 'ORD_VALIDATE_001',
+        response: expect.objectContaining({
+          details: { state: 'draft', reason: 'financial_evidence' },
+        }),
+      });
+      expect(mockPrismaService.orders.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejects a populated draft with a typed error before DELETE', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        ...emptyOrder(), order_items: [{ id: 17 }],
+      } as any);
+
+      await expect(service.remove(1)).rejects.toMatchObject({
+        errorCode: 'ORD_VALIDATE_001',
+        response: expect.objectContaining({
+          details: { state: 'draft', reason: 'order_items_present' },
+        }),
+      });
+      expect(mockPrismaService.orders.delete).not.toHaveBeenCalled();
+    });
+
+    it('maps a racing dependent FK to a typed error instead of HTTP 500', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(emptyOrder() as any);
+      mockPrismaService.orders.delete.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('dependent FK', {
+          code: 'P2003', clientVersion: '7.4.1',
+        }),
+      );
+
+      await expect(service.remove(1)).rejects.toMatchObject({
+        errorCode: 'ORD_VALIDATE_001',
+        response: expect.objectContaining({
+          details: { state: 'draft', reason: 'dependent_records' },
+        }),
+      });
+    });
+
+    it('no revela ni borra orden fuera del scope', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(null);
+      await expect(service.remove(1)).rejects.toMatchObject({ errorCode: 'ORD_FIND_001' });
+      expect(mockPrismaService.orders.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 1, store_id: 1 },
+      }));
+      expect(mockPrismaService.orders.delete).not.toHaveBeenCalled();
+    });
   });
 
   /**
@@ -303,6 +473,30 @@ describe('OrdersService', () => {
       await service.findAll({} as any);
 
       expect(lastWhere().payments).toBeUndefined();
+    });
+
+    it('R10 filtra por cualquier tramo liquidado del método seleccionado', async () => {
+      await service.findAll({ payment_method_id: 17 } as any);
+
+      expect(lastWhere().AND).toEqual([
+        { payments: { some: {
+          store_payment_method_id: 17,
+          state: { in: ['succeeded', 'captured', 'partially_refunded', 'refunded'] },
+        } } },
+      ]);
+      expect(mockPrismaService.orders.count).toHaveBeenCalledWith({ where: lastWhere() });
+    });
+
+    it('R10 conserva por separado el filtro de estado y el de método en una orden multimétodo', async () => {
+      await service.findAll({ payment_method_id: 17, payment_status: 'pending' } as any);
+
+      expect(lastWhere().AND).toEqual([
+        { payments: { some: {
+          store_payment_method_id: 17,
+          state: { in: ['succeeded', 'captured', 'partially_refunded', 'refunded'] },
+        } } },
+        { payments: { some: { state: 'pending' } } },
+      ]);
     });
 
     it('B) aplica date_from solo (sin date_to)', async () => {
@@ -377,6 +571,191 @@ describe('OrdersService', () => {
     });
   });
 
+  /**
+   * Paso 3 (dashboard-sales-filters-pin-multiselect-sse) — Estado, Canal y
+   * Estado de Pago aceptan uno o varios valores. El DTO normaliza a array
+   * (params repetidos o coma) y `findAll` usa `in` para arrays e igualdad
+   * exacta para single, bajo el auto-scope de tienda existente.
+   */
+  describe('findAll — filtros multi-valor (paso 3)', () => {
+    beforeEach(() => {
+      mockPrismaService.orders.findMany.mockResolvedValue([]);
+      mockPrismaService.orders.count.mockResolvedValue(0);
+    });
+
+    const lastWhere = () =>
+      mockPrismaService.orders.findMany.mock.calls[0][0].where;
+
+    it('status array usa state: { in }', async () => {
+      await service.findAll({ status: ['processing', 'delivered'] } as any);
+
+      expect(lastWhere().state).toEqual({ in: ['processing', 'delivered'] });
+    });
+
+    it('channel array usa channel: { in }', async () => {
+      await service.findAll({ channel: ['whatsapp', 'ecommerce'] } as any);
+
+      expect(lastWhere().channel).toEqual({ in: ['whatsapp', 'ecommerce'] });
+    });
+
+    it('payment_status array usa payments.some.state: { in } (sin método)', async () => {
+      await service.findAll({
+        payment_status: ['succeeded', 'captured'],
+      } as any);
+
+      expect(lastWhere()).toEqual(
+        expect.objectContaining({
+          payments: { some: { state: { in: ['succeeded', 'captured'] } } },
+        }),
+      );
+    });
+
+    it('payment_status array usa { in } también en la rama con payment_method_id', async () => {
+      await service.findAll({
+        payment_method_id: 17,
+        payment_status: ['pending', 'failed'],
+      } as any);
+
+      expect(lastWhere().AND).toEqual([
+        { payments: { some: {
+          store_payment_method_id: 17,
+          state: { in: ['succeeded', 'captured', 'partially_refunded', 'refunded'] },
+        } } },
+        { payments: { some: { state: { in: ['pending', 'failed'] } } } },
+      ]);
+    });
+
+    it('array de un elemento usa in (equivalente a igualdad)', async () => {
+      await service.findAll({ status: ['finished'] } as any);
+
+      expect(lastWhere().state).toEqual({ in: ['finished'] });
+    });
+
+    it('compat single: strings conservan igualdad exacta', async () => {
+      await service.findAll({
+        status: 'finished',
+        channel: 'pos',
+        payment_status: 'succeeded',
+      } as any);
+
+      const where = lastWhere();
+      expect(where.state).toBe('finished');
+      expect(where.channel).toBe('pos');
+      expect(where.payments).toEqual({ some: { state: 'succeeded' } });
+    });
+
+    it('compat single: payment_status string en la rama con payment_method_id conserva igualdad', async () => {
+      await service.findAll({
+        payment_method_id: 17,
+        payment_status: 'pending',
+      } as any);
+
+      expect(lastWhere().AND[1]).toEqual({
+        payments: { some: { state: 'pending' } },
+      });
+    });
+
+    it('la guarda status && !dispatchable sobrevive con arrays (dispatchable gana)', async () => {
+      await service.findAll({
+        status: ['finished'],
+        dispatchable: true,
+      } as any);
+
+      expect(lastWhere().state).toEqual({
+        in: ['processing', 'pending_payment'],
+      });
+    });
+  });
+
+  describe('OrderQueryDto — normalización multi-valor (paso 3)', () => {
+    // page/limit como strings: replica el query-string real (el DTO los
+    // parsea a int) para que validateSync no reporte ruido ajeno al filtro.
+    const toDto = (query: Record<string, unknown>) =>
+      plainToInstance(OrderQueryDto, { page: '1', limit: '10', ...query });
+
+    it('string único → array de uno y valida', () => {
+      const dto = toDto({ status: 'finished' });
+
+      expect(dto.status).toEqual(['finished']);
+      expect(validateSync(dto)).toEqual([]);
+    });
+
+    it('string con coma → split+trim sin vacíos y valida', () => {
+      const dto = toDto({ channel: 'whatsapp, ecommerce ,,pos ' });
+
+      expect(dto.channel).toEqual(['whatsapp', 'ecommerce', 'pos']);
+      expect(validateSync(dto)).toEqual([]);
+    });
+
+    it('params repetidos (array) → tal cual y valida', () => {
+      const dto = toDto({ payment_status: ['succeeded', 'captured'] });
+
+      expect(dto.payment_status).toEqual(['succeeded', 'captured']);
+      expect(validateSync(dto)).toEqual([]);
+    });
+
+    it('ausente y string vacío → undefined sin errores', () => {
+      const missing = toDto({});
+
+      expect(missing.status).toBeUndefined();
+
+      const empty = toDto({ status: '', channel: '   ' });
+
+      expect(empty.status).toBeUndefined();
+      expect(empty.channel).toBeUndefined();
+      expect(validateSync(empty)).toEqual([]);
+    });
+
+    it('rechaza un valor fuera del enum dentro del array', () => {
+      const dto = toDto({ status: ['processing', 'nope'] });
+
+      const errors = validateSync(dto);
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0].property).toBe('status');
+    });
+  });
+
+  describe('findAll — refund net and method catalog', () => {
+    it('R13 descuenta solo refunds completados, sin mutar grand_total', async () => {
+      mockPrismaService.orders.findMany.mockResolvedValueOnce([
+        { id: 1, state: 'finished', grand_total: new Prisma.Decimal(100000),
+          order_items: [], payments: [], refunds: [
+            { amount: new Prisma.Decimal(25000) },
+            { amount: new Prisma.Decimal(5000) },
+          ] },
+        { id: 2, state: 'refunded', grand_total: new Prisma.Decimal(10000),
+          order_items: [], payments: [], refunds: [{ amount: new Prisma.Decimal(10000) }] },
+      ]);
+      mockPrismaService.orders.count.mockResolvedValueOnce(2);
+
+      const result = await service.findAll({} as any);
+
+      expect(result.data.map((o) => ({ original: Number(o.grand_total), net: o.net_total,
+        refunded: o.completed_refund_amount, partial: o.is_partially_refunded })))
+        .toEqual([
+          { original: 100000, net: 70000, refunded: 30000, partial: true },
+          { original: 10000, net: 0, refunded: 10000, partial: false },
+        ]);
+      expect(result.data[0]).not.toHaveProperty('refunds');
+      expect(mockPrismaService.orders.findMany.mock.calls[0][0].include.refunds)
+        .toEqual({ where: { state: 'completed' }, select: { amount: true } });
+    });
+
+    it('R10 cataloga también métodos históricos sin exponer configuración sensible', async () => {
+      const methods = [{ id: 17, state: 'disabled', display_name: 'Transferencia anterior',
+        system_payment_method: { display_name: 'Transferencia' } }];
+      mockPrismaService.store_payment_methods.findMany.mockResolvedValueOnce(methods);
+
+      expect(await service.listPaymentMethods()).toEqual(methods);
+      expect(mockPrismaService.store_payment_methods.findMany).toHaveBeenCalledWith({
+        select: { id: true, display_name: true, state: true,
+          system_payment_method: { select: { display_name: true } } },
+        orderBy: [{ display_order: 'asc' }, { id: 'asc' }],
+      });
+    });
+  });
+
   describe('read-side cancellation policy', () => {
     it('returns per-order policy and loads safety evidence in the page query without N+1', async () => {
       mockPrismaService.orders.findMany.mockResolvedValueOnce([
@@ -389,7 +768,9 @@ describe('OrdersService', () => {
       const result = await service.findAll({} as any);
 
       expect(result.data.map((order) => order.cancellation_policy)).toEqual([
-        { can_cancel: false, can_cancel_payment: false, reason_code: 'ORD_CANCEL_STOCK_COMMITTED_001' },
+        // Regla del dueño: el stock comprometido bloquea cancelar la ORDEN,
+        // no cancelar el PAGO.
+        { can_cancel: false, can_cancel_payment: true, reason_code: 'ORD_CANCEL_STOCK_COMMITTED_001' },
         { can_cancel: true, can_cancel_payment: false, reason_code: null },
         { can_cancel: false, can_cancel_payment: false, reason_code: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001' },
       ]);
@@ -674,6 +1055,315 @@ describe('OrdersService', () => {
     });
   });
 
+  // ----------------------------------------------------------------
+  // order-truth-and-invoice-tz plan — Step 2. `findOne` attaches
+  // `available_actions` (order) + `items[].available_actions` (line),
+  // computed by the SAME util predicates `OrderFlowService
+  // .getAvailableActions` calls — additive fields only, nothing existing
+  // changes shape.
+  // ----------------------------------------------------------------
+  describe('findOne — available_actions (order-truth-and-invoice-tz plan, Step 2)', () => {
+    let contextSpy: jest.SpyInstance;
+
+    afterEach(() => contextSpy?.mockRestore());
+
+    it('attaches order-level available_actions from the same predicates as getAvailableActions', async () => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        user_id: 1,
+        roles: ['owner'],
+      } as any);
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 50,
+        state: 'created',
+        delivery_type: 'shipping',
+        shipping_method_id: null,
+        payment_form: '1',
+        grand_total: 100,
+        payments: [],
+        refunds: [],
+        order_items: [],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const result = await service.findOne(50);
+
+      expect((result as any).available_actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: 'edit_order', enabled: true }),
+          expect.objectContaining({ code: 'pay', enabled: true }),
+          expect.objectContaining({ code: 'assign_shipping', enabled: true }),
+          expect.objectContaining({ code: 'cancel', enabled: true }),
+        ]),
+      );
+    });
+
+    it('disables edit_order/pay for a financial-split-locked order, still owner', async () => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        user_id: 1,
+        roles: ['owner'],
+      } as any);
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 52,
+        state: 'created',
+        delivery_type: 'direct_delivery',
+        active_financial_split_id: 9,
+        grand_total: 100,
+        payments: [],
+        refunds: [],
+        order_items: [],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const result = await service.findOne(52);
+      const actions = (result as any).available_actions as Array<{
+        code: string; enabled: boolean; reason?: string;
+      }>;
+
+      expect(actions.find((a) => a.code === 'edit_order')).toMatchObject({
+        enabled: false,
+        reason: 'SPLIT_ACCOUNT_LOCKED',
+      });
+      expect(actions.find((a) => a.code === 'pay')).toMatchObject({
+        enabled: false,
+        reason: 'SPLIT_ACCOUNT_LOCKED',
+      });
+    });
+
+    it('shows only one home-delivery dispatch action on COD detail while payment is pending', async () => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1, organization_id: 1, user_id: 1, roles: ['owner'],
+      } as any);
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 53,
+        state: 'pending_payment',
+        delivery_type: 'home_delivery',
+        shipping_method_id: 9,
+        shipping_method: { type: 'own_fleet' },
+        payment_form: '1',
+        grand_total: 43_000,
+        payments: [{ state: 'pending', amount: 43_000 }],
+        refunds: [],
+        order_items: [{ id: 531, item_type: 'direct', kitchen_ticket_items: [] }],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const order = await service.findOne(53);
+      const actions = (order as any).available_actions as Array<{ code: string }>;
+      expect(actions.filter((action) => action.code === 'dispatch_order')).toHaveLength(1);
+      expect(actions.some((action) => action.code === 'manual_ship')).toBe(false);
+      expect(actions.some((action) => action.code === 'ready_for_pickup')).toBe(false);
+    });
+
+    it('does not show legacy tracking/ready actions alongside dispatch on processing home delivery', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 54,
+        state: 'processing',
+        delivery_type: 'home_delivery',
+        shipping_method_id: 9,
+        shipping_method: { type: 'own_fleet' },
+        payment_form: '1',
+        grand_total: 43_000,
+        payments: [{ state: 'succeeded', amount: 43_000 }],
+        refunds: [],
+        order_items: [{ id: 541, item_type: 'direct', kitchen_ticket_items: [] }],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const order = await service.findOne(54);
+      const codes = ((order as any).available_actions as Array<{ code: string }>).map((action) => action.code);
+      expect(codes.filter((code) => code === 'dispatch_order')).toHaveLength(1);
+      expect(codes).not.toContain('ship_with_tracking');
+      expect(codes).not.toContain('ready_for_pickup');
+    });
+
+    it('attaches item-level available_actions (deliver/cancel/reverse_delivered/resend) per order item', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 51,
+        state: 'processing',
+        delivery_type: 'direct_delivery',
+        payments: [],
+        refunds: [],
+        order_items: [
+          {
+            id: 510,
+            product_id: null,
+            unit_price: 10,
+            quantity: 1,
+            total_price: 10,
+            item_type: 'prepared',
+            delivered_at: null,
+            kitchen_ticket_items: [{ status: 'ready' }],
+            products: {},
+          },
+        ],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const result = await service.findOne(51);
+      const item = (result as any).order_items[0];
+
+      expect(item.available_actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: 'deliver', enabled: true }),
+          expect.objectContaining({ code: 'cancel', enabled: true }),
+          expect.objectContaining({ code: 'reverse_delivered', enabled: false }),
+        ]),
+      );
+    });
+
+    it('does not advertise item delivery for a physical line with a prepared product pending in KDS', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 55, state: 'pending_payment', delivery_type: 'home_delivery',
+        payments: [], refunds: [], order_promotions: [], coupon_uses: [],
+        order_items: [{
+          id: 551, item_type: 'physical', skip_kds: false, delivered_at: null,
+          products: { product_type: 'prepared' },
+          kitchen_ticket_items: [{ status: 'pending' }],
+        }],
+      });
+
+      const order = await service.findOne(55);
+      expect((order as any).order_items[0].available_actions).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'deliver', enabled: false })]),
+      );
+    });
+  });
+
+  /**
+   * order-truth-and-invoice-tz plan, Step 7 — `getTimeline` lee `order_events`
+   * cuando existen y cae al `audit_logs` legacy cuando no. `orderHistoryService`
+   * es `@Optional()` en el constructor real (para no romper `new OrdersService`
+   * en otros specs), así que aquí se asigna directo sobre la instancia con un
+   * mock mínimo — no hace falta reconstruir el TestingModule completo.
+   */
+  describe('getTimeline — order_events con fallback legacy (order-truth-and-invoice-tz plan, Step 7)', () => {
+    const baseOrder = {
+      id: 700,
+      state: 'created',
+      delivery_type: 'direct_delivery',
+      payments: [],
+      refunds: [],
+      order_items: [],
+      order_promotions: [],
+      coupon_uses: [],
+    };
+
+    beforeEach(() => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(baseOrder);
+    });
+
+    it('returns legacy:false with events mapped only from order_events when the order has any', async () => {
+      const listForOrder = jest.fn().mockResolvedValue([
+        {
+          id: 1,
+          event_type: 'state_changed',
+          from_state: 'created',
+          to_state: 'processing',
+          actor_user_id: 5,
+          actor_source: 'http',
+          payment_id: null,
+          order_item_id: null,
+          amount: null,
+          payload: null,
+          created_at: new Date('2026-01-01T10:00:00Z'),
+          users: { id: 5, first_name: 'Ana', last_name: 'Lopez' },
+        },
+        {
+          id: 2,
+          event_type: 'payment_registered',
+          from_state: null,
+          to_state: null,
+          actor_user_id: null,
+          actor_source: 'webhook',
+          payment_id: 33,
+          order_item_id: null,
+          amount: '50000',
+          payload: { method: 'card' },
+          created_at: new Date('2026-01-01T10:05:00Z'),
+          users: null,
+        },
+      ]);
+      (service as any).orderHistoryService = { listForOrder };
+
+      const result = await service.getTimeline(700);
+
+      expect(listForOrder).toHaveBeenCalledWith(700);
+      expect(mockPrismaService.audit_logs.findMany).not.toHaveBeenCalled();
+      expect(result.legacy).toBe(false);
+      expect(result.events).toEqual([
+        expect.objectContaining({
+          id: 1,
+          event_type: 'state_changed',
+          from_state: 'created',
+          to_state: 'processing',
+          actor: { user_id: 5, name: 'Ana Lopez' },
+          actor_source: 'http',
+        }),
+        expect.objectContaining({
+          id: 2,
+          event_type: 'payment_registered',
+          actor: null,
+          actor_source: 'webhook',
+          payment_id: 33,
+          amount: '50000',
+          payload: { method: 'card' },
+        }),
+      ]);
+    });
+
+    it('falls back to legacy audit_logs output (unchanged) when the order has no order_events', async () => {
+      const listForOrder = jest.fn().mockResolvedValue([]);
+      (service as any).orderHistoryService = { listForOrder };
+      const legacyLogs = [
+        {
+          id: 10,
+          action: 'UPDATE',
+          resource: 'orders',
+          resource_id: 700,
+          users: null,
+          created_at: new Date('2025-01-01T00:00:00Z'),
+        },
+      ];
+      mockPrismaService.audit_logs.findMany.mockResolvedValue(legacyLogs);
+
+      const result = await service.getTimeline(700);
+
+      expect(listForOrder).toHaveBeenCalledWith(700);
+      expect(mockPrismaService.audit_logs.findMany).toHaveBeenCalled();
+      expect(result.legacy).toBe(true);
+      expect(result.events).toBe(legacyLogs);
+    });
+
+    it('falls back to legacy when OrderHistoryService did not resolve (@Optional with no DI provider)', async () => {
+      (service as any).orderHistoryService = undefined;
+      const legacyLogs = [
+        {
+          id: 11,
+          action: 'CREATE',
+          resource: 'orders',
+          resource_id: 700,
+          users: null,
+          created_at: new Date('2025-01-01T00:00:00Z'),
+        },
+      ];
+      mockPrismaService.audit_logs.findMany.mockResolvedValue(legacyLogs);
+
+      const result = await service.getTimeline(700);
+
+      expect(result.legacy).toBe(true);
+      expect(result.events).toBe(legacyLogs);
+    });
+  });
+
   /**
    * QUI-557 — El vector de corrupción que hacía reaparecer el ticket.
    *
@@ -697,6 +1387,164 @@ describe('OrdersService', () => {
    * Ahora deriva el bruto server-side con `resolveFinalUnitPriceServerSide`
    * (mismas tasas de catálogo que ya resuelve para `order_item_taxes`).
    */
+  describe('create — E.3 delivery type and channel', () => {
+    let contextSpy: jest.SpyInstance;
+    const makeDto = (extra: Record<string, unknown> = {}) => ({
+      order_number: 'ORD-E3-1',
+      subtotal: 100,
+      total_amount: 100,
+      skip_schedule_validation: true,
+      items: [{ product_name: 'Custom item', quantity: 1, unit_price: 100, total_price: 100 }],
+      ...extra,
+    }) as CreateOrderDto;
+
+    beforeEach(() => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1, organization_id: 1, user_id: 99, request_id: 'req-e3',
+      } as any);
+      mockPrismaService.orders.create.mockReset().mockImplementation(async ({ data }: any) => ({
+        id: 930,
+        store_id: 1,
+        order_number: data.order_number,
+        delivery_type: data.delivery_type ?? order_delivery_type_enum.direct_delivery,
+        channel: data.channel ?? order_channel_enum.pos,
+        state: data.state,
+        grand_total: data.grand_total,
+        currency: data.currency,
+        order_items: [{ product_id: null, product_variant_id: null, quantity: 1, products: null }],
+      }));
+    });
+
+    afterEach(() => contextSpy.mockRestore());
+
+    it('rejects an insufficient tracked line before creating the order', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([{ id: 51, price_unit_quantity: null, product_tax_assignments: [] }] as any);
+      mockPrismaService.products.findUnique.mockResolvedValue({
+        id: 51, name: 'MODELO', product_type: 'physical', product_variants: [],
+      } as any);
+      const shortage = new VendixHttpException(
+        ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+        'MODELO sin existencias',
+        { items: [{ product_id: 51, product_variant_id: null, product_name: 'MODELO', kind: 'product', requested: 2, available: 0 }] },
+      );
+      mockStockValidator.assertLinesAvailable.mockRejectedValueOnce(shortage);
+
+      await expect(service.create(makeDto({
+        items: [{ product_id: 51, product_name: 'MODELO', quantity: 2, unit_price: 100, total_price: 200 }],
+      }), { id: 99 })).rejects.toMatchObject({
+        errorCode: 'INV_STOCK_INSUFFICIENT_LINES',
+      });
+      expect(mockStockValidator.assertLinesAvailable).toHaveBeenCalledWith(
+        [expect.objectContaining({ product_id: 51, quantity: 2 })],
+        expect.objectContaining({ tx: mockPrismaService }),
+      );
+      expect(mockPrismaService.orders.create).not.toHaveBeenCalled();
+      expect(mockStockLevelManager.reserveStock).not.toHaveBeenCalled();
+    });
+
+    it('reserves a tracked line strictly in the same transaction as create', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([{ id: 51, price_unit_quantity: null, product_tax_assignments: [] }] as any);
+      mockPrismaService.products.findUnique.mockResolvedValue({
+        id: 51, name: 'MODELO', product_type: 'physical', product_variants: [],
+      } as any);
+      mockPrismaService.orders.create.mockResolvedValueOnce({
+        id: 930, store_id: 1, order_number: 'ORD-E3-1', grand_total: 100,
+        currency: 'COP', order_items: [{
+          product_id: 51, product_variant_id: null, product_name: 'MODELO',
+          item_type: 'physical', quantity: 1, stock_units_consumed: null,
+          products: { track_inventory: true }, product_variants: null,
+        }],
+      } as any);
+
+      await service.create(makeDto({
+        items: [{ product_id: 51, product_name: 'MODELO', quantity: 1, unit_price: 100, total_price: 100 }],
+      }), { id: 99 });
+
+      expect(mockStockLevelManager.reserveStock).toHaveBeenCalledWith(
+        51, undefined, 1, 1, 'order', 930, 99,
+        true, mockPrismaService, undefined, false, undefined, false,
+      );
+    });
+
+    it('reserves split stock across two sellable locations in one transaction', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([{ id: 51, price_unit_quantity: null, product_tax_assignments: [] }] as any);
+      mockPrismaService.products.findUnique.mockResolvedValue({
+        id: 51, name: 'MODELO', product_type: 'physical', product_variants: [],
+      } as any);
+      mockPrismaService.orders.create.mockResolvedValueOnce({
+        id: 931, store_id: 1, order_number: 'ORD-E3-1', grand_total: 200,
+        currency: 'COP', order_items: [{
+          product_id: 51, product_variant_id: null, product_name: 'MODELO',
+          item_type: 'physical', quantity: 2, stock_units_consumed: null,
+          products: { track_inventory: true }, product_variants: null,
+        }],
+      } as any);
+      mockSellableStockAllocator.allocateForLine.mockResolvedValueOnce({
+        slices: [{ location_id: 1, quantity: 1 }, { location_id: 2, quantity: 1 }],
+        allocated: 2, available: 2, shortfall: 0,
+      });
+
+      await service.create(makeDto({
+        items: [{ product_id: 51, product_name: 'MODELO', quantity: 2, unit_price: 100, total_price: 200 }],
+      }), { id: 99 });
+
+      expect(mockStockLevelManager.reserveStock).toHaveBeenCalledTimes(2);
+      expect(mockStockLevelManager.reserveStock).toHaveBeenNthCalledWith(1,
+        51, undefined, 1, 1, 'order', 931, 99, true, mockPrismaService,
+        undefined, false, undefined, false,
+      );
+      expect(mockStockLevelManager.reserveStock).toHaveBeenNthCalledWith(2,
+        51, undefined, 2, 1, 'order', 931, 99, true, mockPrismaService,
+        undefined, false, undefined, false,
+      );
+    });
+
+    it('uses catalog prepared type even if the client claims physical', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([{ id: 52, price_unit_quantity: null, product_tax_assignments: [] }] as any);
+      mockPrismaService.products.findUnique.mockResolvedValue({
+        id: 52, name: 'Plato', product_type: 'prepared', product_variants: [],
+      } as any);
+
+      await service.create(makeDto({
+        items: [{ product_id: 52, product_name: 'Plato', item_type: 'physical', quantity: 1, unit_price: 100, total_price: 100 }],
+      }), { id: 99 });
+
+      expect(mockPrismaService.orders.create.mock.calls[0][0].data.order_items.create[0].item_type).toBe('prepared');
+      expect(mockStockValidator.assertLinesAvailable).toHaveBeenCalledWith([], expect.anything());
+      expect(mockStockLevelManager.reserveStock).not.toHaveBeenCalled();
+    });
+
+    it('persists dine_in and whatsapp instead of falling through to schema defaults', async () => {
+      const order = await service.create(makeDto({ delivery_type: order_delivery_type_enum.dine_in, channel: order_channel_enum.whatsapp }), { id: 99 });
+      expect(order).toMatchObject({ delivery_type: order_delivery_type_enum.dine_in, channel: order_channel_enum.whatsapp, state: order_state_enum.created });
+      expect(mockPrismaService.orders.create.mock.calls[0][0].data).toMatchObject({ delivery_type: order_delivery_type_enum.dine_in, channel: order_channel_enum.whatsapp });
+    });
+
+    it('writes explicit direct_delivery/pos defaults and never pickup when omitted', async () => {
+      const order = await service.create(makeDto(), { id: 99 });
+      expect(order).toMatchObject({ delivery_type: order_delivery_type_enum.direct_delivery, channel: order_channel_enum.pos });
+      expect(mockPrismaService.orders.create.mock.calls[0][0].data).toMatchObject({ delivery_type: order_delivery_type_enum.direct_delivery, channel: order_channel_enum.pos });
+    });
+
+    it('keeps home_delivery + prepared in pending_delivery', async () => {
+      const dto = makeDto({ delivery_type: order_delivery_type_enum.home_delivery });
+      dto.items[0].product_type = 'prepared';
+      const order = await service.create(dto, { id: 99 });
+      expect(order).toMatchObject({ delivery_type: order_delivery_type_enum.home_delivery, state: order_state_enum.pending_delivery });
+    });
+
+    it('accepts every schema channel and rejects an invalid channel and unknown field through DTO validation', () => {
+      for (const channel of Object.values(order_channel_enum)) {
+        const dto = plainToInstance(CreateOrderDto, makeDto({ channel }));
+        expect(validateSync(dto, { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
+      }
+      for (const extra of [{ channel: 'telegram' }, { canal: 'pos' }, { delivery_type: 'takeaway' }]) {
+        const dto = plainToInstance(CreateOrderDto, makeDto(extra));
+        expect(validateSync(dto, { whitelist: true, forbidNonWhitelisted: true }).length).toBeGreaterThan(0);
+      }
+    });
+  });
+
   describe('create — F-006 final_unit_price server-side (C.8)', () => {
     const contextSpy = () =>
       jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
@@ -878,6 +1726,48 @@ describe('OrdersService', () => {
 
     /** Todos los estados que la UI manda hoy por el PATCH genérico. */
     const UI_STATES = ['cancelled', 'shipped', 'delivered'] as const;
+
+    it('el DTO admite motivo string pero rechaza uno no textual', () => {
+      expect(validateSync(plainToInstance(UpdateOrderDto, {
+        state: 'processing', reason: 'Entrega equivocada',
+      }), { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
+      expect(validateSync(plainToInstance(UpdateOrderDto, {
+        state: 'processing', reason: 123,
+      }), { whitelist: true, forbidNonWhitelisted: true }).length).toBeGreaterThan(0);
+    });
+
+    it.each([undefined, '', '   '])(
+      'rechaza delivered -> processing sin motivo del usuario (%s) antes de cualquier write',
+      async (reason) => {
+        mockPrismaService.orders.findFirst.mockResolvedValue({ ...processingOrder, state: 'delivered' });
+        await expect(service.update(590, {
+          state: 'processing', reason, internal_notes: 'nota',
+        } as any)).rejects.toMatchObject({
+          errorCode: 'ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001',
+        });
+        expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+        expect(mockOrderFlowService.forceOrderState).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([false, true])(
+      'delega motivo del usuario para delivered -> processing (con metadata=%s)',
+      async (withMetadata) => {
+        mockPrismaService.orders.findFirst.mockResolvedValue({ ...processingOrder, state: 'delivered' });
+        mockPrismaService.orders.update.mockResolvedValue(processingOrder);
+        await service.update(590, {
+          state: 'processing', reason: '  Entrega equivocada  ',
+          ...(withMetadata ? { internal_notes: 'nota' } : {}),
+        } as any);
+        expect(mockOrderFlowService.forceOrderState).toHaveBeenCalledWith(590, 'processing', {
+          reason: 'Entrega equivocada',
+        });
+        for (const [call] of mockPrismaService.orders.update.mock.calls) {
+          expect(call.data.reason).toBeUndefined();
+          expect(call.data.state).toBeUndefined();
+        }
+      },
+    );
 
     it.each(UI_STATES)(
       'delega state=%s en forceOrderState y no escribe el estado en crudo',
@@ -1331,7 +2221,20 @@ describe('OrdersService', () => {
         .mockResolvedValueOnce(draftOrder as any)
         .mockResolvedValue(persistedOrder as any);
       mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
-      mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
+      mockPrismaService.addresses.findFirst.mockResolvedValue({
+        country_code: 'CO', city: 'Bogotá', state_province: 'Bogotá',
+      } as any);
+      // P0-1: el editor resuelve la tasa con `resolveLineTaxesForOrder`
+      // (`products.findMany` → asignaciones). IVA 19 % AGREGADO sobre la base
+      // 100 ⇒ 19, el mismo número que `persistedOrder` declara.
+      mockPrismaService.products.findMany.mockResolvedValue([
+        productTaxRow(1, {
+          id: 10,
+          name: 'IVA 19%',
+          rate: 0.19,
+          is_inclusive: false,
+        }),
+      ] as any);
       mockPrismaService.product_variants.findMany.mockResolvedValue([]);
       mockPrismaService.shipping_methods.findFirst.mockResolvedValue({
         id: 5,
@@ -1414,6 +2317,250 @@ describe('OrdersService', () => {
       }
     });
 
+    it('reutiliza solo la dirección huérfana ya asociada al borrador alias', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        const aliasDraft = {
+          ...draftOrder, customer_id: null, customer_alias: 'Portería',
+          shipping_address_id: 33,
+        };
+        mockPrismaService.orders.findFirst.mockReset()
+          .mockResolvedValueOnce(aliasDraft as any)
+          .mockResolvedValue({
+            ...persistedOrder,
+            customer_id: null,
+            customer_alias: 'Portería',
+            shipping_address_id: 33,
+          } as any);
+        mockPrismaService.store_settings.findFirst.mockResolvedValue({
+          settings: { pos: { allow_alias_sales: true } },
+        } as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1, name: 'Test product', product_type: 'simple', product_variants: [],
+        } as any);
+
+        await service.updateOrderFromEditor(500, {
+          ...fullDto, customer_id: null, customer_alias: 'Portería',
+          shipping_address_id: undefined,
+        });
+
+        expect(mockPrismaService.addresses.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: 33, store_id: 1, user_id: null },
+          }),
+        );
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('rechaza tomar la dirección huérfana de otro alias de la misma tienda', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        mockPrismaService.orders.findFirst.mockReset().mockResolvedValueOnce({
+          ...draftOrder, customer_id: null, customer_alias: 'Portería',
+          shipping_address_id: 33,
+        } as any);
+        mockPrismaService.store_settings.findFirst.mockResolvedValue({
+          settings: { pos: { allow_alias_sales: true } },
+        } as any);
+        await expect(service.updateOrderFromEditor(500, {
+          ...fullDto, customer_id: null, customer_alias: 'Portería',
+          shipping_address_id: 34,
+        })).rejects.toMatchObject({
+          errorCode: ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001.code,
+        });
+        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // Impuesto opcional por tarifa de envío — copia en el editor.
+    // ----------------------------------------------------------------
+    describe('impuesto del envío en el editor', () => {
+      const INC_SNAPSHOT = {
+        shipping_tax_rate_id: 77,
+        shipping_tax_name: 'INC 8%',
+        shipping_tax_type: 'inc',
+        shipping_tax_rate: 0.08,
+        shipping_tax_amount: 0.74,
+      };
+      let snapshotForRate: jest.Mock;
+      const arrangeProduct = () =>
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1, name: 'Test product', product_type: 'simple', product_variants: [],
+        } as any);
+      const headerUpdate = () =>
+        mockPrismaService.orders.update.mock.calls
+          .map((c: any[]) => c[0])
+          .find((a: any) => a?.where?.id === 500 && 'grand_total' in (a.data ?? {}))?.data;
+
+      beforeEach(() => {
+        snapshotForRate = jest.fn().mockResolvedValue({ ...INC_SNAPSHOT });
+        (service as any).shippingTaxService = { snapshotForRate };
+      });
+
+      it('método + tarifa: copia nueva de la tarifa vigente', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          await service.updateOrderFromEditor(500, fullDto);
+          expect(snapshotForRate).toHaveBeenCalledWith(null, 7, 10, { store_id: 1 });
+          expect(headerUpdate()).toMatchObject({
+            ...INC_SNAPSHOT,
+            shipping_rate_id: 7,
+            shipping_cost: 10,
+            grand_total: 129,
+          });
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it('paso 2 — tarifa flat con umbral de envío gratis superado: shipping_cost 0 (unificado con quoteRateGross)', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          // Dirección resoluble ⇒ el editor ahora puede cotizar la tarifa
+          // explícita en vez de asumir `base_cost` a ciegas.
+          mockPrismaService.addresses.findFirst.mockResolvedValueOnce({
+            country_code: 'CO',
+            city: 'Bogotá',
+            latitude: 4.711,
+            longitude: -74.0721,
+          } as any);
+          // El umbral de envío gratis vive dentro del cálculo único de
+          // `ShippingCalculatorService` (probado en
+          // `shipping-calculator.service.spec.ts`, paso 1); acá solo se
+          // prueba que el editor USA ese resultado en vez del atajo
+          // `base_cost`.
+          mockShippingCalculator.quoteRateGross.mockResolvedValueOnce(0);
+          // El guard anti-rollback (ORD_EDIT_TOTALS_ROLLBACK_001) relee la
+          // orden dentro de la tx y la compara contra lo recalculado; el
+          // `persistedOrder` compartido trae `shipping_cost: 10` fijo, así
+          // que hay que reflejar el 0 (y el `grand_total` resultante) en la
+          // lectura posterior a la escritura.
+          mockPrismaService.orders.findFirst.mockResolvedValue({
+            ...persistedOrder,
+            shipping_cost: 0,
+            grand_total: 119,
+          } as any);
+          await service.updateOrderFromEditor(500, { ...fullDto, shipping_cost: 0 });
+          expect(mockShippingCalculator.quoteRateGross).toHaveBeenCalled();
+          expect(mockShippingCalculator.quoteRateGross.mock.calls[0][1]).toBe(7);
+          // El editor trata su propio costo calculado como "de tarifa"
+          // (mismo contrato existente, ver `resolveShippingTaxChange`): con
+          // costo 0 la copia SÍ se re-deriva sobre ese 0, nunca se inventa
+          // sobre el `base_cost` de 10 que hubiera regido sin el paso 2.
+          expect(snapshotForRate).toHaveBeenCalledWith(null, 7, 0, { store_id: 1 });
+          const data = headerUpdate();
+          expect(data.shipping_cost).toBe(0);
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it('DTO sin envío: conserva costo y copia (no escribe shipping_tax_*)', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          const withShipping = {
+            ...draftOrder, shipping_cost: '10.00', shipping_method_id: 5, shipping_rate_id: 7,
+          };
+          mockPrismaService.orders.findFirst.mockReset();
+          mockPrismaService.orders.findFirst
+            .mockResolvedValueOnce(withShipping as any)
+            .mockResolvedValue(persistedOrder as any);
+          const { delivery_type, shipping_method_id, shipping_rate_id, shipping_address_id, shipping_cost, ...noShip } = fullDto;
+          await service.updateOrderFromEditor(500, noShip);
+          expect(snapshotForRate).not.toHaveBeenCalled();
+          const data = headerUpdate();
+          expect(data.shipping_cost).toBe(10);
+          expect(data.shipping_rate_id).toBe(7);
+          expect('shipping_tax_amount' in data).toBe(false);
+          expect('shipping_tax_rate_id' in data).toBe(false);
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it('mismo método, tarifa y costo (solo se edita la nota): conserva la copia aunque la tarifa haya cambiado su impuesto', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          // Tras la venta la tarifa pasó a no tener impuesto: re-copiarla
+          // borraría el INC ya cobrado. Nada del envío cambió ⇒ no se toca.
+          snapshotForRate.mockResolvedValue({
+            shipping_tax_rate_id: null, shipping_tax_name: null, shipping_tax_type: null,
+            shipping_tax_rate: null, shipping_tax_amount: 0,
+          });
+          const withShipping = {
+            ...draftOrder, shipping_cost: '10.00',
+            shipping_method_id: fullDto.shipping_method_id, shipping_rate_id: 7,
+            ...INC_SNAPSHOT,
+          };
+          mockPrismaService.orders.findFirst.mockReset();
+          mockPrismaService.orders.findFirst
+            .mockResolvedValueOnce(withShipping as any)
+            .mockResolvedValue(persistedOrder as any);
+          await service.updateOrderFromEditor(500, { ...fullDto, notes: 'nota editada' });
+          expect(snapshotForRate).not.toHaveBeenCalled();
+          const data = headerUpdate();
+          expect(data.shipping_rate_id).toBe(7);
+          expect(data.shipping_cost).toBe(10);
+          expect('shipping_tax_amount' in data).toBe(false);
+          expect('shipping_tax_rate_id' in data).toBe(false);
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it('dtoDropsShipment (pickup): limpia la copia y suelta shipping_rate_id', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          const withShipping = {
+            ...draftOrder, shipping_cost: '10.00', shipping_method_id: 5, shipping_rate_id: 7,
+          };
+          mockPrismaService.orders.findFirst.mockReset();
+          mockPrismaService.orders.findFirst
+            .mockResolvedValueOnce(withShipping as any)
+            .mockResolvedValue({ ...persistedOrder, shipping_cost: 0, grand_total: 119 } as any);
+          const { shipping_method_id, shipping_rate_id, shipping_address_id, shipping_cost, ...rest } = fullDto;
+          await service.updateOrderFromEditor(500, { ...rest, delivery_type: 'pickup' });
+          expect(snapshotForRate).not.toHaveBeenCalled();
+          expect(headerUpdate()).toMatchObject({
+            shipping_rate_id: null,
+            shipping_cost: 0,
+            shipping_tax_rate_id: null,
+            shipping_tax_name: null,
+            shipping_tax_type: null,
+            shipping_tax_rate: null,
+            shipping_tax_amount: 0,
+            grand_total: 119,
+          });
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+    });
+
     // ----------------------------------------------------------------
     // C.8 — F-012/F-037 (blocker/major): el subtotal usaba `priceUnitsQty`
     // (la ESCALA `price_unit_quantity` del producto) pero el impuesto
@@ -1447,18 +2594,20 @@ describe('OrdersService', () => {
           shipping_method_id: null,
           shipping_rate_id: null,
         };
-        // Lo que el commit debe escribir/leer si el multiplicador es
-        // ÚNICO: subtotal = unit_price(10) × escala(1000) = 10.000; tax =
-        // (10 × 0,19) × escala(1000) = 1.900. Si el impuesto usara
-        // `quantity` (2000) en vez de la escala, daría 3.800 — el doble —
-        // y este test fallaría.
+        // Lo que el commit debe escribir/leer con el multiplicador ÚNICO de
+        // línea (`resolveLineUnits`: quantity / escala = 2000 / 1000 = 2):
+        // subtotal = 10 × 2 = 20 (= Σ `total_price` de la línea); tax =
+        // 1,90 × 2 = 3,80. P0-4: la cabecera es Σ de líneas — el valor
+        // anterior de este test (10 × 1000 = 10.000) multiplicaba por la
+        // ESCALA y dejaba la cabecera 500× por encima de la línea que ella
+        // misma escribía (total_price = 20).
         const scaledPersistedOrder = {
           ...scaledDraftOrder,
-          subtotal_amount: 10000,
-          tax_amount: 1900,
+          subtotal_amount: 20,
+          tax_amount: 3.8,
           discount_amount: 0,
           shipping_cost: 0,
-          grand_total: 11900,
+          grand_total: 23.8,
           order_items: [],
           users: { id: 99, first_name: 'Juan' },
           order_promotions: [],
@@ -1473,7 +2622,12 @@ describe('OrdersService', () => {
         // resuelta vía el mismo `products.findMany` que ya usa el paso 4
         // (validación de existencia).
         mockPrismaService.products.findMany.mockResolvedValue([
-          { id: 1, price_unit_quantity: 1000 },
+          productTaxRow(
+            1,
+            { id: 10, name: 'IVA 19%', rate: 0.19, is_inclusive: false },
+            'iva',
+            { price_unit_quantity: 1000 },
+          ),
         ] as any);
         mockPrismaService.products.findUnique.mockResolvedValue({
           id: 1,
@@ -1526,8 +2680,16 @@ describe('OrdersService', () => {
         expect(result).toBeDefined();
         const writtenData = mockPrismaService.orders.update.mock.calls[0][0]
           .data;
-        expect(Number(writtenData.subtotal_amount)).toBe(10000);
-        expect(Number(writtenData.tax_amount)).toBe(1900);
+        expect(Number(writtenData.subtotal_amount)).toBe(20);
+        expect(Number(writtenData.tax_amount)).toBe(3.8);
+        // La línea escrita y la cabecera usan el MISMO multiplicador.
+        const writtenLine = mockPrismaService.order_items.create.mock.calls[0][0]
+          .data;
+        expect(Number(writtenLine.total_price)).toBe(20);
+        expect(Number(writtenLine.tax_amount_item)).toBe(1.9);
+        expect(writtenLine.order_item_taxes.create[0].tax_amount.toNumber()).toBe(
+          3.8,
+        );
         // Invariante fuerte e independiente de la escala elegida: la
         // proporción impuesto/subtotal debe ser EXACTAMENTE la tasa del
         // catálogo (19 %). Un multiplicador distinto entre subtotal e
@@ -1939,16 +3101,14 @@ describe('OrdersService', () => {
     });
 
     // ----------------------------------------------------------------
-    // C.8 — F-035 (major) / F-047 (blocker): `updateOrderFromEditor`
-    // reemplaza las líneas con `order_items.deleteMany` + recreación; si
-    // la orden ya tiene desglose fiscal persistido (`order_item_taxes`),
-    // ese `deleteMany` choca contra la FK `order_item_taxes_order_item_id_fkey`
-    // (sin `onDelete`, RESTRICT por default) y Prisma lanza P2003 crudo —
-    // un 500 sin código de negocio. `assertNoPersistedTaxBreakdown` corta
-    // ANTES, con 409 `ORD_EDIT_TAX_BREAKDOWN_LOCKED_001`, sin tocar una
-    // sola fila.
+    // P0-4 (auditoría impuestos por producto) — antes un borrador con
+    // `order_item_taxes` persistido se rechazaba con 409
+    // `ORD_EDIT_TAX_BREAKDOWN_LOCKED_001` (el `deleteMany` de líneas chocaba
+    // con la FK sin `onDelete`). Ahora el servidor borra el desglose en la
+    // MISMA tx, recrea cada línea con su desglose anidado y la cabecera es
+    // Σ de líneas.
     // ----------------------------------------------------------------
-    it('lanza 409 ORD_EDIT_TAX_BREAKDOWN_LOCKED_001 si la orden ya tiene order_item_taxes persistidos', async () => {
+    it('P0-4: edita un draft CON desglose fiscal (antes 409): borra y recrea order_item_taxes en la tx', async () => {
       setupContext();
       const contextSpy = spyContext();
       try {
@@ -1959,24 +3119,201 @@ describe('OrdersService', () => {
           product_type: 'simple',
           product_variants: [],
         } as any);
-        // La orden ya tiene al menos un renglón de desglose fiscal.
-        mockPrismaService.order_item_taxes.findFirst.mockResolvedValueOnce({
+        mockPrismaService.order_item_taxes.findFirst.mockResolvedValue({
           id: 77,
         } as any);
+        // Línea previa DISTINTA (cantidad 2): no se conserva, se recalcula.
+        mockPrismaService.order_items.findMany.mockResolvedValue([
+          {
+            product_id: 1,
+            product_variant_id: null,
+            quantity: 2,
+            weight: null,
+            price_unit_quantity: null,
+            applied_price_tier_id: null,
+            unit_price: '100.00',
+            total_price: '200.00',
+            tax_rate: '0.19',
+            tax_amount_item: '19.00',
+            final_unit_price: '119.00',
+            order_item_taxes: [
+              {
+                tax_rate_id: 10,
+                tax_name: 'IVA 19%',
+                tax_rate: '0.19',
+                tax_amount: '38.00',
+                tax_type: 'iva',
+                is_compound: false,
+                is_inclusive: false,
+              },
+            ],
+          },
+        ] as any);
 
-        let caught: VendixHttpException | null = null;
-        try {
-          await service.updateOrderFromEditor(500, fullDto);
-        } catch (err) {
-          caught = err as VendixHttpException;
-        }
+        await service.updateOrderFromEditor(500, {
+          ...fullDto,
+          // El cliente manda impuesto 0: no decide.
+          items: [{ ...fullDto.items[0], tax_amount_item: 0 }],
+        });
 
-        expect(caught).toBeInstanceOf(VendixHttpException);
-        expect(caught!.errorCode).toBe(
-          ErrorCodes.ORD_EDIT_TAX_BREAKDOWN_LOCKED_001.code,
+        // Desglose borrado ANTES que las líneas, en la misma tx.
+        expect(mockPrismaService.order_item_taxes.deleteMany).toHaveBeenCalledWith(
+          { where: { order_items: { order_id: 500 } } },
         );
-        // La guarda corre ANTES del deleteMany: ninguna línea se toca.
-        expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+        const deleteTaxesOrder =
+          mockPrismaService.order_item_taxes.deleteMany.mock
+            .invocationCallOrder[0];
+        const deleteItemsOrder =
+          mockPrismaService.order_items.deleteMany.mock.invocationCallOrder[0];
+        expect(deleteTaxesOrder).toBeLessThan(deleteItemsOrder);
+        expect(mockPrismaService.order_items.createMany).not.toHaveBeenCalled();
+
+        const line = mockPrismaService.order_items.create.mock.calls[0][0].data;
+        expect(Number(line.unit_price)).toBe(100);
+        expect(Number(line.tax_amount_item)).toBe(19);
+        expect(Number(line.final_unit_price)).toBe(119);
+        expect(line.order_item_taxes.create).toHaveLength(1);
+        expect(line.order_item_taxes.create[0]).toMatchObject({
+          tax_rate_id: 10,
+          tax_type: 'iva',
+          is_inclusive: false,
+        });
+        expect(line.order_item_taxes.create[0].tax_amount.toNumber()).toBe(19);
+
+        // Cabecera = Σ líneas.
+        const header = mockPrismaService.orders.update.mock.calls[0][0].data;
+        expect(Number(header.subtotal_amount)).toBe(100);
+        expect(Number(header.tax_amount)).toBe(19);
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('P0-1: con IVA INCLUIDO el editor parte del bruto (11.900 ⇒ 10.000 + 1.900), no re-despeja el neto', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
+        mockPrismaService.products.findMany.mockResolvedValue([
+          productTaxRow(1, {
+            id: 11,
+            name: 'IVA 19% incl',
+            rate: 0.19,
+            is_inclusive: true,
+          }),
+        ] as any);
+        const persisted = {
+          ...persistedOrder,
+          subtotal_amount: 10000,
+          tax_amount: 1900,
+          grand_total: 11910,
+        };
+        mockPrismaService.orders.findFirst
+          .mockReset()
+          .mockResolvedValueOnce(draftOrder as any)
+          .mockResolvedValue(persisted as any);
+
+        await service.updateOrderFromEditor(500, {
+          ...fullDto,
+          items: [
+            {
+              product_id: 1,
+              product_name: 'Test product',
+              quantity: 1,
+              // Payload real del editor: neto + bruto.
+              unit_price: 10000,
+              final_unit_price: 11900,
+              total_price: 10000,
+              tax_amount_item: 1900,
+              tax_rate: 0.19,
+            },
+          ],
+        });
+
+        const line = mockPrismaService.order_items.create.mock.calls[0][0].data;
+        // Defecto previo: despejaba 19 % sobre el NETO ⇒ 8.403,36 + 1.596,64.
+        expect(Number(line.unit_price)).toBe(10000);
+        expect(Number(line.tax_amount_item)).toBe(1900);
+        expect(Number(line.final_unit_price)).toBe(11900);
+        expect(line.order_item_taxes.create[0]).toMatchObject({
+          tax_rate_id: 11,
+          is_inclusive: true,
+        });
+        const header = mockPrismaService.orders.update.mock.calls[0][0].data;
+        expect(Number(header.tax_amount)).toBe(1900);
+        expect(Number(header.grand_total)).toBe(11910);
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('ADR-10: la línea persistida que vuelve SIN cambios conserva su snapshot fiscal aunque el catálogo haya cambiado', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
+        // El catálogo HOY dice 5 %; la línea se vendió con 19 %.
+        mockPrismaService.products.findMany.mockResolvedValue([
+          productTaxRow(1, {
+            id: 12,
+            name: 'IVA 5%',
+            rate: 0.05,
+            is_inclusive: false,
+          }),
+        ] as any);
+        mockPrismaService.order_items.findMany.mockResolvedValue([
+          {
+            product_id: 1,
+            product_variant_id: null,
+            quantity: 1,
+            weight: null,
+            price_unit_quantity: null,
+            applied_price_tier_id: null,
+            unit_price: '100.00',
+            total_price: '100.00',
+            tax_rate: '0.19',
+            tax_amount_item: '19.00',
+            final_unit_price: '119.00',
+            order_item_taxes: [
+              {
+                tax_rate_id: 10,
+                tax_name: 'IVA 19%',
+                tax_rate: '0.19',
+                tax_amount: '19.00',
+                tax_type: 'iva',
+                is_compound: false,
+                is_inclusive: false,
+              },
+            ],
+          },
+        ] as any);
+
+        // Sólo cambia la nota; la línea llega idéntica.
+        await service.updateOrderFromEditor(500, fullDto);
+
+        const line = mockPrismaService.order_items.create.mock.calls[0][0].data;
+        expect(Number(line.tax_amount_item)).toBe(19);
+        expect(line.order_item_taxes.create).toHaveLength(1);
+        expect(line.order_item_taxes.create[0]).toMatchObject({
+          tax_rate_id: 10,
+          tax_name: 'IVA 19%',
+          tax_type: 'iva',
+        });
+        expect(line.order_item_taxes.create[0].tax_amount.toNumber()).toBe(19);
+        const header = mockPrismaService.orders.update.mock.calls[0][0].data;
+        expect(Number(header.tax_amount)).toBe(19);
       } finally {
         contextSpy.mockRestore();
       }
@@ -2074,8 +3411,8 @@ describe('OrdersService', () => {
     // ----------------------------------------------------------------
     // CP-POLLO-ARABE-727 · fix/table-close-order — Option 2, leg 2.
     //
-    // El editor atómico debe bloquearse cuando existe una sesión de mesa
-    // CERRADA vinculada al order_id. Eso cierra el síntoma reportado en
+    // El editor atómico debe bloquearse cuando existe historial de mesa
+    // pero NINGUNA sesión abierta vinculada al order_id. Eso cierra el síntoma reportado en
     // QUI-726: el editor seguía aceptando mutaciones sobre órdenes que
     // ya tenían la mesa cerrada (típicamente porque el mesero cerró la
     // mesa pensando que el cliente se había ido, sin que la cuenta
@@ -2086,15 +3423,11 @@ describe('OrdersService', () => {
     // condicional con `state IN (created, draft)` que de todas formas
     // va a fallar después.
     //
-    // Decisión consciente: NO replicamos este guard en `update` /
-    // `updateOrderItems` en este PR — el reporte del líder menciona
-    // "el editor", y la fuente del leak reportada es el flujo del editor
-    // atómico. `updateOrderItems` ya valida `session.closed_at` por su
-    // propio camino (addItems/removeItem). Un sweep simétrico queda como
-    // follow-up explícito.
+    // ADR-07/G.1: updateOrderItems comparte ahora este guard, para que
+    // PUT items no reabra una orden cuyo historial solo tiene cierres.
     // ----------------------------------------------------------------
 
-    it('lanza 409 ORD_EDIT_NOT_ALLOWED_001 cuando existe una table_session CERRADA para el order_id', async () => {
+    it('lanza 409 ORD_EDIT_NOT_ALLOWED_001 cuando solo existe una table_session CERRADA', async () => {
       setupContext();
       const contextSpy = spyContext();
       try {
@@ -2102,11 +3435,9 @@ describe('OrdersService', () => {
         mockPrismaService.orders.findFirst.mockResolvedValue(editableOrder);
         // PERO la sesión de mesa ya fue cerrada (mesero la cerró sin cobrar).
         // El guard del editor tiene que detectarlo y cortar antes del claim.
-        mockPrismaService.table_sessions.findFirst.mockResolvedValue({
-          id: 77,
-          order_id: 500,
-          closed_at: new Date(),
-        });
+        mockPrismaService.table_sessions.findFirst
+          .mockResolvedValueOnce(null) // ninguna abierta
+          .mockResolvedValueOnce({ id: 77, closed_at: new Date() });
 
         let caught: VendixHttpException | null = null;
         try {
@@ -2174,7 +3505,7 @@ describe('OrdersService', () => {
           expect.objectContaining({
             where: expect.objectContaining({
               order_id: 500,
-              closed_at: { not: null },
+              closed_at: null,
             }),
           }),
         );
@@ -2187,11 +3518,7 @@ describe('OrdersService', () => {
       setupContext();
       const contextSpy = spyContext();
       try {
-        // El guard hace `findFirst({ where: { order_id, closed_at: { not: null } } })`.
-        // Una sesión con `closed_at: null` NO satisface ese WHERE (closed_at IS NULL,
-        // no NOT NULL), así que Prisma devuelve `null` aunque exista la sesión.
-        // Eso es lo correcto: la sesión existe pero sigue abierta → no bloqueamos.
-        mockPrismaService.table_sessions.findFirst.mockResolvedValue(null);
+        mockPrismaService.table_sessions.findFirst.mockResolvedValue({ id: 78, closed_at: null });
 
         arrangeEditableDraft();
 
@@ -2214,6 +3541,32 @@ describe('OrdersService', () => {
             }),
           }),
         );
+        expect(mockPrismaService.table_sessions.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ order_id: 500, closed_at: null }) }),
+        );
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('PERMITE editar con historial cerrado y una sesión ABIERTA vigente', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        mockPrismaService.table_sessions.findFirst.mockImplementation(async ({ where }) =>
+          where.closed_at === null ? { id: 79, closed_at: null } : { id: 77, closed_at: new Date() },
+        );
+        arrangeEditableDraft();
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1, name: 'Test product', product_type: 'simple', product_variants: [],
+        } as any);
+
+        await service.updateOrderFromEditor(500, fullDto);
+
+        expect(mockPrismaService.orders.updateMany).toHaveBeenCalled();
+        expect(mockPrismaService.table_sessions.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ order_id: 500, closed_at: null }) }),
+        );
       } finally {
         contextSpy.mockRestore();
       }
@@ -2228,8 +3581,8 @@ describe('OrdersService', () => {
    * prueba cubre el sitio propio de `updateOrderItems` (orders.service.ts,
    * dentro del `$transaction`, justo después de `assertVariantRequiredForPrepared`).
    */
-  describe('updateOrderItems — F-035/F-047 guard (C.8)', () => {
-    it('lanza 409 ORD_EDIT_TAX_BREAKDOWN_LOCKED_001 si la orden ya tiene order_item_taxes persistidos', async () => {
+  describe('updateOrderItems — P0-4 desglose reescrito por el servidor', () => {
+    const arrange = () => {
       mockRequestContextService.getContext.mockReturnValue({
         store_id: 1,
         organization_id: 1,
@@ -2237,6 +3590,102 @@ describe('OrdersService', () => {
         user_id: 99,
         request_id: 'req-test-002',
       });
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 700,
+        store_id: 1,
+        state: 'draft',
+        shipping_cost: '0.00',
+      } as any);
+      mockPrismaService.products.findUnique.mockResolvedValue({
+        id: 1,
+        name: 'Test product',
+        product_type: 'simple',
+        product_variants: [],
+      } as any);
+      mockPrismaService.products.findMany.mockResolvedValue([
+        productTaxRow(1, {
+          id: 11,
+          name: 'IVA 19% incl',
+          rate: 0.19,
+          is_inclusive: true,
+        }, 'iva', { base_price: 11900, is_on_sale: false, sale_price: null }),
+      ] as any);
+      mockPrismaService.orders.update.mockResolvedValue({} as any);
+      mockPrismaService.order_items.deleteMany.mockResolvedValue({ count: 1 });
+      // Draft: sin reserva; findUnique sirve a los dos reads de la tx.
+      mockPrismaService.orders.findUnique.mockResolvedValue({
+        id: 700,
+        order_items: [
+          {
+            product_id: 1,
+            product_variant_id: null,
+            quantity: 3,
+            weight: null,
+            price_unit_quantity: null,
+            applied_price_tier_id: null,
+            unit_price: '10000.00',
+            total_price: '30000.00',
+            tax_rate: '0.19',
+            tax_amount_item: '1900.00',
+            final_unit_price: '11900.00',
+            order_item_taxes: [
+              {
+                tax_rate_id: 11,
+                tax_name: 'IVA 19% incl',
+                tax_rate: '0.19',
+                tax_amount: '5700.00',
+                tax_type: 'iva',
+                is_compound: false,
+                is_inclusive: true,
+              },
+            ],
+            products: { id: 1, track_inventory: false },
+          },
+        ],
+      } as any);
+    };
+
+    it('rejects a stock shortfall before releasing old reservations or replacing lines', async () => {
+      arrange();
+      const shortage = new VendixHttpException(
+        ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
+        'Test product sin existencias',
+        { items: [{ product_id: 1, product_variant_id: null, product_name: 'Test product', kind: 'product', requested: 2, available: 0 }] },
+      );
+      mockStockValidator.assertLinesAvailable.mockRejectedValueOnce(shortage);
+
+      await expect(service.updateOrderItems(700, {
+        items: [{ product_id: 1, product_name: 'Test product', quantity: 2, unit_price: 11900, total_price: 23800 }],
+      } as any)).rejects.toMatchObject({
+        errorCode: 'INV_STOCK_INSUFFICIENT_LINES',
+      });
+      expect(mockStockValidator.assertLinesAvailable).toHaveBeenCalledWith(
+        [expect.objectContaining({ product_id: 1, quantity: 2 })],
+        { orderId: 700, tx: mockPrismaService, allowOversell: false },
+      );
+      expect(mockStockLevelManager.releaseReservationsByReference).not.toHaveBeenCalled();
+      expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('rechaza PUT items sobre orden con solo sesión cerrada antes de escribir', async () => {
+      const contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1, organization_id: 1, user_id: 99,
+      } as any);
+      try {
+        arrange();
+        mockPrismaService.table_sessions.findFirst
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({ id: 70 });
+
+        await expect(service.updateOrderItems(700, { items: [] } as any)).rejects
+          .toMatchObject({ errorCode: ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code });
+        expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('orden con order_item_taxes (antes 409): borra el desglose, recrea desde el catálogo y cabecera = Σ', async () => {
       const contextSpy = jest
         .spyOn(RequestContextService, 'getContext')
         .mockReturnValue({
@@ -2248,54 +3697,94 @@ describe('OrdersService', () => {
           request_id: 'req-test-002',
         });
       try {
-        mockPrismaService.orders.findFirst.mockResolvedValue({
-          id: 700,
-          store_id: 1,
-          state: 'draft',
-        } as any);
-        mockPrismaService.products.findMany.mockResolvedValue([
-          { id: 1 },
-        ] as any);
-        mockPrismaService.products.findUnique.mockResolvedValue({
-          id: 1,
-          name: 'Test product',
-          product_type: 'simple',
-          product_variants: [],
-        } as any);
-        // La orden ya tiene desglose fiscal persistido.
-        mockPrismaService.order_item_taxes.findFirst.mockResolvedValueOnce({
-          id: 55,
-        } as any);
-
-        const dto = {
+        arrange();
+        // La sesión abierta vigente habilita la edición aunque haya una
+        // sesión cerrada anterior para la misma orden (ADR-07).
+        mockPrismaService.table_sessions.findFirst.mockImplementation(async ({ where }) =>
+          where.closed_at === null ? { id: 71, closed_at: null } : { id: 70, closed_at: new Date() },
+        );
+        // El cliente manda góndola 11.900 × 2, sin impuesto (payload tipo
+        // reserva): el servidor despeja el incluido.
+        await service.updateOrderItems(700, {
           items: [
             {
               product_id: 1,
               product_name: 'Test product',
-              quantity: 1,
-              unit_price: 100,
-              total_price: 100,
-              tax_amount_item: 0,
-              tax_rate: 0,
+              quantity: 2,
+              unit_price: 11900,
+              total_price: 23800,
             },
           ],
-        } as any;
+          tax_amount: 0,
+          total_amount: 23800,
+        } as any);
 
-        let caught: VendixHttpException | null = null;
-        try {
-          await service.updateOrderItems(700, dto);
-        } catch (err) {
-          caught = err as VendixHttpException;
-        }
-
-        expect(caught).toBeInstanceOf(VendixHttpException);
-        expect(caught!.errorCode).toBe(
-          ErrorCodes.ORD_EDIT_TAX_BREAKDOWN_LOCKED_001.code,
+        expect(mockPrismaService.table_sessions.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ order_id: 700, closed_at: null }) }),
         );
-        // La guarda corre ANTES del deleteMany: ninguna línea se toca.
+
+        expect(mockPrismaService.order_item_taxes.deleteMany).toHaveBeenCalledWith(
+          { where: { order_items: { order_id: 700 } } },
+        );
         expect(
-          mockPrismaService.order_items.deleteMany,
-        ).not.toHaveBeenCalled();
+          mockPrismaService.order_item_taxes.deleteMany.mock
+            .invocationCallOrder[0],
+        ).toBeLessThan(
+          mockPrismaService.order_items.deleteMany.mock.invocationCallOrder[0],
+        );
+        const line = mockPrismaService.order_items.create.mock.calls[0][0].data;
+        expect(Number(line.unit_price)).toBe(10000);
+        expect(Number(line.total_price)).toBe(20000);
+        expect(Number(line.tax_amount_item)).toBe(1900);
+        expect(line.order_item_taxes.create[0].tax_amount.toNumber()).toBe(3800);
+        const header = mockPrismaService.orders.update.mock.calls[0][0].data;
+        expect(header.subtotal_amount).toBe(20000);
+        expect(header.tax_amount).toBe(3800);
+        expect(header.grand_total).toBe(23800);
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('ADR-10: la línea reenviada sin cambios conserva su snapshot', async () => {
+      const contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({
+          store_id: 1,
+          organization_id: 1,
+          is_super_admin: false,
+          is_owner: false,
+          user_id: 99,
+          request_id: 'req-test-003',
+        });
+      try {
+        arrange();
+        // Catálogo HOY exento: la línea igual conserva su 19 % histórico.
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 1, product_tax_assignments: [] },
+        ] as any);
+        await service.updateOrderItems(700, {
+          items: [
+            {
+              product_id: 1,
+              product_name: 'Test product',
+              quantity: 3,
+              unit_price: 10000,
+              total_price: 30000,
+              final_unit_price: 11900,
+            },
+          ],
+        } as any);
+
+        const line = mockPrismaService.order_items.create.mock.calls[0][0].data;
+        expect(Number(line.tax_amount_item)).toBe(1900);
+        expect(line.order_item_taxes.create[0]).toMatchObject({
+          tax_rate_id: 11,
+          is_inclusive: true,
+        });
+        expect(line.order_item_taxes.create[0].tax_amount.toNumber()).toBe(5700);
+        const header = mockPrismaService.orders.update.mock.calls[0][0].data;
+        expect(header.tax_amount).toBe(5700);
       } finally {
         contextSpy.mockRestore();
       }
@@ -2655,12 +4144,18 @@ describe('OrdersService', () => {
 
         await service.create(dtoWithLine({}), { id: 99 });
 
-        // La línea SÍ se escribe, y sigue llevando su escalar de impuesto —
-        // lo que desaparece es la CLASIFICACIÓN fabricada, no la magnitud.
-        // Así el test no puede pasar por "no se creó ninguna orden".
+        // La línea SÍ se escribe (el test no puede pasar por "no se creó
+        // ninguna orden"). P1-2 / ADR-10: un producto SIN asignación fiscal
+        // no lleva impuesto — el servidor decide, y el 800 que declaró el
+        // cliente no se persiste (antes quedaba como escalar huérfano: un
+        // impuesto sin fila de desglose que lo clasificara).
         const line = writtenLine();
         expect(line.product_name).toBe('Pollo Árabe');
-        expect(Number(line.tax_amount_item)).toBe(800);
+        expect(Number(line.tax_amount_item)).toBe(0);
+        expect(
+          (mockPrismaService.orders.create.mock.calls[0][0] as any).data
+            .tax_amount,
+        ).toBe(0);
         // Antes acá se escribía `{create:[{tax_name:'IVA',tax_type:'iva',…}]}`.
         expect(line.order_item_taxes).toBeUndefined();
         // Sin categoría declarada ni siquiera se consulta el catálogo.
@@ -2740,6 +4235,278 @@ describe('OrdersService', () => {
         expect(taxes.create).toHaveLength(1);
         expect(taxes.create[0].tax_rate_id).toBe(10);
         expect(taxes.create[0].tax_type).toBe('iva');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+  /**
+   * P1-2 / P1-3 (auditoría impuestos por producto) — `orders.create` aplica
+   * el impuesto del CATÁLOGO en el servidor. Si el cliente difiere ≥1 ¢ gana
+   * el servidor con un warn (no 400): reservas y el borrador de mostrador
+   * legacy mandan el precio de góndola sin impuesto (ver docblock en
+   * `create`). Cabecera = Σ líneas.
+   */
+  describe('create — impuesto de línea decidido por el servidor (P1-2 / P1-3)', () => {
+    const contextSpy = () =>
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        is_super_admin: false,
+        is_owner: false,
+        user_id: 99,
+        request_id: 'req-test-p12',
+      } as any);
+
+    const arrange = (productRow: Record<string, unknown>) => {
+      mockPrismaService.products.findUnique.mockResolvedValue({
+        id: 1,
+        name: 'Producto',
+        product_type: 'simple',
+        product_variants: [],
+        cost_price: 5000,
+      } as any);
+      mockPrismaService.products.findMany.mockResolvedValue([
+        productRow,
+      ] as any);
+      mockPrismaService.orders.create.mockResolvedValue({
+        id: 950,
+        store_id: 1,
+        order_number: 'ORD-P12-1',
+        grand_total: 0,
+        currency: 'COP',
+        order_items: [
+          {
+            product_id: 1,
+            product_variant_id: null,
+            quantity: 1,
+            stock_units_consumed: null,
+            products: { track_inventory: false },
+          },
+        ],
+      } as any);
+    };
+
+    /** Payload estilo `reservations.service.ts`: góndola sin impuesto. */
+    const reservationStyleDto = (
+      price: number,
+      extra: Record<string, unknown> = {},
+    ) =>
+      ({
+        order_number: 'ORD-P12-1',
+        subtotal: price,
+        total_amount: price,
+        skip_schedule_validation: true,
+        items: [
+          {
+            product_id: 1,
+            product_name: 'Producto',
+            quantity: 1,
+            unit_price: price,
+            total_price: price,
+            ...extra,
+          },
+        ],
+      }) as any;
+
+    const written = () => {
+      const data = (mockPrismaService.orders.create.mock.calls[0][0] as any)
+        .data;
+      return { header: data, line: data.order_items.create[0] };
+    };
+
+    it('P1-3 reservas / cliente manda impuesto 0: IVA 19 % incluido a 11.900 ⇒ base 10.000 + 1.900 (el servidor corrige)', async () => {
+      const spy = contextSpy();
+      const warn = jest
+        .spyOn((service as any).logger, 'warn')
+        .mockImplementation(() => undefined);
+      try {
+        arrange(
+          productTaxRow(
+            1,
+            { id: 11, name: 'IVA 19%', rate: 0.19, is_inclusive: true },
+            'iva',
+            { base_price: 11900, is_on_sale: false, sale_price: null },
+          ),
+        );
+        await service.create(
+          reservationStyleDto(11900, { tax_amount_item: 0, tax_rate: 0 }),
+          { id: 99 },
+        );
+        const { header, line } = written();
+        expect(line.unit_price).toBe(10000);
+        expect(line.total_price).toBe(10000);
+        expect(line.tax_amount_item).toBe(1900);
+        expect(line.final_unit_price).toBe(11900);
+        expect(line.order_item_taxes.create).toHaveLength(1);
+        expect(line.order_item_taxes.create[0]).toMatchObject({
+          tax_rate_id: 11,
+          tax_type: 'iva',
+          is_inclusive: true,
+        });
+        expect(line.order_item_taxes.create[0].tax_amount.toNumber()).toBe(
+          1900,
+        );
+        expect(header.subtotal_amount).toBe(10000);
+        expect(header.tax_amount).toBe(1900);
+        expect(header.grand_total).toBe(11900);
+        // Gana el servidor, con rastro.
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('gana el servidor'),
+        );
+      } finally {
+        warn.mockRestore();
+        spy.mockRestore();
+      }
+    });
+
+    it('IVA 19 % AGREGADO: base 10.000 ⇒ línea 10.000 + 1.900, total 11.900', async () => {
+      const spy = contextSpy();
+      try {
+        arrange(
+          productTaxRow(1, {
+            id: 10,
+            name: 'IVA 19%',
+            rate: 0.19,
+            is_inclusive: false,
+          }),
+        );
+        await service.create(reservationStyleDto(10000), { id: 99 });
+        const { header, line } = written();
+        expect(line.unit_price).toBe(10000);
+        expect(line.tax_amount_item).toBe(1900);
+        expect(line.final_unit_price).toBe(11900);
+        expect(line.order_item_taxes.create[0].is_inclusive).toBe(false);
+        expect(header.tax_amount).toBe(1900);
+        expect(header.grand_total).toBe(11900);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('INC 8 % incluido a 18.500 ⇒ 17.129,63 + 1.370,37 con tax_type inc', async () => {
+      const spy = contextSpy();
+      try {
+        arrange(
+          productTaxRow(
+            1,
+            { id: 30, name: 'INC 8%', rate: 0.08, is_inclusive: true },
+            'inc',
+            { base_price: 18500, is_on_sale: false, sale_price: null },
+          ),
+        );
+        await service.create(reservationStyleDto(18500), { id: 99 });
+        const { header, line } = written();
+        expect(line.unit_price).toBe(17129.63);
+        expect(line.tax_amount_item).toBe(1370.37);
+        expect(line.final_unit_price).toBe(18500);
+        expect(line.order_item_taxes.create[0].tax_type).toBe('inc');
+        expect(line.order_item_taxes.create[0].tax_amount.toNumber()).toBe(
+          1370.37,
+        );
+        expect(header.subtotal_amount).toBe(17129.63);
+        expect(header.tax_amount).toBe(1370.37);
+        expect(header.grand_total).toBe(18500);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('producto exento: sin impuesto ni filas aunque el cliente mande 1.900', async () => {
+      const spy = contextSpy();
+      try {
+        arrange({ id: 1, product_tax_assignments: [] });
+        await service.create(
+          reservationStyleDto(10000, { tax_amount_item: 1900, tax_rate: 0.19 }),
+          { id: 99 },
+        );
+        const { header, line } = written();
+        expect(line.unit_price).toBe(10000);
+        expect(line.tax_amount_item).toBe(0);
+        expect(line.order_item_taxes).toBeUndefined();
+        expect(header.tax_amount).toBe(0);
+        expect(header.grand_total).toBe(10000);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('variante: el bruto de catálogo sale del precio de la VARIANTE, no del producto', async () => {
+      const spy = contextSpy();
+      try {
+        arrange(
+          productTaxRow(
+            1,
+            { id: 11, name: 'IVA 19%', rate: 0.19, is_inclusive: true },
+            'iva',
+            { base_price: 5950, is_on_sale: false, sale_price: null },
+          ),
+        );
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Producto',
+          product_type: 'simple',
+          product_variants: [{ id: 5 }],
+          cost_price: 5000,
+        } as any);
+        mockPrismaService.product_variants.findUnique.mockResolvedValue({
+          id: 5,
+          product_id: 1,
+          product_images: null,
+        } as any);
+        mockPrismaService.product_variants.findMany.mockResolvedValue([
+          {
+            id: 5,
+            product_id: 1,
+            price_override: 11900,
+            is_on_sale: false,
+            sale_price: null,
+          },
+        ] as any);
+        await service.create(
+          reservationStyleDto(11900, { product_variant_id: 5 }),
+          { id: 99 },
+        );
+        const { header, line } = written();
+        expect(line.product_variant_id).toBe(5);
+        expect(line.unit_price).toBe(10000);
+        expect(line.tax_amount_item).toBe(1900);
+        expect(header.tax_amount).toBe(1900);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('línea custom sin producto ni categoría: conserva el escalar del cliente (no se rompe)', async () => {
+      const spy = contextSpy();
+      try {
+        arrange({ id: 1, product_tax_assignments: [] });
+        await service.create(
+          {
+            order_number: 'ORD-P12-1',
+            subtotal: 5000,
+            total_amount: 5950,
+            skip_schedule_validation: true,
+            items: [
+              {
+                product_name: 'Servicio manual',
+                quantity: 1,
+                unit_price: 5000,
+                total_price: 5000,
+                tax_amount_item: 950,
+                tax_rate: 0.19,
+              },
+            ],
+          } as any,
+          { id: 99 },
+        );
+        const { header, line } = written();
+        expect(line.product_id).toBeNull();
+        expect(line.unit_price).toBe(5000);
+        expect(line.tax_amount_item).toBe(950);
+        expect(line.order_item_taxes).toBeUndefined();
+        expect(header.tax_amount).toBe(950);
+        expect(header.grand_total).toBe(5950);
       } finally {
         spy.mockRestore();
       }

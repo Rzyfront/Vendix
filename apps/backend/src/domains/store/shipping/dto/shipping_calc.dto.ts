@@ -96,3 +96,18 @@ export class CalculateShippingDto {
   @Type(() => CartItemCalcDto)
   items: CartItemCalcDto[];
 }
+
+/** A cashier-entered price: gross for inclusive rates, base for additive rates. */
+export class QuoteManualShippingDto {
+  @IsInt()
+  @Min(1)
+  shipping_method_id: number;
+
+  @IsInt()
+  @Min(1)
+  shipping_rate_id: number;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  manual_shipping_price: number;
+}

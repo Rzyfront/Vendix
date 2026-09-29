@@ -30,6 +30,7 @@ import { PosCustomer } from '../services/pos-customer.service';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
 import type { Table } from '../../restaurant-ops/tables/interfaces';
 
 type TableZone = string | null;
@@ -524,6 +525,15 @@ export class PosOpenTableModalComponent {
         next: (result) => {
           this.submitting.set(false);
           this.toastService.success('Mesa abierta correctamente');
+          // The POST succeeds even when the table was still marked cleaning.
+          // Keep the warning non-blocking: no confirmation or second request.
+          if ((result as OpenTableSessionResult & { previous_table_status?: string }).previous_table_status === 'cleaning') {
+            this.toastService.warning(
+              ERROR_MESSAGES['TABLE_REOPENED_FROM_CLEANING_001'],
+              undefined,
+              5000,
+            );
+          }
           this.sessionOpened.emit(result);
           this.isOpenChange.emit(false);
         },

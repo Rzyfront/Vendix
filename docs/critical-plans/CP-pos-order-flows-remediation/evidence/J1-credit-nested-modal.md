@@ -1,0 +1,7 @@
+# J.1 Modal de cliente sobre checkout POS y teclado anidado
+
+Playwright real en `https://vendix.com/admin/pos` (sin POST ni venta): Coca-Cola 400ml → «Cobrar $38.000» → Para llevar → Crédito. Al escoger crédito sin cliente se abrió «Buscar Cliente» sobre «Finalizar venta», como muestran `J1-credit-customer-over-checkout.png` y dos diálogos visibles con el de cliente centrado al frente. El foco inicial cayó en el botón de cierre del cliente, no en el `body` ni detrás del overlay.
+
+Pulsar **Escape** cerró solo «Buscar Cliente». El shell quedó visible en **Cobro · Crédito**, con el producto y total **$38.000**, plan de cuotas intacto, foco en botón del shell y `body.style.overflow='hidden'` (`J1-credit-checkout-after-customer-escape.png`). No hubo petición de cobro. El test anidado del modal comprueba además que un segundo Escape cierra el shell y libera el scroll, y que Tab no escapa del modal superior.
+
+El orden del template `pos.component.ts` es checkout-shell antes de layaway-config y order-payment, y `app-pos-customer-modal` después de los tres. Todos usan el mismo z-index compartido; no cambió escala ni stacking context. Además del reorden inicial `08d53167d`, el cierre de teclado se reparó en `b19aa295f`. Tests focalizados modal + checkout POS + helper nombre: **42/42**; watcher Angular OK. El barrido de los siete specs de modales detectó cinco fixtures obsoletas ajenas (rol obligatorio de usuario y efecto asíncrono de cierre POP); se alinearon en `9d514d78f` y la suite completa pasó **52/52**.

@@ -34,6 +34,7 @@ describe('StoreUserCreateModalComponent (QUI-554)', () => {
     username: '',
     email: 'qui554.spec@roku.test',
     password: 'Repro554@x',
+    role: 'employee',
   };
 
   beforeEach(() => {
@@ -78,6 +79,7 @@ describe('StoreUserCreateModalComponent (QUI-554)', () => {
       last_name: validUser.last_name,
       email: validUser.email,
       password: validUser.password,
+      role: validUser.role,
     });
     httpMock.expectNone(() => true);
   });

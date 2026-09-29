@@ -125,30 +125,43 @@ export class InventorySettingsDto {
   track_inventory?: boolean;
 
   /**
-   * SIN LECTOR — se acepta y se persiste, pero ningún servicio la consulta.
-   *
-   * La sobreventa YA está bloqueada, y no por esta bandera sino en duro:
-   * `payments.service.ts` fija `allowOversell = false` y lanza
-   * `POS_STOCK_INSUFFICIENT_001`; `reserveStock` lanza `INV_STOCK_001` antes de
-   * escribir un disponible negativo; el commit de entrega lanza
-   * `INV_STOCK_002`. Poner esta bandera en `true` NO habilita vender sin saldo.
-   *
-   * Detrás de esas guardas queda un recorte a cero (`Math.max(0, …)`) que actúa
-   * en caminos que no pasan por ellas (ajustes, producción, integraciones) y
-   * oculta el faltante. Tampoco lo gobierna esta bandera. Sitios del recorte:
-   * stock-level-manager.service.ts (~223 y ~992), movements.service.ts (~371 y
-   * ~382), inventory-integration.service.ts (~228),
-   * sellable-stock-allocator.service.ts (~108-130).
+   * "Permitir sobreventa" (docs/plans/no-overselling-stock-guard-plan.md, step
+   * 9). AHORA TIENE LECTOR: `StockValidatorService.resolveInventoryPolicy`.
+   * Default `false`. ON → `assertLinesAvailable` no lanza (advierte),
+   * `reserveStock` de los caminos de orden usa `allow_negative_available=true`,
+   * y `commitOrderLines` usa `blockOnInsufficient=false` dejando on_hand /
+   * available en NEGATIVO (sin recorte a 0). OFF (default) preserva el
+   * comportamiento estricto previo (`POS_STOCK_INSUFFICIENT_001` / `INV_STOCK_001`
+   * / `INV_STOCK_002`).
    */
   @ApiProperty({
     example: false,
     required: false,
     description:
-      'INACTIVA: se persiste pero ningún proceso la lee. La sobreventa se bloquea en duro (POS_STOCK_INSUFFICIENT_001 / INV_STOCK_001); ponerla en true NO habilita vender sin saldo.',
+      'Permitir sobreventa. Default false. ON: reservar/pagar/entregar/disparar a cocina no bloquean por falta de stock de PRODUCTOS y el disponible/on_hand puede quedar negativo.',
   })
   @IsOptional()
   @IsBoolean()
   allow_negative_stock?: boolean;
+
+  /**
+   * "Permitir sobre-uso de insumos" (docs/plans/no-overselling-stock-guard-plan.md,
+   * step 9). Default `true` — ausente o `null` resuelve a `true` (nunca `?? false`).
+   * Leído por `StockValidatorService.resolveInventoryPolicy`. ON → el chequeo de
+   * insumos trackeados en fire/resend/producción advierte (`logger.warn` +
+   * `stock_warnings`) en vez de bloquear, y consume completo dejando el insumo
+   * NEGATIVO. OFF → bloquea con 409 `INV_STOCK_INSUFFICIENT_LINES` nombrando el
+   * insumo faltante.
+   */
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'Permitir sobre-uso de insumos. Default true (ausente/null = true). ON: fire/resend/producción no bloquean por insumo trackeado insuficiente; consumen completo dejando stock negativo.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allow_ingredient_overuse?: boolean;
 
   @ApiProperty({ enum: ['cpp', 'fifo'], example: 'cpp', required: false })
   @IsOptional()
@@ -420,16 +433,7 @@ export class PosSettingsDto {
   @IsBoolean()
   allow_alias_sales?: boolean;
 
-  /**
-   * F-127 — severidad de la compuerta fiscal por linea del carril de cobro
-   * (`POS_TABLE_LINE_TAX_UNRESOLVABLE_001`, `payments.service.ts`). Ausente o
-   * `'block'` = comportamiento de siempre (lanza y revierte). `'warn'` deja
-   * pasar la linea normalizando el impuesto a cero y registra el detalle;
-   * `'off'` deja pasar en silencio. Bajarla es una valvula de emergencia por
-   * tienda para no dejar la caja parada mientras se corrige el catalogo: toda
-   * venta que pasa por `'warn'`/`'off'` lleva IVA potencialmente
-   * sub-declarado a la DIAN (F-065).
-   */
+  /** @deprecated ADR-10: aceptar JSON histórico sin afectar el cobro. */
   @ApiProperty({ example: 'block', required: false, enum: ['block', 'warn', 'off'] })
   @IsOptional()
   @IsIn(['block', 'warn', 'off'], {
@@ -1103,6 +1107,33 @@ export class DispatchSettingsDto {
   @IsOptional()
   @IsBoolean()
   requires_dispatch_address?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Permite "Crear remisión con ruta de despacho" en el selector de despacho (QUI-844). Default: true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_dispatch_with_remision?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Permite "Entrega completa" en el selector de despacho (QUI-844). Default: true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_dispatch_direct_delivery?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Permite "Enviar a despacho" (pool de repartidores) en el selector de despacho (QUI-844). Default: true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_dispatch_to_pool?: boolean;
 }
 
 export class RestaurantSettingsDto {

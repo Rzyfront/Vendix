@@ -196,8 +196,8 @@ import { prepMinutesOrNull } from '../../../../../public/ecommerce/components/st
                    algo con su escala al lado: "$5.000 por m". -->
               <span class="weight-unit">{{ priceUnit.label }}</span>
             }
-            @if (hasActiveDiscount()) {
-              <span class="original-price">{{ product().base_price | currency }}</span>
+            @if (compareAtFinalPrice(); as compareAt) {
+              <span class="original-price">{{ compareAt | currency }}</span>
             }
             @if (promotionStackItems().length > 0) {
               <app-promotion-stack
@@ -801,18 +801,21 @@ export class ProductCardComponent {
 
   hasActiveDiscount(): boolean {
     const product = this.product();
-    const basePrice = Number(product.base_price) || 0;
-    const promoPrice = this.promoPrice();
+    const current = this.displayPrice();
+    const regular = product.active_promotion
+      ? Number(product.final_price)
+      : Number(product.regular_final_price);
+    return (Boolean(product.active_promotion) || product.is_on_sale === true) &&
+      Number.isFinite(regular) && regular > current && current > 0;
+  }
 
-    // An active backend-resolved promotion ALWAYS wins, regardless of the
-    // legacy `is_on_sale` flag. Without a promotion we still honour the
-    // existing sale_price flow.
-    if (product.active_promotion) {
-      return basePrice > 0 && promoPrice > 0 && promoPrice < basePrice;
-    }
-
-    if (!product.is_on_sale) return false;
-    return basePrice > 0 && promoPrice > 0 && promoPrice < basePrice;
+  compareAtFinalPrice(): number | null {
+    if (!this.hasActiveDiscount()) return null;
+    const product = this.product();
+    const before = product.active_promotion
+      ? Number(product.final_price)
+      : Number(product.regular_final_price);
+    return Number.isFinite(before) && before > this.displayPrice() ? before : null;
   }
 
   /**
@@ -841,12 +844,10 @@ export class ProductCardComponent {
       );
     }
 
-    const basePrice = Number(product.base_price) || 0;
-    const promoPrice = this.promoPrice();
-
-    if (basePrice <= 0 || promoPrice <= 0 || promoPrice >= basePrice) return 0;
-
-    return Math.round(((basePrice - promoPrice) / basePrice) * 100);
+    const regular = this.compareAtFinalPrice();
+    const current = this.displayPrice();
+    if (regular == null || current <= 0) return 0;
+    return Math.round(((regular - current) / regular) * 100);
   }
 
   promotionBadgeLabel(): string {

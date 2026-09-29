@@ -276,6 +276,11 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'Fiscal electronic invoice template violates DIAN mandatory graphic representation requirements',
   },
+  PRINT_TICKET_DISCLAIMER_REQUIRED_001: {
+    code: 'PRINT_TICKET_DISCLAIMER_REQUIRED_001',
+    httpStatus: 422,
+    devMessage: 'POS sale ticket must declare it is not an electronic invoice (footer disclaimer field or custom token)',
+  },
   PRINT_GATEWAY_RENDER_FAILED_001: {
     code: 'PRINT_GATEWAY_RENDER_FAILED_001',
     httpStatus: 500,
@@ -364,6 +369,46 @@ export const ErrorCodes = {
     code: 'PAYMENT_NOT_OWNED',
     httpStatus: 403,
     devMessage: 'Payment does not belong to the requesting user',
+  },
+
+  // Multi-tender cash payments (pago multimétodo de contado)
+  PAY_MULTI_TENDER_SUM_MISMATCH: {
+    code: 'PAY_MULTI_TENDER_SUM_MISMATCH',
+    httpStatus: 400,
+    devMessage: 'Multi-tender legs must add up to the payable amount',
+  },
+  PAY_MULTI_TENDER_METHOD_NOT_ALLOWED: {
+    code: 'PAY_MULTI_TENDER_METHOD_NOT_ALLOWED',
+    httpStatus: 400,
+    devMessage:
+      'Only direct payment methods are allowed in a multi-tender cash payment',
+  },
+  PAY_MULTI_TENDER_MULTIPLE_CASH: {
+    code: 'PAY_MULTI_TENDER_MULTIPLE_CASH',
+    httpStatus: 400,
+    devMessage: 'Only one cash leg is allowed in a multi-tender cash payment',
+  },
+  PAY_MULTI_TENDER_CASH_INSUFFICIENT: {
+    code: 'PAY_MULTI_TENDER_CASH_INSUFFICIENT',
+    httpStatus: 400,
+    devMessage: 'Cash received is less than the cash leg amount',
+  },
+  PAY_MULTI_TENDER_WALLET_INSUFFICIENT: {
+    code: 'PAY_MULTI_TENDER_WALLET_INSUFFICIENT',
+    httpStatus: 400,
+    devMessage: 'Wallet balance does not cover the wallet legs in this atomic POS payment',
+  },
+  // Fase 2 paso 5 (pos-draft-without-cash-session-plan) — carril "registrar
+  // pago": el parcial (`dto.amount` < saldo) sólo se admite sobre una orden en
+  // `pending_payment`. Sobre cualquier otro estado el operador debe cobrar el
+  // saldo completo; se rechaza en voz alta en vez de ignorar el monto y
+  // cobrar de más. 400 como el resto de la familia PAY_ (regla del carril,
+  // mismo criterio que PAY_MULTI_TENDER_METHOD_NOT_ALLOWED), sin envolver.
+  PAY_PARTIAL_NOT_ALLOWED_001: {
+    code: 'PAY_PARTIAL_NOT_ALLOWED_001',
+    httpStatus: 400,
+    devMessage:
+      'Partial registration is only allowed on orders in pending_payment; charge the full outstanding balance instead',
   },
 
   // Payment Sources (Card-On-File / Wompi recurrent)
@@ -538,6 +583,16 @@ export const ErrorCodes = {
     code: 'ECOM_CHECKOUT_006',
     httpStatus: 409,
     devMessage: 'Checkout already in progress for this Idempotency-Key, retry shortly',
+  },
+  // Checkout WhatsApp con envío por asignar (pending_shipping_assignment):
+  // exige channel='whatsapp', sin shipping_method_id/shipping_rate_id, y la
+  // tienda con ecommerce.checkout.whatsapp_checkout=true + whatsapp_number
+  // configurado. Cualquier violación cae en este único código 400.
+  ECOM_CHECKOUT_PENDING_SHIPPING_001: {
+    code: 'ECOM_CHECKOUT_PENDING_SHIPPING_001',
+    httpStatus: 400,
+    devMessage:
+      'pending_shipping_assignment requires channel=whatsapp, no shipping_method_id/shipping_rate_id, and store WhatsApp checkout enabled with a configured number',
   },
   ECOM_ACCOUNT_001: {
     code: 'ECOM_ACCOUNT_001',
@@ -759,6 +814,16 @@ export const ErrorCodes = {
     code: 'STORE_CONTEXT_001',
     httpStatus: 400,
     devMessage: 'Store context required',
+  },
+  ADDR_PRIMARY_REQUIRES_CUSTOMER_001: {
+    code: 'ADDR_PRIMARY_REQUIRES_CUSTOMER_001',
+    httpStatus: 400,
+    devMessage: 'A primary address requires a customer',
+  },
+  ADDR_CUSTOMER_NOT_IN_STORE_001: {
+    code: 'ADDR_CUSTOMER_NOT_IN_STORE_001',
+    httpStatus: 400,
+    devMessage: 'Customer does not belong to this store',
   },
 
   // Marketing
@@ -1070,6 +1135,16 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Invalid order status',
   },
+  ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001: {
+    code: 'ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'A user-provided reason is required to return a delivered order to processing',
+  },
+  ORD_DELIVERED_REVERSAL_OWNER_001: {
+    code: 'ORD_DELIVERED_REVERSAL_OWNER_001',
+    httpStatus: 400,
+    devMessage: 'Only the kitchen reversal bridge may use delivered to processing as a legal transition',
+  },
   ORD_CANCEL_STOCK_COMMITTED_001: {
     code: 'ORD_CANCEL_STOCK_COMMITTED_001',
     httpStatus: 409,
@@ -1079,6 +1154,16 @@ export const ErrorCodes = {
     code: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001',
     httpStatus: 409,
     devMessage: 'Confirmed payment requires a processor reversal or reconciliation, not local cancellation',
+  },
+  ORD_CANCEL_OPEN_TABLE_001: {
+    code: 'ORD_CANCEL_OPEN_TABLE_001',
+    httpStatus: 409,
+    devMessage: 'La orden pertenece a una mesa abierta; cierra la cuenta desde Mesas antes de cancelarla.',
+  },
+  ORD_CANCEL_CREDIT_NOTE_REQUIRED_001: {
+    code: 'ORD_CANCEL_CREDIT_NOTE_REQUIRED_001',
+    httpStatus: 409,
+    devMessage: 'Order has a DIAN-accepted electronic invoice without an accepted credit note; issue the credit note before cancelling',
   },
   ORD_STOCK_COMMIT_STATE_001: {
     code: 'ORD_STOCK_COMMIT_STATE_001',
@@ -1112,6 +1197,16 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'Shipping method is required to charge this order: assign it first (Elige el método de envío antes de cobrar)',
+  },
+  // Paso 2 (checkout-whatsapp-location-fallback): una orden con pagos ya
+  // aplicados (total_paid > 0) no puede cambiar su shipping_cost vía
+  // assignShipping — desincroniza total_paid/remaining_balance porque el
+  // pago ya se aplicó sobre el grand_total anterior.
+  ORD_SHIP_CHARGED_COST_CHANGE_001: {
+    code: 'ORD_SHIP_CHARGED_COST_CHANGE_001',
+    httpStatus: 400,
+    devMessage:
+      'Cannot change shipping cost on an order with applied payments (assign a method with the same cost, or reverse the payment first)',
   },
   // Impresión masiva (QUI-599). El bulk print es tolerante por diseño: omite
   // las órdenes no imprimibles y sigue con el resto. Este código solo se lanza
@@ -1255,6 +1350,15 @@ export const ErrorCodes = {
     devMessage:
       'Insufficient available stock to deliver order (no reservation and available stock is not enough)',
   },
+  // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md) — usado
+  // por StockValidatorService.assertLinesAvailable/assertIngredientsAvailable
+  // para bloquear ANTES de reservar/comprometer, nombrando cada línea/insumo
+  // con stock insuficiente en `details.items`.
+  INV_STOCK_INSUFFICIENT_LINES: {
+    code: 'INV_STOCK_INSUFFICIENT_LINES',
+    httpStatus: 409,
+    devMessage: 'Stock insuficiente para uno o más productos',
+  },
   POS_STOCK_INSUFFICIENT_001: {
     code: 'POS_STOCK_INSUFFICIENT_001',
     httpStatus: 409,
@@ -1290,6 +1394,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'A draft (is_draft=true) cannot be combined with requires_payment=true; save the order first, then charge it via flow/pay',
+  },
+  POS_DRAFT_DUPLICATE_ORDER_001: {
+    code: 'POS_DRAFT_DUPLICATE_ORDER_001',
+    httpStatus: 409,
+    devMessage: 'The referenced POS order has already been paid or cannot be charged',
   },
   // CP-POS-SVC-PERF-001 / C.4 hardening — atomic booking requires a
   // customer. `bookings.customer_id` is NOT NULL in the schema; an
@@ -1337,6 +1446,17 @@ export const ErrorCodes = {
     devMessage:
       'This order is no longer in an editable state (created/draft required)',
   },
+  // ADR-07 / G.1 — future table-reassignment route uses these policy outcomes.
+  ORD_TABLE_REASSIGN_ORDER_STATE_001: {
+    code: 'ORD_TABLE_REASSIGN_ORDER_STATE_001',
+    httpStatus: 409,
+    devMessage: 'Cancelled or refunded orders cannot be returned to a table',
+  },
+  ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001: {
+    code: 'ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001',
+    httpStatus: 409,
+    devMessage: 'This order has financial activity that prevents table reassignment',
+  },
   // CP-POS-CREAR-EDITAR-COBRAR-001 — el customer_id que manda el frontend no
   // pertenece a la tienda del contexto. 403 (no es problema de autenticación, es
   // de scope/tenant).
@@ -1344,6 +1464,24 @@ export const ErrorCodes = {
     code: 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001',
     httpStatus: 403,
     devMessage: 'The selected customer does not belong to the current store',
+  },
+  // Release-853 paso 10 — la orden ya tiene factura `sales_invoice` vigente
+  // (cualquier estado fuera de draft/voided/cancelled) y su adquiriente es
+  // inmutable; la vía de corrección es la nota crédito. 409 porque la
+  // petición está bien formada; lo que cambió es el estado fiscal del recurso.
+  ORD_TITULAR_INVOICED_001: {
+    code: 'ORD_TITULAR_INVOICED_001',
+    httpStatus: 409,
+    devMessage:
+      'This order already has an issued sales invoice and its holder cannot be changed',
+  },
+  // El titular no cambia mientras la orden tenga saldo abierto en cartera:
+  // `accounts_receivable.customer_id` quedaría con el cliente anterior.
+  ORD_TITULAR_OPEN_RECEIVABLE_001: {
+    code: 'ORD_TITULAR_OPEN_RECEIVABLE_001',
+    httpStatus: 409,
+    devMessage:
+      'This order has an open accounts receivable balance and its holder cannot be changed',
   },
   // CP-POS-CREAR-EDITAR-COBRAR-001 — dirección/método/rate de envío inválidos,
   // método inactivo, rate no pertenece al método, o costo negativo.
@@ -1393,6 +1531,34 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'Order payment could not be processed; the order remains ready-to-pay',
+  },
+  ORD_PAY_ALREADY_PAID_001: {
+    code: 'ORD_PAY_ALREADY_PAID_001',
+    httpStatus: 409,
+    devMessage: 'Order is already fully paid',
+  },
+  // B4/B8 follow-up — una orden `delivered`/`finished` con payment_form='2'
+  // (venta a crédito, ver `registerCreditPayment`) NO puede cobrarse de
+  // contado por `payOrder`: dejaría CxC/cuotas abiertas huérfanas. El abono
+  // debe pasar por el flujo de crédito (`registerCreditPayment` /
+  // `installment_payment.received`).
+  ORD_PAY_CREDIT_ORDER_001: {
+    code: 'ORD_PAY_CREDIT_ORDER_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden es a crédito (payment_form=2); registre el abono por el flujo de crédito, no por cobro de contado.',
+  },
+  // Fase 2 paso 5 (pos-draft-without-cash-session-plan) — lo consume el paso 6
+  // en `confirmPayment`: un pago `pending` de confirmación manual
+  // (`isManualConfirmationPending`) no se confirma con un clic; el personal lo
+  // REGISTRA por `flow/pay` (monto + método recibidos, con vuelto o saldo).
+  // Sólo el webhook (`source: 'webhook'`) sigue confirmando. 409: conflicto
+  // con el carril requerido.
+  ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001: {
+    code: 'ORD_MANUAL_PAYMENT_REQUIRES_REGISTER_001',
+    httpStatus: 409,
+    devMessage:
+      'El pago pendiente es de confirmación manual: regístralo por flow/pay con el monto y método recibidos; solo el webhook puede confirmarlo.',
   },
   // CP-POS-MODAL-SCOPE-001 / Phase C.4 — edit→pay sin cliente cuando el escape
   // hatch está apagado. 409: el cashier debe seleccionar cliente (vía
@@ -1740,6 +1906,21 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Refund validation failed',
   },
+  REF_PAYOUT_REQUIRED_001: {
+    code: 'REF_PAYOUT_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'Completed manual refund requires payout reference and channel',
+  },
+  REF_RESOLUTION_CONFLICT_001: {
+    code: 'REF_RESOLUTION_CONFLICT_001',
+    httpStatus: 409,
+    devMessage: 'Refund resolution conflicts with its current state or payout reference',
+  },
+  REF_TAX_BREAKDOWN_MISSING_001: {
+    code: 'REF_TAX_BREAKDOWN_MISSING_001',
+    httpStatus: 409,
+    devMessage: 'Refund tax breakdown cannot be reconstructed safely',
+  },
 
   // Superadmin
   SUP_ADMIN_USER_001: {
@@ -2044,6 +2225,20 @@ export const ErrorCodes = {
     code: 'INVOICING_VALIDATE_001',
     httpStatus: 400,
     devMessage: 'Invoice validation failed',
+  },
+  /**
+   * Adquiriente nominativo (tiene número Y nombre) sin tipo de identificación
+   * declarado. Antes se completaba con 'CC' en silencio en
+   * `acquirer-rail.resolver.ts` (persistencia) y `dian-direct.provider.ts`
+   * (emisión) — así se transmitió a la DIAN una Cédula de Ciudadanía para un
+   * NIT real (incidente Óptica Panorama SAS / Pollo Árabe). Ahora bloquea
+   * ANTES de tomar el consecutivo en vez de inventar el tipo.
+   */
+  INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED: {
+    code: 'INVOICING_ACQUIRER_DOCUMENT_TYPE_REQUIRED',
+    httpStatus: 400,
+    devMessage:
+      'Nominative acquirer (has document number and name) without a declared document type',
   },
   INVOICING_STATUS_001: {
     code: 'INVOICING_STATUS_001',
@@ -3049,6 +3244,21 @@ export const ErrorCodes = {
       'Invoice data request has already been submitted or completed; the link accepts data only once',
   },
   /**
+   * P1-B — mismo `document_number` ya existe en la organización con un
+   * `document_type` DECLARADO que difiere del que el comprador acaba de
+   * escribir en el formulario público del token. Reusar esa ficha
+   * sobrescribiendo en silencio inventaría un hecho sobre un cliente que la
+   * tienda ya conocía con otro tipo; crear un segundo usuario duplicaría el
+   * `document_number` bajo la misma organización. Se bloquea para que un
+   * humano decida — no hay una tercera opción segura.
+   */
+  INVOICING_DATA_REQUEST_005: {
+    code: 'INVOICING_DATA_REQUEST_005',
+    httpStatus: 409,
+    devMessage:
+      'Existing customer with this document_number already has a declared document_type that differs from the one submitted in the token form',
+  },
+  /**
    * REENVÍO DE FACTURA (E.6, `POST /store/invoicing/:id/deliver`).
    *
    * Los tres códigos cubren el ciclo del reenvío a un correo distinto del
@@ -3195,6 +3405,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Fiscal retry is not idempotent',
   },
+  FISCAL_SEND_IN_PROGRESS: {
+    code: 'FISCAL_SEND_IN_PROGRESS',
+    httpStatus: 409,
+    devMessage: 'Invoice is already being transmitted to DIAN',
+  },
   FISCAL_ACCOUNTING_BLOCKED: {
     code: 'FISCAL_ACCOUNTING_BLOCKED',
     httpStatus: 412,
@@ -3221,6 +3436,26 @@ export const ErrorCodes = {
     httpStatus: 412,
     devMessage:
       'Commerce is not VAT responsible (DIAN): cannot assign or charge IVA',
+  },
+  // B4 — Gate "no responsable de INC". El comercio NO declara O-33 en su RUT
+  // (casilla 53): no puede asignar INC a una tarifa de envío ni cobrarlo en
+  // una venta. `details` incluye `context: 'shipping'`,
+  // `cta: '/admin/fiscal/wizard'` y `reason`.
+  FISCAL_INC_NOT_RESPONSIBLE_001: {
+    code: 'FISCAL_INC_NOT_RESPONSIBLE_001',
+    httpStatus: 412,
+    devMessage:
+      'Commerce is not INC responsible (DIAN): cannot assign or charge INC',
+  },
+  // B5 — Reparación de la copia del impuesto del envío bloqueada: la orden
+  // está cancelada/devuelta, la copia no se puede completar desde su tarifa,
+  // o `clear` choca con un asiento de venta ya contabilizado. `details`
+  // lleva `order_id` y el motivo (`state`, `reason` o `entry_number`).
+  ORD_SHIPPING_TAX_REPAIR_BLOCKED_001: {
+    code: 'ORD_SHIPPING_TAX_REPAIR_BLOCKED_001',
+    httpStatus: 409,
+    devMessage:
+      'Shipping tax copy cannot be repaired in this state (cancelled/refunded order, unresolvable rate, or posted sale entry)',
   },
   /**
    * Art. 616-1 ET / Res. 000165 de 2023: the POS electronic equivalent document
@@ -5527,11 +5762,9 @@ export const ErrorCodes = {
     code: 'KDS_STATION_LOCKED',
     httpStatus: 403,
     devMessage:
-      'La estación está siendo gestionada por otro operador. Solo el dueño del turno o un administrador pueden actuar sobre sus tickets.',
+      'Otro operador tiene esta estación. Pídele que cierre su turno o solicita a un administrador que tome la estación.',
   },
-  // QUI-652 — la entrega es un hecho de servicio y aplica a todo item, pero un
-  // plato preparado sigue exigiendo estado 'ready' en cocina: dejar que el
-  // mesero marque entregado un plato sin cocinar haria mentir al KDS.
+  /** @deprecated Sin lanzadores; usar ORDER_ITEM_NOT_DELIVERABLE para la entrega por ítem. */
   TABLE_SESSION_ITEM_NOT_DELIVERABLE: {
     code: 'TABLE_SESSION_ITEM_NOT_DELIVERABLE',
     httpStatus: 409,
@@ -5604,6 +5837,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La mesa ya tiene una sesión abierta',
   },
+  // B.5 / ERR-39 — aviso de una apertura exitosa, nunca se lanza como excepción.
+  TABLE_REOPENED_FROM_CLEANING_001: {
+    code: 'TABLE_REOPENED_FROM_CLEANING_001',
+    httpStatus: 200,
+    devMessage: 'La mesa estaba en limpieza antes de abrir la cuenta',
+  },
   TABLE_SESSION_CLOSED: {
     code: 'TABLE_SESSION_CLOSED',
     httpStatus: 409,
@@ -5634,6 +5873,16 @@ export const ErrorCodes = {
     devMessage:
       'Cannot remove an item already being prepared in the kitchen',
   },
+  ORD_ITEM_CANCEL_PAID_001: {
+    code: 'ORD_ITEM_CANCEL_PAID_001',
+    httpStatus: 409,
+    devMessage: 'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
+  },
+  ORD_ITEM_CANCEL_STATE_001: {
+    code: 'ORD_ITEM_CANCEL_STATE_001',
+    httpStatus: 409,
+    devMessage: 'No se puede cancelar un plato de una orden en estado terminal.',
+  },
   TABLE_GUEST_COUNT_EXCEEDS_CAPACITY: {
     code: 'TABLE_GUEST_COUNT_EXCEEDS_CAPACITY',
     httpStatus: 422,
@@ -5650,6 +5899,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'La sesión de mesa ya fue cobrada; no se puede cobrar dos veces',
+  },
+  POS_TABLE_SESSION_PROJECTION_FAILED_001: {
+    code: 'POS_TABLE_SESSION_PROJECTION_FAILED_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden tiene sesiones de mesa, pero ninguna permanece abierta para proyectar el cobro',
   },
   // ── Split Order (Restaurant Suite Fase E) ────────────────────
   SPLIT_ORDER_NOT_FOUND: {
@@ -5689,6 +5944,13 @@ export const ErrorCodes = {
     code: 'KITCHEN_TICKET_INVALID_STATE',
     httpStatus: 409,
     devMessage: 'Transición de estado del ticket no permitida',
+  },
+  // La entrega desde cocina solo acepta tickets enteramente para llevar.
+  KITCHEN_TICKET_NOT_TAKEAWAY: {
+    code: 'KITCHEN_TICKET_NOT_TAKEAWAY',
+    httpStatus: 422,
+    devMessage:
+      'Este ticket incluye platos de mesa. Entrégalos desde la mesa, no desde cocina.',
   },
   // Restaurant Suite — Fase K audit jun-2026: explicit operator-friendly
   // codes for the common invalid transitions surfaced by the table-session
@@ -5848,6 +6110,17 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'The expected cash amount changed after the client read it; refresh the summary before closing',
+  },
+
+  // Caja registradora — cobro sin sesión del operador
+  // (`assertSessionForSales`). 409 y no 403: el usuario SÍ tiene permiso para
+  // cobrar; lo que falta es que tenga su caja abierta. No es "no puedes", es
+  // "abre tu caja primero". Guardar un borrador POS no pasa por este gate
+  // (guardar ≠ cobrar).
+  CASH_SESSION_REQUIRED_001: {
+    code: 'CASH_SESSION_REQUIRED_001',
+    httpStatus: 409,
+    devMessage: 'Abre tu caja para registrar pagos.',
   },
 
   // Reporte "Stock Bajo por Proveedor" (CP-low-stock-by-supplier).
@@ -6035,17 +6308,8 @@ export const ErrorCodes = {
       'total_price de la línea no cuadra con unit_price × line_units fuera de tolerancia (I-1).',
   },
 
-  // B.3 (plan CP-pos-exclusive-tax-double-charge, QUI-832) — F-065 / ERR-23
-  // del registro del plan. `TaxesService.calculateProductTaxes` ahora expone
-  // `has_tax_assignment` para que el llamador distinga «producto sin
-  // impuestos asignados» de «producto con impuestos resueltos a cero»; este
-  // código es lo que ese llamador debe lanzar cuando `has_tax_assignment ===
-  // false` en un contexto donde la línea ya tenía impuesto (p. ej. al cerrar
-  // una cuenta de mesa cuyo producto perdió su `product_tax_assignments`
-  // — caso real: purga de Roma Motos). Sitio de lanzamiento identificado
-  // (`payments.service.ts`, fuera del alcance de este cambio — ver BLOCKER
-  // REPORT del paso B.3 en evidence/B3-taxes-ejecucion.md): aún no está
-  // cableado.
+  // ADR-10: código legado reservado, sin lanzador. La falta de una asignación
+  // fiscal ACTUAL no demuestra que una línea nueva perdió un impuesto.
   POS_TABLE_LINE_TAX_UNRESOLVABLE_001: {
     code: 'POS_TABLE_LINE_TAX_UNRESOLVABLE_001',
     httpStatus: 422,
@@ -6060,11 +6324,8 @@ export const ErrorCodes = {
   // `fixed_base: undefined` en esta ruta (F-021, `tax-inclusive-math.ts:133`),
   // así que una tasa AIU que llegara acá perdería su carve-out EN SILENCIO y
   // la base declarada a la DIAN saldría mal, sin compuerta que lo note. Se
-  // rechaza en vez de resolver mal. No entra bajo la válvula
-  // `settings.pos.tax_line_gate` (F-127) a propósito: aquella baja una
-  // compuerta de DATOS del catálogo para no dejar la caja parada; ésta
-  // protege de una aritmética fiscal incorrecta, que es lo que la válvula
-  // nunca debe poder apagar.
+  // rechaza en vez de resolver mal. La antigua `tax_line_gate` fue retirada
+  // por ADR-10; esta compuerta de aritmética fiscal permanece activa.
   POS_DECLARED_GROSS_FIXED_BASE_001: {
     code: 'POS_DECLARED_GROSS_FIXED_BASE_001',
     httpStatus: 422,
@@ -6142,6 +6403,31 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'El tributo de la nota no declara tax_type y no hay fila de catálogo de la cual resolverlo; inventarlo haría que la nota acredite un tributo distinto al facturado.',
+  },
+
+  // B4 (release-855) — cancelPayment() en una orden `delivered`/`finished`
+  // repagable: se bloquea cuando existe una factura de venta vigente que ya
+  // salió hacia la DIAN (validated/sent/accepted). Anular el pago detrás de
+  // una factura emitida descuadraría lo declarado; la vía correcta es una
+  // nota crédito, no una anulación local del pago.
+  ORD_PAYMENT_CANCEL_INVOICED_001: {
+    code: 'ORD_PAYMENT_CANCEL_INVOICED_001',
+    httpStatus: 409,
+    devMessage:
+      'Order has a sales invoice already issued to DIAN (validated/sent/accepted); cancelling the payment locally would desync the declared invoice. Issue a credit note instead.',
+  },
+
+  // B1b (order-truth-and-invoice-tz plan) — `finished` is a hard boundary for
+  // `cancelPayment`. Once an order is finalized (stock committed, invoice
+  // cycle closed) a local payment void is no longer the right instrument —
+  // money must flow back through a refund, which is fiscally aware and
+  // leaves an auditable trail. `delivered`/`shipped` still allow the local
+  // void (see `FULFILLED_PAYMENT_CANCELABLE_STATES` in
+  // `order-cancellation-policy.util.ts`); only `finished` rejects.
+  ORD_PAYMENT_CANCEL_FINISHED_001: {
+    code: 'ORD_PAYMENT_CANCEL_FINISHED_001',
+    httpStatus: 409,
+    devMessage: 'La orden ya está finalizada; usa un reembolso.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

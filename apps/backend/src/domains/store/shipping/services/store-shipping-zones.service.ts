@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma, shipping_rate_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import {
@@ -8,10 +9,67 @@ import {
   UpdateRateDto,
 } from '../dto/store-shipping-zones.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import {
+  SHIPPING_TAX_CATEGORY_SELECT,
+  ShippingTaxService,
+  type ShippingRateTaxCategoryView,
+  type ShippingRateTaxOptions,
+} from './shipping-tax.service';
+
+/** Include canónico de toda lectura de tarifa (método + categoría de impuesto). */
+const RATE_INCLUDE = {
+  shipping_method: {
+    select: {
+      id: true,
+      name: true,
+      type: true,
+      logo_url: true,
+    },
+  },
+  tax_category: { select: SHIPPING_TAX_CATEGORY_SELECT },
+} as const;
+
+/**
+ * Proyecta `tax_category` a la forma pública del contrato:
+ * `{ id, name, tax_type: 'iva'|'inc', rate_percent } | null`.
+ */
+function withTaxCategoryView<T extends { tax_category?: unknown }>(
+  rate: T,
+): Omit<T, 'tax_category'> & { tax_category: ShippingRateTaxCategoryView | null } {
+  return {
+    ...rate,
+    tax_category: ShippingTaxService.toTaxCategoryView(
+      (rate.tax_category ?? null) as Parameters<
+        typeof ShippingTaxService.toTaxCategoryView
+      >[0],
+    ),
+  };
+}
+
+/**
+ * Normaliza la escala del DTO a JSON plano para Prisma. `null` (quitar la
+ * escala) se persiste como NULL de columna (`Prisma.DbNull`): el `null`
+ * plano en un campo Json lo rechaza Prisma con error de validación (500).
+ */
+function toDistanceTiersJson(
+  tiers: Array<{ from_km: number; to_km?: number | null; price: number }> | null,
+):
+  | Array<{ from_km: number; to_km: number | null; price: number }>
+  | typeof Prisma.DbNull {
+  if (tiers == null) return Prisma.DbNull;
+  return tiers.map((tier) => ({
+    from_km: tier.from_km,
+    to_km: tier.to_km ?? null,
+    price: tier.price,
+  }));
+}
 
 @Injectable()
 export class StoreShippingZonesService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private shippingTax: ShippingTaxService,
+  ) {}
 
   // ========== ZONAS DEL SISTEMA (Solo lectura) ==========
 
@@ -55,23 +113,15 @@ export class StoreShippingZonesService {
       throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
-    return base_client.shipping_rates.findMany({
+    const rates = await base_client.shipping_rates.findMany({
       where: {
         shipping_zone_id: zone_id,
         is_active: true,
       },
-      include: {
-        shipping_method: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-            logo_url: true,
-          },
-        },
-      },
+      include: RATE_INCLUDE,
       orderBy: { name: 'asc' },
     });
+    return rates.map(withTaxCategoryView);
   }
 
   // ========== ZONAS DE TIENDA (CRUD) ==========
@@ -196,20 +246,12 @@ export class StoreShippingZonesService {
       throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
-    return this.prisma.shipping_rates.findMany({
+    const rates = await this.prisma.shipping_rates.findMany({
       where: { shipping_zone_id: zone_id },
-      include: {
-        shipping_method: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-            logo_url: true,
-          },
-        },
-      },
+      include: RATE_INCLUDE,
       orderBy: { name: 'asc' },
     });
+    return rates.map(withTaxCategoryView);
   }
 
   /**
@@ -238,8 +280,15 @@ export class StoreShippingZonesService {
       throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
-    return this.prisma.shipping_rates.create({
+    // Impuesto opcional: 404 fuera de alcance, 400 no elegible, 412 IVA sin O-48.
+    await this.shippingTax.assertCategoryAssignable(dto.tax_category_id);
+
+    const created = await this.prisma.shipping_rates.create({
       data: {
+        tax_category_id: dto.tax_category_id ?? null,
+        // El modo vive en la tarifa (default incluido); el update lo lleva el
+        // spread de `update_data` (el DTO lo declara opcional).
+        tax_is_inclusive: dto.tax_is_inclusive ?? true,
         shipping_zone_id: dto.shipping_zone_id,
         shipping_method_id: dto.shipping_method_id,
         name: dto.name,
@@ -250,22 +299,32 @@ export class StoreShippingZonesService {
         max_val: dto.max_val,
         free_shipping_threshold: dto.free_shipping_threshold,
         is_active: dto.is_active ?? true,
+        // Escala de km: ausente ⇒ precio plano; se persiste como JSON plano.
+        // Release-853 paso 11 — `free` no lleva escala: se limpia aunque el
+        // DTO traiga una (el wizard manda `[]` al pasar a `free`).
+        ...(dto.distance_tiers !== undefined ||
+        dto.type === shipping_rate_type_enum.free
+          ? {
+              distance_tiers:
+                dto.type === shipping_rate_type_enum.free
+                  ? Prisma.DbNull
+                  : toDistanceTiersJson(dto.distance_tiers ?? null),
+            }
+          : {}),
       },
-      include: {
-        shipping_method: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-            logo_url: true,
-          },
-        },
-      },
+      include: RATE_INCLUDE,
     });
+    return withTaxCategoryView(created);
   }
 
   /**
-   * Update a rate in a store's zone
+   * Update a rate in a store's zone.
+   *
+   * La zona de una tarifa NO se cambia por aquí: antes el `shipping_zone_id`
+   * del DTO se descartaba en silencio y el wizard creía haber movido la
+   * tarifa. Ahora, si llega distinto al actual, se rechaza con 400 (para
+   * mover una tarifa: crearla en la otra zona y borrar ésta). Igual al actual
+   * ⇒ se ignora (el wizard siempre lo reenvía).
    */
   async updateStoreRate(id: number, dto: UpdateRateDto) {
     const rate = await this.prisma.shipping_rates.findFirst({
@@ -283,23 +342,61 @@ export class StoreShippingZonesService {
       throw new VendixHttpException(ErrorCodes.SHIP_PERM_001);
     }
 
-    // Remove zone_id from update if present (can't change zone)
-    const { shipping_zone_id, ...update_data } = dto;
-
-    return this.prisma.shipping_rates.update({
-      where: { id },
-      data: update_data,
-      include: {
-        shipping_method: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-            logo_url: true,
-          },
+    const { shipping_zone_id, tax_category_id, distance_tiers, ...update_data } =
+      dto;
+    if (
+      shipping_zone_id !== undefined &&
+      shipping_zone_id !== null &&
+      Number(shipping_zone_id) !== rate.shipping_zone_id
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.SHIP_VALIDATE_001,
+        'No se puede cambiar la zona de una tarifa existente. Crea la tarifa en la otra zona y elimina esta.',
+        {
+          rate_id: id,
+          current_zone_id: rate.shipping_zone_id,
+          requested_zone_id: shipping_zone_id,
         },
+      );
+    }
+
+    // `undefined` ⇒ no se toca; `null` ⇒ se quita el impuesto; número ⇒ se
+    // valida (404/400/412) y se asigna. Solo se valida si CAMBIA: el frontend
+    // reenvía la categoría actual en toda edición, y si esa categoría dejó de
+    // ser elegible (otra tasa, emisor sin O-48) no debe bloquear un cambio de
+    // nombre o de activo.
+    const tax_category_changes =
+      tax_category_id !== undefined &&
+      (tax_category_id === null ? null : Number(tax_category_id)) !==
+        (rate.tax_category_id ?? null);
+    if (tax_category_changes) {
+      await this.shippingTax.assertCategoryAssignable(tax_category_id);
+    }
+
+    // Release-853 paso 11 — tipo efectivo: `free` limpia la escala aunque
+    // el DTO no la toque (pasar a gratis no debe dejar tramos huérfanos).
+    const effective_type = dto.type ?? rate.type;
+
+    const updated = await this.prisma.shipping_rates.update({
+      where: { id },
+      data: {
+        ...update_data,
+        ...(tax_category_changes ? { tax_category_id } : {}),
+        // `undefined` ⇒ no se toca; `null` ⇒ se quita la escala (DbNull, no
+        // `null` plano: Prisma rechaza el `null` plano en Json con 500).
+        ...(distance_tiers !== undefined ||
+        effective_type === shipping_rate_type_enum.free
+          ? {
+              distance_tiers:
+                effective_type === shipping_rate_type_enum.free
+                  ? Prisma.DbNull
+                  : toDistanceTiersJson(distance_tiers ?? null),
+            }
+          : {}),
       },
+      include: RATE_INCLUDE,
     });
+    return withTaxCategoryView(updated);
   }
 
   /**
@@ -395,6 +492,9 @@ export class StoreShippingZonesService {
             min_val: rate.min_val,
             max_val: rate.max_val,
             free_shipping_threshold: rate.free_shipping_threshold,
+            // El clonado copia el modo (sin impuesto: la categoría es de la
+            // tienda y la tarifa del sistema no la lleva).
+            tax_is_inclusive: rate.tax_is_inclusive,
             is_active: true,
             source_type: 'custom',
             copied_from_system_rate_id: rate.id,
@@ -443,8 +543,9 @@ export class StoreShippingZonesService {
       throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
-    // Create the rate copy
-    return this.prisma.shipping_rates.create({
+    // Create the rate copy (sin impuesto: la categoría es de la tienda y la
+    // tarifa del sistema no la lleva; el modo sí se copia).
+    const copy = await this.prisma.shipping_rates.create({
       data: {
         shipping_zone_id: target_zone_id,
         shipping_method_id: system_rate.shipping_method_id,
@@ -455,21 +556,14 @@ export class StoreShippingZonesService {
         min_val: system_rate.min_val,
         max_val: system_rate.max_val,
         free_shipping_threshold: system_rate.free_shipping_threshold,
+        tax_is_inclusive: system_rate.tax_is_inclusive,
         is_active: true,
         source_type: 'custom',
         copied_from_system_rate_id: system_rate.id,
       },
-      include: {
-        shipping_method: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-            logo_url: true,
-          },
-        },
-      },
+      include: RATE_INCLUDE,
     });
+    return withTaxCategoryView(copy);
   }
 
   /**
@@ -586,6 +680,7 @@ export class StoreShippingZonesService {
               min_val: system_rate.min_val,
               max_val: system_rate.max_val,
               free_shipping_threshold: system_rate.free_shipping_threshold,
+              tax_is_inclusive: system_rate.tax_is_inclusive,
               updated_at: new Date(),
             },
           });
@@ -603,6 +698,7 @@ export class StoreShippingZonesService {
               min_val: system_rate.min_val,
               max_val: system_rate.max_val,
               free_shipping_threshold: system_rate.free_shipping_threshold,
+              tax_is_inclusive: system_rate.tax_is_inclusive,
               is_active: true,
               source_type: 'system_copy',
               copied_from_system_rate_id: system_rate.id,
@@ -620,6 +716,17 @@ export class StoreShippingZonesService {
         },
       };
     });
+  }
+
+  // ========== IMPUESTO DEL ENVÍO ==========
+
+  /**
+   * Categorías que se pueden asignar a una tarifa (con motivo si no), la
+   * identidad fiscal del emisor, la sugerencia no vinculante para
+   * restaurantes O-33 y advertencias (INC sin O-33).
+   */
+  async getRateTaxOptions(): Promise<ShippingRateTaxOptions> {
+    return this.shippingTax.getRateTaxOptions();
   }
 
   // ========== ESTADÍSTICAS ==========

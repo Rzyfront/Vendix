@@ -91,6 +91,12 @@ export interface StandardPrintDataModel {
     internal_notes?: string;
     cashier_name?: string;
     pos_terminal?: string;
+    /**
+     * Descargo no fiscal del tiquete POS (`pos_sale_ticket`): publicado solo
+     * por ese provider; el compositor lo pinta fijo en el footer cuando viene
+     * presente y el validador lo exige en ese formato.
+     */
+    non_fiscal_disclaimer?: string;
     payment_method?: string;
     amount_received?: number;
     amount_received_formatted?: string;

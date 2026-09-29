@@ -52,6 +52,8 @@ import {
 } from './services/invoice-calculator.service';
 import { TrmService } from './services/trm.service';
 import {
+  DEFAULT_STORE_TIMEZONE,
+  fiscalIssueDate,
   localDateString,
   resolveOrganizationTimezone,
   resolveStoreTimezone,
@@ -100,6 +102,7 @@ import { InvoiceWithholdingInputDto } from './dto/invoice-withholding-input.dto'
 import { resolveAcquirerRail } from './validators/acquirer-rail.resolver';
 import type { StoredTechnicalKey } from '../../../common/services/technical-key-vault.service';
 import { CUSTOMER_FOR_INVOICE_SELECT } from './utils/customer-invoice-data.adapter';
+import { normalizeNit } from '../../../common/utils/nit.util';
 import {
   buildContractAiuDraft,
   ContractAiuSnapshot,
@@ -113,6 +116,16 @@ import { normalizeInvoiceTaxRate } from './utils/invoice-tax-rate.util';
 // (Σ `order_item_taxes` → escalar × `resolveLineUnits`). Definición ÚNICA
 // compartida con mesas, pagos y remisiones: ver `createFromOrder`.
 import { resolveOrderLineTaxTotal } from '../taxes/utils/final-price.util';
+import { resolveCategoryTaxType } from '../shipping/utils/shipping-tax.util';
+import { projectOrderInvoiceLines } from './utils/order-invoice-lines.util';
+// F-090 remediación (Agente E, 2026-09-27) — resuelve la tarifa real de una
+// línea huérfana (población 3 de `aggregateOrderTaxes`) contra el catálogo
+// del producto o contra un hermano real de la misma orden; nunca inventa.
+import {
+  buildSiblingTaxCandidates,
+  extractProductTaxCandidates,
+  resolveOrphanLineTax,
+} from './utils/orphan-line-tax.util';
 
 /**
  * Listing rows whose send/transmission state is an error or a pending send get
@@ -142,7 +155,14 @@ const INVOICE_INCLUDE = {
   invoice_taxes: true,
   resolution: { select: RESOLUTION_PUBLIC_SELECT },
   customer: {
-    select: { id: true, first_name: true, last_name: true, email: true },
+    select: {
+      id: true,
+      first_name: true,
+      last_name: true,
+      legal_name: true,
+      person_type: true,
+      email: true,
+    },
   },
   supplier: {
     select: {
@@ -550,6 +570,298 @@ export function computeOrderInvoiceSubtotal(
 }
 
 /**
+ * Texto fiscal de una línea orden→factura (`invoice_items.description`, lo que
+ * la DIAN recibe como `cac:Item/cbc:Description`).
+ *
+ * Nombre-primero: el POS persiste la descripción de marketing del catálogo en
+ * `order_items.description`, y leerla antes que el nombre declaraba esa
+ * descripción en el documento firmado. La cadena cae por nombre snapshot →
+ * nombre vivo → variante → descripción, y solo la descripción (texto libre
+ * largo) se recorta al techo FAZ02 de 300 caracteres; los nombres son
+ * `VARCHAR(255)` y nunca lo alcanzan. Cada eslabón ignora blancos puros.
+ */
+export const INVOICE_LINE_DESCRIPTION_MAX_LENGTH = 300;
+
+export interface OrderInvoiceLineDescriptionSource {
+  product_name?: unknown;
+  description?: unknown;
+  products?: { name?: unknown } | null;
+  product_variants?: { name?: unknown } | null;
+}
+
+export function resolveOrderInvoiceLineDescription(
+  item: OrderInvoiceLineDescriptionSource | null | undefined,
+): string {
+  const text = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  };
+  return (
+    text(item?.product_name) ??
+    text(item?.products?.name) ??
+    text(item?.product_variants?.name) ??
+    text(item?.description)?.slice(0, INVOICE_LINE_DESCRIPTION_MAX_LENGTH) ??
+    'Product'
+  );
+}
+
+/**
+ * Lo que `createFromOrder` lee de la orden para proyectar el impuesto del
+ * envío. Es la COPIA congelada al vender (`orders.shipping_tax_*`), nunca la
+ * tarifa ni su categoría actual: editar la tarifa después no mueve la factura
+ * de una orden vieja.
+ */
+export interface InvoiceShippingTaxSource {
+  shipping_cost?: unknown;
+  shipping_tax_rate_id?: number | null;
+  shipping_tax_name?: string | null;
+  shipping_tax_type?: string | null;
+  shipping_tax_rate?: unknown;
+  shipping_tax_amount?: unknown;
+}
+
+export type InvoiceShippingTaxProjection =
+  | {
+      /** La orden trae copia: la línea Envío sale en forma base. */
+      applies: true;
+      gross: Prisma.Decimal;
+      /** `shipping_cost − shipping_tax_amount`, EXACTO (no se re-despeja). */
+      base: Prisma.Decimal;
+      tax_amount: Prisma.Decimal;
+      tax_row: InvoiceTaxRowInput;
+    }
+  | {
+      applies: false;
+      /** `none` = sin copia (el caso de siempre); el resto es copia incoherente. */
+      reason: 'none' | 'unsupported_tax_type' | 'missing_rate' | 'amount_not_below_cost';
+    };
+
+/**
+ * Impuesto del envío en la factura nacida de una orden, a partir de la copia.
+ *
+ * Sin copia (`shipping_tax_amount = 0`) ⇒ `applies: false` y la línea Envío
+ * sale EXACTAMENTE como antes. Con copia:
+ * · base = `shipping_cost − shipping_tax_amount`, al centavo exacto. El
+ *   impuesto ya se truncó al vender (`resolveInclusiveClearing`); volver a
+ *   despejar produciría una segunda verdad. `base × tarifa` puede diferir del
+ *   impuesto ≤ 0,01 — FAX07 (±2,00), FAU04/FAU06 (a peso) y
+ *   `checkTaxSubtotals` (≤ 1 ¢) lo aceptan.
+ * · la fila lleva `tax_type` de la copia (sin tipo ⇒ iva, misma lectura que
+ *   `buildShippingTaxBreakdownRow` usa para contabilidad) y la tarifa en
+ *   PORCENTAJE (`orderTaxFractionToInvoiceRate`), `is_inclusive = false`.
+ *
+ * Una copia incoherente (tipo fuera de iva/inc, sin tarifa, impuesto ≥ costo)
+ * NO se «arregla» inventando una tarifa: se informa y el llamador deja el
+ * envío como hoy.
+ */
+/** Motivo legible de una copia de impuesto del envío incoherente. */
+export function describeShippingTaxIncoherence(
+  reason: Exclude<
+    Extract<InvoiceShippingTaxProjection, { applies: false }>['reason'],
+    'none'
+  >,
+): string {
+  switch (reason) {
+    case 'unsupported_tax_type':
+      return 'el tipo de impuesto no es IVA ni INC';
+    case 'missing_rate':
+      return 'el impuesto no tiene tarifa';
+    case 'amount_not_below_cost':
+      return 'el impuesto es igual o mayor que el costo del envío';
+  }
+}
+
+export function resolveInvoiceShippingTax(
+  order: InvoiceShippingTaxSource,
+): InvoiceShippingTaxProjection {
+  const tax_amount = new Prisma.Decimal(
+    Number(order.shipping_tax_amount ?? 0) || 0,
+  ).toDecimalPlaces(2);
+  if (!tax_amount.greaterThan(0)) return { applies: false, reason: 'none' };
+
+  const tax_type = resolveCategoryTaxType(order.shipping_tax_type);
+  if (tax_type !== 'iva' && tax_type !== 'inc') {
+    return { applies: false, reason: 'unsupported_tax_type' };
+  }
+  const fraction = Number(order.shipping_tax_rate ?? 0);
+  if (!Number.isFinite(fraction) || fraction <= 0) {
+    return { applies: false, reason: 'missing_rate' };
+  }
+  const gross = new Prisma.Decimal(
+    Number(order.shipping_cost ?? 0) || 0,
+  ).toDecimalPlaces(2);
+  const base = gross.minus(tax_amount);
+  if (!base.greaterThan(0)) {
+    return { applies: false, reason: 'amount_not_below_cost' };
+  }
+
+  return {
+    applies: true,
+    gross,
+    base,
+    tax_amount,
+    tax_row: {
+      tax_rate_id: order.shipping_tax_rate_id ?? null,
+      tax_name: order.shipping_tax_name || tax_type.toUpperCase(),
+      tax_rate: orderTaxFractionToInvoiceRate(fraction, tax_type),
+      taxable_amount: base.toNumber(),
+      tax_amount: tax_amount.toNumber(),
+      tax_type,
+      is_inclusive: false,
+    },
+  };
+}
+
+/** Fila de impuesto persistida de un borrador, tal como la lee `update()`. */
+export interface PersistedLineTaxRow {
+  invoice_item_id?: number | null;
+  tax_type?: string | null;
+  tax_rate: Prisma.Decimal | number | string;
+  taxable_amount: Prisma.Decimal | number | string;
+  tax_amount: Prisma.Decimal | number | string;
+  is_inclusive?: boolean | null;
+}
+
+/** Impuesto declarado por el PATCH para una línea (sólo lo que se contrasta). */
+export interface DeclaredLineTax {
+  tax_type?: string | null;
+  tax_rate?: number | string | null;
+  tax_amount?: number | string | null;
+}
+
+const PINNED_QUOTA_MAX_DELTA = new Prisma.Decimal('0.01');
+
+const rateInPersistedUnit = (tax: CalculatedTax): Prisma.Decimal => {
+  const rate = new Prisma.Decimal(tax.tax_rate);
+  return tax.rate_basis === 'fraction' ? rate.times(100) : rate;
+};
+
+const sameDecimal = (
+  a: Prisma.Decimal | number | string | null | undefined,
+  b: Prisma.Decimal | number | string | null | undefined,
+): boolean =>
+  a != null &&
+  b != null &&
+  new Prisma.Decimal(a as Prisma.Decimal.Value).equals(
+    new Prisma.Decimal(b as Prisma.Decimal.Value),
+  );
+
+/**
+ * Conserva, al re-editar un borrador, la cuota de impuesto que la línea YA
+ * tiene persistida cuando el motor la re-deriva con un centavo de diferencia.
+ *
+ * ## Por qué existe
+ *
+ * Una línea nacida de un precio con impuesto INCLUIDO (el envío gravado de una
+ * orden, cualquier ítem despejado al vender) se congeló como
+ * `base = bruto − trunc(cuota)`. Re-editar el borrador la vuelve a pasar por
+ * el motor en forma base, y `trunc(base × tarifa)` puede dar un centavo más o
+ * menos que la cuota original: 5.000 con IVA 19 % se congela como
+ * 4.201,69 + 798,31, y el motor re-deriva 798,32. Sin esto, guardar el
+ * borrador sin tocar nada movía el total del documento un centavo respecto de
+ * lo que cobró la orden.
+ *
+ * ## Cuándo pinea (y cuándo no)
+ *
+ * Sólo si existe una fila GEMELA persistida y ligada a una línea
+ * (`invoice_item_id`), adicional, del mismo tipo, misma tarifa y MISMA base
+ * gravable, cuya cuota difiere de la recalculada en exactamente un centavo o
+ * menos (y no es igual). Si el PATCH declara la cuota, tiene que ser la
+ * persistida. Cada fila gemela se usa una sola vez. Cambiar la cantidad, el
+ * precio, la tarifa o el tipo rompe la igualdad de base y el motor manda,
+ * como hasta hoy. Un centavo es la tolerancia que ya aceptan el prevalidador
+ * (`checkTaxSubtotals`, `ONE_CENT`), FAU04 y FAX07.
+ *
+ * Devuelve cuántas cuotas pineó; el resultado se corrige EN SITIO (línea,
+ * cabecera por tributo, esquemas y totales), con el mismo delta.
+ */
+export function pinPersistedLineQuotas(
+  calculated: InvoiceCalculatorResult,
+  persisted_rows: ReadonlyArray<PersistedLineTaxRow>,
+  declared_lines: ReadonlyArray<{ taxes?: ReadonlyArray<DeclaredLineTax> | null }>,
+): number {
+  const available = persisted_rows.filter(
+    (row) => row.invoice_item_id != null && row.is_inclusive !== true,
+  );
+  const used = new Set<PersistedLineTaxRow>();
+  let pinned = 0;
+
+  for (const line of calculated.lines) {
+    for (const tax of line.taxes) {
+      if (tax.is_inclusive) continue;
+      const type = (tax.tax_type || 'iva').toLowerCase();
+      const rate = rateInPersistedUnit(tax);
+      const twin = available.find(
+        (row) =>
+          !used.has(row) &&
+          (row.tax_type || 'iva').toLowerCase() === type &&
+          new Prisma.Decimal(row.tax_rate as Prisma.Decimal.Value).equals(
+            rate,
+          ) &&
+          sameDecimal(row.taxable_amount, tax.taxable_amount),
+      );
+      if (!twin) continue;
+
+      const persisted = new Prisma.Decimal(
+        twin.tax_amount as Prisma.Decimal.Value,
+      );
+      const delta = persisted.minus(new Prisma.Decimal(tax.tax_amount));
+      if (delta.isZero() || delta.abs().greaterThan(PINNED_QUOTA_MAX_DELTA)) {
+        continue;
+      }
+      const declared = (declared_lines[line.index]?.taxes ?? []).find(
+        (d) =>
+          (d.tax_type || 'iva').toLowerCase() === type &&
+          d.tax_rate != null &&
+          new Prisma.Decimal(d.tax_rate).equals(rate),
+      );
+      if (
+        declared?.tax_amount != null &&
+        !sameDecimal(declared.tax_amount, persisted)
+      ) {
+        continue;
+      }
+
+      used.add(twin);
+      pinned += 1;
+      const shift = (value: string) =>
+        new Prisma.Decimal(value).plus(delta).toFixed(2);
+      tax.tax_amount = persisted.toFixed(2);
+      line.tax_amount = shift(line.tax_amount);
+      line.total_amount = shift(line.total_amount);
+
+      const header = calculated.header_taxes.find(
+        (h) =>
+          h.tax_name === tax.tax_name &&
+          h.tax_rate === tax.tax_rate &&
+          h.tax_type === tax.tax_type &&
+          h.is_inclusive === tax.is_inclusive &&
+          h.dian_tax_code === tax.dian_tax_code,
+      );
+      if (header) header.tax_amount = shift(header.tax_amount);
+      const scheme = calculated.tax_schemes.find(
+        (s) => s.dian_tax_code === tax.dian_tax_code,
+      );
+      if (scheme) scheme.tax_amount = shift(scheme.tax_amount);
+
+      const totals = calculated.totals;
+      totals.tax_amount = shift(totals.tax_amount);
+      if (tax.dian_tax_code === '01') totals.tax_iva = shift(totals.tax_iva);
+      else if (tax.dian_tax_code === '04')
+        totals.tax_inc = shift(totals.tax_inc);
+      else if (tax.dian_tax_code === '03')
+        totals.tax_ica = shift(totals.tax_ica);
+      else totals.tax_other = shift(totals.tax_other);
+      totals.tax_inclusive_amount = shift(totals.tax_inclusive_amount);
+      totals.total_amount = shift(totals.total_amount);
+    }
+  }
+
+  return pinned;
+}
+
+/**
  * Correlación espejo↔motor (B.1, F-063): lo mínimo para unir un warn del
  * motor o un 422 del gate con el documento que lo produjo, sin re-ejecutar
  * a mano. Todo opcional: el gate también corre en caminos sin factura
@@ -643,7 +955,11 @@ export class InvoicingService {
   }> {
     const context = RequestContextService.getContext();
     const organization_id = Number(context?.organization_id ?? 0);
-    const year = new Date().getFullYear();
+    // Step 8 — año civil en la zona de la tienda, no la del contenedor.
+    const year = await this.resolveCivilYear(new Date(), {
+      store_id: context?.store_id ?? null,
+      organization_id: context?.organization_id ?? null,
+    });
 
     if (!organization_id) {
       return {
@@ -875,6 +1191,38 @@ export class InvoicingService {
     return context;
   }
 
+  /**
+   * Año civil de `value` en la zona de la tienda (store-first,
+   * organización-fallback) — Step 8. Reemplaza `getFullYear()` crudo, que lee
+   * el año del CONTENEDOR (UTC) y no el de la tienda emisora: una factura
+   * hecha después de las 19:00 en Bogotá el 31-dic caía en el año siguiente.
+   *
+   * Usa la misma bifurcación fiscal que `cbc:IssueDate` (`fiscalIssueDate`):
+   * si `value` es un instante real se convierte a la zona; si es medianoche
+   * UTC exacta (fecha ya naive) se lee tal cual. Nunca lanza — ante
+   * cualquier fallo de resolución de tz cae al año en UTC, que es el
+   * comportamiento previo a este cambio.
+   */
+  private async resolveCivilYear(
+    value: Date,
+    context: { store_id?: number | bigint | null; organization_id?: number | bigint | null },
+  ): Promise<number> {
+    try {
+      const timezone =
+        context.store_id != null
+          ? await resolveStoreTimezone(this.prisma, Number(context.store_id))
+          : context.organization_id != null
+            ? await resolveOrganizationTimezone(
+                this.prisma.withoutScope(),
+                Number(context.organization_id),
+              )
+            : DEFAULT_STORE_TIMEZONE;
+      return Number(fiscalIssueDate(value, timezone).slice(0, 4));
+    } catch {
+      return value.getUTCFullYear();
+    }
+  }
+
   private async resolveAccountingEntityIdForContext(context: {
     organization_id?: number;
     store_id?: number;
@@ -1046,6 +1394,137 @@ export class InvoicingService {
     }
   }
 
+  /**
+   * Task E — snapshot `customer_*` completo derivado de la FICHA vinculada,
+   * en el vocabulario de columnas de `invoices` (no el de `ProviderInvoiceData`:
+   * `customer_regime`/`customer_tax_responsibilities` allá son
+   * `customer_tax_regime`/`customer_fiscal_responsibilities` acá — ver el
+   * aviso de nombres en `customer-invoice-data.adapter.ts`).
+   *
+   * Único punto de composición reusado por `create()`, `buildDraftProjection()`,
+   * `createFromOrder()`, `createFromFinancialAccount()`, `createFromSalesOrder()`
+   * y `update()`: antes cada uno componía el nombre y la dirección primaria por
+   * su cuenta, y `createFromSalesOrder()` cargaba el régimen/responsabilidades/
+   * tipo de persona/DV/email/teléfono de la ficha sin escribir ninguno — los
+   * tenía en memoria y los dejaba caer.
+   *
+   * Devuelve `null` cuando no hay ficha (factura manual sin `customer_id`): en
+   * ese caso el snapshot sale ÍNTEGRO de `dto.customer_*` en el call site.
+   */
+  private buildCustomerSnapshotFromFicha(
+    customer:
+      | {
+          legal_name?: string | null;
+          first_name?: string | null;
+          last_name?: string | null;
+          document_type?: string | null;
+          document_number?: string | null;
+          verification_digit?: string | null;
+          email?: string | null;
+          phone?: string | null;
+          tax_regime?: string | null;
+          fiscal_responsibilities?: readonly string[] | null;
+          person_type?: string | null;
+          addresses?: readonly unknown[] | null;
+        }
+      | null
+      | undefined,
+  ): {
+    customer_name: string | null;
+    customer_tax_id: string | null;
+    customer_document_type: string | null;
+    customer_verification_digit: string | null;
+    customer_email: string | null;
+    customer_phone: string | null;
+    customer_tax_regime: string | null;
+    customer_fiscal_responsibilities: string[] | null;
+    customer_person_type: string | null;
+    customer_address: unknown | null;
+  } | null {
+    if (!customer) return null;
+
+    const legal_name = (customer.legal_name ?? '').trim();
+    const first_name = (customer.first_name ?? '').trim();
+    const last_name = (customer.last_name ?? '').trim();
+    const composed_name =
+      legal_name || `${first_name} ${last_name}`.trim() || '';
+
+    return {
+      customer_name: composed_name || null,
+      customer_tax_id: customer.document_number ?? null,
+      customer_document_type: customer.document_type ?? null,
+      customer_verification_digit: customer.verification_digit ?? null,
+      customer_email: customer.email ?? null,
+      customer_phone: customer.phone ?? null,
+      customer_tax_regime: customer.tax_regime ?? null,
+      customer_fiscal_responsibilities: customer.fiscal_responsibilities
+        ? [...customer.fiscal_responsibilities]
+        : null,
+      customer_person_type: customer.person_type ?? null,
+      customer_address: customer.addresses?.[0] ?? null,
+    };
+  }
+
+  /**
+   * Task D#4 — mismo cierre que `CustomersService.splitNitAndDv` (ver
+   * `customers.service.ts`), aplicado al snapshot `customer_*` de una factura
+   * MANUAL. Sólo actúa cuando el tipo declarado es NIT (código DIAN `'31'` o
+   * el alias interno `'NIT'`): cualquier otro documento no lleva DV pegado.
+   *
+   * `document_number` puede llegar con el DV pegado (`'27003183-1'`) porque
+   * `create-invoice.dto.ts` no restringe el formato de `customer_tax_id` más
+   * allá de `@MaxLength(50)`. Si además viene un `customer_verification_digit`
+   * explícito que CONTRADICE al pegado, o el DV (pegado o explícito) no cuadra
+   * con el módulo 11 de la DIAN, rechaza ANTES de persistir — igual que
+   * `NitDvMatches`, pero cubriendo el caso que ese validador no puede ver
+   * porque el DV no viaja en su propio campo.
+   */
+  private splitInvoiceCustomerNitDv(input: {
+    document_type?: string | null;
+    document_number?: string | null;
+    verification_digit?: string | null;
+  }): { document_number: string | null; verification_digit: string | null } {
+    const type = (input.document_type ?? '').trim().toUpperCase();
+    const is_nit = type === '31' || type === 'NIT';
+    const raw_number = (input.document_number ?? '').trim();
+    const explicit_dv = (input.verification_digit ?? '').trim();
+
+    if (!is_nit || !raw_number) {
+      return {
+        document_number: input.document_number ?? null,
+        verification_digit: input.verification_digit ?? null,
+      };
+    }
+
+    const nit_input = raw_number.includes('-')
+      ? raw_number
+      : explicit_dv
+        ? `${raw_number}-${explicit_dv}`
+        : raw_number;
+    const result = normalizeNit(nit_input);
+
+    // El número traía el DV pegado Y además vino uno explícito: si no
+    // coinciden, se declararon dos verdades distintas sobre el mismo dígito.
+    const inline_conflict =
+      raw_number.includes('-') &&
+      Boolean(explicit_dv) &&
+      result.provided_dv !== null &&
+      result.provided_dv !== explicit_dv;
+
+    if (inline_conflict || (result.provided_dv !== null && result.dv_mismatch)) {
+      throw new VendixHttpException(
+        ErrorCodes.CUSTOMER_NIT_DV_MISMATCH,
+        `El dígito de verificación '${explicit_dv || result.provided_dv}' no corresponde al NIT '${result.number || raw_number}': el módulo 11 de la DIAN da '${result.dv}'. Si escribiste el NIT con el DV pegado, sepáralos: el número va en customer_tax_id sin DV y el DV en customer_verification_digit.`,
+        { field: 'customer_verification_digit' },
+      );
+    }
+
+    return {
+      document_number: result.number || raw_number,
+      verification_digit: result.dv || explicit_dv || null,
+    };
+  }
+
   private async loadSupportAdjustmentOriginal(
     dto: CreateInvoiceDto,
     accounting_entity_id: number,
@@ -1168,7 +1647,13 @@ export class InvoicingService {
         orderBy: { [sort_by]: sort_order },
         include: {
           customer: {
-            select: { id: true, first_name: true, last_name: true },
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              legal_name: true,
+              person_type: true,
+            },
           },
           resolution: {
             select: { id: true, prefix: true, resolution_number: true },
@@ -1288,6 +1773,45 @@ export class InvoicingService {
       await this.assertCustomerResolvable(resolved_customer_id);
     }
 
+    // Task E — ficha del cliente vinculado, mapeada al snapshot `customer_*`
+    // de `invoices` (ver `buildCustomerSnapshotFromFicha`). `null` cuando la
+    // factura es manual sin `customer_id`: ahí el snapshot sale íntegro de
+    // `dto.customer_*`, como antes.
+    const linked_customer_ficha =
+      resolved_customer_id != null
+        ? await this.prisma.users.findFirst({
+            where: { id: resolved_customer_id },
+            select: CUSTOMER_FOR_INVOICE_SELECT,
+          })
+        : null;
+    const linked_customer_snapshot = this.buildCustomerSnapshotFromFicha(
+      linked_customer_ficha,
+    );
+
+    // Task D#4 — separa un NIT con DV pegado ANTES de persistir. El tipo y el
+    // número EFECTIVOS son los que realmente se van a grabar (dto explícito →
+    // ficha vinculada → proveedor del documento soporte), para no dejar sin
+    // validar un NIT que llegó sólo por la ficha o por `support_supplier`.
+    const effective_customer_document_type =
+      dto.customer_document_type ??
+      linked_customer_snapshot?.customer_document_type ??
+      support_supplier?.document_type ??
+      null;
+    const effective_customer_tax_id =
+      dto.customer_tax_id ??
+      linked_customer_snapshot?.customer_tax_id ??
+      support_supplier?.tax_id ??
+      null;
+    const nit_split = this.splitInvoiceCustomerNitDv({
+      document_type: effective_customer_document_type,
+      document_number: effective_customer_tax_id,
+      verification_digit:
+        dto.customer_verification_digit ??
+        linked_customer_snapshot?.customer_verification_digit ??
+        support_supplier?.verification_digit ??
+        null,
+    });
+
     // QUI-690 Step 3 — Inline product creation per line. NOT YET IMPLEMENTED:
     // ProductsService.create is 150+ lines (variants, stock_levels, images,
     // dedup, pricing rules) and refactoring it into a transaction-safe
@@ -1386,8 +1910,12 @@ export class InvoicingService {
           store_id: context.store_id,
           customer_id: resolved_customer_id,
           base: calculated.totals.total_before_tax,
-          iva_amount: calculated.totals.tax_amount,
           issue_date,
+          items: this.buildWithholdingOperationItems(
+            dto.items,
+            line_snapshots,
+            calculated.lines,
+          ),
         });
 
     // Generate invoice number from resolution
@@ -1419,9 +1947,20 @@ export class InvoicingService {
         status: 'draft',
         customer_id: resolved_customer_id,
         supplier_id: dto.supplier_id,
-        customer_name: dto.customer_name ?? support_supplier?.name,
-        customer_tax_id: dto.customer_tax_id ?? support_supplier?.tax_id,
-        customer_address: dto.customer_address ?? support_supplier?.addresses,
+        // Task E — con `customer_id` vinculado, el snapshot sale de la FICHA
+        // cuando el DTO no trae el campo explícito (el frontend normalmente
+        // sólo manda `customer_id`, no cada columna a mano). Sin ficha
+        // (factura manual), `dto.customer_*` sigue siendo la única fuente —
+        // comportamiento previo intacto.
+        customer_name:
+          dto.customer_name ??
+          linked_customer_snapshot?.customer_name ??
+          support_supplier?.name,
+        customer_tax_id: nit_split.document_number ?? undefined,
+        customer_address:
+          dto.customer_address ??
+          linked_customer_snapshot?.customer_address ??
+          support_supplier?.addresses,
         // Identidad fiscal del adquiriente — SNAPSHOT de la emisión.
         //
         // Hasta la migración `20260815120000_dian_invoice_contract` estos datos
@@ -1435,13 +1974,30 @@ export class InvoicingService {
         //
         // Persistirlos aquí congela lo que valió al emitir, igual que
         // `customer_address`, que ya seguía este patrón.
-        customer_email: dto.customer_email,
-        customer_phone: dto.customer_phone,
-        customer_document_type: dto.customer_document_type,
-        customer_verification_digit: dto.customer_verification_digit,
-        customer_tax_regime: dto.customer_tax_regime,
+        customer_email:
+          dto.customer_email ?? linked_customer_snapshot?.customer_email,
+        customer_phone:
+          dto.customer_phone ?? linked_customer_snapshot?.customer_phone,
+        customer_document_type: effective_customer_document_type ?? undefined,
+        customer_verification_digit: nit_split.verification_digit ?? undefined,
+        customer_tax_regime:
+          dto.customer_tax_regime ??
+          linked_customer_snapshot?.customer_tax_regime,
         customer_fiscal_responsibilities:
-          dto.customer_fiscal_responsibilities ?? undefined,
+          dto.customer_fiscal_responsibilities ??
+          linked_customer_snapshot?.customer_fiscal_responsibilities ??
+          undefined,
+        // Task D — precedencia: valor declarado en el DTO (factura manual) →
+        // `person_type` de la ficha vinculada → NULL (deja que
+        // `resolveAcquirerIdentity` derive del código de documento en emisión).
+        customer_person_type:
+          dto.customer_person_type ??
+          (linked_customer_snapshot?.customer_person_type as
+            | 'NATURAL'
+            | 'JURIDICA'
+            | undefined
+            | null) ??
+          undefined,
         // Forma ('1' contado / '2' crédito) y medio de pago DIAN.
         payment_form: dto.payment_form,
         payment_means_code: dto.payment_means_code,
@@ -1626,7 +2182,11 @@ export class InvoicingService {
         customer_id:
           invoice.customer_id != null ? Number(invoice.customer_id) : null,
         declared: dto.withholdings,
-        year: new Date(issue_date).getFullYear(),
+        // Step 8 — año civil de emisión en la zona de la tienda.
+        year: await this.resolveCivilYear(new Date(issue_date), {
+          store_id,
+          organization_id,
+        }),
       });
 
       // Se actualiza `withholding_amount` con el agregado de lo declarado y se
@@ -1777,8 +2337,12 @@ export class InvoicingService {
           store_id: context.store_id,
           customer_id: dto.customer_id,
           base: calculated.totals.total_before_tax,
-          iva_amount: calculated.totals.tax_amount,
           issue_date,
+          items: this.buildWithholdingOperationItems(
+            dto.items,
+            line_snapshots,
+            calculated.lines,
+          ),
         });
 
     const document_type = this.toFiscalDocumentType(dto.invoice_type);
@@ -1800,6 +2364,10 @@ export class InvoicingService {
             select: CUSTOMER_FOR_INVOICE_SELECT,
           })
         : null;
+    // Task E — mismo snapshot que `create()` persistiría desde esta ficha.
+    const draft_customer_snapshot = this.buildCustomerSnapshotFromFicha(
+      customer,
+    );
 
     const split_line_taxes = this.needsPersistedLineTaxes(
       calculated.header_taxes,
@@ -1838,30 +2406,65 @@ export class InvoicingService {
       supplier_id: dto.supplier_id ?? null,
       customer,
       supplier: support_supplier ?? null,
-      // El snapshot del adquiriente TAL COMO SE PERSISTIRÍA. Cuando hay
-      // `inline_customer`, éste es el único sitio donde su identidad viaja: no
-      // se creó ninguna fila.
+      // El snapshot del adquiriente TAL COMO SE PERSISTIRÍA — MISMA precedencia
+      // que `create()` (Task E): dto explícito → ficha vinculada
+      // (`draft_customer_snapshot`) → proveedor del documento soporte →
+      // `inline_customer` (cliente aún no creado, sólo aplica sin `customer_id`).
       customer_name:
         dto.customer_name ??
+        draft_customer_snapshot?.customer_name ??
         support_supplier?.name ??
         this.draftInlineCustomerName(dto) ??
         null,
       customer_tax_id:
         dto.customer_tax_id ??
+        draft_customer_snapshot?.customer_tax_id ??
         support_supplier?.tax_id ??
         dto.inline_customer?.document_number ??
         null,
-      customer_address: dto.customer_address ?? support_supplier?.addresses,
-      customer_email: dto.customer_email ?? dto.inline_customer?.email ?? null,
-      customer_phone: dto.customer_phone ?? dto.inline_customer?.phone ?? null,
+      customer_address:
+        dto.customer_address ??
+        draft_customer_snapshot?.customer_address ??
+        support_supplier?.addresses,
+      customer_email:
+        dto.customer_email ??
+        draft_customer_snapshot?.customer_email ??
+        dto.inline_customer?.email ??
+        null,
+      customer_phone:
+        dto.customer_phone ??
+        draft_customer_snapshot?.customer_phone ??
+        dto.inline_customer?.phone ??
+        null,
       customer_document_type:
         dto.customer_document_type ??
+        draft_customer_snapshot?.customer_document_type ??
         dto.inline_customer?.document_type ??
         null,
-      customer_verification_digit: dto.customer_verification_digit ?? null,
-      customer_tax_regime: dto.customer_tax_regime ?? null,
+      customer_verification_digit:
+        dto.customer_verification_digit ??
+        draft_customer_snapshot?.customer_verification_digit ??
+        null,
+      customer_tax_regime:
+        dto.customer_tax_regime ??
+        draft_customer_snapshot?.customer_tax_regime ??
+        null,
       customer_fiscal_responsibilities:
-        dto.customer_fiscal_responsibilities ?? null,
+        dto.customer_fiscal_responsibilities ??
+        draft_customer_snapshot?.customer_fiscal_responsibilities ??
+        null,
+      // Task D — misma precedencia que `create()`: declarado en el DTO → el
+      // `person_type` de la ficha vinculada → `null` (el validador de borrador
+      // no deriva del código de documento; eso lo hace `resolveAcquirerIdentity`
+      // en emisión).
+      customer_person_type:
+        dto.customer_person_type ??
+        (draft_customer_snapshot?.customer_person_type as
+          | 'NATURAL'
+          | 'JURIDICA'
+          | null
+          | undefined) ??
+        null,
       operation_type: dto.operation_type ?? null,
       currency: dto.currency || 'COP',
       issue_date,
@@ -2349,15 +2952,56 @@ export class InvoicingService {
     // dos veces. La inclusividad de origen sigue auditable en
     // `order_item_taxes`, y SÍ decide el split por línea más abajo (incidente
     // #81), que se conserva para no mover un byte del XML.
-    const productItems = (order.order_items || []).map((item: any) => {
-      const description =
-        item.description ||
-        item.product_name ||
-        item.products?.name ||
-        'Product';
+    // DESCUENTO DE ORDEN e IMPUESTO DE LÍNEA POR UNIDAD (P0-2 / P2-1): ver
+    // `projectOrderInvoiceLines`. Sin descuento y sin deriva de más de un
+    // centavo, toda línea sale `unchanged` y la factura es la de siempre.
+    const lineProjection = projectOrderInvoiceLines(
+      order.order_items || [],
+      order.discount_amount,
+    );
+    if (lineProjection.error) {
+      const failure = lineProjection.error;
+      throw new VendixHttpException(
+        failure.code === 'unclosed'
+          ? ErrorCodes.INVOICING_CALC_005
+          : ErrorCodes.INVOICING_CALC_006,
+        failure.code === 'discount_exceeds_lines'
+          ? `El descuento de la orden #${order.id} (${failure.discount}) es mayor que el valor de los productos que pueden recibirlo (${failure.eligible_gross}). No se creó la factura ni se usó ningún número. Corrige el descuento de la orden y factura de nuevo.`
+          : failure.code === 'unclosed'
+            ? `No pudimos repartir el descuento de la orden #${order.id} entre sus productos de forma que la factura sume exactamente lo que pagó el cliente. No se creó la factura ni se usó ningún número. Escríbenos a soporte con el número de la orden para facturarla.`
+            : `Un producto de la orden #${order.id} tiene un impuesto mal configurado (${failure.detail}), así que no se puede repartir el descuento de la orden sin cambiar lo que se declara. No se creó la factura ni se usó ningún número. Revisa el impuesto de ese producto en la orden o escríbenos a soporte.`,
+        { order_id: order.id, detail: `order_discount:${failure.code}` },
+      );
+    }
+    // Filas de la orden con la base y las cuotas ya proyectadas: es lo que
+    // agregan `aggregateOrderTaxes` y `computeOrderInvoiceSubtotal`, para que
+    // cabecera, filas y líneas lean el MISMO número.
+    const projectedOrderItems = (order.order_items || []).map(
+      (item: any, index: number) => {
+        const line = lineProjection.lines[index];
+        if (line.reason === 'unchanged') return item;
+        return {
+          ...item,
+          total_price: line.base,
+          order_item_taxes: (item.order_item_taxes || []).map(
+            (row: any, row_index: number) => ({
+              ...row,
+              tax_amount: line.tax_amounts[row_index],
+            }),
+          ),
+        };
+      },
+    );
+    const productItems = (order.order_items || []).map((item: any, index: number) => {
+      const projectedLine = lineProjection.lines[index];
+      // Nombre-primero: la descripción del catálogo que trae la línea es
+      // respaldo, nunca titular (ver `resolveOrderInvoiceLineDescription`).
+      const description = resolveOrderInvoiceLineDescription(item);
       const quantity = Number(item.quantity || 1);
       const unit_price = Number(item.unit_price || 0);
-      const discount = Number(item.discount_amount || 0);
+      // `order_items` no tiene columna de descuento: el de la línea es el que
+      // proyecta el reparto del descuento de orden (o el ajuste de P2-1).
+      const discount = projectedLine.discount.toNumber();
       // El impuesto de la línea COMPLETA, leído del snapshot persistido.
       //
       // `order_items.tax_amount_item` es el impuesto POR UNIDAD DE PRECIO
@@ -2384,9 +3028,14 @@ export class InvoicingService {
       // cabecera —desglose que YA era correcto—, y `checkTaxInclusiveTotal`
       // (FAU06) deja de abortar la firma por esta causa DESPUÉS de que
       // `validate()` consumió el consecutivo DIAN.
-      const tax = resolveOrderLineTaxTotal(item);
+      const tax =
+        projectedLine.reason === 'unchanged'
+          ? resolveOrderLineTaxTotal(item)
+          : projectedLine.tax_total.toNumber();
       const total_amount =
-        Number(item.total_price || quantity * unit_price - discount) + tax;
+        projectedLine.reason === 'unchanged'
+          ? Number(item.total_price || quantity * unit_price - discount) + tax
+          : projectedLine.base.plus(projectedLine.tax_total).toNumber();
       return {
         product_id: item.product_id,
         product_variant_id: item.product_variant_id,
@@ -2397,6 +3046,17 @@ export class InvoicingService {
         tax_amount: new Prisma.Decimal(tax),
         total_amount: new Prisma.Decimal(total_amount),
         is_inclusive: false,
+        // `order_items.price_unit_quantity` (snapshot de `products.price_unit_quantity`
+        // al vender, ver el schema): a cuántas unidades de stock corresponde
+        // `unit_price`. Sin copiarlo, el prevalidador (`fiscal-document.validator.ts`
+        // L620/L744) recompone `LineExtensionAmount` como `unit_price * quantity`
+        // (NULL ⇒ 1) en vez de `unit_price * quantity / price_unit_quantity`, y una
+        // línea vendida por caja/empaque (`price_unit_quantity` > 1) dispara
+        // `HEADER_LINE_EXTENSION_MISMATCH` (FAU02) contra el total realmente cobrado.
+        price_unit_quantity:
+          typeof item.price_unit_quantity === 'number'
+            ? item.price_unit_quantity
+            : null,
         // "Empaque por tarifa" snapshot propagated from the order line so the
         // invoice mirrors the order PDF (tier label + packaging units consumed).
         applied_price_tier_name:
@@ -2411,25 +3071,64 @@ export class InvoicingService {
       };
     });
     const shippingCost = Number(order.shipping_cost || 0);
+    // IMPUESTO DEL ENVÍO desde la COPIA de la orden (`orders.shipping_tax_*`,
+    // ver `resolveInvoiceShippingTax`). Con copia, la línea Envío se expresa
+    // en forma base —`unit_price` = base, `tax_amount` = impuesto,
+    // `is_inclusive = false`, como las líneas de producto— y su total sigue
+    // siendo el bruto que pagó el cliente: `total_amount` no se mueve. Sin
+    // copia la línea sale EXACTAMENTE como antes (sin `is_inclusive`).
+    // B7: la copia se resuelve SIEMPRE, incluso con `shipping_cost = 0`. Una
+    // copia con impuesto y envío 0 es incoherente y la guarda la rechaza
+    // (`amount_not_below_cost`); nunca se omite en silencio.
+    const shippingTax = resolveInvoiceShippingTax(order);
+    // Copia incoherente (sin tarifa, tipo fuera de iva/inc, impuesto ≥ costo):
+    // se RECHAZA. Facturar el envío sin tributo dejaría la factura
+    // declarando menos impuesto del que la orden y la contabilidad registran,
+    // e inventar la tarifa es peor. El borrador nace sin numerar, así que no
+    // se consume consecutivo.
+    if (!shippingTax.applies && shippingTax.reason !== 'none') {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_006,
+        `La orden #${order.id} tiene una copia del impuesto del envío incoherente ` +
+          `(${describeShippingTaxIncoherence(shippingTax.reason)}): no se puede ` +
+          'facturar sin inventar la tarifa ni omitir un impuesto que la orden ya cobró. ' +
+          'Corrige el impuesto del envío desde el detalle de la orden (Reparar impuesto del envío) y factura de nuevo.',
+        { order_id: order.id, detail: `shipping_tax:${shippingTax.reason}` },
+      );
+    }
+    const shippingBase = shippingTax.applies
+      ? shippingTax.base.toNumber()
+      : shippingCost;
+    const shippingLine = shippingTax.applies
+      ? {
+          product_id: null,
+          product_variant_id: null,
+          description: 'Envio',
+          quantity: new Prisma.Decimal(1),
+          unit_price: shippingTax.base,
+          discount_amount: new Prisma.Decimal(0),
+          tax_amount: shippingTax.tax_amount,
+          total_amount: shippingTax.gross,
+          is_inclusive: false,
+          applied_price_tier_name: null,
+          stock_units_consumed: null,
+          serial_numbers_snapshot: null,
+        }
+      : {
+          product_id: null,
+          product_variant_id: null,
+          description: 'Envio',
+          quantity: new Prisma.Decimal(1),
+          unit_price: new Prisma.Decimal(shippingCost),
+          discount_amount: new Prisma.Decimal(0),
+          tax_amount: new Prisma.Decimal(0),
+          total_amount: new Prisma.Decimal(shippingCost),
+          applied_price_tier_name: null,
+          stock_units_consumed: null,
+          serial_numbers_snapshot: null,
+        };
     const items =
-      shippingCost > 0
-        ? [
-            ...productItems,
-            {
-              product_id: null,
-              product_variant_id: null,
-              description: 'Envio',
-              quantity: new Prisma.Decimal(1),
-              unit_price: new Prisma.Decimal(shippingCost),
-              discount_amount: new Prisma.Decimal(0),
-              tax_amount: new Prisma.Decimal(0),
-              total_amount: new Prisma.Decimal(shippingCost),
-              applied_price_tier_name: null,
-              stock_units_consumed: null,
-              serial_numbers_snapshot: null,
-            },
-          ]
-        : productItems;
+      shippingCost > 0 ? [...productItems, shippingLine] : productItems;
 
     // A.4: el subtotal es Σ de BASES gravables y ya llega despejado desde
     // los canales (POS y checkout persisten la base en `unit_price`): no se
@@ -2439,19 +3138,32 @@ export class InvoicingService {
     // F-056: fórmula fijada y documentada en `computeOrderInvoiceSubtotal`
     // (arriba del todo en este archivo) — ahí está el porqué de las tres
     // lecturas descartadas de ADR-04.
-    const subtotal = computeOrderInvoiceSubtotal(
-      order.order_items || [],
-      shippingCost,
+    // Con impuesto en el envío el subtotal suma la BASE del envío, no el
+    // bruto: el impuesto viaja en `tax` y `subtotal + tax` sigue dando el total.
+    // Base NETA del descuento proyectado: FAU02 compara `subtotal_amount`
+    // contra Σ `LineExtensionAmount`, que ya resta el descuento de línea.
+    // Sumas en coma flotante: se cierran al centavo para que la cabecera no
+    // persista ruido (`8906.869999…`) ahora que las líneas llevan descuento.
+    const toCents = (n: number) => Math.round(n * 100) / 100;
+    const subtotal = toCents(
+      computeOrderInvoiceSubtotal(projectedOrderItems, shippingBase),
     );
-    const discount = items.reduce(
-      (acc: number, item: any) => acc + Number(item.discount_amount),
-      0,
+    const discount = toCents(
+      items.reduce(
+        (acc: number, item: any) => acc + Number(item.discount_amount),
+        0,
+      ),
     );
-    const tax = items.reduce(
-      (acc: number, item: any) => acc + Number(item.tax_amount),
-      0,
+    const tax = toCents(
+      items.reduce(
+        (acc: number, item: any) => acc + Number(item.tax_amount),
+        0,
+      ),
     );
-    const total = subtotal - discount + tax;
+    // `subtotal` ya es neto del descuento de línea (ver arriba): restarlo otra
+    // vez lo contaría dos veces. Sin descuento `discount` es 0 y el total es el
+    // de siempre.
+    const total = toCents(subtotal + tax);
 
     // Aggregate the order's per-line typed taxes (order_item_taxes) into invoice
     // header-level invoice_taxes, one row per (name, rate, fiscal type,
@@ -2465,7 +3177,7 @@ export class InvoicingService {
       header_rows: invoiceTaxRows,
       distinct_group_count: distinctGroupCount,
       tax_scalar_without_breakdown: taxScalarWithoutBreakdown,
-    } = aggregateOrderTaxes(order.order_items || []);
+    } = aggregateOrderTaxes(projectedOrderItems);
     // F-090 (eje de código de F-053) — población 3 de `aggregateOrderTaxes`
     // (ver su docblock): líneas con `tax_amount_item` > 0 pero SIN filas
     // `order_item_taxes` no aportan nada a `invoiceTaxRows` y hoy se ven
@@ -2478,6 +3190,27 @@ export class InvoicingService {
     // F-090 dice que hoy no se puede. No se sintetiza la fila que falta
     // (ver docblock de `aggregateOrderTaxes`): se reporta el conteo y los
     // índices para que quien investigue pueda ir directo a la línea.
+    //
+    // Task 3a (Agente D, 2026-09-27) — INTENTAMOS convertir esto en un throw
+    // fail-closed (`INVOICING_CALC_001`), asumiendo que una línea escalar sin
+    // desglose es siempre un documento internamente incoherente. Es FALSO:
+    // `invoicing.service.tax-matrix.spec.ts` ("caja x24 SIN desglose: el
+    // escalar cae al fallback y escala por unidades de precio ($8.000)" y
+    // "línea por PESO: el multiplicador es `weight`") prueba, contra el
+    // camino real, que esta MISMA población (F-090) tiene una resolución
+    // deliberada y ya probada: la línea se factura con su escalar
+    // `tax_amount_item` ESCALADO por `quantity / price_unit_quantity` (o por
+    // `weight`), sin sintetizar una fila `order_item_taxes`/`invoice_taxes` —
+    // exactamente lo que el docblock de `aggregateOrderTaxes` ya documentaba
+    // ("no se sintetiza la fila que falta"). El throw rompía ambos tests.
+    // Revertido en su momento: se dejó el warn original. El riesgo de
+    // `HEADER_TAX_TOTAL_MISMATCH` que motivó el intento SÍ se cierra ahora
+    // (Agente E, 2026-09-27, ver el bloque siguiente): el throw fail-closed
+    // vuelve, pero condicionado a que NINGUNA fuente real (producto o
+    // hermano de la misma orden) resuelva la tarifa — la población que
+    // `tax-matrix.spec.ts` ya prueba contra el escalador de unidades de
+    // precio ahora resuelve por asignación de producto (fixture actualizado
+    // en esos dos tests) y nunca llega al throw.
     if (taxScalarWithoutBreakdown.count > 0) {
       this.logger.warn(
         `[invoice:create-from-order]${formatGateCorrelation({
@@ -2490,11 +3223,175 @@ export class InvoicingService {
           `fuera de invoice_taxes — no se sintetiza la fila faltante`,
       );
     }
+    // F-090 remediación (Agente E, 2026-09-27) — el warn de arriba deja de
+    // ser el único rastro. Cada línea de la población 3 se resuelve contra
+    // UNA fuente real —la asignación de impuesto del producto primero, una
+    // fila `order_item_taxes` real de un hermano de la MISMA orden después
+    // (`resolveOrphanLineTax`, `./utils/orphan-line-tax.util.ts`)— y, si
+    // ninguna la explica sin ambigüedad (misma tolerancia de 1 ¢ que
+    // `FiscalDocumentValidator`), el documento se corta con
+    // `INVOICING_CALC_001` ANTES de tocar el consecutivo DIAN. La función
+    // PURA `aggregateOrderTaxes` sigue sin sintetizar nada (su docblock
+    // sigue siendo cierto); esto vive acá, en el llamador con Prisma, que sí
+    // tiene catálogo y hermanos reales para mirar.
+    if (taxScalarWithoutBreakdown.count > 0) {
+      const siblingCandidates = buildSiblingTaxCandidates(projectedOrderItems);
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      // Consulta SEPARADA y acotada (`select`, no `include` anidado dentro
+      // de la mega-consulta de arriba) por los `product_id` de las líneas
+      // huérfanas — nunca las de `orders.findFirst`. Anidar
+      // `product_tax_assignments -> tax_categories -> tax_rates` DENTRO del
+      // `include` gigante de `orders.findFirst` hacía que `backend-typecheck`
+      // reventara por heap (medido: PASA con 6144 MB, FALLA con el techo por
+      // defecto de 3072 MB de `buildcheck.sh` — ver `buildcheck-dev`) porque
+      // el chequeo de tipos de Prisma es combinatorio sobre el árbol
+      // COMPLETO del `include`. Esta consulta aparte, del mismo tamaño que
+      // la de arriba (línea ~6828, `resolveWithholdingAmount`), no paga ese
+      // costo porque su tipo no se anida dentro del otro.
+      const orphanProductIds = Array.from(
+        new Set(
+          taxScalarWithoutBreakdown.line_indexes
+            .map((i) => (projectedOrderItems[i] as any)?.product_id)
+            .filter(
+              (id: unknown): id is number =>
+                typeof id === 'number' && Number.isFinite(id),
+            ),
+        ),
+      );
+      const orphanProducts = orphanProductIds.length
+        ? await this.prisma.products.findMany({
+            where: { id: { in: orphanProductIds } },
+            select: {
+              id: true,
+              product_tax_assignments: {
+                select: {
+                  is_inclusive: true,
+                  tax_categories: {
+                    select: {
+                      tax_type: true,
+                      is_inclusive: true,
+                      tax_rates: { select: { id: true, name: true, rate: true } },
+                    },
+                  },
+                },
+              },
+            },
+          })
+        : [];
+      const orphanProductById = new Map(orphanProducts.map((p) => [p.id, p]));
+      for (const lineIndex of taxScalarWithoutBreakdown.line_indexes) {
+        const sourceItem: any = projectedOrderItems[lineIndex];
+        const taxable_amount = Number(sourceItem?.total_price || 0);
+        const tax_amount = resolveOrderLineTaxTotal(sourceItem);
+        if (tax_amount <= 0) continue; // ya descartado arriba; defensivo
+        const resolution = resolveOrphanLineTax({
+          taxable_amount,
+          tax_amount,
+          product_candidates: extractProductTaxCandidates(
+            orphanProductById.get(Number(sourceItem?.product_id)),
+          ),
+          sibling_candidates: siblingCandidates,
+        });
+        if (!resolution.resolved) {
+          throw new VendixHttpException(
+            ErrorCodes.INVOICING_CALC_001,
+            `La orden #${order.id}, línea ${lineIndex + 1}, cobra ` +
+              `${tax_amount} de impuesto sin fila de desglose y ` +
+              `${
+                resolution.reason === 'ambiguous'
+                  ? 'más de una tarifa real la explica igual de bien'
+                  : 'ninguna tarifa real del producto ni de una línea hermana de la misma orden la explica'
+              } — no se inventa la tarifa. No se creó la factura ni se ` +
+              `usó ningún número. Revisa la asignación de impuesto del ` +
+              `producto (o el desglose de la línea de origen) y factura de nuevo.`,
+            {
+              order_id: order.id,
+              detail: `orphan_line_tax:${lineIndex}:${resolution.reason}`,
+            },
+          );
+        }
+        const resolved = resolution.resolved;
+        const persistedRow: InvoiceTaxRowInput = {
+          tax_rate_id: resolved.tax_rate_id,
+          tax_name: resolved.tax_name,
+          tax_rate: orderTaxFractionToInvoiceRate(
+            resolved.tax_rate,
+            resolved.tax_type,
+          ),
+          taxable_amount: round2(taxable_amount),
+          tax_amount: round2(tax_amount),
+          tax_type: resolved.tax_type,
+          is_inclusive: resolved.is_inclusive,
+        };
+        orderLineTaxes[lineIndex] = [
+          ...(orderLineTaxes[lineIndex] || []),
+          persistedRow,
+        ];
+        const group = invoiceTaxRows.find(
+          (existing) =>
+            existing.tax_name === persistedRow.tax_name &&
+            Number(existing.tax_rate) === Number(persistedRow.tax_rate) &&
+            existing.tax_type === persistedRow.tax_type &&
+            (existing.tax_rate_id ?? null) ===
+              (persistedRow.tax_rate_id ?? null) &&
+            (existing.is_inclusive === true) ===
+              (persistedRow.is_inclusive === true),
+        );
+        if (group) {
+          group.taxable_amount = round2(
+            Number(group.taxable_amount || 0) + taxable_amount,
+          );
+          group.tax_amount = round2(
+            Number(group.tax_amount || 0) + tax_amount,
+          );
+        } else {
+          invoiceTaxRows.push({ ...persistedRow });
+        }
+      }
+    }
     // La línea de ENVÍO, cuando existe, se añade al final de `items` y no
     // lleva tributos: se representa como un arreglo vacío para que el
     // alineamiento por posición contra `invoice_items` siga siendo cierto.
-    if (shippingCost > 0) orderLineTaxes.push([]);
-    const taxGroups = { size: distinctGroupCount };
+    //
+    // Con impuesto en el envío la línea lleva SU fila (base del envío +
+    // impuesto) y esa misma fila se funde en el agregado de cabecera —misma
+    // clave que `aggregateOrderTaxes`: (nombre|tarifa|tipo|id|inclusivo)— para
+    // que el respaldo de `persistLineTaxes` (cabecera sin vínculo) también la
+    // lleve y `invoices.tax_amount` = Σ filas (FAU06).
+    if (shippingCost > 0) {
+      if (shippingTax.applies) {
+        const row = shippingTax.tax_row;
+        orderLineTaxes.push([{ ...row }]);
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        const group = invoiceTaxRows.find(
+          (existing) =>
+            existing.tax_name === row.tax_name &&
+            Number(existing.tax_rate) === Number(row.tax_rate) &&
+            existing.tax_type === row.tax_type &&
+            (existing.tax_rate_id ?? null) === (row.tax_rate_id ?? null) &&
+            (existing.is_inclusive === true) === (row.is_inclusive === true),
+        );
+        if (group) {
+          group.taxable_amount = round2(
+            Number(group.taxable_amount || 0) + Number(row.taxable_amount || 0),
+          );
+          group.tax_amount = round2(
+            Number(group.tax_amount || 0) + Number(row.tax_amount || 0),
+          );
+        } else {
+          invoiceTaxRows.push({ ...row });
+        }
+      } else {
+        orderLineTaxes.push([]);
+      }
+    }
+    // `distinctGroupCount` sólo contaba los grupos que salían de
+    // `aggregateOrderTaxes`; el envío y la remediación F-090 de arriba
+    // pueden fundirse en un grupo ya existente o abrir uno nuevo en
+    // `invoiceTaxRows`, así que el tamaño real de después es la única
+    // cuenta que no queda desactualizada (antes de estas dos fusiones,
+    // `distinctGroupCount === invoiceTaxRows.length` siempre se cumplía).
+    const taxGroups = { size: invoiceTaxRows.length };
 
     // `needsOrderLineTaxSplit`: multi-tributo O cualquier línea inclusiva.
     // Con un solo tributo AGREGADO el emisor produce el mismo XML heredándolo;
@@ -2502,10 +3399,18 @@ export class InvoicingService {
     // cabecera no lleva `invoice_item_id`, el prevalidador no usa la base
     // persistida y recomputa `bruto − impuesto` sobre unidades que ya son
     // netas (doble despeje). Ver `needsPersistedLineTaxes` para create/update.
-    const split_order_line_taxes = needsOrderLineTaxSplit(
-      taxGroups.size,
-      orderLineTaxes,
-    );
+    //
+    // El impuesto del envío FUERZA el split: su fila tiene que quedar ligada a
+    // la línea Envío (`invoice_item_id`) para que el «todo o nada» de
+    // `invoice-flow`, FAU04 y la NC parcial lean bases persistidas por línea.
+    // Una línea proyectada (descuento de orden o P2-1) también lo fuerza: su
+    // cuota puede llevar el centavo de un bruto inalcanzable
+    // (`settleToTarget`), que el prevalidador tolera por fila pero no sumado
+    // con los truncados de otras líneas en una fila de cabecera.
+    const split_order_line_taxes =
+      needsOrderLineTaxSplit(taxGroups.size, orderLineTaxes) ||
+      shippingTax.applies ||
+      lineProjection.lines.some((line) => line.reason !== 'unchanged');
     // Forma base (ver arriba): el split ya se decidió con la inclusividad de
     // ORIGEN; lo que se persiste es base + cuota, así que toda fila de
     // tributo nace `is_inclusive = false` — el gate lee `tax.is_inclusive`
@@ -2591,6 +3496,29 @@ export class InvoicingService {
         // consecutivo en cada venta anónima.
         customer_tax_id: acquirerRail.identity.document_number,
         customer_document_type: acquirerRail.identity.document_type,
+        // Snapshot del adquiriente congelado al facturar: email/teléfono para
+        // `cac:Contact`, DV y responsabilidades para recalcular el MISMO CUFE
+        // en reenvíos años después. La fuente es la misma del carril (ficha
+        // `users` o datos del invitado) y nunca se mezclan.
+        // `customer_tax_regime` NO se copia: la columna espera código DIAN
+        // ('48'/'49') y `users.tax_regime` es etiqueta RUT ('COMUN'…); la
+        // emisión lo resuelve de la ficha viva.
+        customer_email:
+          order.users?.email ?? invoiceDataRequest?.email ?? null,
+        customer_phone:
+          order.users?.phone ?? invoiceDataRequest?.phone ?? null,
+        customer_verification_digit:
+          order.users?.verification_digit ?? null,
+        customer_fiscal_responsibilities:
+          order.users?.fiscal_responsibilities?.length
+            ? order.users.fiscal_responsibilities
+            : undefined,
+        // Task E — sin esto, una venta de mostrador SIN cliente identificado
+        // (consumidor final) queda con `customer_person_type` NULL, que
+        // `resolveAcquirerIdentity` respalda correctamente derivando del
+        // código de documento en emisión; con cliente identificado, congela
+        // su `person_type` real en vez de re-derivarlo después.
+        customer_person_type: order.users?.person_type ?? undefined,
         order_id: order.id,
         invoice_number: null,
         resolution_id: null,
@@ -2600,7 +3528,12 @@ export class InvoicingService {
         // Plan Despacho Economía — FASE 4 paso 13. Persistir el monto del flete
         // separado del subtotal de productos. El asiento diferenciará producto
         // (4135) vs flete (414505) al validar la factura.
-        shipping_amount: new Prisma.Decimal(shippingCost),
+        //
+        // Es la BASE NETA del envío: con impuesto en el envío,
+        // `onInvoiceValidated` separa producto (subtotal − shipping → 4135) de
+        // flete (shipping → 414505) y el impuesto va a 2408/2436 por
+        // `tax_breakdown`. Sin copia es el bruto, como siempre.
+        shipping_amount: new Prisma.Decimal(shippingBase),
         total_amount: new Prisma.Decimal(total),
         currency: 'COP',
         issue_date: new Date(),
@@ -2658,7 +3591,9 @@ export class InvoicingService {
     const account = await this.prisma.order_financial_accounts.findFirst({
       where: { id: accountId, state: 'active', store_id: context.store_id },
       include: {
-        split: { include: { source_order: true } },
+        // Hermanas de la división: su flete bruto reparte el impuesto del envío
+        // de la orden igual que el asiento de la cuenta.
+        split: { include: { source_order: true, accounts: { orderBy: { ordinal: 'asc' }, select: { id: true, shipping_cost: true } } } },
         customer: true,
         lines: { orderBy: { id: 'asc' }, include: { taxes: { orderBy: { id: 'asc' } } } },
         payments: ORDER_PAYMENT_MEANS_INCLUDE,
@@ -2670,7 +3605,10 @@ export class InvoicingService {
     }
     if (account.customer_id) await this.assertCustomerResolvable(account.customer_id);
     const source = account.split.source_order;
-    const projected = projectFinancialAccountInvoice(account, source.order_number);
+    const projected = projectFinancialAccountInvoice(account, source.order_number, {
+      source_order: source,
+      accounts: account.split.accounts,
+    });
     const identity = resolveAcquirerRail(account.customer ?? {}).identity;
     const payments = account.role === 'paid_original'
       ? await this.prisma.payments.findMany({ where: { id: { in: account.split.original_payment_ids }, order_id: source.id }, include: { store_payment_method: { include: { system_payment_method: true } } } })
@@ -2705,6 +3643,15 @@ export class InvoicingService {
           customer_email: account.customer?.email,
           customer_phone: account.customer?.phone,
           customer_verification_digit: account.customer?.verification_digit,
+          // Task E — `account.customer: true` ya trae el registro completo;
+          // antes se dejaban caer régimen/responsabilidades/tipo de persona
+          // aunque ya estaban en memoria.
+          customer_tax_regime: account.customer?.tax_regime ?? undefined,
+          customer_fiscal_responsibilities:
+            account.customer?.fiscal_responsibilities?.length
+              ? account.customer.fiscal_responsibilities
+              : undefined,
+          customer_person_type: account.customer?.person_type ?? undefined,
           invoice_number: null, resolution_id: null,
           subtotal_amount: projected.subtotal, discount_amount: projected.discount,
           tax_amount: projected.tax, total_amount: projected.total,
@@ -2894,6 +3841,19 @@ export class InvoicingService {
         customer_id: sales_order.customer_id,
         customer_name,
         customer_tax_id: customer?.document_number || undefined,
+        // Task E — el `select` de `customer` (arriba) YA carga estos siete
+        // campos; antes quedaban en memoria sin escribirse y la factura nacía
+        // con el snapshot a medias (nombre + NIT, nada más).
+        customer_document_type: customer?.document_type ?? undefined,
+        customer_verification_digit: customer?.verification_digit ?? undefined,
+        customer_email: customer?.email ?? undefined,
+        customer_phone: customer?.phone ?? undefined,
+        customer_tax_regime: customer?.tax_regime ?? undefined,
+        customer_fiscal_responsibilities: customer?.fiscal_responsibilities
+          ?.length
+          ? customer.fiscal_responsibilities
+          : undefined,
+        customer_person_type: customer?.person_type ?? undefined,
         sales_order_id: sales_order.id,
         resolution_id,
         subtotal_amount: new Prisma.Decimal(subtotal),
@@ -3313,6 +4273,18 @@ export class InvoicingService {
 
     // Only allow editing invoices in draft state
     if (invoice.status !== 'draft') {
+      // Titular de emitida: el documento ya tiene efectos fiscales y su
+      // adquiriente es inmutable; la vía de corrección es la nota crédito.
+      if (
+        dto.customer_id !== undefined &&
+        dto.customer_id !== invoice.customer_id
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_STATUS_002,
+          `La factura #${id} ya no está en borrador y su titular no se puede cambiar. Emite una nota crédito para corregir el adquiriente.`,
+          { invoice_id: id, status: invoice.status },
+        );
+      }
       throw new VendixHttpException(ErrorCodes.INVOICING_STATUS_002);
     }
 
@@ -3373,16 +4345,132 @@ export class InvoicingService {
       await this.assertCustomerResolvable(dto.customer_id);
     }
 
+    // Cambio de titular en borrador: refresca el snapshot del adquiriente
+    // desde la ficha del nuevo cliente para no dejar nombre/documento viejos
+    // con FK nueva. Los campos que el PATCH trae explícitos ganan al refresco
+    // (se aplican después en `update_data`).
+    let titular_snapshot: Record<string, unknown> = {};
+    if (
+      dto.customer_id !== undefined &&
+      dto.customer_id !== invoice.customer_id
+    ) {
+      if (dto.customer_id != null) {
+        // Task E — MISMO `select` que `create()`/`buildDraftProjection()`
+        // (`CUSTOMER_FOR_INVOICE_SELECT`), en vez de una proyección propia que
+        // antes faltaba `tax_regime`, `person_type` y `addresses`: el cambio
+        // de titular dejaba esos tres campos del snapshot viejo intactos, con
+        // FK ya apuntando al cliente nuevo.
+        const new_customer = await this.prisma.users.findFirst({
+          where: { id: dto.customer_id },
+          select: CUSTOMER_FOR_INVOICE_SELECT,
+        });
+        if (new_customer) {
+          // El NOMBRE y el CARRIL (consumidor final vs. nominativo) siguen
+          // saliendo de `resolveAcquirerRail` — es el único que decide si el
+          // número `222222222222` debe imponerse sobre un nombre real. El
+          // resto del snapshot sale del helper compartido.
+          const rail = resolveAcquirerRail({
+            document_type: new_customer.document_type,
+            document_number: new_customer.document_number,
+            legal_name: new_customer.legal_name,
+            first_name: new_customer.first_name,
+            last_name: new_customer.last_name,
+          });
+          const ficha_snapshot =
+            this.buildCustomerSnapshotFromFicha(new_customer);
+          titular_snapshot = {
+            customer_name: rail.identity.name,
+            customer_tax_id: rail.identity.document_number,
+            customer_document_type: rail.identity.document_type,
+            customer_email: ficha_snapshot?.customer_email ?? null,
+            customer_phone: ficha_snapshot?.customer_phone ?? null,
+            customer_verification_digit:
+              ficha_snapshot?.customer_verification_digit ?? null,
+            customer_fiscal_responsibilities:
+              ficha_snapshot?.customer_fiscal_responsibilities ?? null,
+            customer_tax_regime: ficha_snapshot?.customer_tax_regime ?? null,
+            customer_person_type:
+              ficha_snapshot?.customer_person_type ?? null,
+            customer_address: ficha_snapshot?.customer_address ?? null,
+          };
+        }
+      } else {
+        // Titular a null: limpia el snapshot para no dejar identidad huérfana.
+        titular_snapshot = {
+          customer_name: null,
+          customer_tax_id: null,
+          customer_document_type: null,
+          customer_email: null,
+          customer_phone: null,
+          customer_verification_digit: null,
+          customer_fiscal_responsibilities: null,
+          customer_tax_regime: null,
+          customer_person_type: null,
+          customer_address: null,
+        };
+      }
+    }
+
+    // Task D#4 — split de NIT con DV pegado cuando el PATCH toca el documento
+    // del adquiriente A MANO (fuera de un cambio de `customer_id`, que ya
+    // llega separado desde la ficha vía `titular_snapshot`). El valor
+    // EFECTIVO considera lo que el PATCH trae, y si no trae un campo, lo que
+    // `titular_snapshot` acaba de fijar o, en su defecto, lo que la factura ya
+    // tenía — para no perder de vista un NIT que llega pegado en un solo campo
+    // mientras el otro se conserva.
+    const touches_customer_document =
+      dto.customer_tax_id !== undefined ||
+      dto.customer_document_type !== undefined ||
+      dto.customer_verification_digit !== undefined;
+    const invoice_nit_split = touches_customer_document
+      ? this.splitInvoiceCustomerNitDv({
+          document_type:
+            dto.customer_document_type ??
+            (titular_snapshot.customer_document_type as
+              | string
+              | null
+              | undefined) ??
+            invoice.customer_document_type,
+          document_number:
+            dto.customer_tax_id ??
+            (titular_snapshot.customer_tax_id as string | null | undefined) ??
+            invoice.customer_tax_id,
+          verification_digit:
+            dto.customer_verification_digit ??
+            (titular_snapshot.customer_verification_digit as
+              | string
+              | null
+              | undefined) ??
+            invoice.customer_verification_digit,
+        })
+      : null;
+
     // If items are provided, recalculate amounts and replace
     const update_data: any = {
       ...(dto.customer_id !== undefined && { customer_id: dto.customer_id }),
+      ...titular_snapshot,
       ...(dto.supplier_id !== undefined && { supplier_id: dto.supplier_id }),
       ...(dto.customer_name !== undefined && {
         customer_name: dto.customer_name,
       }),
-      ...(dto.customer_tax_id !== undefined && {
-        customer_tax_id: dto.customer_tax_id,
-      }),
+      // Si el PATCH toca el documento, número y DV se escriben JUNTOS desde el
+      // split: un `customer_tax_id: "27003183-1"` solo también fija el DV
+      // derivado (1), no depende de que el PATCH traiga `customer_verification_digit`.
+      ...(touches_customer_document && invoice_nit_split
+        ? {
+            ...((dto.customer_tax_id !== undefined ||
+              invoice_nit_split.document_number !== null) && {
+              customer_tax_id:
+                invoice_nit_split.document_number ?? dto.customer_tax_id,
+            }),
+            ...((dto.customer_verification_digit !== undefined ||
+              invoice_nit_split.verification_digit !== null) && {
+              customer_verification_digit:
+                invoice_nit_split.verification_digit ??
+                dto.customer_verification_digit,
+            }),
+          }
+        : {}),
       ...(dto.customer_address !== undefined && {
         customer_address: dto.customer_address,
       }),
@@ -3400,14 +4488,18 @@ export class InvoicingService {
       ...(dto.customer_document_type !== undefined && {
         customer_document_type: dto.customer_document_type,
       }),
-      ...(dto.customer_verification_digit !== undefined && {
-        customer_verification_digit: dto.customer_verification_digit,
-      }),
       ...(dto.customer_tax_regime !== undefined && {
         customer_tax_regime: dto.customer_tax_regime,
       }),
       ...(dto.customer_fiscal_responsibilities !== undefined && {
         customer_fiscal_responsibilities: dto.customer_fiscal_responsibilities,
+      }),
+      // Task D — sólo tiene efecto para facturas manuales sin `customer_id`;
+      // con titular vinculado, `titular_snapshot.customer_person_type` (más
+      // arriba) ya fijó el valor de la ficha y éste no lo pisa salvo que el
+      // PATCH lo declare explícitamente.
+      ...(dto.customer_person_type !== undefined && {
+        customer_person_type: dto.customer_person_type,
       }),
       ...(dto.payment_form !== undefined && {
         payment_form: dto.payment_form,
@@ -3570,6 +4662,14 @@ export class InvoicingService {
           invoice_id: id,
         },
       );
+      // La línea que ya declaraba una cuota truncada al vender (envío gravado,
+      // precio con impuesto incluido) la conserva: re-guardar el borrador no
+      // puede mover el total un centavo. Ver `pinPersistedLineQuotas`.
+      const pinned_quotas = pinPersistedLineQuotas(
+        calculated,
+        (invoice.invoice_taxes ?? []) as PersistedLineTaxRow[],
+        dto.items as ReadonlyArray<{ taxes?: DeclaredLineTax[] | null }>,
+      );
       // EL SNAPSHOT SE REFRESCA EN CADA EDICIÓN QUE TOCA LÍNEAS.
       //
       // Dejarlo quieto sería peor que no tenerlo: los importes de abajo se
@@ -3599,10 +4699,11 @@ export class InvoicingService {
       }
 
       recalculated_header_taxes = calculated.header_taxes;
-      recalculated_line_taxes = this.needsPersistedLineTaxes(
-        calculated.header_taxes,
-        calculated.lines,
-      )
+      // Una cuota pineada sólo sobrevive a la PRÓXIMA edición si su fila queda
+      // ligada a la línea: se fuerza el desglose, igual que `createFromOrder`.
+      recalculated_line_taxes =
+        pinned_quotas > 0 ||
+        this.needsPersistedLineTaxes(calculated.header_taxes, calculated.lines)
         ? calculated.lines.map((line) => line.taxes)
         : [];
 
@@ -5287,28 +6388,65 @@ export class InvoicingService {
    * valida `cbc:PayableAmount` sin mirar `cac:WithholdingTaxTotal`, y restarla
    * descuadra el documento. Vale para los tres roles.
    */
+  /**
+   * Proyecta `dto.items` + su snapshot de catálogo + el recálculo del motor a
+   * lo que `resolveSufferedByOperation` necesita para agrupar bienes vs
+   * servicios: `product_type` sale del snapshot (ya resuelto por
+   * `resolveLinePricingSnapshots` en la MISMA consulta a `products` que
+   * resuelve `account_code`/`unit_code` — no agrega una consulta nueva);
+   * `base`/`ivaAmount` salen del recálculo por línea (`line_extension_amount`
+   * / `tax_amount`), no del agregado del documento, porque cada línea aporta
+   * su parte al grupo al que pertenece.
+   */
+  private buildWithholdingOperationItems(
+    items: CreateInvoiceItemDto[],
+    snapshots: InvoiceLinePricingSnapshot[],
+    lines: CalculatedLine[],
+  ): Array<{ product_type?: string | null; base: number; ivaAmount: number }> {
+    return items.map((_item, index) => ({
+      product_type: snapshots[index]?.product_type ?? null,
+      base: Number(lines[index]?.line_extension_amount ?? 0),
+      ivaAmount: Number(lines[index]?.tax_amount ?? 0),
+    }));
+  }
+
   private async resolveWithholdingAmount(params: {
     organization_id?: number;
     store_id?: number;
     customer_id?: number | null;
+    /** Base agregada del documento. Sólo la usa `self` (autorretención). */
     base: string;
-    iva_amount: string;
     issue_date: Date;
+    /**
+     * Una entrada por línea del documento (mismo orden que `dto.items`), con
+     * su `product_type` (bien vs servicio), su base neta y su IVA — para que
+     * `resolveSufferedByOperation` agrupe la retención POR TIPO DE OPERACIÓN
+     * en vez de resolverla sobre el agregado del documento entero. `self`
+     * (autorretención) sigue usando `base`: no depende de lo vendido, sólo de
+     * la calidad del emisor.
+     */
+    items: Array<{
+      product_type?: string | null;
+      base: number;
+      ivaAmount: number;
+    }>;
   }): Promise<Prisma.Decimal | null> {
     if (typeof params.organization_id !== 'number') return null;
 
     try {
       const base = Number(params.base);
-      const ivaAmount = Number(params.iva_amount);
-      const year = params.issue_date.getFullYear();
+      // Step 8 — año civil de emisión en la zona de la tienda.
+      const year = await this.resolveCivilYear(params.issue_date, {
+        store_id: params.store_id ?? null,
+        organization_id: params.organization_id ?? null,
+      });
 
       const [suffered, self] = await Promise.all([
-        this.withholdingFlow.resolveSuffered({
+        this.withholdingFlow.resolveSufferedByOperation({
           organization_id: params.organization_id,
           store_id: params.store_id ?? null,
           customer_id: params.customer_id ?? null,
-          base,
-          ivaAmount,
+          items: params.items,
           year,
         }),
         this.withholdingFlow.resolveSelf({
@@ -6064,6 +7202,12 @@ export class InvoicingService {
             price_unit_quantity: true,
             account_code: true,
             stock_uom: { select: { code: true } },
+            // Retención sufrida POR TIPO DE OPERACIÓN (decisión del dueño
+            // 2026-09-26): una sola consulta por lote, reusando este join
+            // que ya trae `products` por `product_id` — evita un N+1 sólo
+            // para clasificar bienes vs servicios en
+            // `resolveWithholdingAmount`.
+            product_type: true,
           },
         })
       : [];
@@ -6074,6 +7218,7 @@ export class InvoicingService {
         price_unit_quantity: number | null;
         account_code: string | null;
         stock_uom: { code: string } | null;
+        product_type: string | null;
       }
     >(products.map((p) => [p.id, p]));
 
@@ -6161,6 +7306,10 @@ export class InvoicingService {
             ? resolveUneceUnitCode(product.stock_uom.code)
             : undefined),
         account_code: account_code || undefined,
+        // `null` cuando la línea no referencia un producto del catálogo
+        // (ítem libre/manual): `resolveWithholdingAmount` lo trata igual que
+        // `physical`/`prepared` — cuenta como bien, nunca como servicio.
+        product_type: product?.product_type ?? null,
       };
     });
   }
@@ -6176,6 +7325,13 @@ interface InvoiceLinePricingSnapshot {
   unit_code?: string;
   /** Cuenta ya resuelta: línea → variante → producto. `undefined` ⇒ mapping. */
   account_code?: string;
+  /**
+   * `products.product_type` de la línea (`physical` | `service` | `prepared`),
+   * o `null` cuando la línea no referencia un producto del catálogo. Consumida
+   * por `resolveWithholdingAmount` para agrupar bienes vs servicios
+   * (`WithholdingFlowService.resolveSufferedByOperation`).
+   */
+  product_type?: string | null;
 }
 
 /**

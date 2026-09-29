@@ -1,6 +1,7 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  ElementRef,
   OnInit,
   DestroyRef,
   signal,
@@ -11,7 +12,7 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { firstValueFrom, debounceTime, distinctUntilChanged, filter } from 'rxjs';
+import { firstValueFrom, debounceTime, distinctUntilChanged, filter, finalize, merge } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import {
@@ -29,6 +30,7 @@ import {
   CheckoutService,
   PaymentMethod,
   CheckoutRequest,
+  CheckoutShippingAddress,
   GuestCheckoutCustomer,
   BookingSelection,
   WompiWidgetConfig,
@@ -41,6 +43,7 @@ import { AccountService, Address } from '../../services/account.service';
 import { CustomerAddressPickerComponent } from '../../../../../shared/components/customer-address-picker/customer-address-picker.component';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
+import { focusFirstInvalid } from '../../../../../core/utils/focus-first-invalid';
 import { phoneDigitsValidator } from '../../utils/address-validators';
 import {
   CatalogService,
@@ -64,6 +67,7 @@ import {
 } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { IconName } from '../../../../../shared/components/icon/icons.registry';
 import {
   SelectorComponent,
   SelectorOption,
@@ -77,12 +81,13 @@ import {
 } from '../../components/guest-checkout-data-modal/guest-checkout-data-modal.component';
 import { PaymentInstructionsModalComponent } from '../../components/payment-instructions-modal/payment-instructions-modal.component';
 import { LocationPermissionModalComponent } from '../../components/location-permission-modal/location-permission-modal.component';
+import { WhatsappFallbackModalComponent } from '../../components/whatsapp-fallback-modal/whatsapp-fallback-modal.component';
 import { AddressMapPickerComponent } from '../../components/address-map-picker/address-map-picker.component';
 import { GeolocationService } from '../../services/geolocation.service';
-import {
-  GeocodingService,
-  NormalizedAddress,
-} from '../../services/geocoding.service';
+import { GeocodingService, GeocodePrecision } from '../../services/geocoding.service';
+
+const UNLOCATED_ADDRESS_WARNING =
+  'No pudimos ubicar tu dirección automáticamente. Marca tu ubicación en el mapa para calcular la tarifa de envío.';
 
 @Component({
   selector: 'app-checkout',
@@ -105,10 +110,47 @@ import {
     CustomerAddressPickerComponent,
     CartPromotionsComponent,
     LocationPermissionModalComponent,
+    WhatsappFallbackModalComponent,
     AddressMapPickerComponent,
   ],
   templateUrl: './checkout.component.html',
   styleUrls: ['./checkout.component.scss'],
+  styles: [
+    `
+      /* Paso 10 — overlay de éxito pedido→detalle (900-1200ms). Reutiliza
+         la clase del overlay de pago del scss; aquí solo el acento de éxito. */
+      .order-success-overlay {
+        animation: order-success-in 0.25s ease-out;
+      }
+      .order-success-overlay .success-icon {
+        color: var(--color-success);
+        filter: drop-shadow(0 2px 12px rgba(0, 0, 0, 0.45));
+      }
+      .order-success-overlay .success-title {
+        margin: 0;
+        font-size: var(--fs-lg);
+        font-weight: var(--fw-bold);
+      }
+      .order-success-overlay .success-sub {
+        margin: 0;
+        font-size: var(--fs-sm);
+        opacity: 0.85;
+      }
+      @keyframes order-success-in {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .order-success-overlay {
+          animation: none;
+        }
+      }
+    `,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class CheckoutComponent implements OnInit {
@@ -122,19 +164,120 @@ export class CheckoutComponent implements OnInit {
   readonly save_new_address = signal(true);
   readonly is_authenticated = signal(false);
 
-  // ========== GEO-LOCATION (opt-in map address) ==========
-  /** True once the location opt-in modal has been offered (show only once). */
-  readonly location_prompt_shown = signal(false);
+  // ========== GEO-LOCATION (explicit-trigger map pin) ==========
+  // GPS is NEVER requested automatically — only via the map's "Ubicarme"
+  // control (`AddressMapPickerComponent.locateRequested`). The map/GPS path
+  // is a ONE-WAY sink into latitude/longitude; it never rewrites the address
+  // text fields. The written address is the sole source of truth and drives
+  // the map via forward-geocode (see `forwardGeocodeFromForm`).
   /** Controls the location-permission modal visibility. */
   readonly show_location_modal = signal(false);
   /** Current map center / captured coordinate (never rendered as text). */
   readonly map_center = signal<{ lat: number; lng: number } | null>(null);
   /**
-   * True once the address map reported ready (`mapReady`: MapLibre `load` or
-   * its error fallback). Gates the location prompt so the browser permission
-   * is only requested when a live map can consume the coordinate.
+   * Non-blocking notice shown under the map when the typed address could not
+   * be located (forward-geocode returned null/error). Cleared as soon as a
+   * geocode succeeds or the user moves the pin manually.
    */
-  readonly map_ready = signal(false);
+  readonly addressWarning = signal<string | null>(null);
+
+  /**
+   * GAP 2 (2026-09-27) — static prompt shown next to the
+   * `app-address-map-picker` rendered alongside a SAVED address that has no
+   * resolved coordinate (`!hasResolvedCoords()`, see template). A plain
+   * constant (not a signal) since the wording never varies — visibility is
+   * entirely controlled by the block's own `!hasResolvedCoords()` gate, so
+   * this never needs to react on its own.
+   */
+  readonly savedAddressMapWarningText =
+    'No pudimos ubicar esta dirección automáticamente. Marca tu ubicación en el mapa para calcular la tarifa de envío.';
+
+  /**
+   * Paso 8 (precision UX) — how precise the LAST resolved coordinate is,
+   * per the backend's `ForwardGeocodeResult.precision`. `null` while nothing
+   * has resolved yet. Purely informational: it never blocks Continuar/submit.
+   */
+  readonly geocodePrecision = signal<GeocodePrecision | null>(null);
+  /** Canonical address label the last forward-geocode matched, for display. */
+  readonly geocodeLabel = signal<string | null>(null);
+
+  /**
+   * Chip de carga (2026-09-27) — reference count of forward-geocode requests
+   * currently in flight, either from the written address
+   * (`forwardGeocodeFromForm`) or from a saved address without resolved
+   * coords (`ensureSavedAddressCoords`). Exposed as `isLocatingAddress` below.
+   *
+   * A COUNTER, not a plain boolean: neither caller runs its geocode through
+   * `switchMap` (both are only coalesced by an 800ms `debounceTime` upstream,
+   * see `setupLocationData`), so two requests CAN overlap when the backend
+   * cascade is slow (its own budget is up to 15s, see
+   * `vendix-address-geocoding`). A plain boolean flipped to `false` in the
+   * first request's `finalize` would go stuck-false while a SECOND, still
+   * pending request is the one whose result actually matters. Counting
+   * in-flight requests and reading "any pending" avoids that stale-false
+   * flicker without a switchMap rewrite.
+   */
+  private readonly locatingRequestCount = signal(0);
+  /** True while a forward-geocode for the address/map is in flight (see doc above). */
+  readonly isLocatingAddress = computed<boolean>(
+    () => this.locatingRequestCount() > 0,
+  );
+
+  /**
+   * True once the buyer has explicitly placed the pin themselves (map
+   * drag/click or accepted GPS fix). While true, a forward-geocode from
+   * typing city/department must NOT overwrite the buyer's coordinate —
+   * only editing `address_line1` again resets this, since that means the
+   * buyer is describing a different location.
+   */
+  readonly pinConfirmed = signal(false);
+  /** Briefly true to nudge the map (scroll + highlight) on low-precision hits. */
+  readonly mapHighlight = signal(false);
+
+  /**
+   * Precision badge shown near the address field/map. `pinConfirmed` always
+   * wins — a buyer-placed pin is more trustworthy than any geocoder guess.
+   * Returns `null` when there is nothing to show yet.
+   */
+  readonly precisionBadge = computed<{
+    text: string;
+    icon: IconName;
+    tone: 'success' | 'info' | 'warning';
+  } | null>(() => {
+    if (this.pinConfirmed()) {
+      return {
+        text: 'Punto confirmado en el mapa',
+        icon: 'check-circle-2',
+        tone: 'success',
+      };
+    }
+    switch (this.geocodePrecision()) {
+      case 'exact':
+        return { text: 'Ubicación exacta', icon: 'check-circle-2', tone: 'success' };
+      case 'interpolated':
+        return {
+          text: 'Ubicación aproximada a la placa',
+          icon: 'map-pin',
+          tone: 'info',
+        };
+      case 'intersection':
+        return { text: 'Ubicada en la esquina', icon: 'map-pin', tone: 'info' };
+      case 'street':
+        return {
+          text: 'Solo encontramos la calle — confirma el punto en el mapa',
+          icon: 'alert-triangle',
+          tone: 'warning',
+        };
+      case 'area':
+        return {
+          text: 'Solo encontramos el barrio o sector — confirma el punto en el mapa',
+          icon: 'alert-triangle',
+          tone: 'warning',
+        };
+      default:
+        return null;
+    }
+  });
 
   /** Mirror of the selected country code so the template can branch reactively (zoneless). */
   readonly selected_country_code = signal('CO');
@@ -142,23 +285,6 @@ export class CheckoutComponent implements OnInit {
   readonly isColombia = computed(() => this.selected_country_code() === 'CO');
   /** Signal mirror of address_form.validity (FormGroup.valid is not reactive in zoneless). */
   readonly addressFormValid = signal(false);
-
-  /**
-   * Whether the user may leave the address step. Either a saved address is
-   * selected, or the new-address form is fully valid. Service-only carts skip
-   * the address step entirely. This GATES THE CONTINUE BUTTON without adding a
-   * new hard block to any other flow.
-   */
-  readonly canProceedFromAddress = computed(() => {
-    if (this.cartHasOnlyServices) return true;
-    // Paso 1 delivery-first: sin modo elegido no se avanza.
-    if (this.selected_delivery() == null) return false;
-    // Recoger: la opción de retiro se autocotiza al elegir el modo; el click
-    // de Continuar espera la promesa si sigue en vuelo (ver `nextStep`).
-    if (this.selected_delivery() === 'pickup') return true;
-    if (!this.use_new_address()) return this.selected_address_id() != null;
-    return this.addressFormValid();
-  });
 
   /**
    * Identidad de la línea (producto:variante:tarifa) para el `track` del
@@ -213,9 +339,39 @@ export class CheckoutComponent implements OnInit {
    */
   readonly is_whatsapp_channel = signal(false);
 
+  // ========== WHATSAPP LOCATION FALLBACK ==========
+  // Distinct from `is_whatsapp_channel` above (that one is the explicit
+  // "Finalizar por WhatsApp" entry point). This fallback instead offers
+  // WhatsApp as a rescue path from INSIDE the normal home-delivery flow,
+  // only when the buyer could not be located on the map at all.
+  /** Controls the WhatsApp-fallback modal visibility. */
+  readonly show_whatsapp_fallback_modal = signal(false);
+  /** True while the fallback order is being submitted (modal loading state). */
+  readonly whatsapp_fallback_submitting = signal(false);
+
+  /**
+   * True when the store both enabled WhatsApp checkout and configured a
+   * number — same reading `cart.component.ts:81` (`whatsappEnabled()`) uses.
+   * `getCurrentDomainConfig()` looks like a plain method but internally reads
+   * `tenant_facade.domainConfig`, a `toSignal()`-backed signal, so wrapping
+   * it in `computed()` here is fully zoneless-reactive (vendix-zoneless-signals):
+   * no plain field is read by this computed.
+   */
+  readonly canUseWhatsappFallback = computed<boolean>(() => {
+    const checkout = this.tenant_facade.getCurrentDomainConfig()?.customConfig
+      ?.ecommerce?.checkout;
+    return !!checkout?.whatsapp_checkout && !!checkout?.whatsapp_number?.trim();
+  });
+
   // Wompi Widget
   readonly isWompiPayment = signal(false);
   readonly wompiWidgetLoading = signal(false);
+
+  /**
+   * Paso 10 (roku-shop-checkout) — overlay de éxito entre `response.success`
+   * y el `navigate` al detalle, en ambas ramas (normal y Wompi). ~1000ms.
+   */
+  readonly showOrderSuccessOverlay = signal(false);
 
   // Payment instructions modal + receipt file (bank_transfer / voucher)
   readonly show_payment_instructions_modal = signal(false);
@@ -390,6 +546,8 @@ export class CheckoutComponent implements OnInit {
   readonly loading_cities = signal(false);
 
   private destroyRef = inject(DestroyRef);
+  /** Host element, used by `focusFirstInvalid` to scroll/focus the first invalid field. */
+  private readonly host = inject(ElementRef<HTMLElement>);
   private catalogService = inject(CatalogService);
   private countryService = inject(CountryService);
   private currencyService = inject(CurrencyFormatService);
@@ -406,6 +564,28 @@ export class CheckoutComponent implements OnInit {
   readonly guestDataModal = viewChild(GuestCheckoutDataModalComponent);
   private guest_data_decision_made = false;
   private guest_checkout_data: GuestCheckoutData | null = null;
+  /**
+   * `true` when the guest-data modal was opened FROM the WhatsApp-fallback
+   * confirm (guest without prior data), so `onGuestDataCompleted` routes to
+   * `submitWhatsappFallbackOrder()` instead of the normal `placeOrder()`.
+   */
+  private whatsapp_fallback_pending_guest_data = false;
+
+  /**
+   * Pending timer for an AUTOMATIC map-scroll request (owner decision
+   * 2026-09-27, see {@link focusMapHint}). Restarted per request, cancelled
+   * the moment the buyer edits the address again.
+   */
+  private autoMapFocusTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Detaches the one-shot `blur` listener from the "not while typing" rule. */
+  private autoMapFocusBlurCleanup: (() => void) | null = null;
+  /**
+   * Rule 4: an AUTOMATIC scroll happens at most once per component instance.
+   * Plain field, not a signal — nothing in the template reads it.
+   */
+  private autoMapFocusDone = false;
+  /** A geocode miss whose warning waits for the first auto-focus to show. */
+  private pendingAddressWarning = false;
 
   constructor(
     private cart_service: CartService,
@@ -418,65 +598,109 @@ export class CheckoutComponent implements OnInit {
     // Limpieza del debounce de recotización al salir del checkout.
     this.destroyRef.onDestroy(() => {
       if (this.shipping_fetch_timer) clearTimeout(this.shipping_fetch_timer);
+      if (this.order_success_timer) clearTimeout(this.order_success_timer);
+      // Rule 3 cleanup (owner, 2026-09-27): an already-scheduled setTimeout
+      // and a `blur` listener are not rxjs subscriptions and survive destroy
+      // on their own — clear them explicitly.
+      this.clearPendingAutoMapFocus();
     });
     this.initForm();
-
-    // Offer location capture ONCE — the first time the customer is on the
-    // address step of a physical-item cart with home delivery selected, the
-    // new-address form open AND the map ready to consume a coordinate, and
-    // only when the browser supports geolocation. Never fires in pickup mode
-    // or before a delivery mode is chosen. Reads step/cart/use_new/delivery/
-    // map_ready as reactive deps; the guard runs untracked so writing the
-    // flag signals does not re-trigger the effect. The actual decision (use
-    // GPS directly vs. show the opt-in modal vs. stay manual) is delegated to
-    // maybeOfferLocation() based on the current permission state.
-    effect(() => {
-      const isAddressStep = this.step() === 1;
-      const cart = this.cart();
-      const useNew = this.use_new_address();
-      const deliveryMode = this.selected_delivery();
-      const mapReady = this.map_ready();
-      untracked(() => {
-        if (
-          isAddressStep &&
-          cart != null &&
-          !this.cartHasOnlyServices &&
-          useNew &&
-          deliveryMode === 'home' &&
-          mapReady &&
-          !this.location_prompt_shown() &&
-          this.geolocation.isSupported()
-        ) {
-          this.location_prompt_shown.set(true);
-          void this.maybeOfferLocation();
-        }
-      });
-    });
 
     // CP-tienda-checkout-whatsapp (C.2): recotización de fondo del domicilio.
     // Cuando el modo es domicilio y hay una dirección válida, cotiza con
     // debounce para detectar cobertura en el paso 1; la elección explícita
     // vive en el paso Pago junto al total. Lee como deps reactivas
     // solo signals; el valor del formulario se lee untracked vía la clave.
+    // H2 (paso 2): `coords_version` es dep para que el pin movido y el
+    // forward-geocode tardío invaliden la cotización sellada sin coords.
     effect(() => {
       const mode = this.selected_delivery();
       const valid = this.addressFormValid();
       const savedId = this.selected_address_id();
       const fresh = this.use_new_address();
       const onStep1 = this.step() === 1;
+      const coordsV = this.coords_version();
       untracked(() => {
         if (mode !== 'home' || this.cartHasOnlyServices || !onStep1) return;
         void valid;
         void savedId;
         void fresh;
+        void coordsV;
+        // H2: la guardada sin coords dispara su geocode; al resolver, el bump
+        // re-ejecuta este effect con la clave ya versionada por coords.
+        const activeSavedId = this.selected_address_id();
+        if (!this.use_new_address() && activeSavedId != null) {
+          this.ensureSavedAddressCoords(activeSavedId);
+        }
+        // Owner directive (change #2): no coords yet → no auto-quote, no
+        // auto-selected/zone-default rate. `hasResolvedCoords` itself reads
+        // `coords_version` so this re-evaluates the instant a pin/GPS/geocode
+        // resolves.
+        if (!this.hasResolvedCoords()) return;
         const key = this.currentAddressKey();
-        if (!key || key === this.shipping_quote_key) return;
+        if (!key || key === this.shipping_quote_key()) return;
         // Anti-carrera A→B→A (auditoría D.3): solo la última clave programa;
         // al disparar se revalida que siga vigente antes de cotizar.
         if (this.shipping_fetch_timer) clearTimeout(this.shipping_fetch_timer);
         this.shipping_fetch_timer = setTimeout(() => {
           if (this.currentAddressKey() !== key) return;
           void this.refreshShippingQuote(key);
+        }, 600);
+      });
+    });
+
+    // QUI-883: vista previa del descuento del cupón con debounce. Lee como
+    // deps solo signals (código + líneas del carrito); el fetch corre
+    // untracked y revalida vigencia al disparar.
+    effect(() => {
+      const code = this.coupon_code().trim().toUpperCase();
+      const items = this.cart()?.items ?? [];
+      untracked(() => {
+        if (this.coupon_preview_timer) clearTimeout(this.coupon_preview_timer);
+        if (code.length < 3 || items.length === 0) {
+          this.couponPreviewAmount.set(0);
+          this.couponPreviewLoading.set(false);
+          this.couponPreviewReason.set(null);
+          return;
+        }
+        const payloadItems = items.map((i) => ({
+          product_id: i.product_id,
+          ...(i.product_variant_id != null
+            ? { product_variant_id: i.product_variant_id }
+            : {}),
+          quantity: i.quantity,
+        }));
+        this.coupon_preview_timer = setTimeout(() => {
+          if (this.coupon_code().trim().toUpperCase() !== code) return;
+          this.couponPreviewLoading.set(true);
+          this.checkout_service
+            .previewCouponDiscount({ coupon_code: code, items: payloadItems })
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: (res) => {
+                if (res?.data?.valid) {
+                  this.couponPreviewAmount.set(
+                    Number(res.data.discount_amount) || 0,
+                  );
+                  this.couponPreviewReason.set(null);
+                } else {
+                  this.couponPreviewAmount.set(0);
+                  const reasonCode = res?.data?.reason;
+                  this.couponPreviewReason.set(
+                    (reasonCode && ERROR_MESSAGES[reasonCode]) ||
+                      'Este cupón no aplica a tu compra.',
+                  );
+                }
+                this.couponPreviewLoading.set(false);
+              },
+              error: () => {
+                this.couponPreviewAmount.set(0);
+                this.couponPreviewReason.set(
+                  'No se pudo validar el cupón. Inténtalo de nuevo.',
+                );
+                this.couponPreviewLoading.set(false);
+              },
+            });
         }, 600);
       });
     });
@@ -750,13 +974,31 @@ export class CheckoutComponent implements OnInit {
       .pipe(
         debounceTime(300),
         distinctUntilChanged(),
-        filter(() => !this.cartHasOnlyServices && this.address_form.valid),
+        // Owner directive (change #2): sin coords resueltas no se cotiza ni
+        // en silencio — mostrar un costo de zona aquí sería exactamente la
+        // tarifa por defecto que ya no debe verse antes de tener un punto.
+        filter(
+          () =>
+            !this.cartHasOnlyServices &&
+            this.address_form.valid &&
+            this.hasResolvedCoords(),
+        ),
         takeUntilDestroyed(this.destroyRef),
       )
       // `notify: false` — esto corre mientras el comprador todavía está
       // eligiendo la ciudad. Actualiza el estado de cobertura en silencio; el
       // aviso explícito se da al intentar avanzar, no mientras tipea.
       .subscribe(() => this.loadShippingOptions(false));
+
+    // Editing the street line invalidates a previously buyer-confirmed pin —
+    // the buyer is describing a (possibly different) location, so the next
+    // forward-geocode below must be allowed to move the pin again. This runs
+    // UNDEBOUNCED (every keystroke) so `pinConfirmed` flips to false well
+    // before the 800ms debounce below fires the actual geocode.
+    this.address_form
+      .get('address_line1')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.pinConfirmed.set(false));
 
     // Forward-geocode what the customer TYPES so the map re-centers on it. The
     // reverse-geocode fill uses `emitEvent: false`, so only genuine typing
@@ -771,47 +1013,334 @@ export class CheckoutComponent implements OnInit {
       )
       .subscribe((line1: string) => this.forwardGeocodeFromForm(line1));
 
+    // Also re-trigger the forward geocode when city or department changes —
+    // a finer administrative division changes where the geocoder should look,
+    // even if the street line1 text itself did not change.
+    const cityChanges = cityControl?.valueChanges;
+    const depChanges = depControl?.valueChanges;
+    if (cityChanges && depChanges) {
+      merge(cityChanges, depChanges)
+        .pipe(
+          debounceTime(800),
+          distinctUntilChanged(),
+          takeUntilDestroyed(this.destroyRef),
+        )
+        .subscribe(() =>
+          this.forwardGeocodeFromForm(
+            this.address_form.get('address_line1')?.value ?? null,
+          ),
+        );
+    }
+
+    // Rule 2 of the auto-scroll gate (owner, 2026-09-27): cancel a pending
+    // AUTOMATIC map-scroll timer the instant address_line1/city/department
+    // change — it was waiting on the address as it stood before, not on
+    // whatever gets typed next. Deliberately NOT debounced: it must react on
+    // every keystroke, unlike the geocode triggers above.
+    merge(
+      this.address_form.get('address_line1')!.valueChanges,
+      cityControl!.valueChanges,
+      depControl!.valueChanges,
+    )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.clearPendingAutoMapFocus());
+
     // Load departments for default country
     this.loadDepartments();
   }
 
   /**
    * Geocodes the free-text address being typed → coordinate, and re-centers the
-   * map on it (dropping the marker). Query = line1 + selected city name +
-   * "Colombia". Moving the map this way does NOT emit `located`, so it never
-   * fights the reverse-geocode that fills the form when the marker is dragged.
-   * The resolved point is stored silently on the hidden lat/lng controls.
+   * map on it (dropping the marker). Query = line1 + city + department, plus
+   * "Colombia" appended only when the country is CO (or not yet chosen).
+   * Moving the map this way does NOT emit `located`, so it never fights the
+   * one-way map→form coordinate sink. The resolved point is stored silently
+   * on the hidden lat/lng controls — text fields are NEVER rewritten from
+   * here. When the address cannot be located, sets a non-blocking
+   * `addressWarning` instead of blocking the flow (geocoding failures never
+   * block per `vendix-address-geocoding`).
+   *
+   * Paso 8: bails out entirely when `pinConfirmed()` is true — the buyer
+   * already placed (or GPS-confirmed) an exact pin, and a coarser text
+   * geocode (e.g. triggered by a city/department change) must never yank it
+   * back. Editing `address_line1` is the only thing that resets the flag
+   * (see the raw subscription in `setupLocationData`).
    */
   private forwardGeocodeFromForm(line1: string | null): void {
-    const base = (line1 ?? '').trim();
+    if (this.pinConfirmed()) return;
+
+    const base = (
+      line1 ?? this.address_form.get('address_line1')?.value ?? ''
+    ).trim();
     if (base.length < 5) return;
 
-    const cityId = this.address_form.get('city')?.value;
-    const cityName =
-      this.cities().find((c) => c.id === Number(cityId))?.name ?? '';
-    const query = [base, cityName, 'Colombia'].filter(Boolean).join(', ');
+    const countryCode = (
+      this.address_form.get('country_code')?.value ?? ''
+    ).trim();
+    const cityValue = this.address_form.get('city')?.value;
+    const stateValue = this.address_form.get('state_province')?.value;
 
+    const cityName = this.isColombia()
+      ? (this.cities().find((c) => c.id === Number(cityValue))?.name ?? '')
+      : String(cityValue ?? '').trim();
+    const stateName = this.isColombia()
+      ? (this.departments().find((d) => d.id === Number(stateValue))?.name ??
+        '')
+      : String(stateValue ?? '').trim();
+
+    // Owner decision 2026-09-27: never geocode a partial address. The street
+    // line alone almost never matches, and a premature miss only flashed the
+    // "no pudimos ubicar" warning while the buyer was still filling the form.
+    if (!countryCode || !cityName || !stateName) {
+      this.addressWarning.set(null);
+      this.pendingAddressWarning = false;
+      return;
+    }
+
+    const parts = [base, cityName, stateName].filter(Boolean);
+    if (countryCode === 'CO') parts.push('Colombia');
+    const query = parts.join(', ');
+
+    // Pass city/state as separate params (when resolved) instead of relying
+    // on the backend splitting them out of `query` by commas, which breaks
+    // if the customer's free-text address itself contains a comma.
+    this.locatingRequestCount.update((n) => n + 1);
     this.geocoding
-      .forward(query)
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .forward(query, {
+        city: cityName || undefined,
+        state: stateName || undefined,
+      })
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        // Runs on next/error AND on early unsubscribe (component destroyed
+        // mid-flight) — the chip never gets stuck showing "Ubicando...".
+        finalize(() => this.locatingRequestCount.update((n) => Math.max(0, n - 1))),
+      )
       .subscribe({
         next: (res) => {
-          if (res?.lat == null || res?.lng == null) return;
+          if (res?.lat == null || res?.lng == null) {
+            this.handleUnresolvedGeocode();
+            return;
+          }
           const coords = { lat: res.lat, lng: res.lng };
+          // 'area' = city/vereda centroid, NOT a resolved point for pricing
+          // (bug reported E2E 2026-09-27: a nonsense rural address resolved
+          // to the city centroid and silently quoted/charged from there).
+          // Center the map near the city so the buyer can find themselves,
+          // but never write the centroid into lat/lng — treat it exactly
+          // like an unresolved geocode (explicit warning + "Usar mi
+          // ubicación automática" + focusMapHint), so it can never quote or
+          // block-pass Continuar on its own.
+          if (res.precision === 'area') {
+            this.map_center.set(coords);
+            this.handleUnresolvedGeocode();
+            return;
+          }
           this.map_center.set(coords);
-          // Persist the point silently (never shown as text). Dragging the
-          // marker afterward re-geocodes it precisely.
+          this.addressWarning.set(null);
+          this.pendingAddressWarning = false;
+          this.geocodePrecision.set(res.precision ?? null);
+          this.geocodeLabel.set(res.label ?? null);
+          // Persist the point silently (never shown as text).
           this.address_form
             .get('latitude')
             ?.setValue(coords.lat, { emitEvent: false });
           this.address_form
             .get('longitude')
             ?.setValue(coords.lng, { emitEvent: false });
+          // H2: el forward-geocode tardío invalida la cotización sellada sin
+          // coords (el setValue silencioso no dispara el effect por sí solo).
+          this.bumpCoordsVersion();
+          // Low-precision hit and no manual confirmation yet: nudge the
+          // buyer to check the pin — non-blocking, never stops Continuar.
+          if (res.precision === 'street') {
+            this.focusMapHint('auto');
+          }
         },
         error: () => {
           // Forward-geocode failed → leave the map as-is; manual form works.
+          this.handleUnresolvedGeocode();
         },
       });
+  }
+
+  /**
+   * Forward-geocode returned nothing usable (null result or request error):
+   * clear any previously-resolved coordinate so checkout never quotes or
+   * saves a point that belongs to a DIFFERENT address the buyer already
+   * moved past, show the explicit "no pudimos ubicar" warning (with the
+   * "Usar mi ubicación automática" CTA rendered alongside it in the
+   * template), and pull the map into view. Owner directive (change #2): home
+   * delivery must NEVER fall back to a silent zone rate here — `coords_version`
+   * bumping also flips `hasResolvedCoords()` to false, which blocks Continuar
+   * and suppresses auto-quoting until the buyer resolves a point (map pin or
+   * GPS).
+   */
+  private handleUnresolvedGeocode(): void {
+    this.clearGeocodedCoords();
+    // The warning slot sits above the address fields on mobile, so inserting
+    // it mid-typing shifted the field under the buyer's thumb: until the
+    // first auto-focus fires it is held back and shown together with it.
+    if (this.autoMapFocusDone) {
+      this.addressWarning.set(UNLOCATED_ADDRESS_WARNING);
+    } else {
+      this.pendingAddressWarning = true;
+    }
+    this.focusMapHint('auto');
+  }
+
+  /**
+   * Clears any previously-resolved coordinate so checkout never quotes or
+   * saves a point that belongs to a DIFFERENT address the buyer already
+   * moved past. Bumping `coords_version` re-evaluates the quote — with no
+   * client coords, `hasResolvedCoords()` turns false and blocks auto-quoting
+   * and Continuar for home delivery (owner directive, change #2).
+   */
+  private clearGeocodedCoords(): void {
+    this.address_form.get('latitude')?.setValue(null, { emitEvent: false });
+    this.address_form.get('longitude')?.setValue(null, { emitEvent: false });
+    this.geocodePrecision.set(null);
+    this.geocodeLabel.set(null);
+    this.bumpCoordsVersion();
+  }
+
+  /**
+   * Pulls the map into view and pulses it briefly so the buyer notices there
+   * is something to do there — reused both for a low-precision geocode hit
+   * (`street`/`area`, non-blocking nudge) and for an unresolved geocode
+   * (`handleUnresolvedGeocode`, where Continuar IS blocked until a point is
+   * confirmed). Purely visual: never itself blocks or unblocks anything.
+   * A no-op when no map is mounted (e.g. saved-address view).
+   *
+   * `mode` (owner decision 2026-09-27): a debounced forward-geocode fires
+   * after every typing pause, and a partial address that fails used to
+   * scroll the page out from under the buyer's thumb mid-keystroke — worse
+   * on mobile with the keyboard open. `'auto'` (a geocode result — never a
+   * click) goes through {@link requestAutoMapFocus}'s gate/debounce/typing
+   * check/once-only rules; `'user'` (a click: "Usar mi ubicación
+   * automática", Continuar, or declining the WhatsApp fallback) scrolls
+   * immediately, exactly like before. The highlight pulse always runs
+   * immediately either way.
+   */
+  private focusMapHint(mode: 'auto' | 'user' = 'user'): void {
+    this.mapHighlight.set(true);
+    if (mode === 'auto') {
+      this.requestAutoMapFocus();
+    } else {
+      // A click is not a race with typing: surface any held-back warning
+      // (it carries the "Usar mi ubicación automática" CTA) right away.
+      if (this.pendingAddressWarning) {
+        this.addressWarning.set(UNLOCATED_ADDRESS_WARNING);
+        this.pendingAddressWarning = false;
+      }
+      this.scrollToMapAnchor();
+    }
+    setTimeout(() => this.mapHighlight.set(false), 2000);
+  }
+
+  /** Rule 2: 500ms debounce, restarted on every new AUTOMATIC request. Never
+   *  scrolls synchronously; only ever schedules {@link runAutoMapFocus}. */
+  private requestAutoMapFocus(): void {
+    if (this.autoMapFocusDone) return;
+    this.clearPendingAutoMapFocus();
+    this.autoMapFocusTimer = setTimeout(() => {
+      this.autoMapFocusTimer = null;
+      this.runAutoMapFocus();
+    }, 500);
+  }
+
+  /**
+   * Rule 1 — required-fields gate: department, city and a real address line
+   * must ALL be filled before an automatic scroll is allowed. Re-checked
+   * both when the timer fires and again on `blur` (see
+   * {@link runAutoMapFocus}), since the address can still be incomplete at
+   * either point.
+   */
+  private autoMapFocusGateOpen(): boolean {
+    const state = String(
+      this.address_form.get('state_province')?.value ?? '',
+    ).trim();
+    const city = String(this.address_form.get('city')?.value ?? '').trim();
+    const line1 = String(
+      this.address_form.get('address_line1')?.value ?? '',
+    ).trim();
+    return state.length > 0 && city.length > 0 && line1.length >= 5;
+  }
+
+  /**
+   * Runs when the 500ms timer elapses, and again from the one-shot `blur`
+   * listener it may attach (rule 3). If the buyer is still typing in a text
+   * field inside THIS component when the timer fires, the scroll is
+   * deferred to that field's `blur` instead of firing on top of them.
+   */
+  private runAutoMapFocus(): void {
+    if (this.autoMapFocusDone || !this.autoMapFocusGateOpen()) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && this.isTextEntryInsideHost(active)) {
+      this.clearPendingAutoMapFocus();
+      const onBlur = () => {
+        active.removeEventListener('blur', onBlur);
+        this.autoMapFocusBlurCleanup = null;
+        // Next tick: `activeElement` is still <body> during `blur`. If focus
+        // just moved to another field of this form, keep waiting on that one.
+        setTimeout(() => this.runAutoMapFocus(), 0);
+      };
+      active.addEventListener('blur', onBlur, { once: true });
+      this.autoMapFocusBlurCleanup = () => active.removeEventListener('blur', onBlur);
+      return;
+    }
+    if (this.pendingAddressWarning) {
+      this.addressWarning.set(UNLOCATED_ADDRESS_WARNING);
+      this.pendingAddressWarning = false;
+    }
+    this.scrollToMapAnchor();
+    this.autoMapFocusDone = true; // Rule 4 — never again for this instance.
+  }
+
+  /**
+   * Text-entry elements the "not while typing" rule waits out: text-like
+   * `<input>` types (or no `type` attribute, which defaults to `text`),
+   * `<textarea>`, and `contenteditable` — but only inside THIS component's
+   * host, so focus elsewhere on the page never blocks the scroll.
+   */
+  private isTextEntryInsideHost(el: HTMLElement): boolean {
+    if (!this.host.nativeElement.contains(el)) return false;
+    if (el.isContentEditable) return true;
+    if (el.tagName === 'TEXTAREA') return true;
+    if (el.tagName !== 'INPUT') return false;
+    const type = (el.getAttribute('type') || 'text').toLowerCase();
+    return ['text', 'search', 'tel', 'email', 'number'].includes(type);
+  }
+
+  /** The actual scroll, shared by the automatic (gated) and user-initiated
+   *  paths. `setTimeout(0)` because the map wrapper renders on the next tick. */
+  private scrollToMapAnchor(): void {
+    setTimeout(() => {
+      this.host.nativeElement
+        .querySelector('.address-map-anchor')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 0);
+  }
+
+  /** Cancels the pending timer and/or detaches the `blur` listener, if any. */
+  private clearPendingAutoMapFocus(): void {
+    if (this.autoMapFocusTimer != null) {
+      clearTimeout(this.autoMapFocusTimer);
+      this.autoMapFocusTimer = null;
+    }
+    this.autoMapFocusBlurCleanup?.();
+    this.autoMapFocusBlurCleanup = null;
+  }
+
+  /**
+   * "Usar mi ubicación automática" CTA next to the unresolved-geocode
+   * warning: re-focuses the map (in case the buyer scrolled away) and opens
+   * the SAME existing GPS consent flow as the map's own "Ubicarme" control
+   * (`onLocateRequested` → `show_location_modal` → `requestGeolocation`).
+   */
+  useAutoLocation(): void {
+    this.focusMapHint('user');
+    void this.onLocateRequested();
   }
 
   private async loadDepartments(): Promise<void> {
@@ -954,41 +1483,43 @@ export class CheckoutComponent implements OnInit {
   }
 
   // ========== GEO-LOCATION HANDLERS ==========
+  // Map/GPS is a strictly ONE-WAY sink into latitude/longitude — it NEVER
+  // rewrites the address text fields. The written address is the source of
+  // truth; it drives the map via forward-geocode, never the other way.
 
   /**
-   * Decides how to capture location based on the current permission state:
-   * - `granted` → the customer already allowed it, so use GPS directly (no
-   *   modal) and prefill the form.
-   * - `denied`  → previously blocked; do not show the modal (keep manual form).
-   * - `prompt`/unknown → offer the opt-in modal so the browser prompt fires on
-   *   accept.
+   * The map's "Ubicarme" control was clicked. This is the ONLY place GPS may
+   * be requested — never automatically. Decides based on the current
+   * permission state:
+   * - `granted` → geolocate directly (no modal — already allowed).
+   * - `denied`/`unsupported` → if the store offers the WhatsApp fallback,
+   *   open that modal instead of nagging with a toast; otherwise the usual
+   *   toast (nagging a blocked customer is pointless without a fallback).
+   * - `prompt`/unknown → show the opt-in modal first so the browser's own
+   *   permission prompt fires only after the customer accepts ours.
    */
-  private async maybeOfferLocation(): Promise<void> {
+  async onLocateRequested(): Promise<void> {
     const state = await this.geolocation.getPermissionState();
     if (state === 'granted') {
-      void this.onLocationAccept();
+      void this.requestGeolocation();
     } else if (state === 'denied' || state === 'unsupported') {
-      // No modal: nagging a blocked customer is pointless — stay on manual form.
-      this.show_location_modal.set(false);
+      if (this.canUseWhatsappFallback()) {
+        this.show_whatsapp_fallback_modal.set(true);
+      } else {
+        this.toast.info(
+          'No pudimos obtener tu ubicación. Puedes ingresar la dirección manualmente.',
+          'Ubicación no disponible',
+        );
+      }
     } else {
       this.show_location_modal.set(true);
     }
   }
 
-  /** Customer accepted the prompt: request GPS, enable the map, prefill form. */
+  /** Customer accepted the priming modal: request GPS and drop the pin. */
   async onLocationAccept(): Promise<void> {
     this.show_location_modal.set(false);
-    try {
-      const coords = await this.geolocation.getPrecisePosition();
-      this.map_center.set(coords);
-      this.applyReverseGeocode(coords);
-    } catch {
-      // Permission denied / unsupported / timeout → stay on the manual form.
-      this.toast.info(
-        'No pudimos obtener tu ubicación. Puedes ingresar la dirección manualmente.',
-        'Ubicación no disponible',
-      );
-    }
+    await this.requestGeolocation();
   }
 
   /** Customer declined: close the prompt and keep the manual form flow. */
@@ -996,134 +1527,119 @@ export class CheckoutComponent implements OnInit {
     this.show_location_modal.set(false);
   }
 
+  /** Requests the live GPS position and drops it on the map (coords only). */
+  private async requestGeolocation(): Promise<void> {
+    try {
+      const coords = await this.geolocation.getPrecisePosition();
+      this.onMapLocated(coords);
+    } catch {
+      // Permission denied / unsupported / timeout → offer the WhatsApp
+      // fallback when the store supports it; otherwise stay on the manual
+      // form with the usual toast.
+      if (this.canUseWhatsappFallback()) {
+        this.show_whatsapp_fallback_modal.set(true);
+      } else {
+        this.toast.info(
+          'No pudimos obtener tu ubicación. Puedes ingresar la dirección manualmente.',
+          'Ubicación no disponible',
+        );
+      }
+    }
+  }
+
   /**
-   * Marker moved by the user (drag/click): re-geocode and refresh the exact
-   * coordinate + address fields. We deliberately do NOT push `map_center` here —
-   * the marker is already where the user put it, and re-centering would fight the
-   * drag. `map_center` is reserved for programmatic locates (GPS / typed address).
+   * Marker moved by the user (drag/click) or GPS resolved: the map is only
+   * ever a SINK for the written address — a coordinate arriving here must
+   * NEVER rewrite address_line1/city/department/etc. Routes by the active
+   * address mode (GAP 2, 2026-09-27): the new-address form writes
+   * latitude/longitude on `address_form` (`setMapCoords`) — a SAVED address
+   * has no form to write into, so a pin/GPS fix placed on ITS map (rendered
+   * only while `!hasResolvedCoords()`) persists straight to the saved
+   * address instead (`setSavedAddressCoords`).
    */
   onMapLocated(coords: { lat: number; lng: number }): void {
-    this.applyReverseGeocode(coords);
+    if (!this.use_new_address()) {
+      const id = this.selected_address_id();
+      if (id != null) {
+        this.setSavedAddressCoords(id, coords);
+        return;
+      }
+    }
+    this.setMapCoords(coords);
   }
 
   /**
-   * The address map settled (loaded, or failed and fell back to manual):
-   * mark it ready so the deferred location effect may offer the opt-in
-   * prompt in home mode.
+   * Stores the exact coordinate on the form. Never touches text fields.
+   * Paso 8: marks `pinConfirmed` — from here on, a text-driven forward-geocode
+   * must NOT overwrite this buyer-placed point (see `forwardGeocodeFromForm`).
+   * The stale geocoder label is cleared since it no longer describes this
+   * exact point; the "Punto confirmado" badge takes over (see `precisionBadge`).
    */
-  onMapReady(): void {
-    this.map_ready.set(true);
-  }
-
-  /** Stores the exact coordinate on the form and prefills the address fields. */
-  private applyReverseGeocode(coords: { lat: number; lng: number }): void {
+  private setMapCoords(coords: { lat: number; lng: number }): void {
+    this.map_center.set(coords);
     this.address_form.get('latitude')?.setValue(coords.lat);
     this.address_form.get('longitude')?.setValue(coords.lng);
-
-    this.geocoding
-      .reverse(coords.lat, coords.lng)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (address) => this.prefillFromGeocode(address),
-        error: () => {
-          // Reverse geocoding failed: keep the exact coordinate; the customer
-          // fills the textual address manually.
-        },
-      });
+    this.addressWarning.set(null);
+    this.pendingAddressWarning = false;
+    this.pinConfirmed.set(true);
+    this.geocodeLabel.set(null);
+    // H2: mover el pin / aceptar GPS invalida la cotización sellada (las
+    // coords entran a la clave).
+    this.bumpCoordsVersion();
   }
 
   /**
-   * Fills the address form from a normalized geocode result. For Colombia it
-   * maps the department/city NAMES to the api-colombia IDs the selectors use
-   * (department → load cities → city), mirroring the existing ID/name mapping.
-   * For other countries the free-text controls receive the names directly.
+   * GAP 2 (2026-09-27) — persists a manually-placed pin or GPS fix for a
+   * SAVED address that has no resolved coordinate. Never touches address
+   * text fields (coords-only sink, same contract as `setMapCoords`). Uses
+   * the SAME `updateAddress` call `ensureSavedAddressCoords` uses so the
+   * confirm step quotes from the SAME persisted point (Release-853 paso
+   * 11 — lo mostrado = lo cobrado). The override/`coords_version` bump only
+   * happens on persistence success — if the PUT fails, `hasResolvedCoords()`
+   * stays false and the map/warning keep showing so the buyer can retry.
    */
-  private async prefillFromGeocode(address: NormalizedAddress): Promise<void> {
-    const form = this.address_form;
-
-    if (address.address_line1) {
-      // emitEvent:false → this reverse fill must NOT re-trigger the forward
-      // geocode watcher on address_line1 (that would fight the map).
-      form.get('address_line1')?.setValue(address.address_line1, {
-        emitEvent: false,
-      });
-    }
-    if (address.address_line2) {
-      form.get('address_line2')?.setValue(address.address_line2, {
-        emitEvent: false,
-      });
-    }
-    if (address.postal_code) {
-      form.get('postal_code')?.setValue(address.postal_code, {
-        emitEvent: false,
-      });
-    }
-
-    const cc = (address.country_code || '').toUpperCase();
-    const known = this.countries().some((c) => c.code === cc);
-    const targetCountry = known ? cc : 'CO';
-
-    if (targetCountry === 'CO') {
-      // Ensure CO is selected without clobbering an already-CO selection
-      // (setValue would re-trigger the reset + department reload cascade).
-      if (form.get('country_code')?.value !== 'CO') {
-        form.get('country_code')?.setValue('CO');
-      }
-      if (this.departments().length === 0) {
-        await this.loadDepartments();
-      }
-      const department = this.matchByName(
-        this.departments(),
-        address.state_province,
-      );
-      if (department) {
-        form
-          .get('state_province')
-          ?.setValue(department.id, { emitEvent: false });
-        await this.loadCities(department.id);
-        const city = this.matchByName(this.cities(), address.city);
-        if (city) {
-          form.get('city')?.setValue(city.id, { emitEvent: false });
-        }
-      }
-    } else {
-      // Non-CO: switch to free-text mode, then fill the names directly.
-      form.get('country_code')?.setValue(targetCountry);
-      if (address.state_province) {
-        form.get('state_province')?.setValue(address.state_province);
-      }
-      if (address.city) {
-        form.get('city')?.setValue(address.city);
-      }
-    }
-
-    form.markAsDirty();
-    // setValue with emitEvent:false above does not push statusChanges, so
-    // refresh the validity mirror that gates canProceedFromAddress.
-    this.addressFormValid.set(this.address_form.valid);
-  }
-
-  /** Case/accent-insensitive best-effort match of a named option. */
-  private matchByName<T extends { id: number; name: string }>(
-    options: T[],
-    name: string | null,
-  ): T | undefined {
-    if (!name) return undefined;
-    const normalize = (value: string) =>
-      value
-        .normalize('NFD')
-        .replace(/[̀-ͯ]/g, '')
-        .toLowerCase()
-        .trim();
-    const target = normalize(name);
-    if (!target) return undefined;
-    return (
-      options.find((o) => normalize(o.name) === target) ??
-      options.find((o) => {
-        const candidate = normalize(o.name);
-        return candidate.includes(target) || target.includes(candidate);
+  private setSavedAddressCoords(
+    id: number,
+    coords: { lat: number; lng: number },
+  ): void {
+    const saved = this.addresses().find((a) => a.id === id);
+    if (!saved) return;
+    this.map_center.set(coords);
+    this.account_service
+      .updateAddress(id, {
+        address_line1: saved.address_line1,
+        address_line2: saved.address_line2 ?? undefined,
+        city: saved.city,
+        state_province: saved.state_province ?? undefined,
+        country_code: saved.country_code,
+        postal_code: saved.postal_code ?? undefined,
+        phone_number: saved.phone_number ?? undefined,
+        latitude: coords.lat,
+        longitude: coords.lng,
       })
-    );
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.addresses.update((list) =>
+            list.map((a) =>
+              a.id === id
+                ? { ...a, latitude: coords.lat, longitude: coords.lng }
+                : a,
+            ),
+          );
+          this.savedCoordsOverride.update((m) => ({
+            ...m,
+            [id]: coords,
+          }));
+          this.bumpCoordsVersion();
+        },
+        error: () => {
+          this.toast.warning(
+            'No pudimos guardar la ubicación en tu dirección. Intenta de nuevo.',
+            'Aviso',
+          );
+        },
+      });
   }
 
   selectPaymentMethod(method_id: number): void {
@@ -1302,11 +1818,30 @@ export class CheckoutComponent implements OnInit {
    */
   readonly shippingCost = computed(() => this.shipping_cost());
 
-  /** Texto del envío: "Gratis" cuando es 0, formato moneda cuando no. */
+  /**
+   * Texto del envío: "Pendiente" mientras el domicilio no tiene tarifa
+   * resuelta (`shippingBlockedReason()` no nulo — sin coords, cotización
+   * obsoleta/en vuelo, o sin cobertura), "Gratis" cuando el costo real es 0,
+   * formato moneda en cualquier otro caso. Bug reportado E2E 2026-09-27: el
+   * resumen mostraba "Gratis" (y luego un costo) ANTES de que se resolviera
+   * ninguna tarifa para domicilio — `shippingBlockedReason` ya es null para
+   * pickup/servicio-solo, así que esta rama nunca oculta el costo real de
+   * esos casos.
+   */
   readonly shippingDisplay = computed(() => {
+    if (this.shippingBlockedReason() !== null) return 'Pendiente';
     const cost = this.shippingCost();
     return cost === 0 ? 'Gratis' : cost.toString();
   });
+
+  /**
+   * Costo de envío a sumar en el "Total estimado" del resumen. Mientras el
+   * domicilio está pendiente de resolver (`shippingBlockedReason()`), el
+   * total NUNCA debe incluir un monto de envío — ver `shippingDisplay`.
+   */
+  readonly shippingCostForTotal = computed<number>(() =>
+    this.shippingBlockedReason() !== null ? 0 : this.shippingCost(),
+  );
 
   /**
    * Cupón actual del carrito: prioriza el que el cliente tipeó en el input
@@ -1319,12 +1854,18 @@ export class CheckoutComponent implements OnInit {
   });
 
   /**
-   * Monto del cupón actual. El backend todavía lo calcula al confirmar la
-   * compra (no en el summary), así que aquí reportamos 0 hasta entonces.
-   * El resumen del checkout sigue mostrando el descuento promocional
-   * automático en `cart.promotion_discount`, que es reactivo y fiable.
+   * Vista previa del descuento del cupón (QUI-883). Antes se reportaba 0
+   * hasta confirmar y el comprador creía que el cupón no funcionaba. Ahora
+   * se consulta al backend (misma validación del confirm) con debounce;
+   * el confirm recalcula de todos modos, así que la cifra final manda.
    */
-  readonly couponDiscount = computed(() => 0);
+  readonly couponPreviewAmount = signal(0);
+  readonly couponPreviewLoading = signal(false);
+  /** Motivo en español cuando el cupón no aplica (ver `ERROR_MESSAGES`). */
+  readonly couponPreviewReason = signal<string | null>(null);
+  private coupon_preview_timer: ReturnType<typeof setTimeout> | null = null;
+
+  readonly couponDiscount = computed(() => this.couponPreviewAmount());
 
   /** Promociones aplicadas con scope preservado para el breakdown. */
   readonly appliedPromotionsWithScope = computed(
@@ -1423,10 +1964,41 @@ export class CheckoutComponent implements OnInit {
    * Clave de la dirección con la que se cotizó lo que hoy muestra
    * `shipping_options`. Si el comprador la cambia, la cotización queda
    * obsoleta y hay que recotizar antes de avanzar (ver `nextStep`).
+   *
+   * Signal (no propiedad plana): `shippingBlockedReason` la lee dentro de un
+   * `computed()` — un campo plano nunca dispara recomputación cuando se
+   * asigna, dejando el botón Continuar bloqueado en "Calculando…" para
+   * siempre aunque la cotización ya haya llegado (bug reportado E2E
+   * 2026-09-27).
    */
-  private shipping_quote_key: string | null = null;
+  private readonly shipping_quote_key = signal<string | null>(null);
   private shipping_fetch_promise: Promise<void> | null = null;
   private shipping_fetch_timer: ReturnType<typeof setTimeout> | null = null;
+  /** Paso 10 — temporizador del overlay de éxito pedido→detalle. */
+  private order_success_timer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * H2 (paso 2): versión reactiva de las coordenadas de la dirección activa.
+   * Se incrementa cada vez que se resuelven coords (pin movido, GPS aceptado,
+   * forward-geocode completado u override de guardada). El effect de
+   * recotización la lee como dep para que la llegada tardía de coords
+   * invalide la cotización sellada sin ellas.
+   */
+  readonly coords_version = signal(0);
+
+  /**
+   * H2: coords resueltas por forward-geocode para direcciones GUARDADAS sin
+   * pin (`address_id → {lat,lng}`). La guardada se cotiza primero por zona y,
+   * al resolver el geocode, el override entra a la clave y dispara la
+   * recotización por distancia. Release-853 paso 11: el override solo se
+   * fija si las coords se persistieron con `updateAddress` (lo mostrado =
+   * lo cobrado); sin persistencia no hay override y rige la zona.
+   */
+  private savedCoordsOverride = signal<
+    Record<number, { lat: number; lng: number }>
+  >({});
+  /** Guard single-flight por dirección mientras su forward-geocode vuela. */
+  private savedGeocodeInFlight = new Set<number>();
 
   /** Identidad de la dirección activa de domicilio, o null si no hay. */
   private currentAddressKey(): string | null {
@@ -1434,10 +2006,195 @@ export class CheckoutComponent implements OnInit {
     if (this.use_new_address()) {
       if (!this.address_form.valid) return null;
       const v = this.address_form.getRawValue();
-      return `new:${v.country_code}|${v.state_province}|${v.city}|${v.address_line1}|${v.postal_code}`;
+      const lat = v.latitude ?? 'x';
+      const lng = v.longitude ?? 'x';
+      return `new:${v.country_code}|${v.state_province}|${v.city}|${v.address_line1}|${v.postal_code}|${lat},${lng}`;
     }
     const id = this.selected_address_id();
-    return id != null ? `saved:${id}` : null;
+    if (id == null) return null;
+    const saved = this.addresses().find((a) => a.id === id);
+    const override = this.savedCoordsOverride()[id];
+    const lat = override?.lat ?? saved?.latitude ?? 'x';
+    const lng = override?.lng ?? saved?.longitude ?? 'x';
+    return `saved:${id}@${lat},${lng}`;
+  }
+
+  /** H2: invalida la cotización sellada al resolverse nuevas coordenadas. */
+  private bumpCoordsVersion(): void {
+    this.coords_version.update((v) => v + 1);
+  }
+
+  /**
+   * True once the ACTIVE home-delivery address (new-address form OR the
+   * selected saved address) has a resolved coordinate: forward-geocode,
+   * manual pin, or GPS. Owner directive (change #2): home delivery must
+   * NEVER auto-select a rate or show a zone-default cost while this is
+   * false — it gates auto-quoting and the address/shipping step's Continuar
+   * (see `shippingBlockedReason`).
+   *
+   * Reads `coords_version()` as the reactive trigger and then plain-reads
+   * the form value — `address_form.get(...)?.value` is NOT itself reactive
+   * inside a `computed()` (vendix-zoneless-signals), so recomputation must
+   * be driven by the signal that every coords-writing path already bumps.
+   */
+  readonly hasResolvedCoords = computed<boolean>(() => {
+    this.coords_version();
+    if (this.use_new_address()) {
+      const lat = this.address_form.get('latitude')?.value;
+      const lng = this.address_form.get('longitude')?.value;
+      return lat != null && lng != null;
+    }
+    const id = this.selected_address_id();
+    if (id == null) return false;
+    if (this.savedCoordsOverride()[id]) return true;
+    const saved = this.addresses().find((a) => a.id === id);
+    return saved?.latitude != null && saved?.longitude != null;
+  });
+
+  /**
+   * Reason the address/shipping step's Continuar is blocked, or `null` when
+   * it may proceed. Only gates a physical, HOME-delivery cart — pickup and
+   * service-only carts are never coord-gated (owner directive, change #2).
+   */
+  readonly shippingBlockedReason = computed<string | null>(() => {
+    if (this.cartHasOnlyServices || this.selected_delivery() !== 'home') {
+      return null;
+    }
+    if (!this.hasResolvedCoords()) {
+      // Owner directive (2026-09-27): copia acortada para caber en el aviso
+      // compacto de una sola linea (`.checkout-block-reason`, max 40px).
+      return 'Marca tu ubicación en el mapa para calcular el envío.';
+    }
+    const key = this.currentAddressKey();
+    const quoteFresh = !!key && key === this.shipping_quote_key();
+    if (!quoteFresh || this.loading_shipping()) {
+      return 'Calculando la tarifa de envío para tu ubicación…';
+    }
+    if (this.shippableOptions().length === 0) {
+      return 'No hay tarifa de envío para esta ubicación.';
+    }
+    return null;
+  });
+
+  /** True when the address/shipping step may advance (Continuar enabled). */
+  readonly canProceedFromAddressStep = computed<boolean>(
+    () => this.shippingBlockedReason() === null,
+  );
+
+  /**
+   * H2: si la dirección guardada no trae coords (ni override resuelto),
+   * dispara un forward-geocode no-bloqueante; al resolver, guarda el override
+   * y sube `coords_version` para que el effect recotice con lat/lng. La
+   * cotización por zona ya sellada sigue vigente hasta entonces.
+   *
+   * Release-853 paso 11 — lo mostrado = lo cobrado: el confirm cotiza con
+   * la dirección PERSISTIDA, así que las coords del geocode se guardan con
+   * `updateAddress` ANTES de cotizar con ellas. El PUT exige la dirección
+   * completa (address_line1/city/country_code requeridos), no solo coords.
+   * Si la persistencia falla, no hay override y rige la zona.
+   */
+  private ensureSavedAddressCoords(id: number): void {
+    if (this.savedCoordsOverride()[id]) return;
+    const saved = this.addresses().find((a) => a.id === id);
+    if (!saved) return;
+    if (saved.latitude != null && saved.longitude != null) return;
+    if (this.savedGeocodeInFlight.has(id)) return;
+    const query = [
+      saved.address_line1,
+      saved.city,
+      saved.state_province,
+      saved.country_code,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    if (query.trim().length < 5) return;
+    this.savedGeocodeInFlight.add(id);
+    this.locatingRequestCount.update((n) => n + 1);
+    this.geocoding
+      // Paso 8: pass city/state as separate params so the backend does not
+      // have to split them out of `query` by commas (see `forward` opts).
+      .forward(query, {
+        city: saved.city || undefined,
+        state: saved.state_province || undefined,
+      })
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        // Only covers THIS forward-geocode, not the follow-up `updateAddress`
+        // persist below — the chip's job is "locating", not "saving"; the
+        // precision badge already takes over as soon as `next` sets it.
+        finalize(() => this.locatingRequestCount.update((n) => Math.max(0, n - 1))),
+      )
+      .subscribe({
+        next: (res) => {
+          const lat = res?.lat;
+          const lng = res?.lng;
+          // 'area' = city/neighbourhood centroid — treated exactly like an
+          // unresolved geocode (commit 28947e899 applies this to new
+          // addresses; GAP 1, 2026-09-27, closes the same hole for the
+          // saved-address backfill). NEVER persisted: writing a centroid
+          // into a customer's saved address would poison it permanently —
+          // every future order from that address would silently quote/ship
+          // from the wrong point. The map rendered next to this saved
+          // address (GAP 2, `!hasResolvedCoords()`) is what lets the buyer
+          // resolve it for real.
+          if (lat == null || lng == null || res?.precision === 'area') {
+            this.savedGeocodeInFlight.delete(id);
+            return;
+          }
+          // A manual pin/GPS fix (GAP 2 map) may have already resolved this
+          // SAME address while this request was in flight — the buyer-placed
+          // point already won; never clobber it with a stale background
+          // geocode result.
+          if (this.savedCoordsOverride()[id]) {
+            this.savedGeocodeInFlight.delete(id);
+            return;
+          }
+          // Store precision for display (the badge also renders next to the
+          // saved-address map, GAP 2, while `!hasResolvedCoords()`).
+          this.geocodePrecision.set(res.precision ?? null);
+          this.geocodeLabel.set(res.label ?? null);
+          this.account_service
+            .updateAddress(id, {
+              address_line1: saved.address_line1,
+              address_line2: saved.address_line2 ?? undefined,
+              city: saved.city,
+              state_province: saved.state_province ?? undefined,
+              country_code: saved.country_code,
+              postal_code: saved.postal_code ?? undefined,
+              phone_number: saved.phone_number ?? undefined,
+              latitude: lat,
+              longitude: lng,
+            })
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: () => {
+                this.savedGeocodeInFlight.delete(id);
+                this.addresses.update((list) =>
+                  list.map((a) =>
+                    a.id === id
+                      ? { ...a, latitude: lat, longitude: lng }
+                      : a,
+                  ),
+                );
+                this.savedCoordsOverride.update((m) => ({
+                  ...m,
+                  [id]: { lat, lng },
+                }));
+                this.bumpCoordsVersion();
+              },
+              error: () => {
+                // Sin persistencia no hay override: lo mostrado sigue
+                // siendo la cotización por zona (warning no-bloqueante).
+                this.savedGeocodeInFlight.delete(id);
+              },
+            });
+        },
+        error: () => {
+          // Sin coords se conserva la cotización por zona; el form manual
+          // sigue funcionando (warning no-bloqueante por diseño).
+          this.savedGeocodeInFlight.delete(id);
+        },
+      });
   }
 
   /** Elige el modo de entrega. Recoger limpia la dirección del comprador. */
@@ -1446,7 +2203,7 @@ export class CheckoutComponent implements OnInit {
     this.selected_delivery.set(mode);
     this.error_message.set('');
     // Toda selección de envío anterior queda obsoleta al cambiar de modo.
-    this.shipping_quote_key = null;
+    this.shipping_quote_key.set(null);
     this.shipping_options.set([]);
     this.selected_shipping_method_id = null;
     this.selected_shipping_option_id = null;
@@ -1600,7 +2357,7 @@ export class CheckoutComponent implements OnInit {
       // Solo sella si la dirección no cambió durante el vuelo (la respuesta
       // lenta de una clave vieja nunca pisa la cotización vigente).
       if (this.currentAddressKey() === key) {
-        this.shipping_quote_key = key;
+        this.shipping_quote_key.set(key);
       }
     });
     this.shipping_fetch_promise = p;
@@ -1705,6 +2462,12 @@ export class CheckoutComponent implements OnInit {
         '— no se consulta el envío con un ID crudo.',
       );
       return null;
+    }
+    // Paso 5 shipping-distance-pricing: el form trae latitude/longitude del
+    // map picker (null sin pin); se omiten sin pin para cotizar por zona.
+    if (value.latitude == null || value.longitude == null) {
+      delete value.latitude;
+      delete value.longitude;
     }
     return value;
   }
@@ -1960,12 +2723,22 @@ export class CheckoutComponent implements OnInit {
   }
 
   mapAddressToCalc(addr: Address) {
-    const raw = {
+    const raw: any = {
       country_code: addr.country_code,
       state_province: addr.state_province,
       city: addr.city,
       postal_code: addr.postal_code || undefined,
     };
+    // Paso 5 shipping-distance-pricing: con pin se cotiza por distancia;
+    // sin coords se omiten y rige la tarifa de zona, sin error visible.
+    // H2: el override del forward-geocode de guardadas gana sobre la fila.
+    const override = this.savedCoordsOverride()[addr.id];
+    const lat = override?.lat ?? addr.latitude;
+    const lng = override?.lng ?? addr.longitude;
+    if (lat != null && lng != null) {
+      raw.latitude = lat;
+      raw.longitude = lng;
+    }
     const { value } = this.resolveGeoNames(raw);
     return value;
   }
@@ -2011,14 +2784,29 @@ export class CheckoutComponent implements OnInit {
       }
 
       if (this.use_new_address() && !this.address_form.valid) {
-        this.error_message.set(
-          ERROR_MESSAGES['ECOM_CHECKOUT_ADDR_REQUIRED_001'],
-        );
         this.address_form.markAllAsTouched();
+        const missing = this.missingAddressFieldsMessage();
+        this.error_message.set(
+          missing || ERROR_MESSAGES['ECOM_CHECKOUT_ADDR_REQUIRED_001'],
+        );
+        focusFirstInvalid(this.host, { scroll: true });
         return;
       }
       if (!this.use_new_address() && !this.selected_address_id()) {
         this.error_message.set(ERROR_MESSAGES['ECOM_CHECKOUT_ADDR_SAVED_001']);
+        focusFirstInvalid(this.host, { scroll: true });
+        return;
+      }
+
+      // Owner directive (change #2): mientras NO haya coords (ni geocode ni
+      // pin ni GPS) para domicilio, no se cotiza ni se avanza con una tarifa
+      // por defecto — defensa en profundidad del mismo bloqueo del botón
+      // Continuar (ver `canProceedFromAddressStep`).
+      if (!this.hasResolvedCoords()) {
+        this.error_message.set(
+          'Necesitamos tu ubicación exacta para calcular el envío. Marca el punto en el mapa o usa tu ubicación automática.',
+        );
+        this.focusMapHint('user');
         return;
       }
 
@@ -2040,7 +2828,7 @@ export class CheckoutComponent implements OnInit {
       const key = this.currentAddressKey();
       if (
         key &&
-        (key !== this.shipping_quote_key ||
+        (key !== this.shipping_quote_key() ||
           this.selected_shipping_option_id == null)
       ) {
         await this.refreshShippingQuote(key);
@@ -2237,6 +3025,16 @@ export class CheckoutComponent implements OnInit {
         // Continue with shipping options
         this.error_message.set('');
         await this.loadShippingOptions();
+        // Owner directive (change #2): con coords ya resueltas (verificado
+        // antes de llamar a este método) pero sin tarifa devuelta, tampoco
+        // se avanza — mismo bloqueo que la ruta de dirección ya guardada.
+        if (this.shippableOptions().length === 0) {
+          this.error_message.set(
+            'No hay envío a domicilio para esta dirección. Prueba con otra dirección o elige "Recoger en tienda".',
+          );
+          this.is_loading.set(false);
+          return;
+        }
         this.advanceStep();
         this.is_loading.set(false);
       },
@@ -2249,6 +3047,12 @@ export class CheckoutComponent implements OnInit {
         );
         this.error_message.set('');
         await this.loadShippingOptions();
+        if (this.shippableOptions().length === 0) {
+          this.error_message.set(
+            'No hay envío a domicilio para esta dirección. Prueba con otra dirección o elige "Recoger en tienda".',
+          );
+          return;
+        }
         this.advanceStep();
       },
     });
@@ -2292,6 +3096,70 @@ export class CheckoutComponent implements OnInit {
 
   prevStep(): void {
     this.step.set(this.step() - 1);
+  }
+
+  /**
+   * Paso 10 — transición pedido→detalle: muestra el overlay de éxito y
+   * navega tras ~1000ms (ventana 900-1200ms del plan). Ambas ramas de éxito
+   * (normal y Wompi APPROVED) pasan por aquí.
+   */
+  private navigateAfterSuccessOverlay(
+    commands: (string | number)[],
+    queryParams: Record<string, string | number | boolean>,
+  ): void {
+    this.showOrderSuccessOverlay.set(true);
+    if (this.order_success_timer) clearTimeout(this.order_success_timer);
+    this.order_success_timer = setTimeout(() => {
+      this.order_success_timer = null;
+      this.showOrderSuccessOverlay.set(false);
+      void this.router.navigate(commands, { queryParams });
+    }, 1000);
+  }
+
+  /**
+   * Resolves the shipping-address portion of a `CheckoutRequest` from the
+   * current step-1 state (new-address form vs a selected saved address).
+   * Extracted from `placeOrder()` so `submitWhatsappFallbackOrder()` can
+   * reuse the exact same resolution instead of duplicating it.
+   *
+   * Returns `{}` when the cart has no physical items (nothing to resolve).
+   * `unresolvedCityError: true` means the typed address' city/department
+   * catalog IDs could not be mapped to names yet — the caller must abort
+   * with `ORD_SHIP_CITY_UNRESOLVED_001`, exactly as `placeOrder()` always
+   * has (never send a raw catalog ID as the city name).
+   */
+  private resolveShippingAddressForRequest(): {
+    shipping_address?: CheckoutShippingAddress;
+    shipping_address_id?: number;
+    unresolvedCityError?: boolean;
+  } {
+    if (this.cartHasOnlyServices) return {};
+    if (this.use_new_address()) {
+      const { value: addressValue, unresolved } = this.resolveGeoNames(
+        this.address_form.getRawValue(),
+      );
+      if (unresolved.length > 0) {
+        return { unresolvedCityError: true };
+      }
+      return { shipping_address: addressValue };
+    }
+    if (this.selected_address_id()) {
+      return { shipping_address_id: this.selected_address_id() ?? undefined };
+    }
+    return {};
+  }
+
+  /**
+   * A.4 CP-facturacion-fixes: one key per purchase attempt. Retries of the
+   * SAME attempt reuse it (the backend returns the first response); a new
+   * attempt (after a visible error) generates another. Extracted from
+   * `placeOrder()` so `submitWhatsappFallbackOrder()` shares the exact same
+   * generation logic.
+   */
+  private newIdempotencyKey(): string {
+    return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 
   placeOrder(): void {
@@ -2432,33 +3300,22 @@ export class CheckoutComponent implements OnInit {
         : {}),
     };
 
-    if (!this.cartHasOnlyServices && this.use_new_address()) {
-      // Convert IDs to names for backend compatibility
-      const { value: addressValue, unresolved } = this.resolveGeoNames(
-        this.address_form.getRawValue(),
-      );
-
+    const shippingAddress = this.resolveShippingAddressForRequest();
+    if (shippingAddress.unresolvedCityError) {
       // Mandar el ID del catálogo como nombre de ciudad deja la orden con una
       // dirección de envío inservible para despacho. Abortamos.
-      if (unresolved.length > 0) {
-        this.is_submitting.set(false);
-        this.error_message.set(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
-        this.toast.error(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
-        return;
-      }
-
-      request.shipping_address = addressValue;
-    } else if (!this.cartHasOnlyServices && this.selected_address_id()) {
-      request.shipping_address_id = this.selected_address_id() ?? undefined;
+      this.is_submitting.set(false);
+      this.error_message.set(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
+      this.toast.error(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
+      return;
+    }
+    if (shippingAddress.shipping_address) {
+      request.shipping_address = shippingAddress.shipping_address;
+    } else if (shippingAddress.shipping_address_id != null) {
+      request.shipping_address_id = shippingAddress.shipping_address_id;
     }
 
-    // A.4 CP-facturacion-fixes: una key por intento de compra. Los reintentos del
-    // MISMO intento la reutilizan (el backend devuelve la primera respuesta);
-    // un intento nuevo (tras error visible) genera otra.
-    const idempotencyKey =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const idempotencyKey = this.newIdempotencyKey();
 
     // Wompi payment flow: create order first, then open widget.
     // En canal WhatsApp NO se abre wa.me antes del pago: el mensaje de
@@ -2530,16 +3387,15 @@ export class CheckoutComponent implements OnInit {
           }
           if (!this.is_authenticated() && response.data.public_order_token) {
             this.cart_service.clearAllCart();
-            this.router.navigate(
+            this.navigateAfterSuccessOverlay(
               ['/pedido', response.data.public_order_token],
-              {
-                queryParams: { success: true },
-              },
+              { success: true },
             );
           } else {
-            this.router.navigate(['/account/orders', response.data.order_id], {
-              queryParams: { success: true },
-            });
+            this.navigateAfterSuccessOverlay(
+              ['/account/orders', response.data.order_id],
+              { success: true },
+            );
           }
         }
       },
@@ -2561,10 +3417,191 @@ export class CheckoutComponent implements OnInit {
   onGuestDataCompleted(data: GuestCheckoutData | null): void {
     // `null` = el invitado canceló el modal: se aborta, sin reintentar solo.
     // Al pulsar "Finalizar" de nuevo el modal vuelve a abrirse.
-    if (!data) return;
+    if (!data) {
+      this.whatsapp_fallback_pending_guest_data = false;
+      return;
+    }
     this.guest_checkout_data = data;
     this.guest_data_decision_made = true;
+    if (this.whatsapp_fallback_pending_guest_data) {
+      this.whatsapp_fallback_pending_guest_data = false;
+      this.submitWhatsappFallbackOrder();
+      return;
+    }
     this.placeOrder();
+  }
+
+  // ========== WHATSAPP LOCATION FALLBACK HANDLERS ==========
+
+  /**
+   * Buyer confirmed sending the order to the store's WhatsApp instead of
+   * fighting the map. Validates the SAME address form the normal home-
+   * delivery step requires (plus guest contact data), but deliberately
+   * skips `hasResolvedCoords()`/`shippingBlockedReason()` — those exist to
+   * gate auto-quoting a shipping rate, and this flow has none: that is the
+   * entire point of the fallback.
+   */
+  onWhatsappFallbackConfirm(): void {
+    const addressValid = this.use_new_address()
+      ? this.address_form.valid
+      : !!this.selected_address_id();
+    if (!addressValid) {
+      this.show_whatsapp_fallback_modal.set(false);
+      if (this.use_new_address()) {
+        this.address_form.markAllAsTouched();
+      }
+      this.toast.warning(
+        'Completa tu dirección y datos de contacto para enviar el pedido.',
+        'Datos incompletos',
+      );
+      return;
+    }
+
+    if (!this.is_authenticated() && !this.guest_data_decision_made) {
+      this.whatsapp_fallback_pending_guest_data = true;
+      this.show_whatsapp_fallback_modal.set(false);
+      this.guestDataModal()?.open();
+      return;
+    }
+
+    this.submitWhatsappFallbackOrder();
+  }
+
+  /** Buyer declined the fallback: close the modal and re-focus the map. */
+  onWhatsappFallbackDecline(): void {
+    this.show_whatsapp_fallback_modal.set(false);
+    this.focusMapHint('user');
+  }
+
+  /**
+   * Builds and submits the pending-shipping WhatsApp order: `channel:
+   * 'whatsapp'` + `pending_shipping_assignment: true`, with no
+   * `payment_method_id` / `shipping_method_id` / `shipping_rate_id` — the
+   * backend forces `delivery_type='other'` and the store assigns shipping
+   * afterward via `PATCH /store/orders/:id/shipping`. Reuses the same
+   * shipping-address resolution and idempotency-key helpers `placeOrder()`
+   * uses, so the two flows never drift apart.
+   */
+  private submitWhatsappFallbackOrder(): void {
+    const shippingAddress = this.resolveShippingAddressForRequest();
+    if (shippingAddress.unresolvedCityError) {
+      this.toast.error(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
+      return;
+    }
+
+    this.whatsapp_fallback_submitting.set(true);
+
+    const request: CheckoutRequest = {
+      channel: 'whatsapp',
+      pending_shipping_assignment: true,
+      notes: this.notes() || undefined,
+      items: this.cart()?.items?.map((item: CartItem) => ({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id || undefined,
+        quantity: item.quantity,
+        price_tier_id: item.price_tier?.id ?? undefined,
+      })),
+      guest_customer: this.toGuestCustomer(this.guest_checkout_data),
+      coupon_code: this.coupon_code().trim() || undefined,
+      ...(shippingAddress.shipping_address
+        ? { shipping_address: shippingAddress.shipping_address }
+        : {}),
+      ...(shippingAddress.shipping_address_id != null
+        ? { shipping_address_id: shippingAddress.shipping_address_id }
+        : {}),
+    };
+
+    const idempotencyKey = this.newIdempotencyKey();
+    const contact = this.resolveFallbackContact(shippingAddress.shipping_address);
+
+    this.checkout_service.checkout(request, null, idempotencyKey).subscribe({
+      next: (response) => {
+        this.whatsapp_fallback_submitting.set(false);
+        if (!response.success) return;
+        this.show_whatsapp_fallback_modal.set(false);
+        this.orderPlaced = true;
+        this.openWhatsAppFromResponse(response.data, {
+          pendingShipping: true,
+          contactName: contact.name,
+          contactPhone: contact.phone,
+          address: contact.address,
+          notes: this.notes() || undefined,
+        });
+        if (!this.is_authenticated() && response.data.public_order_token) {
+          this.cart_service.clearAllCart();
+          this.navigateAfterSuccessOverlay(
+            ['/pedido', response.data.public_order_token],
+            { success: true },
+          );
+        } else {
+          this.navigateAfterSuccessOverlay(
+            ['/account/orders', response.data.order_id],
+            { success: true },
+          );
+        }
+      },
+      error: (err) => {
+        this.whatsapp_fallback_submitting.set(false);
+        const msg = extractApiErrorMessage(err);
+        this.toast.error(msg, 'Error al procesar el pedido');
+        if (!this.is_authenticated()) {
+          this.guest_data_decision_made = false;
+        }
+      },
+    });
+  }
+
+  /**
+   * Contact name/phone/address for the extended fallback WhatsApp message —
+   * sourced from the same data the request itself carries: the ALREADY
+   * geo-name-resolved `shipping_address` this same submit built (new-address
+   * case — avoids a second `resolveGeoNames` pass), the selected saved
+   * address (saved-address case), and guest data for the name. Never from
+   * GPS/map coordinates (those are never written into the address text
+   * fields).
+   */
+  private resolveFallbackContact(
+    resolvedNewAddress?: CheckoutShippingAddress,
+  ): {
+    name?: string;
+    phone?: string;
+    address?: { line1: string; line2?: string; city: string; state: string };
+  } {
+    const guest = this.guest_checkout_data;
+    const name =
+      this.is_authenticated() || !guest
+        ? undefined
+        : `${guest.first_name ?? ''} ${guest.last_name ?? ''}`.trim() ||
+          undefined;
+
+    if (this.use_new_address()) {
+      if (!resolvedNewAddress) return { name };
+      return {
+        name,
+        phone: resolvedNewAddress.phone_number || undefined,
+        address: {
+          line1: resolvedNewAddress.address_line1,
+          line2: resolvedNewAddress.address_line2 || undefined,
+          city: resolvedNewAddress.city || '',
+          state: resolvedNewAddress.state_province || '',
+        },
+      };
+    }
+
+    const saved = this.addresses().find(
+      (a) => a.id === this.selected_address_id(),
+    );
+    if (!saved) return { name };
+    return {
+      name,
+      phone: saved.phone_number || undefined,
+      address: {
+        line1: saved.address_line1,
+        line2: saved.address_line2 || undefined,
+        city: saved.city || '',
+        state: saved.state_province || '',
+      },
+    };
   }
 
   /**
@@ -2637,16 +3674,35 @@ export class CheckoutComponent implements OnInit {
    * bloquea el popup, se informa para que el comprador lo abra manualmente
    * (la orden YA existe: nunca se pierde la venta por un popup bloqueado).
    */
-  private openWhatsAppFromResponse(order: {
-    order_number: string;
-    total: number;
-    items?: Array<{
-      name: string;
-      variant_sku: string | null;
-      quantity: number;
-      total_price: number;
-    }>;
-  }): void {
+  private openWhatsAppFromResponse(
+    order: {
+      order_number: string;
+      total: number;
+      subtotal?: number;
+      tax_amount?: number;
+      discount_amount?: number;
+      items?: Array<{
+        name: string;
+        variant_sku: string | null;
+        quantity: number;
+        total_price: number;
+      }>;
+    },
+    /**
+     * checkout-whatsapp-location-fallback: extends the message with the
+     * pending-shipping context when the order was created via
+     * `submitWhatsappFallbackOrder()`. Omitted (or `pendingShipping: false`)
+     * on the normal `?channel=whatsapp` flow — the message body is then
+     * byte-identical to before this parameter existed.
+     */
+    opts?: {
+      pendingShipping: boolean;
+      contactName?: string;
+      contactPhone?: string;
+      address?: { line1: string; line2?: string; city: string; state: string };
+      notes?: string;
+    },
+  ): void {
     const config = this.tenant_facade.getCurrentDomainConfig();
     const phone = (
       config?.customConfig?.ecommerce?.checkout?.whatsapp_number || ''
@@ -2690,11 +3746,48 @@ export class CheckoutComponent implements OnInit {
       : customerName
         ? `Hola, soy *${customerName}*! Acabo de comprar en *${storeName}* 🛒`
         : `Hola! Acabo de comprar en *${storeName}* 🛒`;
+    // checkout-whatsapp-location-fallback: extra block with contact/address/
+    // notes/pending-shipping totals, only when the order was created via the
+    // location fallback. Empty string when `opts` is omitted, so the message
+    // below is byte-identical to the pre-existing normal WhatsApp flow.
+    const pendingLines = opts?.pendingShipping
+      ? [
+          opts.contactName ? `*Cliente:* ${opts.contactName}` : '',
+          opts.contactPhone ? `*Teléfono:* ${opts.contactPhone}` : '',
+          opts.address
+            ? `*Dirección:* ${[
+                opts.address.line1,
+                opts.address.line2,
+                opts.address.city,
+                opts.address.state,
+              ]
+                .filter(Boolean)
+                .join(', ')}`
+            : '',
+          opts.notes ? `*Notas:* ${opts.notes}` : '',
+          `*Envío:* por definir con la tienda`,
+          order.subtotal != null
+            ? `*Subtotal:* ${fmt(Number(order.subtotal))}`
+            : '',
+          order.tax_amount != null
+            ? `*Impuestos:* ${fmt(Number(order.tax_amount))}`
+            : '',
+          order.discount_amount
+            ? `*Descuento:* -${fmt(Number(order.discount_amount))}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : '';
     const message = encodeURIComponent(
       `${header}\n\n` +
         `*Pedido:* ${order.order_number}\n\n` +
         (itemLines ? `*Productos:*\n${itemLines}\n\n` : '') +
-        `*Total:* ${fmt(Number(order.total))}\n\n` +
+        (pendingLines ? `${pendingLines}\n\n` : '') +
+        `${opts?.pendingShipping ? '*Total (sin envío):*' : '*Total:*'} ${fmt(Number(order.total))}\n\n` +
+        (opts?.pendingShipping
+          ? `*Motivo:* No pudimos ubicarme en el mapa\n\n`
+          : '') +
         `Quedo atento para coordinar el pago y la entrega!`,
     );
     const popup = window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
@@ -2770,13 +3863,11 @@ export class CheckoutComponent implements OnInit {
             if (publicOrderToken) {
               this.cart_service.clearAllCart();
             }
-            this.router.navigate(
+            this.navigateAfterSuccessOverlay(
               publicOrderToken
                 ? ['/pedido', publicOrderToken]
                 : ['/account/orders', orderId],
-              {
-                queryParams: { success: true },
-              },
+              { success: true },
             );
           } else if (
             transaction.status === 'DECLINED' ||
@@ -2920,5 +4011,31 @@ export class CheckoutComponent implements OnInit {
     const errorKey = Object.keys(control.errors)[0];
     const code = map[errorKey];
     return code ? (ERROR_MESSAGES[code] ?? '') : '';
+  }
+
+  /** Human-readable labels for the "Completa: X, Y" missing-fields summary. */
+  private static readonly ADDRESS_FIELD_LABELS: Record<string, string> = {
+    address_line1: 'Dirección',
+    address_line2: 'Dirección (línea 2)',
+    state_province: 'Departamento',
+    city: 'Ciudad',
+    country_code: 'País',
+    postal_code: 'Código postal',
+    phone_number: 'Teléfono',
+  };
+
+  /**
+   * Builds a "Completa: X, Y" summary from the currently invalid, enabled
+   * controls of `address_form`, so the customer sees exactly what is missing
+   * in addition to the per-field errors already shown via `getFieldError`.
+   * Returns '' if nothing maps to a known label (falls back to the generic
+   * coded message at the call site).
+   */
+  private missingAddressFieldsMessage(): string {
+    const missing = Object.entries(this.address_form.controls)
+      .filter(([, control]) => control.enabled && control.invalid)
+      .map(([name]) => CheckoutComponent.ADDRESS_FIELD_LABELS[name])
+      .filter((label): label is string => Boolean(label));
+    return missing.length > 0 ? `Completa: ${missing.join(', ')}` : '';
   }
 }

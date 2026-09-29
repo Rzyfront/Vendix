@@ -209,3 +209,39 @@ describe('RefundCalculationService — per-line quantity integrity', () => {
     });
   });
 });
+
+describe('RefundCalculationService — cash cancellation ceiling', () => {
+  const prisma = { orders: { findFirst: jest.fn() } };
+  const service = new RefundCalculationService(prisma as unknown as StorePrismaService);
+  const tx = prisma as any;
+  const totals = {
+    grand_total: new Prisma.Decimal('59.50'),
+    tax_amount: new Prisma.Decimal('9.50'),
+    shipping_cost: new Prisma.Decimal(0),
+    shipping_tax_amount: new Prisma.Decimal(0),
+    shipping_tax_type: null,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.orders.findFirst.mockResolvedValue(buildOrder({ ...totals, refunds: [] }));
+  });
+
+  it('allocates paid cash without exceeding grand_total', async () => {
+    const result = await service.calculateCancellationCashRefund(
+      9001, new Prisma.Decimal('59.50'), tx, totals,
+    );
+    expect(result.amount.equals('59.50')).toBe(true);
+    expect(result.subtotal.equals('50.00')).toBe(true);
+    expect(result.tax.equals('9.50')).toBe(true);
+  });
+
+  it('rejects a second payout when prior completed refunds consume the ceiling', async () => {
+    prisma.orders.findFirst.mockResolvedValue(buildOrder({
+      ...totals, refunds: [{ amount: new Prisma.Decimal('20.00'), refund_items: [], shipping_refund: 0 }],
+    }));
+    await expect(service.calculateCancellationCashRefund(
+      9001, new Prisma.Decimal('59.50'), tx, totals,
+    )).rejects.toThrow(/exceeds the remaining refundable/);
+  });
+});

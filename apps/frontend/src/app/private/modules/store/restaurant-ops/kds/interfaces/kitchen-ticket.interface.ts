@@ -16,6 +16,13 @@ export type KitchenTicketStatus =
 
 export type KitchenTicketItemStatus = KitchenTicketStatus;
 
+export type KitchenOrderDeliveryType =
+  | 'pickup'
+  | 'home_delivery'
+  | 'direct_delivery'
+  | 'other'
+  | 'dine_in';
+
 export interface KitchenTicketProductRef {
   id: number;
   name: string;
@@ -166,6 +173,7 @@ export interface KitchenTicket {
   kds_id?: number;
   order?: {
     order_number: string;
+    delivery_type: KitchenOrderDeliveryType;
     customer_alias?: string | null;
     users?: { first_name: string; last_name: string } | null;
   } | null;
@@ -218,6 +226,11 @@ export type KdsEvent =
     }
   | {
       type: 'ticket.ready';
+      ticket: KitchenTicket;
+      ts: number;
+    }
+  | {
+      type: 'ticket.updated';
       ticket: KitchenTicket;
       ts: number;
     }

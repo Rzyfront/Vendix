@@ -1,12 +1,17 @@
 import {
+  IsArray,
+  ArrayMinSize,
+  ArrayMaxSize,
   IsInt,
   IsEnum,
   IsOptional,
   IsNumber,
   Min,
   IsString,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PaymentLegDto } from '../../../payments/dto/payment-leg.dto';
 
 export enum PaymentType {
   DIRECT = 'direct',
@@ -26,6 +31,18 @@ export class PayOrderDto {
   amount_received?: number;
 
   // Credit payment fields
+  /**
+   * Fase 2 paso 5 — carril "registrar pago": SÓLO `flow/pay` sobre una orden
+   * con pago `pending` de confirmación manual (`isManualConfirmationPending`)
+   * —o con un parcial ya registrado (`pending_payment` + abonos `succeeded`)—
+   * lee este campo, y entonces define LO COBRADO (no el total de la orden):
+   * `amount` < saldo → pago parcial (la orden sigue en `pending_payment` con
+   * `remaining_balance` actualizado, sin transición, sin stock ni factura);
+   * `amount` = saldo → flujo actual. En efectivo, `amount_received` > `amount`
+   * produce vuelto (`change`); lo no-efectivo nunca supera el saldo
+   * (`PAY_MULTI_TENDER_SUM_MISMATCH` / `PAY_INVALID_AMOUNT_001`). Fuera del
+   * carril manual este campo se ignora como siempre.
+   */
   @IsOptional()
   @IsNumber()
   @Min(0.01)
@@ -38,6 +55,26 @@ export class PayOrderDto {
   @IsOptional()
   @IsString()
   payment_reference?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  bank_account_id?: number;
+
+  /**
+   * Cobro multimétodo de contado: 2..5 tramos cuya suma debe ser igual al
+   * total a cobrar (`amountToCharge`). Sólo se acepta con
+   * `payment_type: 'direct'`. Si no llega, el cobro sigue el camino escalar de
+   * siempre. Ver `normalizePaymentLegs`.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(5)
+  @ValidateNested({ each: true })
+  @Type(() => PaymentLegDto)
+  payments?: PaymentLegDto[];
 
   // ── Propina (T3) ────────────────────────────────────────────────────────
   // Mismos nombres y validadores que `CreatePosPaymentDto`: el frontend usa

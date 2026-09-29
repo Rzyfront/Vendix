@@ -63,6 +63,13 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
+import {
+  formatDateOnlyUTC,
+  formatStoreDate,
+  formatStoreDateTime,
+} from '../../../../../../shared/utils/date.util';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
 @Component({
   selector: 'vendix-invoice-detail',
@@ -184,12 +191,12 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs">
                 @if (cont.declaredAt) {
                   <div [ngClass]="cont.expired ? 'text-error' : 'text-warning'">
-                    Declarada: {{ cont.declaredAt | date:'dd/MM/yyyy HH:mm' }}
+                    Declarada: {{ formatInvoiceDateTime(cont.declaredAt) }}
                   </div>
                 }
                 @if (cont.deadline) {
                   <div [ngClass]="cont.expired ? 'text-error' : 'text-warning'">
-                    Vence: {{ cont.deadline | date:'dd/MM/yyyy HH:mm' }}
+                    Vence: {{ formatInvoiceDateTime(cont.deadline) }}
                   </div>
                 }
               </div>
@@ -352,7 +359,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs text-text-secondary">
                 <div>Intentos: {{ retry.attempts }} de {{ retry.max_attempts }}</div>
                 @if (retry.next_retry_at) {
-                  <div>Próximo intento: {{ retry.next_retry_at | date:'dd/MM/yyyy HH:mm' }}</div>
+                  <div>Próximo intento: {{ formatInvoiceDateTime(retry.next_retry_at) }}</div>
                 }
               </div>
               @if (retry.last_error) {
@@ -445,13 +452,13 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             <div class="rounded-lg border border-border px-3 py-2">
               <p class="text-[11px] uppercase tracking-wide text-text-secondary">Emisión</p>
               <p class="text-sm font-medium text-text-primary">
-                {{ inv.issue_date | date:'dd/MM/yyyy':'UTC' }}
+                {{ formatInvoiceDate(inv.issue_date) }}
               </p>
             </div>
             <div class="rounded-lg border border-border px-3 py-2">
               <p class="text-[11px] uppercase tracking-wide text-text-secondary">Vencimiento</p>
               <p class="text-sm font-medium text-text-primary">
-                {{ inv.due_date ? (inv.due_date | date:'dd/MM/yyyy':'UTC') : 'Contado' }}
+                {{ inv.due_date ? formatInvoiceDate(inv.due_date) : 'Contado' }}
               </p>
             </div>
             <div class="rounded-lg border border-border px-3 py-2">
@@ -798,16 +805,20 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 <span class="text-text-secondary">Subtotal</span>
                 <span class="text-text-primary">{{ formatCurrency(inv.subtotal_amount) }}</span>
               </div>
+              <!-- El subtotal de la factura YA suma la línea «Envio» (base
+                   neta si el domicilio lleva INC incluido; su tributo va en
+                   Impuestos). Mostrarlo como fila propia lo contaba dos veces:
+                   se deja como desglose informativo del subtotal, no sumando. -->
+              @if (shippingAmount() > 0) {
+                <div class="flex justify-between pl-3 text-xs">
+                  <span class="text-text-secondary">Incluye envío (base)</span>
+                  <span class="text-text-secondary">{{ formatCurrency(shippingAmount()) }}</span>
+                </div>
+              }
               @if (inv.discount_amount > 0) {
                 <div class="flex justify-between text-sm">
                   <span class="text-text-secondary">Descuentos</span>
                   <span class="text-error">−{{ formatCurrency(inv.discount_amount) }}</span>
-                </div>
-              }
-              @if (shippingAmount() > 0) {
-                <div class="flex justify-between text-sm">
-                  <span class="text-text-secondary">Envío</span>
-                  <span class="text-text-primary">{{ formatCurrency(shippingAmount()) }}</span>
                 </div>
               }
               <div class="flex justify-between text-sm">
@@ -1032,7 +1043,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                         >
                       </div>
                       <p class="text-xs text-text-secondary">
-                        {{ (event.issued_at || event.created_at) | date:'dd/MM/yyyy HH:mm' }}
+                        {{ formatInvoiceDateTime(event.issued_at || event.created_at) }}
                         @if (event.event_number) {
                           <span> · N° {{ event.event_number }}</span>
                         }
@@ -1085,9 +1096,10 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               <app-button
                 variant="outline"
                 size="sm"
+                [disabled]="sending()"
                 (clicked)="onSend()">
                 <app-icon slot="icon" name="send" [size]="14"></app-icon>
-                {{ sendLabel() }}
+                {{ sending() ? 'Enviando…' : sendLabel() }}
               </app-button>
             }
             <!-- REENVIAR. No hay endpoint de "resend": el reenvio es el MISMO
@@ -1099,9 +1111,10 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               <app-button
                 variant="outline"
                 size="sm"
+                [disabled]="sending()"
                 (clicked)="onSend()">
                 <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
-                Reenviar a la DIAN
+                {{ sending() ? 'Enviando…' : 'Reenviar a la DIAN' }}
               </app-button>
             }
             <!-- El pie solo ofrece el atajo cuando la nota SE PUEDE crear; la
@@ -1230,6 +1243,7 @@ export class InvoiceDetailComponent {
   private invoicingService = inject(InvoicingService);
   private toast = inject(ToastService);
   private printService = inject(DocumentPrintService);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
 
   private readonly storeRejection = this.store.selectSignal(selectDianRejection);
   private readonly hydratedInvoice = this.store.selectSignal(selectCurrentInvoice);
@@ -1243,6 +1257,9 @@ export class InvoiceDetailComponent {
   /** Descarga del PDF en curso. Señal, no booleano plano: en zoneless un campo
    *  mutado dentro de un `subscribe` no repinta nada. */
   readonly pdfLoading = signal(false);
+
+  /** Envio a la DIAN en curso: deshabilita Enviar/Reenviar (evita doble transmision). */
+  readonly sending = signal(false);
 
   /** Impresión en curso. Misma razón que `pdfLoading`. */
   readonly printing = signal(false);
@@ -1306,6 +1323,17 @@ export class InvoiceDetailComponent {
         }
       });
     });
+
+    // Fin del envio a la DIAN (exito o fallo): libera los botones.
+    this.actions$
+      .pipe(
+        ofType(
+          InvoicingActions.sendInvoiceSuccess,
+          InvoicingActions.sendInvoiceFailure,
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(() => this.sending.set(false));
 
     // El PDF regenerado se abre cuando la respuesta llega con su URL firmada.
     // Se escucha la accion de exito en vez de suscribirse al HTTP desde aqui
@@ -1428,7 +1456,12 @@ export class InvoiceDetailComponent {
     }));
   });
 
-  readonly taxLines = computed<InvoiceTax[]>(() => {
+  /**
+   * Filas de impuesto crudas (una por fila persistida): solo las consume
+   * `priorRegimeHint`, que necesita el enlace por línea (`invoice_item_id`)
+   * para el recómputo. El template usa `taxLines` (agrupadas).
+   */
+  private readonly rawTaxLines = computed<InvoiceTax[]>(() => {
     const inv = this.detail();
     return (inv?.invoice_taxes ?? inv?.taxes ?? []).map((tax) => ({
       ...tax,
@@ -1436,6 +1469,30 @@ export class InvoiceDetailComponent {
       tax_amount: this.toNumber(tax?.tax_amount),
       taxable_amount: this.toNumber(tax?.taxable_amount),
     }));
+  });
+
+  /**
+   * B6 — una sola fila por `tax_type|tax_rate`: con dos o más tributos el
+   * backend persiste una fila por (línea × tributo), así que plato INC 8 % +
+   * envío INC 8 % llegaban como dos filas idénticas. Se suman los importes YA
+   * truncados (igual que `aggregateInvoiceTaxes` del ticket). Sin tipo ⇒ IVA
+   * (contrato tipado: lo no tipado es IVA).
+   */
+  readonly taxLines = computed<InvoiceTax[]>(() => {
+    const grouped = new Map<string, InvoiceTax>();
+    for (const tax of this.rawTaxLines()) {
+      const key = `${tax?.tax_type ?? 'iva'}|${tax?.tax_rate}`;
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.tax_amount =
+          Number(existing.tax_amount) + Number(tax?.tax_amount);
+        existing.taxable_amount =
+          Number(existing.taxable_amount) + Number(tax?.taxable_amount);
+      } else {
+        grouped.set(key, { ...tax });
+      }
+    }
+    return Array.from(grouped.values());
   });
 
   /**
@@ -1457,7 +1514,7 @@ export class InvoiceDetailComponent {
   readonly priorRegimeHint = computed<string | null>(() => {
     const lines = this.lines();
     if (lines.length === 0) return null;
-    const taxes = this.taxLines() as Array<
+    const taxes = this.rawTaxLines() as Array<
       InvoiceTax & {
         invoice_item_id?: number | null;
         is_inclusive?: boolean | null;
@@ -1534,11 +1591,7 @@ export class InvoiceDetailComponent {
     const inv = this.detail();
     const snapshot = (inv?.customer_name ?? '').trim();
     if (snapshot) return snapshot;
-    const live = [inv?.customer?.first_name, inv?.customer?.last_name]
-      .map((part) => (part ?? '').trim())
-      .filter(Boolean)
-      .join(' ');
-    return live || '';
+    return customerDisplayName(inv?.customer, '');
   });
 
   readonly acquirerDocument = computed(() => {
@@ -1810,6 +1863,28 @@ export class InvoiceDetailComponent {
     return Number(value) === 0 ? '0%' : String(value);
   }
 
+  /**
+   * `issue_date`/`due_date`-shaped civil date (`DD/MM/YYYY`) in the store's
+   * timezone. See `formatStoreDate` in `date.util.ts` for the UTC-midnight
+   * bifurcation this applies (order-truth-and-invoice-tz-plan, Step 9).
+   * Public because the template invokes it (AOT does not allow `private`).
+   */
+  formatInvoiceDate(value: string | Date | null | undefined): string {
+    if (!value) return '';
+    return formatStoreDate(value, this.storeSettingsFacade.timezone());
+  }
+
+  /**
+   * Real-instant date + time (`DD/MM/YYYY HH:mm`) in the store's timezone —
+   * for columns that always carry a genuine instant (contingency deadlines,
+   * DIAN retry timestamps, DIAN event timestamps), never `issue_date`/
+   * `due_date`. Public because the template invokes it.
+   */
+  formatInvoiceDateTime(value: string | Date | null | undefined): string {
+    if (!value) return '';
+    return formatStoreDateTime(value, this.storeSettingsFacade.timezone());
+  }
+
   readonly resolutionBanner = computed(() => {
     const res = this.detail()?.resolution;
     if (!res) return null;
@@ -1863,7 +1938,7 @@ export class InvoiceDetailComponent {
           ? 'Sin vigencia registrada'
           : expiring
             ? `Vence en ${days_left} día${days_left === 1 ? '' : 's'}`
-            : `Vigente hasta ${new Date(res.valid_to!).toLocaleDateString('es-CO')}`,
+            : `Vigente hasta ${formatDateOnlyUTC(res.valid_to!)}`,
       validityTone: tone(expired ? 'bad' : expiring || days_left === null ? 'warn' : 'ok'),
     };
   });
@@ -2170,7 +2245,8 @@ export class InvoiceDetailComponent {
 
   onSend(): void {
     const inv = this.detail();
-    if (inv) {
+    if (inv && !this.sending()) {
+      this.sending.set(true);
       this.store.dispatch(InvoicingActions.sendInvoice({ id: inv.id }));
     }
   }

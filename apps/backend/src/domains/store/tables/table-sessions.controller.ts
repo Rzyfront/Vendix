@@ -28,7 +28,9 @@ import {
   ConfirmTablePaymentDto,
   CancelOrderItemDto,
   TransferTableSessionDto,
+  UpdateOrderItemNotesDto,
 } from './dto';
+import { ReassignTableSessionDto } from './dto/table-session.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
@@ -48,7 +50,7 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
  *   - `table_payment_pending` |
  *     `table_payment_confirmed`               (C5: payment per-table state)
  */
-const STAFF_EVENT_WHITELIST = (type: string): boolean => {
+export const STAFF_EVENT_WHITELIST = (type: string): boolean => {
   if (type === 'comensal_joined') return true;
   if (type === 'comensal_left') return true;
   if (type === 'item_added') return true;
@@ -59,6 +61,8 @@ const STAFF_EVENT_WHITELIST = (type: string): boolean => {
   if (type === 'payment.confirmed') return true;
   if (type === 'table_payment_pending') return true;
   if (type === 'table_payment_confirmed') return true;
+  // La cuenta fue pagada, pero la mesa permanece ocupada hasta su cierre.
+  if (type === 'session_paid') return true;
   // Mesa cerrada (POS close-out o cierre canónico / reconciliación Wompi) —
   // el dashboard refresca la mesa a `cleaning` / libre.
   if (type === 'session_closed') return true;
@@ -127,6 +131,13 @@ export class TableSessionsController {
       result,
       'Sesión de mesa abierta exitosamente',
     );
+  }
+
+  @Post('reassign')
+  @Permissions('store:table_sessions:update')
+  async reassign(@Body() dto: ReassignTableSessionDto) {
+    const result = await this.tableSessionsService.reassignSessionToTable(dto);
+    return this.responseService.created(result, 'Cuenta reasignada a la mesa de destino');
   }
 
   /**
@@ -313,6 +324,25 @@ export class TableSessionsController {
       orderItemId,
     );
     return this.responseService.updated(result, 'Item marcado como entregado');
+  }
+
+  /**
+   * Update notes on a single item of the check (QUI-840 / notas de mesa).
+   * PATCH /api/store/table-sessions/:id/items/:orderItemId/notes
+   */
+  @Patch(':id/items/:orderItemId/notes')
+  @Permissions('store:table_sessions:update')
+  async updateItemNotes(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('orderItemId', ParseIntPipe) orderItemId: number,
+    @Body() dto: UpdateOrderItemNotesDto,
+  ) {
+    const result = await this.tableSessionsService.updateItemNotes(
+      id,
+      orderItemId,
+      dto.notes,
+    );
+    return this.responseService.updated(result, 'Nota del ítem actualizada');
   }
 
   /**

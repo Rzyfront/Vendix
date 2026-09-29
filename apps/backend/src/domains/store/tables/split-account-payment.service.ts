@@ -232,15 +232,10 @@ export class SplitAccountPaymentService {
               ),
           };
         }
-        if (
-          registerSettings?.enabled &&
-          registerSettings?.require_session_for_sales &&
-          !cashSession
-        ) {
-          this.reject(
-            'Se requiere una caja registradora abierta para procesar ventas.',
-          );
-        }
+        // Gate único de caja (`assertSessionForSales`): conserva la posición
+        // original — después del replay por idempotencia, que no crea dinero
+        // y por tanto no exige sesión.
+        await this.sessions.assertSessionForSales(user_id);
         if (cashSession) {
           const open =
             await tx.$queryRaw`SELECT id FROM cash_register_sessions WHERE id = ${cashSession.id} AND store_id = ${store_id} AND status = 'open' FOR UPDATE`;
@@ -542,19 +537,13 @@ export class SplitAccountPaymentService {
               },
             });
         }
-        let paidSession: any = null;
+        let paidSession: Awaited<
+          ReturnType<TableSessionsService['projectOrderPaymentToTableSession']>
+        > = null;
         if (paid.gte(money(order.grand_total))) {
-          const session = await tx.table_sessions.findFirst({
-            where: {
-              order_id: order.id,
-              store_id,
-              closed_at: null,
-              paid_at: null,
-            },
-          });
-          if (session)
-            paidSession = await this.tableSessions.markSessionPaid(
-              session.id,
+          paidSession =
+            await this.tableSessions.projectOrderPaymentToTableSession(
+              order.id,
               paymentId,
               tx,
             );
@@ -568,14 +557,7 @@ export class SplitAccountPaymentService {
           recorded: !!fresh.financial_effects_recorded_at,
         };
       });
-      if (result.paidSession) {
-        this.tableSessions.emitSessionPaid(
-          store_id,
-          result.paidSession.id,
-          payment.order_id,
-          paymentId,
-        );
-      }
+      result.paidSession?.emitAfterCommit();
       if (result.recorded) return;
       if (result.fullyPaid)
         await this.orderFlow.settleFinancialSplitSource(

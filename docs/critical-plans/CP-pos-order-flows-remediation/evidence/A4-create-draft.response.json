@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "message": "Orden creada exitosamente",
+  "data": {
+    "id": 1104,
+    "store_id": 10,
+    "state": "draft",
+    "order_number": "ORD2609230001",
+    "customer_alias": "QA A4 borrador cancelable",
+    "internal_notes": null
+  }
+}

@@ -18,6 +18,7 @@ import { InventorySerialNumbersService } from '../../../inventory/serial-numbers
 import { WalletService } from '../../../wallet/wallet.service';
 import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
 import { PaymentGatewayService } from '../../../payments/services/payment-gateway.service';
+import { ManualRefundDeliveryService } from '../../../accounting/auto-entries/manual-refund-delivery.service';
 import { CreateRefundDto, CreateRefundItemDto } from '../dto/create-refund.dto';
 import { RefundCalculationService } from './refund-calculation.service';
 import { RefundFlowService } from './refund-flow.service';
@@ -154,6 +155,7 @@ describe('Refund integrity — real flow + real calculation', () => {
         { provide: WalletService, useValue: wallet },
         { provide: WalletBalanceService, useValue: balance },
         { provide: PaymentGatewayService, useValue: gateway },
+        { provide: ManualRefundDeliveryService, useValue: { deliver: jest.fn(), enqueue: jest.fn() } },
       ],
     }).compile();
     service = module.get(RefundFlowService);

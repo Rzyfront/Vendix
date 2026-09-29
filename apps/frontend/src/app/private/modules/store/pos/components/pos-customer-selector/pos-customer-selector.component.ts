@@ -31,6 +31,7 @@ import {
 } from '../../../../../../shared/components';
 import { computeDocumentFormatHint } from '../../utils/document-format-hint.util';
 import { computePhoneFormatHint } from '../../utils/phone-format-hint.util';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 import {
   extractFormIdentifiers,
   RawCustomerResolveForm,
@@ -100,6 +101,24 @@ export class PosCustomerSelectorComponent {
    * en vez de mandar al cajero por el flujo completo "Con Cliente".
    */
   readonly minimalInvoiceMode = input<boolean>(false);
+  /**
+   * Incidente Óptica Panorama SAS — cuando la venta va a facturación
+   * electrónica (DIAN), un `document_conflict` del resolve (el documento
+   * tecleado no coincide con el que ya tiene guardado la ficha matcheada
+   * por email/nombre — ver `customers.service.ts findOrCreateByEmailOrDocument`,
+   * líneas ~590-611, backend fuera de este scope, solo lectura) NO puede
+   * pasar en silencio: bloquea el avance en vez de facturar con la
+   * identidad equivocada. Fuera de facturación electrónica el conflicto
+   * sigue siendo no bloqueante (comportamiento previo).
+   *
+   * Default `false` a propósito: el host debe pasar explícitamente esta
+   * bandera (p.ej. `settingsFacade.checkout()?.require_customer_data` en
+   * `pos-checkout-shell`, que ya es el flag documentado como "gobierna
+   * electronic invoicing" — ver comentario en ese archivo, fuera de mi
+   * scope) para activar el bloqueo; sin wiring del host, el gate queda
+   * inactivo y el comportamiento no cambia.
+   */
+  readonly requiresElectronicInvoicing = input<boolean>(false);
 
   // ── Outputs ─────────────────────────────────────────────────────────
   readonly customerSelected = output<PosCustomer>();
@@ -124,6 +143,13 @@ export class PosCustomerSelectorComponent {
   private readonly query = signal('');
   /** Última consulta efectiva (reservada para futuros prefill heurísticos). */
   readonly lastQuery = signal('');
+  /**
+   * `true` mientras el último `resolveCustomer()` respondió `document_conflict`
+   * bajo facturación electrónica y el avance quedó bloqueado — ver
+   * `requiresElectronicInvoicing`. Se limpia al editar el formulario o al
+   * salir del paso de creación.
+   */
+  readonly documentConflict = signal(false);
 
   // ── Top-suggestions (clientes más frecuentes) ───────────────────────
   /** Top-3 clientes por volumen de órdenes (carga on-init si showTopSuggestions). */
@@ -281,6 +307,15 @@ export class PosCustomerSelectorComponent {
         if (wantTop && !minimalInvoice) this.loadTopCustomers();
       });
     });
+
+    // Editar cualquier campo tras un bloqueo por document_conflict limpia el
+    // aviso — el cajero ya está corrigiendo la ficha, no tiene sentido dejar
+    // el mensaje viejo colgado hasta el próximo "Siguiente".
+    this.form.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.documentConflict()) this.documentConflict.set(false);
+      });
   }
 
   /** Carga perezosa e idempotente del top-3 comprimido (solo cuando showTopSuggestions). */
@@ -364,6 +399,16 @@ export class PosCustomerSelectorComponent {
           this.toastService.error('Error al buscar clientes');
         },
       });
+  }
+
+  /**
+   * Nombre a mostrar en la chip de cliente seleccionado y en las filas de
+   * resultados/frecuentes. Un cliente JURIDICA sólo trae `legal_name`
+   * (first_name/last_name quedan vacíos); sin este fallback la fila salía en
+   * blanco.
+   */
+  displayName(customer: PosCustomer): string {
+    return customerDisplayName(customer, '');
   }
 
   selectCustomer(customer: PosCustomer): void {
@@ -470,11 +515,20 @@ export class PosCustomerSelectorComponent {
 
     return this.customerService.resolveCustomer(request).pipe(
       map(
-        ({
-          customer,
-          was_created,
-          was_updated,
-        }): boolean => {
+        (result): boolean => {
+          const { customer, was_created, was_updated, document_conflict } =
+            result;
+
+          if (document_conflict && this.requiresElectronicInvoicing()) {
+            this.documentConflict.set(true);
+            this.resolving.set(false);
+            this.toastService.error(
+              'El documento ingresado no coincide con la ficha del cliente; edita la ficha antes de facturar',
+            );
+            return false;
+          }
+          this.documentConflict.set(false);
+
           this.customerSelected.emit(customer);
           this.view.set('overview');
           this.form.reset();
@@ -488,10 +542,9 @@ export class PosCustomerSelectorComponent {
             // the cashier sees confirmation that the existing customer was
             // reused (otherwise the wizard advances silently).
             const name =
-              [customer.first_name, customer.last_name]
-                .filter(Boolean)
-                .join(' ')
-                .trim() || customer.email || 'seleccionado';
+              customerDisplayName(customer, '') ||
+              customer.email ||
+              'seleccionado';
             this.toastService.success(`Cliente encontrado: ${name}`);
           }
           return true;

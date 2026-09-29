@@ -13,10 +13,12 @@ import {
 import { ShippingService } from './shipping.service';
 import { ShippingCalculatorService } from './shipping-calculator.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { CurrentStore } from '../../../common/decorators/current-store.decorator';
 import { Public } from '../../../common/decorators/public.decorator';
 import { RequestContextService } from '../../../common/context/request-context.service';
-import { CalculateShippingDto } from './dto/shipping_calc.dto';
+import { CalculateShippingDto, QuoteManualShippingDto } from './dto/shipping_calc.dto';
 import {
   CreateShippingMethodDto,
   UpdateShippingMethodDto,
@@ -131,6 +133,21 @@ export class ShippingController {
   }
 
   // --- CALCULATOR ---
+  @Post('manual-quote')
+  @UseGuards(PermissionsGuard)
+  @Permissions('store:pos:access', 'store:orders:create', 'store:orders:update')
+  quoteManualShipping(
+    @CurrentStore() storeId: number,
+    @Body() dto: QuoteManualShippingDto,
+  ) {
+    return this.shippingService.quoteManualShipping(
+      storeId,
+      dto.shipping_method_id,
+      dto.shipping_rate_id,
+      dto.manual_shipping_price,
+    );
+  }
+
   @Public()
   @Post('calculate')
   async calculateAndGetRates(

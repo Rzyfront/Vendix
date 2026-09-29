@@ -29,6 +29,8 @@ import {
   UpdateOrderEditorDto,
 } from './dto';
 import { AssignShippingMethodDto } from './dto';
+import { RepairShippingTaxDto } from './dto/repair-shipping-tax.dto';
+import { OrderShippingTaxRepairService } from './services/order-shipping-tax-repair.service';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -38,7 +40,7 @@ import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException } from '@common/errors';
-import { OrderEtaService } from './services/order-eta.service';
+import { OrderEtaService, EtaItemInput } from './services/order-eta.service';
 import { SettingsService } from '../settings/settings.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { EcommercePrismaService } from 'src/prisma/services/ecommerce-prisma.service';
@@ -69,6 +71,9 @@ export class OrdersController {
     // Carril B - B3: NotificationsSseService es el hub por store_id del que
     // OrderSseService empuja. Aqui suscribimos el stream del detalle de orden.
     private readonly sseService: NotificationsSseService,
+    // B5: reparación de la copia del impuesto del envío en órdenes
+    // ya despachadas (salida real de la guarda de facturación).
+    private readonly shippingTaxRepairService: OrderShippingTaxRepairService,
   ) {}
 
   // CP-POS-SVC-PERF-001 / Bugfix — Nest can't reflect Logger as a
@@ -134,6 +139,15 @@ export class OrdersController {
     }
   }
 
+  // Static route must precede @Get(':id'). Uses the order-read permission,
+  // not settings-read, so every role allowed to list sales can filter them.
+  @Get('payment-methods')
+  @Permissions('store:orders:read')
+  async listPaymentMethods() {
+    const methods = await this.ordersService.listPaymentMethods();
+    return this.responseService.success(methods, 'Métodos de pago obtenidos exitosamente');
+  }
+
   @Get('preview-eta')
   @Permissions('store:orders:read')
   @ApiOperation({ summary: 'Preview estimated preparation and delivery time' })
@@ -144,7 +158,7 @@ export class OrdersController {
     @Query('shipping_method_id') shippingMethodId?: string,
   ) {
     try {
-      let items: { preparation_time_minutes: number | null }[] = [];
+      let items: EtaItemInput[] = [];
       let transitMinutes = 0;
 
       if (cartId) {
@@ -152,11 +166,16 @@ export class OrdersController {
           where: { cart_id: +cartId },
           include: {
             product: { select: { preparation_time_minutes: true } },
+            // R8-F2 — `cart_items.product_variant_id` sí existe: el preview
+            // resuelve la misma regla variante ?? producto ?? default.
+            product_variant: { select: { preparation_time_minutes: true } },
           },
         });
         items = cartItems.map((ci: any) => ({
           preparation_time_minutes:
             ci.product?.preparation_time_minutes ?? null,
+          variant_preparation_time_minutes:
+            ci.product_variant?.preparation_time_minutes ?? null,
         }));
       }
 
@@ -300,38 +319,8 @@ export class OrdersController {
   @Get(':id')
   @Permissions('store:orders:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.ordersService.findOne(id);
-      return this.responseService.success(
-        result,
-        'Orden obtenida exitosamente',
-      );
-    } catch (error) {
-      // CP-POS-SVC-PERF-001 / Bugfix — never leak Prisma stack traces or
-      // raw `Unknown field …` errors into the response body. VendixHttpException
-      // errors carry a curated devMessage; everything else is an internal
-      // server error and must surface as a generic 500 with a stable
-      // error_code the frontend can switch on.
-      if (error instanceof VendixHttpException) {
-        return this.responseService.error(
-          (error as any).devMessage || error.message,
-          (error as any).userMessage || error.message,
-          error.getStatus ? error.getStatus() : 400,
-          (error as any).errorCode,
-        );
-      }
-      // Unexpected — log the full trace server-side, return generic.
-      this.logger.error(
-        `[findOne:${id}] Unexpected error`,
-        error?.stack || String(error),
-      );
-      return this.responseService.error(
-        'No se pudo cargar la orden. Intenta de nuevo.',
-        'INTERNAL_ORDER_LOAD_001',
-        500,
-        'INTERNAL_ORDER_LOAD_001',
-      );
-    }
+    const result = await this.ordersService.findOne(id);
+    return this.responseService.success(result, 'Orden obtenida exitosamente');
   }
 
   @Get(':id/timeline')
@@ -406,6 +395,8 @@ export class OrdersController {
         'Orden actualizada exitosamente',
       );
     } catch (error) {
+      // Dejar pasar el código tipado (y el HTTP 400 real) al filtro global.
+      if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al actualizar la orden',
         error.response?.message || error.message,
@@ -508,18 +499,33 @@ export class OrdersController {
     }
   }
 
+  /**
+   * B5 — POST /api/store/orders/:id/shipping-tax/repair
+   *
+   * Repara la copia del impuesto del envío (`orders.shipping_tax_*`) en
+   * órdenes ya despachadas: `complete_rate` la completa desde su tarifa,
+   * `clear` la vacía (solo sin asiento de venta contabilizado). Nunca toca
+   * `shipping_cost` ni `grand_total`. Sin try/catch: el servicio solo lanza
+   * `VendixHttpException` y el filtro global emite status + error_code.
+   */
+  @Post(':id/shipping-tax/repair')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:orders:update')
+  async repairShippingTax(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RepairShippingTaxDto,
+  ) {
+    const result = await this.shippingTaxRepairService.repair(id, dto);
+    return this.responseService.updated(
+      result,
+      'Impuesto del envío reparado exitosamente',
+    );
+  }
+
   @Delete(':id')
   @Permissions('store:orders:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
-    try {
-      await this.ordersService.remove(id);
-      return this.responseService.deleted('Orden eliminada exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar la orden',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    await this.ordersService.remove(id);
+    return this.responseService.deleted('Orden eliminada exitosamente');
   }
 }

@@ -1,0 +1,24 @@
+-- E.1-SA3 DB-05: POS orders born pickup (step E.1: 0 NEW implicit; explicit QA declarations excluded by origin)
+-- run: 2026-09-24T01:05Z, db=vendix_db (docker vendix_postgres)
+
+-- Q1: latest pos+pickup + counts in windows
+    latest_pos_pickup    | last7d | since_e1_start 
+-------------------------+--------+----------------
+ 2026-09-23 11:10:36.288 |     11 |              7
+(1 row)
+
+
+-- Q2: all pos+pickup since E.1 start (2026-09-20) with origin markers
+  id  | order_number  |   state    | created_by_user_id |                                                                                  origin                                                                                  
+------+---------------+------------+--------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ 1121 | POS-2026-0327 | finished   |                162 | 
+ 1136 | ORD2609230002 | cancelled  |                162 | {"_flow_metadata":{"cancelled_at":"2026-09-23T09:07:18.135Z","cancellation_reason":"QA FB22: cancelar en vez de borrar","previous_state":"draft"},"notes":""}
+ 1138 | ORD2609230003 | cancelled  |                162 | {"_flow_metadata":{"cancelled_at":"2026-09-23T09:35:03.583Z","cancellation_reason":"QA E2: descartar orden API con reserva previa","previous_state":"draft"},"notes":""}
+ 1140 | POS-2026-0332 | processing |                162 | {"_flow_metadata":{"promoted_from_draft":true,"promoted_at":"2026-09-23T09:35:58.041Z"},"notes":""}
+ 1142 | POS-2026-0333 | processing |                162 | {"_flow_metadata":{"promoted_from_draft":true,"promoted_at":"2026-09-23T09:36:46.987Z"},"notes":""}
+ 1163 | ORD2609230010 | cancelled  |                162 | {"_flow_metadata":{"cancelled_at":"2026-09-23T11:10:54.685Z","cancellation_reason":"QA A4 borrador abandonado desde UI","previous_state":"draft"},"notes":""}
+ 1164 | ORD2609230011 | cancelled  |                162 | {"_flow_metadata":{"cancelled_at":"2026-09-23T11:10:45.738Z","cancellation_reason":"QA E4 concurrent cancel","previous_state":"draft"},"notes":""}
+(7 rows)
+
+
+-- NOTE: the 7 rows above are all explicit QA declarations by user 162: #1121 carries customer_alias='QA E5 recogida' (matches evidence/E5-pickup.request.json which declares "delivery_type":"pickup" explicitly); the other 6 carry QA reasons in _flow_metadata (FB22/A4/E4/E2 fixtures, E2 promotion); #1140/#1142 are registry-blessed (registry/db.md DB-05). Both POS writers now emit direct_delivery only: pos-checkout-shell.component.ts:1417 + payments.service.ts:4652 default, and the E.5 gate (payments.service.ts:763-777) blocks delivery-intent fallthrough. No implicit llevar->pickup birth exists.

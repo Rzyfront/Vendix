@@ -30,6 +30,12 @@ export function createPrismaMock(
     typeof arg === 'function' ? arg(mock) : Promise.all(arg),
   );
 
+  // Step 1 follow-up (CP-REFUND-FLOW-REDESIGN): creation paths now take the
+  // lifecycle claim via `tx.$queryRaw` (SELECT ... FOR UPDATE). The tx
+  // callback receives this same mock, so the primitive must exist here or
+  // every spec driving those paths fails with "$queryRaw is not a function".
+  mock.$queryRaw = jest.fn().mockResolvedValue([]);
+
   return mock as PrismaMock;
 }
 

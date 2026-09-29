@@ -164,6 +164,19 @@ export class TransferTableSessionDto {
   target_table_id!: number;
 }
 
+/** Open a new session for an existing order without reopening its closed history. */
+export class ReassignTableSessionDto {
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  order_id!: number;
+
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  target_table_id!: number;
+}
+
 /**
  * DTO to add a batch of items to an existing open table session.
  *
@@ -186,4 +199,14 @@ export class AddItemsToTableSessionDto {
   @ValidateNested({ each: true })
   @Type(() => TableSessionAddItemDto)
   items!: TableSessionAddItemDto[];
+}
+
+/**
+ * DTO to update notes on a single item of an open table check.
+ */
+export class UpdateOrderItemNotesDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  notes?: string;
 }

@@ -1,0 +1,13 @@
+{
+  "statusCode": 409,
+  "error_code": "ORD_FLOW_PAYMENT_FAILED_001",
+  "message": "Order payment could not be processed; the order remains ready-to-pay",
+  "details": {
+    "order_id": 1113,
+    "available_actions": [
+      "mark_delivered",
+      "cancel"
+    ],
+    "reason": "pay is not in the available actions for this order state"
+  }
+}

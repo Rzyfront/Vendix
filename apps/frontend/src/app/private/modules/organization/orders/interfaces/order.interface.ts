@@ -58,7 +58,7 @@ export interface OrderStore {
   slug: string;
 }
 
-export type DeliveryType = 'pickup' | 'home_delivery' | 'direct_delivery';
+export type DeliveryType = 'pickup' | 'home_delivery' | 'direct_delivery' | 'dine_in' | 'other';
 
 export interface OrderListItem {
   id: string;

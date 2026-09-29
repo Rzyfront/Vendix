@@ -165,6 +165,7 @@ export interface PosProductVariant {
    * paralelo). Opcional: el display usa `final_price ?? price_override`.
    */
   final_price?: number | null;
+  regular_final_price?: number | null;
   cost_price: number | null;
   stock: number;
   available_stock?: number | null;
@@ -736,6 +737,8 @@ export class PosProductService {
             v.price_override != null ? Number(v.price_override) : null,
           final_price:
             v.final_price != null ? Number(v.final_price) : null,
+          regular_final_price:
+            v.regular_final_price != null ? Number(v.regular_final_price) : null,
           cost_price: v.cost_price != null ? Number(v.cost_price) : null,
           is_on_sale: v.is_on_sale ?? false,
           sale_price: v.sale_price != null ? Number(v.sale_price) : null,
@@ -787,6 +790,12 @@ export class PosProductService {
         ...(product.final_price != null && Number(product.final_price) > 0
           ? { final_price: Number(product.final_price) }
           : {}),
+        // B5/B14 — faltaba copiar oferta a nivel producto (ya se copiaba en
+        // variantes, ver mapeo de variantes más abajo). Sin esto
+        // `PriceResolverService.resolve()` nunca entra a la regla 3
+        // (is_on_sale) y el carrito cobra base_price, no sale_price.
+        is_on_sale: product.is_on_sale ?? false,
+        sale_price: product.sale_price != null ? Number(product.sale_price) : null,
         active_promotion: activePromotion,
         allow_pos_price_override: product.allow_pos_price_override === true,
         cost: product.cost_price ? parseFloat(product.cost_price) : undefined,

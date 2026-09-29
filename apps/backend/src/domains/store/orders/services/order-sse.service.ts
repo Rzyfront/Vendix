@@ -18,6 +18,7 @@ import { SseNotificationPayload } from '../../notifications/interfaces/notificat
  *   - `order.items.updated`   — emitido directo por `updateOrderFromEditor`
  *   - `order.status_changed`  — emitido por `notifications-events.listener`
  *   - `order.shipping_assigned` — emitido por `OrdersService:3094`
+ *   - `order.payment_updated`   — emitido por `OrderFlowService.confirmPayment`
  *
  * Eventos futuros (encargados a otros carriles, no se agregan aquí):
  *   - `order.paid`            — vivirá en `payments.service.ts` (carril lina)
@@ -28,7 +29,8 @@ export type OrderSseKind =
   | 'order.created'
   | 'order.items.updated'
   | 'order.status_changed'
-  | 'order.shipping_assigned';
+  | 'order.shipping_assigned'
+  | 'order.payment_updated';
 
 @Injectable()
 export class OrderSseService {

@@ -17,6 +17,8 @@ import {
   Matches,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
+import { table_status_enum } from '@prisma/client';
+import { PaymentLegDto } from './payment-leg.dto';
 
 export class PosOrderItemDto {
   @IsOptional()
@@ -262,6 +264,13 @@ export class PosInstallmentTermsDto {
 }
 
 export class CreatePosPaymentDto {
+  // Orden ya adoptada por el carrito POS: el cobro reutiliza esta fila.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  order_id?: number;
+
   // Datos del cliente (opcionales para ventas anónimas)
   @IsOptional()
   @IsInt()
@@ -460,6 +469,20 @@ export class CreatePosPaymentDto {
   @MaxLength(255)
   payment_reference?: string;
 
+  /**
+   * Cobro multimétodo de contado: 2..5 tramos cuya suma debe ser igual al
+   * total a cobrar. Si llega con elementos, gana sobre el contrato escalar
+   * (`store_payment_method_id` + `amount_received` + …); si no llega, el cobro
+   * sigue el camino escalar de siempre. Ver `normalizePaymentLegs`.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(5)
+  @ValidateNested({ each: true })
+  @Type(() => PaymentLegDto)
+  payments?: PaymentLegDto[];
+
   // Control de flujo de pago
   @IsOptional()
   @IsBoolean()
@@ -512,6 +535,24 @@ export class CreatePosPaymentDto {
   @Min(0)
   @Type(() => Number)
   shipping_cost?: number;
+
+  /** Gross for inclusive rates; taxable base for additive rates. Server derives shipping_cost. */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  manual_shipping_price?: number;
+
+  /**
+   * Tarifa de envío de la que salió `shipping_cost`. El frontend la envía
+   * Also accompanies manual_shipping_price so the backend can inherit its
+   * fiscal mode and tax category without trusting a client tax calculation.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  shipping_rate_id?: number;
 
   /**
    * GAP-6 (QR mesa dine-in) — Propina opcional. Aditiva al grand_total igual
@@ -654,6 +695,12 @@ export class CreatePosPaymentDto {
   @IsNumber()
   wallet_id?: number;
 
+  /** Stable checkout attempt key; required for Wallet in payments[]. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  idempotency_key?: string;
+
   @IsOptional()
   @IsString()
   return_url?: string;
@@ -749,9 +796,12 @@ export class UpdateOrderWithPaymentDto {
 export class PosPaymentResponseDto {
   success: boolean;
   message: string;
+  /** Prior status only when POS opened a new table session during this charge. */
+  previous_table_status?: table_status_enum;
   order?: {
     id: number;
     order_number: string;
+    customer_alias?: string | null;
     status: string;
     payment_status: string;
     total_amount: number;
@@ -769,6 +819,14 @@ export class PosPaymentResponseDto {
       data?: any;
     };
   };
+  /**
+   * Cobro multimétodo de contado: un elemento por tramo, en orden de
+   * creación, con la MISMA forma que `payment`. Sólo presente cuando el
+   * cobro usó `payments[]` (2..5 tramos); el escalar no la trae (respuesta
+   * histórica intacta) y `payment` sigue siendo el primero, por
+   * compatibilidad con la app móvil.
+   */
+  payments?: NonNullable<PosPaymentResponseDto['payment']>[];
   nextAction?: {
     type: 'redirect' | '3ds' | 'await' | 'none';
     url?: string;

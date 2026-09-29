@@ -1,4 +1,6 @@
 import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createPaymentTools } from '../../../ai-engine/tools/domains/payments.tools';
 import { KitchenFireModule } from '../kitchen-fire/kitchen-fire.module';
 import { PaymentsController } from './payments.controller';
 import { WebhookController } from './webhook.controller';
@@ -13,6 +15,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
 import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import { TaxesModule } from '../taxes/taxes.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -55,6 +58,8 @@ import { InventorySerialNumbersModule } from '../inventory/serial-numbers/invent
 import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.module';
 import { TablesModule } from '../tables/tables.module';
 import { InvoicingModule } from '../invoicing/invoicing.module';
+import { ShippingModule } from '../shipping/shipping.module';
+import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 
 @Module({
   imports: [
@@ -86,6 +91,12 @@ import { InvoicingModule } from '../invoicing/invoicing.module';
     // A.3 CP-facturacion-fixes: InvoicingService + InvoiceFlowService for the
     // webhook auto-send. No cycle: the invoicing graph never imports payments.
     InvoicingModule,
+    // Copia del impuesto del envío (ShippingTaxService) en la venta POS a
+    // domicilio. Sin ciclo: ShippingModule solo importa Prisma/Response/Settings.
+    ShippingModule,
+    // Plan order-truth-and-invoice-tz — writer único de `order_events`.
+    // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
+    OrderHistoryModule,
   ],
   controllers: [
     // CP-POLLO-ARABE-727 (verificación E2E) — `BankAccountsController` va ANTES
@@ -111,6 +122,13 @@ import { InvoicingModule } from '../invoicing/invoicing.module';
     WebhookHandlerService,
     WebhookController,
     StockLevelManager,
+    // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
+    // step 4) — re-declared locally, same established pattern as
+    // `StockLevelManager` above (see `order-stock-commit.module.ts` docstring).
+    // `OrderStockCommitModule` (imported below) provides its own instance but
+    // only exports `OrderStockCommitService` + `SellableStockAllocator`, not
+    // this one.
+    StockValidatorService,
     InventoryTransactionsService,
     SystemPaymentMethodsService,
     StorePaymentMethodsService,
@@ -137,6 +155,9 @@ import { InvoicingModule } from '../invoicing/invoicing.module';
 })
 export class PaymentsModule implements OnModuleInit {
   constructor(
+    private toolRegistry: AIToolRegistry,
+    private paymentsService: PaymentsService,
+    private storePaymentMethodsService: StorePaymentMethodsService,
     private paymentGateway: PaymentGatewayService,
     private cashProcessor: CashPaymentProcessor,
     private cashOnDeliveryProcessor: CashOnDeliveryPaymentProcessor,
@@ -161,5 +182,16 @@ export class PaymentsModule implements OnModuleInit {
     );
     this.paymentGateway.registerProcessor('wompi', this.wompiProcessor);
     this.paymentGateway.registerProcessor('wallet', this.walletProcessor);
+
+    // O-30..O-32: cobro POS y reembolsos vía `PaymentsService`. Registro
+    // descentralizado: vive aquí (módulo dueño) y no en `AIEngineModule`
+    // para no reintroducir el ciclo DI. `AIToolRegistry` viene del módulo
+    // global, así que no cuesta ningún import.
+    this.toolRegistry.registerMany(
+      createPaymentTools({
+        paymentsService: this.paymentsService,
+        storePaymentMethodsService: this.storePaymentMethodsService,
+      }),
+    );
   }
 }

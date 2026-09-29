@@ -21,14 +21,23 @@ import {
  *    que el KDS y el listado de órdenes puedan mostrarlo.
  *
  * Reglas del campo `cancellation_type`:
- *  - Opcional. Si llega, debe ser uno de los dos valores canónicos.
+ *  - Opcional. Si llega, debe ser uno de los tres valores canónicos.
  *  - Si no llega, el backend lo deriva:
  *      - `before_fire`     → `inventory_consumed_at_fire=false`
  *      - `after_fire_waste`→ `inventory_consumed_at_fire=true`
  *    La derivación es segura: depende solo del flag persistido, no del
  *    estado del ticket KDS en runtime.
+ *
+ * | Carril | Valor persistido | ¿Habilita remake? |
+ * | --- | --- | --- |
+ * | Línea sin fire | `before_fire` | No |
+ * | Línea/mesa/orden disparada, reuso | `after_fire_reused` | Sí |
+ * | Línea/mesa/orden disparada, merma | `after_fire_waste` | Sí |
+ * | Reversa de entrega, restock | `after_fire_reused` | Sí si fue disparada |
+ * | Reversa de entrega, waste | `after_fire_waste` | Sí si fue disparada |
+ * `delivered_restock` / `delivered_waste` son sólo lectura histórica.
  */
-export type CancellationType = 'before_fire' | 'after_fire_waste';
+export type CancellationType = 'before_fire' | 'after_fire_reused' | 'after_fire_waste';
 
 export class CancelOrderItemDto {
   @IsString()
@@ -37,7 +46,7 @@ export class CancelOrderItemDto {
   reason!: string;
 
   @IsOptional()
-  @IsEnum(['before_fire', 'after_fire_waste'])
+  @IsEnum(['before_fire', 'after_fire_reused', 'after_fire_waste'])
   cancellation_type?: CancellationType;
 }
 

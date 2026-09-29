@@ -641,6 +641,9 @@ import {
                             {{ item.quantity }} {{ item.quantity === 1 ? 'paquete' : 'paquetes' }}
                           </span>
                         }
+                        @if (getOversellWarning(item); as warning) {
+                          <span class="text-[10px] font-medium text-amber-700" role="status">{{ warning }}</span>
+                        }
                       </div>
                     }
                   </div>
@@ -2071,7 +2074,13 @@ private cartService = inject(PosCartService);
       .updateCartItem({ itemId, quantity })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {},
+        next: (state) => {
+          const item = state.items.find((candidate) => candidate.id === itemId);
+          if (item) {
+            const warning = this.getOversellWarning(item);
+            if (warning) this.toastService.warning(warning);
+          }
+        },
         error: (error) => {
           this.toastService.error(
             error.message || 'Error al actualizar cantidad',
@@ -2114,13 +2123,18 @@ private cartService = inject(PosCartService);
     return item.quantity * Number(item.units_per_package ?? 1);
   }
 
-  getQuantityMax(item: CartItem): number {
+  getQuantityMax(item: CartItem): number | null {
+    if (this.cartService.allowNegativeStock()) return null;
     if (item.itemType === 'custom' || item.product.track_inventory === false) {
       return 999;
     }
     const availableStock = this.getAvailableStockForItem(item);
     const requiredPerUnit = this.getRequiredStockPerUnit(item);
     return Math.max(0, Math.floor(availableStock / requiredPerUnit));
+  }
+
+  getOversellWarning(item: CartItem): string | null {
+    return this.cartService.getOversellWarningForItem(item);
   }
 
   private getAvailableStockForItem(item: CartItem): number {
@@ -2657,7 +2671,7 @@ private cartService = inject(PosCartService);
     name?: string;
     first_name?: string;
     last_name?: string;
-    legal_name?: string;
+    legal_name?: string | null;
     business_name?: string;
     email?: string;
   } | null | undefined): string {
@@ -2681,7 +2695,7 @@ private cartService = inject(PosCartService);
     name?: string;
     first_name?: string;
     last_name?: string;
-    legal_name?: string;
+    legal_name?: string | null;
     business_name?: string;
     email?: string;
   } | null): string {

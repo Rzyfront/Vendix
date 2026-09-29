@@ -7,9 +7,11 @@ import {
 import { PrismaModule } from '../../../../prisma/prisma.module';
 import { ResponseModule } from '@common/responses/response.module';
 import { RefundCalculationService } from './services/refund-calculation.service';
+import { RefundCoverageService } from './services/refund-coverage.service';
 import { RefundFlowService } from './services/refund-flow.service';
 import { RefundMethodsService } from './services/refund-methods.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../../inventory/shared/services/stock-validator.service';
 import { InventoryTransactionsService } from '../../inventory/transactions/inventory-transactions.service';
 import { CashRegistersModule } from '../../cash-registers/cash-registers.module';
 import { SettingsModule } from '../../settings/settings.module';
@@ -23,7 +25,11 @@ import { OrderStockCommitModule } from '../../inventory/shared/order-stock-commi
 import { WalletModule } from '../../wallet/wallet.module'; // QUI-457
 import { PaymentsModule } from '../../payments/payments.module'; // refund-gateway-fix: W2-A needs PaymentGatewayService
 import { OrdersModule } from '../orders.module'; // QUI-777: OrderSseService vive acá — el listener KDS lo usa para emitir `order.status_changed`
+import { ShippingModule } from '../../shipping/shipping.module'; // ShippingTaxService en shipOrder (sin ciclo: ShippingModule solo importa Prisma/Response/Settings)
 import { KitchenFireModule } from '../../kitchen-fire/kitchen-fire.module'; // Seam cancelOrderItem: cancel KDS pending in-tx + SSE post-commit (sin ciclo: KitchenFireModule no importa este módulo)
+import { AccountingModule } from '../../accounting/accounting.module';
+import { OrderHistoryModule } from '../order-history/order-history.module'; // Plan order-truth-and-invoice-tz — único escritor de order_events (sin ciclo: OrderHistoryModule solo importa PrismaModule)
+import { WithholdingTaxModule } from '../../withholding-tax/withholding-tax.module'; // PLAN-pago-multimetodo-pendientes paso 2 — `payment.received` resuelve retención sufrida (sin ciclo: WithholdingTaxModule solo importa Prisma/Response)
 
 @Module({
   imports: [
@@ -34,7 +40,11 @@ import { KitchenFireModule } from '../../kitchen-fire/kitchen-fire.module'; // S
     InventorySerialNumbersModule,
     OrderStockCommitModule,
     KitchenFireModule,
+    AccountingModule,
+    ShippingModule,
     WalletModule,
+    OrderHistoryModule,
+    WithholdingTaxModule,
     // QUI-777: OrderSseService vive en OrdersModule y OrdersModule ya importa
     // OrderFlowModule (línea 54) — ciclo. `forwardRef` rompe el ciclo en DI.
     forwardRef(() => OrdersModule),
@@ -48,9 +58,15 @@ import { KitchenFireModule } from '../../kitchen-fire/kitchen-fire.module'; // S
   providers: [
     OrderFlowService,
     RefundCalculationService,
+    RefundCoverageService,
     RefundFlowService,
     RefundMethodsService,
     StockLevelManager,
+    // docs/plans/no-overselling-stock-guard-plan.md step 4 — re-declared
+    // locally per the established pattern (see `OrderStockCommitModule`'s
+    // own doc comment); `SellableStockAllocator` is already resolvable here
+    // via the `OrderStockCommitModule` import above.
+    StockValidatorService,
     InventoryTransactionsService,
     OrderEtaService,
     // P3.4: ORG-scope auto-fulfillment of ecommerce orders.

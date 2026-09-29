@@ -98,7 +98,12 @@ export interface CheckoutRequest {
   shipping_address?: CheckoutShippingAddress;
   shipping_method_id?: number;
   shipping_rate_id?: number;
-  payment_method_id: number;
+  /**
+   * Requerido en el checkout normal. Se omite por completo (undefined) en el
+   * fallback WhatsApp (`pending_shipping_assignment:true`): la orden nace sin
+   * pago porque el total real todavía no incluye el envío.
+   */
+  payment_method_id?: number;
   notes?: string;
   bookings?: BookingSelection[];
   items?: Array<{
@@ -137,6 +142,17 @@ export interface CheckoutRequest {
    * post-éxito del frontend cambia (resumen + `wa.me` con automensaje).
    */
   channel?: 'ecommerce' | 'whatsapp';
+  /**
+   * checkout-whatsapp-location-fallback: `true` cuando el comprador no pudo
+   * ubicarse en el mapa (permiso de geolocalización denegado/no soportado, o
+   * el GPS falló) y confirma enviar su pedido al WhatsApp de la tienda en
+   * vez de seguir intentando. Requiere `channel:'whatsapp'`; el backend
+   * fuerza `delivery_type='other'`, omite `shipping_method_id` /
+   * `shipping_rate_id` / `payment_method_id` (no se crea fila de pago ni se
+   * emite factura), y la tienda completa el envío después con
+   * `PATCH /store/orders/:id/shipping`.
+   */
+  pending_shipping_assignment?: boolean;
 }
 
 export interface CheckoutResponse {
@@ -202,6 +218,28 @@ export interface ConfirmWompiPaymentResponse {
 
 export interface CheckoutEligibility {
   invoicing_enabled: boolean;
+}
+
+/**
+ * Paso 9 (roku-shop-checkout-tarifa-detalle-orden) — lectura firmada del
+ * comprobante guest. Clon de la respuesta admin: URL TTL 5 min + content-type
+ * del HEAD (el visor distingue PDF/imagen con él).
+ */
+export interface GuestPaymentReceiptUrl {
+  url: string;
+  expires_at: string;
+  content_type: string | null;
+}
+
+/**
+ * Paso 9 — resultado de la subida tardía del comprobante desde la vista
+ * guest. La página refresca `has_receipt` con esto sin refetch.
+ */
+export interface GuestReceiptUploadResult {
+  payment_id: number;
+  has_receipt: boolean;
+  receipt_content_type: string | null;
+  receipt_uploaded_at: string;
 }
 
 @Injectable({
@@ -314,6 +352,38 @@ export class CheckoutService {
       );
   }
 
+  /**
+   * Vista previa del descuento de un cupón (QUI-883). Solo lectura: el
+   * backend corre la misma validación que el confirm. `items` salen del
+   * carrito (los precios los resuelve el servidor, nunca el cliente).
+   */
+  previewCouponDiscount(body: {
+    coupon_code: string;
+    items: Array<{ product_id: number; product_variant_id?: number; quantity: number }>;
+  }): Observable<{
+    success: boolean;
+    data: {
+      valid: boolean;
+      coupon_id: number | null;
+      code: string;
+      discount_amount: number;
+      subtotal: number;
+      reason?: string;
+    };
+  }> {
+    return this.http.post<{
+      success: boolean;
+      data: {
+        valid: boolean;
+        coupon_id: number | null;
+        code: string;
+        discount_amount: number;
+        subtotal: number;
+        reason?: string;
+      };
+    }>(`${this.api_url}/coupon-preview`, body, { headers: this.getHeaders() });
+  }
+
   checkout(
     request: CheckoutRequest,
     file?: File | null,
@@ -387,6 +457,48 @@ export class CheckoutService {
   ): Observable<{ success: boolean; data: any }> {
     return this.http.get<{ success: boolean; data: any }>(
       `${environment.apiUrl}/ecommerce/invoice-data/${token}/order-summary`,
+      { headers: this.getHeaders() },
+    );
+  }
+
+  /**
+   * Paso 9 (roku-shop-checkout-tarifa-detalle-orden) — URL firmada TTL 5 min
+   * al comprobante de un pago guest. 404 ciego si el token no vincula al
+   * pago (el token viaja en path, nunca en query).
+   */
+  getGuestPaymentReceiptUrl(
+    token: string,
+    paymentId: number,
+  ): Observable<{ success: boolean; data: GuestPaymentReceiptUrl }> {
+    return this.http.get<{ success: boolean; data: GuestPaymentReceiptUrl }>(
+      `${environment.apiUrl}/ecommerce/invoice-data/${token}/payments/${paymentId}/receipt-url`,
+      { headers: this.getHeaders() },
+    );
+  }
+
+  /**
+   * Paso 9 — subida tardía del comprobante desde la vista guest. Mismo
+   * contrato que el checkout: `multipart/form-data` con clave `file`
+   * (sin Content-Type manual: el navegador pone el boundary).
+   */
+  uploadGuestPaymentReceipt(
+    token: string,
+    paymentId: number,
+    file: File,
+  ): Observable<{
+    success: boolean;
+    data: GuestReceiptUploadResult;
+    message?: string;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http.post<{
+      success: boolean;
+      data: GuestReceiptUploadResult;
+      message?: string;
+    }>(
+      `${environment.apiUrl}/ecommerce/invoice-data/${token}/payments/${paymentId}/receipt`,
+      formData,
       { headers: this.getHeaders() },
     );
   }

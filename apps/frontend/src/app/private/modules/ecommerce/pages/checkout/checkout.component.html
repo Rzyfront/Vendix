@@ -185,16 +185,138 @@
               (addNewClicked)="onServiceNewAddressClicked()"
             />
 
+            @if (!use_new_address() && selected_address_id() != null && !hasResolvedCoords()) {
+              <!-- GAP 2 (2026-09-27): dirección guardada sin coords y sin
+                   geocode resuelto — sin este mapa, `shippingBlockedReason()`
+                   pide "Marca el punto en el mapa" pero no había ningún mapa
+                   que marcar para una dirección guardada.
+                   Visual (2026-09-27): el aviso SIEMPRE va encima del mapa,
+                   nunca debajo.
+                   Chip de carga (2026-09-27): mientras `ensureSavedAddressCoords`
+                   tiene un forward-geocode en vuelo, este chip ocupa el MISMO
+                   slot que el badge/warning de abajo — nunca conviven dos a
+                   la vez (ver `isLocatingAddress`). -->
+              <div class="map-column">
+              <div class="map-indicator">
+              <div class="map-indicator__inner">
+              @if (isLocatingAddress()) {
+                <div class="address-locating-chip" role="status" aria-live="polite">
+                  <span class="address-locating-chip__spinner" aria-hidden="true"></span>
+                  <span>Ubicando tu dirección en el mapa…</span>
+                </div>
+              } @else if (precisionBadge(); as badge) {
+                <p
+                  class="address-precision-badge address-precision-badge--{{ badge.tone }}"
+                  role="status"
+                >
+                  <app-icon [name]="badge.icon" [size]="14" />
+                  <span>{{ badge.text }}</span>
+                </p>
+              } @else {
+                <div class="address-map-warning" role="status">
+                  <p class="address-map-warning__text">
+                    <app-icon name="alert-triangle" [size]="14" />
+                    {{ savedAddressMapWarningText }}
+                  </p>
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    class="address-map-warning__action"
+                    (clicked)="useAutoLocation()"
+                  >
+                    <app-icon slot="icon" name="navigation" [size]="14"></app-icon>
+                    Usar mi ubicación automática
+                  </app-button>
+                </div>
+              }
+              </div>
+              </div>
+              <div
+                class="address-map-anchor"
+                [class.address-map-anchor--highlight]="mapHighlight()"
+              >
+                <div class="map-phone-frame">
+                  <app-address-map-picker
+                    hintPosition="top"
+                    [center]="map_center()"
+                    [delegateLocate]="true"
+                    (located)="onMapLocated($event)"
+                    (locateRequested)="onLocateRequested()"
+                  />
+                </div>
+              </div>
+              </div>
+            }
+
             @if (use_new_address()) {
-              <!-- C.3: mapa 50% enmarcado 9:16 tipo teléfono + formulario 50%.
-                   El teléfono va primero para que quede en el viewport inicial. -->
+              <!-- C.3: formulario (izquierda / arriba en mobile) + mapa de apoyo
+                   cuadrado 1:1 (derecha / abajo en mobile), vía `order` en SCSS. -->
               <div class="delivery-address-grid">
+              <div class="map-column">
+              <!-- Chip de carga (2026-09-27): mismo slot que el
+                   warning/badge de abajo — nunca conviven dos a la vez
+                   (ver `isLocatingAddress`). -->
+              <div
+                class="map-indicator"
+                [class.map-indicator--collapsed]="
+                  !isLocatingAddress() && !addressWarning() && !precisionBadge()
+                "
+              >
+              <div class="map-indicator__inner">
+              @if (isLocatingAddress()) {
+                <div class="address-locating-chip" role="status" aria-live="polite">
+                  <span class="address-locating-chip__spinner" aria-hidden="true"></span>
+                  <span>Ubicando tu dirección en el mapa…</span>
+                </div>
+              } @else if (addressWarning()) {
+                <!-- Visual (2026-09-27): el aviso SIEMPRE va encima del mapa. -->
+                <div class="address-map-warning" role="status">
+                  <p class="address-map-warning__text">
+                    <app-icon name="alert-triangle" [size]="14" />
+                    {{ addressWarning() }}
+                  </p>
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    class="address-map-warning__action"
+                    (clicked)="useAutoLocation()"
+                  >
+                    <app-icon slot="icon" name="navigation" [size]="14"></app-icon>
+                    Usar mi ubicación automática
+                  </app-button>
+                </div>
+              } @else if (precisionBadge(); as badge) {
+                <p
+                  class="address-precision-badge address-precision-badge--{{ badge.tone }}"
+                  role="status"
+                >
+                  <app-icon [name]="badge.icon" [size]="14" />
+                  <span>
+                    {{ badge.text }}
+                    @if (geocodeLabel()) {
+                      <span class="address-precision-badge__label">{{
+                        geocodeLabel()
+                      }}</span>
+                    }
+                  </span>
+                </p>
+              }
+              </div>
+              </div>
+              <div
+                class="address-map-anchor"
+                [class.address-map-anchor--highlight]="mapHighlight()"
+              >
               <div class="map-phone-frame">
               <app-address-map-picker
+                hintPosition="top"
                 [center]="map_center()"
+                [delegateLocate]="true"
                 (located)="onMapLocated($event)"
-                (mapReady)="onMapReady()"
+                (locateRequested)="onLocateRequested()"
               />
+              </div>
+              </div>
               </div>
               <form [formGroup]="address_form" class="address-form">
                 <app-input
@@ -323,10 +445,6 @@
                 </p>
               </div>
             } @else if (shippableOptions().length > 0) {
-              <p class="delivery-subhead">
-                Opciones de envío disponibles — elige la tuya en el paso Pago
-                junto al total.
-              </p>
               @if (isPickupOnlyCoverage()) {
                 <div class="shipping-coverage-fallback">
                   <app-icon
@@ -459,12 +577,128 @@
                   (addNewClicked)="onServiceNewAddressClicked()"
                 />
 
+                @if (!use_new_address() && selected_address_id() != null && !hasResolvedCoords()) {
+                  <!-- GAP 2 (2026-09-27): mismo hueco que en el paso de
+                       entrega — sin este mapa una dirección guardada sin
+                       coords no tiene forma de resolverse aquí.
+                       Visual (2026-09-27): el aviso SIEMPRE va encima del mapa.
+                       Chip de carga (2026-09-27): mismo slot que el
+                       badge/warning — nunca conviven dos a la vez (ver
+                       `isLocatingAddress`). -->
+                  <div class="map-column">
+                  <div class="map-indicator">
+                  <div class="map-indicator__inner">
+                  @if (isLocatingAddress()) {
+                    <div class="address-locating-chip" role="status" aria-live="polite">
+                      <span class="address-locating-chip__spinner" aria-hidden="true"></span>
+                      <span>Ubicando tu dirección en el mapa…</span>
+                    </div>
+                  } @else if (precisionBadge(); as badge) {
+                    <p
+                      class="address-precision-badge address-precision-badge--{{ badge.tone }}"
+                      role="status"
+                    >
+                      <app-icon [name]="badge.icon" [size]="14" />
+                      <span>{{ badge.text }}</span>
+                    </p>
+                  } @else {
+                    <div class="address-map-warning" role="status">
+                      <p class="address-map-warning__text">
+                        <app-icon name="alert-triangle" [size]="14" />
+                        {{ savedAddressMapWarningText }}
+                      </p>
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        class="address-map-warning__action"
+                        (clicked)="useAutoLocation()"
+                      >
+                        <app-icon slot="icon" name="navigation" [size]="14"></app-icon>
+                        Usar mi ubicación automática
+                      </app-button>
+                    </div>
+                  }
+                  </div>
+                  </div>
+                  <div
+                    class="address-map-anchor"
+                    [class.address-map-anchor--highlight]="mapHighlight()"
+                  >
+                    <app-address-map-picker
+                      hintPosition="top"
+                      [center]="map_center()"
+                      [delegateLocate]="true"
+                      (located)="onMapLocated($event)"
+                      (locateRequested)="onLocateRequested()"
+                    />
+                  </div>
+                  </div>
+                }
+
                 @if (use_new_address()) {
-                  <app-address-map-picker
-                    [center]="map_center()"
-                    (located)="onMapLocated($event)"
-                    (mapReady)="onMapReady()"
-                  />
+                  <div class="map-column">
+                  <!-- Chip de carga (2026-09-27): mismo slot que el
+                       warning/badge de abajo (ver `isLocatingAddress`). -->
+                  <div
+                    class="map-indicator"
+                    [class.map-indicator--collapsed]="
+                      !isLocatingAddress() && !addressWarning() && !precisionBadge()
+                    "
+                  >
+                  <div class="map-indicator__inner">
+                  @if (isLocatingAddress()) {
+                    <div class="address-locating-chip" role="status" aria-live="polite">
+                      <span class="address-locating-chip__spinner" aria-hidden="true"></span>
+                      <span>Ubicando tu dirección en el mapa…</span>
+                    </div>
+                  } @else if (addressWarning()) {
+                    <!-- Visual (2026-09-27): el aviso SIEMPRE va encima del mapa. -->
+                    <div class="address-map-warning" role="status">
+                      <p class="address-map-warning__text">
+                        <app-icon name="alert-triangle" [size]="14" />
+                        {{ addressWarning() }}
+                      </p>
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        class="address-map-warning__action"
+                        (clicked)="useAutoLocation()"
+                      >
+                        <app-icon slot="icon" name="navigation" [size]="14"></app-icon>
+                        Usar mi ubicación automática
+                      </app-button>
+                    </div>
+                  } @else if (precisionBadge(); as badge) {
+                    <p
+                      class="address-precision-badge address-precision-badge--{{ badge.tone }}"
+                      role="status"
+                    >
+                      <app-icon [name]="badge.icon" [size]="14" />
+                      <span>
+                        {{ badge.text }}
+                        @if (geocodeLabel()) {
+                          <span class="address-precision-badge__label">{{
+                            geocodeLabel()
+                          }}</span>
+                        }
+                      </span>
+                    </p>
+                  }
+                  </div>
+                  </div>
+                  <div
+                    class="address-map-anchor"
+                    [class.address-map-anchor--highlight]="mapHighlight()"
+                  >
+                    <app-address-map-picker
+                      hintPosition="top"
+                      [center]="map_center()"
+                      [delegateLocate]="true"
+                      (located)="onMapLocated($event)"
+                      (locateRequested)="onLocateRequested()"
+                    />
+                  </div>
+                  </div>
                   <form [formGroup]="address_form" class="address-form">
                     <app-input
                       label="Direccion"
@@ -618,6 +852,8 @@
                     <p class="delivery-summary__hint">
                       @if (selected_shipping_option_id == null) {
                         Elige tu tarifa de envío abajo
+                      } @else if (shippingBlockedReason() !== null) {
+                        {{ selectedShippingOptionName() }} — Pendiente
                       } @else {
                         {{ selectedShippingOptionName() }}
                         @if (shippingCost() > 0) {
@@ -985,8 +1221,9 @@
               <div class="summary-row">
                 <span>Envio</span>
                 <span>{{
-                  shippingDisplay() === "Gratis"
-                    ? "Gratis"
+                  shippingDisplay() === "Gratis" ||
+                  shippingDisplay() === "Pendiente"
+                    ? shippingDisplay()
                     : (shippingCost() | currency)
                 }}</span>
               </div>
@@ -999,13 +1236,18 @@
                 placeholder="Código de cupón"
                 [prefixIcon]="true"
                 customInputClass="uppercase tracking-[0.08em] font-medium"
-                helperText="El descuento se calcula al confirmar la compra."
+                helperText="El descuento se muestra aquí y se confirma al pagar."
                 (inputChange)="
                   coupon_code.set($event.toUpperCase().trim())
                 "
               >
                 <app-icon slot="prefix-icon" name="ticket" [size]="16" />
               </app-input>
+              @if (couponPreviewReason()) {
+                <p class="coupon-preview-reason" role="status">
+                  {{ couponPreviewReason() }}
+                </p>
+              }
             </div>
 
             <app-cart-promotions [cart]="cart()" />
@@ -1045,15 +1287,34 @@
               <span>Total estimado</span>
               <span>{{
                 (cart()!.promotional_subtotal ?? cart()!.subtotal) +
-                  shippingCost() | currency
+                  shippingCostForTotal() -
+                  couponDiscount() | currency
               }}</span>
             </div>
           }
         </div>
 
         <!-- Botonera de acciones: vive debajo de la card de resumen para que
-             Continuar / Confirmar queden siempre visibles junto al total. -->
+             Continuar / Confirmar queden siempre visibles junto al total.
+             Es el MISMO nodo en desktop y mobile (CSS la reposiciona a la
+             barra fija inferior en <=1023px), asi que el aviso de abajo
+             tambien aparece en ambos sin logica duplicada. -->
         <div class="checkout-actions checkout-actions--summary">
+          @if (
+            step() === 1 &&
+            !cartHasOnlyServices &&
+            shippingBlockedReason();
+            as blockReason
+          ) {
+            <!-- Visual (2026-09-27): aviso compacto ENCIMA de los botones,
+                 coherente con el estilo de `.address-map-warning`. -->
+            <p class="checkout-block-reason" role="status">
+              <app-icon name="alert-circle" [size]="13"></app-icon>
+              {{ blockReason }}
+            </p>
+          }
+
+          <div class="checkout-actions__row">
           @if (step() > 1) {
             <div class="checkout-actions__left">
               <app-button
@@ -1090,16 +1351,16 @@
                 (bookingStep !== null &&
                   step() === bookingStep &&
                   !allBookingSlotsSelected) ||
-                (step() === 1 &&
-                  !cartHasOnlyServices &&
-                  !canProceedFromAddress()) ||
                 (step() === paymentStep &&
                   !cartHasOnlyServices &&
                   shipping_options().length === 0) ||
                 (step() === paymentStep &&
                   !cartHasOnlyServices &&
                   selected_delivery() === 'home' &&
-                  selected_shipping_option_id == null)
+                  selected_shipping_option_id == null) ||
+                (step() === 1 &&
+                  !cartHasOnlyServices &&
+                  !canProceedFromAddressStep())
               "
             >
               Continuar
@@ -1135,6 +1396,7 @@
               }}
             </app-button>
           }
+          </div>
         </div>
       </div>
     </div>
@@ -1185,10 +1447,33 @@
     (decline)="onLocationDecline()"
   />
 
+  <app-whatsapp-fallback-modal
+    [(isOpen)]="show_whatsapp_fallback_modal"
+    [loading]="whatsapp_fallback_submitting()"
+    (confirm)="onWhatsappFallbackConfirm()"
+    (decline)="onWhatsappFallbackDecline()"
+  />
+
   @if (wompiWidgetLoading()) {
     <div class="wompi-loading-overlay">
       <div class="spinner"></div>
       <p>Preparando pago seguro...</p>
+    </div>
+  }
+
+  @if (showOrderSuccessOverlay()) {
+    <div
+      class="wompi-loading-overlay order-success-overlay"
+      role="status"
+      aria-live="polite"
+    >
+      <app-icon
+        name="check-circle"
+        [size]="52"
+        class="success-icon"
+      ></app-icon>
+      <p class="success-title">¡Pedido confirmado!</p>
+      <p class="success-sub">Redirigiendo al detalle de tu pedido…</p>
     </div>
   }
 </div>

@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import { OrderFlowService } from './order-flow.service';
 import { RefundFlowService } from './services/refund-flow.service';
+import { RefundCoverageService } from './services/refund-coverage.service';
 import { RefundMethodsService } from './services/refund-methods.service';
 import {
   PayOrderDto,
@@ -41,6 +42,8 @@ import { VendixHttpException } from '@common/errors';
 import { ErrorCodes } from '@common/errors/error-codes';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { isOrderFullyPaid } from '../../payments/services/payment-validator.service';
+import { canPay } from './order-action-policy.util';
 import {
   CancelOrderItemDto,
   CancelDeliveredOrderItemDto,
@@ -52,6 +55,7 @@ export class OrderFlowController {
   constructor(
     private readonly orderFlowService: OrderFlowService,
     private readonly refundFlowService: RefundFlowService,
+    private readonly refundCoverageService: RefundCoverageService,
     private readonly refundMethodsService: RefundMethodsService,
     private readonly responseService: ResponseService,
     // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · emits the timeline rows
@@ -125,23 +129,36 @@ export class OrderFlowController {
     // no longer in the action list. The action-set lookup is read-only and
     // uses the same `getOrder`/`state` resolution as the rest of the flow.
     //
-    // QUI-POS-E2E: BUT `getAvailableActions` no incluye `pay` para `draft`
-    // (el SFM espera `created`+), aunque `OrderFlowService.payOrder` SÍ
-    // auto-promueve `draft → created` con `promoteDraftToCreated`. Si
-    // aplicáramos el gate ciegamente, los drafts POS nuevos no podrían
-    // pagarse nunca desde el editor (CP-POS-CREAR-EDITAR-COBRAR-001 happy
-    // path). Excluimos `draft` del gate y dejamos que `payOrder` haga la
-    // promoción idempotente.
-    const availableActions =
-      await this.orderFlowService.getAvailableActions(orderId);
-    const payAction = (availableActions as any[])?.find?.(
-      (a) => a?.code === 'pay',
-    );
+    // QUI-POS-E2E: BUT the `pay` predicate does not enable `draft` (el SFM
+    // espera `created`+), aunque `OrderFlowService.payOrder` SÍ auto-promueve
+    // `draft → created` con `promoteDraftToCreated`. Si aplicáramos el gate
+    // ciegamente, los drafts POS nuevos no podrían pagarse nunca desde el
+    // editor (CP-POS-CREAR-EDITAR-COBRAR-001 happy path). Excluimos `draft`
+    // del gate y dejamos que `payOrder` haga la promoción idempotente.
+    //
+    // order-truth-and-invoice-tz plan (B1b) — this used to peek at
+    // `getAvailableActions()` and look up its `pay` row, an extra query that
+    // ran the FULL action-list computation just to read one boolean. Now
+    // calls the pure `canPay` predicate directly on the already-fetched
+    // `orderRow` — the SAME predicate `OrderFlowService.payOrder`'s internal
+    // guard (and `getAvailableActions`'s own `pay` row) agree with, so this
+    // gate can never diverge from what the service actually allows.
     const orderRow = await this.orderFlowService.getOrder(orderId);
     const isDraft = orderRow?.state === 'draft';
-    const payEnabled = isDraft || !!payAction?.enabled;
+    const payDecision = canPay(orderRow);
+    const payEnabled = isDraft || payDecision.enabled;
 
     if (!payEnabled) {
+      // The action gate runs before payOrder's locked validator. After a
+      // successful payment, `processing`/`shipped` may no longer advertise
+      // `pay`; return the specific fully-paid code rather than masking it
+      // behind the generic unavailable-action error. The service still owns
+      // the atomic check for concurrent requests that pass this preflight.
+      if (['created', 'shipped', 'processing'].includes(orderRow.state)) {
+        if (isOrderFullyPaid(orderRow)) {
+          throw new VendixHttpException(ErrorCodes.ORD_PAY_ALREADY_PAID_001);
+        }
+      }
       // Mirror the canonical error shape so the cashier sees the same code
       // the editor / order-detail pages already handle, AND the timeline is
       // left clean of `payment.attempt` rows for terminal states.
@@ -150,10 +167,9 @@ export class OrderFlowController {
         undefined,
         {
           order_id: orderId,
-          available_actions: (availableActions as any[])?.map?.(
-            (a) => a?.code,
-          ),
-          reason: 'pay is not in the available actions for this order state',
+          reason:
+            payDecision.reason ??
+            'pay is not in the available actions for this order state',
         },
       );
     }
@@ -487,6 +503,8 @@ export class OrderFlowController {
   @Post('reactivate')
   @Permissions('store:orders:order_flow:reactivate')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'OWNER', 'ADMIN')
   async reactivateOrder(
     @Param('orderId', ParseIntPipe) orderId: number,
     @Body() dto: ReactivateOrderDto,
@@ -516,6 +534,8 @@ export class OrderFlowController {
    * cierra a mano como `completed` (la plata ya se movió por otro canal,
    * p.ej. transferencia bancaria) o `failed` (el processor devolvió
    * algo que no levantó error pero la operación no se completó).
+   * `completed` exige referencia de egreso y canal real; `failed` conserva
+   * el contrato anterior de solo motivo de resolución.
    *
    * Permisos: misma política que `cancel-payment` y `forgive-installment`
    * (reuso `store:orders:order_flow:create` + `@Roles('owner', 'admin')`).
@@ -542,6 +562,8 @@ export class OrderFlowController {
       dto.target_state,
       dto.resolution_notes,
       userId,
+      dto.payout_reference,
+      dto.payout_channel,
     );
     return this.responseService.success(
       refund,
@@ -571,6 +593,20 @@ export class OrderFlowController {
     return this.responseService.success(
       available,
       'Available refund methods retrieved',
+    );
+  }
+
+  // CP-REFUND-FLOW-REDESIGN paso 7 — cobertura refund↔NC por línea + aviso
+  // FE. Lectura pura (permiso `read`, como `preview` y
+  // `available-methods`): la consumen el banner FE→NC del detalle (paso 8)
+  // y la sección Reembolsos del ticket (paso 9).
+  @Get('refund/coverage')
+  @Permissions('store:orders:order_flow:read')
+  async getRefundCoverage(@Param('orderId', ParseIntPipe) orderId: number) {
+    const coverage = await this.refundCoverageService.getCoverage(orderId);
+    return this.responseService.success(
+      coverage,
+      'Refund coverage retrieved',
     );
   }
 }

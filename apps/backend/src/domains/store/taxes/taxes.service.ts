@@ -134,14 +134,11 @@ export class TaxesService {
    * fiscales de productos con líneas de mesa abiertas; al cerrar la cuenta,
    * la normalización tomaba el retorno como «producto exento» y emitía el
    * documento con base inflada e IVA cero (sub-declaración DIAN invisible).
-   * El llamador que persiste el documento final (hoy `payments.service.ts`,
-   * fuera del alcance de este cambio) es quien debe leer este campo y
-   * lanzar `POS_TABLE_LINE_TAX_UNRESOLVABLE_001` cuando
-   * `has_tax_assignment === false` en una línea que sí esperaba impuesto,
-   * en vez de normalizar a IVA cero en silencio. Este método NO lanza ese
-   * error ni cambia su comportamiento por defecto: lo consumen POS,
-   * vitrina, checkout y órdenes, y romper ese contrato es una regresión
-   * mayor fuera de este alcance.
+   * ADR-10: esta bandera describe solo el catálogo ACTUAL. No demuestra
+   * que una línea nueva perdió un impuesto ni justifica bloquear su cobro.
+   * Una línea previamente gravada se conserva por su snapshot persistido;
+   * diagnosticar una pérdida real exige evidencia histórica independiente.
+   * El resolver no lanza ni cambia su comportamiento por defecto.
    */
   // CAVEAT (QUI-772 / 2026-08-31). Este resolver SUMA todas las tasas de
   // todas las categorías. El otro camino,
@@ -421,6 +418,21 @@ export class TaxesService {
       );
     }
     await this.findOne(id, user);
+
+    // `shipping_rates.tax_category_id` es FK RESTRICT: sin este chequeo el
+    // borrado revienta con un error de FK opaco. Se cuenta sin scoping de
+    // tienda a propósito: la FK bloquea igual si la usa cualquier tarifa.
+    const shipping_rates_in_use = await this.prisma
+      .withoutScope()
+      .shipping_rates.count({ where: { tax_category_id: id } });
+    if (shipping_rates_in_use > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_CONFLICT_001,
+        `No se puede eliminar la categoría: la usan ${shipping_rates_in_use} tarifa(s) de envío. Quita el impuesto de esas tarifas primero.`,
+        { tax_category_id: id, shipping_rates_in_use },
+      );
+    }
+
     return this.prisma.tax_categories.delete({ where: { id } });
   }
 }

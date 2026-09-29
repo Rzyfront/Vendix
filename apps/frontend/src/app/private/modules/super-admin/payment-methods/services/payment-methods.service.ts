@@ -173,7 +173,7 @@ export class SuperAdminPaymentMethodsService {
       card: 'Tarjeta',
       paypal: 'PayPal',
       bank_transfer: 'Transferencia',
-      voucher: 'Voucher',
+      voucher: 'Datáfono',
     };
     return labelMap[type] || type;
   }

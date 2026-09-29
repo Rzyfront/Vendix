@@ -1,0 +1,18 @@
+HTTP/1.1 400 Bad Request
+X-Powered-By: Express
+Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate
+Pragma: no-cache
+Expires: 0
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Access-Control-Expose-Headers: Authorization,Cache-Control,Pragma,Content-Disposition
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 299
+X-RateLimit-Reset: 60
+X-Request-Id: f6134ee3-8395-430c-8d94-1556974b6d54
+Content-Type: application/json; charset=utf-8
+Content-Length: 912
+ETag: W/"390-TL93QHd3D/z4De6yQ1SXB6Fc0lo"
+Date: Wed, 23 Sep 2026 04:12:38 GMT
+Connection: keep-alive
+Keep-Alive: timeout=65

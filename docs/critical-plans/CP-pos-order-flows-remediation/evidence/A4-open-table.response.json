@@ -1,0 +1,10 @@
+{
+  "success": true,
+  "message": "Sesión de mesa abierta exitosamente",
+  "data": {
+    "id": 103,
+    "order_id": 1105,
+    "table_id": 11,
+    "closed_at": null
+  }
+}

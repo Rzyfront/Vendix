@@ -1,0 +1,239 @@
+[0m[7m[1m[31m FAIL [39m[22m[27m[0m [2msrc/domains/store/orders/order-flow/[22m[1morder-flow.service.spec.ts[22m ([0m[1m[41m6.078 s[49m[22m[0m)
+  OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2)
+    [32m✓[39m [2mreserva antes del pago, mantiene processing durante el cobro y audita el conteo (4 ms)[22m
+    [32m✓[39m [2msegundo submit no reserva ni cobra y conserva el 409 tipado[22m
+    [32m✓[39m [2mrechaza draft ya pagado después del claim sin reservar ni crear otro pago (1 ms)[22m
+    [32m✓[39m [2mrechaza orden created ya pagada y revierte el claim sin crear otro pago[22m
+    [32m✓[39m [2mmétodo de pago inválido restaura created tras el claim, sin pago ni finish[22m
+    [32m✓[39m [2mmétodo de pago inválido restaura shipped tras el claim, sin pago ni finish (1 ms)[22m
+    [32m✓[39m [2mmétodo de pago inválido restaura pending_payment tras el claim, sin pago ni finish[22m
+    [32m✓[39m [2mrechaza orden shipped ya saldada y conserva su estado logístico[22m
+    [32m✓[39m [2mno reclama processing ni cobra otra vez una orden saldada[22m
+    [32m✓[39m [2mdos flow/pay concurrentes sobre created crean solo un pago (1 ms)[22m
+    [32m✓[39m [2mpermite un abono parcial y cobra solo el saldo pendiente[22m
+    [32m✓[39m [2mrestaura shipped y proyecta el saldo al cobrar el remanente[22m
+    [32m✓[39m [2mstock agotado no bloquea el cobro; consumo en cocina evita descontar otra vez[22m
+    [32m✓[39m [2msi falla la infraestructura de reserva, no cobra y restaura el draft (1 ms)[22m
+    [32m✓[39m [2mmétodo de pago inexistente libera solo la reserva del draft y restaura claim[22m
+    [32m✓[39m [2mefectivo corto libera y restaura sin crear pago[22m
+    [32m✓[39m [2mfallo al crear el pago libera la reserva y mantiene el draft cobrable (16 ms)[22m
+    [32m✓[39m [2mfinish bloqueado compensa el pago y libera la reserva nueva[22m
+    [32m✓[39m [2mcocina pendiente cancela el pago y libera la reserva nueva[22m
+    [32m✓[39m [2mno libera una reserva activa que ya existía antes de promover el draft[22m
+    [32m✓[39m [2mERR-33 postcommit conserva el pago succeeded y la reserva activa (1 ms)[22m
+    [32m✓[39m [2mla promoción independiente de mesa/split sigue dejando created[22m
+  OrderFlowService.confirmDelivery — platos pendientes (E.4)
+    [32m✓[39m [2mrechaza finalizar desde processing con lista de platos accionable[22m
+    [32m✓[39m [2mrechaza finalizar desde delivered con lista de platos accionable[22m
+    [32m✓[39m [2mfinaliza desde processing cuando no quedan platos pendientes[22m
+    [32m✓[39m [2mfinaliza desde delivered cuando no quedan platos pendientes (1 ms)[22m
+    [32m✓[39m [2mno consulta cocina ni muta un estado no finalizable[22m
+  OrderFlowService — compensación de pago POS cuando el finish bloquea
+    [32m✓[39m [2mfinish → INV_STOCK_002: anula el pago succeeded y re-lanza el 409[22m
+    [32m✓[39m [2mfinish OK: NO anula el pago (50 ms)[22m
+    [32m✓[39m [2mE.6 flow/pay: 10% usa productos brutos, suma propina al cargo sin gravarla[22m
+    [32m✓[39m [2mproyección falla post-commit: conserva el pago y responde ERR-33 tipado (409) (1 ms)[22m
+  OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas BOM
+    [32m✓[39m [2mkitchenDisposition reuse: devuelve exactamente las tres hojas consumidas, con signo absoluto y ubicación por variante (1 ms)[22m
+    [32m✓[39m [2mkitchenDisposition waste: registra merma sin consultar consumos ni devolver stock[22m
+    [32m✓[39m [2msin kitchenDisposition y ticket avanzado: error tipado antes del claim, sin efectos (1 ms)[22m
+    [32m✓[39m [2mticket pending: cancela sin kitchenDisposition y conserva after_fire_waste[22m
+    [32m✓[39m [2mkitchenDisposition reuse sin consumo registrado: cancela la línea sin devoluciones ni excepción[22m
+  OrderFlowService.reconcileOrderFromDispatch — tabla de derivación
+    [32m✓[39m [2mprepago (balance 0) + allFulfilled → finished[22m
+    [32m✓[39m [2mCOD (balance > 0) + allFulfilled → delivered[22m
+    [32m✓[39m [2mparcial (anyFulfilled, !allFulfilled) → shipped (1 ms)[22m
+    [32m✓[39m [2m!anyFulfilled + anyDispatched (confirmed) → shipped[22m
+    [32m✓[39m [2mcap on_close con ruta abierta: finished derivado → tope shipped[22m
+    [32m✓[39m [2mcap live con ruta abierta: finished derivado → tope delivered[22m
+    [32m✓[39m [2mNO-OP: delivery_type direct_delivery[22m
+    [32m✓[39m [2mNO-OP: delivery_type dine_in[22m
+    [32m✓[39m [2mNO-OP: sin remisiones (|N| = 0)[22m
+    [32m✓[39m [2mNO-OP: estado no-escalera (created)[22m
+    [32m✓[39m [2msolo drafts (nada despachado) → NO-OP[22m
+  OrderFlowService.markKitchenOrderDelivered — restaurant bridge
+    [32m✓[39m [2mhappy path: orden en processing transiciona a delivered con source kitchen_bridge[22m
+    [32m✓[39m [2mdomicilio: cocina terminada NO entrega la orden — queda en processing para despacho[22m
+    [32m✓[39m [2midempotencia: orden ya en delivered devuelve la fila sin transicionar (1 ms)[22m
+    [32m✓[39m [2midempotencia: orden en finished (auto-finalizada por job 4h) NO transiciona[22m
+    [32m✓[39m [2mvalidateTransition lanza ORDER_INVALID_TRANSITION: el error se propaga al listener[22m
+  OrderFlowService.revertKitchenOrderDelivery — kitchen bridge reverse
+    [32m✓[39m [2mhappy path: orden en delivered transiciona a processing[22m
+    [32m✓[39m [2midempotencia: orden inexistente (findFirst retorna null) NO transiciona[22m
+    [32m✓[39m [2midempotencia: orden en processing (ya estaba) NO transiciona[22m
+    [32m✓[39m [2midempotencia: orden en finished (pago confirmado antes de la reversa) NO transiciona[22m
+    [32m✓[39m [2mvalidateTransition lanza: el error se propaga al listener[22m
+  OrderFlowService.cancelOrderItem — seam compartido
+    [32m✓[39m [2m404 si la orden no existe en la tienda (1 ms)[22m
+    [32m✓[39m [2mno cancela una línea cuando la orden ya tiene cuentas financieras activas[22m
+    [32m✓[39m [2msi el split aparece tras la prelectura, el lock lo detecta antes del soft cancel[22m
+    [32m✓[39m [2m404 si el ítem no pertenece a la orden (sin filtrar)[22m
+    [32m✓[39m [2midempotencia: ítem ya cancelado devuelve la vista sin reescribir[22m
+    [32m✓[39m [2m409 si la orden tiene pago real succeeded, no un payment_status inexistente[22m
+    [32m✓[39m [2msi el pago entra después de la prelectura, el lock impide cancelar la línea (1 ms)[22m
+    [32m✓[39m [2m409 si la orden está finished aunque no traiga el campo legado completed[22m
+    [32m✓[39m [2m409 si la orden está en estado terminal[22m
+    [32m✓[39m [2m422 si el motivo tiene menos de 3 caracteres (defensa en profundidad)[22m
+    [32m✓[39m [2mhappy before_fire: soft cancel + recálculo excluyendo cancelados[22m
+    [32m✓[39m [2mF-082: conserva envío, propina y descuento al recalcular grand_total[22m
+    [32m✓[39m [2mhappy after_fire pending: cancela el ticket in-tx + SSE post-commit (5 ms)[22m
+    [32m✓[39m [2mTOCTOU: ticket avanzado en cocina → merma sin tocar el KDS[22m
+    [32m✓[39m [2mcancellation_type explícito se respeta aunque sea inconsistente[22m
+    [32m✓[39m [2mfalla fuerte si KitchenFireService no está cableado[22m
+  OrderFlowService — charge-time shipping gate (A.2 CP-facturacion-fixes)
+    [32m✓[39m [2mblocks charging a home_delivery order without shipping BEFORE the state claim (1 ms)[22m
+    [32m✓[39m [2mblocks charging a other order without shipping BEFORE the state claim[22m
+    [32m✓[39m [2mlets the charge through once a method is assigned[22m
+    [32m✓[39m [2mdoes not block a pickup order without shipping[22m
+    [32m✓[39m [2mdoes not block a direct_delivery order without shipping[22m
+    [32m✓[39m [2mdoes not block a dine_in order without shipping[22m
+    [32m✓[39m [2mexempts services-only carts[22m
+  OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)
+    [32m✓[39m [2m(a) ticket ready mono-ítem no-takeaway → estampa, cierra ticket y emite puente (1 ms)[22m
+    [32m✓[39m [2m(b) ticket con hermano pendiente → solo la fila del ítem cambia, sin evento[22m
+    [32m✓[39m [2m(c) ítem ya delivered + fila ready (caso 6229) → reconcilia sin re-estampar[22m
+    [32m✓[39m [2m(d) re-disparo en cocina (fila pending) → no toca cocina ni emite[22m
+    [32m✓[39m [2m(dispatch) reconciles a pending kitchen row after physical delivery without a KDS order-state bridge (1 ms)[22m
+    [32m✓[39m [2m(dispatch) does not project kitchen for an order outside the explicit store[22m
+    [32m✓[39m [2m(e) sin filas de cocina → nada que hacer, contrato intacto[22m
+    [32m✓[39m [2mun plato pendiente rechaza sin escribir y dirige al operador al KDS[22m
+  OrderFlowService.cancelOrderItem — guarda delivered (1060 paso 1)
+    [32m✓[39m [2m409 ITEM_ALREADY_DELIVERED sin mutación (ruta por defecto)[22m
+    [32m✓[39m [2m409 ITEM_ALREADY_DELIVERED sin mutación (ruta con cancellation_type explícito)[22m
+    [32m✓[39m [2mel conflicto de estado domina: entregado + motivo corto sigue siendo 409[22m
+  OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)
+    [32m✓[39m [2m409 tipado si hay pago succeeded, sin tocar totales, stock ni auditoría (1 ms)[22m
+    [32m✓[39m [2m409 tipado si hay pago captured, sin tocar totales, stock ni auditoría[22m
+    [32m✓[39m [2m409 tipado si hay pago partially_refunded, sin tocar totales, stock ni auditoría[22m
+    [32m✓[39m [2m409 tipado si hay pago refunded, sin tocar totales, stock ni auditoría[22m
+    [32m✓[39m [2mno reversa una línea entregada mientras exista split financiero activo[22m
+    [32m✓[39m [2mrelee el split bajo lock antes de reversar una entrega[22m
+    [32m✓[39m [2msi el cobro entra tras la prelectura, no reversa entrega ni stock[22m
+    [32m✓[39m [2m409 tipado para estado terminal cancelled sin pago (1 ms)[22m
+    [32m✓[39m [2m409 tipado para estado terminal refunded sin pago[22m
+    [32m✓[39m [2m409 tipado para estado terminal finished sin pago[22m
+    [32m✓[39m [2mprioriza el estado refunded aunque conserve un pago reembolsado[22m
+    [32m✓[39m [2mpago pendiente no impide cancelar un plato de cuenta abierta[22m
+    [31m✕[39m [2mrestock: devuelve stock, cancela suave y audita con destino (2 ms)[22m
+    [31m✕[39m [2mwaste: NO toca stock, deja merma auditada[22m
+    [32m✓[39m [2m422 si el motivo tiene menos de 3 caracteres (sin mutación) (1 ms)[22m
+    [32m✓[39m [2m422 si el destino no es restock|waste (sin mutación)[22m
+    [32m✓[39m [2m409 si el ítem no está entregado (sin mutación)[22m
+    [32m✓[39m [2m404 si el ítem no pertenece a la orden[22m
+    [32m✓[39m [2midempotencia: ítem ya cancelado devuelve la vista sin reescribir ni auditar[22m
+  D.2 — cancelación de una línea prepared ya consumida
+    [32m✓[39m [2mreuse delivered=false devuelve SOLO hojas reales y excluye el plato del total (1 ms)[22m
+    [32m✓[39m [2mreuse delivered=true devuelve SOLO hojas reales y excluye el plato del total[22m
+    [32m✓[39m [2mwaste delivered=false reclasifica costo sin segundo descuento (1 ms)[22m
+    [32m✓[39m [2mwaste delivered=true reclasifica costo sin segundo descuento[22m
+    [32m✓[39m [2mfallo contable activo deja la cancelación y auditoría persistidas para reparación[22m
+    [32m✓[39m [2mcontabilidad inactiva no bloquea restock[22m
+    [32m✓[39m [2mcontabilidad inactiva no bloquea waste[22m
+    [32m✓[39m [2mrelectura bajo lock hace replay idempotente antes de stock o asiento (1 ms)[22m
+    [32m✓[39m [2mcosto cero no postea asiento pero la auditoría conserva las hojas desconocidas[22m
+    [32m✓[39m [2morden cobrada rechaza antes de inventario, asiento y auditoría[22m
+    [32m✓[39m [2mno acepta org=0 sintético aunque el contexto tenga actor (14 ms)[22m
+    [32m✓[39m [2mprepared entregado sin consumo histórico nunca inventa stock del plato vendido[22m
+  OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 3)
+    [32m✓[39m [2mfinish → INV_STOCK_002: anula el pago Y restaura created[22m
+    [32m✓[39m [2mfinish OK: NO restaura (el claim es el único updateMany) (1 ms)[22m
+  OrderFlowController.cancelDeliveredOrderItem — permiso propio (1060 paso 2)
+    [32m✓[39m [2mdeclara @Permissions('store:orders:order_flow:cancel_delivered')[22m
+  OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en efectivo
+    [32m✓[39m [2mcancela un draft sin mesa mediante el claim condicional[22m
+    [32m✓[39m [2mrechaza cancelación de finished con código y estado, sin claim[22m
+    [32m✓[39m [2mrechaza cancelación de refunded con código y estado, sin claim[22m
+    [32m✓[39m [2mrechaza cancelación de cancelled con código y estado, sin claim[22m
+    [32m✓[39m [2mrechaza draft con mesa abierta antes de escribir, con código y sesión[22m
+    [32m✓[39m [2mpago succeeded en efectivo: registra el egreso por el monto exacto[22m
+    [32m✓[39m [2mrechaza cobro mixto liquidado sin reversa de tarjeta; no sale efectivo[22m
+    [32m✓[39m [2mventa con tarjeta liquidada: 409 tipado sin cancelar pago ni orden (1 ms)[22m
+    [32m✓[39m [2mpago en efectivo `pending`: nunca entró al cajón, no hay egreso[22m
+    [32m✓[39m [2mel egreso que falla deja constancia auditable (no es un catch mudo)[22m
+    [32m✓[39m [2msin sesión de caja abierta: no inventa el movimiento y escala la falla[22m
+    [32m✓[39m [2mmódulo de caja apagado: ni movimiento ni escalamiento[22m
+    [32m✓[39m [2mrechaza cancelar stock comprometido incluso force=false (1 ms)[22m
+    [32m✓[39m [2mrechaza cancelar stock comprometido incluso force=true[22m
+    [32m✓[39m [2mno anula localmente un pago ONLINE confirmado sin devolución monetaria[22m
+    [32m✓[39m [2mcancelPayment tampoco puede anular un ONLINE succeeded[22m
+    [32m✓[39m [2mrelee líneas después de esperar el lock, no usa el snapshot cancelable anterior[22m
+    [32m✓[39m [2mconfirmPayment no resucita la orden si cancelación ganó el lock[22m
+    [32m✓[39m [2mcancelación registra el estado fresco ganador, no la prelectura (1 ms)[22m
+  OrderFlowService.registerCreditPayment — table projection (B.2/T5)
+    [32m✓[39m [2mprojects the table session only when the credit is fully settled[22m
+    [32m✓[39m [2mdoes not project a partial abono[22m
+    [32m✓[39m [2mprojection failure throws typed ERR-33, keeps payment/cash, skips finish[22m
+    [32m✓[39m [2mprojects even when the kitchen keeps a settled order open (1 ms)[22m
+
+[1m[31m  [1m● [22m[1mOrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2) › restock: devuelve stock, cancela suave y audita con destino[39m[22m
+
+    [2mexpect([22m[31mjest.fn()[39m[2m).[22mtoHaveBeenCalledWith[2m([22m[32m...expected[39m[2m)[22m
+
+    [32m- Expected[39m
+    [31m+ Received[39m
+
+    [2m  Object {[22m
+    [32m-   "data": ObjectContaining {[39m
+    [31m+   "data": Object {[39m
+    [2m      "cancellation_reason": "el cliente devolvió el plato intacto",[22m
+    [32m-     "cancellation_type": "before_fire",[39m
+    [32m-     "updated_at": Any<Date>,[39m
+    [31m+     "cancellation_type": "after_fire_reused",[39m
+    [31m+     "cancelled_at": 2026-09-24T01:00:36.828Z,[39m
+    [31m+     "updated_at": 2026-09-24T01:00:36.828Z,[39m
+    [2m    },[22m
+    [2m    "where": Object {[22m
+    [2m      "id": 801,[22m
+    [2m    },[22m
+    [2m  }[22m,
+
+    Number of calls: [31m1[39m
+[2m[22m
+[2m    [0m [90m 2402 |[39m     )[33m;[39m[22m
+[2m     [90m 2403 |[39m     [90m// Soft cancel con el tipo contable de la reversa.[39m[22m
+[2m    [31m[1m>[22m[2m[39m[90m 2404 |[39m     expect(txMock[33m.[39morder_items[33m.[39mupdate)[33m.[39mtoHaveBeenCalledWith({[22m
+[2m     [90m      |[39m                                       [31m[1m^[22m[2m[39m[22m
+[2m     [90m 2405 |[39m       where[33m:[39m { id[33m:[39m [33mITEM_ID[39m }[33m,[39m[22m
+[2m     [90m 2406 |[39m       data[33m:[39m expect[33m.[39mobjectContaining({[22m
+[2m     [90m 2407 |[39m         cancellation_reason[33m:[39m [32m'el cliente devolvió el plato intacto'[39m[33m,[39m[0m[22m
+[2m[22m
+[2m      [2mat Object.<anonymous> ([22m[2m[0m[36mdomains/store/orders/order-flow/order-flow.service.spec.ts[39m[0m[2m:2404:39)[22m[2m[22m
+
+[1m[31m  [1m● [22m[1mOrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2) › waste: NO toca stock, deja merma auditada[39m[22m
+
+    [2mexpect([22m[31mjest.fn()[39m[2m).[22mtoHaveBeenCalledWith[2m([22m[32m...expected[39m[2m)[22m
+
+    [32m- Expected[39m
+    [31m+ Received[39m
+
+    [2m  Object {[22m
+    [32m-   "data": ObjectContaining {[39m
+    [32m-     "cancellation_type": "before_fire",[39m
+    [31m+   "data": Object {[39m
+    [31m+     "cancellation_reason": "se cayó el plato al llevarlo",[39m
+    [31m+     "cancellation_type": "after_fire_waste",[39m
+    [31m+     "cancelled_at": 2026-09-24T01:00:36.830Z,[39m
+    [31m+     "updated_at": 2026-09-24T01:00:36.830Z,[39m
+    [2m    },[22m
+    [2m    "where": Object {[22m
+    [2m      "id": 801,[22m
+    [2m    },[22m
+    [2m  }[22m,
+
+    Number of calls: [31m1[39m
+[2m[22m
+[2m    [0m [90m 2442 |[39m       stockLevelManager[33m.[39mgetDefaultLocationForProduct[33m,[39m[22m
+[2m     [90m 2443 |[39m     )[33m.[39mnot[33m.[39mtoHaveBeenCalled()[33m;[39m[22m
+[2m    [31m[1m>[22m[2m[39m[90m 2444 |[39m     expect(txMock[33m.[39morder_items[33m.[39mupdate)[33m.[39mtoHaveBeenCalledWith({[22m
+[2m     [90m      |[39m                                       [31m[1m^[22m[2m[39m[22m
+[2m     [90m 2445 |[39m       where[33m:[39m { id[33m:[39m [33mITEM_ID[39m }[33m,[39m[22m
+[2m     [90m 2446 |[39m       data[33m:[39m expect[33m.[39mobjectContaining({ cancellation_type[33m:[39m [32m'before_fire'[39m })[33m,[39m[22m
+[2m     [90m 2447 |[39m     })[33m;[39m[0m[22m
+[2m[22m
+[2m      [2mat Object.<anonymous> ([22m[2m[0m[36mdomains/store/orders/order-flow/order-flow.service.spec.ts[39m[0m[2m:2444:39)[22m[2m[22m
+
+[1mTest Suites: [22m[1m[31m1 failed[39m[22m, 1 total
+[1mTests:       [22m[1m[31m2 failed[39m[22m, [1m[32m146 passed[39m[22m, 148 total
+[1mSnapshots:   [22m0 total
+[1mTime:[22m        6.4 s, estimated 25 s
+[2mRan all test suites[22m[2m matching [22m/src\/domains\/store\/orders\/order-flow\/order-flow.service.spec.ts/i[2m.[22m

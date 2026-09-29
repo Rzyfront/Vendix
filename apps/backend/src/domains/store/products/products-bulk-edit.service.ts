@@ -29,6 +29,11 @@ import {
 // `export *`) los recibiría `undefined` por el ciclo que swc iza al inicio del
 // módulo compilado. Ver la cabecera de `dto/product-enums.ts`.
 import { ProductState, ProductType } from './dto/product-enums';
+import {
+  findProductTaxComboViolation,
+  PROD_TAX_COMBO_001,
+  type ProductTaxComboCategory,
+} from './services/product-tax-combination.util';
 
 /** Fila de `products` leída para el preview. Genérica a propósito: el diff
  *  recorre `BULK_EDITABLE_FIELDS` contra las columnas homónimas de la fila. */
@@ -226,7 +231,14 @@ export class ProductsBulkEditService {
     const bulkTax = await this.resolveBulkTaxContext(taxAction);
     const productTaxesMap = new Map<
       number,
-      Map<number, { name: string; is_inclusive: boolean }>
+      Map<
+        number,
+        {
+          name: string;
+          is_inclusive: boolean;
+          combo: ProductTaxComboCategory;
+        }
+      >
     >();
 
     if (taxAction && bulkTax) {
@@ -239,7 +251,14 @@ export class ProductsBulkEditService {
             // F-031 — el flag viaja en las lecturas del bulk igual que en el
             // detalle: sin esto el preview no ve un cambio solo-de-flag (F-029).
             is_inclusive: true,
-            tax_categories: { select: { id: true, name: true } },
+            tax_categories: {
+              select: {
+                id: true,
+                name: true,
+                tax_type: true,
+                tax_rates: { select: { store_id: true } },
+              },
+            },
           },
         });
 
@@ -253,6 +272,12 @@ export class ProductsBulkEditService {
           perProduct.set(a.tax_category_id, {
             name: a.tax_categories.name,
             is_inclusive: a.is_inclusive,
+            combo: {
+              id: a.tax_categories.id,
+              name: a.tax_categories.name,
+              tax_type: a.tax_categories.tax_type,
+              tax_rates: a.tax_categories.tax_rates,
+            },
           });
         }
       }
@@ -347,6 +372,31 @@ export class ProductsBulkEditService {
       );
       if (failure) {
         return { ...base, status: 'error', ...failure };
+      }
+
+      // P1-4 — el conjunto fiscal SIGUIENTE debe ser una combinación legal.
+      // Mismo validador que `update()` (que es quien realmente rechaza en el
+      // apply, fila por fila): el preview anuncia la fila como error en vez
+      // de prometer un cambio que el apply no escribirá.
+      if (taxAction && bulkTax) {
+        const current = productTaxesMap.get(product.id);
+        const nextCombo = nextTaxIds
+          .map(
+            (cid) =>
+              bulkTax.catalogById.get(cid)?.combo ?? current?.get(cid)?.combo,
+          )
+          .filter((c): c is ProductTaxComboCategory => !!c);
+        const violation = findProductTaxComboViolation(nextCombo, {
+          storeId: product.store_id,
+        });
+        if (violation) {
+          return {
+            ...base,
+            status: 'error',
+            code: PROD_TAX_COMBO_001.code,
+            message: violation.message,
+          };
+        }
       }
 
       const warnings = this.detectWarnings(
@@ -1371,7 +1421,10 @@ export class ProductsBulkEditService {
     action: BulkRelationalTaxActionDto | undefined,
   ): Promise<{
     normalizedMap: Map<number, boolean> | undefined;
-    catalogById: Map<number, { name: string; catalogDefault: boolean }>;
+    catalogById: Map<
+      number,
+      { name: string; catalogDefault: boolean; combo: ProductTaxComboCategory }
+    >;
   } | null> {
     if (!action) return null;
 
@@ -1423,8 +1476,10 @@ export class ProductsBulkEditService {
         id: true,
         name: true,
         is_inclusive: true,
+        // P1-4 — tipo y tarifas alimentan la regla de combinación del preview.
+        tax_type: true,
         tax_rates: {
-          select: { is_inclusive: true },
+          select: { is_inclusive: true, store_id: true },
           orderBy: { id: 'asc' },
         },
       },
@@ -1445,6 +1500,12 @@ export class ProductsBulkEditService {
           {
             name: cat.name,
             catalogDefault: resolveCatalogInclusiveDefault(cat),
+            combo: {
+              id: cat.id,
+              name: cat.name,
+              tax_type: cat.tax_type,
+              tax_rates: cat.tax_rates,
+            },
           },
         ]),
       ),

@@ -96,8 +96,12 @@ export interface PendingBookingSummary {
 export interface TableSessionSummary {
   id: number;
   order_id: number;
-  opened_by: number;
+  opened_by: number | null;
+  /** ADR-04: quien abrió la sesión, no la asignación estática de la mesa. */
+  waiter: TableWaiter | null;
   opened_at: string | Date;
+  /** Marca de cuenta saldada; la mesa permanece ocupada hasta su cierre. */
+  paid_at?: string | Date | null;
   closed_at: string | Date | null;
   guest_count: number | null;
 }
@@ -107,7 +111,7 @@ export interface TableSession {
   store_id: number;
   table_id: number;
   order_id: number;
-  opened_by: number;
+  opened_by: number | null;
   opened_at: string | Date;
   closed_at: string | Date | null;
   /**
@@ -125,7 +129,14 @@ export interface TableSession {
     name: string;
     zone: string | null;
     status: string;
+    waiter?: TableWaiter | null;
   };
+}
+
+export interface TableWaiter {
+  id: number;
+  first_name: string;
+  last_name: string;
 }
 
 export interface TableSessionOrder {
@@ -218,13 +229,12 @@ export interface TableSessionOrderItem {
    * `cancelled_at` es la fuente de verdad (no hay columna `state` enum);
    * `cancellation_reason` queda persistido para auditoría y para que
    * el KDS / listado de ordenes puedan mostrarlo.
-   * `cancellation_type` clasifica el efecto contable:
-   *   - 'before_fire'      → stock revertido.
-   *   - 'after_fire_waste' → merma, stock NO revertido.
+   * `cancellation_type` clasifica el destino. `delivered_*` sólo se lee
+   * en registros históricos; ninguna cancelación nueva lo escribe.
    */
   cancelled_at: string | null;
   cancellation_reason: string | null;
-  cancellation_type: 'before_fire' | 'after_fire_waste' | null;
+  cancellation_type: 'before_fire' | 'after_fire_reused' | 'after_fire_waste' | 'delivered_restock' | 'delivered_waste' | null;
   /**
    * Snapshot of `products.product_type` taken at order creation by the
    * backend (see `table-sessions.service.ts:addItems`). The table
@@ -447,6 +457,18 @@ export interface SplitAccountPaymentResult {
  * `subtotal` + `total_amount` are required by the POS DTO validator even
  * though the backend re-derives the authoritative totals from the order.
  */
+/**
+ * Tramo de un cobro multimétodo de contado (`PaymentLegDto` del backend).
+ * Claves snake_case EXACTAS: `forbidNonWhitelisted` rechaza cualquier otra.
+ */
+export interface TablePaymentLeg {
+  store_payment_method_id: number;
+  amount: number;
+  amount_received?: number;
+  payment_reference?: string;
+  bank_account_id?: number;
+}
+
 export interface PayTableSessionDto {
   table_session_id: number;
   store_payment_method_id: number;
@@ -460,6 +482,11 @@ export interface PayTableSessionDto {
   tip_amount?: number;
   /** QUI-728 (E.1) — cuenta bancaria elegida para transferencia. */
   bank_account_id?: number;
+  /**
+   * Cobro multimétodo: 2..5 tramos. Cuando llega, el backend lo prefiere
+   * sobre el contrato escalar.
+   */
+  payments?: TablePaymentLeg[];
 }
 
 /**
@@ -572,6 +599,23 @@ export interface ConfirmTablePaymentResult {
 export interface TransferTableSessionDto {
   source_table_id: number;
   target_table_id: number;
+}
+
+/** G.2: reuses the existing order and creates a new table session. */
+export interface ReassignTableSessionDto {
+  order_id: number;
+  target_table_id: number;
+}
+
+/** Read-side evidence for hiding reassignment when financial history exists. */
+export interface TableOrderReassignmentEvidence {
+  id: number;
+  state: string;
+  total_paid: number | string;
+  active_financial_split_id: number | null;
+  payments: Array<{ state: string }>;
+  // The orders detail endpoint currently projects only its latest invoice.
+  invoices: Array<{ status: string }>;
 }
 
 export type TransferMode = 'transfer' | 'swap';

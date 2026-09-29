@@ -36,6 +36,7 @@ import {
 } from '../../interfaces';
 import { ProductionOrdersService } from '../../services';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import { formatStockWarningSummary } from '../../../../../../../core/utils/stock-shortage.util';
 
 type StatusFilter = 'all' | ProductionOrderStatus;
 
@@ -402,10 +403,15 @@ export class ProductionOrdersListPageComponent implements OnInit {
           .complete(order.id, { produced_qty: produced })
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
-            next: () => {
+            next: (completed) => {
               this.toastService.success(
                 'Producción completada: stock generado y consumos registrados',
               );
+              if (completed?.stock_warnings?.length) {
+                this.toastService.warning(
+                  formatStockWarningSummary(completed.stock_warnings),
+                );
+              }
               this.processingId.set(null);
               this.loadOrders();
               this.loadStats();

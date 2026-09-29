@@ -12,6 +12,8 @@ import {
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { ResponseService } from '@common/responses/response.service';
+import { RequestContextService } from '@common/context/request-context.service';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { FiscalContextResolverService } from './services/fiscal-context-resolver.service';
 import { FiscalFlowStateService } from './services/fiscal-flow-state.service';
 import { FiscalObligationService } from './services/fiscal-obligation.service';
@@ -78,7 +80,13 @@ export class StoreFiscalController {
   @Permissions('store:fiscal:history:read')
   async listHistory(@Query() query: FiscalHistoryQueryDto) {
     const context = await this.contextResolver.resolveForStore();
-    const result = await this.audit.list([context], query);
+    const storeId = RequestContextService.getStoreId();
+    if (typeof storeId !== 'number') {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const result = await this.audit.list([context], query, {
+      store_id: storeId,
+    });
     return this.response.paginated(
       result.data,
       result.total,

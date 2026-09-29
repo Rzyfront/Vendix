@@ -19,11 +19,15 @@ import { StoreContextRunner } from '@common/context/store-context-runner.service
 import { WebhookEvent } from '../interfaces';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 import { PaymentLinksService } from '../../payment-links/payment-links.service';
-import { TableSessionsService } from '../../tables/table-sessions.service';
 import { InvoicingService } from '../../invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../invoicing/invoice-flow/invoice-flow.service';
+import {
+  INVOICE_AUTO_SEND_FAILED_ALERT,
+  isPresentialPosSale,
+} from '../../invoicing/pos/presential-pos-sale';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
-import { buildTaxBreakdown } from '@common/interfaces/tax-breakdown.interface';
+import { buildOrderSaleTaxPayload } from '../utils/order-sale-tax-payload.util';
+import { resolvePaymentReceivedSaleFields } from '../utils/payment-sale-share.util';
 
 interface WebhookPaymentTransition {
   paymentId: number | null;
@@ -31,6 +35,7 @@ interface WebhookPaymentTransition {
   transitioned: boolean;
   shouldConfirmOrder: boolean;
   reconciliationRequired: boolean;
+  posReservedPayment?: boolean;
 }
 
 // States considered terminal for compare-and-swap and idempotency checks.
@@ -55,9 +60,6 @@ export class WebhookHandlerService {
     private readonly storeContextRunner: StoreContextRunner,
     @Inject(forwardRef(() => OrderFlowService))
     private orderFlowService: OrderFlowService,
-    // Restaurant Suite (Obj 6): reconcile a deferred table close when a POS
-    // digital payment (wompi/wallet) is confirmed by the gateway webhook.
-    private readonly tableSessionsService: TableSessionsService,
     // A.3 CP-facturacion-fixes: web auto-send on payment confirmation (ADR-03).
     // InvoicingModule exports both; PaymentsModule imports it (no cycle: the
     // invoicing graph never imports payments/orders/tables).
@@ -273,10 +275,19 @@ export class WebhookHandlerService {
         });
         if (!payment) return noChange;
         const base = { ...noChange, paymentId: payment.id, orderId: payment.order_id };
+        const prior = payment.gateway_response;
+        const reservedWompi = payment.gateway_reference ===
+          `vendix_${order.store_id}_${order.id}_${payment.id}`;
+        const reservedWallet = payment.gateway_reference ===
+          `pos_wallet_${order.store_id}_${order.id}_${payment.id}`;
+        const posReservedPayment =
+          (prior as Record<string, unknown> | null)?.pos_reserved_payment === true &&
+          (reservedWompi || reservedWallet);
         const lateApproval = approved && (payment.state === 'cancelled' ||
-          ['cancelled', 'refunded'].includes(locked.state));
+          ['cancelled', 'refunded'].includes(locked.state) ||
+          (posReservedPayment && payment.state === 'failed'));
         if ((PAYMENT_TERMINAL_STATES as readonly string[]).includes(payment.state) &&
-            !(approved && payment.state === 'cancelled')) {
+            !lateApproval) {
           // Resume a failed post-commit stock step on replay, without emitting
           // a second monetary receipt. Never reopen a terminal order.
           const needsReconciliation = (payment.gateway_response as Record<string, unknown> | null)?.reconciliation_required === true;
@@ -285,7 +296,14 @@ export class WebhookHandlerService {
           return { ...base, shouldConfirmOrder: resume &&
             await this.isOrderFullyPaid(tx, payment.order_id) };
         }
-        const prior = payment.gateway_response;
+        if (posReservedPayment && reservedWallet && ['failed', 'cancelled'].includes(status)) {
+          const debit = await tx.wallet_transactions.findFirst({
+            where: { reference_type: 'payment', reference_id: payment.id,
+              type: 'debit', state: 'completed' },
+            select: { id: true },
+          });
+          if (debit) return base;
+        }
         const response = lateApproval ? {
           ...(prior && typeof prior === 'object' && !Array.isArray(prior) ? prior : {}),
           gateway_event: gatewayResponse,
@@ -293,6 +311,15 @@ export class WebhookHandlerService {
           reconciliation_reason: 'approved_after_local_cancellation',
           previous_payment_state: payment.state,
           order_state: locked.state,
+        } : posReservedPayment ? {
+          ...(gatewayResponse && typeof gatewayResponse === 'object' ? gatewayResponse : { gateway_event: gatewayResponse }),
+          pos_reserved_payment: true,
+          // The wallet id belongs to the server-owned reservation marker, not
+          // to the provider response. Keep it for an idempotent retry after a
+          // successful debit (settleReservedWalletPayment rechecks the ledger).
+          ...(reservedWallet && typeof (prior as Record<string, unknown>).wallet_id === 'number'
+            ? { wallet_id: (prior as Record<string, unknown>).wallet_id }
+            : {}),
         } : payment.financial_account_id ? {
           ...(gatewayResponse && typeof gatewayResponse === 'object' ? gatewayResponse : { gateway_event: gatewayResponse }),
           financial_request: (prior as any)?.financial_request,
@@ -304,7 +331,16 @@ export class WebhookHandlerService {
             ...(approved ? { paid_at: new Date() } : {}), ...(options?.extraUpdate ?? {}) },
         });
         if (cas.count === 0) return base;
+        if (posReservedPayment && ['failed', 'cancelled'].includes(status)) {
+          // An adopted table/order was promoted before this attempt. A declined
+          // digital charge must not cancel it or release its stock/KDS work.
+          await tx.orders.updateMany({
+            where: { id: order.id, store_id: order.store_id, state: 'pending_payment' },
+            data: { state: 'created', updated_at: new Date() },
+          });
+        }
         return { ...base, transitioned: true, reconciliationRequired: lateApproval,
+          posReservedPayment,
           shouldConfirmOrder: approved && !lateApproval &&
             ['pending_payment', 'processing'].includes(locked.state) &&
             await this.isOrderFullyPaid(tx, payment.order_id) };
@@ -317,10 +353,53 @@ export class WebhookHandlerService {
     }
     if (result.orderId && result.shouldConfirmOrder) {
       await this.confirmOrderPaid(result.orderId);
-    } else if (result.transitioned && result.orderId && ['failed', 'cancelled'].includes(status)) {
+    } else if (result.transitioned && result.orderId && !result.posReservedPayment && ['failed', 'cancelled'].includes(status)) {
       await this.cancelOrderIfOpen(result.orderId, status, gatewayResponse);
     }
     return result;
+  }
+
+  /** Internal settlement of an idempotent wallet ledger debit tied to one reserved payment. */
+  async settleReservedWalletPayment(paymentId: number, transactionId: string): Promise<void> {
+    const client = this.prisma.withoutScope();
+    const payment = await client.payments.findUnique({
+      where: { id: paymentId },
+      include: { orders: true, store_payment_method: { include: { system_payment_method: true } } },
+    });
+    const marker = payment?.gateway_response as Record<string, unknown> | null;
+    const walletTx = await client.wallet_transactions.findFirst({
+      where: { reference_type: 'payment', reference_id: paymentId, type: 'debit', state: 'completed' },
+      include: { wallet: true },
+    });
+    if (!payment || !walletTx || payment.store_payment_method?.system_payment_method?.type !== 'wallet' ||
+        marker?.pos_reserved_payment !== true || marker?.wallet_id !== walletTx.wallet_id ||
+        payment.gateway_reference !== `pos_wallet_${payment.orders.store_id}_${payment.order_id}_${payment.id}` ||
+        walletTx.wallet.store_id !== payment.orders.store_id ||
+        walletTx.wallet.customer_id !== payment.orders.customer_id ||
+        !walletTx.amount.equals(payment.amount) || transactionId !== `wallet_${walletTx.id}`) {
+      throw new Error('Wallet ledger does not match this reserved POS payment');
+    }
+    await this.updatePaymentStatus(payment.gateway_reference, 'succeeded', {
+      wallet_transaction_id: walletTx.id,
+      balance_after: walletTx.balance_after.toString(),
+    }, { matchedPayment: payment, extraUpdate: { transaction_id: transactionId } });
+  }
+
+  /** A pre-debit validation rejection may reopen a reservation only if no wallet ledger exists. */
+  async rejectReservedWalletPayment(paymentId: number, reason: string): Promise<void> {
+    const client = this.prisma.withoutScope();
+    const payment = await client.payments.findUnique({
+      where: { id: paymentId },
+      include: { orders: true, store_payment_method: { include: { system_payment_method: true } } },
+    });
+    if (!payment || payment.store_payment_method?.system_payment_method?.type !== 'wallet' ||
+        (payment.gateway_response as Record<string, unknown> | null)?.pos_reserved_payment !== true ||
+        payment.gateway_reference !== `pos_wallet_${payment.orders.store_id}_${payment.order_id}_${payment.id}`) {
+      throw new Error('Not a reserved POS wallet payment');
+    }
+    await this.updatePaymentStatus(payment.gateway_reference, 'failed',
+      { rejection_reason: reason, pos_reserved_payment: true },
+      { matchedPayment: payment });
   }
 
   private async isOrderFullyPaid(tx: Prisma.TransactionClient, orderId: number): Promise<boolean> {
@@ -407,6 +486,7 @@ export class WebhookHandlerService {
    */
   private async emitPaymentReceivedAccounting(paymentId: number): Promise<void> {
     let financial = false;
+    let reservedPos = false;
     try {
       const client = this.prisma.withoutScope();
       const payment = await client.payments.findUnique({
@@ -453,6 +533,12 @@ export class WebhookHandlerService {
         where: { order_id: order.id },
         select: {
           total_price: true,
+          // Descuento de orden: ver `buildOrderSaleTaxPayload`.
+          discount_amount: true,
+          quantity: true,
+          tax_amount_item: true,
+          weight: true,
+          price_unit_quantity: true,
           // `is_inclusive` no se lee: `total_price` ya es el NETO en
           // ambas ramas del escritor. Ver el comentario extenso en
           // `payments.service.ts`.
@@ -461,8 +547,12 @@ export class WebhookHandlerService {
           },
         },
       });
-      const tax_breakdown = buildTaxBreakdown(
-        orderItemsWithTaxes.flatMap((item) =>
+      // Impuesto del envío (copia congelada en la orden): el helper
+      // compartido con el POS separa el flete NETO (414505) del impuesto
+      // (2408/2436) y lo suma al desglose. Antes este emisor omitía
+      // `shipping_amount`: el asiento de una orden con envío no cuadraba.
+      const sale_tax = buildOrderSaleTaxPayload({
+        product_tax_rows: orderItemsWithTaxes.flatMap((item) =>
           (item.order_item_taxes || []).map((tax) => ({
             ...tax,
             // F-111 — misma regla documentada en `payments.service.ts`: la
@@ -471,7 +561,30 @@ export class WebhookHandlerService {
             taxable_amount: Number(item.total_price || 0),
           })),
         ),
-      );
+        order,
+        order_items: orderItemsWithTaxes,
+      });
+      reservedPos =
+        (payment.gateway_response as Record<string, unknown> | null)?.pos_reserved_payment === true;
+      const saleShare = reservedPos
+        ? await resolvePaymentReceivedSaleFields(client, {
+            order_id: order.id,
+            payment_id: payment.id,
+            amount: Number(payment.amount),
+          })
+        : null;
+      if (saleShare) {
+        const shareCents = Math.round((
+          saleShare.subtotal_amount - saleShare.discount_amount +
+          saleShare.tax_amount + (saleShare.shipping_amount ?? 0) + saleShare.tip_amount
+        ) * 100);
+        if (shareCents !== Math.round(Number(payment.amount) * 100) ||
+            (saleShare.tax_amount > 0 && sale_tax.tax_breakdown.length > 0 &&
+              !saleShare.tax_breakdown?.length &&
+              Number(payment.amount) < Number(order.grand_total))) {
+          throw new Error(`Reserved POS payment ${payment.id} has an unreconciled sale share`);
+        }
+      }
 
       const systemPaymentMethod =
         payment.store_payment_method?.system_payment_method;
@@ -489,16 +602,18 @@ export class WebhookHandlerService {
         order_id: order.id,
         order_number: order.order_number,
         amount: Number(payment.amount),
-        subtotal_amount: Number(order.subtotal_amount || 0),
-        tax_amount: Number(order.tax_amount || 0),
-        tax_breakdown,
+        subtotal_amount: saleShare?.subtotal_amount ?? Number(order.subtotal_amount || 0),
+        tax_amount: saleShare?.tax_amount ?? sale_tax.tax_amount,
+        shipping_amount: saleShare?.shipping_amount ?? sale_tax.shipping_amount,
+        tax_breakdown: saleShare?.tax_breakdown ?? sale_tax.tax_breakdown,
         // Webhooks do not compute suffered withholding on the fly (the POS
         // path resolves it via `WithholdingFlow.resolveSuffered` inside its
         // transaction). Leave the breakdown empty; the listener + auto-entry
         // handle `undefined` / `[]` as "no withholding lines".
         withholding_breakdown: [],
-        discount_amount: Number(order.discount_amount || 0),
-        tip_amount: Number(order.tip_amount || 0),
+        // Parte de BASE del descuento de orden (impuesto neto proyectado).
+        discount_amount: saleShare?.discount_amount ?? sale_tax.discount_amount,
+        tip_amount: saleShare?.tip_amount ?? Number(order.tip_amount || 0),
         currency: payment.currency || order.currency || 'COP',
         payment_method: paymentMethodLabel,
         // Webhooks have no end-user context (no JWT user, no POS cashier).
@@ -514,6 +629,20 @@ export class WebhookHandlerService {
       );
     } catch (error) {
       if (financial) throw error;
+      if (reservedPos) {
+        // Money may already be captured. Do not emit a false ledger entry;
+        // leave a durable reconciliation flag for finance/support instead.
+        try {
+          await this.prisma.withoutScope().$executeRaw`
+            UPDATE payments
+            SET gateway_response = COALESCE(gateway_response, '{}'::jsonb) ||
+              '{"reconciliation_required":true,"reconciliation_reason":"pos_reserved_sale_share"}'::jsonb
+            WHERE id = ${paymentId}
+          `;
+        } catch (markError) {
+          this.logger.error(`Could not mark payment ${paymentId} for accounting reconciliation: ${String(markError)}`);
+        }
+      }
       this.logger.error(
         `Failed to emit payment.received for webhook payment ${paymentId}: ${
           error instanceof Error ? error.message : String(error)
@@ -578,7 +707,9 @@ export class WebhookHandlerService {
       await this.storeContextRunner.runInStoreContext(
         order.store_id,
         async () => {
-          await this.orderFlowService.confirmPayment(orderId);
+          await this.orderFlowService.confirmPayment(orderId, {
+            source: 'webhook',
+          });
         },
       );
       this.logger.log(
@@ -608,7 +739,14 @@ export class WebhookHandlerService {
       await this.storeContextRunner.runInStoreContext(
         order.store_id,
         async () => {
-          const confirmed = await this.orderFlowService.confirmPayment(orderId);
+          // OrderFlow owns the post-commit table projection, including repair
+          // on a processing-state replay. Let its failure reach handleWebhook
+          // so dedup is released; the terminal payment CAS prevents a second
+          // monetary receipt when the gateway retries.
+          const confirmed = await this.orderFlowService.confirmPayment(
+            orderId,
+            { source: 'webhook' },
+          );
           if (!confirmed || !['processing', 'shipped'].includes(confirmed.state)) return;
 
           // El dinero acaba de ENTRAR: éste es el punto donde el inventario
@@ -620,21 +758,19 @@ export class WebhookHandlerService {
           // consecuencias. Un fallo de entrega no deshace el dinero recibido.
           await this.commitConfirmedPosStock(orderId);
 
-          // Restaurant Suite (Obj 6): if this order backs a still-open table
-          // session, the POS deferred its close for a digital payment
-          // (wompi/wallet). Now that the gateway confirmed the charge, close
-          // the session — `closeSession` flips the table to `cleaning` and
-          // emits `session_closed` to staff + comensal streams. No-op for
-          // non-restaurant / non-table orders (findFirst returns null).
-          const openSession = await this.prisma.table_sessions.findFirst({
-            where: { order_id: orderId, closed_at: null },
-            select: { id: true },
-          });
-          if (openSession) {
-            await this.tableSessionsService.closeSession(openSession.id);
-            this.logger.log(
-              `Table session ${openSession.id} closed after digital payment confirmation of order ${orderId}`,
-            );
+          // Venta presencial (POS o mesa QR `dine_in`, ver `isPresentialPosSale`)
+          // con confirmación aplicada: `confirmPayment` ya disparó
+          // `POS_SALE_COMPLETED_EVENT` con la MISMA compuerta y
+          // `PosSaleCompletedListener` es el único dueño de su emisión
+          // (crea/valida/transmite respetando `invoicing.pos.auto_emit`, y marca
+          // `fiscal_alert_code` si falla). Enviar aquí también la misma factura
+          // correría en paralelo con el listener: `InvoiceFlowService.send`
+          // no tiene CAS y la transmitiría dos veces.
+          if (
+            isPresentialPosSale(order) &&
+            (confirmed as any).payment_confirmation_applied === true
+          ) {
+            return;
           }
 
           // A.3 CP-facturacion-fixes (ADR-03): web auto-send on payment
@@ -731,6 +867,11 @@ export class WebhookHandlerService {
         blockOnInsufficient: false,
         consumeSerials: true,
         reason: 'POS Sale (pago digital confirmado)',
+        onShortfall: (item) => this.logger.error(
+          `Order ${orderId}: faltante al confirmar pago digital — ${item.product_name} ` +
+          `(producto ${item.product_id}, variante ${item.product_variant_id ?? 'base'}): ` +
+          `requerido ${item.requested}, disponible ${item.available}. Conciliar inventario.`,
+        ),
       });
 
       await this.recordStockReconciliation(orderId, null);
@@ -806,17 +947,14 @@ export class WebhookHandlerService {
       }
 
       // Compuerta de auto-emisión: el carril lo decide DÓNDE se consume la
-      // venta, no el medio de pago ni el tipo de pedido. `pos` es siempre
-      // mostrador; `dine_in` también, aunque el `channel` sea `ecommerce`
-      // porque una mesa abierta por QR nace con channel:'ecommerce' +
-      // delivery_type:'dine_in' (table-sessions.service.ts) para que los
-      // reportes distingan la cuenta iniciada por QR de la iniciada en caja.
-      // El comensal está en el local y lo cobra el mesero: sin la mitad
-      // `dine_in` aquí, apagar "tienda en línea" dejaría sin facturar las
+      // venta, no el medio de pago ni el tipo de pedido. Definición única en
+      // `isPresentialPosSale` (pos, o mesa QR ecommerce + dine_in): sin la
+      // mitad `dine_in`, apagar "tienda en línea" dejaría sin facturar las
       // mesas de un restaurante entero.
-      const isCounterLane =
-        channel === order_channel_enum.pos ||
-        deliveryType === order_delivery_type_enum.dine_in;
+      const isCounterLane = isPresentialPosSale({
+        channel,
+        delivery_type: deliveryType,
+      });
       const invoicingSettings = isCounterLane
         ? await this.invoicing.getPosInvoicingSettings()
         : await this.invoicing.getEcommerceInvoicingSettings();
@@ -866,7 +1004,7 @@ export class WebhookHandlerService {
         }
         await this.prisma.orders.update({
           where: { id: orderId },
-          data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+          data: { fiscal_alert_code: INVOICE_AUTO_SEND_FAILED_ALERT },
         });
       } catch (flagErr) {
         this.logger.warn(

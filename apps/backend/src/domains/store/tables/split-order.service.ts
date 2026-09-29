@@ -9,6 +9,8 @@ import {
   FinancialSplitErrors,
 } from 'src/common/errors';
 import { resolveOrderLineTaxTotal } from '../taxes/utils/final-price.util';
+import { buildShippingTaxBreakdownRow } from '../shipping/utils/shipping-tax.util';
+import { allocateFinancialAccountShippingTax } from '../shipping/utils/financial-account-shipping-tax.util';
 import {
   SplitByItemsDto,
   SplitByAmountDto,
@@ -23,6 +25,7 @@ import {
   FinancialSplitAllocation,
   FinancialSplitAllocationResult,
   SplitAllocationError,
+  getCents,
 } from './utils/split-allocation.util';
 
 const RECEIVED = ['succeeded', 'captured'];
@@ -240,6 +243,13 @@ export class SplitOrderService {
           id: order.id,
           currency: order.currency,
           source: this.kernelSource(order),
+          shipping_tax: {
+            rate_id: order.shipping_tax_rate_id ?? null,
+            name: order.shipping_tax_name ?? null,
+            type: order.shipping_tax_type ?? null,
+            rate: String(order.shipping_tax_rate ?? 0),
+            amount: String(order.shipping_tax_amount ?? 0),
+          },
           customer_id: order.customer_id,
           customer_alias: order.customer_alias,
           payment_form: order.payment_form,
@@ -271,10 +281,52 @@ export class SplitOrderService {
     request: FinancialSplitRequest,
   ): FinancialSplitAllocationResult {
     try {
-      return allocateFinancialSplit(this.kernelSource(order), request);
+      const allocation = allocateFinancialSplit(this.kernelSource(order), request);
+      this.ensureShippingTaxProjects(order, allocation);
+      return allocation;
     } catch (error) {
       if (error instanceof SplitAllocationError) this.reject(error.message);
       throw error;
+    }
+  }
+
+  /** The invoice and journal share this allocator. Reject before creating any
+   * account if a malformed copy or tiny cent allocation would omit shipping tax. */
+  private ensureShippingTaxProjects(
+    order: any,
+    allocation: FinancialSplitAllocationResult,
+  ): void {
+    const tax = getCents(order.shipping_tax_amount ?? 0, 'shipping_tax_amount');
+    if (tax < 0n) {
+      this.reject('La copia del impuesto del envío es negativa; revisa la tarifa antes de dividir.');
+    }
+    if (tax === 0n) return;
+    const shipping = getCents(order.shipping_cost ?? 0, 'shipping_cost');
+    const row = buildShippingTaxBreakdownRow(order);
+    if (!row || row.tax_rate <= 0 || shipping <= tax) {
+      this.reject(
+        'La copia del impuesto del envío es incoherente; revisa la tarifa antes de dividir.',
+      );
+    }
+    const portions = [
+      ...(allocation.retained_account ? [allocation.retained_account] : []),
+      ...allocation.accounts,
+    ];
+    const siblings = portions.map((portion, index) => ({
+      id: index + 1,
+      shipping_cost: portion.shipping_cost,
+    }));
+    const projected = siblings.reduce((sum, sibling) => {
+      const share = allocateFinancialAccountShippingTax({
+        ...sibling,
+        split: { source_order: order, accounts: siblings },
+      });
+      return sum + (share?.amount ?? 0n);
+    }, 0n);
+    if (projected !== tax) {
+      this.reject(
+        'El impuesto del envío no se puede repartir entre estas cuentas sin perder centavos; ajusta el reparto.',
+      );
     }
   }
 

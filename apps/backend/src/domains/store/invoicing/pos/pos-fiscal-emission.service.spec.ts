@@ -20,9 +20,12 @@ describe('PosFiscalEmissionService', () => {
       contingency_deadline: null,
     };
 
-    const prisma = {
+    const prisma: any = {
       orders: {
-        findFirst: jest.fn().mockResolvedValue({ id: 1 }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ id: 1, store_id: 1, stores: { organization_id: 9 } }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       invoices: {
         findFirst: jest.fn().mockResolvedValue(validatedInvoice),
@@ -34,8 +37,15 @@ describe('PosFiscalEmissionService', () => {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 900 }),
       },
+      // Plan order-truth-and-invoice-tz (Step 6) — guard anti-duplicado de
+      // `recordInvoiceIssued`: sin fila previa por defecto.
+      order_events: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       ...overrides.prisma,
     };
+    prisma.$executeRawUnsafe = jest.fn().mockResolvedValue(0);
+    prisma.$transaction = jest.fn((callback) => callback(prisma));
 
     const invoicing = {
       getElectronicEmissionEligibility: jest
@@ -65,6 +75,12 @@ describe('PosFiscalEmissionService', () => {
       ...overrides.fiscal_scope,
     };
 
+    // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
+    const orderHistory = {
+      record: jest.fn().mockResolvedValue(null),
+      ...overrides.orderHistory,
+    };
+
     return {
       service: new PosFiscalEmissionService(
         prisma as any,
@@ -72,12 +88,14 @@ describe('PosFiscalEmissionService', () => {
         invoice_flow as any,
         retry_queue as any,
         fiscal_scope as any,
+        orderHistory as any,
       ),
       prisma,
       invoicing,
       invoice_flow,
       retry_queue,
       fiscal_scope,
+      orderHistory,
       validatedInvoice,
     };
   };
@@ -204,6 +222,84 @@ describe('PosFiscalEmissionService', () => {
     });
   });
 
+  it('dos fallos de creación del mismo pedido dejan exactamente una constancia', async () => {
+    mockRequestContext({ organization_id: 10, store_id: 20 });
+    const { service, prisma, invoicing } = createService();
+    prisma.invoices.findFirst.mockResolvedValue(null);
+    invoicing.createFromOrder.mockRejectedValue(new Error('Sin resolución vigente'));
+
+    let recorded = false;
+    prisma.fiscal_operation_events.findFirst.mockImplementation(async () =>
+      recorded ? { id: 900 } : null,
+    );
+    prisma.fiscal_operation_events.create.mockImplementation(async () => {
+      recorded = true;
+      return { id: 900 };
+    });
+
+    const first = await service.emitForOrder(1);
+    const second = await service.emitForOrder(1);
+
+    expect(first.state).toBe('failed');
+    expect(second.state).toBe('failed');
+    expect(prisma.fiscal_operation_events.create).toHaveBeenCalledTimes(1);
+    expect(prisma.fiscal_operation_events.findFirst).toHaveBeenCalledWith({
+      where: {
+        organization_id: 10,
+        store_id: 20,
+        accounting_entity_id: 77,
+        event_type: 'pos_sale_without_fiscal_document',
+        resource_type: 'order',
+        resource_id: 1,
+      },
+      select: { id: true },
+    });
+  });
+
+  it('serializa intentos concurrentes del mismo pedido antes de leer y escribir', async () => {
+    mockRequestContext({ organization_id: 10, store_id: 20 });
+    const { service, prisma, invoicing } = createService();
+    prisma.invoices.findFirst.mockResolvedValue(null);
+    invoicing.createFromOrder.mockRejectedValue(new Error('Sin resolución vigente'));
+
+    let recorded = false;
+    let writes = 0;
+    let releasePrevious = Promise.resolve();
+    prisma.$transaction.mockImplementation(async (callback) => {
+      const previous = releasePrevious;
+      let release!: () => void;
+      releasePrevious = new Promise<void>((resolve) => { release = resolve; });
+      const tx = {
+        $executeRawUnsafe: jest.fn(async () => previous),
+        fiscal_operation_events: {
+          findFirst: jest.fn(async () => recorded ? { id: 900 } : null),
+          create: jest.fn(async () => {
+            recorded = true;
+            writes++;
+            return { id: 900 };
+          }),
+        },
+      };
+      try {
+        await callback(tx);
+      } finally {
+        release();
+      }
+      expect(tx.$executeRawUnsafe).toHaveBeenCalledWith(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        'pos_uncovered_sale:10:20:1',
+      );
+    });
+
+    const results = await Promise.all([
+      service.emitForOrder(1),
+      service.emitForOrder(1),
+    ]);
+
+    expect(results.map(({ state }) => state)).toEqual(['failed', 'failed']);
+    expect(writes).toBe(1);
+  });
+
   it('(b) getStatusForOrder reporta `failed` leyendo la constancia, en vez de «Emitiendo…» para siempre', async () => {
     mockRequestContext({ organization_id: 10, store_id: 20 });
     const { service, prisma } = createService();
@@ -256,5 +352,161 @@ describe('PosFiscalEmissionService', () => {
     expect(result.state).toBe('issued');
     expect(result.invoice_id).toBe(5);
     expect(prisma.fiscal_operation_events.create).not.toHaveBeenCalled();
+  });
+
+  it('registra invoice_issued en order_events la primera vez que la emisión queda `issued`', async () => {
+    mockRequestContext({ organization_id: 10, store_id: 20 });
+    const { service, prisma, orderHistory } = createService();
+
+    prisma.invoices.findFirst.mockResolvedValue({
+      id: 5,
+      invoice_number: 'FE-5',
+      status: 'accepted',
+      transmission_status: 'accepted',
+      cufe: 'CUFE-5',
+      pdf_url: null,
+      contingency_deadline: null,
+    });
+
+    await service.emitForOrder(1);
+
+    expect(orderHistory.record).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({
+        orderId: 1,
+        storeId: 1,
+        organizationId: 9,
+        type: 'invoice_issued',
+        payload: { invoice_id: 5, invoice_number: 'FE-5' },
+      }),
+    );
+  });
+
+  it('NO duplica invoice_issued cuando emitForOrder se reinvoca sobre una factura ya aceptada', async () => {
+    mockRequestContext({ organization_id: 10, store_id: 20 });
+    const { service, prisma, orderHistory } = createService({
+      prisma: {
+        order_events: {
+          findFirst: jest.fn().mockResolvedValue({ id: 501 }),
+        },
+      },
+    });
+
+    prisma.invoices.findFirst.mockResolvedValue({
+      id: 5,
+      invoice_number: 'FE-5',
+      status: 'accepted',
+      transmission_status: 'accepted',
+      cufe: 'CUFE-5',
+      pdf_url: null,
+      contingency_deadline: null,
+    });
+
+    await service.emitForOrder(1);
+
+    expect(orderHistory.record).not.toHaveBeenCalled();
+  });
+
+  describe('banner INVOICE_AUTO_SEND_FAILED (orders.fiscal_alert_code)', () => {
+    const MARK = {
+      where: {
+        id: 1,
+        OR: [
+          { fiscal_alert_code: null },
+          { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+        ],
+      },
+      data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+    };
+    const CLEAR = {
+      where: { id: 1, fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+      data: { fiscal_alert_code: null },
+    };
+    const failedStatus: any = { order_id: 1, state: 'failed', message: 'x', invoice_id: 5 };
+
+    it('emisión aceptada LIMPIA sólo su propio código', async () => {
+      const { service, prisma } = createService();
+      prisma.invoices.findFirst.mockResolvedValue({
+        id: 5, invoice_number: 'FE-5', status: 'accepted',
+        transmission_status: 'accepted', cufe: 'CUFE-5', pdf_url: null,
+        contingency_deadline: null,
+      });
+
+      const result = await service.emitForOrder(1);
+
+      expect(result.state).toBe('issued');
+      expect(prisma.orders.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.orders.updateMany).toHaveBeenCalledWith(CLEAR);
+    });
+
+    it('emisión fallida desde emitForOrder NO marca (sólo el listener automático marca)', async () => {
+      const { service, prisma, invoice_flow } = createService();
+      invoice_flow.send.mockRejectedValue(new Error('El certificado de firma expiró.'));
+
+      const result = await service.emitForOrder(1);
+
+      expect(result.state).toBe('failed');
+      expect(prisma.orders.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('markAutoSendFailedAlert con estado failed y factura validated marca INVOICE_AUTO_SEND_FAILED sin pisar códigos ajenos', async () => {
+      const { service, prisma } = createService();
+
+      await service.markAutoSendFailedAlert(1, failedStatus);
+
+      expect(prisma.orders.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.orders.updateMany).toHaveBeenCalledWith(MARK);
+    });
+
+    it('markAutoSendFailedAlert sin factura (createFromOrder lanzó) también marca', async () => {
+      const { service, prisma } = createService();
+      prisma.invoices.findFirst.mockResolvedValue(null);
+
+      await service.markAutoSendFailedAlert(1, { ...failedStatus, invoice_id: null });
+
+      expect(prisma.orders.updateMany).toHaveBeenCalledWith(MARK);
+    });
+
+    it.each(['pending', 'contingency', 'not_applicable', 'issued'])(
+      'markAutoSendFailedAlert con estado %s no escribe nada',
+      async (state) => {
+        const { service, prisma } = createService();
+
+        await service.markAutoSendFailedAlert(1, { ...failedStatus, state });
+
+        expect(prisma.orders.updateMany).not.toHaveBeenCalled();
+      },
+    );
+
+    it('markAutoSendFailedAlert que relee la factura ya accepted LIMPIA en vez de marcar', async () => {
+      const { service, prisma } = createService();
+      prisma.invoices.findFirst.mockResolvedValue({ id: 5, status: 'accepted' });
+
+      await service.markAutoSendFailedAlert(1, failedStatus);
+
+      expect(prisma.orders.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.orders.updateMany).toHaveBeenCalledWith(CLEAR);
+    });
+
+    it.each(['voided', 'cancelled'])(
+      'markAutoSendFailedAlert sobre factura %s no marca (anulación deliberada)',
+      async (status) => {
+        const { service, prisma } = createService();
+        prisma.invoices.findFirst.mockResolvedValue({ id: 5, status });
+
+        await service.markAutoSendFailedAlert(1, failedStatus);
+
+        expect(prisma.orders.updateMany).not.toHaveBeenCalled();
+      },
+    );
+
+    it('markAutoSendFailedAlert nunca lanza aunque la escritura falle', async () => {
+      const { service, prisma } = createService();
+      prisma.orders.updateMany.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        service.markAutoSendFailedAlert(1, failedStatus),
+      ).resolves.toBeUndefined();
+    });
   });
 });
