@@ -102,6 +102,7 @@ import { InvoiceWithholdingInputDto } from './dto/invoice-withholding-input.dto'
 import { resolveAcquirerRail } from './validators/acquirer-rail.resolver';
 import type { StoredTechnicalKey } from '../../../common/services/technical-key-vault.service';
 import { CUSTOMER_FOR_INVOICE_SELECT } from './utils/customer-invoice-data.adapter';
+import { normalizeNit } from '../../../common/utils/nit.util';
 import {
   buildContractAiuDraft,
   ContractAiuSnapshot,
@@ -154,7 +155,14 @@ const INVOICE_INCLUDE = {
   invoice_taxes: true,
   resolution: { select: RESOLUTION_PUBLIC_SELECT },
   customer: {
-    select: { id: true, first_name: true, last_name: true, email: true },
+    select: {
+      id: true,
+      first_name: true,
+      last_name: true,
+      legal_name: true,
+      person_type: true,
+      email: true,
+    },
   },
   supplier: {
     select: {
@@ -1386,6 +1394,137 @@ export class InvoicingService {
     }
   }
 
+  /**
+   * Task E — snapshot `customer_*` completo derivado de la FICHA vinculada,
+   * en el vocabulario de columnas de `invoices` (no el de `ProviderInvoiceData`:
+   * `customer_regime`/`customer_tax_responsibilities` allá son
+   * `customer_tax_regime`/`customer_fiscal_responsibilities` acá — ver el
+   * aviso de nombres en `customer-invoice-data.adapter.ts`).
+   *
+   * Único punto de composición reusado por `create()`, `buildDraftProjection()`,
+   * `createFromOrder()`, `createFromFinancialAccount()`, `createFromSalesOrder()`
+   * y `update()`: antes cada uno componía el nombre y la dirección primaria por
+   * su cuenta, y `createFromSalesOrder()` cargaba el régimen/responsabilidades/
+   * tipo de persona/DV/email/teléfono de la ficha sin escribir ninguno — los
+   * tenía en memoria y los dejaba caer.
+   *
+   * Devuelve `null` cuando no hay ficha (factura manual sin `customer_id`): en
+   * ese caso el snapshot sale ÍNTEGRO de `dto.customer_*` en el call site.
+   */
+  private buildCustomerSnapshotFromFicha(
+    customer:
+      | {
+          legal_name?: string | null;
+          first_name?: string | null;
+          last_name?: string | null;
+          document_type?: string | null;
+          document_number?: string | null;
+          verification_digit?: string | null;
+          email?: string | null;
+          phone?: string | null;
+          tax_regime?: string | null;
+          fiscal_responsibilities?: readonly string[] | null;
+          person_type?: string | null;
+          addresses?: readonly unknown[] | null;
+        }
+      | null
+      | undefined,
+  ): {
+    customer_name: string | null;
+    customer_tax_id: string | null;
+    customer_document_type: string | null;
+    customer_verification_digit: string | null;
+    customer_email: string | null;
+    customer_phone: string | null;
+    customer_tax_regime: string | null;
+    customer_fiscal_responsibilities: string[] | null;
+    customer_person_type: string | null;
+    customer_address: unknown | null;
+  } | null {
+    if (!customer) return null;
+
+    const legal_name = (customer.legal_name ?? '').trim();
+    const first_name = (customer.first_name ?? '').trim();
+    const last_name = (customer.last_name ?? '').trim();
+    const composed_name =
+      legal_name || `${first_name} ${last_name}`.trim() || '';
+
+    return {
+      customer_name: composed_name || null,
+      customer_tax_id: customer.document_number ?? null,
+      customer_document_type: customer.document_type ?? null,
+      customer_verification_digit: customer.verification_digit ?? null,
+      customer_email: customer.email ?? null,
+      customer_phone: customer.phone ?? null,
+      customer_tax_regime: customer.tax_regime ?? null,
+      customer_fiscal_responsibilities: customer.fiscal_responsibilities
+        ? [...customer.fiscal_responsibilities]
+        : null,
+      customer_person_type: customer.person_type ?? null,
+      customer_address: customer.addresses?.[0] ?? null,
+    };
+  }
+
+  /**
+   * Task D#4 — mismo cierre que `CustomersService.splitNitAndDv` (ver
+   * `customers.service.ts`), aplicado al snapshot `customer_*` de una factura
+   * MANUAL. Sólo actúa cuando el tipo declarado es NIT (código DIAN `'31'` o
+   * el alias interno `'NIT'`): cualquier otro documento no lleva DV pegado.
+   *
+   * `document_number` puede llegar con el DV pegado (`'27003183-1'`) porque
+   * `create-invoice.dto.ts` no restringe el formato de `customer_tax_id` más
+   * allá de `@MaxLength(50)`. Si además viene un `customer_verification_digit`
+   * explícito que CONTRADICE al pegado, o el DV (pegado o explícito) no cuadra
+   * con el módulo 11 de la DIAN, rechaza ANTES de persistir — igual que
+   * `NitDvMatches`, pero cubriendo el caso que ese validador no puede ver
+   * porque el DV no viaja en su propio campo.
+   */
+  private splitInvoiceCustomerNitDv(input: {
+    document_type?: string | null;
+    document_number?: string | null;
+    verification_digit?: string | null;
+  }): { document_number: string | null; verification_digit: string | null } {
+    const type = (input.document_type ?? '').trim().toUpperCase();
+    const is_nit = type === '31' || type === 'NIT';
+    const raw_number = (input.document_number ?? '').trim();
+    const explicit_dv = (input.verification_digit ?? '').trim();
+
+    if (!is_nit || !raw_number) {
+      return {
+        document_number: input.document_number ?? null,
+        verification_digit: input.verification_digit ?? null,
+      };
+    }
+
+    const nit_input = raw_number.includes('-')
+      ? raw_number
+      : explicit_dv
+        ? `${raw_number}-${explicit_dv}`
+        : raw_number;
+    const result = normalizeNit(nit_input);
+
+    // El número traía el DV pegado Y además vino uno explícito: si no
+    // coinciden, se declararon dos verdades distintas sobre el mismo dígito.
+    const inline_conflict =
+      raw_number.includes('-') &&
+      Boolean(explicit_dv) &&
+      result.provided_dv !== null &&
+      result.provided_dv !== explicit_dv;
+
+    if (inline_conflict || (result.provided_dv !== null && result.dv_mismatch)) {
+      throw new VendixHttpException(
+        ErrorCodes.CUSTOMER_NIT_DV_MISMATCH,
+        `El dígito de verificación '${explicit_dv || result.provided_dv}' no corresponde al NIT '${result.number || raw_number}': el módulo 11 de la DIAN da '${result.dv}'. Si escribiste el NIT con el DV pegado, sepáralos: el número va en customer_tax_id sin DV y el DV en customer_verification_digit.`,
+        { field: 'customer_verification_digit' },
+      );
+    }
+
+    return {
+      document_number: result.number || raw_number,
+      verification_digit: result.dv || explicit_dv || null,
+    };
+  }
+
   private async loadSupportAdjustmentOriginal(
     dto: CreateInvoiceDto,
     accounting_entity_id: number,
@@ -1508,7 +1647,13 @@ export class InvoicingService {
         orderBy: { [sort_by]: sort_order },
         include: {
           customer: {
-            select: { id: true, first_name: true, last_name: true },
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              legal_name: true,
+              person_type: true,
+            },
           },
           resolution: {
             select: { id: true, prefix: true, resolution_number: true },
@@ -1627,6 +1772,45 @@ export class InvoicingService {
       // acaba de nacer en este mismo tenant.
       await this.assertCustomerResolvable(resolved_customer_id);
     }
+
+    // Task E — ficha del cliente vinculado, mapeada al snapshot `customer_*`
+    // de `invoices` (ver `buildCustomerSnapshotFromFicha`). `null` cuando la
+    // factura es manual sin `customer_id`: ahí el snapshot sale íntegro de
+    // `dto.customer_*`, como antes.
+    const linked_customer_ficha =
+      resolved_customer_id != null
+        ? await this.prisma.users.findFirst({
+            where: { id: resolved_customer_id },
+            select: CUSTOMER_FOR_INVOICE_SELECT,
+          })
+        : null;
+    const linked_customer_snapshot = this.buildCustomerSnapshotFromFicha(
+      linked_customer_ficha,
+    );
+
+    // Task D#4 — separa un NIT con DV pegado ANTES de persistir. El tipo y el
+    // número EFECTIVOS son los que realmente se van a grabar (dto explícito →
+    // ficha vinculada → proveedor del documento soporte), para no dejar sin
+    // validar un NIT que llegó sólo por la ficha o por `support_supplier`.
+    const effective_customer_document_type =
+      dto.customer_document_type ??
+      linked_customer_snapshot?.customer_document_type ??
+      support_supplier?.document_type ??
+      null;
+    const effective_customer_tax_id =
+      dto.customer_tax_id ??
+      linked_customer_snapshot?.customer_tax_id ??
+      support_supplier?.tax_id ??
+      null;
+    const nit_split = this.splitInvoiceCustomerNitDv({
+      document_type: effective_customer_document_type,
+      document_number: effective_customer_tax_id,
+      verification_digit:
+        dto.customer_verification_digit ??
+        linked_customer_snapshot?.customer_verification_digit ??
+        support_supplier?.verification_digit ??
+        null,
+    });
 
     // QUI-690 Step 3 — Inline product creation per line. NOT YET IMPLEMENTED:
     // ProductsService.create is 150+ lines (variants, stock_levels, images,
@@ -1763,9 +1947,20 @@ export class InvoicingService {
         status: 'draft',
         customer_id: resolved_customer_id,
         supplier_id: dto.supplier_id,
-        customer_name: dto.customer_name ?? support_supplier?.name,
-        customer_tax_id: dto.customer_tax_id ?? support_supplier?.tax_id,
-        customer_address: dto.customer_address ?? support_supplier?.addresses,
+        // Task E — con `customer_id` vinculado, el snapshot sale de la FICHA
+        // cuando el DTO no trae el campo explícito (el frontend normalmente
+        // sólo manda `customer_id`, no cada columna a mano). Sin ficha
+        // (factura manual), `dto.customer_*` sigue siendo la única fuente —
+        // comportamiento previo intacto.
+        customer_name:
+          dto.customer_name ??
+          linked_customer_snapshot?.customer_name ??
+          support_supplier?.name,
+        customer_tax_id: nit_split.document_number ?? undefined,
+        customer_address:
+          dto.customer_address ??
+          linked_customer_snapshot?.customer_address ??
+          support_supplier?.addresses,
         // Identidad fiscal del adquiriente — SNAPSHOT de la emisión.
         //
         // Hasta la migración `20260815120000_dian_invoice_contract` estos datos
@@ -1779,13 +1974,30 @@ export class InvoicingService {
         //
         // Persistirlos aquí congela lo que valió al emitir, igual que
         // `customer_address`, que ya seguía este patrón.
-        customer_email: dto.customer_email,
-        customer_phone: dto.customer_phone,
-        customer_document_type: dto.customer_document_type,
-        customer_verification_digit: dto.customer_verification_digit,
-        customer_tax_regime: dto.customer_tax_regime,
+        customer_email:
+          dto.customer_email ?? linked_customer_snapshot?.customer_email,
+        customer_phone:
+          dto.customer_phone ?? linked_customer_snapshot?.customer_phone,
+        customer_document_type: effective_customer_document_type ?? undefined,
+        customer_verification_digit: nit_split.verification_digit ?? undefined,
+        customer_tax_regime:
+          dto.customer_tax_regime ??
+          linked_customer_snapshot?.customer_tax_regime,
         customer_fiscal_responsibilities:
-          dto.customer_fiscal_responsibilities ?? undefined,
+          dto.customer_fiscal_responsibilities ??
+          linked_customer_snapshot?.customer_fiscal_responsibilities ??
+          undefined,
+        // Task D — precedencia: valor declarado en el DTO (factura manual) →
+        // `person_type` de la ficha vinculada → NULL (deja que
+        // `resolveAcquirerIdentity` derive del código de documento en emisión).
+        customer_person_type:
+          dto.customer_person_type ??
+          (linked_customer_snapshot?.customer_person_type as
+            | 'NATURAL'
+            | 'JURIDICA'
+            | undefined
+            | null) ??
+          undefined,
         // Forma ('1' contado / '2' crédito) y medio de pago DIAN.
         payment_form: dto.payment_form,
         payment_means_code: dto.payment_means_code,
@@ -2152,6 +2364,10 @@ export class InvoicingService {
             select: CUSTOMER_FOR_INVOICE_SELECT,
           })
         : null;
+    // Task E — mismo snapshot que `create()` persistiría desde esta ficha.
+    const draft_customer_snapshot = this.buildCustomerSnapshotFromFicha(
+      customer,
+    );
 
     const split_line_taxes = this.needsPersistedLineTaxes(
       calculated.header_taxes,
@@ -2190,30 +2406,65 @@ export class InvoicingService {
       supplier_id: dto.supplier_id ?? null,
       customer,
       supplier: support_supplier ?? null,
-      // El snapshot del adquiriente TAL COMO SE PERSISTIRÍA. Cuando hay
-      // `inline_customer`, éste es el único sitio donde su identidad viaja: no
-      // se creó ninguna fila.
+      // El snapshot del adquiriente TAL COMO SE PERSISTIRÍA — MISMA precedencia
+      // que `create()` (Task E): dto explícito → ficha vinculada
+      // (`draft_customer_snapshot`) → proveedor del documento soporte →
+      // `inline_customer` (cliente aún no creado, sólo aplica sin `customer_id`).
       customer_name:
         dto.customer_name ??
+        draft_customer_snapshot?.customer_name ??
         support_supplier?.name ??
         this.draftInlineCustomerName(dto) ??
         null,
       customer_tax_id:
         dto.customer_tax_id ??
+        draft_customer_snapshot?.customer_tax_id ??
         support_supplier?.tax_id ??
         dto.inline_customer?.document_number ??
         null,
-      customer_address: dto.customer_address ?? support_supplier?.addresses,
-      customer_email: dto.customer_email ?? dto.inline_customer?.email ?? null,
-      customer_phone: dto.customer_phone ?? dto.inline_customer?.phone ?? null,
+      customer_address:
+        dto.customer_address ??
+        draft_customer_snapshot?.customer_address ??
+        support_supplier?.addresses,
+      customer_email:
+        dto.customer_email ??
+        draft_customer_snapshot?.customer_email ??
+        dto.inline_customer?.email ??
+        null,
+      customer_phone:
+        dto.customer_phone ??
+        draft_customer_snapshot?.customer_phone ??
+        dto.inline_customer?.phone ??
+        null,
       customer_document_type:
         dto.customer_document_type ??
+        draft_customer_snapshot?.customer_document_type ??
         dto.inline_customer?.document_type ??
         null,
-      customer_verification_digit: dto.customer_verification_digit ?? null,
-      customer_tax_regime: dto.customer_tax_regime ?? null,
+      customer_verification_digit:
+        dto.customer_verification_digit ??
+        draft_customer_snapshot?.customer_verification_digit ??
+        null,
+      customer_tax_regime:
+        dto.customer_tax_regime ??
+        draft_customer_snapshot?.customer_tax_regime ??
+        null,
       customer_fiscal_responsibilities:
-        dto.customer_fiscal_responsibilities ?? null,
+        dto.customer_fiscal_responsibilities ??
+        draft_customer_snapshot?.customer_fiscal_responsibilities ??
+        null,
+      // Task D — misma precedencia que `create()`: declarado en el DTO → el
+      // `person_type` de la ficha vinculada → `null` (el validador de borrador
+      // no deriva del código de documento; eso lo hace `resolveAcquirerIdentity`
+      // en emisión).
+      customer_person_type:
+        dto.customer_person_type ??
+        (draft_customer_snapshot?.customer_person_type as
+          | 'NATURAL'
+          | 'JURIDICA'
+          | null
+          | undefined) ??
+        null,
       operation_type: dto.operation_type ?? null,
       currency: dto.currency || 'COP',
       issue_date,
@@ -3262,6 +3513,12 @@ export class InvoicingService {
           order.users?.fiscal_responsibilities?.length
             ? order.users.fiscal_responsibilities
             : undefined,
+        // Task E — sin esto, una venta de mostrador SIN cliente identificado
+        // (consumidor final) queda con `customer_person_type` NULL, que
+        // `resolveAcquirerIdentity` respalda correctamente derivando del
+        // código de documento en emisión; con cliente identificado, congela
+        // su `person_type` real en vez de re-derivarlo después.
+        customer_person_type: order.users?.person_type ?? undefined,
         order_id: order.id,
         invoice_number: null,
         resolution_id: null,
@@ -3386,6 +3643,15 @@ export class InvoicingService {
           customer_email: account.customer?.email,
           customer_phone: account.customer?.phone,
           customer_verification_digit: account.customer?.verification_digit,
+          // Task E — `account.customer: true` ya trae el registro completo;
+          // antes se dejaban caer régimen/responsabilidades/tipo de persona
+          // aunque ya estaban en memoria.
+          customer_tax_regime: account.customer?.tax_regime ?? undefined,
+          customer_fiscal_responsibilities:
+            account.customer?.fiscal_responsibilities?.length
+              ? account.customer.fiscal_responsibilities
+              : undefined,
+          customer_person_type: account.customer?.person_type ?? undefined,
           invoice_number: null, resolution_id: null,
           subtotal_amount: projected.subtotal, discount_amount: projected.discount,
           tax_amount: projected.tax, total_amount: projected.total,
@@ -3575,6 +3841,19 @@ export class InvoicingService {
         customer_id: sales_order.customer_id,
         customer_name,
         customer_tax_id: customer?.document_number || undefined,
+        // Task E — el `select` de `customer` (arriba) YA carga estos siete
+        // campos; antes quedaban en memoria sin escribirse y la factura nacía
+        // con el snapshot a medias (nombre + NIT, nada más).
+        customer_document_type: customer?.document_type ?? undefined,
+        customer_verification_digit: customer?.verification_digit ?? undefined,
+        customer_email: customer?.email ?? undefined,
+        customer_phone: customer?.phone ?? undefined,
+        customer_tax_regime: customer?.tax_regime ?? undefined,
+        customer_fiscal_responsibilities: customer?.fiscal_responsibilities
+          ?.length
+          ? customer.fiscal_responsibilities
+          : undefined,
+        customer_person_type: customer?.person_type ?? undefined,
         sales_order_id: sales_order.id,
         resolution_id,
         subtotal_amount: new Prisma.Decimal(subtotal),
@@ -4076,21 +4355,20 @@ export class InvoicingService {
       dto.customer_id !== invoice.customer_id
     ) {
       if (dto.customer_id != null) {
+        // Task E — MISMO `select` que `create()`/`buildDraftProjection()`
+        // (`CUSTOMER_FOR_INVOICE_SELECT`), en vez de una proyección propia que
+        // antes faltaba `tax_regime`, `person_type` y `addresses`: el cambio
+        // de titular dejaba esos tres campos del snapshot viejo intactos, con
+        // FK ya apuntando al cliente nuevo.
         const new_customer = await this.prisma.users.findFirst({
           where: { id: dto.customer_id },
-          select: {
-            first_name: true,
-            last_name: true,
-            legal_name: true,
-            email: true,
-            phone: true,
-            document_type: true,
-            document_number: true,
-            verification_digit: true,
-            fiscal_responsibilities: true,
-          },
+          select: CUSTOMER_FOR_INVOICE_SELECT,
         });
         if (new_customer) {
+          // El NOMBRE y el CARRIL (consumidor final vs. nominativo) siguen
+          // saliendo de `resolveAcquirerRail` — es el único que decide si el
+          // número `222222222222` debe imponerse sobre un nombre real. El
+          // resto del snapshot sale del helper compartido.
           const rail = resolveAcquirerRail({
             document_type: new_customer.document_type,
             document_number: new_customer.document_number,
@@ -4098,18 +4376,22 @@ export class InvoicingService {
             first_name: new_customer.first_name,
             last_name: new_customer.last_name,
           });
+          const ficha_snapshot =
+            this.buildCustomerSnapshotFromFicha(new_customer);
           titular_snapshot = {
             customer_name: rail.identity.name,
             customer_tax_id: rail.identity.document_number,
             customer_document_type: rail.identity.document_type,
-            customer_email: new_customer.email ?? null,
-            customer_phone: new_customer.phone ?? null,
+            customer_email: ficha_snapshot?.customer_email ?? null,
+            customer_phone: ficha_snapshot?.customer_phone ?? null,
             customer_verification_digit:
-              new_customer.verification_digit ?? null,
+              ficha_snapshot?.customer_verification_digit ?? null,
             customer_fiscal_responsibilities:
-              new_customer.fiscal_responsibilities?.length
-                ? new_customer.fiscal_responsibilities
-                : null,
+              ficha_snapshot?.customer_fiscal_responsibilities ?? null,
+            customer_tax_regime: ficha_snapshot?.customer_tax_regime ?? null,
+            customer_person_type:
+              ficha_snapshot?.customer_person_type ?? null,
+            customer_address: ficha_snapshot?.customer_address ?? null,
           };
         }
       } else {
@@ -4122,9 +4404,46 @@ export class InvoicingService {
           customer_phone: null,
           customer_verification_digit: null,
           customer_fiscal_responsibilities: null,
+          customer_tax_regime: null,
+          customer_person_type: null,
+          customer_address: null,
         };
       }
     }
+
+    // Task D#4 — split de NIT con DV pegado cuando el PATCH toca el documento
+    // del adquiriente A MANO (fuera de un cambio de `customer_id`, que ya
+    // llega separado desde la ficha vía `titular_snapshot`). El valor
+    // EFECTIVO considera lo que el PATCH trae, y si no trae un campo, lo que
+    // `titular_snapshot` acaba de fijar o, en su defecto, lo que la factura ya
+    // tenía — para no perder de vista un NIT que llega pegado en un solo campo
+    // mientras el otro se conserva.
+    const touches_customer_document =
+      dto.customer_tax_id !== undefined ||
+      dto.customer_document_type !== undefined ||
+      dto.customer_verification_digit !== undefined;
+    const invoice_nit_split = touches_customer_document
+      ? this.splitInvoiceCustomerNitDv({
+          document_type:
+            dto.customer_document_type ??
+            (titular_snapshot.customer_document_type as
+              | string
+              | null
+              | undefined) ??
+            invoice.customer_document_type,
+          document_number:
+            dto.customer_tax_id ??
+            (titular_snapshot.customer_tax_id as string | null | undefined) ??
+            invoice.customer_tax_id,
+          verification_digit:
+            dto.customer_verification_digit ??
+            (titular_snapshot.customer_verification_digit as
+              | string
+              | null
+              | undefined) ??
+            invoice.customer_verification_digit,
+        })
+      : null;
 
     // If items are provided, recalculate amounts and replace
     const update_data: any = {
@@ -4135,7 +4454,7 @@ export class InvoicingService {
         customer_name: dto.customer_name,
       }),
       ...(dto.customer_tax_id !== undefined && {
-        customer_tax_id: dto.customer_tax_id,
+        customer_tax_id: invoice_nit_split?.document_number ?? dto.customer_tax_id,
       }),
       ...(dto.customer_address !== undefined && {
         customer_address: dto.customer_address,
@@ -4155,13 +4474,22 @@ export class InvoicingService {
         customer_document_type: dto.customer_document_type,
       }),
       ...(dto.customer_verification_digit !== undefined && {
-        customer_verification_digit: dto.customer_verification_digit,
+        customer_verification_digit:
+          invoice_nit_split?.verification_digit ??
+          dto.customer_verification_digit,
       }),
       ...(dto.customer_tax_regime !== undefined && {
         customer_tax_regime: dto.customer_tax_regime,
       }),
       ...(dto.customer_fiscal_responsibilities !== undefined && {
         customer_fiscal_responsibilities: dto.customer_fiscal_responsibilities,
+      }),
+      // Task D — sólo tiene efecto para facturas manuales sin `customer_id`;
+      // con titular vinculado, `titular_snapshot.customer_person_type` (más
+      // arriba) ya fijó el valor de la ficha y éste no lo pisa salvo que el
+      // PATCH lo declare explícitamente.
+      ...(dto.customer_person_type !== undefined && {
+        customer_person_type: dto.customer_person_type,
       }),
       ...(dto.payment_form !== undefined && {
         payment_form: dto.payment_form,

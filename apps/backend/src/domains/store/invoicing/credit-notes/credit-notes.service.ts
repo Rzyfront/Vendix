@@ -678,6 +678,12 @@ export class CreditNotesService {
         customer_tax_regime: related_invoice.customer_tax_regime,
         customer_fiscal_responsibilities:
           related_invoice.customer_fiscal_responsibilities,
+        // Task E#4 — mismo criterio que el resto de este bloque: sin copiar
+        // `customer_person_type`, una NC sobre una factura de persona natural
+        // con NIT queda sin el respaldo que `resolveAcquirerIdentity` necesita
+        // y puede transmitirse como JURIDICA (Task D) al perder la ficha
+        // vinculada de origen.
+        customer_person_type: related_invoice.customer_person_type,
         related_invoice_id: related_invoice.id,
         resolution_id,
         subtotal_amount: subtotal,

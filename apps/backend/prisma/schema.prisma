@@ -5987,6 +5987,15 @@ model invoices {
   /// alinearse con `customer_address`, el otro snapshot del adquiriente en esta
   /// misma tabla; la fuente viva `users.fiscal_responsibilities` sí es String[].
   customer_fiscal_responsibilities Json?
+  /// Tipo de persona del adquiriente (NATURAL/JURIDICA), congelado como el
+  /// resto del snapshot `customer_*`. Es el ÚLTIMO eslabón de la precedencia
+  /// en `resolveAcquirerIdentity` (cliente vinculado → ESTE snapshot →
+  /// derivado del tipo de documento): sin él, una factura manual SIN cliente
+  /// vinculado para una persona natural con NIT (documento 31) se resolvía
+  /// como JURIDICA por default, invirtiendo el `cbc:AdditionalAccountID` que
+  /// viaja al XML. Reutiliza `persona_type_enum` (ya existe, ver `users`), no
+  /// se crea un enum nuevo.
+  customer_person_type             persona_type_enum?
   order_id                         Int?
   sales_order_id                   Int?
   related_invoice_id               Int?
