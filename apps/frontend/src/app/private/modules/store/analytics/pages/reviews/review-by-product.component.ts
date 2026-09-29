@@ -3,6 +3,11 @@ import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import {
+  ResponsiveDataViewComponent,
+  TableColumn,
+  ItemListCardConfig,
+} from '../../../../../../shared/components';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ReviewsByProductRow, AnalyticsService } from '../../services/analytics.service';
@@ -24,6 +29,7 @@ import {
   imports: [
     CommonModule,
     CardComponent,
+    ResponsiveDataViewComponent,
     StatsComponent,
     IconComponent,
     AnalyticsCardComponent,
@@ -121,42 +127,14 @@ import {
               Sin reseñas en el período seleccionado.
             </div>
           } @else {
-            <div class="overflow-x-auto">
-              <table class="w-full text-sm">
-                <thead>
-                  <tr class="text-left text-[var(--color-text-secondary)] border-b border-border">
-                    <th class="py-2 pr-4 font-semibold">Producto</th>
-                    <th class="py-2 pr-4 font-semibold">SKU</th>
-                    <th class="py-2 pr-4 font-semibold text-right">Reseñas</th>
-                    <th class="py-2 pr-4 font-semibold text-right">Promedio</th>
-                    <th class="py-2 pr-4 font-semibold text-right">5★</th>
-                    <th class="py-2 pr-4 font-semibold text-right">4★</th>
-                    <th class="py-2 pr-4 font-semibold text-right">3★</th>
-                    <th class="py-2 pr-4 font-semibold text-right">2★</th>
-                    <th class="py-2 pr-4 font-semibold text-right">1★</th>
-                    <th class="py-2 pr-4 font-semibold text-right">Verificadas</th>
-                    <th class="py-2 font-semibold text-right">Pendientes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (row of rows(); track row.product_id) {
-                    <tr class="border-b border-border last:border-0">
-                      <td class="py-2 pr-4 font-medium text-[var(--color-text-primary)]">{{ row.product_name }}</td>
-                      <td class="py-2 pr-4 text-[var(--color-text-secondary)]">{{ row.sku }}</td>
-                      <td class="py-2 pr-4 text-right">{{ row.total_reviews }}</td>
-                      <td class="py-2 pr-4 text-right">{{ row.average_rating }}</td>
-                      <td class="py-2 pr-4 text-right">{{ row.stars_5 }}</td>
-                      <td class="py-2 pr-4 text-right">{{ row.stars_4 }}</td>
-                      <td class="py-2 pr-4 text-right">{{ row.stars_3 }}</td>
-                      <td class="py-2 pr-4 text-right">{{ row.stars_2 }}</td>
-                      <td class="py-2 pr-4 text-right">{{ row.stars_1 }}</td>
-                      <td class="py-2 pr-4 text-right">{{ row.verified_count }}</td>
-                      <td class="py-2 text-right">{{ row.pending_count }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
+            <app-responsive-data-view
+              [data]="rows()"
+              [columns]="columns"
+              [cardConfig]="cardConfig"
+              [loading]="loading()"
+              emptyMessage="Sin reseñas en el período seleccionado."
+              emptyIcon="star"
+            ></app-responsive-data-view>
           }
 
           <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
@@ -186,6 +164,32 @@ export class ReviewByProductComponent implements OnInit {
     end_date: getDefaultEndDate(),
     preset: 'thisMonth',
   });
+
+  readonly columns: TableColumn[] = [
+    { key: 'product_name', label: 'Producto', sortable: false, priority: 1 },
+    { key: 'sku', label: 'SKU', sortable: false, priority: 3, defaultValue: '-' },
+    { key: 'total_reviews', label: 'Reseñas', sortable: false, align: 'right', priority: 1, transform: (v: unknown) => String(Number(v) || 0) },
+    { key: 'average_rating', label: 'Promedio', sortable: false, align: 'right', priority: 1, transform: (v: unknown) => String(Number(v) || 0) },
+    { key: 'stars_5', label: '5★', sortable: false, align: 'right', priority: 3, transform: (v: unknown) => String(Number(v) || 0) },
+    { key: 'stars_4', label: '4★', sortable: false, align: 'right', priority: 3, transform: (v: unknown) => String(Number(v) || 0) },
+    { key: 'stars_3', label: '3★', sortable: false, align: 'right', priority: 3, transform: (v: unknown) => String(Number(v) || 0) },
+    { key: 'stars_2', label: '2★', sortable: false, align: 'right', priority: 3, transform: (v: unknown) => String(Number(v) || 0) },
+    { key: 'stars_1', label: '1★', sortable: false, align: 'right', priority: 3, transform: (v: unknown) => String(Number(v) || 0) },
+    { key: 'verified_count', label: 'Verificadas', sortable: false, align: 'right', priority: 2, transform: (v: unknown) => String(Number(v) || 0) },
+    { key: 'pending_count', label: 'Pendientes', sortable: false, align: 'right', priority: 2, transform: (v: unknown) => String(Number(v) || 0) },
+  ];
+
+  readonly cardConfig: ItemListCardConfig = {
+    titleKey: 'product_name',
+    subtitleKey: 'sku',
+    subtitleTransform: (item: ReviewsByProductRow) => item.sku || '',
+    detailKeys: [
+      { key: 'total_reviews', label: 'Reseñas', icon: 'message-square', transform: (v: unknown) => String(Number(v) || 0) },
+      { key: 'average_rating', label: 'Promedio', icon: 'star', transform: (v: unknown) => String(Number(v) || 0) },
+      { key: 'verified_count', label: 'Verificadas', icon: 'check-circle', transform: (v: unknown) => String(Number(v) || 0) },
+      { key: 'pending_count', label: 'Pendientes', icon: 'clock', transform: (v: unknown) => String(Number(v) || 0) },
+    ],
+  };
 
   readonly reviewsViews: AnalyticsView[] = getViewsByCategory('reviews');
 
