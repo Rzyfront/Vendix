@@ -17,8 +17,15 @@ import {
 import { ShipOrderDto } from '../../../domains/store/orders/order-flow/dto/ship-order.dto';
 import { CancelOrderDto } from '../../../domains/store/orders/order-flow/dto/cancel-order.dto';
 import { CreateRefundDto } from '../../../domains/store/orders/order-flow/dto/create-refund.dto';
+import { DeliverOrderDto } from '../../../domains/store/orders/order-flow/dto/deliver-order.dto';
 import { OrderFlowService } from '../../../domains/store/orders/order-flow/order-flow.service';
 import { RefundFlowService } from '../../../domains/store/orders/order-flow/services/refund-flow.service';
+import { OrdersBulkService } from '../../../domains/store/orders/orders-bulk.service';
+import {
+  BULK_ORDER_TRANSITION_TARGETS,
+  BulkTransitionOrdersDto,
+  MAX_BULK_ORDERS_IDS,
+} from '../../../domains/store/orders/dto/bulk-orders.dto';
 import {
   InsufficientStockItem,
   StockDemandLine,
@@ -35,6 +42,7 @@ export interface OrdersToolDeps {
   orderFlowService: OrderFlowService;
   refundFlowService: RefundFlowService;
   stockValidatorService: StockValidatorService;
+  ordersBulkService: OrdersBulkService;
 }
 
 // Derivados de los enums Prisma generados — nunca copias a mano: si el schema
@@ -162,6 +170,22 @@ const REFUND_CEILING_TOLERANCE = 0.01;
  * service dueño al ejecutar; el preview no duplica su máquina de estados.
  */
 const TERMINAL_ORDER_STATES = ['cancelled', 'refunded', 'finished'] as const;
+
+/** O-23: acciones de entrega (espejo de los endpoints del flow). */
+const DELIVER_ACTIONS = ['deliver', 'deliver_item', 'confirm_delivery'] as const;
+
+/**
+ * O-23: estados desde los que `confirmDelivery` cierra la orden
+ * (`FINISHABLE_STATES` en `order-flow.service.ts`). Se espeja acá para que el
+ * preview anticipe el rechazo en vez de prometer un cierre imposible.
+ */
+const CONFIRMABLE_DELIVERY_STATES = ['delivered', 'processing'] as const;
+
+/** O-27: máximo de eventos del timeline que se serializan. */
+const MAX_TIMELINE_EVENTS = 50;
+
+/** O-28: cuántas filas del preview masivo viajan en el diff. */
+const MAX_BULK_PREVIEW_ROWS = 10;
 
 /**
  * Valida un DTO como el `ValidationPipe` global del HTTP (`whitelist` +
@@ -392,6 +416,7 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
     orderFlowService,
     refundFlowService,
     stockValidatorService,
+    ordersBulkService,
   } = deps;
 
   const noStore = (what: string) =>
@@ -2647,6 +2672,625 @@ export function createOrdersTools(deps: OrdersToolDeps): RegisteredTool[] {
             error: `No se pudo reembolsar: ${info.message}`,
             next_step:
               'Repite preview_refund para cotizar con el estado actual y reintenta.',
+          });
+        }
+      },
+    },
+
+    // ─── O-23 deliver_order_items ──────────────────────────────────────
+    {
+      name: 'deliver_order_items',
+      version: '1',
+      domain: 'orders',
+      description:
+        'Entrega una orden o sus renglones: deliver mueve shipped→delivered (la orden completa), deliver_item entrega UN renglón (plato, cerveza) en órdenes sin mesa, y confirm_delivery cierra delivered/processing como recibida. Lee primero get_order para ver estado y renglones. Nunca escribe orders.state directo: delega en OrderFlowService.',
+      parameters: {
+        type: 'object',
+        properties: {
+          order_id: {
+            type: 'number',
+            description:
+              'Identificador interno de la orden. Obténlo con find_order.',
+          },
+          action: {
+            type: 'string',
+            enum: DELIVER_ACTIONS,
+            description:
+              'deliver: entrega total (exige shipped). deliver_item: entrega un renglón (exige order_item_id). confirm_delivery: confirma la recepción y cierra.',
+          },
+          order_item_id: {
+            type: 'number',
+            description:
+              'Id del renglón dentro de la orden (ver get_order). Obligatorio con deliver_item.',
+          },
+          delivered_to: {
+            type: 'string',
+            description: 'Quién recibió. Solo con deliver. Opcional.',
+          },
+          delivery_notes: {
+            type: 'string',
+            description: 'Notas de la entrega. Solo con deliver. Opcional.',
+          },
+        },
+        required: ['order_id', 'action'],
+      },
+      requiredPermissions: ['store:orders:order_flow:create'],
+      requiresConfirmation: true,
+      preview: async (args, context): Promise<ToolPreview> => {
+        if (!context.store_id) {
+          return {
+            status: 'error',
+            target: 'Entregar orden',
+            changes: [],
+            message: 'Sin tienda en contexto: las entregas están acotadas por tienda.',
+          };
+        }
+        const orderId = Number(args.order_id);
+        if (!Number.isFinite(orderId) || orderId < 1) {
+          return {
+            status: 'error',
+            target: 'Entregar orden',
+            changes: [],
+            message: `order_id inválido: "${args.order_id}". Usa find_order para obtener uno válido.`,
+          };
+        }
+        const action = String(args.action ?? '');
+        if (!(DELIVER_ACTIONS as readonly string[]).includes(action)) {
+          return {
+            status: 'error',
+            target: 'Entregar orden',
+            changes: [],
+            message: `action "${action}" no existe. Valores válidos: ${DELIVER_ACTIONS.join(', ')}.`,
+          };
+        }
+        if (action === 'deliver') {
+          const validated = toValidatedDto(DeliverOrderDto, {
+            ...(args.delivered_to
+              ? { delivered_to: String(args.delivered_to) }
+              : {}),
+            ...(args.delivery_notes
+              ? { delivery_notes: String(args.delivery_notes) }
+              : {}),
+          });
+          if (!validated.ok) {
+            return {
+              status: 'error',
+              target: 'Entregar orden',
+              changes: [],
+              message: validated.message,
+            };
+          }
+        }
+        let order: any;
+        try {
+          order = await ordersService.findOne(orderId);
+        } catch (error: any) {
+          return {
+            status: 'error',
+            target: 'Entregar orden',
+            changes: [],
+            message: `No se encontró la orden ${orderId} en esta tienda: ${describeError(error).message}`,
+          };
+        }
+        const subject = `orden ${order.order_number} de ${customerName(order)}`;
+        if (action === 'deliver') {
+          if (order.state !== 'shipped') {
+            return {
+              status: 'error',
+              target: `Entregar ${subject}`,
+              changes: [],
+              message: `La orden está en estado '${order.state}': la entrega total exige 'shipped' (despáchala primero con ship_order).`,
+            };
+          }
+          return {
+            status: 'ok',
+            target: `Entregar ${subject}`,
+            changes: [
+              {
+                field: 'estado',
+                label: 'Estado',
+                from: 'shipped',
+                to: 'delivered',
+              },
+              ...(args.delivered_to
+                ? [
+                    {
+                      field: 'recibido_por',
+                      label: 'Recibido por',
+                      from: null,
+                      to: String(args.delivered_to),
+                    },
+                  ]
+                : []),
+              ...(args.delivery_notes
+                ? [
+                    {
+                      field: 'notas',
+                      label: 'Notas',
+                      from: null,
+                      to: String(args.delivery_notes),
+                    },
+                  ]
+                : []),
+            ],
+            domain: 'orders',
+          };
+        }
+        if (action === 'deliver_item') {
+          const itemId = Number(args.order_item_id);
+          if (!Number.isInteger(itemId) || itemId < 1) {
+            return {
+              status: 'error',
+              target: `Entregar renglón de ${subject}`,
+              changes: [],
+              message:
+                'deliver_item exige order_item_id: lee los renglones con get_order y pasa el id.',
+            };
+          }
+          const item = (order.order_items ?? []).find(
+            (row: any) => Number(row.id) === itemId,
+          );
+          if (!item) {
+            return {
+              status: 'error',
+              target: `Entregar renglón de ${subject}`,
+              changes: [],
+              message: `El renglón ${itemId} no pertenece a esta orden. Lee los renglones con get_order.`,
+            };
+          }
+          if (item.delivered_at) {
+            return {
+              status: 'error',
+              target: `Entregar renglón de ${subject}`,
+              changes: [],
+              message: `"${item.product_name ?? `renglón ${itemId}`}" ya fue entregado: no hay nada que entregar.`,
+            };
+          }
+          return {
+            status: 'ok',
+            target: `Entregar "${item.product_name ?? `renglón ${itemId}`}" de ${subject}`,
+            changes: [
+              {
+                field: `renglon_${itemId}`,
+                label: item.product_name ?? `Renglón ${itemId}`,
+                from: 'pendiente',
+                to: 'entregado',
+              },
+            ],
+            domain: 'orders',
+          };
+        }
+        if (
+          !(CONFIRMABLE_DELIVERY_STATES as readonly string[]).includes(
+            order.state,
+          )
+        ) {
+          return {
+            status: 'error',
+            target: `Confirmar entrega de ${subject}`,
+            changes: [],
+            message: `La orden está en estado '${order.state}': solo se confirma la recepción desde '${CONFIRMABLE_DELIVERY_STATES.join("' o '")}'.`,
+          };
+        }
+        return {
+          status: 'ok',
+          target: `Confirmar entrega de ${subject}`,
+          changes: [
+            {
+              field: 'estado',
+              label: 'Estado',
+              from: order.state,
+              to: 'finished',
+            },
+          ],
+          domain: 'orders',
+        };
+      },
+      handler: async (args, context) => {
+        if (!context.store_id) return noStore('la entrega de órdenes');
+        const orderId = Number(args.order_id);
+        if (!Number.isFinite(orderId) || orderId < 1) {
+          return JSON.stringify({
+            error: `order_id inválido: "${args.order_id}". Usa find_order para obtener uno válido.`,
+            next_step: 'Obtén el order_id con find_order y reintenta.',
+          });
+        }
+        const action = String(args.action ?? '');
+        if (!(DELIVER_ACTIONS as readonly string[]).includes(action)) {
+          return JSON.stringify({
+            error: `action "${action}" no existe. Valores válidos: ${DELIVER_ACTIONS.join(', ')}.`,
+            next_step: 'Elige deliver, deliver_item o confirm_delivery y reintenta.',
+          });
+        }
+        const validatedDeliver =
+          action === 'deliver'
+            ? toValidatedDto(DeliverOrderDto, {
+                ...(args.delivered_to
+                  ? { delivered_to: String(args.delivered_to) }
+                  : {}),
+                ...(args.delivery_notes
+                  ? { delivery_notes: String(args.delivery_notes) }
+                  : {}),
+              })
+            : { ok: true as const, dto: {} as DeliverOrderDto };
+        if (!validatedDeliver.ok) {
+          return JSON.stringify({
+            error: validatedDeliver.message,
+            next_step: 'Corrige los campos indicados y vuelve a proponer la entrega.',
+          });
+        }
+        try {
+          const fresh: any = await ordersService.findOne(orderId);
+          if (action === 'deliver') {
+            if (fresh.state !== 'shipped') {
+              return JSON.stringify({
+                error: `La orden cambió a estado '${fresh.state}': la entrega total exige 'shipped'.`,
+                next_step: 'Lee la orden con get_order para ver su estado actual.',
+              });
+            }
+            const updated: any = await orderFlowService.deliverOrder(
+              orderId,
+              validatedDeliver.dto,
+            );
+            return JSON.stringify({
+              entrega: {
+                order_id: orderId,
+                numero: updated?.order_number ?? fresh.order_number,
+                estado: updated?.state ?? 'delivered',
+              },
+              nota: 'La orden quedó entregada. Usa confirm_delivery cuando el cliente confirme la recepción para cerrarla.',
+            });
+          }
+          if (action === 'deliver_item') {
+            const itemId = Number(args.order_item_id);
+            if (!Number.isInteger(itemId) || itemId < 1) {
+              return JSON.stringify({
+                error: 'deliver_item exige order_item_id.',
+                next_step: 'Lee los renglones con get_order y pasa el id.',
+              });
+            }
+            const item = (fresh.order_items ?? []).find(
+              (row: any) => Number(row.id) === itemId,
+            );
+            if (!item) {
+              return JSON.stringify({
+                error: `El renglón ${itemId} no pertenece a esta orden.`,
+                next_step: 'Lee los renglones con get_order para ver los ids válidos.',
+              });
+            }
+            if (item.delivered_at) {
+              return JSON.stringify({
+                error: `"${item.product_name ?? `renglón ${itemId}`}" ya fue entregado: no hay nada que entregar.`,
+                next_step: 'Lee la orden con get_order para ver qué renglones siguen pendientes.',
+              });
+            }
+            await orderFlowService.deliverOrderItem(orderId, itemId);
+            return JSON.stringify({
+              entrega: {
+                order_id: orderId,
+                order_item_id: itemId,
+                producto: item.product_name ?? null,
+              },
+              nota: 'El renglón quedó entregado.',
+            });
+          }
+          if (
+            !(CONFIRMABLE_DELIVERY_STATES as readonly string[]).includes(
+              fresh.state,
+            )
+          ) {
+            return JSON.stringify({
+              error: `La orden cambió a estado '${fresh.state}': solo se confirma la recepción desde '${CONFIRMABLE_DELIVERY_STATES.join("' o '")}'.`,
+              next_step: 'Lee la orden con get_order para ver su estado actual.',
+            });
+          }
+          const updated: any =
+            await orderFlowService.confirmDelivery(orderId);
+          return JSON.stringify({
+            entrega: {
+              order_id: orderId,
+              numero: updated?.order_number ?? fresh.order_number,
+              estado: updated?.state ?? 'finished',
+            },
+            nota: 'La recepción quedó confirmada y la orden se cerró.',
+          });
+        } catch (error: any) {
+          const info = describeError(error);
+          return JSON.stringify({
+            error: `No se pudo entregar: ${info.message}`,
+            next_step:
+              'Lee la orden con get_order: puede haber cambiado de estado o tener cocina pendiente.',
+          });
+        }
+      },
+    },
+
+    // ─── O-27 get_order_timeline ─────────────────────────────────────────
+    {
+      name: 'get_order_timeline',
+      version: '1',
+      domain: 'orders',
+      readOnly: true,
+      description:
+        'Historial de eventos de UNA orden: cambios de estado, pagos, reembolsos y quién los hizo, en orden. Úsala para "¿qué le pasó a esta orden?", "¿quién la canceló?" o antes de proponer un cambio masivo (es la cadena de validación de bulk_transition_orders). Requiere el order_id: si solo tienes el número o el cliente, resuelve antes con find_order.',
+      parameters: {
+        type: 'object',
+        properties: {
+          order_id: {
+            type: 'number',
+            description:
+              'Identificador interno de la orden. Obténlo con find_order.',
+          },
+          limit: {
+            type: 'number',
+            description:
+              'Máximo de eventos. Por defecto 50, máximo 100.',
+          },
+        },
+        required: ['order_id'],
+      },
+      requiredPermissions: ['store:orders:read'],
+      handler: async (args, context) => {
+        if (!context.store_id) return noStore('el historial de órdenes');
+        const orderId = Number(args.order_id);
+        if (!Number.isFinite(orderId) || orderId < 1) {
+          return JSON.stringify({
+            error: `order_id inválido: "${args.order_id}". Usa find_order para obtener uno válido.`,
+            next_step: 'Obtén el order_id con find_order y reintenta.',
+          });
+        }
+        const limit = clamp(args.limit, MAX_TIMELINE_EVENTS, 100);
+        try {
+          const [order, timeline] = await Promise.all([
+            ordersService.findOne(orderId),
+            ordersService.getTimeline(orderId),
+          ]);
+          const events = Array.isArray((timeline as any)?.events)
+            ? (timeline as any).events
+            : [];
+          const legacy = !!(timeline as any)?.legacy;
+          const compact = events.slice(0, limit).map((event: any) => ({
+            id: event?.id ?? null,
+            tipo: event?.event_type ?? event?.action ?? 'evento',
+            de: event?.from_state ?? event?.old_value ?? null,
+            a: event?.to_state ?? event?.new_value ?? null,
+            actor: event?.actor
+              ? (event.actor.name ?? `usuario #${event.actor.user_id ?? '?'}`)
+              : event?.users
+                ? [event.users.first_name, event.users.last_name]
+                    .filter(Boolean)
+                    .join(' ') || event.users.email
+                : null,
+            monto: event?.amount !== undefined ? num(event.amount) : undefined,
+            detalle: event?.payload ?? event?.description ?? null,
+            creada: event?.created_at ?? null,
+          }));
+          return JSON.stringify({
+            orden: {
+              order_id: orderId,
+              numero: (order as any).order_number,
+              estado: (order as any).state,
+              cliente: customerName(order),
+            },
+            total_eventos: events.length,
+            mostrando: compact.length,
+            ...(events.length > compact.length && {
+              nota: `Se muestran ${compact.length} de ${events.length} eventos: los más recientes primero.`,
+            }),
+            ...(legacy && {
+              fuente: 'legacy',
+              fuente_nota:
+                'Esta orden es anterior al registro de eventos: el historial viene de auditoría y puede estar incompleto.',
+            }),
+            eventos: compact,
+          });
+        } catch (error: any) {
+          const info = describeError(error);
+          return JSON.stringify({
+            error: `No se pudo leer el historial de la orden ${orderId}: ${info.message}`,
+            next_step: 'Verifica el order_id con find_order y reintenta.',
+          });
+        }
+      },
+    },
+
+    // ─── O-28 bulk_transition_orders ────────────────────────────────────
+    {
+      name: 'bulk_transition_orders',
+      version: '1',
+      domain: 'orders',
+      description:
+        'Mueve N órdenes al mismo estado (finished, shipped, delivered o cancelled) con previsualización por orden: la preview clasifica cada id en ok / ya-está / forzada / inválida ANTES de que el usuario apruebe. Lee primero get_order_timeline en las órdenes objetivo para auditar qué les pasó. Sin transacción global: cada orden se aplica por separado y el resultado reporta una por una.',
+      parameters: {
+        type: 'object',
+        properties: {
+          order_ids: {
+            type: 'array',
+            minItems: 1,
+            maxItems: MAX_BULK_ORDERS_IDS,
+            description: `Ids internos de las órdenes (máximo ${MAX_BULK_ORDERS_IDS}). Resuélvelos con find_order o list_orders.`,
+            items: { type: 'number' },
+          },
+          target_state: {
+            type: 'string',
+            enum: BULK_ORDER_TRANSITION_TARGETS,
+            description: 'Estado destino común a todo el lote.',
+          },
+          reason: {
+            type: 'string',
+            description:
+              'Motivo que queda auditado en cada orden. Opcional pero recomendado.',
+          },
+        },
+        required: ['order_ids', 'target_state'],
+      },
+      requiredPermissions: ['store:orders:bulk_update'],
+      requiresConfirmation: true,
+      preview: async (args, context): Promise<ToolPreview> => {
+        if (!context.store_id) {
+          return {
+            status: 'error',
+            target: 'Transición masiva de órdenes',
+            changes: [],
+            message: 'Sin tienda en contexto: las órdenes están acotadas por tienda.',
+          };
+        }
+        const rawIds = Array.isArray(args.order_ids) ? args.order_ids : [];
+        const validated = toValidatedDto(BulkTransitionOrdersDto, {
+          ids: rawIds.map((id) => Number(id)),
+          ...(args.target_state
+            ? { targetState: String(args.target_state) }
+            : {}),
+          ...(args.reason ? { reason: String(args.reason) } : {}),
+        });
+        if (!validated.ok) {
+          return {
+            status: 'error',
+            target: 'Transición masiva de órdenes',
+            changes: [],
+            message: validated.message,
+          };
+        }
+        let dryRun: any;
+        try {
+          dryRun = await ordersBulkService.previewTransition(validated.dto);
+        } catch (error: any) {
+          return {
+            status: 'error',
+            target: 'Transición masiva de órdenes',
+            changes: [],
+            message: `No se pudo previsualizar el lote: ${describeError(error).message}`,
+          };
+        }
+        const items = (dryRun.items ?? []) as Array<{
+          id: number;
+          order_number: string;
+          current_state: string;
+          status: string;
+          message?: string;
+        }>;
+        const count = (status: string) =>
+          items.filter((item) => item.status === status).length;
+        const ok = count('ok');
+        const skipped = count('skipped');
+        const warnings = count('warning');
+        const errors = count('error');
+        const detail = (item: (typeof items)[number]) =>
+          `${item.order_number}: ${item.current_state} → ${validated.dto.targetState} (${item.status}${item.message ? `, ${item.message}` : ''})`;
+        if (errors === items.length && items.length > 0) {
+          return {
+            status: 'error',
+            target: `Mover ${items.length} órdenes a ${validated.dto.targetState}`,
+            changes: [],
+            message: `Ninguna orden del lote es válida: ${items
+              .slice(0, 5)
+              .map(detail)
+              .join('; ')}. Revisa los ids con find_order y vuelve a proponer.`,
+          };
+        }
+        return {
+          status: errors > 0 || warnings > 0 ? 'warning' : 'ok',
+          target: `Mover ${items.length} órdenes a ${validated.dto.targetState}`,
+          changes: [
+            {
+              field: 'resumen',
+              label: 'Clasificación del lote',
+              from: null,
+              to: `${ok} aplicables, ${skipped} ya están en destino, ${warnings} forzadas (auditadas), ${errors} inválidas (se omiten)`,
+            },
+            ...items.slice(0, MAX_BULK_PREVIEW_ROWS).map((item) => ({
+              field: `orden_${item.id}`,
+              label: item.order_number,
+              from: item.current_state,
+              to:
+                item.status === 'ok' || item.status === 'warning'
+                  ? validated.dto.targetState
+                  : `${item.status}: ${item.message ?? 'sin detalle'}`,
+            })),
+          ],
+          ...(errors > 0 || warnings > 0
+            ? {
+                message: [
+                  errors > 0
+                    ? `${errors} inválidas se omiten al aplicar (${items
+                        .filter((item) => item.status === 'error')
+                        .slice(0, 5)
+                        .map((item) => item.order_number)
+                        .join(', ')})`
+                    : null,
+                  warnings > 0
+                    ? `${warnings} forzadas quedarán auditadas como transición forzada`
+                    : null,
+                  items.length > MAX_BULK_PREVIEW_ROWS
+                    ? `se muestran ${MAX_BULK_PREVIEW_ROWS} de ${items.length} filas`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join('. '),
+              }
+            : {}),
+          domain: 'orders',
+        };
+      },
+      handler: async (args, context) => {
+        if (!context.store_id) return noStore('la transición masiva de órdenes');
+        const rawIds = Array.isArray(args.order_ids) ? args.order_ids : [];
+        const validated = toValidatedDto(BulkTransitionOrdersDto, {
+          ids: rawIds.map((id) => Number(id)),
+          ...(args.target_state
+            ? { targetState: String(args.target_state) }
+            : {}),
+          ...(args.reason ? { reason: String(args.reason) } : {}),
+        });
+        if (!validated.ok) {
+          return JSON.stringify({
+            error: validated.message,
+            next_step: 'Corrige los ids o el estado destino y vuelve a proponer.',
+          });
+        }
+        try {
+          // Re-verificación: el lote pudo moverse entre el preview y el apply.
+          // Si ya no queda nada aplicable, no se toca ninguna orden.
+          const fresh: any = await ordersBulkService.previewTransition(
+            validated.dto,
+          );
+          const freshItems = (fresh.items ?? []) as Array<{ status: string }>;
+          const applicable = freshItems.filter(
+            (item) => item.status === 'ok' || item.status === 'warning',
+          ).length;
+          if (applicable === 0) {
+            return JSON.stringify({
+              error:
+                'El lote cambió desde el preview: ya no queda ninguna orden aplicable (pueden haberse movido de estado o salir de la tienda).',
+              next_step:
+                'Vuelve a proponer el lote para previsualizarlo con el estado actual.',
+            });
+          }
+          const result: any = await ordersBulkService.bulkTransition(
+            validated.dto,
+          );
+          return JSON.stringify({
+            lote: {
+              destino: validated.dto.targetState,
+              total: result.total,
+              aplicadas: result.successful,
+              fallidas: result.failed,
+            },
+            por_orden: (result.results ?? []).map((row: any) => ({
+              order_id: row.id,
+              estado: row.status,
+              detalle: row.message ?? row.code ?? null,
+            })),
+            next_step:
+              result.failed > 0
+                ? 'Algunas órdenes fallaron: audita cada una con get_order_timeline antes de reintentar.'
+                : 'Lote aplicado. Audita cualquier orden con get_order_timeline.',
+          });
+        } catch (error: any) {
+          const info = describeError(error);
+          return JSON.stringify({
+            error: `No se pudo aplicar el lote: ${info.message}`,
+            next_step: 'Vuelve a proponer el lote para previsualizarlo de nuevo.',
           });
         }
       },

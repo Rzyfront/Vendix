@@ -7,11 +7,31 @@ import { ReservationsService } from '../../../domains/store/reservations/reserva
 import { AvailabilityService } from '../../../domains/store/reservations/availability.service';
 import { CreateBookingDto } from '../../../domains/store/reservations/dto/create-booking.dto';
 import { BookingQueryDto } from '../../../domains/store/reservations/dto/booking-query.dto';
+import { RescheduleBookingDto } from '../../../domains/store/reservations/dto/reschedule-booking.dto';
+import {
+  ApproveRescheduleRequestDto,
+  RejectRescheduleRequestDto,
+} from '../../../domains/store/reservations/dto/decide-reschedule-request.dto';
+import { ProvidersService } from '../../../domains/store/reservations/providers/providers.service';
+import { ProviderScheduleService } from '../../../domains/store/reservations/providers/provider-schedule.service';
+import { BusinessHoursService } from '../../../domains/store/reservations/business-hours/business-hours.service';
+import { CreateProviderDto } from '../../../domains/store/reservations/providers/dto/create-provider.dto';
+import { UpdateProviderDto } from '../../../domains/store/reservations/providers/dto/update-provider.dto';
+import { AssignServiceDto } from '../../../domains/store/reservations/providers/dto/assign-service.dto';
+import {
+  ProviderScheduleItemDto,
+  UpsertProviderScheduleDto,
+} from '../../../domains/store/reservations/providers/dto/upsert-provider-schedule.dto';
+import { CreateProviderExceptionDto } from '../../../domains/store/reservations/providers/dto/create-provider-exception.dto';
+import { UpsertBusinessHoursDto } from '../../../domains/store/reservations/business-hours/dto/upsert-business-hours.dto';
 import { booking_status_enum, order_channel_enum } from '@prisma/client';
 
 export interface ReservationsToolDeps {
   reservationsService: ReservationsService;
   availabilityService: AvailabilityService;
+  providersService: ProvidersService;
+  providerScheduleService: ProviderScheduleService;
+  businessHoursService: BusinessHoursService;
 }
 
 // Derivados de los enums Prisma generados — nunca copias a mano.
@@ -33,6 +53,39 @@ const BOOKING_TRANSITIONS = [
 ] as const;
 
 type BookingTransition = (typeof BOOKING_TRANSITIONS)[number];
+
+/** O-51: reagendar directo o decidir una solicitud pendiente. */
+const RESCHEDULE_ACTIONS = ['reschedule', 'approve', 'reject'] as const;
+
+/**
+ * O-51: estados que aceptan reprogramación (espejo del gate en
+ * `ReservationsService.reschedule`). El preview anticipa el rechazo en vez
+ * de prometer un cambio imposible.
+ */
+const RESCHEDULABLE_BOOKING_STATUSES = ['pending', 'confirmed'] as const;
+
+/** O-52: configuración de proveedores y calendario maestro. */
+const PROVIDER_ACTIONS = [
+  'create',
+  'update',
+  'assign_service',
+  'remove_service',
+  'set_schedule',
+  'add_exception',
+  'remove_exception',
+  'set_business_hours',
+] as const;
+
+/** O-52: nombre legible del día para previews con sujeto humano. */
+const DAY_NAMES = [
+  'domingo',
+  'lunes',
+  'martes',
+  'miércoles',
+  'jueves',
+  'viernes',
+  'sábado',
+] as const;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -151,7 +204,13 @@ function compactBooking(booking: any) {
 export function createReservationsTools(
   deps: ReservationsToolDeps,
 ): RegisteredTool[] {
-  const { reservationsService, availabilityService } = deps;
+  const {
+    reservationsService,
+    availabilityService,
+    providersService,
+    providerScheduleService,
+    businessHoursService,
+  } = deps;
 
   const noStore = (what: string) =>
     JSON.stringify({
@@ -997,6 +1056,1195 @@ export function createReservationsTools(
             error: `No se pudo mover la reserva: ${describeError(error)}`,
             next_step:
               'Lee la reserva con get_booking: cada transición parte de un estado válido.',
+          });
+        }
+      },
+    },
+
+    // ─── O-51 reschedule_booking ───────────────────────────────────────
+    {
+      name: 'reschedule_booking',
+      version: '1',
+      domain: 'reservations',
+      description:
+        'Reprograma una reserva (action=reschedule) o decide una solicitud pendiente (approve/reject). Cadena OBLIGATORIA: lee primero get_booking para conocer estado y horario actual. Solo pending/confirmed se mueven; el slot nuevo se verifica libre (excluyendo la propia reserva) en el preview y se re-verifica al aplicar. Si la tienda exige aprobación, reschedule crea una solicitud pendiente en vez de mover la cita.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: RESCHEDULE_ACTIONS,
+            description:
+              'reschedule: mover la cita (exige booking_id + date + start_time + end_time). approve/reject: decidir una solicitud (exige request_id; reject exige decision_reason).',
+          },
+          booking_id: {
+            type: 'number',
+            description:
+              'Reserva a mover. Lista con list_bookings, detalla con get_booking.',
+          },
+          date: {
+            type: 'string',
+            description: 'Nueva fecha YYYY-MM-DD.',
+          },
+          start_time: {
+            type: 'string',
+            description: 'Nueva hora de inicio HH:mm (24h).',
+          },
+          end_time: {
+            type: 'string',
+            description: 'Nueva hora de fin HH:mm (24h).',
+          },
+          reason: {
+            type: 'string',
+            description:
+              'Motivo del cambio. Opcional; queda en la solicitud si la tienda exige aprobación.',
+          },
+          request_id: {
+            type: 'number',
+            description:
+              'Solicitud pendiente a decidir (approve/reject).',
+          },
+          decision_reason: {
+            type: 'string',
+            description:
+              'Obligatorio al rechazar (el cliente lo recibe; mínimo 3 caracteres). Opcional al aprobar.',
+          },
+        },
+        required: ['action'],
+      },
+      requiredPermissions: ['store:reservations:update'],
+      requiresConfirmation: true,
+      preview: async (args, context): Promise<ToolPreview> => {
+        if (!context.store_id) {
+          return {
+            status: 'error',
+            target: 'Reprogramar reserva',
+            changes: [],
+            message: 'Sin tienda en contexto: las reservas están acotadas por tienda.',
+          };
+        }
+        const action = String(args.action ?? '');
+        if (!(RESCHEDULE_ACTIONS as readonly string[]).includes(action)) {
+          return {
+            status: 'error',
+            target: 'Reprogramar reserva',
+            changes: [],
+            message: `action "${action}" no existe. Valores válidos: ${RESCHEDULE_ACTIONS.join(', ')}.`,
+          };
+        }
+        if (action === 'reschedule') {
+          const bookingId = Number(args.booking_id);
+          if (!Number.isFinite(bookingId) || bookingId < 1) {
+            return {
+              status: 'error',
+              target: 'Reprogramar reserva',
+              changes: [],
+              message: `booking_id inválido: "${args.booking_id}". Usa list_bookings para obtener uno válido.`,
+            };
+          }
+          const validated = toValidatedDto(RescheduleBookingDto, {
+            ...(args.date ? { date: String(args.date) } : {}),
+            ...(args.start_time
+              ? { start_time: String(args.start_time) }
+              : {}),
+            ...(args.end_time ? { end_time: String(args.end_time) } : {}),
+          });
+          if (!validated.ok) {
+            return {
+              status: 'error',
+              target: 'Reprogramar reserva',
+              changes: [],
+              message: validated.message,
+            };
+          }
+          let booking: any;
+          try {
+            booking = await reservationsService.findOne(bookingId);
+          } catch (error: any) {
+            return {
+              status: 'error',
+              target: 'Reprogramar reserva',
+              changes: [],
+              message: `No se encontró la reserva ${bookingId} en esta tienda: ${describeError(error)}`,
+            };
+          }
+          if (
+            !(RESCHEDULABLE_BOOKING_STATUSES as readonly string[]).includes(
+              booking.status,
+            )
+          ) {
+            return {
+              status: 'error',
+              target: `Reprogramar ${bookingSubject(booking)}`,
+              changes: [],
+              message: `La reserva está en estado '${booking.status}': solo se reprograma desde '${RESCHEDULABLE_BOOKING_STATUSES.join("' o '")}'.`,
+            };
+          }
+          const dto = validated.dto;
+          const date = String(dto.date).slice(0, 10);
+          let free: boolean;
+          try {
+            free = await availabilityService.isSlotAvailable(
+              booking.product_id,
+              date,
+              dto.start_time,
+              dto.end_time,
+              booking.provider_id ?? undefined,
+              booking.id,
+            );
+          } catch (error: any) {
+            return {
+              status: 'error',
+              target: `Reprogramar ${bookingSubject(booking)}`,
+              changes: [],
+              message: `No se pudo verificar la disponibilidad: ${describeError(error)}`,
+            };
+          }
+          if (!free) {
+            const alternatives = await availabilityService
+              .getAvailableSlots(booking.product_id, date, date, {
+                ...(booking.provider_id !== undefined &&
+                booking.provider_id !== null
+                  ? { provider_id: booking.provider_id }
+                  : {}),
+              })
+              .catch(() => []);
+            const options = alternatives
+              .slice(0, 5)
+              .map((slot) => `${slot.start_time}–${slot.end_time}`)
+              .join(', ');
+            return {
+              status: 'error',
+              target: `Reprogramar ${bookingSubject(booking)}`,
+              changes: [],
+              message:
+                `El horario ${date} ${dto.start_time}–${dto.end_time} está ocupado${options ? `; libres ese día: ${options}` : ''}. ` +
+                'Elige otro slot (check_booking_availability) y vuelve a proponer.',
+            };
+          }
+          return {
+            status: 'ok',
+            target: `Reprogramar ${bookingSubject(booking)}`,
+            changes: [
+              {
+                field: 'horario',
+                label: 'Horario',
+                from: `${String(booking.date).slice(0, 10)} ${booking.start_time}–${booking.end_time}`,
+                to: `${date} ${dto.start_time}–${dto.end_time}`,
+              },
+            ],
+            message:
+              'Si la tienda exige aprobación, esto crea una solicitud pendiente en vez de mover la cita.',
+            domain: 'reservations',
+          };
+        }
+        const requestId = Number(args.request_id);
+        if (!Number.isFinite(requestId) || requestId < 1) {
+          return {
+            status: 'error',
+            target: 'Decidir solicitud de reagenda',
+            changes: [],
+            message: `request_id inválido: "${args.request_id}".`,
+          };
+        }
+        if (action === 'reject') {
+          const validated = toValidatedDto(RejectRescheduleRequestDto, {
+            ...(args.decision_reason
+              ? { decision_reason: String(args.decision_reason) }
+              : {}),
+          });
+          if (!validated.ok) {
+            return {
+              status: 'error',
+              target: 'Rechazar solicitud de reagenda',
+              changes: [],
+              message: validated.message,
+            };
+          }
+        }
+        let request: any;
+        try {
+          request = await reservationsService.getRescheduleRequestForAgent(
+            context.store_id,
+            requestId,
+          );
+        } catch (error: any) {
+          return {
+            status: 'error',
+            target: 'Decidir solicitud de reagenda',
+            changes: [],
+            message: `No se pudo leer la solicitud ${requestId}: ${describeError(error)}`,
+          };
+        }
+        if (!request) {
+          return {
+            status: 'error',
+            target: 'Decidir solicitud de reagenda',
+            changes: [],
+            message: `La solicitud ${requestId} no existe en esta tienda.`,
+          };
+        }
+        if (request.status !== 'pending') {
+          return {
+            status: 'error',
+            target: `Solicitud #${requestId}`,
+            changes: [],
+            message: `La solicitud ya está en estado '${request.status}': solo las pendientes se deciden.`,
+          };
+        }
+        const booking = request.booking ?? {};
+        const from = `${String(booking.date ?? '?').slice(0, 10)} ${booking.start_time ?? ''}–${booking.end_time ?? ''}`.trim();
+        const to = `${String(request.requested_date).slice(0, 10)} ${request.requested_start_time}–${request.requested_end_time}`;
+        if (action === 'approve') {
+          return {
+            status: 'ok',
+            target: `Aprobar reagenda #${requestId}: ${booking.product?.name ?? 'servicio'} — ${bookingCustomerName({ customer: booking.customer })}`,
+            changes: [
+              {
+                field: 'solicitud',
+                label: 'Solicitud',
+                from: 'pending',
+                to: 'approved',
+              },
+              { field: 'horario', label: 'Horario', from, to },
+            ],
+            domain: 'reservations',
+          };
+        }
+        return {
+          status: 'warning',
+          target: `Rechazar reagenda #${requestId}: ${booking.product?.name ?? 'servicio'} — ${bookingCustomerName({ customer: booking.customer })}`,
+          changes: [
+            {
+              field: 'solicitud',
+              label: 'Solicitud',
+              from: 'pending',
+              to: 'rejected',
+            },
+            {
+              field: 'motivo',
+              label: 'Motivo (lo recibe el cliente)',
+              from: null,
+              to: String(args.decision_reason),
+            },
+          ],
+          message: 'La reserva queda en su horario original.',
+          domain: 'reservations',
+        };
+      },
+      handler: async (args, context) => {
+        if (!context.store_id) return noStore('la reprogramación de reservas');
+        const action = String(args.action ?? '');
+        if (!(RESCHEDULE_ACTIONS as readonly string[]).includes(action)) {
+          return JSON.stringify({
+            error: `action "${action}" no existe. Valores válidos: ${RESCHEDULE_ACTIONS.join(', ')}.`,
+            next_step: 'Elige reschedule, approve o reject y reintenta.',
+          });
+        }
+        if (action === 'reschedule') {
+          const bookingId = Number(args.booking_id);
+          if (!Number.isFinite(bookingId) || bookingId < 1) {
+            return JSON.stringify({
+              error: `booking_id inválido: "${args.booking_id}".`,
+              next_step: 'Lista las reservas con list_bookings y usa su booking_id.',
+            });
+          }
+          const validated = toValidatedDto(RescheduleBookingDto, {
+            ...(args.date ? { date: String(args.date) } : {}),
+            ...(args.start_time
+              ? { start_time: String(args.start_time) }
+              : {}),
+            ...(args.end_time ? { end_time: String(args.end_time) } : {}),
+          });
+          if (!validated.ok) {
+            return JSON.stringify({
+              error: validated.message,
+              next_step: 'Corrige los campos indicados y vuelve a proponer.',
+            });
+          }
+          try {
+            const before: any =
+              await reservationsService.findOne(bookingId);
+            if (
+              !(RESCHEDULABLE_BOOKING_STATUSES as readonly string[]).includes(
+                before.status,
+              )
+            ) {
+              return JSON.stringify({
+                error: `La reserva cambió a estado '${before.status}': solo se reprograma desde '${RESCHEDULABLE_BOOKING_STATUSES.join("' o '")}'.`,
+                next_step: 'Lee la reserva con get_booking para ver su estado actual.',
+              });
+            }
+            const dto = validated.dto;
+            const date = String(dto.date).slice(0, 10);
+            const free = await availabilityService.isSlotAvailable(
+              before.product_id,
+              date,
+              dto.start_time,
+              dto.end_time,
+              before.provider_id ?? undefined,
+              before.id,
+            );
+            if (!free) {
+              const alternatives = await availabilityService
+                .getAvailableSlots(before.product_id, date, date, {
+                  ...(before.provider_id !== undefined &&
+                  before.provider_id !== null
+                    ? { provider_id: before.provider_id }
+                    : {}),
+                })
+                .catch(() => []);
+              return JSON.stringify({
+                error: `El slot ${date} ${dto.start_time}–${dto.end_time} se ocupó antes de aplicar.`,
+                alternativas: alternatives.slice(0, 8).map((slot) => ({
+                  fecha: slot.date,
+                  inicio: slot.start_time,
+                  fin: slot.end_time,
+                  proveedores_disponibles: slot.total_available,
+                })),
+                next_step:
+                  'Elige una alternativa con check_booking_availability y vuelve a proponer.',
+              });
+            }
+            const after: any = await reservationsService.reschedule(
+              bookingId,
+              dto,
+            );
+            // El service enruta según la política de la tienda: si movió la
+            // cita, la fecha/hora volvió cambiada; si exige aprobación, la
+            // devuelve intacta y crea la solicitud pendiente.
+            const moved =
+              String(after?.date ?? '').slice(0, 10) === date &&
+              after?.start_time === dto.start_time &&
+              after?.end_time === dto.end_time;
+            if (!moved) {
+              return JSON.stringify({
+                solicitud_creada: {
+                  booking_id: bookingId,
+                  numero: after?.booking_number ?? null,
+                  horario_actual: `${String(after?.date ?? '').slice(0, 10)} ${after?.start_time ?? ''}–${after?.end_time ?? ''}`.trim(),
+                  horario_solicitado: `${date} ${dto.start_time}–${dto.end_time}`,
+                },
+                nota: 'La tienda exige aprobación: la cita NO se movió y quedó una solicitud pendiente. Decídela con action=approve o reject.',
+              });
+            }
+            return JSON.stringify({
+              reprogramacion: {
+                booking_id: bookingId,
+                numero: after?.booking_number ?? null,
+                horario_anterior: `${String(before.date).slice(0, 10)} ${before.start_time}–${before.end_time}`,
+                horario: `${date} ${dto.start_time}–${dto.end_time}`,
+                estado: after?.status ?? null,
+              },
+            });
+          } catch (error: any) {
+            return JSON.stringify({
+              error: `No se pudo reprogramar: ${describeError(error)}`,
+              next_step:
+                'Lee la reserva con get_booking y verifica el slot con check_booking_availability.',
+            });
+          }
+        }
+        const userId = Number(context.user_id);
+        if (!Number.isFinite(userId) || userId < 1) {
+          return JSON.stringify({
+            error: 'Sin usuario en contexto: decidir una solicitud exige saber quién la decide (auditoría).',
+            next_step: 'Reintenta desde una sesión autenticada.',
+          });
+        }
+        const requestId = Number(args.request_id);
+        if (!Number.isFinite(requestId) || requestId < 1) {
+          return JSON.stringify({
+            error: `request_id inválido: "${args.request_id}".`,
+            next_step: 'Pasa el id de la solicitud pendiente a decidir.',
+          });
+        }
+        try {
+          const current: any =
+            await reservationsService.getRescheduleRequestForAgent(
+              context.store_id as number,
+              requestId,
+            );
+          if (!current) {
+            return JSON.stringify({
+              error: `La solicitud ${requestId} no existe en esta tienda.`,
+              next_step: 'Verifica el request_id y reintenta.',
+            });
+          }
+          if (current.status !== 'pending') {
+            return JSON.stringify({
+              error: `La solicitud ya está en estado '${current.status}': solo las pendientes se deciden.`,
+              next_step: 'Pide una solicitud pendiente y reintenta.',
+            });
+          }
+          if (action === 'approve') {
+            const validated = toValidatedDto(ApproveRescheduleRequestDto, {
+              ...(args.decision_reason
+                ? { decision_reason: String(args.decision_reason) }
+                : {}),
+            });
+            if (!validated.ok) {
+              return JSON.stringify({
+                error: validated.message,
+                next_step: 'Corrige el motivo y reintenta.',
+              });
+            }
+            await reservationsService.approveRescheduleRequest(requestId, {
+              decidedByUserId: userId,
+              ...(validated.dto.decision_reason
+                ? { decisionReason: validated.dto.decision_reason }
+                : {}),
+            });
+            return JSON.stringify({
+              decision: {
+                request_id: requestId,
+                resultado: 'approved',
+                booking_id: current.booking_id,
+                horario_aplicado: `${String(current.requested_date).slice(0, 10)} ${current.requested_start_time}–${current.requested_end_time}`,
+              },
+              nota: 'La solicitud quedó aprobada y la reserva se movió al slot solicitado.',
+            });
+          }
+          const validated = toValidatedDto(RejectRescheduleRequestDto, {
+            ...(args.decision_reason
+              ? { decision_reason: String(args.decision_reason) }
+              : {}),
+          });
+          if (!validated.ok) {
+            return JSON.stringify({
+              error: validated.message,
+              next_step: 'Indica un motivo de al menos 3 caracteres y reintenta.',
+            });
+          }
+          await reservationsService.rejectRescheduleRequest(requestId, {
+            decidedByUserId: userId,
+            decisionReason: validated.dto.decision_reason,
+          });
+          return JSON.stringify({
+            decision: {
+              request_id: requestId,
+              resultado: 'rejected',
+              booking_id: current.booking_id,
+              motivo: validated.dto.decision_reason,
+            },
+            nota: 'La solicitud quedó rechazada y la reserva sigue en su horario original.',
+          });
+        } catch (error: any) {
+          return JSON.stringify({
+            error: `No se pudo decidir la solicitud: ${describeError(error)}`,
+            next_step: 'Verifica que la solicitud siga pendiente y reintenta.',
+          });
+        }
+      },
+    },
+
+    // ─── O-52 manage_booking_providers ──────────────────────────────────
+    {
+      name: 'manage_booking_providers',
+      version: '1',
+      domain: 'reservations',
+      description:
+        'Configuración de reservas: crea/edita proveedores (quién atiende), les asigna o quita servicios, define su horario semanal y sus excepciones (vacaciones, días no disponibles), y edita el calendario maestro de la tienda (business_hours) contra el que se intersecta toda disponibilidad. Es configuración, no operación diaria: usala cuando el usuario pida cambiar el equipo o los horarios.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: PROVIDER_ACTIONS,
+            description:
+              'create/update: alta y edición de proveedor. assign_service/remove_service: vínculo proveedor↔servicio. set_schedule: reemplaza el horario semanal. add_exception/remove_exception: días no disponibles. set_business_hours: reemplaza el calendario maestro de la tienda.',
+          },
+          provider_id: {
+            type: 'number',
+            description: 'Proveedor objetivo (todo salvo create y set_business_hours).',
+          },
+          employee_id: {
+            type: 'number',
+            description: 'Empleado a dar de alta como proveedor (solo create).',
+          },
+          display_name: {
+            type: 'string',
+            description: 'Nombre visible del proveedor.',
+          },
+          avatar_url: { type: 'string', description: 'Foto. Opcional.' },
+          bio: { type: 'string', description: 'Presentación. Opcional.' },
+          is_active: {
+            type: 'boolean',
+            description: 'Activa o desactiva al proveedor (solo update).',
+          },
+          sort_order: {
+            type: 'number',
+            description: 'Orden en listados (solo update).',
+          },
+          product_id: {
+            type: 'number',
+            description: 'Servicio a asignar o quitar (assign/remove_service).',
+          },
+          schedule: {
+            type: 'array',
+            description:
+              'Horario semanal COMPLETO que reemplaza al actual: [{day_of_week 0-6 (0=domingo), start_time HH:mm, end_time HH:mm, block_order?, is_active?}].',
+            items: { type: 'object' },
+          },
+          exception: {
+            type: 'object',
+            description:
+              'Excepción a crear: {date YYYY-MM-DD, is_unavailable? (default true), custom_start_time?, custom_end_time?, reason?}.',
+          },
+          exception_id: {
+            type: 'number',
+            description: 'Excepción a eliminar (remove_exception).',
+          },
+          business_hours: {
+            type: 'array',
+            description:
+              'Calendario maestro COMPLETO: [{day_of_week 0-6, start_time HH:mm, end_time HH:mm, is_active?}]. Los días omitidos se DESACTIVAN.',
+            items: { type: 'object' },
+          },
+        },
+        required: ['action'],
+      },
+      // AND fail-closed: la mayoría de acciones son `reservations:update`,
+      // pero `set_business_hours` toca el calendario maestro, cuyo dueño HTTP
+      // exige `business_hours:write`. El registry solo sabe AND, así que la
+      // tool exige ambos y nadie configura horarios por la puerta de atrás.
+      requiredPermissions: [
+        'store:reservations:update',
+        'store:business_hours:write',
+      ],
+      requiresConfirmation: true,
+      preview: async (args, context): Promise<ToolPreview> => {
+        if (!context.store_id) {
+          return {
+            status: 'error',
+            target: 'Configurar proveedores',
+            changes: [],
+            message: 'Sin tienda en contexto: los proveedores están acotados por tienda.',
+          };
+        }
+        const action = String(args.action ?? '');
+        if (!(PROVIDER_ACTIONS as readonly string[]).includes(action)) {
+          return {
+            status: 'error',
+            target: 'Configurar proveedores',
+            changes: [],
+            message: `action "${action}" no existe. Valores válidos: ${PROVIDER_ACTIONS.join(', ')}.`,
+          };
+        }
+        const providerName = (provider: any): string =>
+          provider?.display_name ??
+          [provider?.employee?.first_name, provider?.employee?.last_name]
+            .filter(Boolean)
+            .join(' ') ??
+          `Proveedor #${provider?.id ?? args.provider_id}`;
+        const needProvider = async (): Promise<any | ToolPreview> => {
+          const providerId = Number(args.provider_id);
+          if (!Number.isFinite(providerId) || providerId < 1) {
+            return {
+              status: 'error',
+              target: 'Configurar proveedores',
+              changes: [],
+              message: `provider_id inválido: "${args.provider_id}".`,
+            };
+          }
+          try {
+            return await providersService.findOne(providerId);
+          } catch (error: any) {
+            return {
+              status: 'error',
+              target: 'Configurar proveedores',
+              changes: [],
+              message: `No se encontró el proveedor ${providerId} en esta tienda: ${describeError(error)}`,
+            };
+          }
+        };
+        const isPreview = (value: any): value is ToolPreview =>
+          !!value && typeof value === 'object' && 'status' in value;
+
+        if (action === 'create') {
+          const validated = toValidatedDto(CreateProviderDto, {
+            ...(args.employee_id !== undefined &&
+              args.employee_id !== null && {
+                employee_id: Number(args.employee_id),
+              }),
+            ...(args.display_name
+              ? { display_name: String(args.display_name) }
+              : {}),
+            ...(args.avatar_url ? { avatar_url: String(args.avatar_url) } : {}),
+            ...(args.bio ? { bio: String(args.bio) } : {}),
+          });
+          if (!validated.ok) {
+            return {
+              status: 'error',
+              target: 'Nuevo proveedor',
+              changes: [],
+              message: validated.message,
+            };
+          }
+          return {
+            status: 'ok',
+            target: `Nuevo proveedor${validated.dto.display_name ? `: ${validated.dto.display_name}` : ''}`,
+            changes: [
+              {
+                field: 'empleado',
+                label: 'Empleado',
+                from: null,
+                to: `Empleado #${validated.dto.employee_id}`,
+              },
+              ...(validated.dto.display_name
+                ? [
+                    {
+                      field: 'nombre',
+                      label: 'Nombre visible',
+                      from: null,
+                      to: validated.dto.display_name,
+                    },
+                  ]
+                : []),
+            ],
+            domain: 'reservations',
+          };
+        }
+        if (action === 'update') {
+          const provider = await needProvider();
+          if (isPreview(provider)) return provider;
+          const validated = toValidatedDto(UpdateProviderDto, {
+            ...(args.display_name
+              ? { display_name: String(args.display_name) }
+              : {}),
+            ...(args.avatar_url ? { avatar_url: String(args.avatar_url) } : {}),
+            ...(args.bio ? { bio: String(args.bio) } : {}),
+            ...(args.is_active !== undefined && args.is_active !== null
+              ? { is_active: args.is_active === true }
+              : {}),
+            ...(args.sort_order !== undefined && args.sort_order !== null
+              ? { sort_order: Number(args.sort_order) }
+              : {}),
+          });
+          if (!validated.ok) {
+            return {
+              status: 'error',
+              target: `Editar ${providerName(provider)}`,
+              changes: [],
+              message: validated.message,
+            };
+          }
+          const dto = validated.dto as Record<string, any>;
+          const labels: Record<string, string> = {
+            display_name: 'Nombre visible',
+            avatar_url: 'Foto',
+            bio: 'Presentación',
+            is_active: 'Activo',
+            sort_order: 'Orden',
+          };
+          const changes = Object.keys(labels)
+            .filter(
+              (field) => dto[field] !== undefined && dto[field] !== null,
+            )
+            .map((field) => ({
+              field,
+              label: labels[field],
+              from: provider[field] ?? null,
+              to: dto[field],
+            }));
+          if (!changes.length) {
+            return {
+              status: 'error',
+              target: `Editar ${providerName(provider)}`,
+              changes: [],
+              message:
+                'No hay nada que cambiar: pasa al menos uno de display_name, avatar_url, bio, is_active o sort_order.',
+            };
+          }
+          return {
+            status: 'ok',
+            target: `Editar ${providerName(provider)}`,
+            changes,
+            domain: 'reservations',
+          };
+        }
+        if (action === 'assign_service' || action === 'remove_service') {
+          const provider = await needProvider();
+          if (isPreview(provider)) return provider;
+          const productId = Number(args.product_id);
+          if (!Number.isFinite(productId) || productId < 1) {
+            return {
+              status: 'error',
+              target: `${action === 'assign_service' ? 'Asignar' : 'Quitar'} servicio`,
+              changes: [],
+              message: `product_id inválido: "${args.product_id}".`,
+            };
+          }
+          if (action === 'assign_service') {
+            const validated = toValidatedDto(AssignServiceDto, {
+              product_id: productId,
+            });
+            if (!validated.ok) {
+              return {
+                status: 'error',
+                target: 'Asignar servicio',
+                changes: [],
+                message: validated.message,
+              };
+            }
+          }
+          return {
+            status: action === 'remove_service' ? 'warning' : 'ok',
+            target: `${action === 'assign_service' ? 'Asignar' : 'Quitar'} servicio #${productId} ${action === 'assign_service' ? 'a' : 'de'} ${providerName(provider)}`,
+            changes: [
+              {
+                field: 'servicio',
+                label: 'Servicio',
+                from: action === 'assign_service' ? null : `Servicio #${productId}`,
+                to: action === 'assign_service' ? `Servicio #${productId}` : null,
+              },
+            ],
+            ...(action === 'remove_service'
+              ? {
+                  message:
+                    'El proveedor dejará de ofrecerse para ese servicio en la disponibilidad.',
+                }
+              : {}),
+            domain: 'reservations',
+          };
+        }
+        if (action === 'set_schedule') {
+          const provider = await needProvider();
+          if (isPreview(provider)) return provider;
+          const rawItems = Array.isArray(args.schedule) ? args.schedule : [];
+          const validated = toValidatedDto(UpsertProviderScheduleDto, {
+            items: rawItems.map((row: any) => ({
+              ...(row?.day_of_week !== undefined && {
+                day_of_week: Number(row.day_of_week),
+              }),
+              ...(row?.block_order !== undefined && {
+                block_order: Number(row.block_order),
+              }),
+              ...(row?.start_time ? { start_time: String(row.start_time) } : {}),
+              ...(row?.end_time ? { end_time: String(row.end_time) } : {}),
+              ...(row?.is_active !== undefined
+                ? { is_active: row.is_active === true }
+                : {}),
+            })),
+          });
+          if (!validated.ok) {
+            return {
+              status: 'error',
+              target: `Horario de ${providerName(provider)}`,
+              changes: [],
+              message: validated.message,
+            };
+          }
+          const summary = validated.dto.items
+            .map(
+              (item) =>
+                `${DAY_NAMES[item.day_of_week]} ${item.start_time}–${item.end_time}${item.is_active === false ? ' (inactivo)' : ''}`,
+            )
+            .join(', ');
+          return {
+            status: 'ok',
+            target: `Horario de ${providerName(provider)}`,
+            changes: [
+              {
+                field: 'horario',
+                label: 'Horario semanal (reemplaza al actual)',
+                from: 'actual',
+                to: summary,
+              },
+            ],
+            domain: 'reservations',
+          };
+        }
+        if (action === 'add_exception') {
+          const provider = await needProvider();
+          if (isPreview(provider)) return provider;
+          const raw = (args.exception ?? {}) as Record<string, any>;
+          const validated = toValidatedDto(CreateProviderExceptionDto, {
+            ...(raw.date ? { date: String(raw.date) } : {}),
+            ...(raw.is_unavailable !== undefined
+              ? { is_unavailable: raw.is_unavailable === true }
+              : {}),
+            ...(raw.custom_start_time
+              ? { custom_start_time: String(raw.custom_start_time) }
+              : {}),
+            ...(raw.custom_end_time
+              ? { custom_end_time: String(raw.custom_end_time) }
+              : {}),
+            ...(raw.reason ? { reason: String(raw.reason) } : {}),
+          });
+          if (!validated.ok) {
+            return {
+              status: 'error',
+              target: `Excepción de ${providerName(provider)}`,
+              changes: [],
+              message: validated.message,
+            };
+          }
+          return {
+            status: 'ok',
+            target: `No disponible ${validated.dto.date} — ${providerName(provider)}`,
+            changes: [
+              {
+                field: 'excepcion',
+                label: 'Día no disponible',
+                from: null,
+                to: `${validated.dto.date}${validated.dto.reason ? ` (${validated.dto.reason})` : ''}`,
+              },
+            ],
+            domain: 'reservations',
+          };
+        }
+        if (action === 'remove_exception') {
+          const exceptionId = Number(args.exception_id);
+          if (!Number.isFinite(exceptionId) || exceptionId < 1) {
+            return {
+              status: 'error',
+              target: 'Eliminar excepción',
+              changes: [],
+              message: `exception_id inválido: "${args.exception_id}".`,
+            };
+          }
+          return {
+            status: 'warning',
+            target: `Eliminar excepción #${exceptionId}`,
+            changes: [
+              {
+                field: 'excepcion',
+                label: 'Excepción',
+                from: `#${exceptionId}`,
+                to: null,
+              },
+            ],
+            message: 'El día volverá a regirse por el horario semanal normal.',
+            domain: 'reservations',
+          };
+        }
+        // set_business_hours
+        const rawItems = Array.isArray(args.business_hours)
+          ? args.business_hours
+          : [];
+        const validated = toValidatedDto(UpsertBusinessHoursDto, {
+          items: rawItems.map((row: any) => ({
+            ...(row?.day_of_week !== undefined && {
+              day_of_week: Number(row.day_of_week),
+            }),
+            ...(row?.start_time ? { start_time: String(row.start_time) } : {}),
+            ...(row?.end_time ? { end_time: String(row.end_time) } : {}),
+            ...(row?.is_active !== undefined
+              ? { is_active: row.is_active === true }
+              : {}),
+          })),
+        });
+        if (!validated.ok) {
+          return {
+            status: 'error',
+            target: 'Calendario maestro de la tienda',
+            changes: [],
+            message: validated.message,
+          };
+        }
+        for (const item of validated.dto.items) {
+          if (item.start_time >= item.end_time) {
+            return {
+              status: 'error',
+              target: 'Calendario maestro de la tienda',
+              changes: [],
+              message: `Día ${item.day_of_week} (${DAY_NAMES[item.day_of_week]}): end_time (${item.end_time}) debe ser mayor que start_time (${item.start_time}).`,
+            };
+          }
+        }
+        const sent = new Set(validated.dto.items.map((item) => item.day_of_week));
+        const omitted = [0, 1, 2, 3, 4, 5, 6]
+          .filter((day) => !sent.has(day))
+          .map((day) => DAY_NAMES[day]);
+        return {
+          status: 'warning',
+          target: 'Calendario maestro de la tienda',
+          changes: validated.dto.items.map((item) => ({
+            field: `dia_${item.day_of_week}`,
+            label: DAY_NAMES[item.day_of_week],
+            from: 'actual',
+            to:
+              item.is_active === false
+                ? 'cerrado'
+                : `${item.start_time}–${item.end_time}`,
+          })),
+          message:
+            `Reemplaza TODO el calendario: ${omitted.length ? `los días omitidos (${omitted.join(', ')}) se DESACTIVAN` : 'los 7 días quedan definidos'}. ` +
+            'Ningún proveedor podrá reservarse fuera de estas ventanas.',
+          domain: 'reservations',
+        };
+      },
+      handler: async (args, context) => {
+        if (!context.store_id)
+          return noStore('la configuración de proveedores');
+        const action = String(args.action ?? '');
+        if (!(PROVIDER_ACTIONS as readonly string[]).includes(action)) {
+          return JSON.stringify({
+            error: `action "${action}" no existe. Valores válidos: ${PROVIDER_ACTIONS.join(', ')}.`,
+            next_step: 'Elige una acción válida y reintenta.',
+          });
+        }
+        const providerName = (provider: any): string =>
+          provider?.display_name ??
+          [provider?.employee?.first_name, provider?.employee?.last_name]
+            .filter(Boolean)
+            .join(' ') ??
+          `Proveedor #${provider?.id ?? args.provider_id}`;
+        try {
+          if (action === 'create') {
+            const validated = toValidatedDto(CreateProviderDto, {
+              ...(args.employee_id !== undefined &&
+                args.employee_id !== null && {
+                  employee_id: Number(args.employee_id),
+                }),
+              ...(args.display_name
+                ? { display_name: String(args.display_name) }
+                : {}),
+              ...(args.avatar_url
+                ? { avatar_url: String(args.avatar_url) }
+                : {}),
+              ...(args.bio ? { bio: String(args.bio) } : {}),
+            });
+            if (!validated.ok) {
+              return JSON.stringify({
+                error: validated.message,
+                next_step: 'Corrige los campos indicados y vuelve a proponer.',
+              });
+            }
+            const created: any = await providersService.create(validated.dto);
+            return JSON.stringify({
+              proveedor_creado: {
+                provider_id: created?.id ?? null,
+                nombre: providerName(created),
+              },
+              next_step:
+                'Asígnale servicios (assign_service) y horario (set_schedule) para que aparezca disponible.',
+            });
+          }
+          if (action === 'set_business_hours') {
+            const rawItems = Array.isArray(args.business_hours)
+              ? args.business_hours
+              : [];
+            const validated = toValidatedDto(UpsertBusinessHoursDto, {
+              items: rawItems.map((row: any) => ({
+                ...(row?.day_of_week !== undefined && {
+                  day_of_week: Number(row.day_of_week),
+                }),
+                ...(row?.start_time
+                  ? { start_time: String(row.start_time) }
+                  : {}),
+                ...(row?.end_time ? { end_time: String(row.end_time) } : {}),
+                ...(row?.is_active !== undefined
+                  ? { is_active: row.is_active === true }
+                  : {}),
+              })),
+            });
+            if (!validated.ok) {
+              return JSON.stringify({
+                error: validated.message,
+                next_step: 'Corrige los días indicados y vuelve a proponer.',
+              });
+            }
+            for (const item of validated.dto.items) {
+              if (item.start_time >= item.end_time) {
+                return JSON.stringify({
+                  error: `Día ${item.day_of_week} (${DAY_NAMES[item.day_of_week]}): end_time debe ser mayor que start_time.`,
+                  next_step: 'Corrige el día indicado y reintenta.',
+                });
+              }
+            }
+            await businessHoursService.upsertAll(
+              context.store_id as number,
+              validated.dto,
+            );
+            return JSON.stringify({
+              calendario_maestro: {
+                dias_definidos: validated.dto.items.length,
+              },
+              nota: 'El calendario maestro quedó reemplazado: los días omitidos se desactivaron.',
+            });
+          }
+          // Resto de acciones: re-verifican que el proveedor siga existiendo.
+          const providerId = Number(args.provider_id);
+          if (!Number.isFinite(providerId) || providerId < 1) {
+            return JSON.stringify({
+              error: `provider_id inválido: "${args.provider_id}".`,
+              next_step: 'Pasa el id del proveedor a configurar.',
+            });
+          }
+          const provider: any =
+            await providersService.findOne(providerId);
+          if (action === 'update') {
+            const validated = toValidatedDto(UpdateProviderDto, {
+              ...(args.display_name
+                ? { display_name: String(args.display_name) }
+                : {}),
+              ...(args.avatar_url
+                ? { avatar_url: String(args.avatar_url) }
+                : {}),
+              ...(args.bio ? { bio: String(args.bio) } : {}),
+              ...(args.is_active !== undefined && args.is_active !== null
+                ? { is_active: args.is_active === true }
+                : {}),
+              ...(args.sort_order !== undefined && args.sort_order !== null
+                ? { sort_order: Number(args.sort_order) }
+                : {}),
+            });
+            if (!validated.ok) {
+              return JSON.stringify({
+                error: validated.message,
+                next_step: 'Corrige los campos indicados y vuelve a proponer.',
+              });
+            }
+            const dto = validated.dto as Record<string, any>;
+            if (
+              !['display_name', 'avatar_url', 'bio', 'is_active', 'sort_order'].some(
+                (field) => dto[field] !== undefined && dto[field] !== null,
+              )
+            ) {
+              return JSON.stringify({
+                error: 'No hay nada que cambiar.',
+                next_step:
+                  'Pasa al menos uno de display_name, avatar_url, bio, is_active o sort_order.',
+              });
+            }
+            const updated: any = await providersService.update(
+              providerId,
+              validated.dto,
+            );
+            return JSON.stringify({
+              proveedor_actualizado: {
+                provider_id: providerId,
+                nombre: providerName(updated ?? provider),
+              },
+            });
+          }
+          if (action === 'assign_service') {
+            const productId = Number(args.product_id);
+            if (!Number.isFinite(productId) || productId < 1) {
+              return JSON.stringify({
+                error: `product_id inválido: "${args.product_id}".`,
+                next_step: 'Pasa el id del servicio a asignar.',
+              });
+            }
+            await providersService.assignService(providerId, productId);
+            return JSON.stringify({
+              asignacion: {
+                provider_id: providerId,
+                proveedor: providerName(provider),
+                product_id: productId,
+              },
+              nota: 'El proveedor ya ofrece ese servicio en la disponibilidad.',
+            });
+          }
+          if (action === 'remove_service') {
+            const productId = Number(args.product_id);
+            if (!Number.isFinite(productId) || productId < 1) {
+              return JSON.stringify({
+                error: `product_id inválido: "${args.product_id}".`,
+                next_step: 'Pasa el id del servicio a quitar.',
+              });
+            }
+            await providersService.removeService(providerId, productId);
+            return JSON.stringify({
+              remocion: {
+                provider_id: providerId,
+                proveedor: providerName(provider),
+                product_id: productId,
+              },
+              nota: 'El proveedor dejó de ofrecerse para ese servicio.',
+            });
+          }
+          if (action === 'set_schedule') {
+            const rawItems = Array.isArray(args.schedule) ? args.schedule : [];
+            const validated = toValidatedDto(UpsertProviderScheduleDto, {
+              items: rawItems.map((row: any) => ({
+                ...(row?.day_of_week !== undefined && {
+                  day_of_week: Number(row.day_of_week),
+                }),
+                ...(row?.block_order !== undefined && {
+                  block_order: Number(row.block_order),
+                }),
+                ...(row?.start_time
+                  ? { start_time: String(row.start_time) }
+                  : {}),
+                ...(row?.end_time ? { end_time: String(row.end_time) } : {}),
+                ...(row?.is_active !== undefined
+                  ? { is_active: row.is_active === true }
+                  : {}),
+              })),
+            });
+            if (!validated.ok) {
+              return JSON.stringify({
+                error: validated.message,
+                next_step: 'Corrige el horario indicado y vuelve a proponer.',
+              });
+            }
+            await providerScheduleService.upsertSchedule(
+              providerId,
+              validated.dto.items,
+            );
+            return JSON.stringify({
+              horario: {
+                provider_id: providerId,
+                proveedor: providerName(provider),
+                bloques: validated.dto.items.length,
+              },
+              nota: 'El horario semanal quedó reemplazado.',
+            });
+          }
+          if (action === 'add_exception') {
+            const raw = (args.exception ?? {}) as Record<string, any>;
+            const validated = toValidatedDto(CreateProviderExceptionDto, {
+              ...(raw.date ? { date: String(raw.date) } : {}),
+              ...(raw.is_unavailable !== undefined
+                ? { is_unavailable: raw.is_unavailable === true }
+                : {}),
+              ...(raw.custom_start_time
+                ? { custom_start_time: String(raw.custom_start_time) }
+                : {}),
+              ...(raw.custom_end_time
+                ? { custom_end_time: String(raw.custom_end_time) }
+                : {}),
+              ...(raw.reason ? { reason: String(raw.reason) } : {}),
+            });
+            if (!validated.ok) {
+              return JSON.stringify({
+                error: validated.message,
+                next_step: 'Corrige la excepción indicada y vuelve a proponer.',
+              });
+            }
+            const created: any =
+              await providerScheduleService.createException(
+                providerId,
+                validated.dto,
+              );
+            return JSON.stringify({
+              excepcion_creada: {
+                exception_id: created?.id ?? null,
+                provider_id: providerId,
+                fecha: validated.dto.date,
+              },
+            });
+          }
+          // remove_exception
+          const exceptionId = Number(args.exception_id);
+          if (!Number.isFinite(exceptionId) || exceptionId < 1) {
+            return JSON.stringify({
+              error: `exception_id inválido: "${args.exception_id}".`,
+              next_step: 'Pasa el id de la excepción a eliminar.',
+            });
+          }
+          await providerScheduleService.deleteException(exceptionId);
+          return JSON.stringify({
+            excepcion_eliminada: { exception_id: exceptionId },
+            nota: 'El día vuelve a regirse por el horario semanal normal.',
+          });
+        } catch (error: any) {
+          return JSON.stringify({
+            error: `No se pudo aplicar el cambio: ${describeError(error)}`,
+            next_step: 'Verifica los ids (proveedor, servicio, excepción) y reintenta.',
           });
         }
       },

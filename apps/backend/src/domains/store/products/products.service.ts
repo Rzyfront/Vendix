@@ -6348,6 +6348,162 @@ export class ProductsService {
     };
   }
 
+  /**
+   * O-3/O-4 agent archive context: product label + write-off plan + active
+   * reservations flag, in service-owned reads (tools never touch Prisma).
+   *
+   * MISMO predicado que `loadProductForArchive()` (`state != archived` +
+   * alcance de tienda): un id inexistente y uno ya archivado devuelven
+   * `product: null` para que la tool responda el error guiado en vez de
+   * lanzar. El plan sale de `buildArchiveWriteOffPlan`, la misma cuenta que
+   * `remove()` va a ejecutar.
+   */
+  async findProductArchivePreviewForAgent(productId: number) {
+    const context = RequestContextService.getContext();
+    const product = await this.prisma.products.findFirst({
+      where: {
+        id: productId,
+        state: { not: ProductState.ARCHIVED },
+        ...(!context?.is_super_admin && { store_id: context?.store_id }),
+      },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        state: true,
+        store_id: true,
+        cost_price: true,
+      },
+    });
+    if (!product) {
+      return { product: null, plan: null, hasActiveReservations: false };
+    }
+    // Superconjunto deliberado (igual que `remove()`): cualquier reserva
+    // activa sobre el producto o sus variantes bloquea el archivado.
+    const [plan, reservation] = await Promise.all([
+      this.buildArchiveWriteOffPlan(product),
+      this.prisma.stock_reservations.findFirst({
+        where: { product_id: productId, status: 'active' },
+        select: { id: true },
+      }),
+    ]);
+    return {
+      product: {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        state: product.state,
+      },
+      plan,
+      hasActiveReservations: !!reservation,
+    };
+  }
+
+  /**
+   * O-5 agent image target: the image plus its product label. Null when the
+   * image does not exist in this store (relational scope via `products`).
+   */
+  async findProductImageForAgent(imageId: number) {
+    const image: any = await this.prisma.product_images.findFirst({
+      where: { id: imageId },
+      select: {
+        id: true,
+        product_id: true,
+        image_url: true,
+        is_main: true,
+        products: {
+          select: { id: true, name: true, sku: true, state: true },
+        },
+      },
+    });
+    if (!image) return null;
+    return {
+      id: image.id,
+      product_id: image.product_id,
+      image_url: image.image_url,
+      is_main: image.is_main === true,
+      product: image.products ?? null,
+    };
+  }
+
+  /**
+   * O-7 agent promotion lookup: existence + display names for the preview.
+   * No money fields selected, so no cocina stripping is needed here (the
+   * write itself returns `getProductPromotions`, already stripped).
+   */
+  async findPromotionsByIdsForAgent(ids: number[]) {
+    if (!ids.length) return [];
+    return this.prisma.promotions.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, type: true, state: true },
+      orderBy: { id: 'asc' },
+    }) as Promise<
+      Array<{ id: number; name: string; type: string; state: string }>
+    >;
+  }
+
+  /**
+   * O-8 agent online-purchase context: product label + store readiness + the
+   * URL that would be generated. Read-only: generating happens in
+   * `generateOnlinePurchaseLink` after the user confirms.
+   */
+  async findOnlinePurchaseContextForAgent(productId: number) {
+    const product = await this.prisma.products.findFirst({
+      where: { id: productId, state: { not: ProductState.ARCHIVED } },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        slug: true,
+        store_id: true,
+        online_purchase_url: true,
+        online_purchase_generated_at: true,
+      },
+    });
+    if (!product) {
+      return {
+        product: null,
+        ready: false,
+        reason: 'product_not_found',
+        message: `No existe un producto con id ${productId} en esta tienda.`,
+        pending_url: null as string | null,
+      };
+    }
+    if (product.store_id == null) {
+      return {
+        product: {
+          id: product.id,
+          name: product.name,
+          sku: product.sku,
+          online_purchase_url: product.online_purchase_url,
+          online_purchase_generated_at:
+            product.online_purchase_generated_at,
+        },
+        ready: false,
+        reason: 'ecommerce_not_configured',
+        message: 'El producto no tiene tienda asociada.',
+        pending_url: null as string | null,
+      };
+    }
+    const status = await this.resolveOnlinePurchaseStatus(product.store_id);
+    return {
+      product: {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        online_purchase_url: product.online_purchase_url,
+        online_purchase_generated_at: product.online_purchase_generated_at,
+      },
+      ready: status.ready,
+      reason: status.reason,
+      message: status.message,
+      pending_url:
+        status.ready && status.domain_hostname
+          ? this.buildOnlinePurchaseUrl(status.domain_hostname, product.slug)
+          : null,
+    };
+  }
+
   private async resolvePosScope(
     // B.2 (F-089) — single-flight opcional: `findAll` pasa su promesa de
     // settings para no leer `store_settings` 2 veces por request. Ausente ⇒

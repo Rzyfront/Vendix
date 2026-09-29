@@ -12,6 +12,9 @@ import { StockTransfersService } from '../../../domains/store/orders/stock-trans
 import { CreateTransferDto } from '../../../domains/store/orders/stock-transfers/dto/create-transfer.dto';
 import { UpdateTransferDto } from '../../../domains/store/orders/stock-transfers/dto/update-transfer.dto';
 import { CompleteTransferDto } from '../../../domains/store/orders/stock-transfers/dto/complete-transfer.dto';
+import { CreateLocationDto } from '../../../domains/store/inventory/locations/dto/create-location.dto';
+import { UpdateLocationDto } from '../../../domains/store/inventory/locations/dto/update-location.dto';
+import { SourcingSuggestionQueryDto } from '../../../domains/store/inventory/stock-levels/dto/sourcing-suggestion-query.dto';
 
 export interface InventoryToolServices {
   stockLevelsService: StockLevelsService;
@@ -1256,6 +1259,671 @@ export function createInventoryTools(
             'Lee los pendientes con get_stock_adjustments para ver su estado actual.',
             info.code,
           );
+        }
+      },
+    },
+
+    // ─── O-16: manage_locations (WRITE) ────────────────────────────────
+    // Configuración de bodegas: crear, editar, desactivar y marcar la
+    // bodega por defecto de la tienda. Eliminar es un soft-delete
+    // (`is_active=false`): el stock queda intacto. Cadena:
+    // get_inventory_locations → write.
+    {
+      name: 'manage_locations',
+      version: '1',
+      domain: 'inventory',
+      description:
+        'Crea, edita, desactiva o marca como por defecto las bodegas/ubicaciones de inventario. Eliminar NO borra stock: solo desactiva la bodega. Resuelve IDs con get_inventory_locations antes de proponer. Acciones: create (name + code), update, delete (soft), set_default.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['create', 'update', 'delete', 'set_default'],
+            description: 'Acción sobre la ubicación.',
+          },
+          location_id: {
+            type: 'number',
+            description:
+              'ID de la ubicación (requerido para update, delete y set_default).',
+          },
+          name: {
+            type: 'string',
+            description: 'Nombre (requerido para create).',
+          },
+          code: {
+            type: 'string',
+            description: 'Código único (requerido para create).',
+          },
+          type: {
+            type: 'string',
+            enum: LOCATION_TYPES,
+            description: 'Tipo de ubicación (create/update).',
+          },
+          is_active: {
+            type: 'boolean',
+            description: 'Activa/inactiva (update).',
+          },
+        },
+        required: ['action'],
+      },
+      requiredPermissions: [
+        'store:inventory:locations:create',
+        'store:inventory:locations:update',
+        'store:inventory:locations:delete',
+        'store:inventory:set-default-location',
+      ],
+      requiresConfirmation: true,
+      preview: async (args, context) => {
+        const action = String(args.action ?? '');
+        if (!['create', 'update', 'delete', 'set_default'].includes(action)) {
+          return previewError(
+            'Ubicación de inventario',
+            `action "${action}" inválida. Usa create, update, delete o set_default.`,
+          );
+        }
+
+        if (!context.store_id && !context.organization_id) {
+          return previewError(
+            'Ubicación de inventario',
+            'Sin tienda ni organización en contexto.',
+          );
+        }
+
+        try {
+          if (action === 'create') {
+            const checked = toValidatedDto(CreateLocationDto, {
+              ...(args.name ? { name: String(args.name) } : {}),
+              ...(args.code ? { code: String(args.code) } : {}),
+              ...(args.type ? { type: String(args.type) } : {}),
+              ...(args.is_active !== undefined
+                ? { is_active: Boolean(args.is_active) }
+                : {}),
+            });
+            if (!checked.ok) {
+              return previewError('Nueva ubicación', checked.message);
+            }
+            return {
+              status: 'ok',
+              target: `Nueva ubicación — ${checked.dto.name} (${checked.dto.code})`,
+              changes: [
+                {
+                  field: 'name',
+                  label: 'Nombre',
+                  from: null,
+                  to: checked.dto.name,
+                },
+                {
+                  field: 'code',
+                  label: 'Código',
+                  from: null,
+                  to: checked.dto.code,
+                },
+                {
+                  field: 'type',
+                  label: 'Tipo',
+                  from: null,
+                  to: (checked.dto as any).type ?? 'store',
+                },
+              ],
+              domain: 'inventory',
+            };
+          }
+
+          const locationId = toPositiveInt(args.location_id);
+          if (!locationId) {
+            return previewError(
+              'Ubicación de inventario',
+              `${action} exige location_id.`,
+            );
+          }
+          const location =
+            await services.locationsService.findOne(locationId);
+          if (!location) {
+            return previewError(
+              `Ubicación #${locationId}`,
+              `La ubicación ${locationId} no existe en esta tienda.`,
+            );
+          }
+          const label = `${location.name} (${location.code})`;
+
+          if (action === 'update') {
+            const changes = [
+              ...(args.name && args.name !== location.name
+                ? [
+                    {
+                      field: 'name',
+                      label: 'Nombre',
+                      from: location.name,
+                      to: String(args.name),
+                    },
+                  ]
+                : []),
+              ...(args.code && args.code !== location.code
+                ? [
+                    {
+                      field: 'code',
+                      label: 'Código',
+                      from: location.code,
+                      to: String(args.code),
+                    },
+                  ]
+                : []),
+              ...(args.type && args.type !== location.type
+                ? [
+                    {
+                      field: 'type',
+                      label: 'Tipo',
+                      from: location.type,
+                      to: String(args.type),
+                    },
+                  ]
+                : []),
+              ...(args.is_active !== undefined &&
+              Boolean(args.is_active) !== Boolean(location.is_active)
+                ? [
+                    {
+                      field: 'is_active',
+                      label: 'Estado',
+                      from: location.is_active ? 'activa' : 'inactiva',
+                      to: args.is_active ? 'activa' : 'inactiva',
+                    },
+                  ]
+                : []),
+            ];
+            if (!changes.length) {
+              return previewError(
+                label,
+                'No hay cambios: manda al menos name, code, type o is_active distinto al actual.',
+              );
+            }
+            return {
+              status: 'ok',
+              target: label,
+              changes,
+              domain: 'inventory',
+            };
+          }
+
+          if (action === 'delete') {
+            if (!location.is_active) {
+              return previewError(
+                label,
+                'La ubicación ya está inactiva: nada que desactivar.',
+              );
+            }
+            return {
+              status: 'warning',
+              target: label,
+              changes: [
+                {
+                  field: 'is_active',
+                  label: 'Estado',
+                  from: 'activa',
+                  to: 'inactiva (soft-delete)',
+                },
+              ],
+              message:
+                'Desactivar NO borra el stock que queda en la bodega: solo la saca de selectores y flujos. Mueve o ajusta ese stock después si la bodega se vacía.',
+              domain: 'inventory',
+            };
+          }
+
+          // set_default
+          if ((location as any).is_default) {
+            return previewError(
+              label,
+              'La ubicación ya es la bodega por defecto de la tienda.',
+            );
+          }
+          if (!location.is_active) {
+            return previewError(
+              label,
+              'La ubicación está inactiva: solo una bodega activa puede ser la por defecto.',
+            );
+          }
+          return {
+            status: 'warning',
+            target: label,
+            changes: [
+              {
+                field: 'is_default',
+                label: 'Bodega por defecto',
+                from: 'otra bodega',
+                to: label,
+              },
+            ],
+            message:
+              'La bodega por defecto recibe el stock de recepciones y ventas que no indican bodega explícita.',
+            domain: 'inventory',
+          };
+        } catch (error) {
+          const info = describeError(error);
+          return previewError('Ubicación de inventario', info.message);
+        }
+      },
+      handler: async (args) => {
+        const action = String(args.action ?? '');
+
+        try {
+          if (action === 'create') {
+            const checked = toValidatedDto(CreateLocationDto, {
+              ...(args.name ? { name: String(args.name) } : {}),
+              ...(args.code ? { code: String(args.code) } : {}),
+              ...(args.type ? { type: String(args.type) } : {}),
+              ...(args.is_active !== undefined
+                ? { is_active: Boolean(args.is_active) }
+                : {}),
+            });
+            if (!checked.ok) return toolError(checked.message);
+            const created =
+              await services.locationsService.create(checked.dto);
+            return JSON.stringify({
+              resumen: `Ubicación ${created.name} (${created.code}) creada`,
+              location_id: created.id,
+              siguiente_paso:
+                'Úsala como origen/destino en manage_stock_transfers.',
+            });
+          }
+
+          const locationId = toPositiveInt(args.location_id);
+          if (!locationId) {
+            return toolError(`${action} exige location_id.`);
+          }
+          // Re-verificación: la ubicación sigue existiendo.
+          const fresh =
+            await services.locationsService.findOne(locationId);
+          if (!fresh) {
+            return toolError(
+              `La ubicación ${locationId} ya no existe en esta tienda.`,
+            );
+          }
+
+          if (action === 'update') {
+            const checked = toValidatedDto(UpdateLocationDto, {
+              ...(args.name ? { name: String(args.name) } : {}),
+              ...(args.code ? { code: String(args.code) } : {}),
+              ...(args.type ? { type: String(args.type) } : {}),
+              ...(args.is_active !== undefined
+                ? { is_active: Boolean(args.is_active) }
+                : {}),
+            });
+            if (!checked.ok) return toolError(checked.message);
+            const updated = await services.locationsService.update(
+              locationId,
+              checked.dto,
+            );
+            return JSON.stringify({
+              resumen: `Ubicación ${updated.name} (${updated.code}) actualizada`,
+              location_id: locationId,
+            });
+          }
+
+          if (action === 'delete') {
+            if (!fresh.is_active) {
+              return toolError(
+                `La ubicación ${fresh.name} ya está inactiva: nada que desactivar.`,
+              );
+            }
+            await services.locationsService.remove(locationId);
+            return JSON.stringify({
+              resumen: `Ubicación ${fresh.name} desactivada (soft-delete, el stock queda intacto)`,
+              location_id: locationId,
+            });
+          }
+
+          if (action === 'set_default') {
+            if ((fresh as any).is_default) {
+              return toolError(
+                `La ubicación ${fresh.name} ya es la bodega por defecto.`,
+              );
+            }
+            if (!fresh.is_active) {
+              return toolError(
+                `La ubicación ${fresh.name} está inactiva: reactívala antes de marcarla por defecto.`,
+              );
+            }
+            const updated =
+              await services.locationsService.setAsDefault(locationId);
+            return JSON.stringify({
+              resumen: `Ubicación ${(updated as any)?.name ?? fresh.name} marcada como bodega por defecto de la tienda`,
+              location_id: locationId,
+            });
+          }
+
+          return toolError(
+            `action "${action}" inválida. Usa create, update, delete o set_default.`,
+          );
+        } catch (error) {
+          const info = describeError(error);
+          return toolError(
+            info.message,
+            'Lee las ubicaciones con get_inventory_locations para ver el estado actual.',
+            info.code,
+          );
+        }
+      },
+    },
+
+    // ─── O-17: release_stock_reservations (WRITE, cuarentena) ──────────
+    // Libera reservas activas de stock: por producto o TODAS (emergencia
+    // administrativa). Es la herramienta más peligrosa del lote: las órdenes
+    // afectadas pierden su stock apartado. Por eso exige confirmación FUERTE
+    // con frase de consecuencia: el primer llamado devuelve la frase exacta
+    // que hay que repetir en `consequence_ack` para acuñar el token.
+    // Delega en `InventoryAdjustmentsService` → `StockLevelManager`; las
+    // reservas se marcan `cancelled` (restauran disponible, no tocan on-hand).
+    // Cadena: get_stock_levels / check_stock_availability → write.
+    {
+      name: 'release_stock_reservations',
+      version: '1',
+      domain: 'inventory',
+      description:
+        'CUARENTENA: libera reservas activas de stock (apartados de órdenes, transferencias o layaway) marcándolas canceladas: el disponible se restaura. scope by_product exige product_id; scope all libera TODAS las reservas (emergencia administrativa). EXIGE frase de consecuencia: llama una vez sin consequence_ack para recibir la frase exacta, pídele al usuario que la confirme, y repite incluyéndola.',
+      parameters: {
+        type: 'object',
+        properties: {
+          scope: {
+            type: 'string',
+            enum: ['by_product', 'all'],
+            description:
+              'by_product: solo un producto (variante opcional). all: TODAS las reservas activas.',
+          },
+          product_id: {
+            type: 'number',
+            description: 'Producto (requerido con scope by_product).',
+          },
+          product_variant_id: {
+            type: 'number',
+            description: 'Variante (opcional, afina by_product).',
+          },
+          consequence_ack: {
+            type: 'string',
+            description:
+              'Frase de consecuencia exacta que devuelve el primer llamado. Sin ella no hay token.',
+          },
+        },
+        required: ['scope'],
+      },
+      requiredPermissions: ['store:inventory:adjustments:create'],
+      requiresConfirmation: true,
+      preview: async (args, context) => {
+        const scope = String(args.scope ?? '');
+        if (!['by_product', 'all'].includes(scope)) {
+          return previewError(
+            'Liberación de reservas',
+            `scope "${scope}" inválido. Usa by_product o all.`,
+          );
+        }
+
+        if (!context.store_id && !context.organization_id) {
+          return previewError(
+            'Liberación de reservas',
+            'Sin tienda ni organización en contexto.',
+          );
+        }
+
+        const requiredPhrase =
+          scope === 'all'
+            ? 'LIBERAR TODAS LAS RESERVAS'
+            : 'LIBERAR RESERVAS DEL PRODUCTO';
+
+        try {
+          const productId =
+            scope === 'by_product'
+              ? toPositiveInt(args.product_id)
+              : null;
+          if (scope === 'by_product' && !productId) {
+            return previewError(
+              'Liberación de reservas',
+              'scope by_product exige product_id.',
+            );
+          }
+          const variantId = toPositiveInt(args.product_variant_id);
+
+          const summary =
+            await services.adjustmentsService.getActiveReservationsSummary(
+              productId ?? undefined,
+              variantId ?? undefined,
+            );
+          if (!summary.active_count) {
+            return previewError(
+              'Liberación de reservas',
+              scope === 'all'
+                ? 'No hay reservas activas en la tienda: nada que liberar.'
+                : `El producto ${productId} no tiene reservas activas: nada que liberar.`,
+            );
+          }
+
+          let subject = 'toda la tienda';
+          if (productId) {
+            const rows = await services.stockLevelsService
+              .findAll({ product_id: productId })
+              .catch(() => []);
+            const first = Array.isArray(rows) ? rows[0] : null;
+            subject =
+              first?.products?.name ??
+              first?.product?.name ??
+              `producto #${productId}`;
+            if (variantId) subject += ` (variante #${variantId})`;
+          }
+
+          const refs = summary.references
+            .map((r: any) => `${r.type} #${r.id} (${r.quantity}u)`)
+            .join('; ');
+          const consequence =
+            scope === 'all'
+              ? `Se liberan las ${summary.active_count} reservas activas de TODA la tienda (${summary.total_quantity} unidades apartadas vuelven a disponible). Las órdenes, transferencias y layaways afectados pierden su stock apartado y pueden quedar sin existencias al cobrar o despachar.`
+              : `Se liberan las ${summary.active_count} reservas activas de ${subject} (${summary.total_quantity} unidades apartadas vuelven a disponible). Las órdenes y transferencias afectadas pierden su apartado sobre este producto.`;
+
+          if (args.consequence_ack !== requiredPhrase) {
+            return previewError(
+              scope === 'all'
+                ? `Liberar TODAS las reservas (${summary.active_count})`
+                : `Liberar reservas — ${subject}`,
+              `${consequence} Para continuar, repite el llamado con consequence_ack exactamente igual a: "${requiredPhrase}".`,
+            );
+          }
+
+          return {
+            status: 'warning',
+            target:
+              scope === 'all'
+                ? `Liberar TODAS las reservas (${summary.active_count} reservas, ${summary.total_quantity}u)`
+                : `Liberar reservas — ${subject} (${summary.active_count} reservas, ${summary.total_quantity}u)`,
+            changes: [
+              {
+                field: 'reservations',
+                label: 'Reservas',
+                from: `${summary.active_count} activas`,
+                to: 'cancelled (disponible restaurado)',
+              },
+              {
+                field: 'references',
+                label: 'Referencias afectadas',
+                from: null,
+                to: refs || 'sin detalle',
+              },
+            ],
+            message: `${consequence} Frase de consecuencia declarada por el modelo.`,
+            domain: 'inventory',
+          };
+        } catch (error) {
+          const info = describeError(error);
+          return previewError('Liberación de reservas', info.message);
+        }
+      },
+      handler: async (args) => {
+        const scope = String(args.scope ?? '');
+        const requiredPhrase =
+          scope === 'all'
+            ? 'LIBERAR TODAS LAS RESERVAS'
+            : 'LIBERAR RESERVAS DEL PRODUCTO';
+        if (args.consequence_ack !== requiredPhrase) {
+          return toolError(
+            'Falta la frase de consecuencia: repite el llamado con consequence_ack exacto.',
+            `Llama primero sin consequence_ack para recibir la frase ("${requiredPhrase}").`,
+          );
+        }
+
+        try {
+          const productId =
+            scope === 'by_product'
+              ? toPositiveInt(args.product_id)
+              : null;
+          if (scope === 'by_product' && !productId) {
+            return toolError('scope by_product exige product_id.');
+          }
+          const variantId = toPositiveInt(args.product_variant_id);
+
+          // Re-verificación: las reservas siguen ahí (el preview es
+          // proyección, otro proceso pudo liberarlas en el medio).
+          const fresh =
+            await services.adjustmentsService.getActiveReservationsSummary(
+              productId ?? undefined,
+              variantId ?? undefined,
+            );
+          if (!fresh.active_count) {
+            return toolError(
+              'Ya no hay reservas activas en este alcance: otro proceso las liberó después del preview.',
+              'Verifica el disponible con get_stock_levels.',
+            );
+          }
+
+          const result =
+            scope === 'all'
+              ? await services.adjustmentsService.releaseAllReservations()
+              : await services.adjustmentsService.releaseReservationsByProduct(
+                  productId as number,
+                  variantId ?? undefined,
+                );
+          return JSON.stringify({
+            resumen:
+              scope === 'all'
+                ? `Liberadas ${result.released_count} reservas de toda la tienda (${result.total_quantity}u devueltas a disponible)`
+                : `Liberadas ${result.released_count} reservas del producto ${productId} (${result.total_quantity}u devueltas a disponible)`,
+            released_count: result.released_count,
+            total_quantity: result.total_quantity,
+            siguiente_paso:
+              'Verifica el disponible resultante con get_stock_levels.',
+          });
+        } catch (error) {
+          const info = describeError(error);
+          return toolError(
+            info.message,
+            'Verifica las reservas y el stock con get_stock_levels antes de reintentar.',
+            info.code,
+          );
+        }
+      },
+    },
+
+    // ─── O-18: get_sourcing_suggestion (READ) ──────────────────────────
+    // "¿De dónde saco este stock?": vende desde la bodega principal, transfiere
+    // desde otra, o compra más. Opcionalmente incluye la deriva del espejo
+    // denormalizado (mirror-drift). La reconciliación NO es tool: va por el
+    // flujo de ajustes con aprobación.
+    {
+      name: 'get_sourcing_suggestion',
+      version: '1',
+      domain: 'inventory',
+      readOnly: true,
+      description:
+        'Sugiere de dónde surtir un producto: available (la bodega principal cubre), transfer (otra bodega cubre el faltante) o purchase (hay que comprar). Con include_mirror_drift=true añade la deriva del espejo denormalizado (descuadres entre stock_quantity y existencias reales).',
+      parameters: {
+        type: 'object',
+        properties: {
+          product_id: {
+            type: 'number',
+            description: 'Producto a surtir.',
+          },
+          product_variant_id: {
+            type: 'number',
+            description: 'Variante específica (opcional).',
+          },
+          quantity: {
+            type: 'number',
+            description: 'Cantidad solicitada (por defecto 1).',
+          },
+          include_mirror_drift: {
+            type: 'boolean',
+            description:
+              'Incluye la deriva del espejo denormalizado (por defecto false).',
+          },
+        },
+        required: ['product_id'],
+      },
+      requiredPermissions: ['store:inventory:stock_levels:read'],
+      handler: async (args, context) => {
+        if (!context.store_id && !context.organization_id) {
+          return JSON.stringify({
+            error:
+              'Sin tienda ni organización en contexto: el sourcing está acotado por tenant.',
+          });
+        }
+
+        const checked = toValidatedDto(SourcingSuggestionQueryDto, {
+          ...(args.product_id !== undefined
+            ? { product_id: Number(args.product_id) }
+            : {}),
+          ...(args.product_variant_id !== undefined &&
+          args.product_variant_id !== null
+            ? { product_variant_id: Number(args.product_variant_id) }
+            : {}),
+          ...(args.quantity !== undefined
+            ? { quantity: Number(args.quantity) }
+            : {}),
+        });
+        if (!checked.ok) {
+          return JSON.stringify({
+            error: checked.message,
+            next_step:
+              'Pasa product_id (entero ≥1) y quantity (entero ≥1).',
+          });
+        }
+
+        try {
+          const [sourcing, drift] = await Promise.all([
+            services.stockLevelsService.getSourcingSuggestion(checked.dto),
+            args.include_mirror_drift
+              ? services.stockLevelsService.getMirrorDrift()
+              : Promise.resolve(null),
+          ]);
+
+          const nextStep =
+            sourcing.suggestion === 'available'
+              ? 'Vende desde la bodega principal: tiene suficiente.'
+              : sourcing.suggestion === 'transfer'
+                ? 'Mueve el faltante con manage_stock_transfers desde una bodega con existencias.'
+                : 'Ninguna bodega cubre: crea una orden de compra (manage_purchase_orders).';
+
+          return JSON.stringify({
+            sugerencia: sourcing.suggestion,
+            cantidad_solicitada: sourcing.requested_quantity,
+            bodega_principal: sourcing.main_location,
+            otras_bodegas: sourcing.other_locations,
+            siguiente_paso: nextStep,
+            ...(drift
+              ? {
+                  espejo: {
+                    coincide: (drift as any).is_consistent ?? null,
+                    descuadres:
+                      (drift as any).drifted_total ??
+                      (drift as any).drifted?.length ??
+                      0,
+                    detalle: ((drift as any).drifted ?? []).slice(0, 10),
+                    nota: 'La reconciliación va por el flujo de ajustes con aprobación, no por tool.',
+                  },
+                }
+              : {}),
+          });
+        } catch (error) {
+          const info = describeError(error);
+          return JSON.stringify({
+            error: `No se pudo calcular el sourcing: ${info.message}`,
+            next_step:
+              'Verifica el producto y el stock con get_stock_levels.',
+          });
         }
       },
     },

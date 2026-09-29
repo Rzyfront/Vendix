@@ -331,4 +331,312 @@ describe('suppliers.tools · O-38 find_supplier / O-41 get_supplier_summary', ()
       expect(answer.next_step).toMatch(/find_supplier/);
     });
   });
+
+  describe('get_supplier (O-39)', () => {
+    const SUPPLIER = {
+      id: 21,
+      name: 'Distribuidora Andina',
+      code: 'AND-01',
+      state: 'active',
+      contact_person: 'Marcela Ríos',
+      email: 'compras@andina.co',
+      phone: '6015550101',
+      tax_id: '900123456',
+      payment_terms: 'NET30',
+      supplier_products: [
+        {
+          product_id: 9,
+          products: { name: 'Café 500g', sku: 'CAFE-500' },
+        },
+      ],
+    };
+
+    it('contrato: readOnly sin confirmación y permiso de lectura', () => {
+      const tools = buildTools();
+      const tool = getTool(tools, 'get_supplier');
+      expect(tool.version).toBe('1');
+      expect(tool.readOnly).toBe(true);
+      expect(tool.requiresConfirmation).toBeUndefined();
+      expect(tool.requiredPermissions).toEqual([
+        'store:inventory:suppliers:read',
+      ]);
+    });
+
+    it('happy: detalle con catálogo de productos', async () => {
+      const tools = buildTools({
+        findOne: jest.fn().mockResolvedValue(SUPPLIER),
+      });
+      const tool = getTool(tools, 'get_supplier');
+      const answer = JSON.parse(
+        await tool.handler!({ supplier_id: 21 }, CONTEXT),
+      );
+
+      expect(answer.proveedor).toEqual(
+        expect.objectContaining({
+          supplier_id: 21,
+          name: 'Distribuidora Andina',
+          code: 'AND-01',
+          state: 'active',
+          payment_terms: 'NET30',
+          products_count: 1,
+          productos: [
+            { product_id: 9, name: 'Café 500g', sku: 'CAFE-500' },
+          ],
+        }),
+      );
+    });
+
+    it('happy: include_products=false omite el catálogo', async () => {
+      const tools = buildTools({
+        findOne: jest.fn().mockResolvedValue(SUPPLIER),
+      });
+      const tool = getTool(tools, 'get_supplier');
+      const answer = JSON.parse(
+        await tool.handler!(
+          { supplier_id: 21, include_products: false },
+          CONTEXT,
+        ),
+      );
+
+      expect(answer.proveedor.productos).toBeUndefined();
+      expect(answer.proveedor.name).toBe('Distribuidora Andina');
+    });
+
+    it('sad: supplier_id inválido no llama al servicio', async () => {
+      const findOne = jest.fn();
+      const tools = buildTools({ findOne });
+      const tool = getTool(tools, 'get_supplier');
+      const answer = JSON.parse(
+        await tool.handler!({ supplier_id: 0 }, CONTEXT),
+      );
+
+      expect(answer.error).toMatch(/inválido/);
+      expect(findOne).not.toHaveBeenCalled();
+    });
+
+    it('sad: proveedor inexistente responde {error, next_step}', async () => {
+      const tools = buildTools({
+        findOne: jest.fn().mockRejectedValue(new Error('no existe')),
+      });
+      const tool = getTool(tools, 'get_supplier');
+      const answer = JSON.parse(
+        await tool.handler!({ supplier_id: 999 }, CONTEXT),
+      );
+
+      expect(answer.error).toMatch(/999/);
+      expect(answer.next_step).toMatch(/find_supplier/);
+    });
+  });
+
+  describe('manage_suppliers (O-40)', () => {
+    const SUPPLIER = {
+      id: 21,
+      name: 'Distribuidora Andina',
+      code: 'AND-01',
+      state: 'active',
+      contact_person: 'Marcela Ríos',
+      email: 'compras@andina.co',
+      phone: '6015550101',
+      tax_id: '900123456',
+    };
+
+    it('contrato: version 1, confirmación, preview y permisos de escritura', () => {
+      const tools = buildTools();
+      const tool = getTool(tools, 'manage_suppliers');
+      expect(tool.version).toBe('1');
+      expect(tool.requiresConfirmation).toBe(true);
+      expect(typeof tool.preview).toBe('function');
+      expect(tool.requiredPermissions).toEqual([
+        'store:inventory:suppliers:create',
+        'store:inventory:suppliers:update',
+        'store:inventory:suppliers:delete',
+      ]);
+    });
+
+    it('preview create muestra sujeto humano con nombre y código', async () => {
+      const tools = buildTools();
+      const tool = getTool(tools, 'manage_suppliers');
+      const preview = await tool.preview!(
+        {
+          action: 'create',
+          name: 'Cafés del Sur',
+          code: 'SUR-01',
+          email: 'hola@sur.co',
+        },
+        CONTEXT,
+      );
+
+      expect(preview.status).toBe('ok');
+      expect(preview.target).toBe('Nuevo proveedor — Cafés del Sur (SUR-01)');
+      expect(preview.changes).toContainEqual(
+        expect.objectContaining({ field: 'email', to: 'hola@sur.co' }),
+      );
+    });
+
+    it('preview create sin código aborta sin token', async () => {
+      const create = jest.fn();
+      const tools = buildTools({ create });
+      const tool = getTool(tools, 'manage_suppliers');
+      const preview = await tool.preview!(
+        { action: 'create', name: 'Sin código' },
+        CONTEXT,
+      );
+
+      expect(preview.status).toBe('error');
+      expect(preview.message).toMatch(/validación/);
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('preview set_state muestra el cambio de estado', async () => {
+      const tools = buildTools({
+        findOne: jest.fn().mockResolvedValue(SUPPLIER),
+      });
+      const tool = getTool(tools, 'manage_suppliers');
+      const preview = await tool.preview!(
+        { action: 'set_state', supplier_id: 21, state: 'inactive' },
+        CONTEXT,
+      );
+
+      expect(preview).toEqual({
+        status: 'ok',
+        target: 'Distribuidora Andina (AND-01)',
+        changes: [
+          {
+            field: 'state',
+            label: 'Estado',
+            from: 'active',
+            to: 'inactive',
+          },
+        ],
+        domain: 'suppliers',
+      });
+    });
+
+    it('preview set_state con archived aborta (va por delete)', async () => {
+      const tools = buildTools({
+        findOne: jest.fn().mockResolvedValue(SUPPLIER),
+      });
+      const tool = getTool(tools, 'manage_suppliers');
+      const preview = await tool.preview!(
+        { action: 'set_state', supplier_id: 21, state: 'archived' },
+        CONTEXT,
+      );
+
+      expect(preview.status).toBe('error');
+      expect(preview.message).toMatch(/va por delete/);
+    });
+
+    it('preview delete con documentos abiertos aborta sin token', async () => {
+      const tools = buildTools({
+        findOne: jest.fn().mockResolvedValue(SUPPLIER),
+        getSupplierSummary: jest.fn().mockResolvedValue({
+          open_pos_count: 2,
+          outstanding_debt: 3200000,
+        }),
+      });
+      const tool = getTool(tools, 'manage_suppliers');
+      const preview = await tool.preview!(
+        { action: 'delete', supplier_id: 21 },
+        CONTEXT,
+      );
+
+      expect(preview.status).toBe('error');
+      expect(preview.message).toMatch(/2 orden\(es\) abierta\(s\)/);
+    });
+
+    it('preview delete limpio advierte que conserva historia', async () => {
+      const tools = buildTools({
+        findOne: jest.fn().mockResolvedValue(SUPPLIER),
+        getSupplierSummary: jest.fn().mockResolvedValue({
+          open_pos_count: 0,
+          outstanding_debt: 0,
+        }),
+      });
+      const tool = getTool(tools, 'manage_suppliers');
+      const preview = await tool.preview!(
+        { action: 'delete', supplier_id: 21 },
+        CONTEXT,
+      );
+
+      expect(preview.status).toBe('warning');
+      expect(preview.message).toMatch(/conserva/);
+    });
+
+    it('handler create happy delega con DTO validado', async () => {
+      const create = jest.fn().mockResolvedValue({
+        id: 30,
+        name: 'Cafés del Sur',
+        code: 'SUR-01',
+      });
+      const tools = buildTools({ create });
+      const tool = getTool(tools, 'manage_suppliers');
+      const answer = JSON.parse(
+        await tool.handler!(
+          { action: 'create', name: 'Cafés del Sur', code: 'SUR-01' },
+          CONTEXT,
+        ),
+      );
+
+      expect(answer.supplier_id).toBe(30);
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Cafés del Sur', code: 'SUR-01' }),
+      );
+    });
+
+    it('handler set_state re-verifica: si otro lo cambió, no duplica', async () => {
+      const setState = jest.fn();
+      const tools = buildTools({
+        findOne: jest.fn().mockResolvedValue({
+          ...SUPPLIER,
+          state: 'inactive',
+        }),
+        setState,
+      });
+      const tool = getTool(tools, 'manage_suppliers');
+      const answer = JSON.parse(
+        await tool.handler!(
+          { action: 'set_state', supplier_id: 21, state: 'inactive' },
+          CONTEXT,
+        ),
+      );
+
+      expect(answer.error).toMatch(/ya está en/);
+      expect(setState).not.toHaveBeenCalled();
+    });
+
+    it('handler delete happy archiva vía el servicio', async () => {
+      const remove = jest.fn().mockResolvedValue({
+        ...SUPPLIER,
+        state: 'archived',
+      });
+      const tools = buildTools({
+        findOne: jest.fn().mockResolvedValue(SUPPLIER),
+        remove,
+      });
+      const tool = getTool(tools, 'manage_suppliers');
+      const answer = JSON.parse(
+        await tool.handler!({ action: 'delete', supplier_id: 21 }, CONTEXT),
+      );
+
+      expect(answer.state).toBe('archived');
+      expect(remove).toHaveBeenCalledWith(21);
+    });
+
+    it('handler traduce el fallo del dominio a {error, next_step}', async () => {
+      const tools = buildTools({
+        findOne: jest.fn().mockResolvedValue(SUPPLIER),
+        update: jest.fn().mockRejectedValue(new Error('NIT duplicado')),
+      });
+      const tool = getTool(tools, 'manage_suppliers');
+      const answer = JSON.parse(
+        await tool.handler!(
+          { action: 'update', supplier_id: 21, tax_id: '900999' },
+          CONTEXT,
+        ),
+      );
+
+      expect(answer.error).toMatch(/NIT duplicado/);
+      expect(answer.next_step).toMatch(/get_supplier/);
+    });
+  });
 });

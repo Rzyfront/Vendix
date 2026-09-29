@@ -42,6 +42,8 @@ describe('customers.tools · contrato T4', () => {
         getTopProductsForAgent: jest.fn(),
         getSegmentPopulationForAgent: jest.fn(),
         resolveCurrencyFromOrdersForAgent: jest.fn(),
+        getStats: jest.fn(),
+        getTopCustomers: jest.fn(),
       } as any,
     } satisfies CustomerToolDeps;
   }
@@ -65,13 +67,14 @@ describe('customers.tools · contrato T4', () => {
 
   // ─── (d)+(e) Registro: permisos, categoría y forma ────────────────────
   describe('registro', () => {
-    it('expone exactamente los 4 tools del dominio customers', () => {
+    it('expone exactamente los 5 tools del dominio customers', () => {
       const { tools } = buildTools();
       expect(tools.map((tool) => tool.name)).toEqual([
         'find_customer',
         'get_customer_history',
         'get_customer_segments',
         'lookup_customer',
+        'get_customer_stats',
       ]);
       for (const tool of tools) {
         expect(tool.domain).toBe('customers');
@@ -120,6 +123,12 @@ describe('customers.tools · contrato T4', () => {
       expect(
         Object.keys(byName.get('lookup_customer')!.parameters.properties),
       ).toEqual(['documento', 'telefono', 'email']);
+      expect(
+        byName.get('get_customer_stats')!.parameters.required ?? [],
+      ).toEqual([]);
+      expect(
+        Object.keys(byName.get('get_customer_stats')!.parameters.properties),
+      ).toEqual(['top_limit']);
     });
   });
 
@@ -648,6 +657,118 @@ describe('customers.tools · contrato T4', () => {
           'Sin tienda en contexto: los clientes se resuelven siempre dentro de una tienda.',
       });
       expect(deps.customersService.findAll).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── O-43 get_customer_stats ──────────────────────────────────────────
+  describe('get_customer_stats', () => {
+    const STATS = {
+      total_customers: 120,
+      active_customers: 80,
+      new_customers_this_month: 7,
+      total_revenue: 45250750.5,
+    };
+    const TOP = [
+      {
+        id: 501,
+        first_name: 'Marcela',
+        last_name: 'Ríos',
+        email: 'marcela@example.com',
+        phone: '3001234567',
+        document_type: 'CC',
+        document_number: '12345678',
+        order_count: 14,
+      },
+      {
+        id: 502,
+        first_name: 'Juan',
+        last_name: null,
+        email: null,
+        phone: null,
+        document_type: null,
+        document_number: null,
+        order_count: 9,
+      },
+    ];
+
+    it('(b) happy: snapshot exacto de resumen + ranking', async () => {
+      const { deps, tools } = buildTools();
+      deps.customersService.getStats.mockResolvedValue(STATS);
+      deps.customersService.getTopCustomers.mockResolvedValue(TOP);
+
+      const answer = await run(tools, 'get_customer_stats', {});
+
+      expect(answer).toEqual({
+        resumen: {
+          total_clientes: 120,
+          clientes_activos: 80,
+          nuevos_este_mes: 7,
+          facturacion_clientes: 45250750.5,
+        },
+        top_clientes: [
+          {
+            customer_id: 501,
+            name: 'Marcela Ríos',
+            document: 'CC 12345678',
+            phone: '3001234567',
+            email: 'marcela@example.com',
+            ordenes_finalizadas: 14,
+          },
+          {
+            customer_id: 502,
+            name: 'Juan',
+            document: null,
+            phone: null,
+            email: null,
+            ordenes_finalizadas: 9,
+          },
+        ],
+        nota: expect.stringContaining('finished'),
+        next_step: expect.stringContaining('get_customer_history'),
+      });
+      expect(deps.customersService.getStats).toHaveBeenCalledWith(STORE_ID);
+      expect(deps.customersService.getTopCustomers).toHaveBeenCalledWith(
+        STORE_ID,
+        5,
+      );
+    });
+
+    it('(b) happy: top_limit viaja acotado al service', async () => {
+      const { deps, tools } = buildTools();
+      deps.customersService.getStats.mockResolvedValue(STATS);
+      deps.customersService.getTopCustomers.mockResolvedValue([]);
+
+      await run(tools, 'get_customer_stats', { top_limit: 99 });
+
+      expect(deps.customersService.getTopCustomers).toHaveBeenCalledWith(
+        STORE_ID,
+        20,
+      );
+    });
+
+    it('(a) sad: sin tienda → error y cero queries', async () => {
+      const { deps, tools } = buildTools();
+
+      const answer = await run(tools, 'get_customer_stats', {}, {});
+
+      expect(answer).toEqual({
+        error:
+          'Sin tienda en contexto: las estadísticas de clientes son siempre por tienda.',
+      });
+      expect(deps.customersService.getStats).not.toHaveBeenCalled();
+      expect(deps.customersService.getTopCustomers).not.toHaveBeenCalled();
+    });
+
+    it('(c) el service lanza → {error}', async () => {
+      const { deps, tools } = buildTools();
+      deps.customersService.getStats.mockRejectedValue(
+        new Error('aggregate caído'),
+      );
+      deps.customersService.getTopCustomers.mockResolvedValue([]);
+
+      const answer = await run(tools, 'get_customer_stats', {});
+
+      expect(answer.error).toContain('aggregate caído');
     });
   });
 });

@@ -33,10 +33,29 @@ describe('reservations.tools · contrato T4', () => {
         complete: jest.fn(),
         noShow: jest.fn(),
         checkIn: jest.fn(),
+        reschedule: jest.fn(),
+        approveRescheduleRequest: jest.fn(),
+        rejectRescheduleRequest: jest.fn(),
+        getRescheduleRequestForAgent: jest.fn(),
       } as any,
       availabilityService: {
         isSlotAvailable: jest.fn(),
         getAvailableSlots: jest.fn(),
+      } as any,
+      providersService: {
+        findOne: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+        assignService: jest.fn(),
+        removeService: jest.fn(),
+      } as any,
+      providerScheduleService: {
+        upsertSchedule: jest.fn(),
+        createException: jest.fn(),
+        deleteException: jest.fn(),
+      } as any,
+      businessHoursService: {
+        upsertAll: jest.fn(),
       } as any,
     } satisfies ReservationsToolDeps;
   }
@@ -116,7 +135,7 @@ describe('reservations.tools · contrato T4', () => {
 
   // ─── (d)+(e) Registro: permisos, categoría y forma ────────────────────
   describe('registro', () => {
-    it('expone exactamente los 5 tools del dominio reservations', () => {
+    it('expone exactamente los 7 tools del dominio reservations', () => {
       const { tools } = buildTools();
       expect(tools.map((tool) => tool.name)).toEqual([
         'list_bookings',
@@ -124,6 +143,8 @@ describe('reservations.tools · contrato T4', () => {
         'check_booking_availability',
         'manage_bookings',
         'transition_booking',
+        'reschedule_booking',
+        'manage_booking_providers',
       ]);
       for (const tool of tools) {
         expect(tool.domain).toBe('reservations');
@@ -150,6 +171,12 @@ describe('reservations.tools · contrato T4', () => {
       expect(byName.get('transition_booking')!.requiredPermissions).toEqual([
         'store:reservations:update',
       ]);
+      expect(byName.get('reschedule_booking')!.requiredPermissions).toEqual([
+        'store:reservations:update',
+      ]);
+      expect(
+        byName.get('manage_booking_providers')!.requiredPermissions,
+      ).toEqual(['store:reservations:update', 'store:business_hours:write']);
     });
 
     it('reads readOnly y writes con confirmación+preview', () => {
@@ -165,7 +192,12 @@ describe('reservations.tools · contrato T4', () => {
         expect(tool.requiresConfirmation ?? false).toBe(false);
         expect(tool.preview).toBeUndefined();
       }
-      for (const name of ['manage_bookings', 'transition_booking']) {
+      for (const name of [
+        'manage_bookings',
+        'transition_booking',
+        'reschedule_booking',
+        'manage_booking_providers',
+      ]) {
         const tool = byName.get(name)!;
         expect(tool.readOnly ?? false).toBe(false);
         expect(tool.requiresConfirmation).toBe(true);
@@ -212,6 +244,28 @@ describe('reservations.tools · contrato T4', () => {
         'complete',
         'no_show',
         'check_in',
+      ]);
+      expect(byName.get('reschedule_booking')!.parameters.required).toEqual([
+        'action',
+      ]);
+      expect(
+        byName.get('reschedule_booking')!.parameters.properties.action.enum,
+      ).toEqual(['reschedule', 'approve', 'reject']);
+      expect(
+        byName.get('manage_booking_providers')!.parameters.required,
+      ).toEqual(['action']);
+      expect(
+        byName.get('manage_booking_providers')!.parameters.properties.action
+          .enum,
+      ).toEqual([
+        'create',
+        'update',
+        'assign_service',
+        'remove_service',
+        'set_schedule',
+        'add_exception',
+        'remove_exception',
+        'set_business_hours',
       ]);
     });
   });
@@ -694,6 +748,446 @@ describe('reservations.tools · contrato T4', () => {
 
       expect(answer.error).toContain('desde confirmed');
       expect(answer.next_step).toContain('get_booking');
+    });
+  });
+
+  // ─── O-51 reschedule_booking ───────────────────────────────────────────
+  describe('reschedule_booking', () => {
+    const MOVE_ARGS = {
+      action: 'reschedule',
+      booking_id: 81,
+      date: '2026-10-06',
+      start_time: '11:00',
+      end_time: '12:00',
+    };
+    const REQUEST_ROW = {
+      id: 5,
+      booking_id: 81,
+      status: 'pending',
+      requested_date: '2026-10-06',
+      requested_start_time: '11:00',
+      requested_end_time: '12:00',
+      booking: {
+        id: 81,
+        booking_number: 'RSV-081',
+        date: '2026-10-05',
+        start_time: '10:00',
+        end_time: '11:00',
+        customer: { first_name: 'Marcela', last_name: 'Ríos' },
+        product: { name: 'Corte de cabello' },
+      },
+    };
+
+    it('(b) happy: mueve directo con slot re-verificado (excluye la propia)', async () => {
+      const { deps, tools } = buildTools();
+      deps.reservationsService.findOne.mockResolvedValue(BOOKING_ROW);
+      deps.availabilityService.isSlotAvailable.mockResolvedValue(true);
+      deps.reservationsService.reschedule.mockResolvedValue({
+        ...BOOKING_ROW,
+        date: '2026-10-06',
+        start_time: '11:00',
+        end_time: '12:00',
+      });
+
+      const answer = await run(tools, 'reschedule_booking', MOVE_ARGS);
+
+      expect(answer).toEqual({
+        reprogramacion: {
+          booking_id: 81,
+          numero: 'RSV-081',
+          horario_anterior: '2026-10-05 10:00–11:00',
+          horario: '2026-10-06 11:00–12:00',
+          estado: 'pending',
+        },
+      });
+      expect(deps.availabilityService.isSlotAvailable).toHaveBeenCalledWith(
+        21,
+        '2026-10-06',
+        '11:00',
+        '12:00',
+        undefined,
+        81,
+      );
+    });
+
+    it('(b) tienda con aprobación: reporta solicitud creada, no movimiento', async () => {
+      const { deps, tools } = buildTools();
+      deps.reservationsService.findOne.mockResolvedValue(BOOKING_ROW);
+      deps.availabilityService.isSlotAvailable.mockResolvedValue(true);
+      deps.reservationsService.reschedule.mockResolvedValue(BOOKING_ROW);
+
+      const answer = await run(tools, 'reschedule_booking', MOVE_ARGS);
+
+      expect(answer.solicitud_creada).toEqual({
+        booking_id: 81,
+        numero: 'RSV-081',
+        horario_actual: '2026-10-05 10:00–11:00',
+        horario_solicitado: '2026-10-06 11:00–12:00',
+      });
+      expect(answer.nota).toContain('NO se movió');
+      expect(answer.nota).toContain('approve');
+    });
+
+    it('(e) preview ok: sujeto humano servicio+cliente+horario', async () => {
+      const { deps, tools } = buildTools();
+      deps.reservationsService.findOne.mockResolvedValue(BOOKING_ROW);
+      deps.availabilityService.isSlotAvailable.mockResolvedValue(true);
+
+      const result = await preview(tools, 'reschedule_booking', MOVE_ARGS);
+
+      expect(result.status).toBe('ok');
+      expect(result.target).toContain('Corte de cabello');
+      expect(result.target).toContain('Marcela Ríos');
+      expect(result.changes).toEqual([
+        {
+          field: 'horario',
+          label: 'Horario',
+          from: '2026-10-05 10:00–11:00',
+          to: '2026-10-06 11:00–12:00',
+        },
+      ]);
+      expect(result.domain).toBe('reservations');
+      expect(deps.reservationsService.reschedule).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: reserva completada → error sin verificar slot', async () => {
+      const { deps, tools } = buildTools();
+      deps.reservationsService.findOne.mockResolvedValue({
+        ...BOOKING_ROW,
+        status: 'completed',
+      });
+
+      const result = await preview(tools, 'reschedule_booking', MOVE_ARGS);
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain("'completed'");
+      expect(
+        deps.availabilityService.isSlotAvailable,
+      ).not.toHaveBeenCalled();
+      expect(deps.reservationsService.reschedule).not.toHaveBeenCalled();
+    });
+
+    it('(c) carrera: el slot se ocupa entre preview y apply → {error, alternativas, next_step}', async () => {
+      const { deps, tools } = buildTools();
+      deps.reservationsService.findOne.mockResolvedValue(BOOKING_ROW);
+      deps.availabilityService.isSlotAvailable.mockResolvedValue(false);
+      deps.availabilityService.getAvailableSlots.mockResolvedValue([
+        {
+          date: '2026-10-06',
+          start_time: '12:00',
+          end_time: '13:00',
+          total_available: 1,
+        },
+      ]);
+
+      const answer = await run(tools, 'reschedule_booking', MOVE_ARGS);
+
+      expect(answer.error).toContain('se ocupó antes de aplicar');
+      expect(answer.alternativas).toEqual([
+        {
+          fecha: '2026-10-06',
+          inicio: '12:00',
+          fin: '13:00',
+          proveedores_disponibles: 1,
+        },
+      ]);
+      expect(answer.next_step).toContain('check_booking_availability');
+      expect(deps.reservationsService.reschedule).not.toHaveBeenCalled();
+    });
+
+    it('(b) happy: approve mueve la cita y audita al usuario', async () => {
+      const { deps, tools } = buildTools();
+      deps.reservationsService.getRescheduleRequestForAgent.mockResolvedValue(
+        REQUEST_ROW,
+      );
+      deps.reservationsService.approveRescheduleRequest.mockResolvedValue({});
+
+      const answer = await run(tools, 'reschedule_booking', {
+        action: 'approve',
+        request_id: 5,
+      });
+
+      expect(answer).toEqual({
+        decision: {
+          request_id: 5,
+          resultado: 'approved',
+          booking_id: 81,
+          horario_aplicado: '2026-10-06 11:00–12:00',
+        },
+        nota: expect.stringContaining('aprobada'),
+      });
+      expect(
+        deps.reservationsService.approveRescheduleRequest,
+      ).toHaveBeenCalledWith(5, { decidedByUserId: 9 });
+    });
+
+    it('(e) preview reject: warning con motivo que recibe el cliente', async () => {
+      const { deps, tools } = buildTools();
+      deps.reservationsService.getRescheduleRequestForAgent.mockResolvedValue(
+        REQUEST_ROW,
+      );
+
+      const result = await preview(tools, 'reschedule_booking', {
+        action: 'reject',
+        request_id: 5,
+        decision_reason: 'Ese día cerramos por inventario',
+      });
+
+      expect(result.status).toBe('warning');
+      expect(result.target).toContain('Corte de cabello');
+      expect(result.target).toContain('Marcela Ríos');
+      expect(result.changes).toContainEqual({
+        field: 'motivo',
+        label: 'Motivo (lo recibe el cliente)',
+        from: null,
+        to: 'Ese día cerramos por inventario',
+      });
+      expect(
+        deps.reservationsService.rejectRescheduleRequest,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: reject sin motivo → error de DTO sin leer la solicitud', async () => {
+      const { deps, tools } = buildTools();
+
+      const result = await preview(tools, 'reschedule_booking', {
+        action: 'reject',
+        request_id: 5,
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('validación');
+      expect(
+        deps.reservationsService.getRescheduleRequestForAgent,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: decidir solicitud ya decidida → error', async () => {
+      const { deps, tools } = buildTools();
+      deps.reservationsService.getRescheduleRequestForAgent.mockResolvedValue({
+        ...REQUEST_ROW,
+        status: 'approved',
+      });
+
+      const answer = await run(tools, 'reschedule_booking', {
+        action: 'approve',
+        request_id: 5,
+      });
+
+      expect(answer.error).toContain("'approved'");
+      expect(
+        deps.reservationsService.approveRescheduleRequest,
+      ).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── O-52 manage_booking_providers ─────────────────────────────────────
+  describe('manage_booking_providers', () => {
+    const PROVIDER_ROW = {
+      id: 3,
+      display_name: 'Andrés',
+      is_active: true,
+      sort_order: 1,
+    };
+
+    it('(b) happy: create da de alta y sugiere siguientes pasos', async () => {
+      const { deps, tools } = buildTools();
+      deps.providersService.create.mockResolvedValue({
+        id: 4,
+        display_name: 'Lucía',
+      });
+
+      const answer = await run(tools, 'manage_booking_providers', {
+        action: 'create',
+        employee_id: 12,
+        display_name: 'Lucía',
+      });
+
+      expect(answer.proveedor_creado).toEqual({
+        provider_id: 4,
+        nombre: 'Lucía',
+      });
+      expect(answer.next_step).toContain('assign_service');
+      expect(deps.providersService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ employee_id: 12, display_name: 'Lucía' }),
+      );
+    });
+
+    it('(e) preview update: de→a con sujeto humano', async () => {
+      const { deps, tools } = buildTools();
+      deps.providersService.findOne.mockResolvedValue(PROVIDER_ROW);
+
+      const result = await preview(tools, 'manage_booking_providers', {
+        action: 'update',
+        provider_id: 3,
+        is_active: false,
+      });
+
+      expect(result.status).toBe('ok');
+      expect(result.target).toContain('Andrés');
+      expect(result.changes).toEqual([
+        { field: 'is_active', label: 'Activo', from: true, to: false },
+      ]);
+      expect(result.domain).toBe('reservations');
+      expect(deps.providersService.update).not.toHaveBeenCalled();
+    });
+
+    it('(b) happy: assign_service vincula proveedor↔servicio', async () => {
+      const { deps, tools } = buildTools();
+      deps.providersService.findOne.mockResolvedValue(PROVIDER_ROW);
+      deps.providersService.assignService.mockResolvedValue({});
+
+      const answer = await run(tools, 'manage_booking_providers', {
+        action: 'assign_service',
+        provider_id: 3,
+        product_id: 21,
+      });
+
+      expect(answer.asignacion).toEqual({
+        provider_id: 3,
+        proveedor: 'Andrés',
+        product_id: 21,
+      });
+      expect(deps.providersService.assignService).toHaveBeenCalledWith(3, 21);
+    });
+
+    it('(e) preview remove_service: warning que cita disponibilidad', async () => {
+      const { deps, tools } = buildTools();
+      deps.providersService.findOne.mockResolvedValue(PROVIDER_ROW);
+
+      const result = await preview(tools, 'manage_booking_providers', {
+        action: 'remove_service',
+        provider_id: 3,
+        product_id: 21,
+      });
+
+      expect(result.status).toBe('warning');
+      expect(result.target).toContain('Andrés');
+      expect(result.message).toContain('disponibilidad');
+      expect(deps.providersService.removeService).not.toHaveBeenCalled();
+    });
+
+    it('(b) happy: set_schedule reemplaza con días legibles', async () => {
+      const { deps, tools } = buildTools();
+      deps.providersService.findOne.mockResolvedValue(PROVIDER_ROW);
+      deps.providerScheduleService.upsertSchedule.mockResolvedValue([]);
+
+      const schedule = [
+        { day_of_week: 1, start_time: '08:00', end_time: '17:00' },
+        { day_of_week: 2, start_time: '08:00', end_time: '12:00' },
+      ];
+      const result = await preview(tools, 'manage_booking_providers', {
+        action: 'set_schedule',
+        provider_id: 3,
+        schedule,
+      });
+
+      expect(result.status).toBe('ok');
+      expect(result.changes[0].to).toContain('lunes 08:00–17:00');
+      expect(
+        deps.providerScheduleService.upsertSchedule,
+      ).not.toHaveBeenCalled();
+
+      const answer = await run(tools, 'manage_booking_providers', {
+        action: 'set_schedule',
+        provider_id: 3,
+        schedule,
+      });
+
+      expect(answer.horario).toEqual({
+        provider_id: 3,
+        proveedor: 'Andrés',
+        bloques: 2,
+      });
+      expect(
+        deps.providerScheduleService.upsertSchedule,
+      ).toHaveBeenCalledWith(3, expect.arrayContaining([expect.anything()]));
+    });
+
+    it('(a) sad: add_exception sin fecha → error de DTO', async () => {
+      const { deps, tools } = buildTools();
+      deps.providersService.findOne.mockResolvedValue(PROVIDER_ROW);
+
+      const result = await preview(tools, 'manage_booking_providers', {
+        action: 'add_exception',
+        provider_id: 3,
+        exception: { reason: 'vacaciones' },
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('validación');
+      expect(
+        deps.providerScheduleService.createException,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('(e) preview set_business_hours: warning que lista días desactivados', async () => {
+      const { deps, tools } = buildTools();
+
+      const result = await preview(tools, 'manage_booking_providers', {
+        action: 'set_business_hours',
+        business_hours: [
+          { day_of_week: 1, start_time: '08:00', end_time: '18:00' },
+        ],
+      });
+
+      expect(result.status).toBe('warning');
+      expect(result.message).toContain('DESACTIVAN');
+      expect(result.message).toContain('domingo');
+      expect(result.changes).toEqual([
+        { field: 'dia_1', label: 'lunes', from: 'actual', to: '08:00–18:00' },
+      ]);
+      expect(deps.businessHoursService.upsertAll).not.toHaveBeenCalled();
+    });
+
+    it('(b) happy: set_business_hours aplica al store del contexto', async () => {
+      const { deps, tools } = buildTools();
+      deps.businessHoursService.upsertAll.mockResolvedValue([]);
+
+      const answer = await run(tools, 'manage_booking_providers', {
+        action: 'set_business_hours',
+        business_hours: [
+          { day_of_week: 1, start_time: '08:00', end_time: '18:00' },
+        ],
+      });
+
+      expect(answer.calendario_maestro).toEqual({ dias_definidos: 1 });
+      expect(deps.businessHoursService.upsertAll).toHaveBeenCalledWith(
+        STORE_ID,
+        expect.objectContaining({ items: expect.any(Array) }),
+      );
+    });
+
+    it('(a) sad: business_hours con fin<=inicio → error con día legible', async () => {
+      const { deps, tools } = buildTools();
+
+      const result = await preview(tools, 'manage_booking_providers', {
+        action: 'set_business_hours',
+        business_hours: [
+          { day_of_week: 1, start_time: '18:00', end_time: '08:00' },
+        ],
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('lunes');
+      expect(deps.businessHoursService.upsertAll).not.toHaveBeenCalled();
+    });
+
+    it('(c) proveedor inexistente → {error, next_step}', async () => {
+      const { deps, tools } = buildTools();
+      deps.providersService.findOne.mockRejectedValue(
+        new Error('Proveedor no encontrado'),
+      );
+
+      const answer = await run(tools, 'manage_booking_providers', {
+        action: 'update',
+        provider_id: 404,
+        bio: 'nuevo',
+      });
+
+      expect(answer.error).toContain('Proveedor no encontrado');
+      expect(answer.next_step).toContain('proveedor');
+      expect(deps.providersService.update).not.toHaveBeenCalled();
     });
   });
 });

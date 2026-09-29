@@ -948,6 +948,70 @@ export class InventoryAdjustmentsService {
   }
 
   /**
+   * Resumen de reservas activas para el preview de `release_stock_reservations`
+   * (O-17). Solo lectura: cuenta y agrupa por referencia sin mutar nada, para
+   * que la confirmación fuerte cite qué órdenes/transferencias se verán
+   * afectadas antes de liberar.
+   */
+  async getActiveReservationsSummary(
+    product_id?: number,
+    product_variant_id?: number,
+  ): Promise<{
+    active_count: number;
+    total_quantity: number;
+    references: Array<{
+      type: string;
+      id: number;
+      count: number;
+      quantity: number;
+    }>;
+  }> {
+    const reservations = await this.prisma.stock_reservations.findMany({
+      where: {
+        status: 'active',
+        ...(product_id !== undefined ? { product_id } : {}),
+        ...(product_variant_id !== undefined ? { product_variant_id } : {}),
+      },
+      select: {
+        reserved_for_type: true,
+        reserved_for_id: true,
+        quantity: true,
+      },
+    });
+
+    const byRef = new Map<
+      string,
+      { type: string; id: number; count: number; quantity: number }
+    >();
+    let total_quantity = 0;
+    for (const r of reservations) {
+      const qty = Number(r.quantity ?? 0);
+      total_quantity += qty;
+      const key = `${String(r.reserved_for_type)}:${Number(r.reserved_for_id)}`;
+      const existing = byRef.get(key);
+      if (existing) {
+        existing.count += 1;
+        existing.quantity += qty;
+      } else {
+        byRef.set(key, {
+          type: String(r.reserved_for_type),
+          id: Number(r.reserved_for_id),
+          count: 1,
+          quantity: qty,
+        });
+      }
+    }
+
+    return {
+      active_count: reservations.length,
+      total_quantity,
+      references: [...byRef.values()]
+        .sort((a, b) => b.quantity - a.quantity)
+        .slice(0, 10),
+    };
+  }
+
+  /**
    * Elimina un ajuste (solo si no está aprobado)
    */
   /**

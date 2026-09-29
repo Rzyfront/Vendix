@@ -34,6 +34,7 @@ describe('orders.tools · contrato T4', () => {
         findDispatchStatusForAgent: jest.fn(),
         create: jest.fn(),
         updateOrderItems: jest.fn(),
+        getTimeline: jest.fn(),
       } as any,
       dispatchNotesService: {
         getByOrder: jest.fn(),
@@ -49,6 +50,9 @@ describe('orders.tools · contrato T4', () => {
         payOrder: jest.fn(),
         shipOrder: jest.fn(),
         cancelOrder: jest.fn(),
+        deliverOrder: jest.fn(),
+        deliverOrderItem: jest.fn(),
+        confirmDelivery: jest.fn(),
       } as any,
       refundFlowService: {
         previewRefund: jest.fn(),
@@ -56,6 +60,10 @@ describe('orders.tools · contrato T4', () => {
       } as any,
       stockValidatorService: {
         findInsufficientLines: jest.fn(),
+      } as any,
+      ordersBulkService: {
+        previewTransition: jest.fn(),
+        bulkTransition: jest.fn(),
       } as any,
     } satisfies OrdersToolDeps;
   }
@@ -128,7 +136,7 @@ describe('orders.tools · contrato T4', () => {
 
   // ─── (d)+(e) Registro: permisos, categoría y forma ────────────────────
   describe('registro', () => {
-    it('expone exactamente los 12 tools del dominio orders', () => {
+    it('expone exactamente los 15 tools del dominio orders', () => {
       const { tools } = buildTools();
       expect(tools.map((tool) => tool.name)).toEqual([
         'find_order',
@@ -143,6 +151,9 @@ describe('orders.tools · contrato T4', () => {
         'cancel_order',
         'preview_refund',
         'refund_order',
+        'deliver_order_items',
+        'get_order_timeline',
+        'bulk_transition_orders',
       ]);
       for (const tool of tools) {
         expect(tool.domain).toBe('orders');
@@ -190,6 +201,15 @@ describe('orders.tools · contrato T4', () => {
       expect(byName.get('refund_order')!.requiredPermissions).toEqual([
         'store:orders:order_flow:create',
       ]);
+      expect(byName.get('deliver_order_items')!.requiredPermissions).toEqual([
+        'store:orders:order_flow:create',
+      ]);
+      expect(byName.get('get_order_timeline')!.requiredPermissions).toEqual([
+        'store:orders:read',
+      ]);
+      expect(
+        byName.get('bulk_transition_orders')!.requiredPermissions,
+      ).toEqual(['store:orders:bulk_update']);
     });
 
     it('reads readOnly y writes con confirmación+preview (cero aprobación ciega)', () => {
@@ -202,6 +222,7 @@ describe('orders.tools · contrato T4', () => {
         'get_cash_session_status',
         'get_dispatch_status',
         'preview_refund',
+        'get_order_timeline',
       ];
       const writes = [
         'create_order',
@@ -210,6 +231,8 @@ describe('orders.tools · contrato T4', () => {
         'ship_order',
         'cancel_order',
         'refund_order',
+        'deliver_order_items',
+        'bulk_transition_orders',
       ];
       for (const name of reads) {
         const tool = byName.get(name)!;
@@ -291,6 +314,23 @@ describe('orders.tools · contrato T4', () => {
       expect(
         byName.get('refund_order')!.parameters.properties.refund_method.enum,
       ).toEqual(['original_payment', 'cash', 'bank_transfer', 'store_credit']);
+      expect(byName.get('deliver_order_items')!.parameters.required).toEqual([
+        'order_id',
+        'action',
+      ]);
+      expect(
+        byName.get('deliver_order_items')!.parameters.properties.action.enum,
+      ).toEqual(['deliver', 'deliver_item', 'confirm_delivery']);
+      expect(byName.get('get_order_timeline')!.parameters.required).toEqual([
+        'order_id',
+      ]);
+      expect(byName.get('bulk_transition_orders')!.parameters.required).toEqual(
+        ['order_ids', 'target_state'],
+      );
+      expect(
+        byName.get('bulk_transition_orders')!.parameters.properties.target_state
+          .enum,
+      ).toEqual(['finished', 'shipped', 'delivered', 'cancelled']);
     });
   });
 
@@ -1669,6 +1709,393 @@ describe('orders.tools · contrato T4', () => {
 
       expect(answer.error).toContain('processor caído');
       expect(answer.next_step).toContain('preview_refund');
+    });
+  });
+
+  // ─── O-23 deliver_order_items ─────────────────────────────────────────
+  describe('deliver_order_items', () => {
+    const SHIPPED = {
+      ...ORDER_ROW,
+      state: 'shipped',
+      order_items: [
+        { id: 11, product_name: 'Coca Cola 1L', delivered_at: null },
+        {
+          id: 12,
+          product_name: 'Pan tajado',
+          delivered_at: '2026-08-30T16:00:00.000Z',
+        },
+      ],
+    };
+
+    it('(b) happy: deliver shipped→delivered con sujeto humano', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(SHIPPED);
+      deps.orderFlowService.deliverOrder.mockResolvedValue({
+        ...SHIPPED,
+        state: 'delivered',
+      });
+
+      const answer = await run(tools, 'deliver_order_items', {
+        order_id: 301,
+        action: 'deliver',
+        delivered_to: 'Marcela Ríos',
+      });
+
+      expect(answer).toEqual({
+        entrega: {
+          order_id: 301,
+          numero: 'ORD260800301',
+          estado: 'delivered',
+        },
+        nota: expect.stringContaining('confirm_delivery'),
+      });
+      expect(deps.orderFlowService.deliverOrder).toHaveBeenCalledWith(
+        301,
+        expect.objectContaining({ delivered_to: 'Marcela Ríos' }),
+      );
+    });
+
+    it('(e) preview deliver_item nombra el producto, no el id', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(SHIPPED);
+
+      const result = await preview(tools, 'deliver_order_items', {
+        order_id: 301,
+        action: 'deliver_item',
+        order_item_id: 11,
+      });
+
+      expect(result.status).toBe('ok');
+      expect(result.target).toContain('Coca Cola 1L');
+      expect(result.target).toContain('ORD260800301');
+      expect(result.domain).toBe('orders');
+      expect(deps.orderFlowService.deliverOrderItem).not.toHaveBeenCalled();
+    });
+
+    it('(b) happy: confirm_delivery cierra delivered', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue({
+        ...SHIPPED,
+        state: 'delivered',
+      });
+      deps.orderFlowService.confirmDelivery.mockResolvedValue({
+        ...SHIPPED,
+        state: 'finished',
+      });
+
+      const answer = await run(tools, 'deliver_order_items', {
+        order_id: 301,
+        action: 'confirm_delivery',
+      });
+
+      expect(answer.entrega.estado).toBe('finished');
+      expect(deps.orderFlowService.confirmDelivery).toHaveBeenCalledWith(301);
+    });
+
+    it('(a) sad: deliver fuera de shipped → error que cita ship_order', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(ORDER_ROW);
+
+      const result = await preview(tools, 'deliver_order_items', {
+        order_id: 301,
+        action: 'deliver',
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain("'processing'");
+      expect(result.message).toContain('ship_order');
+      expect(deps.orderFlowService.deliverOrder).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: deliver_item ya entregado → error sin mutar', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(SHIPPED);
+
+      const answer = await run(tools, 'deliver_order_items', {
+        order_id: 301,
+        action: 'deliver_item',
+        order_item_id: 12,
+      });
+
+      expect(answer.error).toContain('Pan tajado');
+      expect(answer.error).toContain('ya fue entregado');
+      expect(deps.orderFlowService.deliverOrderItem).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: acción inexistente → error con válidos', async () => {
+      const { deps, tools } = buildTools();
+
+      const answer = await run(tools, 'deliver_order_items', {
+        order_id: 301,
+        action: 'teletransportar',
+      });
+
+      expect(answer.error).toContain('no existe');
+      expect(deps.ordersService.findOne).not.toHaveBeenCalled();
+    });
+
+    it('(c) carrera: la orden salió de shipped antes del apply → {error, next_step}', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue({
+        ...SHIPPED,
+        state: 'delivered',
+      });
+
+      const answer = await run(tools, 'deliver_order_items', {
+        order_id: 301,
+        action: 'deliver',
+      });
+
+      expect(answer.error).toContain("'delivered'");
+      expect(answer.next_step).toContain('get_order');
+      expect(deps.orderFlowService.deliverOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── O-27 get_order_timeline ──────────────────────────────────────────
+  describe('get_order_timeline', () => {
+    const EVENTS = [
+      {
+        id: 1,
+        event_type: 'state_changed',
+        from_state: 'processing',
+        to_state: 'shipped',
+        actor: { user_id: 9, name: 'Ana Operadora' },
+        actor_source: 'staff',
+        payment_id: null,
+        order_item_id: null,
+        amount: null,
+        payload: null,
+        created_at: '2026-08-30T16:00:00.000Z',
+      },
+      {
+        id: 2,
+        event_type: 'payment_confirmed',
+        from_state: null,
+        to_state: null,
+        actor: null,
+        actor_source: 'system',
+        payment_id: 77,
+        order_item_id: null,
+        amount: 59500,
+        payload: null,
+        created_at: '2026-08-30T15:30:00.000Z',
+      },
+    ];
+
+    it('(b) happy: snapshot exacto con actor resuelto', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(ORDER_ROW);
+      deps.ordersService.getTimeline.mockResolvedValue({
+        legacy: false,
+        events: EVENTS,
+      });
+
+      const answer = await run(tools, 'get_order_timeline', { order_id: 301 });
+
+      expect(answer).toEqual({
+        orden: {
+          order_id: 301,
+          numero: 'ORD260800301',
+          estado: 'processing',
+          cliente: 'Marcela Ríos',
+        },
+        total_eventos: 2,
+        mostrando: 2,
+        eventos: [
+          {
+            id: 1,
+            tipo: 'state_changed',
+            de: 'processing',
+            a: 'shipped',
+            actor: 'Ana Operadora',
+            monto: 0,
+            detalle: null,
+            creada: '2026-08-30T16:00:00.000Z',
+          },
+          {
+            id: 2,
+            tipo: 'payment_confirmed',
+            de: null,
+            a: null,
+            actor: null,
+            monto: 59500,
+            detalle: null,
+            creada: '2026-08-30T15:30:00.000Z',
+          },
+        ],
+      });
+      expect(deps.ordersService.getTimeline).toHaveBeenCalledWith(301);
+    });
+
+    it('(b) legacy: avisa que el historial viene de auditoría', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(ORDER_ROW);
+      deps.ordersService.getTimeline.mockResolvedValue({
+        legacy: true,
+        events: [],
+      });
+
+      const answer = await run(tools, 'get_order_timeline', { order_id: 301 });
+
+      expect(answer.fuente).toBe('legacy');
+      expect(answer.fuente_nota).toContain('auditoría');
+      expect(answer.eventos).toEqual([]);
+    });
+
+    it('(a) sad: order_id inválido → error sin llamar al service', async () => {
+      const { deps, tools } = buildTools();
+
+      const answer = await run(tools, 'get_order_timeline', { order_id: 0 });
+
+      expect(answer.error).toContain('order_id inválido');
+      expect(deps.ordersService.getTimeline).not.toHaveBeenCalled();
+    });
+
+    it('(c) el service lanza → {error, next_step}', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersService.findOne.mockResolvedValue(ORDER_ROW);
+      deps.ordersService.getTimeline.mockRejectedValue(
+        new Error('orden de otra tienda'),
+      );
+
+      const answer = await run(tools, 'get_order_timeline', { order_id: 301 });
+
+      expect(answer.error).toContain('otra tienda');
+      expect(answer.next_step).toContain('find_order');
+    });
+  });
+
+  // ─── O-28 bulk_transition_orders ─────────────────────────────────────
+  describe('bulk_transition_orders', () => {
+    const DRY_RUN = {
+      items: [
+        {
+          id: 301,
+          order_number: 'ORD260800301',
+          current_state: 'shipped',
+          status: 'ok',
+          message: 'Enviada → Entregada',
+        },
+        {
+          id: 302,
+          order_number: 'ORD260800302',
+          current_state: 'delivered',
+          status: 'skipped',
+          code: 'ORD_BULK_ALREADY_IN_STATE',
+          message: 'Ya está en Entregada',
+        },
+        {
+          id: 303,
+          order_number: 'ORD260800303',
+          current_state: 'pending_payment',
+          status: 'warning',
+          code: 'ORD_BULK_FORCED_TRANSITION',
+          message: 'Transición forzada',
+        },
+        {
+          id: 999,
+          order_number: '#999',
+          current_state: 'desconocido',
+          status: 'error',
+          code: 'ORD_BULK_NOT_FOUND',
+          message: 'La orden no existe o no pertenece a esta tienda',
+        },
+      ],
+    };
+    const ARGS = { order_ids: [301, 302, 303, 999], target_state: 'delivered' };
+
+    it('(e) preview warning: clasifica ok/ya-está/forzada/inválida', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersBulkService.previewTransition.mockResolvedValue(DRY_RUN);
+
+      const result = await preview(tools, 'bulk_transition_orders', ARGS);
+
+      expect(result.status).toBe('warning');
+      expect(result.target).toContain('delivered');
+      expect(result.domain).toBe('orders');
+      expect(result.changes[0]).toEqual({
+        field: 'resumen',
+        label: 'Clasificación del lote',
+        from: null,
+        to: '1 aplicables, 1 ya están en destino, 1 forzadas (auditadas), 1 inválidas (se omiten)',
+      });
+      expect(result.message).toContain('#999');
+      expect(result.message).toContain('forzadas');
+      expect(deps.ordersBulkService.bulkTransition).not.toHaveBeenCalled();
+    });
+
+    it('(b) happy: aplica y reporta por orden', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersBulkService.previewTransition.mockResolvedValue(DRY_RUN);
+      deps.ordersBulkService.bulkTransition.mockResolvedValue({
+        total: 4,
+        successful: 2,
+        failed: 2,
+        results: [
+          { id: 301, status: 'ok', message: 'Orden 301 → delivered' },
+          { id: 302, status: 'ok', message: 'Orden 302 → delivered' },
+          { id: 303, status: 'error', code: 'X', message: 'falló' },
+          { id: 999, status: 'error', code: 'Y', message: 'no existe' },
+        ],
+      });
+
+      const answer = await run(tools, 'bulk_transition_orders', ARGS);
+
+      expect(answer.lote).toEqual({
+        destino: 'delivered',
+        total: 4,
+        aplicadas: 2,
+        fallidas: 2,
+      });
+      expect(answer.por_orden).toHaveLength(4);
+      expect(answer.next_step).toContain('get_order_timeline');
+      const [dto] = deps.ordersBulkService.bulkTransition.mock.calls[0];
+      expect(dto.ids).toEqual([301, 302, 303, 999]);
+      expect(dto.targetState).toBe('delivered');
+    });
+
+    it('(e) preview error cuando NADA del lote es válido', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersBulkService.previewTransition.mockResolvedValue({
+        items: [DRY_RUN.items[3]],
+      });
+
+      const result = await preview(tools, 'bulk_transition_orders', {
+        order_ids: [999],
+        target_state: 'delivered',
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('Ninguna orden del lote es válida');
+      expect(deps.ordersBulkService.bulkTransition).not.toHaveBeenCalled();
+    });
+
+    it('(c) carrera: sin aplicables al re-verificar → no toca ninguna', async () => {
+      const { deps, tools } = buildTools();
+      deps.ordersBulkService.previewTransition.mockResolvedValue({
+        items: [DRY_RUN.items[3]],
+      });
+
+      const answer = await run(tools, 'bulk_transition_orders', ARGS);
+
+      expect(answer.error).toContain('ya no queda ninguna orden aplicable');
+      expect(deps.ordersBulkService.bulkTransition).not.toHaveBeenCalled();
+    });
+
+    it('(a) sad: destino fuera del carril masivo → error de DTO', async () => {
+      const { deps, tools } = buildTools();
+
+      const result = await preview(tools, 'bulk_transition_orders', {
+        order_ids: [301],
+        target_state: 'draft',
+      });
+
+      expect(result.status).toBe('error');
+      expect(result.message).toContain('validación');
+      expect(
+        deps.ordersBulkService.previewTransition,
+      ).not.toHaveBeenCalled();
     });
   });
 });

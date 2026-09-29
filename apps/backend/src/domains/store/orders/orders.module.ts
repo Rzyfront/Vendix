@@ -112,6 +112,9 @@ export class OrdersModule implements OnModuleInit {
     // Guarda no-overselling para crear/editar órdenes (O-19/O-20).
     // Provider local de este módulo (ver `providers`).
     private readonly stockValidatorService: StockValidatorService,
+    // Dueño del carril masivo preview/transition (O-28). Provider local de
+    // este módulo (ver `providers`): cero imports nuevos.
+    private readonly ordersBulkService: OrdersBulkService,
   ) {}
 
   onModuleInit(): void {
@@ -130,6 +133,7 @@ export class OrdersModule implements OnModuleInit {
         orderFlowService: this.orderFlowService,
         refundFlowService: this.refundFlowService,
         stockValidatorService: this.stockValidatorService,
+        ordersBulkService: this.ordersBulkService,
       }),
     );
 

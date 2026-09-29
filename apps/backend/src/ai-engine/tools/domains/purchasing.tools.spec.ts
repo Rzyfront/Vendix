@@ -585,4 +585,158 @@ describe('purchasing.tools · O-33..O-36 compras', () => {
       expect(answer.status).toBe('partial');
     });
   });
+
+  describe('record_po_payment (O-37)', () => {
+    const PAYMENT_ARGS = {
+      purchase_order_id: 501,
+      amount: 400000,
+      payment_date: '2026-09-29',
+      payment_method: 'transferencia',
+      reference: 'TR-8821',
+    };
+
+    function paymentTools(prior: any[] = [{ amount: '790000' }]) {
+      return buildTools({
+        purchaseOrdersService: {
+          findOne: jest.fn().mockResolvedValue(PO_ROW),
+          getPayments: jest.fn().mockResolvedValue(prior),
+          registerPayment: jest.fn().mockResolvedValue({
+            id: 77,
+            payment_status: 'paid',
+          }),
+        },
+      });
+    }
+
+    it('contrato: version 1, confirmación, preview y permiso de pago', () => {
+      const { tools } = buildTools();
+      const tool = getTool(tools, 'record_po_payment');
+      expect(tool.version).toBe('1');
+      expect(tool.requiresConfirmation).toBe(true);
+      expect(typeof tool.preview).toBe('function');
+      expect(tool.requiredPermissions).toEqual([
+        'store:orders:purchase_orders:pay',
+      ]);
+    });
+
+    it('preview muestra pagado, saldo y saldo después', async () => {
+      const { tools } = paymentTools();
+      const tool = getTool(tools, 'record_po_payment');
+      const preview = await tool.preview!(PAYMENT_ARGS, CONTEXT);
+
+      expect(preview).toEqual({
+        status: 'ok',
+        target: 'OC OC-2026-0501 — Distribuidora Andina — pago de $400000',
+        changes: [
+          {
+            field: 'payment',
+            label: 'Pago',
+            from: 'pagado $790000 de $1190000',
+            to: '+$400000 (transferencia, 2026-09-29)',
+          },
+          {
+            field: 'balance',
+            label: 'Saldo después',
+            from: '$400000',
+            to: '$0',
+          },
+        ],
+        domain: 'purchasing',
+      });
+    });
+
+    it('preview frena el sobrepago sin token ni llamado', async () => {
+      const registerPayment = jest.fn();
+      const { tools } = buildTools({
+        purchaseOrdersService: {
+          findOne: jest.fn().mockResolvedValue(PO_ROW),
+          getPayments: jest.fn().mockResolvedValue([{ amount: '790000' }]),
+          registerPayment,
+        },
+      });
+      const tool = getTool(tools, 'record_po_payment');
+      const preview = await tool.preview!(
+        { ...PAYMENT_ARGS, amount: 400001 },
+        CONTEXT,
+      );
+
+      expect(preview.status).toBe('error');
+      expect(preview.message).toMatch(/excede el saldo pendiente/);
+      expect(registerPayment).not.toHaveBeenCalled();
+    });
+
+    it('preview rechaza monto cero (piso del DTO) sin leer la orden', async () => {
+      const findOne = jest.fn();
+      const { tools } = buildTools({
+        purchaseOrdersService: { findOne },
+      });
+      const tool = getTool(tools, 'record_po_payment');
+      const preview = await tool.preview!(
+        { ...PAYMENT_ARGS, amount: 0 },
+        CONTEXT,
+      );
+
+      expect(preview.status).toBe('error');
+      expect(preview.message).toMatch(/validación/);
+      expect(findOne).not.toHaveBeenCalled();
+    });
+
+    it('handler happy registra con DTO validado', async () => {
+      const { tools, deps } = paymentTools();
+      const tool = getTool(tools, 'record_po_payment');
+      const answer = JSON.parse(
+        await tool.handler!(PAYMENT_ARGS, CONTEXT),
+      );
+
+      expect(answer.payment_id).toBe(77);
+      expect(answer.purchase_order_id).toBe(501);
+      expect(deps.purchaseOrdersService.registerPayment).toHaveBeenCalledWith(
+        501,
+        expect.objectContaining({
+          amount: 400000,
+          payment_method: 'transferencia',
+        }),
+      );
+    });
+
+    it('handler re-verifica: si otro pago entró, no duplica', async () => {
+      const registerPayment = jest.fn();
+      const { tools } = buildTools({
+        purchaseOrdersService: {
+          findOne: jest.fn().mockResolvedValue(PO_ROW),
+          getPayments: jest
+            .fn()
+            .mockResolvedValue([{ amount: '1190000' }]),
+          registerPayment,
+        },
+      });
+      const tool = getTool(tools, 'record_po_payment');
+      const answer = JSON.parse(
+        await tool.handler!(PAYMENT_ARGS, CONTEXT),
+      );
+
+      expect(answer.error).toMatch(/otro pago entró/);
+      expect(answer.next_step).toMatch(/get_purchase_order/);
+      expect(registerPayment).not.toHaveBeenCalled();
+    });
+
+    it('handler traduce el fallo del dominio a {error, next_step}', async () => {
+      const { tools } = buildTools({
+        purchaseOrdersService: {
+          findOne: jest.fn().mockResolvedValue(PO_ROW),
+          getPayments: jest.fn().mockResolvedValue([]),
+          registerPayment: jest
+            .fn()
+            .mockRejectedValue(new Error('CxP bloqueada')),
+        },
+      });
+      const tool = getTool(tools, 'record_po_payment');
+      const answer = JSON.parse(
+        await tool.handler!(PAYMENT_ARGS, CONTEXT),
+      );
+
+      expect(answer.error).toMatch(/CxP bloqueada/);
+      expect(answer.next_step).toMatch(/get_purchase_order/);
+    });
+  });
 });

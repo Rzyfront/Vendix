@@ -9,6 +9,7 @@ import { SuppliersService } from '../../../domains/store/inventory/suppliers/sup
 import { CreatePurchaseOrderDto } from '../../../domains/store/orders/purchase-orders/dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from '../../../domains/store/orders/purchase-orders/dto/update-purchase-order.dto';
 import { ReceivePurchaseOrderDto } from '../../../domains/store/orders/purchase-orders/dto/receive-purchase-order.dto';
+import { RegisterPaymentDto } from '../../../domains/store/orders/purchase-orders/dto/register-payment.dto';
 import { PurchaseOrderQueryDto } from '../../../domains/store/orders/purchase-orders/dto/purchase-order-query.dto';
 
 export interface PurchasingToolDeps {
@@ -974,6 +975,216 @@ export function createPurchasingTools(
           return toolError(
             info.message,
             'Lee la orden con get_purchase_order para ver su estado y recepciones actuales.',
+            info.code,
+          );
+        }
+      },
+    },
+
+    // ─── O-37: record_po_payment (WRITE) ─────────────────────────────────
+    // Registra un pago contra una orden de compra: recalcula `payment_status`,
+    // espeja hacia CxP cuando aplica y emite el asiento. El preview lee los
+    // pagos previos (GET :id/payments) para mostrar pagado/saldo y frenar el
+    // sobrepago antes del token; el handler re-verifica porque la guarda de
+    // sobrepago del servicio corre dentro de su propia transacción.
+    // Cadena: get_purchase_order → write. El escaneo de comprobantes
+    // (scan/match/confirm) va por visión async, no por tool.
+    {
+      name: 'record_po_payment',
+      version: '1',
+      domain: 'purchasing',
+      description:
+        'Registra un pago contra una orden de compra (monto ≥0.01, método, fecha). Muestra lo ya pagado y el saldo pendiente antes de confirmar, y rechaza el sobrepago. Lee primero la orden con get_purchase_order.',
+      parameters: {
+        type: 'object',
+        properties: {
+          purchase_order_id: {
+            type: 'number',
+            description: 'ID de la orden de compra.',
+          },
+          amount: {
+            type: 'number',
+            description: 'Monto del pago (≥ 0.01).',
+          },
+          payment_date: {
+            type: 'string',
+            description: 'Fecha del pago (YYYY-MM-DD).',
+          },
+          payment_method: {
+            type: 'string',
+            description:
+              'Método de pago (transferencia, efectivo, etc., texto libre).',
+          },
+          reference: {
+            type: 'string',
+            description: 'Referencia o comprobante (opcional).',
+          },
+          notes: {
+            type: 'string',
+            description: 'Notas del pago (opcional).',
+          },
+          payment_schedule_id: {
+            type: 'number',
+            description:
+              'ID de la cuota del plan que se salda (opcional).',
+          },
+        },
+        required: [
+          'purchase_order_id',
+          'amount',
+          'payment_date',
+          'payment_method',
+        ],
+      },
+      requiredPermissions: ['store:orders:purchase_orders:pay'],
+      requiresConfirmation: true,
+      preview: async (args, context) => {
+        const purchaseOrderId = toPositiveInt(args.purchase_order_id);
+        if (!purchaseOrderId) {
+          return previewError(
+            'Pago de orden de compra',
+            'purchase_order_id inválido.',
+          );
+        }
+
+        if (!context.store_id && !context.organization_id) {
+          return previewError(
+            'Pago de orden de compra',
+            'Sin tienda ni organización en contexto.',
+          );
+        }
+
+        const checked = toValidatedDto(RegisterPaymentDto, {
+          ...(args.amount !== undefined
+            ? { amount: Number(args.amount) }
+            : {}),
+          ...(args.payment_date
+            ? { payment_date: String(args.payment_date) }
+            : {}),
+          ...(args.payment_method
+            ? { payment_method: String(args.payment_method) }
+            : {}),
+          ...(args.reference ? { reference: String(args.reference) } : {}),
+          ...(args.notes ? { notes: String(args.notes) } : {}),
+          ...(args.payment_schedule_id !== undefined
+            ? { payment_schedule_id: Number(args.payment_schedule_id) }
+            : {}),
+        });
+        if (!checked.ok) {
+          return previewError('Pago de orden de compra', checked.message);
+        }
+
+        try {
+          const resolved = await resolveOrderOrPreviewError(purchaseOrderId);
+          if (!resolved.ok) return resolved.preview;
+          const order = resolved.order;
+          const label = order.order_number
+            ? `OC ${order.order_number} — ${order.suppliers?.name ?? 'sin proveedor'}`
+            : `OC #${order.id}`;
+
+          const prior = await purchaseOrdersService.getPayments(
+            purchaseOrderId,
+          );
+          const paid = (prior ?? []).reduce(
+            (sum: number, p: any) => sum + Number(p.amount ?? 0),
+            0,
+          );
+          const total = Number(order.total_amount ?? 0);
+          const pending = Math.round((total - paid) * 100) / 100;
+          const amount = Number(checked.dto.amount);
+
+          if (amount > pending + 0.005) {
+            return previewError(
+              label,
+              `El pago ($${amount}) excede el saldo pendiente ($${pending}): pagado $${paid} de $${total}.`,
+            );
+          }
+
+          return {
+            status: 'ok',
+            target: `${label} — pago de $${amount}`,
+            changes: [
+              {
+                field: 'payment',
+                label: 'Pago',
+                from: `pagado $${paid} de $${total}`,
+                to: `+$${amount} (${checked.dto.payment_method}, ${checked.dto.payment_date})`,
+              },
+              {
+                field: 'balance',
+                label: 'Saldo después',
+                from: `$${pending}`,
+                to: `$${Math.round((pending - amount) * 100) / 100}`,
+              },
+            ],
+            domain: 'purchasing',
+          };
+        } catch (error) {
+          const info = describeError(error);
+          return previewError('Pago de orden de compra', info.message);
+        }
+      },
+      handler: async (args) => {
+        const purchaseOrderId = toPositiveInt(args.purchase_order_id);
+        if (!purchaseOrderId) {
+          return toolError('purchase_order_id inválido.');
+        }
+
+        const checked = toValidatedDto(RegisterPaymentDto, {
+          ...(args.amount !== undefined
+            ? { amount: Number(args.amount) }
+            : {}),
+          ...(args.payment_date
+            ? { payment_date: String(args.payment_date) }
+            : {}),
+          ...(args.payment_method
+            ? { payment_method: String(args.payment_method) }
+            : {}),
+          ...(args.reference ? { reference: String(args.reference) } : {}),
+          ...(args.notes ? { notes: String(args.notes) } : {}),
+          ...(args.payment_schedule_id !== undefined
+            ? { payment_schedule_id: Number(args.payment_schedule_id) }
+            : {}),
+        });
+        if (!checked.ok) return toolError(checked.message);
+
+        try {
+          // Re-verificación: la orden sigue existiendo y el saldo sigue
+          // alcanzando (otro pago pudo entrar después del preview).
+          const fresh =
+            await purchaseOrdersService.findOne(purchaseOrderId);
+          const prior =
+            await purchaseOrdersService.getPayments(purchaseOrderId);
+          const paid = (prior ?? []).reduce(
+            (sum: number, p: any) => sum + Number(p.amount ?? 0),
+            0,
+          );
+          const pending =
+            Math.round(
+              (Number(fresh.total_amount ?? 0) - paid) * 100,
+            ) / 100;
+          if (Number(checked.dto.amount) > pending + 0.005) {
+            return toolError(
+              `El pago ($${checked.dto.amount}) ya excede el saldo pendiente ($${pending}): otro pago entró después del preview.`,
+              'Lee la orden con get_purchase_order para ver los pagos actuales.',
+            );
+          }
+
+          const payment = await purchaseOrdersService.registerPayment(
+            purchaseOrderId,
+            checked.dto,
+          );
+          return JSON.stringify({
+            resumen: `Pago de $${checked.dto.amount} registrado en OC ${fresh.order_number ?? purchaseOrderId} (saldo $${Math.round((pending - Number(checked.dto.amount)) * 100) / 100})`,
+            purchase_order_id: purchaseOrderId,
+            payment_id: (payment as any)?.id ?? null,
+            payment_status: (payment as any)?.payment_status ?? null,
+          });
+        } catch (error) {
+          const info = describeError(error);
+          return toolError(
+            info.message,
+            'Lee la orden con get_purchase_order para ver su estado y pagos actuales.',
             info.code,
           );
         }

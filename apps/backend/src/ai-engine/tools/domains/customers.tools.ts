@@ -862,5 +862,70 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
         });
       },
     },
+
+    // ─── O-43 get_customer_stats ─────────────────────────────────────────
+    {
+      name: 'get_customer_stats',
+      version: '1',
+      domain: 'customers',
+      readOnly: true,
+      description:
+        'Radiografía de la base de clientes de la tienda: cuántos hay, cuántos compran, cuántos llegaron este mes, cuánto han facturado y el ranking de los que más órdenes finalizadas tienen. Úsala para "¿cuántos clientes tenemos?", "¿quiénes son los top?". Los ids del ranking encadenan con get_customer_history.',
+      parameters: {
+        type: 'object',
+        properties: {
+          top_limit: {
+            type: 'number',
+            description:
+              'Cuántos clientes traer en el ranking. Por defecto 5, tope 20.',
+          },
+        },
+      },
+      requiredPermissions: ['store:customers:read'],
+      handler: async (args, context) => {
+        const storeId = context.store_id;
+        if (!storeId) {
+          return JSON.stringify({
+            error:
+              'Sin tienda en contexto: las estadísticas de clientes son siempre por tienda.',
+          });
+        }
+
+        const topLimit = clampLimit(args.top_limit, 5, 20);
+
+        let stats: any;
+        let top: any[];
+        try {
+          [stats, top] = await Promise.all([
+            customersService.getStats(storeId),
+            customersService.getTopCustomers(storeId, topLimit),
+          ]);
+        } catch (error: any) {
+          return JSON.stringify({
+            error: `No se pudieron calcular las estadísticas: ${error?.message ?? 'error desconocido'}`,
+          });
+        }
+
+        return JSON.stringify({
+          resumen: {
+            total_clientes: stats.total_customers ?? 0,
+            clientes_activos: stats.active_customers ?? 0,
+            nuevos_este_mes: stats.new_customers_this_month ?? 0,
+            facturacion_clientes: round2(toAmount(stats.total_revenue)),
+          },
+          top_clientes: (top ?? []).map((user: any) => ({
+            customer_id: user.id,
+            name: fullName(user),
+            document: formatDocument(user),
+            phone: user.phone ?? null,
+            email: user.email ?? null,
+            ordenes_finalizadas: user.order_count ?? 0,
+          })),
+          nota: 'Activos = con al menos una orden en la tienda; la facturación suma solo órdenes finished; el ranking ordena por número de órdenes finalizadas.',
+          next_step:
+            'Usa customer_id con get_customer_history para ver la ficha de cualquiera del ranking.',
+        });
+      },
+    },
   ];
 }

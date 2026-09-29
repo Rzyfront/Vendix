@@ -1,7 +1,7 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { ReservationsService } from './reservations.service';
 import { AvailabilityService } from './availability.service';
-// Vexi tool family owned by this domain (O-46..O-50). AIToolRegistry comes
+// Vexi tool family owned by this domain (O-46..O-52). AIToolRegistry comes
 // from the @Global() AIEngineModule, so it is injectable WITHOUT importing
 // that module here — importing it would risk a DI cycle.
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
@@ -64,6 +64,11 @@ export class ReservationsModule implements OnModuleInit {
     private readonly toolRegistry: AIToolRegistry,
     private readonly reservationsService: ReservationsService,
     private readonly availabilityService: AvailabilityService,
+    // Dueños de proveedores/horarios/excepciones (O-52) y del calendario
+    // maestro (O-52). Providers locales de este módulo: cero imports nuevos.
+    private readonly providersService: ProvidersService,
+    private readonly providerScheduleService: ProviderScheduleService,
+    private readonly businessHoursService: BusinessHoursService,
   ) {}
 
   onModuleInit(): void {
@@ -71,6 +76,9 @@ export class ReservationsModule implements OnModuleInit {
       createReservationsTools({
         reservationsService: this.reservationsService,
         availabilityService: this.availabilityService,
+        providersService: this.providersService,
+        providerScheduleService: this.providerScheduleService,
+        businessHoursService: this.businessHoursService,
       }),
     );
   }
