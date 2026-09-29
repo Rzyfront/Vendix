@@ -2779,6 +2779,10 @@ export class TableSessionsService {
   ): Promise<{ state: 'succeeded'; payment_id: number }> {
     const { storeId, userId } = this.requireContext();
 
+    // Gate único de caja: con caja activa, quien cobra necesita SU sesión
+    // abierta ANTES de confirmar el pago (cualquier método).
+    await this.cashRegisterSessionsService.assertSessionForSales(userId);
+
     // 1. Tenant + open-session guards.
     const session = await this.findOne(sessionId);
     if (session.closed_at) {
@@ -3028,11 +3032,10 @@ export class TableSessionsService {
    * cash-in (DR 1105 via the `payment.received` event), breaking the
    * cash-register ↔ ledger reconciliation.
    *
-   * Business rule (mirror of the POS `processPosPayment` path): record ONLY if
-   *   1. `pos.cash_register.enabled` is on, AND
-   *   2. the confirming staff user has an OPEN cash session, AND
-   *   3. for non-cash methods, `track_non_cash_payments` is on.
-   * Any miss is a SILENT skip. This helper never throws and never blocks the
+   * Business rule: with `pos.cash_register.enabled`, EVERY method is recorded
+   * (the arqueo still counts only cash). `confirmPayment` already ran
+   * `assertSessionForSales`, so a missing session here is an anomaly and is
+   * logged as error. This helper never throws and never blocks the
    * already-committed payment confirmation (called after the COMMIT and only
    * on a real transition, i.e. `!result.noop`).
    */
@@ -3057,10 +3060,10 @@ export class TableSessionsService {
       const session = await this.cashRegisterSessionsService.getActiveSession(
         userId,
       );
-      if (!session) return;
-
-      // 3. Non-cash gate — skip unless the store tracks non-cash movements.
-      if (paymentMethod !== 'cash' && !crSettings.track_non_cash_payments) {
+      if (!session) {
+        this.logger.error(
+          `[confirmPayment] no open cash session for user ${userId} despite gate; movement NOT recorded (order ${orderId}, payment ${paymentId})`,
+        );
         return;
       }
 

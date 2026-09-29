@@ -33,7 +33,13 @@ export interface CashSessionCloseReport {
     payments_count: number;
     subtotal: number;
     discounts: number;
+    /** Impuesto de productos (`orders.tax_amount`). */
+    product_taxes: number;
+    /** Impuesto del domicilio (`orders.shipping_tax_amount`). */
+    shipping_taxes: number;
+    /** Total de impuestos = product_taxes + shipping_taxes. */
     taxes: number;
+    /** Envíos NETOS de impuesto (shipping_cost − shipping_tax_amount). */
     shipping: number;
     tips: number;
     grand_total: number;
@@ -45,6 +51,22 @@ export interface CashSessionCloseReport {
     by_method: { method: string; count: number; total: number }[];
     payment_cancellations: { count: number; total: number };
   };
+  /** Devoluciones: mismos valores que `refunds`, en un bloque plano. */
+  returns: {
+    refunds_count: number;
+    refunds_total: number;
+    /** Impuesto reembolsado (`refunds.tax_refund`). */
+    refunds_tax: number;
+    payments_cancelled_count: number;
+    payments_cancelled_total: number;
+  };
+  /** Neto: ventas y impuestos tras devoluciones y pagos anulados. */
+  net: {
+    net_sales: number;
+    net_taxes: number;
+  };
+  /** Órdenes enviadas/entregadas con saldo por cobrar al momento de la consulta. */
+  pending_collection: { count: number; total: number };
   discounts: {
     orders_with_discount: number;
     total: number;
