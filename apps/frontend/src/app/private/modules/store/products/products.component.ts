@@ -16,6 +16,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import {
   VexiUiHost,
   VexiUiHostRegistry,
+  vexiWhenReady,
 } from '../../../../core/services/vexi-ui-host.registry';
 
 // Models
@@ -374,13 +375,12 @@ export class ProductsComponent {
     vexiModuleKey: 'products',
     readScreen: () => {
       const pagination = this.pagination();
-      const sortBy = this.currentFilters.sort_by;
-      const sortOrder = this.currentFilters.sort_order;
 
       return {
         module_key: 'products',
         title: 'Productos',
         visible_count: this.products().length,
+        selection: this.archiveTarget()?.name ?? null,
         filters: {
           search: this.searchTerm || undefined,
           ...this.currentFilters,
@@ -388,11 +388,11 @@ export class ProductsComponent {
         form_fields: this.isCreateModalOpen
           ? [...PRODUCT_CREATE_FILLABLE_FIELDS]
           : undefined,
+        open_modal: this.vexiOpenModal(),
         page: pagination.page,
         limit: pagination.limit,
         total: pagination.total,
         total_pages: pagination.totalPages || 1,
-        sort: sortBy ? `${sortBy}:${sortOrder ?? 'asc'}` : undefined,
         // Los dos números se nombran por separado a propósito: "61 productos" y
         // "10 en pantalla" son cosas distintas, y una nota que solo diga el total
         // hace que Vexi le diga a la persona que está viendo 61 filas.
@@ -479,14 +479,13 @@ export class ProductsComponent {
         ),
       );
 
-      // `sort` viaja como "campo:dirección" y aterriza en los sort_by/sort_order
-      // que el DTO ya soporta, pasando por `onFilter` como cualquier filtro.
+      // `sort` se reporta como no soportado: el `ProductQueryDto` del
+      // backend no declara `sort_by`/`sort_order` y el ValidationPipe global
+      // (`forbidNonWhitelisted`) responde 400 si se envían. Fingir el orden
+      // rompería la lista con un error; mismo patrón honesto que Clientes.
+      let sortIgnored = false;
       if (typeof values['sort'] === 'string') {
-        const [by, dir] = values['sort'].split(':');
-        if (by && (dir === 'asc' || dir === 'desc')) {
-          rest['sort_by'] = by;
-          rest['sort_order'] = dir;
-        }
+        sortIgnored = true;
       }
 
       if (Object.keys(rest).length) {
@@ -523,17 +522,23 @@ export class ProductsComponent {
       // longitud hacía que Vexi dijera "quedaron 10" sobre una lista que terminó
       // en 2. Si el conteo importa, el modelo llama ui_read_screen después, que
       // lee la lista ya asentada.
+      const sortNote = sortIgnored
+        ? ' No ordené porque el backend de productos no expone sort.'
+        : '';
       return applied.length
         ? {
             status: 'ok' as const,
             message:
               `Filtré la lista por ${applied.join(' y ')}. La lista se está recargando; si necesitas el conteo, léelo de la pantalla después.` +
-              (note ? ` ${note}` : ''),
+              (note ? ` ${note}` : '') +
+              sortNote,
             detail: note ? { note } : undefined,
           }
         : {
             status: 'not_found' as const,
-            message: 'No me pasaste ningún filtro que esta lista entienda.',
+            message:
+              'No me pasaste ningún filtro que esta lista entienda.' +
+              sortNote,
           };
     },
     fillForm: async (values) => {
@@ -573,10 +578,28 @@ export class ProductsComponent {
       };
     },
     openModal: (id) => this.vexiHostAdapter.runAction!(id),
+    closeModal: async () => {
+      const open = this.vexiOpenModal();
+      if (!open) {
+        return {
+          status: 'not_found' as const,
+          message: 'No hay ningún modal abierto en Productos.',
+        };
+      }
+      this.onModalClose();
+      this.isBulkUploadModalOpen = false;
+      this.isBulkImageUploadModalOpen = false;
+      this.isArchiveWriteOffModalOpen.set(false);
+      return {
+        status: 'ok' as const,
+        message: `Cerré ${open.title}.`,
+      };
+    },
     refresh: () => {
       this.loadProducts();
       return { status: 'ok' as const, message: 'Recargué la lista de productos.' };
     },
+    whenReady: () => vexiWhenReady(() => this.isLoading()),
   };
 
   /** Nombra el modal abierto, para que Vexi no actúe como si la pantalla estuviera libre. */
@@ -584,6 +607,19 @@ export class ProductsComponent {
     if (this.isCreateModalOpen) return 'Hay un formulario de nuevo producto abierto.';
     if (this.isBulkUploadModalOpen) return 'La carga masiva está abierta.';
     if (this.isBulkImageUploadModalOpen) return 'La carga de imágenes está abierta.';
+    return undefined;
+  }
+
+  /** El modal abierto en forma accionable (U-5): `ui_close_modal` cierra este. */
+  private vexiOpenModal(): { id: string; title: string } | undefined {
+    if (this.isCreateModalOpen)
+      return { id: 'nuevo_producto', title: 'el formulario de nuevo producto' };
+    if (this.isBulkUploadModalOpen)
+      return { id: 'carga_masiva', title: 'la carga masiva' };
+    if (this.isBulkImageUploadModalOpen)
+      return { id: 'carga_imagenes', title: 'la carga de imágenes' };
+    if (this.isArchiveWriteOffModalOpen())
+      return { id: 'archivo_producto', title: 'el diálogo de archivado' };
     return undefined;
   }
 

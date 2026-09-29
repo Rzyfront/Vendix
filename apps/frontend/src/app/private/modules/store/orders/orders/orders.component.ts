@@ -13,6 +13,7 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   VexiUiHost,
   VexiUiHostRegistry,
+  vexiWhenReady,
 } from '../../../../../core/services/vexi-ui-host.registry';
 
 @Component({
@@ -153,6 +154,27 @@ export class OrdersComponent {
       const ignored: string[] = [];
       let note: string | undefined;
 
+      // `selection` (U-7): "abre la orden 1046" selecciona y navega al
+      // detalle por el mismo camino del clic en la fila (`viewOrderDetails`),
+      // con el nombre humano que `ui_read_selection` reporta en destino.
+      if (typeof values['selection'] === 'string' && values['selection'].trim()) {
+        const wanted = values['selection'].trim().toLowerCase();
+        const match = list.orders().find((order) => {
+          const byId = String(order.id) === wanted.replace(/^orden\s+/, '');
+          const byNumber = order.order_number?.toLowerCase().includes(wanted);
+          const byAlias = order.customer_alias?.toLowerCase().includes(wanted);
+          return byId || byNumber || byAlias;
+        });
+        if (match) {
+          const label = `Orden ${match.order_number}${match.customer_alias ? ` de ${match.customer_alias}` : ''}`;
+          this.viewOrderDetails(String(match.id));
+          applied.push(`selección "${label}"`);
+        } else {
+          note = `No encontré "${values['selection']}" entre las ventas cargadas; prueba con el número de orden.`;
+          ignored.push('selection');
+        }
+      }
+
       if (typeof values['search'] === 'string') {
         // `onSearchChange` resetea a página 1, igual que teclear en el buscador.
         list.onSearchChange(values['search']);
@@ -225,6 +247,7 @@ export class OrdersComponent {
             'sort',
             'limit',
             'page',
+            'selection',
           ].includes(key)
         ) {
           ignored.push(key);
@@ -254,6 +277,7 @@ export class OrdersComponent {
       this.refreshOrders();
       return { status: 'ok' as const, message: 'Recargué las ventas y sus totales.' };
     },
+    whenReady: () => vexiWhenReady(() => this.ordersList()?.loading() ?? false),
   };
 
   constructor() {

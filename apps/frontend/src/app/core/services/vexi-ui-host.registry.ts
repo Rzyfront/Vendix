@@ -43,6 +43,15 @@ export interface VexiUiScreen {
   selection?: string | null;
   /** Fields of the form currently open, if one is. */
   form_fields?: string[];
+  /**
+   * The modal currently open, if one is (U-5).
+   *
+   * Generalises the per-host `vexiOpenModalNote()` strings into a shape the
+   * dispatcher can act on: `ui_close_modal` closes exactly this, and
+   * `ui_confirm_dialog` correlates a pending `DialogService.confirm` with its
+   * container. Omitted when no modal is open.
+   */
+  open_modal?: { id: string; title: string };
   /** Anything else worth one line in the prompt. */
   notes?: string;
   // ── Paginación server-side (G3) ─────────────────────────────────────
@@ -99,10 +108,55 @@ export interface VexiUiHost {
     id: string,
     args?: Record<string, unknown>,
   ): Promise<VexiUiActionResult>;
+  /**
+   * Closes the open modal through the wrapper that owns its state (U-5).
+   *
+   * Only the component holding the `isOpen` signal may implement this — the
+   * dispatcher never forces somebody else's modal shut. Answers
+   * `no_open_modal` (as `not_found` with that phrase) when there is nothing
+   * to close, and never touches a pending `DialogService.confirm`: those are
+   * answered with `ui_confirm_dialog`, not closed.
+   */
+  closeModal?(): Promise<VexiUiActionResult>;
   /** Reloads the module's own data after a confirmed write. */
   refresh?(): Promise<VexiUiActionResult> | VexiUiActionResult;
-  /** Resolves when the module has finished loading. */
+  /**
+   * Resolves when the module has finished loading (G9).
+   *
+   * Hosts with async loads expose their `isLoading` signals through
+   * `vexiWhenReady()` below; hosts without one omit this and `ui_wait_for`
+   * keeps its documented fallback for exactly those.
+   */
   whenReady?(): Promise<void>;
+}
+
+/**
+ * Builds a `whenReady` from a loading reader (G9).
+ *
+ * Resolves once `isLoading()` reads false, polling on a short interval so no
+ * subscription lifecycle is needed. Rejects on timeout so `ui_wait_for` can
+ * report `still_loading` honestly instead of pretending the screen settled.
+ */
+export function vexiWhenReady(
+  isLoading: () => boolean,
+  timeoutMs = 15000,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (!isLoading()) {
+      resolve();
+      return;
+    }
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (!isLoading()) {
+        clearInterval(timer);
+        resolve();
+      } else if (Date.now() - started > timeoutMs) {
+        clearInterval(timer);
+        reject(new Error('still_loading'));
+      }
+    }, 100);
+  });
 }
 
 /**

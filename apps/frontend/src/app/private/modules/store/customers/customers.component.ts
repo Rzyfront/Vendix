@@ -19,6 +19,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import {
   VexiUiHost,
   VexiUiHostRegistry,
+  vexiWhenReady,
 } from '../../../../core/services/vexi-ui-host.registry';
 
 @Component({
@@ -170,6 +171,7 @@ export class CustomersComponent {
       form_fields: this.isModalOpen()
         ? [...CUSTOMER_MODAL_FILLABLE_FIELDS]
         : undefined,
+      open_modal: this.vexiOpenModal(),
       page: this.page(),
       limit: this.limit(),
       total: this.totalItems(),
@@ -319,11 +321,27 @@ export class CustomersComponent {
       };
     },
     openModal: (id) => this.vexiHostAdapter.runAction!(id),
+    closeModal: async () => {
+      const open = this.vexiOpenModal();
+      if (!open) {
+        return {
+          status: 'not_found' as const,
+          message: 'No hay ningún modal abierto en Clientes.',
+        };
+      }
+      this.closeModal();
+      this.isBulkUploadModalOpen.set(false);
+      return {
+        status: 'ok' as const,
+        message: `Cerré ${open.title}.`,
+      };
+    },
     refresh: () => {
       this.loadCustomers();
       this.loadStats();
       return { status: 'ok' as const, message: 'Recargué la lista de clientes.' };
     },
+    whenReady: () => vexiWhenReady(() => this.loading()),
   };
 
   constructor() {
@@ -421,6 +439,15 @@ export class CustomersComponent {
   closeModal() {
     this.isModalOpen.set(false);
     this.selectedCustomer.set(null);
+  }
+
+  /** El modal abierto en forma accionable (U-5): `ui_close_modal` cierra este. */
+  private vexiOpenModal(): { id: string; title: string } | undefined {
+    if (this.isModalOpen())
+      return { id: 'ficha_cliente', title: 'la ficha de cliente' };
+    if (this.isBulkUploadModalOpen())
+      return { id: 'carga_masiva', title: 'la carga masiva' };
+    return undefined;
   }
 
   onSave(data: CreateCustomerRequest) {

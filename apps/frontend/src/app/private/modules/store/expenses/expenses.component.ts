@@ -19,6 +19,7 @@ import {
   VexiUiHost,
   VexiUiHostRegistry,
   VexiUiScreen,
+  vexiWhenReady,
 } from '../../../../core/services/vexi-ui-host.registry';
 
 import { ExpensesStatsComponent } from './components/expenses-stats/expenses-stats.component';
@@ -146,6 +147,7 @@ export class ExpensesComponent implements VexiUiHost, OnDestroy {
       form_fields: this.isCreateModalOpen()
         ? [...EXPENSE_CREATE_FILLABLE_FIELDS]
         : undefined,
+      open_modal: this.vexiOpenModal(),
       notes: this.loading()
         ? 'La lista todavía está cargando.'
         : this.openModalNote(),
@@ -264,6 +266,25 @@ export class ExpensesComponent implements VexiUiHost, OnDestroy {
     return this.runAction(id);
   }
 
+  async closeModal(): Promise<VexiUiActionResult> {
+    const open = this.vexiOpenModal();
+    if (!open) {
+      return {
+        status: 'not_found',
+        message: 'No hay ningún modal abierto en Gastos.',
+      };
+    }
+    this.isCreateModalOpen.set(false);
+    this.isEditModalOpen.set(false);
+    this.isScannerModalOpen.set(false);
+    this.isCategoriesModalOpen.set(false);
+    return { status: 'ok', message: `Cerré ${open.title}.` };
+  }
+
+  whenReady(): Promise<void> {
+    return vexiWhenReady(() => this.loading() ?? false);
+  }
+
   /**
    * Fills the new-expense form (G1). Opens it first through the module's own
    * handler when closed, fills through the child's own method, and NEVER
@@ -317,6 +338,19 @@ export class ExpensesComponent implements VexiUiHost, OnDestroy {
     if (this.isEditModalOpen()) return 'Hay un gasto abierto en edición.';
     if (this.isScannerModalOpen()) return 'El escáner de recibos está abierto.';
     if (this.isCategoriesModalOpen()) return 'Las categorías están abiertas.';
+    return undefined;
+  }
+
+  /** El modal abierto en forma accionable (U-5): `ui_close_modal` cierra este. */
+  private vexiOpenModal(): { id: string; title: string } | undefined {
+    if (this.isCreateModalOpen())
+      return { id: 'nuevo_gasto', title: 'el formulario de nuevo gasto' };
+    if (this.isEditModalOpen())
+      return { id: 'editar_gasto', title: 'el gasto en edición' };
+    if (this.isScannerModalOpen())
+      return { id: 'escanear_recibo', title: 'el escáner de recibos' };
+    if (this.isCategoriesModalOpen())
+      return { id: 'categorias', title: 'las categorías' };
     return undefined;
   }
 

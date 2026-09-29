@@ -136,6 +136,12 @@ export interface VexiActivityEntry {
   tool: string;
   operation: string;
   applied: boolean;
+  /** `ui` for interface commands, `write` for data changes (default). */
+  kind?: 'write' | 'ui';
+  /** Screen the UI command ran on, when the result carried it. */
+  module_key?: string;
+  /** Outcome of a UI command (`ok`, `no_host`, `needs_user_input`, …). */
+  status?: string;
   document?: {
     attachment_id: string;
     original_name: string;

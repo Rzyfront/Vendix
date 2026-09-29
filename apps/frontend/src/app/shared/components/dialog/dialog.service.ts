@@ -6,6 +6,7 @@ import {
   ApplicationRef,
   DestroyRef,
   inject,
+  signal,
 } from '@angular/core';
 import { ConfirmationModalComponent } from '../confirmation-modal/confirmation-modal.component';
 import { PromptModalComponent } from '../prompt-modal/prompt-modal.component';
@@ -39,14 +40,60 @@ export interface PromptData {
   inputType?: 'text' | 'number';
 }
 
+/**
+ * A `confirm()` dialog waiting on a human (U-6).
+ *
+ * Published so Vexi's dispatcher can answer it from the chat — without this
+ * the turn degrades to a `needs_user_input` dead end. `danger` mirrors the
+ * modal's `confirmVariant`: when true the dispatcher only accepts with the
+ * consequence written by the person, never on the model's own judgement.
+ */
+export interface VexiPendingConfirm {
+  message: string;
+  confirmText: string;
+  danger: boolean;
+}
+
 @Injectable({ providedIn: 'root' })
 export class DialogService {
   private destroyRef = inject(DestroyRef);
+
+  /**
+   * The currently pending `confirm()` dialog, or null when there is none.
+   *
+   * Read-only from the outside: only `confirm()` publishes and only the
+   * dialog's own resolution (click or `vexiResolvePending`) clears it, so a
+   * stale entry can never outlive its modal.
+   */
+  readonly pendingConfirm = signal<VexiPendingConfirm | null>(null);
+
+  private pendingResolve: ((value: boolean) => void) | null = null;
+  private pendingCleanup: (() => void) | null = null;
 
   constructor(
     private injector: EnvironmentInjector,
     private appRef: ApplicationRef,
   ) {}
+
+  /**
+   * Answers the pending `confirm()` from the Vexi chat (U-6).
+   *
+   * Returns false when there is nothing pending — the dispatcher reports
+   * `no_pending_confirm` then. Resolving through the same promise the clicks
+   * use is what keeps the caller's `await` contract intact: the host code
+   * cannot tell a chat answer from a click.
+   */
+  vexiResolvePending(accept: boolean): boolean {
+    const resolve = this.pendingResolve;
+    const cleanup = this.pendingCleanup;
+    if (!resolve || !this.pendingConfirm()) return false;
+    this.pendingResolve = null;
+    this.pendingCleanup = null;
+    this.pendingConfirm.set(null);
+    resolve(accept);
+    cleanup?.();
+    return true;
+  }
 
   /**
    * Escribe un input del componente creado dinámicamente.
@@ -89,16 +136,28 @@ export class DialogService {
         componentRef.destroy();
       };
 
+      // Published for Vexi (U-6) and cleared on every resolution path, so the
+      // signal never claims a dialog is pending after its modal is gone.
+      this.pendingResolve = resolve;
+      this.pendingCleanup = cleanup;
+      this.pendingConfirm.set({
+        message: data.message,
+        confirmText: data.confirmText ?? 'Confirmar',
+        danger: data.confirmVariant === 'danger',
+      });
+
+      const settle = (value: boolean) => {
+        this.pendingResolve = null;
+        this.pendingCleanup = null;
+        this.pendingConfirm.set(null);
+        resolve(value);
+        cleanup();
+      };
+
       this.destroyRef.onDestroy(() => cleanup());
 
-      sub = componentRef.instance.confirm.subscribe(() => {
-        resolve(true);
-        cleanup();
-      });
-      subCancel = componentRef.instance.cancel.subscribe(() => {
-        resolve(false);
-        cleanup();
-      });
+      sub = componentRef.instance.confirm.subscribe(() => settle(true));
+      subCancel = componentRef.instance.cancel.subscribe(() => settle(false));
       this.appRef.attachView(componentRef.hostView);
       const domElem = (componentRef.hostView as any)
         .rootNodes[0] as HTMLElement;
