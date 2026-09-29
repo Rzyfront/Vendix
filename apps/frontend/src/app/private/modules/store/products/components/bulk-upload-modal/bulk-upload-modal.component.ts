@@ -10,6 +10,8 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass, CurrencyPipe } from '@angular/common';
+import { EMPTY, Subscription, expand, of } from 'rxjs';
+import { catchError, tap } from 'rxjs/operators';
 import { RouterLink } from '@angular/router';
 import { ProductsService } from '../../services/products.service';
 import {
@@ -26,7 +28,11 @@ import {
 import {
   BulkProductAnalysisItem,
   BulkProductAnalysisResult,
+  BulkProductUploadItemResult,
+  BulkProductUploadPage,
   BulkProductUploadResult,
+  BulkUploadProgress,
+  BULK_UPLOAD_PAGE_SIZE,
   BulkValidationMessage,
 } from '../../interfaces/bulk-product-analysis.interface';
 
@@ -578,6 +584,11 @@ import {
                         <th
                           class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
                         >
+                          Cód. barras
+                        </th>
+                        <th
+                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                        >
                           Tipo
                         </th>
                         <th
@@ -637,6 +648,11 @@ import {
                             class="px-3 py-2 text-sm font-mono text-xs text-gray-600"
                           >
                             {{ item.sku || '—' }}
+                          </td>
+                          <td
+                            class="px-3 py-2 text-sm font-mono text-xs text-gray-600"
+                          >
+                            {{ item.barcode || '—' }}
                           </td>
                           <td class="px-3 py-2 text-sm">
                             <span
@@ -941,6 +957,11 @@ import {
                     </div>
                     <p class="text-xs text-gray-500 font-mono mb-2">
                       {{ item.sku || '—' }}
+                      @if (item.barcode) {
+                        <span class="ml-2 text-gray-400"
+                          >· CB: {{ item.barcode }}</span
+                        >
+                      }
                     </p>
                     <div
                       class="flex flex-wrap gap-2 text-xs text-gray-600 mb-1"
@@ -1107,8 +1128,37 @@ import {
                 <p class="text-sm text-gray-900 font-medium">
                   Cargando conceptos...
                 </p>
+                @if (progress().phase !== 'idle') {
+                  <div
+                    class="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-2"
+                  >
+                    <div
+                      class="flex items-center justify-between text-[11px] text-gray-600"
+                    >
+                      <span>
+                        Procesando lote {{ progress().doneBatches }}/{{
+                          progress().totalBatches
+                        }}
+                        ({{ progress().doneRows }}/{{ progress().totalRows }}
+                        filas)
+                      </span>
+                      <span class="font-semibold text-primary"
+                        >{{ progressPercent() }}%</span
+                      >
+                    </div>
+                    <div
+                      class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200"
+                    >
+                      <div
+                        class="h-full rounded-full bg-primary transition-all"
+                        [style.width.%]="progressPercent()"
+                      ></div>
+                    </div>
+                  </div>
+                }
                 <p class="text-xs text-gray-500">
-                  Esto puede tomar unos momentos
+                  Se procesa en lotes de {{ pageSize }} filas. Si cierras, los
+                  lotes ya confirmados quedan aplicados.
                 </p>
               </div>
             }
@@ -1212,7 +1262,7 @@ import {
                     <tbody class="bg-surface divide-y divide-gray-200">
                       @for (
                         result of uploadResults()!.results;
-                        track result.sku
+                        track $index
                       ) {
                         <tr>
                           <td
@@ -1363,6 +1413,24 @@ export class BulkUploadModalComponent {
   // Upload state
   readonly isUploading = signal(false);
   readonly uploadResults = signal<BulkProductUploadResult | null>(null);
+  readonly pageSize = BULK_UPLOAD_PAGE_SIZE;
+  private readonly progressState = signal<BulkUploadProgress>({
+    phase: 'idle',
+    totalBatches: 0,
+    doneBatches: 0,
+    totalRows: 0,
+    doneRows: 0,
+  });
+  readonly progress = this.progressState.asReadonly();
+  readonly progressPercent = computed(() => {
+    const p = this.progressState();
+    return p.totalRows > 0
+      ? Math.min(100, Math.round((p.doneRows / p.totalRows) * 100))
+      : 0;
+  });
+  /** Filas aplicadas hasta ahora (acumulado de todas las páginas). */
+  private readonly appliedRows = signal(0);
+  private uploadSub: Subscription | null = null;
 
   // Error state
   readonly uploadError = signal<string | null>(null);
@@ -1494,17 +1562,36 @@ export class BulkUploadModalComponent {
 
   // Cancel/Close
   onCancel() {
-    if (this.sessionId && !this.uploadResults()) {
-      this.productsService
-        .cancelBulkProductSession(this.sessionId)
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe();
+    const pending = this.isUploading();
+    if (pending) {
+      // Detiene la cadena de páginas pendientes (no hay más peticiones).
+      this.uploadSub?.unsubscribe();
+      this.uploadSub = null;
     }
-    if ((this.uploadResults()?.successful ?? 0) > 0) {
+    if (this.sessionId && !this.uploadResults()) {
+      this.cancelSessionSilently(this.sessionId);
+    }
+    const applied = this.uploadResults()?.successful ?? this.appliedRows();
+    if (pending && applied > 0) {
+      this.toastService.warning(
+        `Carga interrumpida: ${applied} fila(s) ya quedaron aplicadas.`,
+      );
+    }
+    if (applied > 0) {
       this.uploadComplete.emit();
     }
     this.isOpenChange.emit(false);
     this.resetState();
+  }
+
+  private cancelSessionSilently(sessionId: string) {
+    this.productsService
+      .cancelBulkProductSession(sessionId)
+      .pipe(
+        catchError(() => EMPTY),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe();
   }
 
   resetState() {
@@ -1521,6 +1608,16 @@ export class BulkUploadModalComponent {
     this.isUploading.set(false);
     this.uploadResults.set(null);
     this.uploadError.set(null);
+    this.uploadSub?.unsubscribe();
+    this.uploadSub = null;
+    this.appliedRows.set(0);
+    this.progressState.set({
+      phase: 'idle',
+      totalBatches: 0,
+      doneBatches: 0,
+      totalRows: 0,
+      doneRows: 0,
+    });
   }
 
   // Step 0: File operations
@@ -1634,39 +1731,116 @@ export class BulkUploadModalComponent {
       });
   }
 
-  // Step 1 -> 2: Upload
+  // Step 1 -> 2: Upload (páginas de 100 en serie, sin abortar por una fallida)
   proceedWithUpload() {
-    if (!this.sessionId) return;
+    const sessionId = this.sessionId;
+    if (!sessionId) return;
+
+    const limit = BULK_UPLOAD_PAGE_SIZE;
+    let total = this.analysisResult()?.total_products ?? 0;
+    let doneSeen = false;
+    const results: BulkProductUploadItemResult[] = [];
+    let successful = 0;
+    let failed = 0;
+    let skipped = 0;
 
     this.isUploading.set(true);
+    this.uploadError.set(null);
     this.currentStep.set(2);
+    this.appliedRows.set(0);
+    this.progressState.set({
+      phase: 'uploading',
+      totalBatches: Math.max(1, Math.ceil(total / limit)),
+      doneBatches: 0,
+      totalRows: total,
+      doneRows: 0,
+    });
 
-    this.productsService
-      .uploadBulkProductsFromSession(this.sessionId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
+    // catchError DENTRO de cada página: la degrada a "todas sus filas fallaron"
+    // y la cadena continúa con la siguiente.
+    const fetchPage = (offset: number) =>
+      this.productsService
+        .uploadProductsFromSessionPage(sessionId, offset, limit)
+        .pipe(
+          catchError((error) => {
+            const message =
+              typeof error === 'string'
+                ? error
+                : error?.error?.message || error?.message || 'Error en el lote';
+            const rows = Math.max(0, Math.min(limit, total - offset));
+            const page: BulkProductUploadPage = {
+              success: false,
+              total,
+              offset,
+              limit,
+              done: false,
+              total_processed: rows,
+              successful: 0,
+              failed: rows,
+              skipped: 0,
+              results: Array.from({ length: rows }, (_, i) => ({
+                row_number: offset + i + 2,
+                product: null,
+                status: 'error' as const,
+                message: `Lote de filas ${offset + 2}-${offset + rows + 1} falló: ${message}`,
+              })),
+            };
+            return of(page);
+          }),
+        );
+
+    this.uploadSub = fetchPage(0)
+      .pipe(
+        expand((page) => {
+          const next = page.offset + limit;
+          return page.done || next >= total ? EMPTY : fetchPage(next);
+        }),
+        tap((page) => {
+          // Si el servidor informa el total (página real), es la verdad.
+          if (page.success !== false || page.done) {
+            if (page.total > 0) total = page.total;
+          }
+          if (page.done) doneSeen = true;
+          results.push(...(page.results ?? []));
+          successful += page.successful ?? 0;
+          failed += page.failed ?? 0;
+          skipped += page.skipped ?? 0;
+          this.appliedRows.set(successful);
+          this.progressState.update((p) => ({
+            ...p,
+            totalRows: total,
+            totalBatches: Math.max(1, Math.ceil(total / limit)),
+            doneBatches: p.doneBatches + 1,
+            doneRows: Math.min(total, p.doneRows + (page.total_processed ?? 0)),
+          }));
+        }),
+      )
       .subscribe({
-        next: (result) => {
+        complete: () => {
+          this.uploadSub = null;
+          // Si la última página falló, el backend no borró el archivo de S3.
+          if (!doneSeen) this.cancelSessionSilently(sessionId);
+          const result: BulkProductUploadResult = {
+            success: failed === 0,
+            total_processed: results.length,
+            successful,
+            failed,
+            skipped,
+            results,
+          };
+          this.progressState.update((p) => ({ ...p, phase: 'done' }));
           this.isUploading.set(false);
           this.uploadResults.set(result);
 
-          if (result.failed > 0 || result.skipped > 0) {
+          if (failed > 0 || skipped > 0) {
             this.toastService.warning(
               'La carga se completó con algunos errores u omisiones.',
             );
           } else {
             this.toastService.success(
-              `${result.successful} concepto(s) cargados exitosamente`,
+              `${successful} concepto(s) cargados exitosamente`,
             );
           }
-        },
-        error: (error) => {
-          this.isUploading.set(false);
-          this.uploadError.set(
-            typeof error === 'string'
-              ? error
-              : error?.error?.message || error?.message || 'Error en la carga',
-          );
-          this.toastService.error('Error en la carga masiva de catálogo');
         },
       });
   }
