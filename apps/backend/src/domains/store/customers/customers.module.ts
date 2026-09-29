@@ -4,6 +4,7 @@ import { createCustomerTools } from '../../../ai-engine/tools/domains/customers.
 import { createCustomerWriteTools } from '../../../ai-engine/tools/domains/writes.tools';
 import { CustomersService } from './customers.service';
 import { CustomerLookupService } from './customer-lookup.service';
+import { RuesLookupService } from './rues-lookup.service';
 import { CustomersController } from './customers.controller';
 import { CustomersBulkService } from './customers-bulk.service';
 import { CustomersBulkController } from './customers-bulk.controller';
@@ -25,6 +26,7 @@ import { EmailModule } from '../../../email/email.module';
   providers: [
     CustomersService,
     CustomerLookupService,
+    RuesLookupService,
     CustomersBulkService,
     CustomerHistoryService,
     CustomerEmailListener,
