@@ -314,6 +314,8 @@ describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
   });
 
   it('diagnose para /admin/dashboard devuelve visible: false con blockedBy: permission si no tiene acceso', () => {
+    // panel_ui lo muestra: el bloqueo debe venir del permiso, no de panel_ui.
+    authFacade.isModuleVisible.and.returnValue(true);
     authFacade.isOwner.and.returnValue(false);
     authFacade.isAdmin.and.returnValue(false);
     authFacade.hasAnyRole.and.returnValue(false);
