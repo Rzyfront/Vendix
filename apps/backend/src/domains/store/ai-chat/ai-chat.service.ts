@@ -992,7 +992,12 @@ export class AIChatService {
     // Pegado al turno nuevo, no al principio de la ventana: lo que gobierna es
     // cómo se responde a ESTE mensaje, y la señal se pierde veinte mensajes
     // atrás si viaja con el historial.
-    const pending = this.findPendingProposal(conversation.messages);
+    // Una continuación nace de resolver la tarjeta: tras «Rechazar» el marcador
+    // sigue vivo en el historial (el rechazo no deja fila en el servidor) y el
+    // bloque le diría al modelo que la tarjeta aún espera «Aprobar».
+    const pending = plan?.isContinuation
+      ? null
+      : this.findPendingProposal(conversation.messages);
     if (pending) {
       messages.push({
         role: 'system',
