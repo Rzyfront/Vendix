@@ -165,3 +165,7 @@ El webhook público POST `/api/public/received-documents/webhook/:publicToken` r
 ### D42 — Configuración bloqueada ante ejecución sin resolver
 
 Antes de editar una conexión, la transacción bloquea su fila y comprueba si conserva un run `pending`, `queued`, `running`, `failed` o `partial`. En ese caso devuelve conflicto incluso si el lease ya es nulo: rotar secretos, endpoint, cursor o versión dejaría el outbox anterior sin ruta de recuperación. La operación debe completarse/reintentarse sobre el mismo run o resolverse mediante una cancelación explícita y auditada futura. Nunca se cancela silenciosamente un documento recibido al deshabilitar el conector.
+
+### D43 — Cancelación explícita de ejecución irresoluble
+
+Para poder corregir un conector tras un fallo permanente, un usuario autorizado puede cancelar **ese run** con motivo obligatorio y auditoría atómica. La transacción bloquea primero conexión y después run, rechaza un proceso activo y sólo admite `pending`, `queued`, `failed`, `partial` o `running` con lease vencido. Conserva hash, conteos y documentos ya persistidos; limpia el payload de ingreso que no se procesará, deja cursor intacto y pausa el siguiente sondeo hasta corrección/solicitud manual. Un trabajo Bull que llegue tarde verá el estado terminal. La UI debe advertir que puede descartarse contenido no procesado; jamás se cancela silenciosamente ni como reacción automática al vencimiento.
