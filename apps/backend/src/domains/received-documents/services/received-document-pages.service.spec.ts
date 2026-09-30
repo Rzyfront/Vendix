@@ -136,17 +136,127 @@ describe('ReceivedDocumentPagesService', () => {
     expect(page.cleanup).toHaveBeenCalledTimes(1);
   });
 
-  it('bounds additional canvases requested internally by PDF.js', async () => {
+  it('rejects internal canvases beyond the maximum source edge before allocation', async () => {
     const createCanvasSpy = jest.spyOn(service as unknown as { createCanvas: (width: number, height: number) => unknown }, 'createCanvas');
     service.pdfJsModule = {
       getDocument: (options: Record<string, unknown>) => {
         const Factory = options['CanvasFactory'] as new (options?: unknown) => { create(width: number, height: number): unknown };
-        new Factory().create(2049, 1);
+        new Factory().create(8193, 1);
         throw new Error('unreachable');
       },
     };
     await expect(service.prepare(pdfFile())).rejects.toBeInstanceOf(BadRequestException);
     expect(createCanvasSpy).not.toHaveBeenCalled();
+  });
+
+  it('allows a scanned A4 source bitmap for PDF internals while keeping the output viewport bounded', async () => {
+    const events: string[] = [];
+    const page = createPage(1, events, () => ({ width: 2048, height: 1200 }));
+    const mock = installPdfMock([page]);
+    const fakeCanvas = (width: number, height: number) => {
+      const surface: { width: number; height: number; toBuffer: jest.Mock; getContext: jest.Mock } = {
+        width, height, toBuffer: jest.fn(() => Buffer.from('jpeg')),
+        getContext: jest.fn(() => ({ canvas: surface })),
+      };
+      return surface as never;
+    };
+    jest.spyOn(service as unknown as { createCanvas: (width: number, height: number) => unknown }, 'createCanvas').mockImplementation(fakeCanvas);
+    service.pdfJsModule = {
+      getDocument: (options: Record<string, unknown>) => {
+        const Factory = options['CanvasFactory'] as new (options?: unknown) => { create(width: number, height: number): { canvas: unknown }; destroy(entry: { canvas: unknown }): void };
+        const factory = new Factory();
+        const embeddedSource = factory.create(2480, 3508);
+        factory.destroy(embeddedSource);
+        return mock.loadingTask;
+      },
+    };
+
+    const result = await service.prepare(pdfFile());
+    expect(result.page_count).toBe(1);
+    expect(page.render).toHaveBeenCalledTimes(1);
+    expect(result.pages[0].page_number).toBe(1);
+  });
+
+  it.each([
+    ['edge', [[8193, 1]]],
+    ['per-surface pixels', [[6400, 6400]]],
+    ['aggregate active pixels', [[8000, 5000], [6000, 4001]]],
+  ])('rejects oversized internal PDF canvas %s before allocating it', async (_name, surfaces) => {
+    const createCanvasSpy = jest.spyOn(service as unknown as { createCanvas: (width: number, height: number) => unknown }, 'createCanvas')
+      .mockImplementation(((width: number, height: number) => ({ width, height, getContext: () => ({ canvas: { width, height } }) })) as never);
+    service.pdfJsModule = {
+      getDocument: (options: Record<string, unknown>) => {
+        const Factory = options['CanvasFactory'] as new (options?: unknown) => { create(width: number, height: number): unknown };
+        const factory = new Factory();
+        for (const [width, height] of surfaces as number[][]) factory.create(width, height);
+        throw new Error('unreachable');
+      },
+    };
+
+    await expect(service.prepare(pdfFile())).rejects.toMatchObject({ response: expect.objectContaining({ message: _name === 'aggregate active pixels' ? 'El PDF excede el límite de memoria de superficies de imagen activas.' : 'El PDF solicitó una superficie de imagen demasiado grande.' }) });
+    const rejectedIndex = surfaces[0][0] > 8192 || surfaces[0][0] * surfaces[0][1] > 40_000_000 ? 0 : 1;
+    expect(createCanvasSpy).toHaveBeenCalledTimes(rejectedIndex);
+  });
+
+  it('releases aggregate pixel budget on reset and destroy', async () => {
+    const createCanvasSpy = jest.spyOn(service as unknown as { createCanvas: (width: number, height: number) => unknown }, 'createCanvas')
+      .mockImplementation(((width: number, height: number) => ({ width, height, getContext: () => ({ canvas: { width, height } }) })) as never);
+    let remaining!: () => void;
+    const loadingTask = { promise: new Promise<never>((_resolve, reject) => { remaining = () => reject(new Error('stop after budget checks')); }), destroy: jest.fn(async () => undefined) };
+    service.pdfJsModule = {
+      getDocument: (options: Record<string, unknown>) => {
+        const Factory = options['CanvasFactory'] as new (options?: unknown) => { create(width: number, height: number): { canvas: { width: number; height: number }; context: unknown }; reset(entry: { canvas: { width: number; height: number }; context: unknown }, width: number, height: number): void; destroy(entry: { canvas: { width: number; height: number }; context: unknown }): void };
+        const factory = new Factory();
+        const first = factory.create(5000, 4000);
+        const second = factory.create(5000, 4000);
+        factory.reset(first, 8000, 5000); // replaces 20 MP with 40 MP: active total is 60 MP, not 80 MP.
+        factory.destroy(second);
+        factory.create(4000, 4000); // 56 MP after destroy remains below 64 MP.
+        remaining();
+        return loadingTask;
+      },
+    };
+
+    await expect(service.prepare(pdfFile())).rejects.toMatchObject({
+      response: expect.objectContaining({ message: 'No se pudo leer el PDF del documento.' }),
+    });
+    expect(createCanvasSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it('zeros an old PDF canvas before reset dimensions to prevent oversized intermediate allocation', async () => {
+    let peakPixels = 0;
+    let resetShape: { width: number; height: number } | undefined;
+    jest.spyOn(service as unknown as { createCanvas: (width: number, height: number) => unknown }, 'createCanvas')
+      .mockImplementation(((width: number, height: number) => {
+        let currentWidth = width;
+        let currentHeight = height;
+        const updatePeak = () => { peakPixels = Math.max(peakPixels, currentWidth * currentHeight); };
+        const surface = {
+          get width() { return currentWidth; },
+          set width(value: number) { currentWidth = value; updatePeak(); },
+          get height() { return currentHeight; },
+          set height(value: number) { currentHeight = value; updatePeak(); },
+          getContext: () => ({ canvas: surface }),
+        };
+        updatePeak();
+        return surface;
+      }) as never);
+    service.pdfJsModule = {
+      getDocument: (options: Record<string, unknown>) => {
+        const Factory = options['CanvasFactory'] as new (options?: unknown) => { create(width: number, height: number): { canvas: { width: number; height: number }; context: unknown }; reset(entry: { canvas: { width: number; height: number }; context: unknown }, width: number, height: number): void };
+        const factory = new Factory();
+        const surface = factory.create(1, 8192);
+        factory.reset(surface, 8192, 1);
+        resetShape = { width: surface.canvas.width, height: surface.canvas.height };
+        throw new Error('stop after reset dimensions are verified');
+      },
+    };
+
+    await expect(service.prepare(pdfFile())).rejects.toMatchObject({
+      response: expect.objectContaining({ message: 'No se pudo leer el PDF del documento.' }),
+    });
+    expect(resetShape).toEqual({ width: 8192, height: 1 });
+    expect(peakPixels).toBeLessThanOrEqual(40_000_000);
   });
 
   it('destroys page, document, and loading resources when rendering fails', async () => {

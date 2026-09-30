@@ -56,6 +56,7 @@ interface PdfJsModule {
 interface PdfCanvasEntry {
   canvas: Canvas | null;
   context: ReturnType<Canvas['getContext']> | null;
+  pixelCount: number;
 }
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -63,6 +64,9 @@ const MAX_TOTAL_OUTPUT_BYTES = 20 * 1024 * 1024;
 const MAX_PDF_PAGES = 10;
 const MAX_CANVAS_EDGE = 2048;
 const MAX_CANVAS_PIXELS = 8_000_000;
+const MAX_PDF_INTERNAL_CANVAS_EDGE = 8192;
+const MAX_PDF_INTERNAL_CANVAS_PIXELS = 40_000_000;
+const MAX_PDF_ACTIVE_CANVAS_PIXELS = 64_000_000;
 const MAX_IMAGE_PIXELS = 40_000_000;
 const MAX_TEXT_CHARS_PER_PAGE = 50_000;
 const MAX_TEXT_ITEMS_PER_PAGE = 100_000;
@@ -153,35 +157,46 @@ export class ReceivedDocumentPagesService {
     let loadingTask: PdfLoadingTask | undefined;
     let pdfDocument: PdfDocument | undefined;
     const activeCanvases = new Set<PdfCanvasEntry>();
+    let activeCanvasPixels = 0;
     const owner = this;
 
     class BoundedCanvasFactory {
       constructor(_options?: unknown) {}
 
       create(width: number, height: number): PdfCanvasEntry {
-        const dimensions = owner.validateCanvasDimensions(width, height);
+        const dimensions = owner.validateInternalCanvasDimensions(width, height, activeCanvasPixels);
         const canvas = owner.createCanvas(dimensions.width, dimensions.height);
-        const entry: PdfCanvasEntry = { canvas, context: canvas.getContext('2d') };
+        const entry: PdfCanvasEntry = { canvas, context: canvas.getContext('2d'), pixelCount: dimensions.pixels };
         activeCanvases.add(entry);
+        activeCanvasPixels += dimensions.pixels;
         return entry;
       }
 
       reset(entry: PdfCanvasEntry, width: number, height: number): void {
         if (!entry.canvas || !entry.context) throw new Error('Canvas factory received a destroyed surface.');
-        const dimensions = owner.validateCanvasDimensions(width, height);
+        if (!activeCanvases.has(entry)) throw new Error('Canvas factory received an untracked surface.');
+        const budgetWithoutEntry = activeCanvasPixels - entry.pixelCount;
+        const dimensions = owner.validateInternalCanvasDimensions(width, height, budgetWithoutEntry);
+        // Release the old bitmap first. Setting width and then height directly
+        // can transiently allocate old-height × new-width (or vice versa), even
+        // when both endpoint surfaces satisfy the cap.
+        entry.canvas.width = 0;
+        entry.canvas.height = 0;
         entry.canvas.width = dimensions.width;
         entry.canvas.height = dimensions.height;
         entry.context = entry.canvas.getContext('2d');
+        activeCanvasPixels = budgetWithoutEntry + dimensions.pixels;
+        entry.pixelCount = dimensions.pixels;
       }
 
       destroy(entry: PdfCanvasEntry): void {
+        if (activeCanvases.delete(entry)) activeCanvasPixels = Math.max(0, activeCanvasPixels - entry.pixelCount);
         if (entry.canvas) {
           entry.canvas.width = 0;
           entry.canvas.height = 0;
         }
         entry.canvas = null;
         entry.context = null;
-        activeCanvases.delete(entry);
       }
     }
 
@@ -272,7 +287,10 @@ export class ReceivedDocumentPagesService {
         }
         entry.canvas = null;
         entry.context = null;
+        entry.pixelCount = 0;
       }
+      activeCanvases.clear();
+      activeCanvasPixels = 0;
       if (pdfDocument) {
         try { await pdfDocument.destroy(); } catch { /* best-effort resource cleanup */ }
       }
@@ -319,6 +337,22 @@ export class ReceivedDocumentPagesService {
       throw this.badRequest('El PDF solicitó una superficie de imagen demasiado grande.');
     }
     return { width: safeWidth, height: safeHeight };
+  }
+
+  private validateInternalCanvasDimensions(width: number, height: number, activePixels: number): { width: number; height: number; pixels: number } {
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      throw this.badRequest('El PDF solicitó dimensiones de imagen inválidas.');
+    }
+    const safeWidth = Math.ceil(width);
+    const safeHeight = Math.ceil(height);
+    const pixels = safeWidth * safeHeight;
+    if (safeWidth > MAX_PDF_INTERNAL_CANVAS_EDGE || safeHeight > MAX_PDF_INTERNAL_CANVAS_EDGE || pixels > MAX_PDF_INTERNAL_CANVAS_PIXELS) {
+      throw this.badRequest('El PDF solicitó una superficie de imagen demasiado grande.');
+    }
+    if (!Number.isSafeInteger(pixels) || activePixels + pixels > MAX_PDF_ACTIVE_CANVAS_PIXELS) {
+      throw this.badRequest('El PDF excede el límite de memoria de superficies de imagen activas.');
+    }
+    return { width: safeWidth, height: safeHeight, pixels };
   }
 
   private hasImageMagic(buffer: Buffer, mimeType: string): boolean {
