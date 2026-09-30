@@ -517,6 +517,9 @@ describe('PurchaseOrdersService.receive()', () => {
           deleteMany: jest.fn(),
           create: jest.fn(),
         },
+        purchase_order_item_taxes: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
         product_variants: { findMany: jest.fn().mockResolvedValue([]) },
       };
       (prismaService.$transaction as jest.Mock).mockImplementation(
@@ -2264,6 +2267,9 @@ describe('PurchaseOrdersService.update() — descuento: 0-100 % y precedencia mo
         findMany: jest.fn().mockResolvedValue([]),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         create: jest.fn().mockResolvedValue({}),
+      },
+      purchase_order_item_taxes: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       product_variants: { findMany: jest.fn().mockResolvedValue([]) },
     };

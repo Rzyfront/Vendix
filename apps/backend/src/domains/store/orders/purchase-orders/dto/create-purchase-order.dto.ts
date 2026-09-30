@@ -32,6 +32,9 @@ import {
 /** Allowed fiscal tax classifications for a purchase line (F1 IVA lifecycle). */
 const TAX_TYPE_VALUES = Object.values(tax_type_enum) as string[];
 
+/** QUI-855 — tax types a multi-tax purchase line accepts (kernel `PurchaseTaxType`). */
+const PURCHASE_TAX_TYPE_VALUES = ['iva', 'inc', 'icui', 'ibua'];
+
 /**
  * Cota de tamaño de los arreglos de línea. El mismo límite que el resto de las
  * operaciones masivas del repo (`BatchCreateAdjustmentsDto`): sin tope, una
@@ -129,21 +132,70 @@ export class PurchaseOrderItemTaxDto {
   @IsOptional()
   tax_name?: string;
 
-  @ApiProperty({ description: 'Tax rate as percentage 0-100' })
+  @ApiProperty({
+    description:
+      'Tax rate as percentage 0-100. Required when calc_mode is percent (validated in the service).',
+    required: false,
+  })
   @Transform(toOptionalNumber)
   @IsNumber()
   @Min(0)
   @Max(100)
-  tax_rate!: number;
+  @IsOptional()
+  tax_rate?: number;
 
   @ApiProperty({
-    description: 'Fiscal classification (iva | inc | ica | ...). Defaults to iva.',
-    enum: tax_type_enum,
+    description: 'Fiscal classification of the purchase tax. Defaults to iva.',
+    enum: PURCHASE_TAX_TYPE_VALUES,
     required: false,
   })
-  @IsIn(TAX_TYPE_VALUES)
+  @IsIn(PURCHASE_TAX_TYPE_VALUES)
   @IsOptional()
   tax_type?: string;
+
+  @ApiProperty({
+    description:
+      'percent (rate over the base) | fixed_per_unit (pesos per unit, e.g. IBUA).',
+    enum: ['percent', 'fixed_per_unit'],
+    required: false,
+  })
+  @IsIn(['percent', 'fixed_per_unit'])
+  @IsOptional()
+  calc_mode?: string;
+
+  @ApiProperty({ description: 'Pesos per unit for fixed_per_unit taxes', required: false })
+  @Transform(toOptionalNumber)
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  fixed_amount_per_unit?: number;
+
+  @ApiProperty({
+    description: 'net | net_plus_prior (cascade over previously computed taxes)',
+    enum: ['net', 'net_plus_prior'],
+    required: false,
+  })
+  @IsIn(['net', 'net_plus_prior'])
+  @IsOptional()
+  base_mode?: string;
+
+  @ApiProperty({ description: 'Calculation order 0-999', required: false })
+  @Transform(toOptionalNumber)
+  @IsInt()
+  @Min(0)
+  @Max(999)
+  @IsOptional()
+  sequence?: number;
+
+  @ApiProperty({
+    description: 'Line tax amount printed by the supplier; replaces the computed one.',
+    required: false,
+  })
+  @Transform(toOptionalNumber)
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  amount_override?: number;
 
   @ApiProperty({
     description: 'Rate already included in the price. Defaults to false.',
@@ -344,6 +396,7 @@ export class PurchaseOrderItemDto {
    */
   @ApiProperty({ type: [PurchaseOrderItemTaxDto], required: false })
   @IsArray()
+  @ArrayMaxSize(4)
   @ValidateNested({ each: true })
   @Type(() => PurchaseOrderItemTaxDto)
   @IsOptional()
