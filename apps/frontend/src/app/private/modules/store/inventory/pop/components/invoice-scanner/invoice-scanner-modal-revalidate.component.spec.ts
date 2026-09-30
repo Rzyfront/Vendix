@@ -220,10 +220,35 @@ describe('InvoiceScannerModalComponent — QUI-855 paso 8b revalidación con IA'
     expect(t).toContain('Total no cuadra');
     expect(t).toContain('Cantidad borrosa');
     expect(t).toContain('El documento dice 5');
-    expect(t).toContain('quantity');
+    expect(t).toContain('Cantidad');
+    expect(t).not.toContain('quantity');
     expect(t).toContain('Usar revalidación');
     expect(t).toContain('Mantener precarga');
     expect(t).toContain('Editar manualmente');
+  });
+
+  it('oculta las divergencias sin diferencia y cuenta solo las reales', () => {
+    const taxes = [{ type: 'iva', rate: 19, fixed_amount_per_unit: null, amount: null, inclusive: false }];
+    const res = buildResult();
+    const noise = Array.from({ length: 3 }, () => ({
+      line_index: 0,
+      field: 'taxes',
+      consolidated_value: taxes,
+      document_value: taxes,
+      revalidated_value: taxes,
+      reason: 'igual',
+    }));
+    res.report.divergences.push(...noise);
+    prime();
+    component.onRevalidateToggle(true);
+    component.openRevalidateSummary();
+    component.sendRevalidate();
+    revalidate$.next(res);
+    fixture.detectChanges();
+    const t = text();
+    expect(t).toContain('Divergencias (1)');
+    expect(t).toContain('3 campos verificados sin diferencias');
+    expect(t).not.toContain('"type"');
   });
 
   it('«Usar revalidación» aplica el merge, marca la línea y resetea el ack', () => {

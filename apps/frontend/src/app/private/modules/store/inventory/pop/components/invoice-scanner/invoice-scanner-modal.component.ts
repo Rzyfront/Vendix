@@ -21,7 +21,8 @@ import { InputsearchComponent } from '../../../../../../../shared/components/inp
 import { StepsLineComponent } from '../../../../../../../shared/components/steps-line/steps-line.component';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
-import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { CurrencyFormatService, CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { buildDivergenceView, DivergenceView } from '../../utils/revalidate-divergence-format.util';
 import { LineTaxesEditorComponent, taxTypeLabel } from '../line-taxes-editor/line-taxes-editor.component';
 
 import { InvoiceScannerService } from '../../services/invoice-scanner.service';
@@ -35,7 +36,6 @@ import {
   InvoiceMatchResult,
   MatchedLineItem,
   ProductCandidate,
-  InvoiceRevalidateDivergence,
   InvoiceRevalidateResult,
   ScanAttachmentInfo,
   ScanLineTax,
@@ -1201,9 +1201,9 @@ import {
 
                 <div data-testid="revalidate-divergences">
                   <h4 class="text-sm font-semibold text-text-primary mb-2">
-                    Divergencias ({{ res.report.divergences.length }})
+                    Divergencias ({{ divergenceView().rows.length }})
                   </h4>
-                  @if (res.report.divergences.length === 0) {
+                  @if (divergenceView().rows.length === 0) {
                     <p class="text-xs text-text-secondary">
                       La IA no encontró diferencias con los datos consolidados.
                     </p>
@@ -1221,32 +1221,51 @@ import {
                           </tr>
                         </thead>
                         <tbody>
-                          @for (d of res.report.divergences; track $index) {
+                          @for (d of divergenceView().rows; track $index) {
                             <tr class="border-b border-border/50 bg-amber-50/60">
-                              <td class="py-2 pr-3 font-semibold">{{ d.line_index === null ? '—' : lineNumber(d.line_index) }}</td>
-                              <td class="py-2 px-3">{{ d.field }}</td>
-                              <td class="py-2 px-3 text-text-secondary">{{ formatValue(d.consolidated_value) }}</td>
-                              <td class="py-2 px-3 text-text-secondary">{{ formatValue(d.document_value) }}</td>
-                              <td class="py-2 px-3 font-semibold text-primary">{{ formatValue(d.revalidated_value) }}</td>
-                              <td class="py-2 pl-3 text-text-secondary">{{ d.reason }}</td>
+                              <td class="py-2 pr-3 font-semibold">{{ d.lineIndex === null ? '—' : lineNumber(d.lineIndex) }}</td>
+                              <td class="py-2 px-3">{{ d.fieldLabel }}</td>
+                              <td class="py-2 px-3 text-text-secondary">{{ d.consolidated }}</td>
+                              <td class="py-2 px-3 text-text-secondary">{{ d.document }}</td>
+                              <td class="py-2 px-3" [class]="d.differs ? 'font-semibold text-primary' : 'text-text-primary'">{{ d.revalidated }}</td>
+                              <td class="py-2 pl-3 text-text-secondary">
+                                @if (d.isUserDecision) {
+                                  <span class="font-medium text-text-primary">Decisión del usuario:</span>
+                                }
+                                {{ d.reason }}
+                              </td>
                             </tr>
                           }
                         </tbody>
                       </table>
                     </div>
                     <div class="sm:hidden space-y-2">
-                      @for (d of res.report.divergences; track $index) {
+                      @for (d of divergenceView().rows; track $index) {
                         <div class="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-1 text-xs">
                           <p class="font-semibold text-text-primary">
-                            {{ d.line_index === null ? 'General' : 'Línea ' + lineNumber(d.line_index) }} · {{ d.field }}
+                            {{ d.lineIndex === null ? 'General' : 'Línea ' + lineNumber(d.lineIndex) }} · {{ d.fieldLabel }}
                           </p>
-                          <p><span class="text-text-secondary">Consolidado:</span> {{ formatValue(d.consolidated_value) }}</p>
-                          <p><span class="text-text-secondary">En el documento:</span> {{ formatValue(d.document_value) }}</p>
-                          <p><span class="text-text-secondary">Revalidado:</span> <span class="font-semibold text-primary">{{ formatValue(d.revalidated_value) }}</span></p>
-                          <p class="text-text-secondary">{{ d.reason }}</p>
+                          <p><span class="text-text-secondary">Consolidado:</span> {{ d.consolidated }}</p>
+                          <p><span class="text-text-secondary">En el documento:</span> {{ d.document }}</p>
+                          <p>
+                            <span class="text-text-secondary">Revalidado:</span>
+                            <span [class]="d.differs ? 'font-semibold text-primary' : 'text-text-primary'">{{ d.revalidated }}</span>
+                          </p>
+                          <p class="text-text-secondary">
+                            @if (d.isUserDecision) {
+                              <span class="font-medium text-text-primary">Decisión del usuario:</span>
+                            }
+                            {{ d.reason }}
+                          </p>
                         </div>
                       }
                     </div>
+                  }
+                  @if (divergenceView().hiddenCount > 0) {
+                    <p class="text-xs text-text-secondary mt-2" data-testid="revalidate-divergences-hidden">
+                      {{ divergenceView().hiddenCount }}
+                      {{ divergenceView().hiddenCount === 1 ? 'campo verificado sin diferencias' : 'campos verificados sin diferencias' }}
+                    </p>
                   }
                 </div>
               }
@@ -1706,12 +1725,17 @@ export class InvoiceScannerModalComponent {
     return c === 'high' ? 'success' : c === 'medium' ? 'warning' : 'error';
   }
 
-  formatValue(v: InvoiceRevalidateDivergence['consolidated_value']): string {
-    if (v === null || v === undefined || v === '') return '—';
-    if (typeof v === 'number') return String(Math.round(v * 10000) / 10000);
-    if (typeof v === 'object') return JSON.stringify(v);
-    return String(v);
-  }
+  private readonly currencyFormat = inject(CurrencyFormatService);
+
+  /**
+   * Divergencias legibles y sin ruido. Lee la moneda dentro del computed, así
+   * que se recalcula sola cuando el servicio termina de resolverla.
+   */
+  readonly divergenceView = computed<DivergenceView>(() => {
+    const res = this.revalidateResult();
+    if (!res) return { rows: [], hiddenCount: 0 };
+    return buildDivergenceView(res.report.divergences, (n) => this.currencyFormat.format(n));
+  });
 
   selectedFile = signal<File | null>(null);
   filePreviewUrl = signal<string | null>(null);
