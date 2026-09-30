@@ -87,6 +87,10 @@ Plan completo en `docs/plans/received-documents-tax-consolidation-plan.md`. La i
 | D16 | Sólo local y QA no productivo; commits incrementales auditados | Mandato del usuario y árbol compartido | Cuándo publicar/desplegar después |
 | D17 | Resumen muestra estimado/revisado/declarado/pagado y cobertura | No ocultar fuente incompleta tras número aparentemente definitivo | Diseño de alertas y filtros |
 | D18 | «salud por pagar» se interpreta como «saldo por pagar» | Contexto de impuestos; preservar salud/PILA ya existente | Confirmar si quiso una ampliación específica de salud |
+| D19 | Validar montos con el perfil DIAN, no la ecuación UBL genérica | En anexo 1.9, TaxInclusive=LineExtension+impuestos directos y Payable=Inclusive−descuentos globales+cargos; anticipos/retenciones son informativos | Perfil por jurisdicción si se amplía fuera de Colombia |
+| D20 | Originales locales sólo en desarrollo/pruebas; S3 en producción | QA no debe escribir al bucket productivo; driver local se rechaza en producción y cada descarga comprueba SHA-256 | Bucket y retención de originales por ambiente |
+| D21 | Preservar tienda operacional aparte de entidad fiscal consolidada | Resolver fiscal puede devolver store_id=null; eso no autoriza al usuario de tienda a ver todas las sucursales | Vista consolidada sólo con contexto organización autorizado |
+| D22 | Recibir documentos no requiere habilitación del flujo de emisión DIAN | Un comprador puede recibir sin emitir; JWT, RBAC, scope y compuerta de suscripción siguen vigentes | Visibilidad comercial por capacidades, no habilitación de ventas |
 
 ## Fuentes oficiales consultadas
 
