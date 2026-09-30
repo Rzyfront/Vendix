@@ -1,5 +1,8 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { DefaultPanelUIService } from './default-panel-ui.service';
+import type { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
+import { computeNewPanelUiKeys, mergePanelUiSoft } from '../utils/panel-ui-merge.util';
 
 /**
  * Drift guard between the two halves of the panel_ui contract.
@@ -48,6 +51,28 @@ describe('PANEL_UI_FALLBACK ↔ APP_MODULES drift', () => {
     );
   }
 
+  function frontendOrgAdminKeys(): string[] {
+    const source = readFileSync(FRONTEND_CONSTANT, 'utf8');
+    const start = source.indexOf('ORG_ADMIN: [');
+    expect(start).toBeGreaterThan(-1);
+    const end = source.indexOf('\n  ],', start);
+    expect(end).toBeGreaterThan(start);
+    return [...source.slice(start, end).matchAll(/key:\s*'([^']+)'/g)].map(
+      (match) => match[1],
+    );
+  }
+
+  function fallbackOrgAdminKeys(): string[] {
+    const source = readFileSync(BACKEND_CONSTANT, 'utf8');
+    const start = source.indexOf('ORG_ADMIN: {');
+    expect(start).toBeGreaterThan(-1);
+    const end = source.indexOf('\n      },', start);
+    expect(end).toBeGreaterThan(start);
+    return [...source.slice(start, end).matchAll(/^\s*([a-z0-9_]+):\s*(?:true|false)/gm)].map(
+      (match) => match[1],
+    );
+  }
+
   it('todo módulo que el editor renderiza tiene default en el backend', () => {
     const fallback = new Set(fallbackStoreAdminKeys());
     const missing = frontendStoreAdminKeys().filter(
@@ -60,5 +85,38 @@ describe('PANEL_UI_FALLBACK ↔ APP_MODULES drift', () => {
   it('el fallback no está vacío (protege contra un parseo que silencie el test)', () => {
     expect(fallbackStoreAdminKeys().length).toBeGreaterThan(50);
     expect(frontendStoreAdminKeys().length).toBeGreaterThan(50);
+  });
+
+  it('expone Facturación como clave curatable ORG_ADMIN y la completa por defecto', () => {
+    expect(fallbackOrgAdminKeys()).toContain('invoicing');
+    expect(frontendOrgAdminKeys()).toContain('invoicing');
+  });
+
+  it('preserva un false explícito del template default aunque el fallback ORG_ADMIN sea true', async () => {
+    const makeService = (panel_ui: Record<string, Record<string, boolean>>) => new DefaultPanelUIService({
+      default_templates: {
+        findFirst: jest.fn().mockResolvedValue({ template_data: { panel_ui } }),
+      },
+    } as unknown as GlobalPrismaService);
+
+    const missing = await makeService({ ORG_ADMIN: {} }).generatePanelUI('ORG_ADMIN');
+    expect(missing.panel_ui.ORG_ADMIN.invoicing).toBe(true);
+
+    const explicitlyHidden = await makeService({ ORG_ADMIN: { invoicing: false } }).generatePanelUI('ORG_ADMIN');
+    expect(explicitlyHidden.panel_ui.ORG_ADMIN.invoicing).toBe(false);
+  });
+
+  it('el soft merge privilegia usuarios dueños, mantiene false del usuario y conserva manager fuera del default invoicing', async () => {
+    const service = new DefaultPanelUIService({
+      default_templates: {
+        findFirst: jest.fn().mockResolvedValue({ template_data: { panel_ui: { ORG_ADMIN: {} } } }),
+      },
+    } as unknown as GlobalPrismaService);
+    const defaults = (await service.generatePanelUI('ORG_ADMIN')).panel_ui;
+
+    expect(mergePanelUiSoft({ ORG_ADMIN: { invoicing: false } }, defaults, ['owner']).ORG_ADMIN.invoicing).toBe(false);
+    expect(mergePanelUiSoft({}, defaults, ['owner']).ORG_ADMIN.invoicing).toBe(true);
+    expect(mergePanelUiSoft({}, defaults, ['manager']).ORG_ADMIN.invoicing).toBeUndefined();
+    expect(computeNewPanelUiKeys(defaults, {}, ['owner']).ORG_ADMIN).toContain('invoicing');
   });
 });
