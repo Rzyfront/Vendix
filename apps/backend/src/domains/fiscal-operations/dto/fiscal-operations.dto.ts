@@ -101,6 +101,10 @@ export class GenerateFiscalObligationsDto {
   period_year!: number;
 
   @IsOptional()
+  @IsIn(FISCAL_CLOSE_TYPES)
+  periodicity?: FiscalCloseType;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -157,6 +161,10 @@ export class CreateTaxDeclarationDraftDto {
   @Type(() => Number)
   @IsInt()
   period_year!: number;
+
+  @IsOptional()
+  @IsIn(FISCAL_CLOSE_TYPES)
+  periodicity?: FiscalCloseType;
 
   @IsOptional()
   @Type(() => Number)
