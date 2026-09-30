@@ -220,6 +220,18 @@
               @if (allocation.status === 'revoked') {
                 <p class="mt-2 text-xs text-warning">Revocada {{ allocation.revoked_at ? dateTime(allocation.revoked_at) : 'en fecha no disponible' }}@if (allocation.revoked_by != null) { · usuario #{{ allocation.revoked_by }} }@if (allocation.revocation_reason) { · Motivo: {{ allocation.revocation_reason }} }</p>
               }
+              @if (allocation.status === 'active') {
+                <app-received-document-match-revoke
+                  [document]="document()"
+                  [scope]="scope()"
+                  [storeId]="storeId()"
+                  [allocation]="allocation"
+                  [allocationsLoaded]="allocationsLoaded()"
+                  [documentVersion]="documentVersion()"
+                  (changed)="onMatchChanged()"
+                  (reloadRequested)="onReloadRequested()"
+                />
+              }
             </article>
           }
         </div>

@@ -18,6 +18,7 @@ import type {
 import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentMatchConfirmComponent } from './received-document-match-confirm.component';
 import { ReceivedDocumentMatchExpenseConfirmComponent } from './received-document-match-expense-confirm.component';
+import { ReceivedDocumentMatchRevokeComponent } from './received-document-match-revoke.component';
 
 const WARNING_LABELS: Record<string, string> = {
   DOCUMENT_LINES_LIMIT_REACHED: 'Hay más líneas de las que se muestran; la comparación puede estar incompleta.',
@@ -69,7 +70,7 @@ const REASON_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-received-document-matching',
   standalone: true,
-  imports: [CardComponent, ReceivedDocumentMatchConfirmComponent, ReceivedDocumentMatchExpenseConfirmComponent],
+  imports: [CardComponent, ReceivedDocumentMatchConfirmComponent, ReceivedDocumentMatchExpenseConfirmComponent, ReceivedDocumentMatchRevokeComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './received-document-matching.component.html',
 })
