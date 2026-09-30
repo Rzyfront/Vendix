@@ -71,20 +71,26 @@ export function taxTypeLabel(type: PurchaseTaxType): string {
             {{ label(tax.tax_type) }}
           </span>
           @if (tax.calc_mode === 'fixed_per_unit') {
-            <div class="flex items-center gap-1">
-              <span class="text-text-secondary">$</span>
-              <app-input
-                type="number"
-                size="sm"
-                [ngModel]="tax.fixed_amount_per_unit"
-                (ngModelChange)="updateFixedAmount(tax.tax_type, $event)"
-                customInputClass="text-right !h-7 !py-0 !w-16"
-                customWrapperClass="!mt-0"
-                min="0"
-                step="0.01"
-              ></app-input>
-              <span class="text-text-secondary">por unidad</span>
-            </div>
+            @if (hasOverride(tax) && !hasFixedAmount(tax)) {
+              <span class="text-text-secondary" data-testid="derived-per-unit">
+                ≈ {{ formatCurrency(perUnitOf(tax)) }} por unidad
+              </span>
+            } @else {
+              <div class="flex items-center gap-1">
+                <span class="text-text-secondary">$</span>
+                <app-input
+                  type="number"
+                  size="sm"
+                  [ngModel]="tax.fixed_amount_per_unit"
+                  (ngModelChange)="updateFixedAmount(tax.tax_type, $event)"
+                  customInputClass="text-right !h-7 !py-0 !w-16"
+                  customWrapperClass="!mt-0"
+                  min="0"
+                  step="0.01"
+                ></app-input>
+                <span class="text-text-secondary">por unidad</span>
+              </div>
+            }
           } @else {
             <div class="flex items-center gap-1">
               <app-input
@@ -98,6 +104,34 @@ export function taxTypeLabel(type: PurchaseTaxType): string {
                 step="0.01"
               ></app-input>
               <span class="text-text-secondary">%</span>
+            </div>
+          }
+          @if (hasOverride(tax)) {
+            <div class="flex items-center gap-1" data-testid="amount-override">
+              <span class="text-text-secondary">Monto línea $</span>
+              <app-input
+                type="number"
+                size="sm"
+                [ngModel]="tax.amount_override"
+                (ngModelChange)="updateAmountOverride(tax.tax_type, $event)"
+                customInputClass="text-right !h-7 !py-0 !w-24"
+                customWrapperClass="!mt-0"
+                min="0"
+                step="0.01"
+              ></app-input>
+              <button
+                type="button"
+                class="text-text-secondary hover:text-destructive"
+                data-testid="clear-override"
+                title="Quitar monto y calcular por tasa o valor por unidad"
+                (click)="clearAmountOverride(tax.tax_type)"
+                [attr.aria-label]="'Quitar monto de ' + label(tax.tax_type)"
+              >
+                <app-icon name="x" [size]="12"></app-icon>
+              </button>
+              <span class="italic text-text-secondary/80">
+                manda el monto
+              </span>
             </div>
           }
           <div class="flex items-center gap-1">
@@ -261,6 +295,20 @@ export class LineTaxesEditorComponent {
     return this.derived().taxes.find((t) => t.tax_type === type)?.tax_amount ?? 0;
   }
 
+  hasFixedAmount(tax: PopLineTax): boolean {
+    return Number(tax.fixed_amount_per_unit ?? 0) > 0;
+  }
+
+  hasOverride(tax: PopLineTax): boolean {
+    return tax.amount_override != null;
+  }
+
+  /** Valor por unidad derivado del monto impreso: override / cantidad. */
+  perUnitOf(tax: PopLineTax): number {
+    const qty = Number(this.quantity());
+    return qty > 0 ? Number(tax.amount_override ?? 0) / qty : 0;
+  }
+
   formatCurrency(amount: number): string {
     return this.currencyService.format(amount || 0);
   }
@@ -307,6 +355,18 @@ export class LineTaxesEditorComponent {
     this.patchRow(type, {
       fixed_amount_per_unit: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0,
     });
+  }
+
+  updateAmountOverride(type: PurchaseTaxType, amount: number | string | null): void {
+    const parsed = Number(amount ?? 0);
+    this.patchRow(type, {
+      amount_override: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0,
+    });
+  }
+
+  /** Quita el monto impreso: el impuesto vuelve a calcularse por tasa / valor por unidad. */
+  clearAmountOverride(type: PurchaseTaxType): void {
+    this.patchRow(type, { amount_override: undefined });
   }
 
   onBaseModeChange(type: PurchaseTaxType, event: Event): void {

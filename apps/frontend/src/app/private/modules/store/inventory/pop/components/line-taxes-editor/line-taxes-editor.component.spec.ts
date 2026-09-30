@@ -94,4 +94,80 @@ describe('LineTaxesEditorComponent — QUI-855', () => {
     component.pricesIncludeTaxChange.emit(true);
     expect(emitted).toEqual([true]);
   });
+
+  describe('monto de línea (amount_override)', () => {
+    const el = () => fixture.nativeElement as HTMLElement;
+    const setTaxes = (taxes: PopLineTax[], qty = 84) => {
+      fixture.componentRef.setInput('taxes', taxes);
+      fixture.componentRef.setInput('quantity', qty);
+      fixture.detectChanges();
+    };
+    const ibua: PopLineTax = {
+      tax_type: 'ibua',
+      calc_mode: 'fixed_per_unit',
+      fixed_amount_per_unit: null,
+      amount_override: 7140,
+      add_to_cost: true,
+    };
+    const icui: PopLineTax = {
+      tax_type: 'icui',
+      calc_mode: 'percent',
+      tax_rate: 20,
+      amount_override: 30334,
+      add_to_cost: true,
+    };
+
+    it('IBUA con override: input con 7140 y "≈ $85 por unidad", sin "$0 por unidad"', async () => {
+      setTaxes([ibua]);
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const input = el().querySelector(
+        '[data-testid="amount-override"] input',
+      ) as HTMLInputElement;
+      expect(Number(input.value)).toBe(7140);
+      const text = el().textContent ?? '';
+      expect(text).toContain('≈ $85');
+      expect(text).toContain('por unidad');
+      expect(text).not.toContain('$0');
+    });
+
+    it('ICUI 20 % con override muestra 20 y el monto 30334', async () => {
+      setTaxes([icui], 10);
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const inputs = Array.from(el().querySelectorAll('input[type="number"]')).map(
+        (i) => Number((i as HTMLInputElement).value),
+      );
+      expect(inputs).toContain(20);
+      expect(inputs).toContain(30334);
+      expect(el().textContent).toContain('manda el monto');
+      expect(component.amountOf('icui')).toBe(30334);
+    });
+
+    it('editar el monto emite amount_override nuevo', () => {
+      setTaxes([icui], 10);
+      const emitted: PopLineTax[][] = [];
+      component.taxesChange.subscribe((t) => emitted.push(t));
+      component.updateAmountOverride('icui', '25000');
+      expect(emitted[0][0].amount_override).toBe(25000);
+      component.updateAmountOverride('icui', -5);
+      expect(emitted[1][0].amount_override).toBe(0);
+    });
+
+    it('quitar el monto emite la fila sin override', () => {
+      setTaxes([icui], 10);
+      const emitted: PopLineTax[][] = [];
+      component.taxesChange.subscribe((t) => emitted.push(t));
+      (el().querySelector('[data-testid="clear-override"]') as HTMLButtonElement).click();
+      expect(emitted.length).toBe(1);
+      expect(emitted[0][0].amount_override).toBeUndefined();
+      expect(emitted[0][0].tax_rate).toBe(20);
+    });
+
+    it('fila sin override no muestra input de monto', () => {
+      setTaxes([iva], 2);
+      expect(el().querySelector('[data-testid="amount-override"]')).toBeNull();
+      expect(el().textContent).not.toContain('manda el monto');
+    });
+  });
 });
