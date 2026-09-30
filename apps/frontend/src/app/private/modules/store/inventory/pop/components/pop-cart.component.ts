@@ -153,7 +153,8 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             </div>
             @if (hasVat()) {
               <div class="flex justify-between text-xs text-text-secondary">
-                <span>IVA</span>
+                <!-- Suma TODAS las filas (IVA + INC/ICUI/IBUA), no sólo el IVA. -->
+                <span>Impuestos</span>
                 <span class="font-medium">{{
                   formatCurrency(summary()?.tax_amount || 0)
                 }}</span>
