@@ -133,6 +133,11 @@ export interface InvoiceScanResult {
    */
   discount_amount?: number | null;
   /**
+   * QUI-855 — el mismo descuento SIN aplanar (tal como se imprimió). Se usa
+   * cuando las líneas entran al carrito en bruto (camino multi-impuesto).
+   */
+  discount_amount_printed?: number | null;
+  /**
    * QUI-661 Fase 4 — descuento por PRONTO PAGO detectado en la factura. Se
    * muestra, NO se aplica: es financiero, va a cuenta de resultado y se decide
    * al registrar el pago (QUI-647). Nunca entra al costo del inventario.

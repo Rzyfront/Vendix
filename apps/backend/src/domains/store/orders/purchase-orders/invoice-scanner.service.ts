@@ -40,6 +40,10 @@ import {
   repairScannedAmount,
   StoreCurrencyInfo,
 } from '../../../../ai-engine/utils/ocr-money.util';
+import {
+  InvoiceRevalidateReport,
+  InvoiceRevalidateResult,
+} from './interfaces/invoice-revalidate-job.interface';
 import sharp = require('sharp');
 
 /**
@@ -1162,6 +1166,217 @@ export class InvoiceScannerService {
     };
   }
 
+  /**
+   * QUI-855 paso 8a - revalidacion con IA de la precarga. Worker-side: la IA
+   * relee el documento original (imagen/PDF ya descargado de S3), lo compara
+   * contra los datos CONSOLIDADOS (lo que el usuario edito tras la precarga) y
+   * su nota, y devuelve datos re-consolidados + informe.
+   *
+   * - El documento pasa por `prepareImage` (igual que el escaneo; un PDF que
+   *   sharp no procesa viaja crudo con su mimetype).
+   * - `consolidated` llega en la forma NORMALIZADA del escaneo (unit_price neto,
+   *   unit_price_gross, taxes[].tax_type...). Se traduce a la forma CRUDA de
+   *   extraccion antes de enviarla a la IA y la respuesta se normaliza con la
+   *   MISMA `normalizeOcrResponse` del escaneo, de modo que el frontend recibe
+   *   exactamente la forma de un scan.
+   * - Llama `aiEngine.run` DIRECTO (nunca `runByApplicationType`, que descarta
+   *   extra_messages en apps image).
+   * Errores: VendixHttpException con mensaje en espanol.
+   */
+  async revalidateInvoice(params: {
+    fileBuffer: Buffer;
+    mimeType: string;
+    consolidated: Record<string, any>;
+    note?: string | null;
+    orderType?: 'retail' | 'ingredient';
+  }): Promise<InvoiceRevalidateResult> {
+    const { fileBuffer, mimeType, consolidated, note, orderType } = params;
+
+    const { base64, mimeType: preparedMime } = await this.prepareImage({
+      buffer: fileBuffer,
+      mimetype: mimeType,
+      size: fileBuffer.length,
+    } as Express.Multer.File);
+    const dataUri = `data:${preparedMime};base64,${base64}`;
+
+    const currency = await this.resolveScanCurrency();
+
+    const rawConsolidated = this.toRawScanShape(consolidated);
+    const consolidatedJson = JSON.stringify(rawConsolidated);
+    const userNote = (note ?? '').trim() || '(sin nota del usuario)';
+
+    const imageMessage: AIMessage = {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text:
+            'Revalidate the consolidated data against this original purchase invoice document. Return ONLY the JSON envelope { "consolidated", "report" } defined in your system instructions.\n\n' +
+            (orderType === 'ingredient'
+              ? 'This is an INGREDIENT order: keep presentation / pack_size / uom_hint on each line exactly as they appear in the consolidated JSON.\n\n'
+              : '') +
+            buildCurrencyInstruction(currency),
+        },
+        {
+          type: 'image_url',
+          image_url: { url: dataUri, detail: 'high' },
+        },
+      ],
+    };
+
+    const response = await this.aiEngine.run(
+      'invoice_ocr_revalidate',
+      { consolidated_json: consolidatedJson, user_note: userNote },
+      [imageMessage],
+    );
+
+    if (!response.success || !response.content) {
+      this.logger.error(`[InvoiceRevalidate] AI failed: ${response.error}`);
+      throw new VendixHttpException(
+        ErrorCodes.INV_SCAN_AI_FAIL,
+        'La IA no pudo revalidar el documento. Intenta de nuevo en unos minutos.',
+      );
+    }
+
+    let parsed: any;
+    try {
+      parsed = parseAiJson(response.content);
+    } catch (err: any) {
+      this.logger.error(
+        `[InvoiceRevalidate] parse failed (${err?.message}). Raw: ${String(response.content).slice(0, 500)}`,
+      );
+      throw new VendixHttpException(
+        ErrorCodes.INV_SCAN_PARSE_FAIL,
+        'La IA devolvió una respuesta que no se pudo leer. Intenta revalidar de nuevo.',
+      );
+    }
+
+    const rawNext =
+      parsed && typeof parsed === 'object' ? parsed.consolidated : null;
+    if (!rawNext || typeof rawNext !== 'object') {
+      throw new VendixHttpException(
+        ErrorCodes.INV_SCAN_INCOMPLETE,
+        'La IA no devolvió los datos consolidados revalidados.',
+      );
+    }
+
+    let normalized: InvoiceScanResult;
+    try {
+      normalized = this.normalizeOcrResponse(
+        this.toRawScanShape(rawNext),
+        currency,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[InvoiceRevalidate] response incomplete (${err?.message})`,
+      );
+      throw new VendixHttpException(
+        ErrorCodes.INV_SCAN_INCOMPLETE,
+        'La IA devolvió datos incompletos (falta proveedor o líneas). Intenta revalidar de nuevo.',
+      );
+    }
+    const { scan_attachment: _omit, ...consolidatedOut } = normalized;
+
+    return {
+      consolidated: consolidatedOut,
+      report: this.sanitizeRevalidateReport(parsed.report),
+    };
+  }
+
+  /**
+   * Traduce datos en la forma NORMALIZADA del escaneo (o la cruda) a la forma
+   * CRUDA de extraccion que entiende la IA y `normalizeOcrResponse`:
+   * `unit_price` = precio IMPRESO (unit_price_gross ?? unit_price),
+   * `discount_amount` = descuento IMPRESO, `taxes[]` con type/rate/amount/inclusive.
+   * Idempotente: aplicarla sobre la forma cruda no la altera.
+   */
+  private toRawScanShape(input: Record<string, any>): Record<string, any> {
+    const src = input && typeof input === 'object' ? input : {};
+    const lines = Array.isArray(src.line_items) ? src.line_items : [];
+    const line_items = lines.map((li: any) => {
+      const item = li && typeof li === 'object' ? li : {};
+      const taxes = Array.isArray(item.taxes)
+        ? item.taxes.map((t: any) => ({
+            type: t?.type ?? t?.tax_type ?? null,
+            rate: t?.rate ?? t?.tax_rate ?? null,
+            fixed_amount_per_unit: t?.fixed_amount_per_unit ?? null,
+            amount: t?.amount ?? t?.amount_override ?? null,
+            inclusive:
+              typeof t?.inclusive === 'boolean'
+                ? t.inclusive
+                : typeof t?.is_inclusive === 'boolean'
+                  ? t.is_inclusive
+                  : undefined,
+          }))
+        : undefined;
+      const {
+        unit_price_gross,
+        discount_amount_printed,
+        taxes: _t,
+        ...rest
+      } = item;
+      return {
+        ...rest,
+        unit_price: unit_price_gross ?? item.unit_price,
+        discount_amount: discount_amount_printed ?? item.discount_amount,
+        ...(taxes ? { taxes } : {}),
+      };
+    });
+    const { scan_attachment: _a, scan_warnings: _w, ...header } = src;
+    return { ...header, line_items };
+  }
+
+  /** Sanea el informe de la IA: arreglos ausentes -> [], strings <= 1000, <= 100 divergencias. */
+  private sanitizeRevalidateReport(raw: any): InvoiceRevalidateReport {
+    const MAX_STR = 1000;
+    const str = (v: unknown): string =>
+      (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(
+        0,
+        MAX_STR,
+      );
+    const arr = (v: unknown): any[] => (Array.isArray(v) ? v : []);
+    const lineIndex = (v: unknown): number | null => {
+      if (v === null || v === undefined || v === '') return null;
+      const n = Number(v);
+      return Number.isInteger(n) && n >= 0 ? n : null;
+    };
+    const clip = (v: unknown): unknown =>
+      typeof v === 'string' ? v.slice(0, MAX_STR) : (v ?? null);
+
+    const r = raw && typeof raw === 'object' ? raw : {};
+    const confidence = ['high', 'medium', 'low'].includes(r.confidence)
+      ? r.confidence
+      : 'medium';
+
+    return {
+      summary: str(r.summary),
+      confidence,
+      findings: arr(r.findings)
+        .filter((f) => f && typeof f === 'object')
+        .map((f) => ({
+          severity: f.severity === 'warning' ? 'warning' : 'info',
+          message: str(f.message),
+        })),
+      red_flags: arr(r.red_flags)
+        .filter((f) => f && typeof f === 'object')
+        .map((f) => ({
+          message: str(f.message),
+          line_index: lineIndex(f.line_index),
+        })),
+      divergences: arr(r.divergences)
+        .filter((d) => d && typeof d === 'object')
+        .slice(0, 100)
+        .map((d) => ({
+          line_index: lineIndex(d.line_index),
+          field: str(d.field),
+          consolidated_value: clip(d.consolidated_value),
+          document_value: clip(d.document_value),
+          revalidated_value: clip(d.revalidated_value),
+          reason: str(d.reason),
+        })),
+    };
+  }
+
   private normalizeOcrResponse(
     raw: unknown,
     currency: StoreCurrencyInfo,
@@ -1334,6 +1549,10 @@ export class InvoiceScannerService {
       // QUI-661 Fase 4 — descuento comercial de pie de factura, aplanado a neto
       // con la misma regla que las líneas.
       discount_amount: headerDiscountNet > 0 ? headerDiscountNet : undefined,
+      // QUI-855 — la misma cifra SIN aplanar: las líneas multi-impuesto viajan en
+      // bruto al carrito y el descuento de cabecera debe ir en su misma unidad.
+      discount_amount_printed:
+        headerDiscountNet > 0 ? headerDiscountPrinted : undefined,
       // El de PRONTO PAGO se extrae para mostrarlo, NUNCA para aplicarlo: es
       // financiero, se decide al pagar (QUI-647) y no rebaja el costo del
       // inventario. Va crudo, sin aplanar, porque no entra a ningún cálculo.

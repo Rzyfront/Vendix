@@ -1084,7 +1084,15 @@ export class PopComponent implements OnInit, OnDestroy {
     // MONTO y entra al carrito tal cual, sin convertirse a porcentaje. Nunca se
     // reportan los dos sobre el mismo dinero — el prompt lo prohíbe
     // explícitamente.
-    const scannedHeaderDiscount = Number(data.scanResult?.discount_amount) || 0;
+    // QUI-855: el descuento se prorratea en la MISMA unidad que el precio de la
+    // línea. Si alguna línea entra por el camino multi-impuesto (precio bruto
+    // impreso), el de cabecera también va impreso; si no, el neto de siempre.
+    const scannedHeaderDiscount =
+      (data.editedItems.some((i) => scanLineHasTaxes(i))
+        ? Number(data.scanResult?.discount_amount_printed)
+        : 0) ||
+      Number(data.scanResult?.discount_amount) ||
+      0;
     if (scannedHeaderDiscount > 0) {
       this.popCartService.setDiscountAmount(scannedHeaderDiscount);
     }

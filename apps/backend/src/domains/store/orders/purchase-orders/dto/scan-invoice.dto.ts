@@ -134,6 +134,11 @@ export interface InvoiceScanResult {
    */
   discount_amount?: number | null;
   /**
+   * QUI-855 — `discount_amount` tal como se imprimió (sin aplanar por IVA). Lo
+   * usa el carrito cuando las líneas viajan en bruto (camino multi-impuesto).
+   */
+  discount_amount_printed?: number | null;
+  /**
    * QUI-661 Fase 4 — descuento por PRONTO PAGO detectado en la factura
    * ("2% si paga antes de 10 días"). Se extrae para MOSTRARLO, no para
    * aplicarlo: es un descuento financiero, va a cuenta de resultado y se

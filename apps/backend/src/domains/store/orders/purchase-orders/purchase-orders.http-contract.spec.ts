@@ -86,6 +86,7 @@ describe('purchase-orders — contrato HTTP (pipe + filtro globales reales)', ()
         VatResponsibilityService,
         { provide: InvoiceScannerService, useValue: {} },
         { provide: getQueueToken('payment-receipt-scan'), useValue: {} },
+        { provide: getQueueToken('invoice-revalidate'), useValue: {} },
         { provide: StorePrismaService, useValue: prisma },
         { provide: StockLevelManager, useValue: {} },
         { provide: CostingService, useValue: {} },
