@@ -3,6 +3,8 @@ import {
   Logger,
   ValidationPipe,
   BadRequestException,
+  PayloadTooLargeException,
+  UnsupportedMediaTypeException,
   INestApplication,
   Type,
 } from '@nestjs/common';
@@ -224,7 +226,25 @@ async function bootstrapApi(role: VendixProcessRole) {
       verify: (request: any, _response, buf: Buffer) => {
         request.rawReceptionBody = Buffer.from(buf);
       },
-    })(req, res, next);
+    })(req, res, (error?: any) => {
+      if (!error) return next();
+
+      // body-parser errors do not extend HttpException, so the global Nest
+      // filter otherwise treats common 413/400 parser failures as 500s.
+      // Translate only this narrow webhook parser's errors and never include
+      // parser messages, request headers, or payload bytes in the response.
+      if (error?.type === 'entity.too.large' || error?.status === 413) {
+        return next(new PayloadTooLargeException('Webhook payload exceeds the allowed limit.'));
+      }
+      if (
+        error?.type === 'encoding.unsupported' ||
+        error?.type === 'charset.unsupported' ||
+        error?.status === 415
+      ) {
+        return next(new UnsupportedMediaTypeException('Unsupported webhook content encoding or charset.'));
+      }
+      return next(new BadRequestException('Invalid webhook request body.'));
+    });
   });
 
   app.use(
