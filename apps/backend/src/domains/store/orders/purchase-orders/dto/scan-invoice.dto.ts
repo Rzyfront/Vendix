@@ -109,6 +109,16 @@ export interface ExtractedLineItem {
    * a la base (bruto o neto), por eso es el dato más robusto que la IA emite.
    */
   discount_percentage?: number | null;
+  /** OCR v2 — unidad en que la factura IMPRIMIÓ el descuento de la línea. */
+  discount_kind?: 'percent' | 'amount';
+  /** OCR v2 — tratamiento del IVA de la línea. */
+  tax_treatment?: 'gravado' | 'exento' | 'excluido';
+  /** OCR v2 — bonificación / obsequio a precio 0. */
+  is_bonus?: boolean;
+  /** OCR v2 — «Valor total» impreso de la línea, solo para cuadrar. */
+  printed_line_total?: number;
+  /** Cuadre determinístico de la línea contra su total impreso. */
+  reconcile?: { expected: number; printed: number; ok: boolean };
 }
 
 export interface InvoiceScanResult {
@@ -156,6 +166,10 @@ export interface InvoiceScanResult {
    * user confirms.
    */
   scan_warnings?: string[];
+  /** OCR v2 — descuento de pie comercial en % tal como se imprimió (único). */
+  header_discount_percentage?: number;
+  header_discount_kind?: 'percent' | 'amount';
+  schema_version?: 1 | 2;
   /**
    * QUI-855 — documento escaneado guardado en S3 (KEY, no URL firmada). El
    * frontend lo reenvía en `scan_attachment` al crear la OC. null si la subida

@@ -44,6 +44,16 @@ import {
   InvoiceRevalidateReport,
   InvoiceRevalidateResult,
 } from './interfaces/invoice-revalidate-job.interface';
+import {
+  resolvePurchaseLineDiscount,
+  resolvePurchaseLineTaxes,
+} from '@common/money-kernel/purchase-line-taxes';
+import {
+  adaptInvoiceOcrV2ToV1,
+  InvoiceOcrV2Raw,
+  isInvoiceOcrV2,
+  toInvoiceOcrV2Shape,
+} from './invoice-ocr-v2.adapter';
 import sharp = require('sharp');
 
 /**
@@ -1201,8 +1211,7 @@ export class InvoiceScannerService {
 
     const currency = await this.resolveScanCurrency();
 
-    const rawConsolidated = this.toRawScanShape(consolidated);
-    const consolidatedJson = JSON.stringify(rawConsolidated);
+    const consolidatedJson = JSON.stringify(toInvoiceOcrV2Shape(consolidated));
     const userNote = (note ?? '').trim() || '(sin nota del usuario)';
 
     const imageMessage: AIMessage = {
@@ -1262,8 +1271,10 @@ export class InvoiceScannerService {
 
     let normalized: InvoiceScanResult;
     try {
+      // La respuesta del prompt nuevo es v2: NO pasa por toRawScanShape (que
+      // espera la forma normalizada/v1 y pisaría unit_price/discount).
       normalized = this.normalizeOcrResponse(
-        this.toRawScanShape(rawNext),
+        isInvoiceOcrV2(rawNext) ? rawNext : this.toRawScanShape(rawNext),
         currency,
       );
     } catch (err: any) {
@@ -1381,7 +1392,15 @@ export class InvoiceScannerService {
     raw: unknown,
     currency: StoreCurrencyInfo,
   ): InvoiceScanResult {
-    const parsed = raw as any;
+    // v2 → forma cruda v1; el resto del flujo no cambia.
+    const isV2 = isInvoiceOcrV2(raw);
+    const parsed = (
+      isV2
+        ? adaptInvoiceOcrV2ToV1(raw as InvoiceOcrV2Raw, {
+            decimalPlaces: currency.decimal_places,
+          })
+        : raw
+    ) as any;
 
     // El total impreso NO es un campo requerido. Una factura multipágina —o un
     // tiquete cuyo pie no alcanza a leerse— devuelve `supplier` y las N líneas
@@ -1468,6 +1487,10 @@ export class InvoiceScannerService {
         );
     if (totalsWarning) scanWarnings.push(totalsWarning);
 
+    // Cuadre determinístico por línea (v1 y v2): un solo aviso agregado.
+    const reconcileWarning = this.buildReconcileWarning(lineItems, currency);
+    if (reconcileWarning) scanWarnings.push(reconcileWarning);
+
     // QUI-661 Fase 4 — descuentos de cabecera.
     const rawHeaderDiscount = Number(parsed.discount_amount);
     const headerDiscountPrinted =
@@ -1532,6 +1555,13 @@ export class InvoiceScannerService {
       headerDiscountNet = 0;
     }
 
+    const headerPct = Number(parsed.header_discount_percentage);
+    const headerKind =
+      parsed.header_discount_kind === 'percent' ||
+      parsed.header_discount_kind === 'amount'
+        ? (parsed.header_discount_kind as 'percent' | 'amount')
+        : undefined;
+
     return {
       supplier: {
         name: parsed.supplier?.name || 'Desconocido',
@@ -1560,7 +1590,95 @@ export class InvoiceScannerService {
       total,
       confidence: Number(parsed.confidence) || 0,
       scan_warnings: scanWarnings.length > 0 ? scanWarnings : undefined,
+      header_discount_percentage:
+        headerDiscountNet > 0 && headerKind === 'percent' && headerPct > 0
+          ? headerPct
+          : undefined,
+      header_discount_kind: headerDiscountNet > 0 ? headerKind : undefined,
+      schema_version: Number(parsed.schema_version) === 2 ? 2 : undefined,
     };
+  }
+
+  /**
+   * Aviso agregado de las líneas que no cuadran con su total impreso (máx. 5
+   * números listados + «y K más»). null si todas cuadran o no hay verificables.
+   */
+  private buildReconcileWarning(
+    lineItems: InvoiceScanResult['line_items'],
+    currency: StoreCurrencyInfo,
+  ): string | null {
+    const bad: Array<{ n: number; expected: number; printed: number }> = [];
+    lineItems.forEach((li, idx) => {
+      if (li.reconcile && li.reconcile.ok === false) {
+        bad.push({ n: idx + 1, ...li.reconcile });
+      }
+    });
+    if (bad.length === 0) return null;
+    const fmt = (v: number) =>
+      v.toLocaleString('es-CO', {
+        maximumFractionDigits: currency.decimal_places,
+      });
+    const listed = bad.slice(0, 5).map((b) => b.n);
+    const extra = bad.length - listed.length;
+    const first = bad[0];
+    const detail = `(calculado $${fmt(first.expected)} vs impreso $${fmt(first.printed)})`;
+    const numbers =
+      listed.join(', ') + (extra > 0 ? ` y ${extra} más` : '');
+    return (
+      (bad.length === 1
+        ? `La línea ${numbers} no cuadra con el total impreso ${detail}.`
+        : `Las líneas ${numbers} no cuadran con el total impreso ${detail}.`) +
+      ' Revisa descuento e impuestos antes de confirmar.'
+    );
+  }
+
+  /**
+   * Cuadre de UNA línea: total calculado por el kernel (mismo que usa la OC)
+   * vs total impreso. undefined si no es verificable (sin total impreso,
+   * bono, cantidad 0 o entradas que el kernel rechaza).
+   */
+  private reconcileLine(params: {
+    grossUnit: number;
+    quantity: number;
+    printedTotal: number;
+    discountAmount: number;
+    discountPct: number | undefined;
+    pricesIncludeTax: boolean;
+    taxes: ExtractedLineTax[];
+  }): { expected: number; printed: number; ok: boolean } | undefined {
+    const { grossUnit, quantity, printedTotal } = params;
+    if (!(printedTotal > 0) || !(quantity > 0)) return undefined;
+    try {
+      const { kernel_discount } = resolvePurchaseLineDiscount({
+        unit_price: grossUnit,
+        quantity,
+        discount_amount: params.discountAmount,
+        discount_percentage: params.discountPct ?? 0,
+      });
+      const resolved = resolvePurchaseLineTaxes({
+        unit_price: grossUnit,
+        quantity,
+        discount_amount: kernel_discount,
+        prices_include_tax: params.pricesIncludeTax,
+        taxes: params.taxes.map((t) => ({
+          tax_type: t.tax_type,
+          calc_mode: t.calc_mode,
+          rate: t.tax_rate,
+          fixed_amount_per_unit: t.fixed_amount_per_unit,
+          is_inclusive: t.is_inclusive,
+          amount_override: t.amount_override,
+        })),
+      });
+      const expected = resolved.line_total;
+      const tolerance = Math.max(1, printedTotal * 0.005);
+      return {
+        expected,
+        printed: printedTotal,
+        ok: Math.abs(expected - printedTotal) <= tolerance,
+      };
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -1703,10 +1821,16 @@ export class InvoiceScannerService {
 
   private normalizeLineItem(
     item: any,
-    pricesIncludeTax: boolean,
+    invoicePricesIncludeTax: boolean,
     currency: StoreCurrencyInfo,
     repairs: { count: number },
   ): InvoiceScanResult['line_items'][number] {
+    // v2: una línea puede declarar una base de precio distinta a la de la factura.
+    const pricesIncludeTax =
+      typeof item.line_prices_include_tax === 'boolean'
+        ? item.line_prices_include_tax
+        : invoicePricesIncludeTax;
+
     // ORDER MATTERS: repair the PRINTED gross before flattening to net. The
     // net-flattening below legitimately produces fractional values
     // (gross / 1.19), so running the repair afterwards would inflate a
@@ -1790,6 +1914,39 @@ export class InvoiceScannerService {
         ? legacyIvaRate / 100
         : taxRate;
 
+    const isBonus = item.is_bonus === true;
+    const discountKind: 'percent' | 'amount' | undefined =
+      item.discount_kind === 'percent' || item.discount_kind === 'amount'
+        ? item.discount_kind
+        : printedAmountDiscount > 0
+          ? 'amount'
+          : discountPct !== undefined
+            ? 'percent'
+            : undefined;
+    const taxTreatment =
+      item.tax_treatment === 'gravado' ||
+      item.tax_treatment === 'exento' ||
+      item.tax_treatment === 'excluido'
+        ? (item.tax_treatment as 'gravado' | 'exento' | 'excluido')
+        : undefined;
+    const rawPrintedLineTotal = Number(item.printed_line_total);
+    const printedLineTotal =
+      Number.isFinite(rawPrintedLineTotal) && rawPrintedLineTotal > 0
+        ? totalRepair.value
+        : undefined;
+
+    const reconcile = isBonus
+      ? undefined
+      : this.reconcileLine({
+          grossUnit,
+          quantity,
+          printedTotal: totalRepair.value,
+          discountAmount: printedAmountDiscount,
+          discountPct,
+          pricesIncludeTax,
+          taxes,
+        });
+
     return {
       description: String(item.description || ''),
       quantity,
@@ -1818,6 +1975,11 @@ export class InvoiceScannerService {
       // en ninguna base. Viaja como procedencia para que el modal muestre la
       // misma cifra que imprime el papel.
       discount_percentage: discountPct,
+      discount_kind: discountKind,
+      tax_treatment: taxTreatment,
+      is_bonus: isBonus ? true : undefined,
+      printed_line_total: printedLineTotal,
+      reconcile,
     };
   }
 
