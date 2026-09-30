@@ -11,11 +11,12 @@ import { describeApiFailure } from '../utils/invoicing-errors.util';
 import type { ReceivedDocument, ReceivedDocumentFile, ReceivedDocumentTax, ReceivedDocumentsScope } from './received-documents.interface';
 import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentFormComponent } from './received-document-form.component';
+import { ReceivedDocumentMatchingComponent } from './received-document-matching.component';
 
 @Component({
   selector: 'app-received-document-detail',
   standalone: true,
-  imports: [CardComponent, StickyHeaderComponent, ReceivedDocumentFormComponent],
+  imports: [CardComponent, StickyHeaderComponent, ReceivedDocumentFormComponent, ReceivedDocumentMatchingComponent],
   template: `
     <div class="w-full space-y-4">
       <app-sticky-header title="Detalle del documento recibido" subtitle="Revisión de evidencia del proveedor" icon="file-text" [showBackButton]="true" backRoute="/admin/invoicing/received-documents" [backQueryParams]="backQueryParams()" />
@@ -79,6 +80,8 @@ import { ReceivedDocumentFormComponent } from './received-document-form.componen
             @if (!doc.validation_summary?.errors?.length && !doc.validation_summary?.warnings?.length) { <p class="text-sm text-text-secondary">Sin observaciones de validación registradas.</p> }
           </section>
         </app-card>
+
+        <app-received-document-matching [document]="doc" [scope]="scope" [storeId]="storeId() ?? null" />
 
         <app-card [responsive]="true">
           <section aria-labelledby="evidence-title">
