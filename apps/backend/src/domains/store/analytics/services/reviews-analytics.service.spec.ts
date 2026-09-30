@@ -248,9 +248,13 @@ describe('ReviewsAnalyticsService summary + trend (QUI-629)', () => {
 
     const result = await service.getReviewsSummary(QUERY as any);
 
-    // avg 4.67 → 1 decimal 4.7; prev avg 3.5 → growth (4.7-3.5)/3.5 = 34.29%
+    // avg 4.6667 → emitted as 4.7 (1 decimal)
     expect(result.average_rating).toBe(4.7);
-    expect(result.average_rating_growth).toBeCloseTo(34.285714, 3);
+    // Growth runs on the RAW average, not the rounded display value — rounding
+    // first would make the growth depend on display precision. And as every
+    // sibling service does, `computeGrowth` is emitted unrounded.
+    // (4.666666… - 3.5) / 3.5 * 100 = 33.3333…%
+    expect(result.average_rating_growth).toBeCloseTo(33.333333, 4);
     // total 6 vs prev 4 → 50%
     expect(result.total_reviews_growth).toBe(50);
   });
