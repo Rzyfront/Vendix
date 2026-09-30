@@ -57,6 +57,17 @@ Monolito modular: dominio compartido `received-documents` con bandeja independie
 - `apps/backend/src/domains/received-documents/services/received-document-storage.service.spec.ts`
 - `apps/backend/src/domains/received-documents/services/received-documents-context.service.ts`
 - `apps/backend/src/domains/received-documents/services/received-documents-context.service.spec.ts`
+- `apps/backend/src/domains/received-documents/services/received-document-pages.service.ts`
+- `apps/backend/src/domains/received-documents/services/received-document-pages.service.spec.ts`
+- `apps/backend/src/domains/received-documents/services/received-document-scan.service.spec.ts`
+- `apps/backend/src/domains/received-documents/interfaces/received-document-scan-job.interface.ts`
+- `apps/backend/src/domains/fiscal-operations/dto/fiscal-tax-position.dto.ts`
+- `apps/backend/src/domains/fiscal-operations/fiscal-tax-position.controller.spec.ts`
+- `apps/backend/src/domains/received-documents/constants/received-document-ocr.application.ts`
+- `apps/backend/prisma/seeds/ai-engine-apps.seed.ts`
+- `apps/backend/src/domains/received-documents/interfaces/received-document-scan.interface.ts`
+- `apps/backend/src/domains/received-documents/services/received-document-scan-queue.service.ts`
+- `apps/backend/src/domains/received-documents/services/received-document-scan-queue.service.spec.ts`
 - `apps/backend/src/domains/received-documents/services/received-document-scan.service.ts`
 - `apps/backend/src/domains/received-documents/services/received-document-scan.processor.ts`
 - `apps/backend/src/domains/received-documents/services/received-document-matching.service.ts`

@@ -71,7 +71,30 @@ Se registrarán comandos exactos, fecha UTC, HEAD/árbol probado, resultados y a
 - Frontend: se detuvo el único watcher lite (techo3072/assertion, más errores reales señal/Router durante edición), se ejecutó Jest serial y se inició uno full. Último ciclo OK 08:46:47 UTC, pid91685; sólo warning preexistente PurchaseTrends CurrencyPipe. Vhost https://vendix.com/ 200. No sustituye E2E UI.
 - Browser nativo volvió a fallar bootstrap (node:process no permitido). Ninguna navegación/E2E UI completada.
 - Matching: faltan asignación relacional por línea y moneda/fiscal owner inequívoco de PO central. La DB ya exige exactamente un target en aggregate links mediante CHECK SQL; su ausencia en schema Prisma no implica ausencia en DB.
-- Consolidado: todavía no consume received eligible_amount ni créditos durables; precierre renta incluye retenciones sufridas ajenas. Objetivo completo NO alcanzado.
+- Consolidado: todavía no consume received eligible_amount ni créditos durables; precierre renta corregido sólo retefuente sufrida clasificada, pero tarifa/política de renta y motor completo pendientes. Objetivo completo NO alcanzado.
+
+### Continuación de integración (30-09-2026)
+
+- ORG recibidos ahora usa selector fiscal STORE validado y omite store_id en consolidado; commit40fb75402. Watcher full verificó cicloOK antes de detenerse sólo para fase Jest; E2E aún no ejecutado.
+- Precierre de renta:21/21 PASS /tmp/vendix-rd-income-1122/backend-tests.log, commit3fc3f79aa; sólo retefuente sufrida tipada, legacy sin clasificación excluida con warningIDs/monto.
+- Preview sin escritura:24/24 PASS /tmp/vendix-rd-preview2-5283/backend-tests.log, commit596fecd46; paridad de cifras y snapshot con borrador, no audit/event/writes. Endpoint y cálculo completo de recibidos/créditos aún pendientes.
+- PDF.js5.4.624+canvas0.1.100 declarados en backend y amboslocks; host y Docker volumen importan/renderizanPNG, commitcf95736ec. Preparación2pPDF real ejecutada, texto e imágenes legibles observados; adapter8/8 PASS /tmp/vendix-rd-pages2-6435/backend-tests.log y nativehost/Docker2pPASS, commit63af226d3.
+- QA adicional de receiver: review200/version2, versiónobsoleta409, tenantbody400, DTD/XXE400 antes de persistir;2docs,0links,0eventsconevent_code. No stock/AP/DIAN/pago de QA.
+
+### OCR conectado y gates (checkpoint881cefecc)
+
+- Core OCR39/39 PASS /tmp/vendix-rd-ocr-core2-7537; revisióneditable extraído/originalconservado, reuploadestadoestable, hashlookupscoped, redondeohalf-evenfirmado. Commit9c6e4dd73.
+- Extracción IA13/13 PASS /tmp/vendix-rd-scan3-13923;2corridaspreviasFAIL(TScast y fixturesErrorCode). Commit6ac20aacc fuecheckpointantesPASS por comandoorquestadorincondicional;73503ffd1corrige yverifica. Camposnominalesnullnoactivanblocker, nominalreal siguependienteDTO.
+- Cola17/17 PASS /tmp/vendix-rd-scanqueue3-15553;8originaleseraninsuficientes. CacheAIprimerganadorbajolock/hash/contexto/version, retryDBsinsegundaIA, corruptionguard+workerquota+pollorg/entity/store. Commit871a9d0d0.
+- ControllersOCR12/12 PASS /tmp/vendix-rd-scancontrollers-14810;202upload+pollread independientes, módulo/providerhealthy sincycle. Commit881cefecc.
+- AppOCR id25 creada sólo local, config9yaexistente vision invoice_ocr; noseedgeneral/secrets ni operatoroverwrite. Configb93008c6b.
+- PreviewAPI:200 conDBreal, mes13/storeoverride/entityinjection/foreignobligation400 ynoJWT401. SQLdrafts6/lines9/fiscalevents57/journals777sinmutación.
+- PrimerPOSTscan real enstore1Starter:403 SUBSCRIPTION_005, como corresponde planasync_queuedesactivado; registrycontinúa2, sinarchivo/job/quotacompra. HappyrealIAconentitlementconfiguradoaúnpendiente; no alterarlicencias paraforzarPASS.
+- Frontendfull único16630/session82415,últimocicloOK. ModalPDF/foto ypollbounded implementadossinE2Ecompleto. Browserpluginbootstrapfalló node:process; MCPPlaywright0.0.83 aislado nuevo se conectó a vhost y navególogin real. Seedadminloginrechazadoporfrontendrol/appSTORE_ADMINdespuéscambioentornodeQA; aunnoingresoaInbox.
+- Canonical identity corregida en `005203b7d`: nominal basis y ajustes de cabecera completos antes de merge; core **43/43 PASS**, `/tmp/vendix-rd-canonical-21827/backend-tests.log`. Casos de conflicto de base nominal, redondeo, cargo y prepago; documentos idénticos legacy monetary conservan el merge.
+- UI real mediante Playwright MCP aislado: login seed owner tech, Fiscal → Facturación → Documentos recibidos seleccionado, bandeja GET **200**. Modal sin archivo deshabilita guardar, TXT inválido muestra error sin API; PDF válido habilita envío, POST **403** por suscripción vencida sin éxito/documento/job. Documento ajeno id1 retorna **404** y alerta sin datos externos. Artefactos locales `/tmp/vendix-rd-browser/scan-modal-open.png` y `foreign-doc-rejected.png`; no commit de trazas con credenciales.
+- E2E happy OCR con entitlement legítimo y selector ORG siguen pendientes. Hubo errores adicionales de SSE/notificaciones CORS, no se declara cero errores globales. Watcher root16630 y MCP98389 terminaron respectivamente143/0 antes de Jest43; el watcher no está actualmente vivo y su último OK es histórico hasta reinicio explícito único.
+- Descubrimientos para el objetivo completo: VAT draft usa subtotal en lugar de taxable_amount tipado; fallback legacy null como IVA requiere distinguir procedencia frente a desconocidos recibidos. Todavía no alimenta recibidos/créditos. Connections/runs sólo modelos; HTTP helper existente tiene ventana DNS rebinding; IMAP no instalado. Todo ello permanece pendiente, sin reducir el alcance.
 
 ## Auditoría de completitud
 

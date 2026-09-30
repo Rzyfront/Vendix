@@ -95,6 +95,10 @@ Plan completo en `docs/plans/received-documents-tax-consolidation-plan.md`. La i
 | D24 | Obligación única por entidad/tipo/rango/jurisdicción; deadline desconocido es NULL | Month/quarter nullable no protegen annual ni municipio y una fecha inventada no es vencimiento legal | Calendarios de nuevos años y jurisdicciones |
 | D25 | Clasificar IBUA 34 e ICUI 35 con fuente DIAN primaria; redondear half-to-even | Resuelve la incertidumbre del helper legacy y preserva tributos distintos de IVA y base nominal | Ampliar catálogo sólo con evidencia oficial |
 
+| D26 | PDF.js directo con canvas acotado y limpieza explícita; no wrapper que oculte recursos | PDF multipágina real requiere límites antes de asignar memoria y Node20 compatible; sharp sólo prepara imágenes | Límites iniciales10p/10MiB/2048px configurables después de métricas |
+| D27 | OCR requiere tienda operacional elegida aunque el NIT sea consolidado | Cuotas/suscripción pertenecen a tienda; no cobrar a la primera tienda arbitraria ni ejecutar sin cuota | Política de facturación de IA org futura |
+| D28 | Preview y declaración comparten cálculo, y lectura no produce borrador | Un segundo motor divergiría; preview preliminar se etiqueta hasta completar elegibilidad/créditos/todas familias | No presentar estimación como saldo definitivo |
+
 ## Fuentes oficiales consultadas
 
 - [Resolución DIAN 227 de 2025](https://normograma.dian.gov.co/dian/compilacion/docs/resolucion_dian_0227_2025.htm): entrega de documentos y confirmaciones de recepción en ventas a crédito; revisar art. 1.5.4.9.1. No implica descubrimiento universal automático de facturas por NIT.
@@ -104,6 +108,9 @@ Plan completo en `docs/plans/received-documents-tax-consolidation-plan.md`. La i
 - [Concepto DIAN 7762 de 2025](https://normograma.dian.gov.co/dian/compilacion/docs/oficio_dian_7762_2025.htm): distinguir causación IVA de recaudo efectivo.
 - [Concepto DIAN 9471 de 2026](https://normograma.dian.gov.co/dian/compilacion/docs/oficio_dian_9471_2026.htm): eventos/aceptación diferenciados; no presentar registro local como validación electrónica.
 - [Concepto DIAN 19339 de 2023](https://normograma.dian.gov.co/dian/compilacion/docs/oficio_dian_19339_2023.htm): códigos XML IBUA 34 e ICUI 35. El anexo 1.9 consultado establece half-to-even y ajuste explícito de redondeo; no aplicar una ecuación UBL genérica incompatible.
+
+- [PDF.js ejemplos oficiales](https://mozilla.github.io/pdf.js/examples/): carga/documentos/páginas/render; API5.4.624 y Node>=20.16 verificados contra package distribuido.
+- [pdf-to-img](https://github.com/k-yle/pdf-to-img): wrapper evaluado; versión5 distribuida no expone destroy ni control previo de canvas, por eso se usa PDF.js directo.
 
 ## Registro de cambios de decisión
 
