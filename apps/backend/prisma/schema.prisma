@@ -7386,7 +7386,8 @@ model fiscal_obligations {
   period_quarter       Int?
   period_start         DateTime                      @db.Date
   period_end           DateTime                      @db.Date
-  due_date             DateTime                      @db.Date
+  /// Null means the statutory deadline is not verified; never invent a fallback date.
+  due_date             DateTime?                     @db.Date
   periodicity          String?                       @db.VarChar(30)
   jurisdiction_key     String                        @default("CO-DIAN") @db.VarChar(100)
   due_date_source      String?                       @db.VarChar(255)
@@ -7420,7 +7421,7 @@ model fiscal_obligations {
   operation_events   fiscal_operation_events[]
   fiscal_tax_payments fiscal_tax_payments[]
 
-  @@unique([accounting_entity_id, type, period_year, period_month, period_quarter], map: "fiscal_obligations_entity_type_period_key")
+  @@unique([accounting_entity_id, type, period_start, period_end, jurisdiction_key], map: "fiscal_obligations_entity_type_range_jurisdiction_key")
   @@index([organization_id, accounting_entity_id, type, period_year], map: "fiscal_obligations_org_entity_type_year_idx")
   @@index([accounting_entity_id, status, due_date], map: "fiscal_obligations_entity_status_due_idx")
   @@index([store_id, status], map: "fiscal_obligations_store_status_idx")
@@ -11932,6 +11933,8 @@ model received_document_taxes {
   amount          Decimal       @default(0) @db.Decimal(15, 2)
   eligible_amount Decimal       @default(0) @db.Decimal(15, 2)
   treatment       String        @default("pending") @db.VarChar(30)
+  /// Nominal/unit tax basis and source qualifiers; never coerce units into money columns.
+  metadata        Json?
 
   document received_documents      @relation(fields: [document_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_taxes_doc_fkey")
   item     received_document_items? @relation(fields: [item_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_taxes_item_fkey")
