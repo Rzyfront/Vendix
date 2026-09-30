@@ -6,7 +6,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, tax_type_enum } from '@prisma/client';
 import { createHash, randomUUID } from 'crypto';
 import { tryResolveTenantFiscalIdentity } from '../../common/helpers/fiscal-identity.helper';
 import { normalizeNit } from '../../common/utils/nit.util';
@@ -50,6 +50,8 @@ const MAX_XML_BYTES = 10 * 1024 * 1024;
 const MONEY_TOLERANCE = new Prisma.Decimal('0.01');
 const MONEY_MAX = new Prisma.Decimal('10000000000000');
 const ITEM_MAX = 500;
+const HEADER_TAX_MAX = 100;
+const ITEM_TAX_MAX = 20;
 const EVENT_IMPORTED = 'IMPORTED';
 
 @Injectable()
@@ -183,23 +185,33 @@ export class ReceivedDocumentsService {
     const scope = await this.resolveScope(ctx);
     const existing = await this.prisma.received_documents.findFirst({
       where: this.documentWhere(scope, id),
+      include: {
+        files: { select: { id: true, file_name: true, sha256: true, role: true } },
+      },
     });
     if (!existing) throw new NotFoundException('Documento recibido no encontrado.');
     this.assertEditable(existing);
 
-    const manualFormat = this.sourceFormat(existing) === 'manual_entry';
-    if (dto.facts && !manualFormat) {
+    const metadata = this.asObject(existing.metadata);
+    const sourceFormat = this.sourceFormat(existing);
+    const manualFormat = sourceFormat === 'manual_entry';
+    const extractedFileFormat = sourceFormat === 'pending_file' &&
+      existing.processing_status === 'ready' &&
+      !!metadata.extraction_snapshot;
+    if (dto.facts && !manualFormat && !extractedFileFormat) {
       throw new ConflictException('Los datos fiscales originales de este documento no pueden editarse; agregue una nota de revisión.');
     }
     const normalized = dto.facts
       ? await this.validateReceiverIdentity(
-          this.normalizeManual(dto.facts),
+          manualFormat
+            ? this.normalizeManual(dto.facts)
+            : this.normalizeExtractionFacts(dto.facts),
           await this.expectedReceiverTaxId(scope),
         )
       : undefined;
     const validation = normalized?.validation;
     const nextMetadata = {
-      ...this.asObject(existing.metadata),
+      ...metadata,
       ...(dto.reviewer_note ? { reviewer_note: dto.reviewer_note } : {}),
       ...(normalized ? { reviewed_snapshot: normalized } : {}),
     };
@@ -247,6 +259,15 @@ export class ReceivedDocumentsService {
             version: dto.expected_version + 1,
             facts_updated: !!normalized,
             reviewer_note: dto.reviewer_note ?? null,
+            source_format: sourceFormat ?? null,
+            source_hash: existing.source_hash ?? null,
+            original_evidence: (existing.files ?? []).map((file: any) => ({
+              id: file.id,
+              file_name: file.file_name,
+              sha256: file.sha256,
+              role: file.role,
+            })),
+            extraction_snapshot_preserved: extractedFileFormat,
           }),
         },
       });
@@ -283,11 +304,12 @@ export class ReceivedDocumentsService {
     const idempotencyKey = `file:${sha256}`;
     const recorded = await this.recordPendingFile(scope, source, idempotencyKey, sha256, file);
     await this.persistOriginalFile(scope, recorded.document.id, file, sha256);
-    await this.prisma.received_documents.updateMany({
-      where: this.documentWhere(scope, recorded.document.id),
-      data: { processing_status: 'pending_ocr' },
-    });
     return this.findOne(ctx, recorded.document.id);
+  }
+
+  /** Pure shared normalization seam for OCR facts; invalid data is returned blocked, never thrown. */
+  normalizeExtractionFacts(facts: ManualReceivedDocumentDto): NormalizedReceivedDocument {
+    return this.withPendingWarnings(this.normalizeManual(facts, false));
   }
 
   /** Internal worker seam: callers must construct the authenticated tenant scope. */
@@ -706,7 +728,10 @@ export class ReceivedDocumentsService {
         await tx.$executeRaw(Prisma.sql`
           SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
         `);
-        const existing = await tx.received_documents.findFirst({ where: this.idempotencyWhere(scope, idempotencyKey) });
+        let existing = await tx.received_documents.findFirst({ where: this.idempotencyWhere(scope, idempotencyKey) });
+        if (!existing) {
+          existing = await this.findExistingFileOwner(tx, scope, sha256);
+        }
         if (existing) return { document: existing, created: false };
         const document = await tx.received_documents.create({
           data: {
@@ -766,7 +791,7 @@ export class ReceivedDocumentsService {
     const where = this.documentWhere(scope, documentId);
     const existing = await this.prisma.received_documents.findFirst({
       where,
-      select: { id: true, processing_status: true },
+      select: { id: true, processing_status: true, metadata: true },
     });
     if (!existing) throw new NotFoundException('Documento recibido no encontrado.');
     const duplicate = await this.prisma.received_document_files.findFirst({
@@ -817,28 +842,43 @@ export class ReceivedDocumentsService {
           if (!this.isFileUniqueError(error)) throw error;
         }
       } catch {
-        await this.markStorageFailure(scope, documentId);
+        await this.markStorageFailure(
+          scope,
+          documentId,
+          ['ready', 'duplicate'].includes(existing.processing_status),
+        );
         throw new ServiceUnavailableException('No se pudo guardar el archivo original; el documento quedó pendiente para reintento.');
       }
     }
-    await this.prisma.received_documents.updateMany({
-      where,
-      data: {
-        processing_status: this.sourceFormat(await this.prisma.received_documents.findFirst({ where, select: { metadata: true } })) === 'pending_file'
-          ? 'pending_ocr'
-          : 'ready',
-      },
-    });
+    const targetStatus = this.sourceFormat(existing) === 'pending_file' ? 'pending_ocr' : 'ready';
+    if (['processing', 'error'].includes(existing.processing_status)) {
+      await this.prisma.received_documents.updateMany({
+        where: { ...where, processing_status: { in: ['processing', 'error'] } },
+        data: { processing_status: targetStatus },
+      });
+    }
   }
 
-  private async markStorageFailure(scope: Scope, documentId: number): Promise<void> {
+  private async markStorageFailure(
+    scope: Scope,
+    documentId: number,
+    preserveProcessingStatus = false,
+  ): Promise<void> {
     try {
       await this.prisma.$transaction(async (tx) => {
-        const updated = await tx.received_documents.updateMany({
-          where: this.documentWhere(scope, documentId),
-          data: { processing_status: 'error' },
-        });
-        if (updated.count !== 1) throw new NotFoundException('Documento recibido no encontrado.');
+        if (preserveProcessingStatus) {
+          const owned = await tx.received_documents.findFirst({
+            where: this.documentWhere(scope, documentId),
+            select: { id: true },
+          });
+          if (!owned) throw new NotFoundException('Documento recibido no encontrado.');
+        } else {
+          const updated = await tx.received_documents.updateMany({
+            where: this.documentWhere(scope, documentId),
+            data: { processing_status: 'error' },
+          });
+          if (updated.count !== 1) throw new NotFoundException('Documento recibido no encontrado.');
+        }
         await tx.received_document_events.upsert({
           where: {
             document_id_idempotency_key: {
@@ -860,6 +900,36 @@ export class ReceivedDocumentsService {
     } catch {
       // The original error remains a storage failure; do not expose database details.
     }
+  }
+
+  private async findExistingFileOwner(tx: any, scope: Scope, sha256: string): Promise<any | null> {
+    const files = await tx.received_document_files.findMany({
+      where: {
+        sha256: sha256.toLowerCase(),
+        document: {
+          organization_id: scope.context.organization_id,
+          accounting_entity_id: scope.context.accounting_entity_id,
+          ...(scope.store_filter != null ? { store_id: scope.store_filter } : {}),
+        },
+      },
+      select: { document_id: true },
+      orderBy: { created_at: 'asc' },
+    });
+    for (const file of files) {
+      const owner = await tx.received_documents.findFirst({
+        where: this.documentWhere(scope, file.document_id),
+      });
+      if (!owner) continue;
+      const mergedInto = this.asObject(owner.metadata).merged_into_document_id;
+      if (Number.isInteger(mergedInto) && mergedInto > 0) {
+        const canonical = await tx.received_documents.findFirst({
+          where: this.documentWhere(scope, mergedInto),
+        });
+        if (canonical) return canonical;
+      }
+      return owner;
+    }
+    return null;
   }
 
   private assertSameNormalizedFacts(existing: any, normalized: NormalizedReceivedDocument): void {
@@ -955,39 +1025,72 @@ export class ReceivedDocumentsService {
     };
   }
 
-  private normalizeManual(dto: ManualReceivedDocumentDto): NormalizedReceivedDocument {
+  private normalizeManual(
+    dto: ManualReceivedDocumentDto,
+    strict = true,
+  ): NormalizedReceivedDocument {
+    const input = (dto ?? {}) as Partial<ManualReceivedDocumentDto>;
+    const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
     const errors: Array<{ code: string; message: string }> = [];
     const warnings: Array<{ code: string; message: string }> = [];
-    if (!dto.invoice_number?.trim()) errors.push({ code: 'MISSING_DOCUMENT_NUMBER', message: 'Falta el número del documento.' });
-    if (!dto.issuer_tax_id?.trim()) errors.push({ code: 'MISSING_ISSUER_TAX_ID', message: 'Falta el documento tributario del emisor.' });
-    if (!dto.issuer_name?.trim()) errors.push({ code: 'MISSING_ISSUER_NAME', message: 'Falta el nombre del emisor.' });
-    if (!dto.receiver_tax_id?.trim()) errors.push({ code: 'MISSING_RECEIVER_TAX_ID', message: 'Falta el documento tributario del adquirente.' });
-    if (!dto.receiver_name?.trim()) errors.push({ code: 'MISSING_RECEIVER_NAME', message: 'Falta el nombre del adquirente.' });
-    if (!/^[A-Z]{3}$/.test(dto.currency ?? '')) errors.push({ code: 'INVALID_CURRENCY', message: 'La moneda debe ser un código ISO de tres letras en mayúscula.' });
-    if (!Array.isArray(dto.items) || dto.items.length === 0) {
+    const documentTypes: NormalizedReceivedDocument['document_type'][] = [
+      'invoice', 'credit_note', 'debit_note', 'non_electronic',
+    ];
+    const documentType = documentTypes.includes(input.document_type as NormalizedReceivedDocument['document_type'])
+      ? input.document_type as NormalizedReceivedDocument['document_type']
+      : 'non_electronic';
+    if (!documentTypes.includes(input.document_type as NormalizedReceivedDocument['document_type'])) {
+      errors.push({ code: 'MISSING_OR_INVALID_DOCUMENT_TYPE', message: 'El tipo documental falta o no es válido.' });
+    }
+    const invoiceNumber = text(input.invoice_number);
+    const issuerTaxId = text(input.issuer_tax_id);
+    const issuerName = text(input.issuer_name);
+    const receiverTaxId = text(input.receiver_tax_id);
+    const receiverName = text(input.receiver_name);
+    const rawCurrency = text(input.currency);
+    const currency = /^[A-Z]{3}$/.test(rawCurrency) ? rawCurrency : 'UNKNOWN';
+    if (!invoiceNumber) errors.push({ code: 'MISSING_DOCUMENT_NUMBER', message: 'Falta el número del documento.' });
+    if (!issuerTaxId) errors.push({ code: 'MISSING_ISSUER_TAX_ID', message: 'Falta el documento tributario del emisor.' });
+    if (!issuerName) errors.push({ code: 'MISSING_ISSUER_NAME', message: 'Falta el nombre del emisor.' });
+    if (!receiverTaxId) errors.push({ code: 'MISSING_RECEIVER_TAX_ID', message: 'Falta el documento tributario del adquirente.' });
+    if (!receiverName) errors.push({ code: 'MISSING_RECEIVER_NAME', message: 'Falta el nombre del adquirente.' });
+    if (!/^[A-Z]{3}$/.test(rawCurrency)) errors.push({ code: 'INVALID_CURRENCY', message: 'La moneda debe ser un código ISO de tres letras en mayúscula.' });
+    const issueDateInput = text(input.issue_date);
+    const dueDateInput = text(input.due_date);
+    const allLineInputs = Array.isArray(input.items) ? input.items : [];
+    const allTaxInputs = Array.isArray(input.taxes) ? input.taxes : [];
+    if (allLineInputs.length > ITEM_MAX) {
+      errors.push({ code: 'TOO_MANY_DOCUMENT_LINES', message: `El documento excede el máximo de ${ITEM_MAX} líneas; se conserva como revisión bloqueada.` });
+    }
+    if (allTaxInputs.length > HEADER_TAX_MAX) {
+      errors.push({ code: 'TOO_MANY_HEADER_TAX_ROWS', message: `El documento excede el máximo de ${HEADER_TAX_MAX} impuestos de cabecera; se conserva como revisión bloqueada.` });
+    }
+    const lineInputs = allLineInputs.slice(0, ITEM_MAX);
+    const taxInputs = allTaxInputs.slice(0, HEADER_TAX_MAX);
+    if (lineInputs.length === 0) {
       errors.push({ code: 'MISSING_DOCUMENT_LINES', message: 'El documento requiere al menos una línea.' });
     }
-    if (!dto.issue_date || !this.isoDate(dto.issue_date)) {
+    if (!issueDateInput || !this.isoDate(issueDateInput)) {
       errors.push({ code: 'MISSING_OR_INVALID_ISSUE_DATE', message: 'La fecha de emisión debe ser una fecha ISO válida.' });
     }
-    if (dto.due_date && !this.isoDate(dto.due_date)) {
+    if (dueDateInput && !this.isoDate(dueDateInput)) {
       errors.push({ code: 'INVALID_DUE_DATE', message: 'La fecha de vencimiento debe ser una fecha ISO válida.' });
     }
-    const headerTaxes: ReceivedDocumentTax[] = (dto.taxes ?? []).map((tax) => this.manualTax(tax, undefined, errors));
-    const items: ReceivedDocumentItem[] = (dto.items ?? []).map((item, index) => this.manualItem(item, index + 1, errors));
-    const subtotal = this.manualMoney(dto.subtotal_amount, 'SUBTOTAL', errors);
-    const discount = this.manualMoney(dto.discount_amount, 'DISCOUNT', errors);
-    const charge = this.manualMoney(dto.charge_amount ?? '0', 'CHARGE', errors);
-    const exclusive = dto.tax_exclusive_amount == null
+    const headerTaxes: ReceivedDocumentTax[] = taxInputs.map((tax) => this.manualTax(tax, undefined, errors));
+    const items: ReceivedDocumentItem[] = lineInputs.map((item, index) => this.manualItem(item, index + 1, errors));
+    const subtotal = this.manualMoney(text(input.subtotal_amount), 'SUBTOTAL', errors);
+    const discount = this.manualMoney(text(input.discount_amount), 'DISCOUNT', errors);
+    const charge = this.manualMoney(input.charge_amount == null ? '0' : text(input.charge_amount), 'CHARGE', errors);
+    const exclusive = input.tax_exclusive_amount == null
       ? undefined
-      : this.manualMoney(dto.tax_exclusive_amount, 'TAX_EXCLUSIVE', errors);
-    const taxAmount = this.manualMoney(dto.tax_amount, 'TAX_AMOUNT', errors);
-    const total = this.manualMoney(dto.total_amount, 'TOTAL', errors);
-    const prepaid = dto.prepaid_amount == null ? undefined : this.manualMoney(dto.prepaid_amount, 'PREPAID', errors);
-    const rounding = dto.payable_rounding_amount == null
+      : this.manualMoney(text(input.tax_exclusive_amount), 'TAX_EXCLUSIVE', errors);
+    const taxAmount = this.manualMoney(text(input.tax_amount), 'TAX_AMOUNT', errors);
+    const total = this.manualMoney(text(input.total_amount), 'TOTAL', errors);
+    const prepaid = input.prepaid_amount == null ? undefined : this.manualMoney(text(input.prepaid_amount), 'PREPAID', errors);
+    const rounding = input.payable_rounding_amount == null
       ? undefined
-      : this.manualRounding(dto.payable_rounding_amount, errors);
-    const withholding = dto.withholding_amount == null ? undefined : this.manualMoney(dto.withholding_amount, 'WITHHOLDING', errors);
+      : this.manualRounding(text(input.payable_rounding_amount), errors);
+    const withholding = input.withholding_amount == null ? undefined : this.manualMoney(text(input.withholding_amount), 'WITHHOLDING', errors);
     const lineNet = items.reduce((sum, item) => sum.plus(item.net_amount), new Prisma.Decimal(0));
     if (this.differenceExceeds(subtotal, lineNet)) {
       errors.push({ code: 'LINE_SUBTOTAL_MISMATCH', message: 'El subtotal no coincide con la suma de las líneas.' });
@@ -1006,15 +1109,18 @@ export class ReceivedDocumentsService {
     if (headerTaxes.length > 0 && lineTaxes.length > 0 && this.differenceExceeds(headerTaxSum, lineTaxSum)) {
       errors.push({ code: 'HEADER_LINE_TAX_MISMATCH', message: 'Los impuestos de cabecera y línea no coinciden.' });
     }
-    const inclusive = dto.tax_inclusive_amount == null
-      ? subtotal.plus(taxAmount).toDecimalPlaces(2)
-      : this.manualMoney(dto.tax_inclusive_amount, 'TAX_INCLUSIVE', errors);
+    const inclusive = input.tax_inclusive_amount == null
+      ? subtotal.plus(taxAmount).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN)
+      : this.manualMoney(text(input.tax_inclusive_amount), 'TAX_INCLUSIVE', errors);
     if (this.differenceExceeds(inclusive, subtotal.plus(taxAmount))) {
       errors.push({ code: 'TAX_INCLUSIVE_AMOUNT_MISMATCH', message: 'El total con impuestos no coincide con subtotal más impuestos.' });
     }
-    const payable = inclusive.minus(discount).plus(charge).toDecimalPlaces(2);
+    // PayableRoundingAmount adjusts the payable; prepaid and withholdings stay
+    // informational under the DIAN profile and do not net the fiscal total.
+    const payable = inclusive.minus(discount).plus(charge).plus(rounding ?? 0)
+      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN);
     if (this.differenceExceeds(total, payable)) {
-      errors.push({ code: 'PAYABLE_TOTAL_MISMATCH', message: 'El total no coincide con total con impuestos menos descuento de cabecera más cargos.' });
+      errors.push({ code: 'PAYABLE_TOTAL_MISMATCH', message: 'El total no coincide con total con impuestos menos descuento de cabecera más cargos y ajuste de redondeo.' });
     }
     for (const tax of [...headerTaxes, ...lineTaxes]) {
       if (tax.tax_type === 'unclassified') {
@@ -1025,13 +1131,13 @@ export class ReceivedDocumentsService {
     if (allTaxes.length === 0) {
       warnings.push({ code: 'TAX_BREAKDOWN_MISSING', message: 'No hay desglose de impuestos; no se asumió IVA.' });
     }
-    const documentKey = dto.document_key?.trim() || undefined;
+    const documentKey = text(input.document_key) || undefined;
     const keyValid = !!documentKey && /^[a-f\d]{96}$/i.test(documentKey);
     if (!documentKey) warnings.push({ code: 'MISSING_DOCUMENT_KEY', message: 'No se informó UUID/clave electrónica; requiere revisión.' });
     else if (!keyValid) warnings.push({ code: 'INVALID_DOCUMENT_KEY_FORMAT', message: 'La clave no tiene el formato hexadecimal DIAN de 96 caracteres.' });
 
     const invalidManualFacts = errors.filter((issue) => issue.code !== 'UNCLASSIFIED_TAX_SCHEME');
-    if (invalidManualFacts.length > 0) {
+    if (strict && invalidManualFacts.length > 0) {
       throw new BadRequestException({
         message: 'Los datos manuales tienen cantidades o valores inconsistentes.',
         validation_errors: invalidManualFacts.map((issue) => issue.code),
@@ -1039,19 +1145,19 @@ export class ReceivedDocumentsService {
     }
 
     return {
-      document_type: dto.document_type,
-      invoice_number: dto.invoice_number.trim(),
-      issuer_tax_id: dto.issuer_tax_id.trim(),
-      issuer_name: dto.issuer_name.trim(),
-      receiver_tax_id: dto.receiver_tax_id.trim(),
-      receiver_name: dto.receiver_name.trim(),
+      document_type: documentType,
+      invoice_number: invoiceNumber,
+      issuer_tax_id: issuerTaxId,
+      issuer_name: issuerName,
+      receiver_tax_id: receiverTaxId,
+      receiver_name: receiverName,
       document_key: documentKey,
-      issue_date: this.isoDate(dto.issue_date) ? dto.issue_date : '',
-      due_date: dto.due_date && this.isoDate(dto.due_date) ? dto.due_date : undefined,
-      currency: dto.currency,
+      issue_date: this.isoDate(issueDateInput) ? issueDateInput : '',
+      due_date: dueDateInput && this.isoDate(dueDateInput) ? dueDateInput : undefined,
+      currency,
       subtotal_amount: this.moneyString(subtotal),
       discount_amount: this.moneyString(discount),
-      charge_amount: dto.charge_amount == null ? undefined : this.moneyString(charge),
+      charge_amount: input.charge_amount == null ? undefined : this.moneyString(charge),
       tax_exclusive_amount: exclusive == null ? undefined : this.moneyString(exclusive),
       tax_inclusive_amount: this.moneyString(inclusive),
       tax_amount: this.moneyString(taxAmount),
@@ -1061,25 +1167,36 @@ export class ReceivedDocumentsService {
       withholding_amount: withholding == null ? undefined : this.moneyString(withholding),
       items,
       taxes: headerTaxes,
-      reference_key: dto.reference_key,
-      reference_number: dto.reference_number,
+      reference_key: text(input.reference_key) || undefined,
+      reference_number: text(input.reference_number) || undefined,
       validation: { errors, warnings, has_signature: false, document_key_format_valid: keyValid },
     };
   }
 
   private manualItem(
-    input: ReceivedDocumentItemDto,
+    input: ReceivedDocumentItemDto | undefined,
     lineNumber: number,
     errors: Array<{ code: string; message: string }>,
   ): ReceivedDocumentItem {
-    const quantity = this.manualDecimal(input.quantity, 11, 4, `LINE_${lineNumber}_QUANTITY`, errors);
-    const unitPrice = this.manualDecimal(input.unit_price, 9, 6, `LINE_${lineNumber}_PRICE`, errors);
-    const discount = this.manualMoney(input.discount_amount, `LINE_${lineNumber}_DISCOUNT`, errors);
-    const net = this.manualMoney(input.net_amount, `LINE_${lineNumber}_NET`, errors);
-    const total = this.manualMoney(input.total_amount, `LINE_${lineNumber}_TOTAL`, errors);
+    const row = (input ?? {}) as Partial<ReceivedDocumentItemDto>;
+    const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+    const quantity = this.manualDecimal(text(row.quantity), 11, 4, `LINE_${lineNumber}_QUANTITY`, errors);
+    const unitPrice = this.manualDecimal(text(row.unit_price), 9, 6, `LINE_${lineNumber}_PRICE`, errors);
+    const discount = this.manualMoney(text(row.discount_amount), `LINE_${lineNumber}_DISCOUNT`, errors);
+    const net = this.manualMoney(text(row.net_amount), `LINE_${lineNumber}_NET`, errors);
+    const total = this.manualMoney(text(row.total_amount), `LINE_${lineNumber}_TOTAL`, errors);
     if (quantity.lte(0)) errors.push({ code: 'INVALID_LINE_QUANTITY', message: `La cantidad de la línea ${lineNumber} debe ser mayor que cero.` });
-    const taxes = (input.taxes ?? []).map((tax) => this.manualTax(tax, lineNumber, errors));
-    const expected = quantity.mul(unitPrice).minus(discount).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    const description = text(row.description);
+    if (!description) errors.push({ code: 'MISSING_LINE_DESCRIPTION', message: `Falta la descripción de la línea ${lineNumber}.` });
+    const allTaxes = Array.isArray(row.taxes) ? row.taxes : [];
+    if (allTaxes.length > ITEM_TAX_MAX &&
+      !errors.some((issue) => issue.code === 'TOO_MANY_LINE_TAX_ROWS')) {
+      errors.push({ code: 'TOO_MANY_LINE_TAX_ROWS', message: `La línea ${lineNumber} excede el máximo de ${ITEM_TAX_MAX} impuestos; se conserva como revisión bloqueada.` });
+    }
+    const taxes = allTaxes.slice(0, ITEM_TAX_MAX)
+      .map((tax) => this.manualTax(tax, lineNumber, errors));
+    const expected = quantity.mul(unitPrice).minus(discount)
+      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN);
     if (this.differenceExceeds(expected, net)) {
       errors.push({ code: 'LINE_AMOUNT_MISMATCH', message: `El neto de la línea ${lineNumber} no coincide con cantidad × precio menos descuento.` });
     }
@@ -1090,10 +1207,10 @@ export class ReceivedDocumentsService {
     }
     return {
       line_number: lineNumber,
-      external_code: input.external_code,
-      description: input.description.trim(),
+      external_code: text(row.external_code) || undefined,
+      description,
       quantity: quantity.toString(),
-      unit_code: input.unit_code,
+      unit_code: text(row.unit_code) || undefined,
       unit_price: unitPrice.toString(),
       discount_amount: this.moneyString(discount),
       net_amount: this.moneyString(net),
@@ -1103,17 +1220,24 @@ export class ReceivedDocumentsService {
   }
 
   private manualTax(
-    input: ReceivedDocumentTaxDto,
+    input: ReceivedDocumentTaxDto | undefined,
     lineNumber: number | undefined,
     errors: Array<{ code: string; message: string }>,
   ): ReceivedDocumentTax {
-    const rate = this.manualDecimal(input.rate, 4, 5, 'TAX_RATE', errors);
-    const base = this.manualMoney(input.base_amount, 'TAX_BASE', errors);
-    const amount = this.manualMoney(input.amount, 'TAX_AMOUNT', errors);
+    const row = (input ?? {}) as Partial<ReceivedDocumentTaxDto>;
+    const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+    const rate = this.manualDecimal(text(row.rate), 4, 5, 'TAX_RATE', errors);
+    const base = this.manualMoney(text(row.base_amount), 'TAX_BASE', errors);
+    const amount = this.manualMoney(text(row.amount), 'TAX_AMOUNT', errors);
+    const rawTaxType = row.tax_type;
+    const taxType = rawTaxType === 'unclassified' ||
+      Object.values(tax_type_enum).includes(rawTaxType as tax_type_enum)
+      ? rawTaxType as ReceivedDocumentTax['tax_type']
+      : 'unclassified';
     return {
-      tax_type: input.tax_type,
-      scheme_code: input.scheme_code ?? '',
-      tax_name: input.tax_name.trim(),
+      tax_type: taxType,
+      scheme_code: text(row.scheme_code),
+      tax_name: text(row.tax_name) || 'Sin clasificar',
       rate: rate.toString(),
       base_amount: this.moneyString(base),
       amount: this.moneyString(amount),
@@ -1352,7 +1476,7 @@ export class ReceivedDocumentsService {
   }
 
   private moneyString(value: Prisma.Decimal): string {
-    return value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toFixed(2);
+    return value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN).toFixed(2);
   }
 
   private dateColumn(value: string | undefined): Date | null {
