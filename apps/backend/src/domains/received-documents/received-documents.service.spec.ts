@@ -52,6 +52,7 @@ function makeHarness() {
   let fileSha: string | null = null;
   const tx: any = {
     $executeRaw: jest.fn().mockResolvedValue(1),
+    $queryRaw: jest.fn().mockResolvedValue([{ id: 50 }]),
     received_documents: {
       findFirst: jest.fn(async ({ where }: any) => where?.idempotency_key
         ? createdDocs.get(where.idempotency_key) ?? null
@@ -70,6 +71,12 @@ function makeHarness() {
     received_document_taxes: {
       createMany: jest.fn().mockResolvedValue({ count: 1 }),
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+    received_document_match_allocations: {
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+    received_document_match_tax_allocations: {
+      findFirst: jest.fn().mockResolvedValue(null),
     },
     received_document_files: {
       findFirst: jest.fn(async () => fileSha ? { id: 1 } : null),
@@ -296,6 +303,69 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     const updateData = h.tx.received_documents.updateMany.mock.calls[0][0].data;
     expect(updateData.validation_summary.errors.map((error: any) => error.code)).toContain('RECEIVER_TAX_ID_MISMATCH');
     expect(h.storage.upload).not.toHaveBeenCalled();
+  });
+
+  it('blocks fact edits when an allocation history exists before version, child, or event writes', async () => {
+    const h = makeHarness();
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce({
+      id: 50, version: 1, source_channel: 'manual', fiscal_status: 'pending', posting_status: 'pending',
+      accepted_at: null, metadata: { source_format: 'manual_entry' }, files: [],
+    });
+    h.tx.received_document_match_allocations.findFirst.mockResolvedValueOnce({ id: 701 });
+
+    await expect(h.service.updateReview(context, 50, {
+      expected_version: 1, facts: manualDto(), reviewer_note: 'Corregir proveedor',
+    } as any)).rejects.toThrow('existe historial de asignaciones de conciliación');
+
+    expect(h.tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(h.tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      h.tx.received_document_match_allocations.findFirst.mock.invocationCallOrder[0],
+    );
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.tx.received_document_items.deleteMany).not.toHaveBeenCalled();
+    expect(h.tx.received_document_taxes.deleteMany).not.toHaveBeenCalled();
+    expect(h.tx.received_document_events.create).not.toHaveBeenCalled();
+  });
+
+  it('also blocks fact edits when only a historical tax allocation exists', async () => {
+    const h = makeHarness();
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce({
+      id: 50, version: 1, source_channel: 'manual', fiscal_status: 'pending', posting_status: 'pending',
+      accepted_at: null, metadata: { source_format: 'manual_entry' }, files: [],
+    });
+    h.tx.received_document_match_tax_allocations.findFirst.mockResolvedValueOnce({ id: 702 });
+
+    await expect(h.service.updateReview(context, 50, {
+      expected_version: 1, facts: manualDto(),
+    } as any)).rejects.toThrow('existe historial de asignaciones de conciliación');
+
+    expect(h.tx.received_document_match_allocations.findFirst).toHaveBeenCalledWith({
+      where: { document_id: 50 }, select: { id: true },
+    });
+    expect(h.tx.received_document_match_tax_allocations.findFirst).toHaveBeenCalledWith({
+      where: { document_tax: { is: { document_id: 50 } } }, select: { id: true },
+    });
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.tx.received_document_events.create).not.toHaveBeenCalled();
+  });
+
+  it('still permits a review note without facts when allocations already exist', async () => {
+    const h = makeHarness();
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce({
+      id: 50, version: 1, source_channel: 'manual', fiscal_status: 'pending', posting_status: 'pending',
+      accepted_at: null, validation_status: 'valid', metadata: { source_format: 'manual_entry' }, files: [],
+    });
+    h.tx.received_document_match_allocations.findFirst.mockResolvedValue({ id: 701 });
+    h.tx.received_document_match_tax_allocations.findFirst.mockResolvedValue({ id: 702 });
+
+    await h.service.updateReview(context, 50, { expected_version: 1, reviewer_note: 'Nota de revisión sin cambiar hechos' } as any);
+
+    expect(h.tx.received_document_match_allocations.findFirst).not.toHaveBeenCalled();
+    expect(h.tx.received_document_match_tax_allocations.findFirst).not.toHaveBeenCalled();
+    expect(h.tx.received_documents.updateMany).toHaveBeenCalledTimes(1);
+    expect(h.tx.received_document_items.deleteMany).not.toHaveBeenCalled();
+    expect(h.tx.received_document_taxes.deleteMany).not.toHaveBeenCalled();
+    expect(h.tx.received_document_events.create).toHaveBeenCalledTimes(1);
   });
 
   it('allows reviewed OCR corrections while preserving original payload, extraction snapshot and evidence', async () => {

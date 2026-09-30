@@ -750,6 +750,14 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.received_document_taxes;
   }
 
+  get received_document_match_allocations() {
+    return this.baseClient.received_document_match_allocations;
+  }
+
+  get received_document_match_tax_allocations() {
+    return this.baseClient.received_document_match_tax_allocations;
+  }
+
   get received_document_links() {
     return this.baseClient.received_document_links;
   }

@@ -231,6 +231,38 @@ export class ReceivedDocumentsService {
     };
 
     await this.prisma.$transaction(async (tx) => {
+      if (normalized) {
+        const storePredicate = scope.store_filter == null
+          ? Prisma.empty
+          : Prisma.sql`AND "store_id" = ${scope.store_filter}`;
+        const locked = await tx.$queryRaw(Prisma.sql`
+          SELECT "id"
+          FROM "received_documents"
+          WHERE "id" = ${id}
+            AND "organization_id" = ${scope.context.organization_id}
+            AND "accounting_entity_id" = ${scope.context.accounting_entity_id}
+            ${storePredicate}
+          FOR UPDATE
+        `) as Array<{ id: number }>;
+        if (locked.length !== 1) {
+          throw new ConflictException('El documento cambió o ya no admite edición; vuelva a cargarlo.');
+        }
+
+        const allocation = await tx.received_document_match_allocations.findFirst({
+          where: { document_id: id },
+          select: { id: true },
+        });
+        const taxAllocation = await tx.received_document_match_tax_allocations.findFirst({
+          where: { document_tax: { is: { document_id: id } } },
+          select: { id: true },
+        });
+        if (allocation || taxAllocation) {
+          throw new ConflictException(
+            'No se pueden editar los hechos fiscales porque existe historial de asignaciones de conciliación; sólo se permite actualizar la nota de revisión.',
+          );
+        }
+      }
+
       const update = await tx.received_documents.updateMany({
         where: {
           ...this.documentWhere(scope, id),
