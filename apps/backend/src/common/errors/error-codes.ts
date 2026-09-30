@@ -1145,6 +1145,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Only the kitchen reversal bridge may use delivered to processing as a legal transition',
   },
+  ORD_FINISH_UNPAID_BALANCE_001: {
+    code: 'ORD_FINISH_UNPAID_BALANCE_001',
+    httpStatus: 409,
+    devMessage: 'La orden tiene un saldo por cobrar. Registra el cobro antes de finalizarla.',
+  },
   ORD_CANCEL_STOCK_COMMITTED_001: {
     code: 'ORD_CANCEL_STOCK_COMMITTED_001',
     httpStatus: 409,

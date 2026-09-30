@@ -7019,7 +7019,12 @@ export class PaymentsService {
       this.logger.debug(
         `[CashRegister] Active session for user ${user.id}: ${session ? `id=${session.id}` : 'NONE'}`,
       );
-      if (!session) return;
+      if (!session) {
+        this.logger.error(
+          `[CashRegister] No open session for user ${user.id}; sale movement NOT recorded (gate should have blocked)`,
+        );
+        return;
+      }
 
       const order_id = order?.id;
       const payment_id = payment?.id;
@@ -7077,17 +7082,7 @@ export class PaymentsService {
         return;
       }
 
-      this.logger.debug(
-        `[CashRegister] payment_method=${payment_method}, track_non_cash=${cr_settings.track_non_cash_payments}`,
-      );
-
-      // Only track non-cash if setting enabled
-      if (payment_method !== 'cash' && !cr_settings.track_non_cash_payments) {
-        this.logger.debug(
-          `[CashRegister] Skipping non-cash movement (tracking disabled)`,
-        );
-        return;
-      }
+      // Todo método se registra (el arqueo esperado sigue contando solo efectivo).
 
       await this.movementsService.recordSaleMovement(session.id, {
         store_id: dtoStoreId,

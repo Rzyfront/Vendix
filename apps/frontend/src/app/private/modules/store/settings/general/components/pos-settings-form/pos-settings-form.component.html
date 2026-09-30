@@ -376,12 +376,36 @@
         </div>
 
         <div class="setting-cell">
-          <app-setting-toggle
-            [formControl]="requireSessionForSalesControl"
-            label="Requerir Sesión Activa"
-            description="Sin caja abierta el POS no deja cobrar: primero se abre el turno"
-            (changed)="onFieldChange()"
-          ></app-setting-toggle>
+          @if (cashRegisterEnabled()) {
+            <!-- Con la caja habilitada el backend siempre exige sesión: se
+                 muestra activado y bloqueado, sin tocar el valor persistido. -->
+            <div
+              class="setting-toggle-row flex items-center justify-between p-2 mt-3 bg-gray-50 border border-gray-100 rounded-xl select-none opacity-50"
+              aria-disabled="true"
+            >
+              <div class="flex-1 mr-4">
+                <span class="text-xs font-semibold text-gray-700 block">
+                  Requerir Sesión Activa
+                </span>
+                <p class="text-[10px] text-gray-500 leading-tight mt-0.5">
+                  Siempre activo cuando la caja está habilitada: todo cobro
+                  requiere caja abierta.
+                </p>
+              </div>
+              <app-toggle
+                class="shrink-0"
+                [checked]="true"
+                [disabled]="true"
+              ></app-toggle>
+            </div>
+          } @else {
+            <app-setting-toggle
+              [formControl]="requireSessionForSalesControl"
+              label="Requerir Sesión Activa"
+              description="Sin caja abierta el POS no deja cobrar: primero se abre el turno"
+              (changed)="onFieldChange()"
+            ></app-setting-toggle>
+          }
           <div class="setting-cell__meta">
             <app-badge variant="warning" size="xsm" badgeStyle="outline">
               Requiere Caja Registradora

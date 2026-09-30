@@ -106,7 +106,10 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
     };
     const notificationsSseService = { push: jest.fn() };
     const eventEmitter = { emit: jest.fn() };
-    const cashRegisterSessionsService = { getActiveSession: jest.fn() };
+    const cashRegisterSessionsService = {
+      getActiveSession: jest.fn(),
+      assertSessionForSales: jest.fn().mockResolvedValue(undefined),
+    };
     const cashRegisterMovementsService = { recordSaleMovement: jest.fn() };
     const kitchenFireService = {
       cancelTicketInTx: jest.fn(),

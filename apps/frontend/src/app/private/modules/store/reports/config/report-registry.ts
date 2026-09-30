@@ -1,4 +1,5 @@
 import { ReportCategory, ReportCategoryId, ReportDefinition, ReportType } from '../interfaces/report.interface';
+import { formatPercentFromFraction } from '../components/report-viewer/report-viewer.component';
 
 export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'overview', label: 'Resumen', description: 'Reporte general consolidado del negocio', icon: 'layout-dashboard', color: 'var(--color-primary)' },
@@ -1331,7 +1332,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'tax_name', header: 'Tipo de Impuesto', type: 'text' },
       { key: 'taxable_amount', header: 'Base Gravable', type: 'currency', footer: 'sum' },
       { key: 'total_tax', header: 'Impuesto', type: 'currency', footer: 'sum' },
-      { key: 'tax_rate', header: 'Tasa', type: 'percentage' },
+      { key: 'tax_rate', header: 'Tasa', type: 'percentage', transform: formatPercentFromFraction },
     ],
     exportFilename: 'tax_summary',
     stats: [

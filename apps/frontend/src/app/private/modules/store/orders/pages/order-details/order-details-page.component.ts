@@ -192,6 +192,7 @@ const ACTION_REASON_FALLBACK: Record<string, string> = {
   ORD_PAYMENT_CANCEL_FINISHED_001: 'La orden ya está finalizada; usa un reembolso para devolver el dinero.',
   ORD_PAYMENT_CANCEL_INVOICED_001: 'Esta orden ya tiene una factura electrónica emitida; no se puede anular el pago.',
   ORD_FAST_TRACK_INVALID_STATE_001: 'La orden en su estado actual no admite procesar en cadena.',
+  ORD_FINISH_UNPAID_BALANCE_001: 'La orden tiene un saldo por cobrar. Registra el cobro antes de finalizarla.',
 };
 
 const GENERIC_ACTION_DISABLED_REASON = 'No disponible en el estado actual de la orden.';
@@ -369,6 +370,38 @@ export function isItemActionEnabled(
   code: 'deliver' | 'cancel' | 'reverse_delivered' | 'resend',
 ): boolean {
   return !!item.available_actions?.some((a) => a.code === code && a.enabled === true);
+}
+
+/** Código de error/`reason` del backend cuando finalizar exige cobrar antes. */
+export const ORD_FINISH_UNPAID_BALANCE_CODE = 'ORD_FINISH_UNPAID_BALANCE_001';
+
+const SETTLED_PAYMENT_STATES_FE: ReadonlySet<string> = new Set([
+  'succeeded',
+  'captured',
+  'partially_refunded',
+  'refunded',
+]);
+
+/**
+ * Espejo EXACTO de `getUnpaidBalanceForFinish`
+ * (`order-action-policy.util.ts`, backend): saldo por cobrar de una orden no
+ * crédito para decidir si se puede finalizar. Solo calcula el MONTO; la señal
+ * primaria de bloqueo es `available_actions.confirm_delivery.reason`.
+ * Pura para spec sin TestBed.
+ */
+export function getUnpaidBalanceForFinish(
+  order: Pick<Order, 'grand_total' | 'remaining_balance' | 'payment_form' | 'payments'>,
+): number {
+  if (order.payment_form === '2') return 0;
+  if (order.grand_total === undefined || order.grand_total === null) return 0;
+  const grand = Number(order.grand_total);
+  if (!(grand > 0)) return 0;
+  const payments = order.payments ?? [];
+  const settledPayments = payments.filter((p) => SETTLED_PAYMENT_STATES_FE.has(p.state));
+  if (settledPayments.length === 0) return grand;
+  const settled = settledPayments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
+  if (settled >= grand - 0.01) return 0;
+  return Math.max(0, Number(order.remaining_balance ?? 0));
 }
 
 /**
@@ -1668,6 +1701,43 @@ export class OrderDetailsPageComponent {
   );
 
   /**
+   * Saldo por cobrar que impide finalizar. Señal primaria: la acción
+   * `confirm_delivery` del backend viene con
+   * `reason === 'ORD_FINISH_UNPAID_BALANCE_001'`; el cálculo espejo solo
+   * aporta el monto (con fallback a remaining_balance/grand_total si el
+   * snapshot local no lo reproduce).
+   */
+  readonly unpaidBalance = computed<number>(() => {
+    const order = this.order();
+    if (!order) return 0;
+    const blockedByBackend = !!order.available_actions?.some(
+      (a) => a.code === 'confirm_delivery' && a.reason === ORD_FINISH_UNPAID_BALANCE_CODE,
+    );
+    const computedAmount = getUnpaidBalanceForFinish(order);
+    if (computedAmount > 0.01) return computedAmount;
+    if (blockedByBackend) {
+      return Number(order.remaining_balance) || Number(order.grand_total) || 0;
+    }
+    return 0;
+  });
+
+  readonly hasUnpaidBalance = computed(() => this.unpaidBalance() > 0.01);
+
+  /** Aviso de saldo (reemplaza Finalizar) en shipped/delivered/processing. */
+  readonly showUnpaidBalanceNotice = computed(() => {
+    const state = this.order()?.state;
+    return (
+      this.hasUnpaidBalance() &&
+      (state === 'shipped' || state === 'delivered' || state === 'processing')
+    );
+  });
+
+  /** `pay` ofrecido y habilitado por el backend (no en processing). */
+  readonly canRegisterUnpaidPayment = computed(
+    () => !!this.order()?.available_actions?.some((a) => a.code === 'pay' && a.enabled === true),
+  );
+
+  /**
    * order-truth-and-invoice-tz plan (Objetivos 3/11/12) — los botones de
    * orden se pintan ÚNICA Y EXCLUSIVAMENTE desde `order.available_actions`
    * (ver `buildOrderActionButtons`, función pura testeable sin TestBed). Se
@@ -1764,7 +1834,12 @@ export class OrderDetailsPageComponent {
       } as OrderActionConfig);
     }
 
-    return [...alerts, ...buttons];
+    // Con saldo por cobrar, Finalizar se sustituye por el aviso de saldo.
+    const visibleButtons = this.showUnpaidBalanceNotice()
+      ? buttons.filter((b) => b.id !== 'finish')
+      : buttons;
+
+    return [...alerts, ...visibleButtons];
   });
 
   /**
@@ -3385,6 +3460,13 @@ export class OrderDetailsPageComponent {
             },
             error: (err) => {
               this.isProcessingAction.set(false);
+              if ((err as { errorCode?: string | null })?.errorCode === ORD_FINISH_UNPAID_BALANCE_CODE) {
+                this.toastService.error(
+                  (err as Error)?.message || 'La orden tiene un saldo por cobrar. Registra el cobro antes de finalizarla.',
+                );
+                this.loadData();
+                return;
+              }
               const pendingKitchen = (err as { errorCode?: string | null })?.errorCode ===
                 'ORDER_HAS_PENDING_KITCHEN_ITEMS';
               const dishes = pendingKitchen
@@ -5631,6 +5713,7 @@ export class OrderDetailsPageComponent {
       },
       error: (err: any) => {
         this.toastService.error(err?.message || 'No se pudo finalizar la orden');
+        if (err?.errorCode === ORD_FINISH_UNPAID_BALANCE_CODE) this.loadData();
       },
     });
   }

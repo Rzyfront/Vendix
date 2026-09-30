@@ -324,6 +324,35 @@ describe('SplitAccountPaymentService', () => {
     expect(movements[0].payment_id).toBe(2);
   });
 
+  it('caja activa + track_non_cash_payments off: transferencia con sesión registra movimiento sale bank_transfer', async () => {
+    settings.getSettings.mockResolvedValue({
+      pos: {
+        cash_register: {
+          enabled: true,
+          require_session_for_sales: false,
+          track_non_cash_payments: false,
+        },
+      },
+    });
+    sessions.getActiveSession.mockResolvedValue({ id: 50 });
+    await service.pay(
+      100,
+      11,
+      makeRequest({
+        store_payment_method_id: 3,
+        payment_reference: 'TRF-1',
+        idempotency_key: 'payment-key-transfer',
+      }),
+    );
+    expect(sessions.assertSessionForSales).toHaveBeenCalled();
+    expect(movements).toHaveLength(1);
+    expect(movements[0]).toMatchObject({
+      type: 'sale',
+      session_id: 50,
+      payment_method: 'bank_transfer',
+    });
+  });
+
   it('rejects same idempotency key with changed amount or reference', async () => {
     await service.pay(100, 11, makeRequest({ amount: 50 }));
     await expect(
