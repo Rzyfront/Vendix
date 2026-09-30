@@ -110,7 +110,7 @@ export class ReceivedDocumentsService {
           include: { taxes: true },
           orderBy: { line_number: 'asc' },
         },
-        taxes: true,
+        taxes: { where: { item_id: null } },
         links: true,
         events: {
           select: { id: true, event_type: true, idempotency_key: true, status: true, result: true, actor_id: true, created_at: true },

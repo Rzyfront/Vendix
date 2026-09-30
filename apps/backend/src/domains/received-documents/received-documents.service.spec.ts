@@ -173,6 +173,18 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     expect(h.prisma.withoutScope).toHaveBeenCalledTimes(1);
   });
 
+  it('returns header taxes separately while retaining per-item taxes under items', async () => {
+    const h = makeHarness();
+    await h.service.findOne(context, 50);
+    expect(h.prisma.received_documents.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 50, organization_id: 2, accounting_entity_id: 8, store_id: 3 }),
+      include: expect.objectContaining({
+        taxes: { where: { item_id: null } },
+        items: expect.objectContaining({ include: { taxes: true } }),
+      }),
+    }));
+  });
+
   it('reuses the same idempotent document and attaches the original file only once', async () => {
     const h = makeHarness();
     await h.service.importXml(context, xmlFile());

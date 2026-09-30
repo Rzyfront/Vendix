@@ -183,6 +183,34 @@ describe('ReceivedDocumentParserService', () => {
     expect(result.validation.errors).toEqual([]);
   });
 
+  it('blocks nominal IBUA unit values that exceed DIAN two-decimal precision', () => {
+    const subtotal = `<cac:TaxSubtotal><cbc:TaxAmount currencyID="COP">1.00</cbc:TaxAmount><cbc:BaseUnitMeasure unitCode="ML">1000.000015</cbc:BaseUnitMeasure><cbc:PerUnitAmount currencyID="COP">0.100015</cbc:PerUnitAmount><cac:TaxCategory><cac:TaxScheme><cbc:ID>34</cbc:ID><cbc:Name>IBUA</cbc:Name></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`;
+    const tax = `<cac:TaxTotal><cbc:TaxAmount currencyID="COP">1.00</cbc:TaxAmount>${subtotal}</cac:TaxTotal>`;
+    const result = service.parse(invoiceXml({
+      taxes: tax, headerTaxes: tax, taxAmount: '1.00', taxInclusive: '101.00', payable: '96.00',
+    }));
+    expect(result.items[0].taxes[0]).toMatchObject({
+      tax_type: 'ibua', tax_basis_type: 'unit',
+      base_amount: '0.00', amount: '1.00',
+    });
+    expect(result.validation.errors.map((error) => error.code)).toContain('DECIMAL_OVERFLOW_IBUA_BASE_UNIT');
+    expect(result.validation.errors.map((error) => error.code)).toContain('DECIMAL_OVERFLOW_IBUA_PER_UNIT_AMOUNT');
+  });
+
+  it('preserves valid nominal IBUA basis values at DIAN two-decimal precision', () => {
+    const subtotal = `<cac:TaxSubtotal><cbc:TaxAmount currencyID="COP">1.00</cbc:TaxAmount><cbc:BaseUnitMeasure unitCode="ML">1000.00</cbc:BaseUnitMeasure><cbc:PerUnitAmount currencyID="COP">0.10</cbc:PerUnitAmount><cac:TaxCategory><cac:TaxScheme><cbc:ID>34</cbc:ID><cbc:Name>IBUA</cbc:Name></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`;
+    const tax = `<cac:TaxTotal><cbc:TaxAmount currencyID="COP">1.00</cbc:TaxAmount>${subtotal}</cac:TaxTotal>`;
+    const result = service.parse(invoiceXml({
+      taxes: tax, headerTaxes: tax, taxAmount: '1.00', taxInclusive: '101.00', payable: '96.00',
+    }));
+    expect(result.items[0].taxes[0]).toMatchObject({
+      tax_type: 'ibua', tax_basis_type: 'unit',
+      base_quantity: '1000.00', per_unit_amount: '0.10',
+      base_unit_code: 'ML', base_amount: '0.00', amount: '1.00',
+    });
+    expect(result.validation.errors).toEqual([]);
+  });
+
   it('uses DIAN half-to-even rounding on each nominal IBUA line before summing', () => {
     const subtotal = `<cac:TaxSubtotal><cbc:TaxAmount currencyID="COP">0.00</cbc:TaxAmount><cbc:BaseUnitMeasure unitCode="ML">0.50</cbc:BaseUnitMeasure><cbc:PerUnitAmount currencyID="COP">1.00</cbc:PerUnitAmount><cac:TaxCategory><cac:TaxScheme><cbc:ID>34</cbc:ID><cbc:Name>IBUA</cbc:Name></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`;
     const line = (number: number) => `<cac:InvoiceLine><cbc:ID>${number}</cbc:ID><cbc:InvoicedQuantity unitCode="NIU">1</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="COP">100.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Producto ${number}</cbc:Name></cac:Item><cac:Price><cbc:PriceAmount currencyID="COP">100.00</cbc:PriceAmount><cbc:BaseQuantity unitCode="NIU">1</cbc:BaseQuantity></cac:Price><cac:TaxTotal><cbc:TaxAmount currencyID="COP">0.00</cbc:TaxAmount>${subtotal}</cac:TaxTotal></cac:InvoiceLine>`;
