@@ -7,6 +7,7 @@ import { OrgInvoicingController } from './invoicing.controller';
 import { OrgInvoicingService } from './invoicing.service';
 import { ReceivedDocumentsModule as SharedReceivedDocumentsModule } from '../../received-documents/received-documents.module';
 import { OrganizationReceivedDocumentsController } from '../../received-documents/organization-received-documents.controller';
+import { OrganizationDocumentReceptionConnectionsController } from '../../received-documents/organization-document-reception-connections.controller';
 
 @Module({
   imports: [
@@ -16,7 +17,11 @@ import { OrganizationReceivedDocumentsController } from '../../received-document
     OrgInvoiceResolutionsModule,
     SharedReceivedDocumentsModule,
   ],
-  controllers: [OrganizationReceivedDocumentsController, OrgInvoicingController],
+  controllers: [
+    OrganizationDocumentReceptionConnectionsController,
+    OrganizationReceivedDocumentsController,
+    OrgInvoicingController,
+  ],
   providers: [OrgInvoicingService],
   exports: [
     OrgDianConfigModule,

@@ -46,6 +46,7 @@ import { InvoiceDeliveryModule } from './delivery/invoice-delivery.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 import { ReceivedDocumentsModule as SharedReceivedDocumentsModule } from '../../received-documents/received-documents.module';
 import { StoreReceivedDocumentsController } from '../../received-documents/store-received-documents.controller';
+import { StoreDocumentReceptionConnectionsController } from '../../received-documents/store-document-reception-connections.controller';
 
 @Module({
   imports: [
@@ -86,6 +87,9 @@ import { StoreReceivedDocumentsController } from '../../received-documents/store
     ProfilesController,
     // Keep the more-specific received-document prefix ahead of InvoicingController
     // (`GET :id`), which otherwise captures `received-documents` as an invoice id.
+    // The nested `connections` collection must precede the parent
+    // `received-documents/:id` route for the same Express registration-order reason.
+    StoreDocumentReceptionConnectionsController,
     StoreReceivedDocumentsController,
     InvoicingController,
     // Superficie fiscal del POS. Controller aparte a propósito: no lleva

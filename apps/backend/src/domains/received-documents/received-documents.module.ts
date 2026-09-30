@@ -13,6 +13,8 @@ import { ReceivedDocumentPagesService } from './services/received-document-pages
 import { ReceivedDocumentScanService } from './services/received-document-scan.service';
 import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
 import { ReceivedDocumentScanProcessor } from './services/received-document-scan.processor';
+import { DocumentReceptionConnectionsService } from './services/document-reception-connections.service';
+import { DocumentReceptionHttpService } from './services/document-reception-http.service';
 
 /** Provider-only shared module; route controllers live in each invoicing module. */
 @Module({
@@ -32,11 +34,14 @@ import { ReceivedDocumentScanProcessor } from './services/received-document-scan
     ReceivedDocumentScanService,
     ReceivedDocumentScanQueueService,
     ReceivedDocumentScanProcessor,
+    DocumentReceptionHttpService,
+    DocumentReceptionConnectionsService,
   ],
   exports: [
     ReceivedDocumentsContextService,
     ReceivedDocumentsService,
     ReceivedDocumentScanQueueService,
+    DocumentReceptionConnectionsService,
   ],
 })
 export class ReceivedDocumentsModule {}

@@ -2301,6 +2301,12 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/invoicing/received-documents/:id/review',
       method: 'PATCH',
     },
+    {
+      name: 'invoicing:received:connections:configure',
+      description: 'Configurar conexiones de recepción de documentos para la tienda',
+      path: '/api/store/invoicing/received-documents/connections',
+      method: 'GET',
+    },
 
     // Perfiles de facturación (CP-INVOICE-PROFILES-AIU-DIAN)
     //
@@ -3938,6 +3944,12 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
     {
+      name: 'organization:invoicing:received:connections:configure',
+      description: 'Configurar conexiones de recepción de documentos de la organización',
+      path: '/api/organization/invoicing/received-documents/connections',
+      method: 'GET',
+    },
+    {
       name: 'organization:fiscal:migrate',
       description: 'Aplicar cambios de fiscal_scope de la organización',
       path: '/api/organization/fiscal-scope',
@@ -4759,6 +4771,8 @@ export async function seedPermissionsAndRoles(
       // Documentos recibidos en el espacio de organización requieren un rol
       // ORG_ADMIN; el gerente conserva únicamente los tres permisos de tienda.
       !p.name.startsWith('organization:invoicing:received:') &&
+      !p.name.startsWith('invoicing:received:connections:') &&
+      !p.name.startsWith('organization:invoicing:received:connections:') &&
       // QUI-600 paso 6: la superficie `superadmin:*` pertenece al nivel
       // plataforma y manager nunca debe portarla. La exclusión se hace en el
       // catch-all de abajo con `startsWith('superadmin:')`, que sustituye los
