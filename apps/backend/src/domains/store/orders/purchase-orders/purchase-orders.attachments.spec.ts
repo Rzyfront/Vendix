@@ -245,6 +245,11 @@ describe('PurchaseOrders — documento escaneado y adjuntos (QUI-855)', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('create con nombre de puntos seguidos (captura macOS «a.m..png») vincula el adjunto', async () => {
+    await runCreate(scan(`${PREFIX}/1790744718377-Captura_12.05.14___a.m..png`));
+    expect(attachments.create).toHaveBeenCalledTimes(1);
+  });
+
   it('repetir el vínculo (update de borrador reenviado) no duplica', async () => {
     attachments.findFirst.mockResolvedValue({ id: 5 });
     await runCreate(scan(`${PREFIX}/1-f.pdf`));

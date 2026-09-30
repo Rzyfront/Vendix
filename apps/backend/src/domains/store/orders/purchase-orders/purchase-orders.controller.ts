@@ -332,8 +332,9 @@ export class PurchaseOrdersController {
     const prefix = await this.purchaseOrdersService.getScanStoragePrefix();
     const key = dto.scan_attachment_key;
     if (
+      // isSafeS3Key ya rechaza segmentos '..'; un `includes('..')` tumbaba
+      // nombres legítimos como la captura de macOS «… a.m..png».
       !isSafeS3Key(key) ||
-      key.includes('..') ||
       !key.startsWith(`${prefix}/`)
     ) {
       throw new BadRequestException(

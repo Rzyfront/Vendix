@@ -5149,6 +5149,7 @@ export class PurchaseOrdersService {
         .split(/[\\/]/)
         .pop()!
         .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .replace(/\.{2,}/g, '.')
         .slice(0, 120) || 'factura';
     const key = await this.s3Service.uploadFile(
       file.buffer,
@@ -5177,7 +5178,6 @@ export class PurchaseOrdersService {
     const prefix = await this.getScanStoragePrefix();
     if (
       !isSafeS3Key(scan.key) ||
-      scan.key.includes('..') ||
       !scan.key.startsWith(`${prefix}/`)
     ) {
       throw new BadRequestException(

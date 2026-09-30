@@ -60,6 +60,19 @@ describe('PurchaseOrdersController — scan/revalidate', () => {
     expect(queue.add).not.toHaveBeenCalled();
   });
 
+  it('nombre con puntos seguidos (captura macOS «a.m..png») sí encola', async () => {
+    const { controller, queue } = build();
+    queue.add.mockResolvedValue({ id: '43' });
+    const key = `${PREFIX}/1790744718377-Captura_12.05.14___a.m..png`;
+    const res: any = await inCtx(1, () =>
+      controller.enqueueInvoiceRevalidate(dto({ scan_attachment_key: key })),
+    );
+    expect(res.data).toEqual({ job_id: '43' });
+    expect(queue.add.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ scan_attachment_key: key }),
+    );
+  });
+
   it('consolidated > 200 KB => 400', async () => {
     const { controller, queue } = build();
     await expect(
