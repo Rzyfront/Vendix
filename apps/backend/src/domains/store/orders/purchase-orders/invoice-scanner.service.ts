@@ -126,6 +126,19 @@ export class InvoiceScannerService {
       `[InvoiceScan] File: mimetype=${file.mimetype}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
     );
 
+    // QUI-855 — el documento se guarda ANTES de la IA: sobrevive aunque el OCR
+    // falle. Un fallo de S3 nunca rompe el escaneo (scan_attachment = null).
+    let scanAttachment: InvoiceScanResult['scan_attachment'] = null;
+    try {
+      scanAttachment =
+        await this.purchaseOrdersService.uploadScanDocument(file);
+    } catch (err: any) {
+      this.logger.error(
+        `[InvoiceScan] No se pudo guardar el documento escaneado en S3: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
+
     const { base64, mimeType } = await this.preprocessImage(file);
     const dataUri = `data:${mimeType};base64,${base64}`;
 
@@ -189,7 +202,10 @@ export class InvoiceScannerService {
     }
 
     try {
-      return this.normalizeOcrResponse(parsed, currency);
+      return {
+        ...this.normalizeOcrResponse(parsed, currency),
+        scan_attachment: scanAttachment,
+      };
     } catch (err: any) {
       if (err instanceof VendixHttpException) throw err;
       this.logger.error(

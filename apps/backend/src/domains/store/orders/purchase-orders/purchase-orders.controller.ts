@@ -392,8 +392,10 @@ export class PurchaseOrdersController {
     @Param('id') id: string,
     @Param('attachmentId') attachmentId: string,
   ) {
-    const result =
-      await this.purchaseOrdersService.removeAttachment(+attachmentId);
+    const result = await this.purchaseOrdersService.removeAttachment(
+      +id,
+      +attachmentId,
+    );
     return this.responseService.success(
       result,
       'Archivo adjunto eliminado exitosamente',

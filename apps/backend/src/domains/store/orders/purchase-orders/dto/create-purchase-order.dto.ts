@@ -120,7 +120,10 @@ export const toOptionalBoolean = (params: TransformFnParams): unknown => {
  * into inventory cost (IBUA/ICUI style) instead of treating it as deductible.
  */
 export class PurchaseOrderItemTaxDto {
-  @ApiProperty({ description: 'Tax rate catalog id (optional)', required: false })
+  @ApiProperty({
+    description: 'Tax rate catalog id (optional)',
+    required: false,
+  })
   @Transform(toOptionalNumber)
   @IsInt()
   @IsOptional()
@@ -163,7 +166,10 @@ export class PurchaseOrderItemTaxDto {
   @IsOptional()
   calc_mode?: string;
 
-  @ApiProperty({ description: 'Pesos per unit for fixed_per_unit taxes', required: false })
+  @ApiProperty({
+    description: 'Pesos per unit for fixed_per_unit taxes',
+    required: false,
+  })
   @Transform(toOptionalNumber)
   @IsNumber()
   @Min(0)
@@ -171,7 +177,8 @@ export class PurchaseOrderItemTaxDto {
   fixed_amount_per_unit?: number;
 
   @ApiProperty({
-    description: 'net | net_plus_prior (cascade over previously computed taxes)',
+    description:
+      'net | net_plus_prior (cascade over previously computed taxes)',
     enum: ['net', 'net_plus_prior'],
     required: false,
   })
@@ -188,7 +195,8 @@ export class PurchaseOrderItemTaxDto {
   sequence?: number;
 
   @ApiProperty({
-    description: 'Line tax amount printed by the supplier; replaces the computed one.',
+    description:
+      'Line tax amount printed by the supplier; replaces the computed one.',
     required: false,
   })
   @Transform(toOptionalNumber)
@@ -339,7 +347,6 @@ export class PurchaseOrderItemDto {
   @Max(100)
   @IsOptional()
   discount_percentage?: number;
-
 
   @ApiProperty({
     description:
@@ -610,7 +617,6 @@ export class PurchaseOrderItemDto {
   category_names?: string;
 }
 
-
 /**
  * QUI-647 — una cuota del calendario de pago acordado con el proveedor.
  *
@@ -649,9 +655,7 @@ export class PurchaseOrderInstallmentDto {
  *   - installments: requiere al menos una cuota en `payment_installments`.
  */
 @ValidatorConstraint({ name: 'IsValidPaymentPlan', async: false })
-export class IsValidPaymentPlanConstraint
-  implements ValidatorConstraintInterface
-{
+export class IsValidPaymentPlanConstraint implements ValidatorConstraintInterface {
   validate(_value: unknown, args: ValidationArguments): boolean {
     const object = args.object as CreatePurchaseOrderDto;
     const plan = object.payment_plan;
@@ -771,9 +775,7 @@ export function validateFreightAndTaxHeader(
 }
 
 @ValidatorConstraint({ name: 'IsValidFreightAndTax', async: false })
-export class IsValidFreightAndTaxConstraint
-  implements ValidatorConstraintInterface
-{
+export class IsValidFreightAndTaxConstraint implements ValidatorConstraintInterface {
   validate(_value: unknown, args: ValidationArguments): boolean {
     return (
       validateFreightAndTaxHeader(args.object as FreightAndTaxHeader) === null
@@ -805,6 +807,54 @@ export function IsValidFreightAndTax(validationOptions?: ValidationOptions) {
       validator: IsValidFreightAndTaxConstraint,
     });
   };
+}
+
+/**
+ * QUI-855 — documento escaneado con IA que se liga a la orden como adjunto.
+ * `key` es la KEY de S3 devuelta por `POST purchase-orders/scan` (nunca una URL
+ * firmada); el servicio valida que pertenezca a la tienda actual.
+ */
+export class ScanAttachmentDto {
+  @ApiProperty({ description: 'S3 key devuelta por el scan' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  key: string;
+
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
+  file_name: string;
+
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  file_type: string;
+
+  @ApiProperty()
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
+  file_size: number;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  supplier_invoice_number?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsDateString()
+  supplier_invoice_date?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  supplier_invoice_amount?: number;
 }
 
 export class CreatePurchaseOrderDto {
@@ -1045,4 +1095,10 @@ export class CreatePurchaseOrderDto {
   @ValidateNested({ each: true })
   @Type(() => PurchaseOrderItemDto)
   items: PurchaseOrderItemDto[];
+
+  @ApiProperty({ required: false, type: ScanAttachmentDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ScanAttachmentDto)
+  scan_attachment?: ScanAttachmentDto;
 }

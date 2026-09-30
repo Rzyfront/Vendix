@@ -151,6 +151,17 @@ export interface InvoiceScanResult {
    * user confirms.
    */
   scan_warnings?: string[];
+  /**
+   * QUI-855 — documento escaneado guardado en S3 (KEY, no URL firmada). El
+   * frontend lo reenvía en `scan_attachment` al crear la OC. null si la subida
+   * falló (el escaneo no se rompe).
+   */
+  scan_attachment?: {
+    key: string;
+    file_name: string;
+    file_type: string;
+    file_size: number;
+  } | null;
 }
 
 // --- Interfaces for match response ---

@@ -7,6 +7,7 @@ import {
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import {
   CreatePurchaseOrderDto,
+  ScanAttachmentDto,
   ShippingCostAllocation,
   validateFreightAndTaxHeader,
 } from './dto/create-purchase-order.dto';
@@ -15,6 +16,8 @@ import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { isSafeS3Key } from '@common/helpers/s3-url.helper';
 import {
   purchase_order_status_enum,
   tax_type_enum,
@@ -136,6 +139,9 @@ export class PurchaseOrdersService {
     received: [],
     cancelled: [],
   };
+
+  /** Stateless: construye keys de S3 por tienda (no requiere DI). */
+  private readonly s3Paths = new S3PathHelper();
 
   constructor(
     private prisma: StorePrismaService,
@@ -1925,8 +1931,12 @@ export class PurchaseOrdersService {
         .toString()
         .padStart(3, '0')}`;
 
-      const { items, created_by_user_id, ...orderData } =
-        createPurchaseOrderDto;
+      const {
+        items,
+        created_by_user_id,
+        scan_attachment: scanAttachment,
+        ...orderData
+      } = createPurchaseOrderDto;
       const user_id = RequestContextService.getUserId();
 
       // Validate Location and Supplier existence to prevent FK errors
@@ -2148,6 +2158,9 @@ export class PurchaseOrdersService {
           },
         });
       }
+
+      // QUI-855 — el documento escaneado queda ligado a la orden en la MISMA tx.
+      await this.linkScanAttachment(tx, purchaseOrder.id, scanAttachment);
 
       return { order: purchaseOrder, advance: advanceToRegister, freight };
     },
@@ -2629,9 +2642,10 @@ export class PurchaseOrdersService {
       // proveedor y una recibida respalda inventario y asientos contables.
       this.assertMutable(order, 'editar');
 
-      const { items, ...rest } = updatePurchaseOrderDto as UpdatePurchaseOrderDto & {
-        items?: any[];
-      };
+      const { items, scan_attachment: scanAttachment, ...rest } =
+        updatePurchaseOrderDto as UpdatePurchaseOrderDto & {
+          items?: any[];
+        };
 
       // C.7 — misma regla de flete e impuesto que en la creación. `PartialType`
       // vuelve opcional a `location_id`, y `@IsOptional()` desactiva TODOS los
@@ -2876,6 +2890,9 @@ export class PurchaseOrdersService {
           round2(netSubtotal) + round2(lineTax) + shippingCost,
         );
       }
+
+      // QUI-855 — idempotente: reenviar el borrador no duplica el adjunto.
+      await this.linkScanAttachment(tx, id, scanAttachment);
 
       return tx.purchase_orders.update({
         where: { id },
@@ -5076,15 +5093,136 @@ export class PurchaseOrdersService {
 
   // ===== Attachments =====
 
+  /** Org + tienda del request, con slug, para construir keys de S3. */
+  private async resolveS3Contexts() {
+    const storeId = RequestContextService.getStoreId();
+    const organizationId = RequestContextService.getOrganizationId();
+    if (!storeId || !organizationId) {
+      throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
+    }
+    const [store, organization] = await Promise.all([
+      this.prisma.stores.findFirst({
+        where: { id: storeId, organization_id: organizationId },
+        select: { id: true, slug: true },
+      }),
+      this.prisma.organizations.findFirst({
+        where: { id: organizationId },
+        select: { id: true, slug: true },
+      }),
+    ]);
+    if (!store) throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
+    if (!organization) throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
+    return { store, organization };
+  }
+
+  /** Prefijo de S3 donde viven los documentos escaneados de la tienda actual. */
+  async getScanStoragePrefix(): Promise<string> {
+    const { store, organization } = await this.resolveS3Contexts();
+    return this.s3Paths.buildPurchaseOrderScanPath(organization, store);
+  }
+
+  /**
+   * QUI-855 — sube el documento escaneado a S3 (bajo la tienda) y devuelve la
+   * KEY (nunca una URL firmada). Se llama ANTES de la IA para que el archivo
+   * sobreviva aunque el OCR falle.
+   */
+  async uploadScanDocument(file: Express.Multer.File): Promise<{
+    key: string;
+    file_name: string;
+    file_type: string;
+    file_size: number;
+  }> {
+    const prefix = await this.getScanStoragePrefix();
+    const safeName =
+      (file.originalname ?? '')
+        .split(/[\\/]/)
+        .pop()!
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .slice(0, 120) || 'factura';
+    const key = await this.s3Service.uploadFile(
+      file.buffer,
+      `${prefix}/${Date.now()}-${safeName}`,
+      file.mimetype,
+    );
+    return {
+      key,
+      file_name: file.originalname || safeName,
+      file_type: file.mimetype,
+      file_size: file.size,
+    };
+  }
+
+  /**
+   * QUI-855 — liga el documento escaneado a la OC dentro de la tx de la OC.
+   * Rechaza keys que no cuelguen del prefijo de escaneos de la tienda actual y
+   * es idempotente por (purchase_order_id, file_url).
+   */
+  private async linkScanAttachment(
+    tx: any,
+    purchaseOrderId: number,
+    scan?: ScanAttachmentDto | null,
+  ): Promise<void> {
+    if (!scan) return;
+    const prefix = await this.getScanStoragePrefix();
+    if (
+      !isSafeS3Key(scan.key) ||
+      scan.key.includes('..') ||
+      !scan.key.startsWith(`${prefix}/`)
+    ) {
+      throw new BadRequestException(
+        'El documento escaneado no pertenece a esta tienda.',
+      );
+    }
+    const existing = await tx.purchase_order_attachments.findFirst({
+      where: { purchase_order_id: purchaseOrderId, file_url: scan.key },
+      select: { id: true },
+    });
+    if (existing) return;
+    await tx.purchase_order_attachments.create({
+      data: {
+        purchase_order_id: purchaseOrderId,
+        file_url: scan.key,
+        file_name: scan.file_name,
+        file_type: scan.file_type,
+        file_size: scan.file_size,
+        supplier_invoice_number: scan.supplier_invoice_number ?? null,
+        supplier_invoice_date: scan.supplier_invoice_date
+          ? new Date(scan.supplier_invoice_date)
+          : null,
+        supplier_invoice_amount: scan.supplier_invoice_amount ?? null,
+        notes: 'Factura escaneada con IA',
+        uploaded_by_user_id: RequestContextService.getUserId() ?? null,
+      },
+    });
+  }
+
+  /** 404 PO_FIND_001 si la OC no es de la tienda actual (prisma scoped). */
+  private async assertOrderInStore(purchaseOrderId: number) {
+    const order = await this.prisma.purchase_orders.findFirst({
+      where: { id: purchaseOrderId },
+      select: { id: true },
+    });
+    if (!order) {
+      throw new VendixHttpException(
+        ErrorCodes.PO_FIND_001,
+        `La orden de compra ${purchaseOrderId} no existe.`,
+        { purchase_order_id: purchaseOrderId },
+      );
+    }
+  }
+
   async addAttachment(
     purchaseOrderId: number,
     file: Express.Multer.File,
     dto: AddAttachmentDto,
   ) {
+    await this.assertOrderInStore(purchaseOrderId);
+    const { store, organization } = await this.resolveS3Contexts();
+
     // 1. Upload to S3 using S3Service (store the KEY, not the presigned URL)
     const s3Key = await this.s3Service.uploadFile(
       file.buffer,
-      `purchase-orders/attachments/${purchaseOrderId}/${Date.now()}-${file.originalname}`,
+      `${this.s3Paths.buildPurchaseOrderAttachmentPath(organization, store, purchaseOrderId)}/${Date.now()}-${file.originalname}`,
       file.mimetype,
     );
 
@@ -5130,6 +5268,7 @@ export class PurchaseOrdersService {
   }
 
   async getAttachments(purchaseOrderId: number) {
+    await this.assertOrderInStore(purchaseOrderId);
     const attachments = await this.prisma.purchase_order_attachments.findMany({
       where: { purchase_order_id: purchaseOrderId },
       include: {
@@ -5154,9 +5293,10 @@ export class PurchaseOrdersService {
     );
   }
 
-  async removeAttachment(attachmentId: number) {
-    const attachment = await this.prisma.purchase_order_attachments.findUnique({
-      where: { id: attachmentId },
+  async removeAttachment(purchaseOrderId: number, attachmentId: number) {
+    await this.assertOrderInStore(purchaseOrderId);
+    const attachment = await this.prisma.purchase_order_attachments.findFirst({
+      where: { id: attachmentId, purchase_order_id: purchaseOrderId },
     });
 
     if (!attachment) {
@@ -5173,8 +5313,8 @@ export class PurchaseOrdersService {
     }
 
     // Delete from DB
-    await this.prisma.purchase_order_attachments.delete({
-      where: { id: attachmentId },
+    await this.prisma.purchase_order_attachments.deleteMany({
+      where: { id: attachmentId, purchase_order_id: purchaseOrderId },
     });
 
     return { deleted: true };
