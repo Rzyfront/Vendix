@@ -731,6 +731,57 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.saas_metrics_snapshot;
   }
 
+  // Received supplier documents and auditable fiscal settlement. Callers must
+  // always supply and validate explicit organization/entity predicates because
+  // this service intentionally bypasses tenant scoping.
+  get received_documents() {
+    return this.baseClient.received_documents;
+  }
+
+  get received_document_files() {
+    return this.baseClient.received_document_files;
+  }
+
+  get received_document_items() {
+    return this.baseClient.received_document_items;
+  }
+
+  get received_document_taxes() {
+    return this.baseClient.received_document_taxes;
+  }
+
+  get received_document_links() {
+    return this.baseClient.received_document_links;
+  }
+
+  get received_document_events() {
+    return this.baseClient.received_document_events;
+  }
+
+  get received_document_event_attempts() {
+    return this.baseClient.received_document_event_attempts;
+  }
+
+  get document_reception_connections() {
+    return this.baseClient.document_reception_connections;
+  }
+
+  get document_reception_runs() {
+    return this.baseClient.document_reception_runs;
+  }
+
+  get fiscal_tax_credits() {
+    return this.baseClient.fiscal_tax_credits;
+  }
+
+  get fiscal_credit_applications() {
+    return this.baseClient.fiscal_credit_applications;
+  }
+
+  get fiscal_tax_payments() {
+    return this.baseClient.fiscal_tax_payments;
+  }
+
   // Inbound vendor support documents (super-admin step 5)
   get vendor_support_documents() {
     return this.baseClient.vendor_support_documents;

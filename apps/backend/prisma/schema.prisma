@@ -53,6 +53,14 @@ model users {
   ciiu_code                  String?                      @db.VarChar(10)
   main_store_id              Int?
   addresses                  addresses[]                  @relation("user_addresses")
+  received_documents_created received_documents[]          @relation("received_documents_created_by")
+  received_documents_reviewed received_documents[]         @relation("received_documents_reviewed_by")
+  received_document_links_created received_document_links[] @relation("received_document_links_created_by")
+  received_document_events_acted received_document_events[] @relation("received_document_events_actor")
+  document_reception_connections_created document_reception_connections[] @relation("document_reception_connections_created_by")
+  fiscal_tax_credits_created fiscal_tax_credits[]           @relation("fiscal_tax_credits_created_by")
+  fiscal_tax_payments_created fiscal_tax_payments[]         @relation("fiscal_tax_payments_created_by")
+  fiscal_credit_applications_created fiscal_credit_applications[] @relation("fiscal_credit_applications_created_by")
   api_keys                   api_keys[]
   audit_logs                 audit_logs[]
   order_events                order_events[]
@@ -656,6 +664,10 @@ model organizations {
   fiscal_close_sessions         fiscal_close_sessions[]
   fiscal_rule_sets              fiscal_rule_sets[]
   fiscal_operation_events       fiscal_operation_events[]
+  received_documents            received_documents[]
+  document_reception_connections document_reception_connections[]
+  fiscal_tax_credits             fiscal_tax_credits[]
+  fiscal_tax_payments            fiscal_tax_payments[]
   accounting_account_mappings   accounting_account_mappings[]
   inventory_cost_layers         inventory_cost_layers[]
   inventory_valuation_snapshots inventory_valuation_snapshots[]
@@ -923,6 +935,10 @@ model stores {
   tax_declaration_drafts      tax_declaration_drafts[]
   fiscal_close_sessions       fiscal_close_sessions[]
   fiscal_operation_events     fiscal_operation_events[]
+  received_documents          received_documents[]
+  document_reception_connections document_reception_connections[]
+  fiscal_tax_credits           fiscal_tax_credits[]
+  fiscal_tax_payments          fiscal_tax_payments[]
   accounting_account_mappings accounting_account_mappings[]
   quotations                  quotations[]
   quotation_profiles          quotation_profiles[]
@@ -1914,6 +1930,7 @@ model product_variants {
   stock_reservations            stock_reservations[]
   stock_transfer_items          stock_transfer_items[]
   supplier_products             supplier_products[]             @relation("product_variantsTosupplier_products")
+  received_document_items       received_document_items[]       @relation("received_document_item_variant")
   cart_items                    cart_items[]
   wishlist_items                wishlist_items[]
   invoice_items                 invoice_items[]
@@ -2082,6 +2099,7 @@ model products {
   online_purchase_domain         domain_settings?                 @relation("product_online_purchase_domain", fields: [online_purchase_domain_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   stores                         stores                           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   purchase_order_items           purchase_order_items[]
+  received_document_items        received_document_items[]       @relation("received_document_item_product")
   return_order_items             return_order_items[]
   reviews                        reviews[]
   sales_order_items              sales_order_items[]
@@ -2753,6 +2771,7 @@ model suppliers {
   // Plan Despacho Economía — FASE 3 paso 11. Contraparte de
   // dispatch_routes.external_carrier_supplier_id → suppliers.id.
   dispatch_routes_as_external_carrier dispatch_routes[]          @relation("dispatch_routes_external_carrier")
+  received_documents                  received_documents[]
 
   @@index([organization_id, name])
   @@index([organization_id, store_id, code])
@@ -2805,6 +2824,7 @@ model expenses {
   approved_by_user   users?              @relation("expenses_approved_by", fields: [approved_by_user_id], references: [id])
   refunded_by_user   users?              @relation("expenses_refunded_by", fields: [refunded_by_user_id], references: [id])
   expense_items      expense_items[]
+  received_document_links received_document_links[] @relation("received_document_link_expense")
 
   @@index([store_id, expense_date])
   @@index([organization_id, expense_date])
@@ -2975,6 +2995,7 @@ model purchase_orders {
   payment_schedules       purchase_order_payment_schedules[]
   receptions              purchase_order_receptions[]
   dispatch_notes          dispatch_notes[]                   @relation("dispatch_notes_purchase_order")
+  received_document_links received_document_links[]          @relation("received_document_link_purchase_order")
 
   @@unique([organization_id, order_number])
 }
@@ -3143,6 +3164,7 @@ model purchase_order_receptions {
   received_by       users?                           @relation("po_reception_receiver", fields: [received_by_user_id], references: [id])
   items             purchase_order_reception_items[]
   ap_reception_link ap_reception_links?
+  received_document_links received_document_links[] @relation("received_document_link_reception")
 
   @@index([purchase_order_id])
 }
@@ -6145,6 +6167,7 @@ model invoices {
   dian_document_events     dian_document_events[]
   invoice_delivery_events  invoice_delivery_events[]
   dispatch_notes           dispatch_notes[]
+  received_document_links  received_document_links[] @relation("received_document_link_invoice")
 
   @@unique([accounting_entity_id, invoice_type, invoice_number])
   @@index([profile_id, profile_version])
@@ -6543,6 +6566,10 @@ model accounting_entities {
   fiscal_close_sessions         fiscal_close_sessions[]
   fiscal_rule_sets              fiscal_rule_sets[]
   fiscal_operation_events       fiscal_operation_events[]
+  received_documents            received_documents[]
+  document_reception_connections document_reception_connections[]
+  fiscal_tax_credits             fiscal_tax_credits[]
+  fiscal_tax_payments            fiscal_tax_payments[]
 
   @@unique([organization_id, store_id, scope, fiscal_scope], map: "accounting_entities_org_store_scope_fiscal_scope_key")
   @@index([organization_id, scope], map: "accounting_entities_organization_scope_idx")
@@ -6669,6 +6696,9 @@ model accounting_entries {
   payroll_settlements         payroll_settlements[]
   vendor_documents_approved   vendor_support_documents[]    @relation("vendor_doc_approved_entry")
   vendor_documents_paid       vendor_support_documents[]    @relation("vendor_doc_paid_entry")
+  received_document_links     received_document_links[]      @relation("received_document_link_accounting_entry")
+  fiscal_tax_credits          fiscal_tax_credits[]           @relation("fiscal_tax_credits_accounting_entry")
+  fiscal_tax_payments         fiscal_tax_payments[]          @relation("fiscal_tax_payments_accounting_entry")
 
   @@index([organization_id, entry_date])
   @@index([organization_id, fiscal_period_id])
@@ -7334,6 +7364,8 @@ model fiscal_evidences {
   fiscal_transmission fiscal_transmissions?     @relation(fields: [fiscal_transmission_id], references: [id], onDelete: Restrict)
   fiscal_obligations  fiscal_obligations[]      @relation("fiscal_obligation_evidence")
   tax_declarations    tax_declaration_drafts[]  @relation("tax_declaration_evidence")
+  fiscal_tax_credits  fiscal_tax_credits[]       @relation("fiscal_tax_credits_evidence")
+  fiscal_tax_payments fiscal_tax_payments[]      @relation("fiscal_tax_payments_evidence")
   operation_events    fiscal_operation_events[]
 
   @@unique([fiscal_transmission_id, evidence_type, content_hash])
@@ -7355,6 +7387,10 @@ model fiscal_obligations {
   period_start         DateTime                      @db.Date
   period_end           DateTime                      @db.Date
   due_date             DateTime                      @db.Date
+  periodicity          String?                       @db.VarChar(30)
+  jurisdiction_key     String                        @default("CO-DIAN") @db.VarChar(100)
+  due_date_source      String?                       @db.VarChar(255)
+  due_date_verified    Boolean                       @default(false)
   estimated_amount     Decimal                       @default(0) @db.Decimal(15, 2)
   final_amount         Decimal                       @default(0) @db.Decimal(15, 2)
   currency             String                        @default("COP") @db.VarChar(10)
@@ -7382,6 +7418,7 @@ model fiscal_obligations {
   evidence           fiscal_evidences?         @relation("fiscal_obligation_evidence", fields: [evidence_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   declaration_drafts tax_declaration_drafts[]
   operation_events   fiscal_operation_events[]
+  fiscal_tax_payments fiscal_tax_payments[]
 
   @@unique([accounting_entity_id, type, period_year, period_month, period_quarter], map: "fiscal_obligations_entity_type_period_key")
   @@index([organization_id, accounting_entity_id, type, period_year], map: "fiscal_obligations_org_entity_type_year_idx")
@@ -7401,6 +7438,8 @@ model tax_declaration_drafts {
   period_year           Int
   period_month          Int?
   period_quarter        Int?
+  periodicity           String?                     @db.VarChar(30)
+  jurisdiction_key      String                      @default("CO-DIAN") @db.VarChar(100)
   period_start          DateTime                    @db.Date
   period_end            DateTime                    @db.Date
   currency              String                      @default("COP") @db.VarChar(10)
@@ -7411,6 +7450,9 @@ model tax_declaration_drafts {
   generated_tax_amount  Decimal                     @default(0) @db.Decimal(15, 2)
   deductible_tax_amount Decimal                     @default(0) @db.Decimal(15, 2)
   withholding_amount    Decimal                     @default(0) @db.Decimal(15, 2)
+  credit_amount         Decimal                     @default(0) @db.Decimal(15, 2)
+  advance_amount        Decimal                     @default(0) @db.Decimal(15, 2)
+  paid_amount           Decimal                     @default(0) @db.Decimal(15, 2)
   balance_due           Decimal                     @default(0) @db.Decimal(15, 2)
   balance_favor         Decimal                     @default(0) @db.Decimal(15, 2)
   penalties_amount      Decimal                     @default(0) @db.Decimal(15, 2)
@@ -7438,6 +7480,9 @@ model tax_declaration_drafts {
   approved_by_user  users?                    @relation("tax_declarations_approved_by", fields: [approved_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   created_by_user   users?                    @relation("tax_declarations_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   lines             tax_declaration_lines[]
+  fiscal_tax_credits fiscal_tax_credits[]
+  fiscal_credit_applications fiscal_credit_applications[]
+  fiscal_tax_payments fiscal_tax_payments[]
   operation_events  fiscal_operation_events[]
 
   @@index([accounting_entity_id, declaration_type, period_year], map: "tax_declaration_drafts_entity_type_year_idx")
@@ -9598,6 +9643,7 @@ model accounts_payable {
   ap_payments          ap_payments[]
   ap_payment_schedules ap_payment_schedules[]
   ap_reception_links   ap_reception_links[]
+  received_document_links received_document_links[] @relation("received_document_link_accounts_payable")
 
   @@index([organization_id, supplier_id])
   @@index([due_date, status])
@@ -11764,4 +11810,365 @@ model order_financial_line_taxes {
   line order_financial_lines @relation(fields: [line_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   @@index([store_id, line_id])
+}
+
+// Persistent supplier documents are kept separate from invoices issued by Vendix.
+model received_documents {
+  id                       Int       @id @default(autoincrement())
+  organization_id          Int
+  store_id                 Int?
+  accounting_entity_id     Int
+  supplier_id              Int?
+  document_type            String    @default("invoice") @db.VarChar(30)
+  source_channel           String    @default("manual") @db.VarChar(30)
+  idempotency_key          String    @db.VarChar(160)
+  issuer_tax_id            String?   @db.VarChar(50)
+  issuer_name              String?   @db.VarChar(255)
+  receiver_tax_id          String?   @db.VarChar(50)
+  receiver_name            String?   @db.VarChar(255)
+  invoice_number           String?   @db.VarChar(100)
+  document_key             String?   @db.VarChar(128)
+  source_hash              String?   @db.VarChar(64)
+  original_reference_key   String?   @db.VarChar(128)
+  original_reference_number String?  @db.VarChar(100)
+  issue_date               DateTime? @db.Date
+  due_date                 DateTime? @db.Date
+  currency                 String    @default("COP") @db.VarChar(10)
+  subtotal_amount          Decimal   @default(0) @db.Decimal(15, 2)
+  discount_amount          Decimal   @default(0) @db.Decimal(15, 2)
+  tax_amount               Decimal   @default(0) @db.Decimal(15, 2)
+  total_amount             Decimal   @default(0) @db.Decimal(15, 2)
+  processing_status        String    @default("ready") @db.VarChar(30)
+  validation_status        String    @default("pending") @db.VarChar(30)
+  review_status            String    @default("pending") @db.VarChar(30)
+  matching_status          String    @default("unlinked") @db.VarChar(30)
+  fiscal_status            String    @default("pending") @db.VarChar(30)
+  posting_status           String    @default("pending") @db.VarChar(30)
+  raw_payload              Json?
+  validation_summary       Json?
+  metadata                 Json?
+  version                  Int       @default(1)
+  created_by               Int?
+  reviewed_by              Int?
+  reviewed_at              DateTime? @db.Timestamp(6)
+  confirmed_goods_at       DateTime? @db.Timestamp(6)
+  accepted_at              DateTime? @db.Timestamp(6)
+  created_at               DateTime  @default(now()) @db.Timestamp(6)
+  updated_at               DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  organization      organizations       @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_docs_org_fkey")
+  store             stores?             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_docs_store_fkey")
+  accounting_entity accounting_entities @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_docs_entity_fkey")
+  supplier          suppliers?          @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_docs_supplier_fkey")
+  creator           users?              @relation("received_documents_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_docs_created_by_fkey")
+  reviewer          users?              @relation("received_documents_reviewed_by", fields: [reviewed_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_docs_reviewed_by_fkey")
+  files             received_document_files[]
+  items             received_document_items[]
+  taxes             received_document_taxes[]
+  links             received_document_links[]
+  events            received_document_events[]
+
+  @@unique([accounting_entity_id, idempotency_key], map: "received_docs_entity_idempotency_key")
+  @@index([organization_id, accounting_entity_id, issue_date], map: "received_docs_org_entity_date_idx")
+  @@index([organization_id, accounting_entity_id, processing_status], map: "received_docs_org_entity_processing_idx")
+  @@index([organization_id, accounting_entity_id, review_status], map: "received_docs_org_entity_review_idx")
+  @@index([organization_id, accounting_entity_id, fiscal_status], map: "received_docs_org_entity_fiscal_idx")
+  @@index([accounting_entity_id, document_key], map: "received_docs_entity_document_key_idx")
+  @@index([accounting_entity_id, source_hash], map: "received_docs_entity_source_hash_idx")
+}
+
+model received_document_files {
+  id          Int      @id @default(autoincrement())
+  document_id Int
+  file_key    String   @db.VarChar(500)
+  file_name   String   @db.VarChar(255)
+  mime_type   String   @db.VarChar(150)
+  file_size   Int
+  sha256      String   @db.VarChar(64)
+  role        String   @default("original") @db.VarChar(30)
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+
+  document received_documents @relation(fields: [document_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_files_doc_fkey")
+
+  @@unique([document_id, sha256], map: "received_doc_files_document_sha256_key")
+  @@index([document_id], map: "received_doc_files_document_idx")
+}
+
+model received_document_items {
+  id                 Int      @id @default(autoincrement())
+  document_id        Int
+  line_number        Int
+  external_code      String?  @db.VarChar(100)
+  description        String   @db.Text
+  quantity           Decimal  @db.Decimal(15, 4)
+  unit_code          String?  @db.VarChar(30)
+  unit_price         Decimal  @db.Decimal(15, 6)
+  discount_amount    Decimal  @default(0) @db.Decimal(15, 2)
+  net_amount         Decimal  @default(0) @db.Decimal(15, 2)
+  total_amount       Decimal  @default(0) @db.Decimal(15, 2)
+  product_id         Int?
+  product_variant_id Int?
+
+  document       received_documents @relation(fields: [document_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_items_doc_fkey")
+  product        products?          @relation("received_document_item_product", fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_items_product_fkey")
+  product_variant product_variants? @relation("received_document_item_variant", fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_items_variant_fkey")
+  taxes          received_document_taxes[]
+
+  @@unique([document_id, line_number], map: "received_doc_items_document_line_key")
+  @@index([document_id], map: "received_doc_items_document_idx")
+  @@index([product_id], map: "received_doc_items_product_idx")
+  @@index([product_variant_id], map: "received_doc_items_variant_idx")
+}
+
+model received_document_taxes {
+  id              Int           @id @default(autoincrement())
+  document_id     Int
+  item_id         Int?
+  tax_type        tax_type_enum?
+  scheme_code     String?       @db.VarChar(30)
+  tax_name        String        @db.VarChar(100)
+  rate            Decimal?      @db.Decimal(9, 5)
+  base_amount     Decimal       @default(0) @db.Decimal(15, 2)
+  amount          Decimal       @default(0) @db.Decimal(15, 2)
+  eligible_amount Decimal       @default(0) @db.Decimal(15, 2)
+  treatment       String        @default("pending") @db.VarChar(30)
+
+  document received_documents      @relation(fields: [document_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_taxes_doc_fkey")
+  item     received_document_items? @relation(fields: [item_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_taxes_item_fkey")
+
+  @@index([document_id], map: "received_doc_taxes_document_idx")
+  @@index([item_id], map: "received_doc_taxes_item_idx")
+  @@index([document_id, tax_type], map: "received_doc_taxes_document_type_idx")
+}
+
+model received_document_links {
+  id                   Int      @id @default(autoincrement())
+  document_id          Int
+  purchase_order_id    Int?
+  reception_id         Int?
+  expense_id            Int?
+  invoice_id            Int?
+  accounts_payable_id   Int?
+  accounting_entry_id   Int?
+  allocation_amount     Decimal  @default(0) @db.Decimal(15, 2)
+  metadata              Json?
+  created_by            Int?
+  created_at            DateTime @default(now()) @db.Timestamp(6)
+
+  document         received_documents       @relation(fields: [document_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_links_doc_fkey")
+  purchase_order   purchase_orders?         @relation("received_document_link_purchase_order", fields: [purchase_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_links_po_fkey")
+  reception        purchase_order_receptions? @relation("received_document_link_reception", fields: [reception_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_links_reception_fkey")
+  expense          expenses?                 @relation("received_document_link_expense", fields: [expense_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_links_expense_fkey")
+  invoice          invoices?                 @relation("received_document_link_invoice", fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_links_invoice_fkey")
+  accounts_payable accounts_payable?         @relation("received_document_link_accounts_payable", fields: [accounts_payable_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_links_ap_fkey")
+  accounting_entry accounting_entries?       @relation("received_document_link_accounting_entry", fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_links_entry_fkey")
+  creator          users?                    @relation("received_document_links_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_links_user_fkey")
+
+  @@index([document_id], map: "received_doc_links_document_idx")
+  @@index([purchase_order_id], map: "received_doc_links_po_idx")
+  @@index([reception_id], map: "received_doc_links_reception_idx")
+  @@index([expense_id], map: "received_doc_links_expense_idx")
+  @@index([invoice_id], map: "received_doc_links_invoice_idx")
+  @@index([accounts_payable_id], map: "received_doc_links_ap_idx")
+  @@index([accounting_entry_id], map: "received_doc_links_entry_idx")
+  @@unique([document_id, purchase_order_id], map: "received_doc_links_doc_po_key")
+  @@unique([document_id, reception_id], map: "received_doc_links_doc_reception_key")
+  @@unique([document_id, expense_id], map: "received_doc_links_doc_expense_key")
+  @@unique([document_id, invoice_id], map: "received_doc_links_doc_invoice_key")
+  @@unique([document_id, accounts_payable_id], map: "received_doc_links_doc_ap_key")
+  @@unique([document_id, accounting_entry_id], map: "received_doc_links_doc_entry_key")
+}
+
+model received_document_events {
+  id               Int       @id @default(autoincrement())
+  document_id      Int
+  event_type       String    @db.VarChar(40)
+  event_code       String?   @db.VarChar(3)
+  idempotency_key  String    @db.VarChar(160)
+  status           String    @default("pending") @db.VarChar(30)
+  event_number     String?   @db.VarChar(100)
+  cude             String?   @db.VarChar(100)
+  request_xml      String?   @db.Text
+  response_xml     String?   @db.Text
+  result           Json?
+  actor_id         Int?
+  event_date       DateTime? @db.Timestamp(6)
+  confirmed_at     DateTime? @db.Timestamp(6)
+  attempt_count    Int       @default(0)
+  created_at       DateTime  @default(now()) @db.Timestamp(6)
+  updated_at       DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  document received_documents @relation(fields: [document_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_events_doc_fkey")
+  actor    users?             @relation("received_document_events_actor", fields: [actor_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_events_actor_fkey")
+  attempts received_document_event_attempts[]
+
+  @@unique([document_id, idempotency_key], map: "received_doc_events_doc_idempotency_key")
+  @@index([document_id, status], map: "received_doc_events_document_status_idx")
+}
+
+model received_document_event_attempts {
+  id            Int      @id @default(autoincrement())
+  event_id      Int
+  attempt_number Int
+  status        String   @db.VarChar(30)
+  request_xml   String?  @db.Text
+  response_xml  String?  @db.Text
+  result        Json?
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+
+  event received_document_events @relation(fields: [event_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "received_doc_attempts_event_fkey")
+
+  @@unique([event_id, attempt_number], map: "received_doc_event_attempt_event_number_key")
+  @@index([event_id], map: "received_doc_event_attempt_event_idx")
+}
+
+model document_reception_connections {
+  id                    Int       @id @default(autoincrement())
+  organization_id       Int
+  store_id              Int?
+  accounting_entity_id  Int
+  name                  String    @db.VarChar(255)
+  connection_type       String    @db.VarChar(30)
+  enabled               Boolean   @default(false)
+  endpoint              String?   @db.VarChar(2048)
+  encrypted_secret      String?   @db.Text
+  settings              Json?
+  cursor                String?   @db.Text
+  poll_interval_minutes Int       @default(15)
+  next_sync_at          DateTime? @db.Timestamp(6)
+  last_synced_at        DateTime? @db.Timestamp(6)
+  last_error            String?   @db.Text
+  created_by            Int?
+  created_at            DateTime  @default(now()) @db.Timestamp(6)
+  updated_at            DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_recv_conn_org_fkey")
+  store             stores?              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_recv_conn_store_fkey")
+  accounting_entity accounting_entities  @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_recv_conn_entity_fkey")
+  creator           users?               @relation("document_reception_connections_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_recv_conn_user_fkey")
+  runs              document_reception_runs[]
+
+  @@index([accounting_entity_id], map: "doc_reception_connections_entity_idx")
+  @@index([enabled, next_sync_at], map: "doc_reception_connections_enabled_next_idx")
+}
+
+model document_reception_runs {
+  id               Int       @id @default(autoincrement())
+  connection_id    Int
+  status           String    @default("pending") @db.VarChar(30)
+  trigger          String    @default("manual") @db.VarChar(30)
+  idempotency_key  String    @db.VarChar(160)
+  received_count  Int       @default(0)
+  duplicate_count Int       @default(0)
+  error_count     Int       @default(0)
+  cursor_before   String?   @db.Text
+  cursor_after    String?   @db.Text
+  summary         Json?
+  started_at      DateTime? @db.Timestamp(6)
+  finished_at     DateTime? @db.Timestamp(6)
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+  updated_at      DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  connection document_reception_connections @relation(fields: [connection_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "doc_recv_runs_conn_fkey")
+
+  @@unique([connection_id, idempotency_key], map: "doc_reception_runs_conn_idempotency_key")
+  @@index([connection_id, status], map: "doc_reception_runs_connection_status_idx")
+}
+
+/// Origin declaration/tax-family uniqueness uses a partial unique index kept
+/// in the migration because Prisma cannot express its IS NOT NULL predicate.
+model fiscal_tax_credits {
+  id                    Int                      @id @default(autoincrement())
+  organization_id       Int
+  store_id              Int?
+  accounting_entity_id  Int
+  tax_type              tax_declaration_type_enum
+  jurisdiction_key      String                   @default("CO-DIAN") @db.VarChar(100)
+  source_kind           String                   @db.VarChar(30)
+  amount                Decimal                  @db.Decimal(15, 2)
+  currency              String                   @default("COP") @db.VarChar(10)
+  effective_date        DateTime                 @db.Date
+  source_declaration_id Int?
+  evidence_id           Int?
+  accounting_entry_id   Int?
+  reference             String?                  @db.VarChar(160)
+  status                String                   @default("draft") @db.VarChar(30)
+  metadata              Json?
+  created_by            Int?
+  created_at            DateTime                 @default(now()) @db.Timestamp(6)
+  updated_at            DateTime                 @default(now()) @updatedAt @db.Timestamp(6)
+
+  organization       organizations          @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_credits_org_fkey")
+  store              stores?                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_credits_store_fkey")
+  accounting_entity  accounting_entities   @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_credits_entity_fkey")
+  source_declaration tax_declaration_drafts? @relation(fields: [source_declaration_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_credits_decl_fkey")
+  evidence           fiscal_evidences?      @relation("fiscal_tax_credits_evidence", fields: [evidence_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_credits_evidence_fkey")
+  accounting_entry   accounting_entries?   @relation("fiscal_tax_credits_accounting_entry", fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_credits_entry_fkey")
+  creator            users?                 @relation("fiscal_tax_credits_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_credits_user_fkey")
+  applications       fiscal_credit_applications[]
+
+  @@index([accounting_entity_id, tax_type, status, effective_date], map: "fiscal_tax_credits_entity_type_status_date_idx")
+  @@index([source_declaration_id], map: "fiscal_tax_credits_source_declaration_idx")
+  @@index([evidence_id], map: "fiscal_tax_credits_evidence_idx")
+  @@index([accounting_entry_id], map: "fiscal_tax_credits_entry_idx")
+}
+
+model fiscal_credit_applications {
+  id              Int      @id @default(autoincrement())
+  credit_id       Int
+  declaration_id  Int
+  amount          Decimal  @db.Decimal(15, 2)
+  status          String   @default("applied") @db.VarChar(30)
+  reversed_at     DateTime? @db.Timestamp(6)
+  created_by      Int?
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+
+  credit       fiscal_tax_credits     @relation(fields: [credit_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_credit_apps_credit_fkey")
+  declaration  tax_declaration_drafts @relation(fields: [declaration_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_credit_apps_decl_fkey")
+  creator      users?                 @relation("fiscal_credit_applications_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_credit_apps_user_fkey")
+
+  @@unique([credit_id, declaration_id], map: "fiscal_credit_applications_credit_decl_key")
+  @@index([declaration_id, status], map: "fiscal_credit_applications_decl_status_idx")
+}
+
+model fiscal_tax_payments {
+  id                   Int                      @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int?
+  accounting_entity_id Int
+  obligation_id        Int
+  declaration_id       Int?
+  tax_type             tax_declaration_type_enum
+  amount               Decimal                  @db.Decimal(15, 2)
+  currency              String                   @default("COP") @db.VarChar(10)
+  payment_date          DateTime                 @db.Date
+  method                String                   @db.VarChar(50)
+  reference             String?                  @db.VarChar(160)
+  evidence_id           Int?
+  accounting_entry_id   Int?
+  idempotency_key       String                   @db.VarChar(160)
+  status                String                   @default("posted") @db.VarChar(30)
+  reversal_of_id        Int?
+  notes                 String?                  @db.Text
+  created_by            Int?
+  created_at            DateTime                 @default(now()) @db.Timestamp(6)
+
+  organization       organizations         @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_payments_org_fkey")
+  store              stores?               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_payments_store_fkey")
+  accounting_entity  accounting_entities  @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_payments_entity_fkey")
+  obligation         fiscal_obligations   @relation(fields: [obligation_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_payments_obligation_fkey")
+  declaration        tax_declaration_drafts? @relation(fields: [declaration_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_payments_decl_fkey")
+  evidence           fiscal_evidences?    @relation("fiscal_tax_payments_evidence", fields: [evidence_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_payments_evidence_fkey")
+  accounting_entry   accounting_entries?  @relation("fiscal_tax_payments_accounting_entry", fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_payments_entry_fkey")
+  creator            users?                @relation("fiscal_tax_payments_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_payments_user_fkey")
+  reversed_payment   fiscal_tax_payments? @relation("fiscal_tax_payment_reversal", fields: [reversal_of_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fiscal_tax_payments_reversal_fkey")
+  reversals          fiscal_tax_payments[] @relation("fiscal_tax_payment_reversal")
+
+  @@unique([accounting_entity_id, idempotency_key], map: "fiscal_tax_payments_entity_idempotency_key")
+  @@index([obligation_id], map: "fiscal_tax_payments_obligation_idx")
+  @@index([declaration_id], map: "fiscal_tax_payments_declaration_idx")
+  @@index([accounting_entity_id, tax_type, payment_date], map: "fiscal_tax_payments_entity_type_date_idx")
+  @@index([evidence_id], map: "fiscal_tax_payments_evidence_idx")
+  @@index([accounting_entry_id], map: "fiscal_tax_payments_entry_idx")
+  @@index([reversal_of_id], map: "fiscal_tax_payments_reversal_idx")
 }
