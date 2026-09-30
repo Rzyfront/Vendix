@@ -16,6 +16,7 @@ import { tax_type_enum } from '@prisma/client';
 import {
   IsValidFreightAndTax,
   PURCHASE_ORDER_ITEMS_MAX,
+  PurchaseOrderItemTaxDto,
   SHIPPING_COST_ALLOCATIONS,
   ShippingCostAllocation,
   toOptionalBoolean,
@@ -48,8 +49,10 @@ export class CostPreviewItemDto {
    * from this using `tax_rate` + the effective `prices_include_tax` mode, so
    * the preview mirrors what `create`/`receive` will persist.
    */
+  // QUI-855 — piso 0, no 0.01: una línea de BONIFICACIÓN (mercancía que el
+  // proveedor regala) entra con precio 0 y la vista previa debe simularla.
   @IsNumber()
-  @Min(0.0001)
+  @Min(0)
   unit_cost: number;
 
   /**
@@ -90,6 +93,14 @@ export class CostPreviewItemDto {
   @IsBoolean()
   @IsOptional()
   prices_include_tax?: boolean;
+
+  /** QUI-855 — multi-impuesto por línea. */
+  @IsArray()
+  @ArrayMaxSize(4)
+  @ValidateNested({ each: true })
+  @Type(() => PurchaseOrderItemTaxDto)
+  @IsOptional()
+  taxes?: PurchaseOrderItemTaxDto[];
 }
 
 export class CostPreviewDto {

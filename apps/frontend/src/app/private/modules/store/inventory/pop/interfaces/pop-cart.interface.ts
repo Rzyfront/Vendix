@@ -4,6 +4,19 @@
  */
 
 import { WithholdingLine } from '../../../withholding-tax/interfaces/withholding.interface';
+import type {
+  PurchaseLineTaxInput as KernelPurchaseLineTaxInput,
+  PurchaseTaxBaseMode,
+  PurchaseTaxCalcMode,
+  PurchaseTaxType,
+} from '@money-kernel/purchase-line-taxes';
+
+export type {
+  KernelPurchaseLineTaxInput,
+  PurchaseTaxBaseMode,
+  PurchaseTaxCalcMode,
+  PurchaseTaxType,
+};
 
 // ============================================================================
 // Base Entity Interfaces (defined first to avoid forward reference issues)
@@ -170,6 +183,49 @@ export interface PreBulkData {
 /**
  * Cart item for purchase order
  */
+/**
+ * QUI-855 — un impuesto dentro de una línea multi-impuesto del carrito.
+ * Espejo del `PurchaseOrderItemTaxDto` del backend (contrato del request). Los
+ * tipos de tipo/modo salen del kernel `purchase-line-taxes`; la única
+ * diferencia con `KernelPurchaseLineTaxInput` es el nombre de la tasa
+ * (`tax_rate` en el wire, `rate` en el kernel).
+ *
+ * `is_inclusive: undefined` hereda el modo efectivo de la línea. INC/ICUI/IBUA
+ * siempre capitalizan al costo (el kernel lo fuerza); `add_to_cost` sólo es
+ * editable para IVA.
+ */
+export interface PopLineTax {
+  tax_type: PurchaseTaxType;
+  tax_rate_id?: number;
+  tax_name?: string;
+  /** PORCENTAJE (19 = 19%), nunca fracción. Sin valor en IBUA (monto fijo). */
+  tax_rate?: number | null;
+  calc_mode?: PurchaseTaxCalcMode;
+  /** Pesos por unidad (calc_mode = fixed_per_unit, IBUA). */
+  fixed_amount_per_unit?: number | null;
+  base_mode?: PurchaseTaxBaseMode;
+  sequence?: number;
+  is_inclusive?: boolean;
+  add_to_cost?: boolean;
+  /** Monto de línea impreso por el proveedor; reemplaza el calculado. */
+  amount_override?: number | null;
+}
+
+/**
+ * QUI-855 — factura escaneada que se adjunta a la OC. `key` es la KEY de S3
+ * devuelta por `POST purchase-orders/scan` (nunca una URL firmada). Los
+ * `supplier_invoice_*` son los datos de cabecera del escaneo, ya revisados.
+ */
+export interface PopScanAttachment {
+  key: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  supplier_invoice_number?: string;
+  supplier_invoice_date?: string;
+  supplier_invoice_amount?: number;
+}
+
 export interface PopCartItem {
   id: string;
   product: PopProduct;
@@ -202,13 +258,33 @@ export interface PopCartItem {
   /**
    * IVA cycle (F1): tax rate captured MANUALLY for this line, as a
    * percentage (e.g. 19 for standard Colombian IVA, 0 for exempt).
+   * `null` ⇒ la tasa nunca se capturó (ya no se siembra un 19 silencioso):
+   * el carrito marca `tax_needs_review` y el impuesto vale 0 hasta confirmarla.
    */
-  tax_rate: number;
+  tax_rate: number | null;
+  /**
+   * La tasa vino vacía (sin catálogo ni escáner) y el operador aún no la
+   * confirmó. El componente muestra «Confirma el impuesto».
+   */
+  tax_needs_review?: boolean;
+  /**
+   * El kernel rechazó la combinación de impuestos de la línea (la vista previa
+   * no puede calcularla). Mensaje para el operador; bloquea el envío igual
+   * que `tax_needs_review`. Lo escribe quien detecte el fallo del kernel.
+   */
+  tax_error?: string;
   /**
    * IVA cycle (F1): tax classification for this line. Defaults to 'iva'.
    * Passed through to the backend as-is (backend is the source of truth).
    */
   tax_type?: string;
+  /**
+   * QUI-855 — N impuestos de esta línea. Cuando tiene elementos REEMPLAZA al
+   * par legacy `tax_rate`/`tax_type` en el backend (`deriveLineTaxes`); la
+   * fila legacy sigue espejando el PRIMER impuesto para lectores viejos.
+   * `add_to_cost: true` capitaliza ese impuesto al costo (estilo IBUA/ICUI).
+   */
+  taxes?: PopLineTax[];
   /**
    * IVA cycle (F1): per-line override of the header `prices_include_tax`
    * mode (mixed invoices). When set, it inverts/overrides the header mode
@@ -279,6 +355,26 @@ export interface PopCartSummary {
   withholding_amount?: number;
   /** Resolved withholding lines for display/breakdown (preview, informative). */
   withholding_lines?: WithholdingLine[];
+  /**
+   * QUI-855 — desglose por impuesto (tipo + tasa + al-costo) para el resumen.
+   * Suma de `tax_amount` por grupo = `tax_amount`. Vacío ⇒ sin impuesto.
+   */
+  tax_groups?: PopTaxGroup[];
+}
+
+/**
+ * QUI-855 — un grupo del desglose de impuestos del resumen del carrito.
+ */
+export interface PopTaxGroup {
+  tax_type: PurchaseTaxType;
+  tax_rate: number;
+  taxable_amount: number;
+  tax_amount: number;
+  /** IBUA: monto fijo por unidad en vez de porcentaje. */
+  calc_mode?: PurchaseTaxCalcMode;
+  fixed_amount_per_unit?: number | null;
+  /** Ese impuesto capitaliza al costo (IBUA/ICUI) en vez de ser descontable. */
+  add_to_cost: boolean;
 }
 
 /**
@@ -303,6 +399,12 @@ export interface PopCartState {
    * header). El escáner de facturas lo enciende al detectar IVA.
    */
   has_vat: boolean;
+  /**
+   * QUI-855 — factura escaneada adjunta (una por OC; un re-escaneo la
+   * reemplaza). Vive en el estado que se persiste en localStorage y viaja en el
+   * payload de creación de la OC.
+   */
+  scan_attachment?: PopScanAttachment | null;
   supplierId: number | null;
   locationId: number | null;
   orderDate: Date;
@@ -395,6 +497,13 @@ export interface AddToPopCartRequest {
   tax_rate?: number;
   tax_type?: string;
   prices_include_tax?: boolean;
+  /**
+   * QUI-855 — N impuestos de la línea (el escáner los emite cuando la factura
+   * trae más de un impuesto). Último escaneo gana, igual que `tax_rate`.
+   */
+  taxes?: PopLineTax[];
+  /** Fuerza la revision del impuesto (p.ej. linea del escaneo que no cuadra). */
+  tax_needs_review?: boolean;
 }
 
 /**

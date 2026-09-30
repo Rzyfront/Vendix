@@ -7,6 +7,7 @@ import {
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import {
   CreatePurchaseOrderDto,
+  ScanAttachmentDto,
   ShippingCostAllocation,
   validateFreightAndTaxHeader,
 } from './dto/create-purchase-order.dto';
@@ -15,6 +16,8 @@ import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { isSafeS3Key } from '@common/helpers/s3-url.helper';
 import {
   purchase_order_status_enum,
   tax_type_enum,
@@ -38,7 +41,14 @@ import {
 } from '@common/utils/store-timezone.util';
 import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
-import { differsByAtLeastCents } from '@common/money-kernel';
+import {
+  differsByAtLeastCents,
+  resolvePurchaseLineTaxes,
+  resolvePurchaseLineDiscount,
+  type PurchaseLineTaxInput,
+  type PurchaseTaxType,
+  type ResolvedPurchaseLine,
+} from '@common/money-kernel';
 import { toTitleCase } from '@common/utils/format.util';
 import { generateSlug } from '@common/utils/slug.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
@@ -76,6 +86,9 @@ import {
  * etiqueta: la contabilidad deriva la cuenta de contrapartida por mapping key,
  * no por este texto.
  */
+/** QUI-855 — tipos de impuesto admitidos en líneas de compra (kernel). */
+const PURCHASE_TAX_TYPES: string[] = ['iva', 'inc', 'icui', 'ibua'];
+
 const PO_ADVANCE_SOURCE = 'po_advance';
 const PO_ADVANCE_PAYMENT_METHOD = 'advance';
 
@@ -128,6 +141,9 @@ export class PurchaseOrdersService {
     cancelled: [],
   };
 
+  /** Stateless: construye keys de S3 por tienda (no requiere DI). */
+  private readonly s3Paths = new S3PathHelper();
+
   constructor(
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
@@ -150,101 +166,248 @@ export class PurchaseOrdersService {
   ) {}
 
   /**
-   * F1 IVA lifecycle — single source of truth for the net/gross split of a
-   * purchase line. The frontend mirrors this exact formula for its live
-   * preview, so it MUST stay byte-for-byte equivalent to the clavado contract:
+   * QUI-855 — ÚNICO adaptador entre una línea de compra (create / update /
+   * cost-preview) y el kernel puro `resolvePurchaseLineTaxes`. Reemplaza a los
+   * antiguos deriveLine*, cuya matemática por impuesto
+   * (extraer cada incluido sobre el mismo bruto) era incorrecta con más de un
+   * impuesto incluido.
    *
-   *   effective_include = item.prices_include_tax ?? header.prices_include_tax
-   *   r = tax_rate / 100
-   *   include  → unit_price_net = gross / (1 + r); tax/u = gross - net
-   *   exclude  → unit_price_net = gross;           tax/u = gross * r
+   * Contrato de descuento QUI-661 (idéntico al histórico): `discount_amount`
+   * gana sobre `discount_percentage`; se le suma la porción PRORRATEADA del
+   * descuento de cabecera; el total se piso a 0 y se topa en el bruto de la
+   * línea (un descuento mayor que la línea es un error de datos y un costo
+   * negativo envenenaría la capa FIFO). El kernel recibe el descuento TOTAL en
+   * pesos, ya resuelto.
    *
-   * `gross` is read from `unit_price` (create) or `unit_cost` (cost preview),
-   * whichever the caller provides. When there is no tax rate the line is
-   * tax-free: net = gross, tax = 0 (preserves legacy behaviour exactly).
+   * Si `item.taxes` viene vacío/ausente se normaliza el par legacy
+   * `tax_rate`/`tax_type` a UNA entrada (tasa 0/null ⇒ línea sin impuestos), de
+   * modo que una línea legacy deriva cifras equivalentes a las históricas, no
+   * idénticas: con cantidades enteras el neto y el impuesto de línea coinciden;
+   * el `unit_cost` puede diferir en menos de 0,001 (el kernel redondea a
+   * centavo el bruto de la línea; p. ej. 1000 × 3 al 19 % incluido:
+   * 840,3361 → 840,3367); con cantidades fraccionarias, neto e impuesto
+   * pueden variar ±0,01.
    *
-   * @returns unit_price_net (per unit, → persisted `unit_cost`),
-   *          tax_amount_per_unit (per unit),
-   *          tax_amount (line total = per-unit × quantity, → persisted),
-   *          effective_include (the resolved mode for the line).
+   * `unit_price_net` (= net_unit, → `unit_cost`), `tax_amount` (= tax_total),
+   * `taxes` (filas resueltas por el kernel, en orden de cálculo).
    */
-  private deriveLineTax(
+  private resolveLineTaxes(
     item: {
       unit_price?: number | null;
       unit_cost?: number | null;
       quantity?: number | null;
       tax_rate?: number | null;
+      tax_type?: string | null;
       prices_include_tax?: boolean | null;
       discount_percentage?: number | null;
       discount_amount?: number | null;
+      taxes?: Array<{
+        tax_rate?: number | null;
+        tax_type?: string | null;
+        is_inclusive?: boolean | null;
+        add_to_cost?: boolean | null;
+        tax_rate_id?: number | null;
+        tax_name?: string | null;
+        calc_mode?: string | null;
+        fixed_amount_per_unit?: number | null;
+        base_mode?: string | null;
+        sequence?: number | null;
+        amount_override?: number | null;
+      }> | null;
     },
     header: { prices_include_tax?: boolean | null },
-    /**
-     * QUI-661 — share of the HEADER discount that belongs to this line, already
-     * prorated by `prorateHeaderDiscount`. Kept as an explicit argument instead
-     * of a field on `item` so a caller can never accidentally double-count it
-     * by also leaving it inside `discount_amount`.
-     */
     proratedHeaderDiscount = 0,
-  ): {
-    unit_price_net: number;
-    tax_amount_per_unit: number;
-    tax_amount: number;
-    effective_include: boolean;
-    /** Total commercial discount applied to the line (own + prorated header). */
-    discount_total: number;
-  } {
+  ) {
     const gross = Number(item.unit_price ?? item.unit_cost ?? 0);
     const quantity = Number(item.quantity ?? 0);
-    const r = Number(item.tax_rate ?? 0) / 100;
     const effective_include =
       item.prices_include_tax ?? header.prices_include_tax ?? false;
 
-    // QUI-661 — the commercial discount is subtracted from the GROSS unit price
-    // BEFORE the VAT split. In Colombia an unconditional commercial discount
-    // reduces the taxable base, so deriving the VAT from the undiscounted price
-    // inflates the deductible VAT that reaches the declaration.
-    //
-    // `discount_amount` wins over `discount_percentage`: the user may type
-    // either, but the resolved money figure is what gets persisted and what the
-    // accounting reads. Re-deriving from the percentage at read time would give
-    // a different number the day the price changes.
-    const ownDiscount =
-      item.discount_amount != null && Number(item.discount_amount) > 0
-        ? Number(item.discount_amount)
-        : gross * quantity * (Number(item.discount_percentage ?? 0) / 100);
-    const discount_total = Math.max(
-      0,
-      ownDiscount + Number(proratedHeaderDiscount || 0),
-    );
-    // Never let a discount drive the line negative: a rebate larger than the
-    // line is a data error, and a negative cost would poison the FIFO layer.
-    const discountPerUnit =
-      quantity > 0 ? Math.min(discount_total / quantity, gross) : 0;
-    const grossAfterDiscount = gross - discountPerUnit;
+    if (
+      !Number.isFinite(quantity) ||
+      quantity < 0 ||
+      !Number.isFinite(gross) ||
+      gross < 0
+    ) {
+      throw new BadRequestException(
+        'Línea de compra inválida: cantidad y precio deben ser válidos.',
+      );
+    }
+    // Cantidad 0 (sólo alcanzable desde la vista previa, que simula la línea
+    // vacía): los importes por unidad se resuelven con cantidad 1 y los totales
+    // de línea quedan en 0, como hacía la derivación histórica.
+    const zeroQty = quantity === 0;
+    const calcQty = zeroQty ? 1 : quantity;
 
-    let unit_price_net: number;
-    let tax_amount_per_unit: number;
-    if (!(r > 0)) {
-      // No (or invalid) tax rate → line is tax-free, cost stays as entered.
-      unit_price_net = grossAfterDiscount;
-      tax_amount_per_unit = 0;
-    } else if (effective_include) {
-      // Price already includes IVA: strip it out to get the net cost.
-      unit_price_net = grossAfterDiscount / (1 + r);
-      tax_amount_per_unit = grossAfterDiscount - unit_price_net;
-    } else {
-      // IVA added on top: entered price is already net.
-      unit_price_net = grossAfterDiscount;
-      tax_amount_per_unit = grossAfterDiscount * r;
+    // QUI-661/855 — descuento total de la línea (propio + porción de cabecera),
+    // resuelto por el kernel compartido (paridad al centavo con el frontend).
+    const { discount_total, kernel_discount: kernelDiscount } =
+      resolvePurchaseLineDiscount({
+        unit_price: gross,
+        quantity,
+        discount_amount: item.discount_amount,
+        discount_percentage: item.discount_percentage,
+        prorated_header_discount: proratedHeaderDiscount,
+      });
+
+    // Entradas de impuesto: `taxes[]` gana; si no, el par legacy.
+    const kernelTaxes: PurchaseLineTaxInput[] = [];
+    const rawTaxes = item.taxes && item.taxes.length > 0 ? item.taxes : null;
+    if (rawTaxes) {
+      const seen = new Set<string>();
+      for (const t of rawTaxes) {
+        const taxType = (t.tax_type ?? 'iva') as string;
+        if (!PURCHASE_TAX_TYPES.includes(taxType)) {
+          throw new BadRequestException(
+            `Tipo de impuesto no soportado en compras: ${taxType}.`,
+          );
+        }
+        if (seen.has(taxType)) {
+          throw new BadRequestException(
+            `Una línea de compra admite un solo impuesto de tipo ${taxType}.`,
+          );
+        }
+        seen.add(taxType);
+        const calcMode = (t.calc_mode ??
+          (taxType === 'ibua' ? 'fixed_per_unit' : 'percent')) as
+          | 'percent'
+          | 'fixed_per_unit';
+        if (calcMode === 'percent' && t.tax_rate == null) {
+          throw new BadRequestException(
+            `El impuesto ${taxType.toUpperCase()} requiere tax_rate cuando el cálculo es porcentual.`,
+          );
+        }
+        if (
+          calcMode === 'fixed_per_unit' &&
+          t.fixed_amount_per_unit == null &&
+          t.amount_override == null
+        ) {
+          throw new BadRequestException(
+            `El impuesto ${taxType.toUpperCase()} de monto fijo requiere fixed_amount_per_unit.`,
+          );
+        }
+        kernelTaxes.push({
+          tax_type: taxType as PurchaseTaxType,
+          tax_rate_id: t.tax_rate_id ?? null,
+          tax_name: t.tax_name ?? null,
+          calc_mode: calcMode,
+          rate: t.tax_rate ?? null,
+          fixed_amount_per_unit: t.fixed_amount_per_unit ?? null,
+          base_mode: (t.base_mode ?? undefined) as
+            | 'net'
+            | 'net_plus_prior'
+            | undefined,
+          sequence: t.sequence ?? null,
+          is_inclusive: t.is_inclusive ?? null,
+          add_to_cost: t.add_to_cost ?? null,
+          amount_override: t.amount_override ?? null,
+        });
+      }
+    } else if (Number(item.tax_rate ?? 0) > 0) {
+      // Rama legacy: un tipo fuera de iva/inc/icui/ibua (p. ej. ica,
+      // withholding) se trata como IVA, como antes. En `taxes[]` explícito
+      // sigue siendo 400.
+      const rawLegacyType = (item.tax_type ?? 'iva') as string;
+      const legacyType = PURCHASE_TAX_TYPES.includes(rawLegacyType)
+        ? rawLegacyType
+        : 'iva';
+      kernelTaxes.push({
+        tax_type: legacyType as PurchaseTaxType,
+        calc_mode: 'percent',
+        rate: Number(item.tax_rate),
+      });
     }
 
+    let resolved: ResolvedPurchaseLine;
+    try {
+      resolved = resolvePurchaseLineTaxes({
+        unit_price: gross,
+        quantity: calcQty,
+        discount_amount: kernelDiscount,
+        prices_include_tax: effective_include,
+        taxes: kernelTaxes,
+      });
+    } catch (error) {
+      throw new BadRequestException(
+        'Línea de compra inválida: los impuestos incluidos superan el valor de la línea.',
+      );
+    }
+
+    const overrideByType = new Map<string, number>();
+    for (const t of kernelTaxes) {
+      if (t.amount_override != null) {
+        overrideByType.set(t.tax_type, t.amount_override);
+      }
+    }
+    const taxes = resolved.taxes.map((t) => ({
+      ...t,
+      amount_override: overrideByType.get(t.tax_type) ?? null,
+    }));
+
+    // Columnas legacy de la línea: se derivan de la fila IVA; sin IVA pero con
+    // otros impuestos, tipo del primero EN ORDEN DE CÁLCULO y tarifa 0 (no hay
+    // tarifa IVA). Nunca `taxes[0]` del arreglo de entrada.
+    let legacy_tax_type: tax_type_enum;
+    let legacy_tax_rate: number | null;
+    if (resolved.iva) {
+      legacy_tax_type = tax_type_enum.iva;
+      legacy_tax_rate = Number(resolved.iva.rate ?? 0);
+    } else if (taxes.length > 0) {
+      legacy_tax_type = taxes[0].tax_type as tax_type_enum;
+      legacy_tax_rate = 0;
+    } else {
+      legacy_tax_type =
+        (item.tax_type as tax_type_enum | undefined) ?? tax_type_enum.iva;
+      legacy_tax_rate = item.tax_rate ?? null;
+    }
+
+    const totalsFactor = zeroQty ? 0 : 1;
     return {
-      unit_price_net,
-      tax_amount_per_unit,
-      tax_amount: tax_amount_per_unit * quantity,
+      unit_price_net: resolved.net_unit,
+      net_total: resolved.net_total * totalsFactor,
+      tax_amount: resolved.tax_total * totalsFactor,
+      tax_amount_per_unit: resolved.tax_total / calcQty,
       effective_include,
-      discount_total: discountPerUnit * quantity,
+      discount_total,
+      taxes,
+      capitalized_total: resolved.capitalized_tax_total * totalsFactor,
+      deductible_total: resolved.non_capitalized_tax_total * totalsFactor,
+      capitalized_per_unit: resolved.capitalized_tax_total / calcQty,
+      iva: resolved.iva,
+      legacy_tax_type,
+      legacy_tax_rate,
+    };
+  }
+
+  /**
+   * QUI-855 — filas hijas `purchase_order_item_taxes` (create anidado) a partir
+   * de los impuestos resueltos por `resolveLineTaxes`. Undefined si la línea no
+   * tiene impuestos.
+   */
+  private buildItemTaxRows(
+    derived: ReturnType<PurchaseOrdersService['resolveLineTaxes']>,
+  ) {
+    if (derived.taxes.length === 0) return undefined;
+    return {
+      create: derived.taxes.map((t) => ({
+        tax_rate_id: t.tax_rate_id,
+        tax_name:
+          t.tax_name ??
+          (t.calc_mode === 'fixed_per_unit'
+            ? `${t.tax_type.toUpperCase()} $${t.fixed_amount_per_unit ?? 0}/u`
+            : `${t.tax_type.toUpperCase()} ${t.rate ?? 0}%`),
+        tax_rate: t.rate,
+        tax_type: t.tax_type as tax_type_enum,
+        calc_mode: t.calc_mode,
+        fixed_amount_per_unit: t.fixed_amount_per_unit,
+        base_mode: t.base_mode,
+        sequence: t.sequence,
+        taxable_amount: t.taxable_amount,
+        tax_amount: t.tax_amount,
+        amount_override: t.amount_override,
+        is_inclusive: t.is_inclusive,
+        add_to_cost: t.add_to_cost,
+      })),
     };
   }
 
@@ -287,12 +450,18 @@ export class PurchaseOrdersService {
     const effective = Math.min(discount, grossTotal);
     const round2 = (n: number) => Math.round(n * 100) / 100;
 
+    // QUI-855 (regalo): igual que `prorateShipping` — el residuo va a la
+    // última línea con bruto > 0 para que una bonificación (precio 0) nunca
+    // absorba descuento ni se lo reste a las líneas que sí pagan.
+    let lastPaying = items.length - 1;
+    while (lastPaying > 0 && !(grossPerLine[lastPaying] > 0)) lastPaying--;
     let assigned = 0;
-    for (let i = 0; i < items.length - 1; i++) {
+    for (let i = 0; i < items.length; i++) {
+      if (i === lastPaying) continue;
       shares[i] = round2((grossPerLine[i] / grossTotal) * effective);
       assigned += shares[i];
     }
-    shares[items.length - 1] = round2(effective - assigned);
+    shares[lastPaying] = round2(effective - assigned);
     return shares;
   }
 
@@ -352,12 +521,19 @@ export class PurchaseOrdersService {
     const weightTotal = weights.reduce((s, v) => s + v, 0);
     const round2 = (n: number) => Math.round(n * 100) / 100;
 
+    // QUI-855 (regalo): el residuo del redondeo va a la última línea con
+    // peso > 0, nunca a una línea de peso 0 (precio 0/bonificación). Antes
+    // caía en la última línea a ciegas: un regalo al final absorbía el
+    // centavo y se lo quitaba a la última línea que sí paga.
+    let lastPaying = weights.length - 1;
+    while (lastPaying > 0 && !(weights[lastPaying] > 0)) lastPaying--;
     let assigned = 0;
-    for (let i = 0; i < weights.length - 1; i++) {
+    for (let i = 0; i < weights.length; i++) {
+      if (i === lastPaying) continue;
       shares[i] = round2((weights[i] / weightTotal) * freight);
       assigned += shares[i];
     }
-    shares[weights.length - 1] = round2(freight - assigned);
+    shares[lastPaying] = round2(freight - assigned);
     return { shares, basis };
   }
 
@@ -1194,9 +1370,9 @@ export class PurchaseOrdersService {
           // capitalize, so the product was born with an understated margin.
           // The header discount is prorated in the totals pass below; here we
           // honour the line's own discount and the include/added VAT mode,
-          // which is what `deriveLineTax` owns.
+          // which is what `resolveLineTaxes` owns.
           let basePrice = item.base_price || 0;
-          const cost = this.deriveLineTax(
+          const cost = this.resolveLineTaxes(
             item,
             createPurchaseOrderDto,
           ).unit_price_net;
@@ -1569,7 +1745,7 @@ export class PurchaseOrdersService {
       // Σ(qty×unit_price) (bruto en modo include-tax, neto en exclude-tax) + un
       // `tax_amount` de header, dando un total inconsistente entre modos (y a
       // veces doble-contando el IVA). Ahora derivamos neto + IVA por línea vía
-      // `deriveLineTax` (la MISMA derivación que persiste cada línea en :848),
+      // `resolveLineTaxes` (la MISMA derivación que persiste cada línea en :848),
       // de modo que:
       //   subtotal_amount = Σ neto           (base independiente del modo)
       //   total_amount    = neto + IVA − descuento + flete   (BRUTO)
@@ -1581,7 +1757,7 @@ export class PurchaseOrdersService {
       //   total = subtotal − descuento + IVA + flete
       // con `lineTax` derivado del subtotal SIN descontar, lo que inflaba el
       // IVA descontable que llega a la declaración. Ahora el descuento de
-      // cabecera se prorratea por línea y entra DENTRO de `deriveLineTax`, que
+      // cabecera se prorratea por línea y entra DENTRO de `resolveLineTaxes`, que
       // baja `unit_price_net` antes de derivar el IVA. Como consecuencia
       // `subtotal_amount` ya viene neto de descuento y restarlo otra vez sería
       // contarlo dos veces.
@@ -1598,15 +1774,15 @@ export class PurchaseOrdersService {
       const netPerLine: number[] = [];
       const quantitiesPerLine: number[] = [];
       for (let i = 0; i < processedItems.length; i++) {
-        const d = this.deriveLineTax(
+        const d = this.resolveLineTaxes(
           processedItems[i],
           createPurchaseOrderDto,
           headerShares[i],
         );
         const qty = Number(processedItems[i].quantity ?? 0);
-        netPerLine.push(d.unit_price_net * qty);
+        netPerLine.push(d.net_total);
         quantitiesPerLine.push(qty);
-        netSubtotal += d.unit_price_net * qty;
+        netSubtotal += d.net_total;
         lineTax += d.tax_amount;
       }
       const subtotal = round2(netSubtotal);
@@ -1757,8 +1933,12 @@ export class PurchaseOrdersService {
         .toString()
         .padStart(3, '0')}`;
 
-      const { items, created_by_user_id, ...orderData } =
-        createPurchaseOrderDto;
+      const {
+        items,
+        created_by_user_id,
+        scan_attachment: scanAttachment,
+        ...orderData
+      } = createPurchaseOrderDto;
       const user_id = RequestContextService.getUserId();
 
       // Validate Location and Supplier existence to prevent FK errors
@@ -1889,7 +2069,7 @@ export class PurchaseOrdersService {
               // the FIFO engine capitalizes at reception — already carries the
               // commercial discount. This is what closes the old gap where the
               // CxP was rebated but the inventory was not.
-              const derived = this.deriveLineTax(
+              const derived = this.resolveLineTaxes(
                 item,
                 createPurchaseOrderDto,
                 headerShares[index],
@@ -1900,12 +2080,14 @@ export class PurchaseOrdersService {
                 quantity_ordered: item.quantity,
                 unit_cost: derived.unit_price_net,
                 unit_price_net: derived.unit_price_net,
-                tax_rate: item.tax_rate ?? null,
-                tax_type:
-                  (item.tax_type as tax_type_enum | undefined) ??
-                  tax_type_enum.iva,
+                // QUI-855 — columnas legacy derivadas de la fila IVA (ver
+                // `resolveLineTaxes`); la verdad por impuesto vive en las filas
+                // hijas, que existen para TODA línea con impuestos.
+                tax_rate: derived.legacy_tax_rate,
+                tax_type: derived.legacy_tax_type,
                 prices_include_tax: item.prices_include_tax ?? null,
                 tax_amount: derived.tax_amount,
+                purchase_order_item_taxes: this.buildItemTaxRows(derived),
                 // Total discount actually applied (own + prorated header), and
                 // the percentage the user typed to get there. The amount is the
                 // source of truth; the percentage is provenance only.
@@ -1978,6 +2160,9 @@ export class PurchaseOrdersService {
           },
         });
       }
+
+      // QUI-855 — el documento escaneado queda ligado a la orden en la MISMA tx.
+      await this.linkScanAttachment(tx, purchaseOrder.id, scanAttachment);
 
       return { order: purchaseOrder, advance: advanceToRegister, freight };
     },
@@ -2384,6 +2569,7 @@ export class PurchaseOrdersService {
           include: {
             products: true,
             product_variants: true,
+            purchase_order_item_taxes: { orderBy: { sequence: 'asc' } },
           },
         },
         // QUI-647 — el detalle de la OC expone el calendario de pagos completo
@@ -2458,9 +2644,10 @@ export class PurchaseOrdersService {
       // proveedor y una recibida respalda inventario y asientos contables.
       this.assertMutable(order, 'editar');
 
-      const { items, ...rest } = updatePurchaseOrderDto as UpdatePurchaseOrderDto & {
-        items?: any[];
-      };
+      const { items, scan_attachment: scanAttachment, ...rest } =
+        updatePurchaseOrderDto as UpdatePurchaseOrderDto & {
+          items?: any[];
+        };
 
       // C.7 — misma regla de flete e impuesto que en la creación. `PartialType`
       // vuelve opcional a `location_id`, y `@IsOptional()` desactiva TODOS los
@@ -2512,7 +2699,7 @@ export class PurchaseOrdersService {
 
       // If items are being updated, recalculate totals.
       // FASE 4 — misma derivación bruta consistente que create(): neto por línea
-      // vía deriveLineTax → subtotal_amount = Σ neto, total_amount = neto + IVA −
+      // vía resolveLineTaxes → subtotal_amount = Σ neto, total_amount = neto + IVA −
       // descuento + flete (BRUTO). Corrige además la columna: antes escribía
       // `.subtotal` (inexistente; la columna real es `subtotal_amount`, ver :838).
       if (items) {
@@ -2535,15 +2722,15 @@ export class PurchaseOrdersService {
         const netPerLine: number[] = [];
         const quantitiesPerLine: number[] = [];
         for (let i = 0; i < items.length; i++) {
-          const d = this.deriveLineTax(
+          const d = this.resolveLineTaxes(
             items[i],
             updatePurchaseOrderDto,
             headerShares[i],
           );
           const qty = Number(items[i].quantity ?? 0);
-          netPerLine.push(d.unit_price_net * qty);
+          netPerLine.push(d.net_total);
           quantitiesPerLine.push(qty);
-          netSubtotal += d.unit_price_net * qty;
+          netSubtotal += d.net_total;
           lineTax += d.tax_amount;
         }
         const subtotal = round2(netSubtotal);
@@ -2582,12 +2769,17 @@ export class PurchaseOrdersService {
         // Reemplazo completo de las líneas. Es seguro porque assertMutable ya
         // garantizó `draft`: sin recepciones, `quantity_received` es 0 en todas
         // y ninguna capa de costeo las referencia.
+        // QUI-855 — las filas hijas de impuestos referencian la línea con
+        // ON DELETE RESTRICT: se borran ANTES que las líneas.
+        await tx.purchase_order_item_taxes.deleteMany({
+          where: { purchase_order_items: { purchase_order_id: id } },
+        });
         await tx.purchase_order_items.deleteMany({
           where: { purchase_order_id: id },
         });
         for (let i = 0; i < items.length; i++) {
           const item = items[i];
-          const derived = this.deriveLineTax(
+          const derived = this.resolveLineTaxes(
             item,
             updatePurchaseOrderDto,
             headerShares[i],
@@ -2603,12 +2795,14 @@ export class PurchaseOrdersService {
               discount_amount: derived.discount_total,
               discount_percentage: item.discount_percentage ?? 0,
               allocated_shipping_amount: freightForItems?.shares[i] ?? 0,
-              tax_rate: item.tax_rate ?? null,
-              tax_type:
-                (item.tax_type as tax_type_enum | undefined) ??
-                tax_type_enum.iva,
+              // QUI-855 — columnas legacy derivadas de la fila IVA (ver create()).
+              tax_rate: derived.legacy_tax_rate,
+              tax_type: derived.legacy_tax_type,
               prices_include_tax: item.prices_include_tax ?? null,
               tax_amount: derived.tax_amount,
+              // QUI-855 — filas por impuesto: las previas se borraron arriba,
+              // así que esto es un reemplazo limpio.
+              purchase_order_item_taxes: this.buildItemTaxRows(derived),
               notes: item.notes,
               batch_number: item.batch_number,
               manufacturing_date:
@@ -2698,6 +2892,9 @@ export class PurchaseOrdersService {
           round2(netSubtotal) + round2(lineTax) + shippingCost,
         );
       }
+
+      // QUI-855 — idempotente: reenviar el borrador no duplica el adjunto.
+      await this.linkScanAttachment(tx, id, scanAttachment);
 
       return tx.purchase_orders.update({
         where: { id },
@@ -3394,12 +3591,13 @@ export class PurchaseOrdersService {
       for (const item of dto.items) {
         if (item.quantity_received <= 0) continue;
 
-        // Create reception item record
+        // Create reception item record (QUI-855: per-line motive).
         await tx.purchase_order_reception_items.create({
           data: {
             reception_id: reception.id,
             purchase_order_item_id: item.id,
             quantity_received: item.quantity_received,
+            note: item.note ?? null,
           },
         });
 
@@ -3416,7 +3614,11 @@ export class PurchaseOrdersService {
       const purchaseOrder = await tx.purchase_orders.findUnique({
         where: { id },
         include: {
-          purchase_order_items: true,
+          // QUI-855 — per-tax rows drive the add_to_cost split below. Absent
+          // rows ⇒ legacy single-tax path (byte-identical numbers).
+          purchase_order_items: {
+            include: { purchase_order_item_taxes: true },
+          },
           location: true,
         },
       });
@@ -3463,6 +3665,9 @@ export class PurchaseOrdersService {
       // — see the `subtotal = sum(quantity * unit_price)` calc above in
       // create()). Used below to prorate the accounting entry amount.
       let receivedBatchSubtotal = 0;
+      // QUI-855 — impuesto capitalizado sellado por ESTE lote (delta de
+      // capitalized_tax_amount), sin reescalar por received/ordered.
+      let receivedBatchCapitalized = 0;
 
       // Create inventory movements, update stock, and calculate cost for received items
       for (const item of dto.items) {
@@ -3475,7 +3680,7 @@ export class PurchaseOrdersService {
         const productVariantId = orderItem?.product_variant_id;
 
         if (productId) {
-          // F1: `unit_cost` now persists the NET price (see create/deriveLineTax).
+          // F1: `unit_cost` now persists the NET price (see create/resolveLineTaxes).
           const netUnitCost = Number(orderItem?.unit_cost || 0);
           // AP proration basis stays on the NET subtotal (matches orderSubtotal
           // below, which reads unit_cost), so the accounting ratio is unchanged.
@@ -3484,6 +3689,10 @@ export class PurchaseOrdersService {
           // ===== F1 IVA lifecycle: cost treatment by fiscal responsibility =====
           // Per-unit IVA sealed on the line at create (tax_amount / qty_ordered),
           // with a recompute fallback for legacy lines that predate F1.
+          // QUI-855: when per-tax rows exist, the `add_to_cost` rows
+          // (IBUA/ICUI style) split out of the deductible family and capitalize
+          // into cost REGARDLESS of responsibility. No rows ⇒ legacy path,
+          // byte-identical to before (all tax in the deductible family).
           const qtyOrdered = orderItem?.quantity_ordered ?? 0;
           const lineTaxAmount =
             orderItem?.tax_amount != null ? Number(orderItem.tax_amount) : null;
@@ -3491,6 +3700,34 @@ export class PurchaseOrdersService {
             lineTaxAmount != null && qtyOrdered > 0
               ? lineTaxAmount / qtyOrdered
               : netUnitCost * (Number(orderItem?.tax_rate ?? 0) / 100);
+          const taxRows =
+            (orderItem as unknown as {
+              purchase_order_item_taxes?: Array<{
+                tax_amount: unknown;
+                add_to_cost: boolean | null;
+              }>;
+            } | undefined)?.purchase_order_item_taxes ?? [];
+          let capitalizedPerUnit = 0;
+          let totalPerUnit = ivaPerUnit;
+          if (taxRows.length > 0 && qtyOrdered > 0) {
+            const capTotal = taxRows
+              .filter((r) => r.add_to_cost)
+              .reduce((sum, r) => sum + Number(r.tax_amount ?? 0), 0);
+            const allTotal = taxRows.reduce(
+              (sum, r) => sum + Number(r.tax_amount ?? 0),
+              0,
+            );
+            capitalizedPerUnit = capTotal / qtyOrdered;
+            totalPerUnit = allTotal / qtyOrdered;
+          } else if (
+            qtyOrdered > 0 &&
+            (orderItem?.tax_type ?? tax_type_enum.iva) !== tax_type_enum.iva
+          ) {
+            // QUI-855 — línea legacy SIN filas hijas con tributo distinto de
+            // IVA (INC): nunca es descontable, todo su impuesto se capitaliza.
+            capitalizedPerUnit = totalPerUnit;
+          }
+          const deductiblePerUnit = totalPerUnit - capitalizedPerUnit;
 
           // C.2 — porción del flete que aterrizó en ESTA línea, llevada a
           // unidad de compra. Se divide por `quantity_ordered` (no por lo
@@ -3516,24 +3753,37 @@ export class PurchaseOrdersService {
           // error es de un orden de magnitud y queda sellado en la capa FIFO,
           // irreversible sin un ajuste manual.
           const costUnit =
-            (vatResponsible ? netUnitCost : netUnitCost + ivaPerUnit) +
-            freightPerUnit;
+            (vatResponsible
+              ? netUnitCost + capitalizedPerUnit
+              : netUnitCost + totalPerUnit) + freightPerUnit;
 
           // Seal the VAT attributable to the units received in THIS batch,
           // proportional to quantity_received (purchase units), accumulating
           // across partial receptions. O-48 → deductible (descontable);
-          // O-49 → capitalized into inventory cost.
-          const sealedTaxNow = ivaPerUnit * item.quantity_received;
-          const prevSealed = vatResponsible
-            ? Number(orderItem?.deductible_tax_amount ?? 0)
-            : Number(orderItem?.capitalized_tax_amount ?? 0);
-          const newSealed =
-            Math.round((prevSealed + sealedTaxNow) * 100) / 100;
+          // O-49 → capitalized into inventory cost. QUI-855: the add_to_cost
+          // portion ALWAYS seals as capitalized, even for a responsible buyer.
+          const sealedCapNow =
+            capitalizedPerUnit * item.quantity_received;
+          const sealedDedNow = vatResponsible
+            ? deductiblePerUnit * item.quantity_received
+            : (totalPerUnit - capitalizedPerUnit) * item.quantity_received;
+          const prevDed = Number(orderItem?.deductible_tax_amount ?? 0);
+          const prevCap = Number(orderItem?.capitalized_tax_amount ?? 0);
+          const newDed =
+            Math.round((prevDed + (vatResponsible ? sealedDedNow : 0)) * 100) /
+            100;
+          const newCap =
+            Math.round(
+              (prevCap + sealedCapNow + (vatResponsible ? 0 : sealedDedNow)) *
+                100,
+            ) / 100;
+          receivedBatchCapitalized += newCap - prevCap;
           await tx.purchase_order_items.update({
             where: { id: item.id },
-            data: vatResponsible
-              ? { deductible_tax_amount: newSealed }
-              : { capitalized_tax_amount: newSealed },
+            data: {
+              deductible_tax_amount: newDed,
+              capitalized_tax_amount: newCap,
+            },
           });
 
           // F2 — sellar la config de UoM del producto ANTES de convertir.
@@ -3880,6 +4130,8 @@ export class PurchaseOrdersService {
             include: {
               products: true,
               product_variants: true,
+              // QUI-855 — base cascada del IVA para `buildPurchaseTaxGroups`.
+              purchase_order_item_taxes: true,
             },
           },
         },
@@ -3899,6 +4151,7 @@ export class PurchaseOrdersService {
         all_items_received,
         reception_id: reception.id,
         received_batch_subtotal: receivedBatchSubtotal,
+        received_batch_capitalized: receivedBatchCapitalized,
         order_subtotal: orderSubtotal,
         // F1/F2 IVA lifecycle: fiscal responsibility resolved once inside the
         // tx (O-48 → net cost + deductible VAT; O-49 → capitalized in cost).
@@ -4067,14 +4320,18 @@ export class PurchaseOrdersService {
       // understates what is actually owed to the supplier. The all_items_received
       // remainder branch trues the order-level total up to gross even across
       // partial receptions.
-      const capitalized_iva = result.vat_responsible
-        ? 0
-        : Math.round(
-            result.updated_po.purchase_order_items.reduce(
-              (sum, i) => sum + Number(i.capitalized_tax_amount ?? 0),
-              0,
-            ) * 100,
-          ) / 100;
+      // QUI-855 — SIEMPRE Σ capitalized_tax_amount. Con O-48 esa columna sólo
+      // lleva la porción capitalizable (INC/ICUI/IBUA y add_to_cost), que sí
+      // entra a la capa FIFO y por tanto a 1435; con O-49 lleva todo el
+      // impuesto. Excluirla con `vat_responsible` dejaba fuera el INC
+      // capitalizado y 1435/CxP quedaban por debajo del FIFO.
+      const capitalized_iva =
+        Math.round(
+          result.updated_po.purchase_order_items.reduce(
+            (sum, i) => sum + Number(i.capitalized_tax_amount ?? 0),
+            0,
+          ) * 100,
+        ) / 100;
 
       // C.3 — el flete entra al asiento. Hoy `shipping_cost` sumaba en
       // `total_amount` mientras el asiento y el auxiliar de cartera se
@@ -4128,13 +4385,17 @@ export class PurchaseOrdersService {
         }
         batch_amount = Math.round((emit_total - alreadyPosted) * 100) / 100;
       } else if (result.order_subtotal > 0) {
-        // Proportional share of this batch vs. the order's full NET subtotal
-        // scaled onto the emit total (gross for O-49). The final reception's
-        // remainder branch trues up any per-batch rounding drift.
+        // QUI-855 — lote = subtotal NETO recibido + impuesto capitalizado de ESE
+        // lote (sin reescalar: el acumulado ya contiene lotes previos y
+        // escalarlo por received/ordered descuadraba DR 1435 vs la capa FIFO) +
+        // la porción proporcional del flete capitalizado. La recepción final
+        // sigue cuadrando por el remanente contra `emit_total`.
         batch_amount =
           Math.round(
-            (result.received_batch_subtotal / result.order_subtotal) *
-              emit_total *
+            (result.received_batch_subtotal +
+              Number(result.received_batch_capitalized ?? 0) +
+              (result.received_batch_subtotal / result.order_subtotal) *
+                capitalized_freight) *
               100,
           ) / 100;
       } else {
@@ -4589,9 +4850,11 @@ export class PurchaseOrdersService {
    *
    * QUI-INC — el grupo lleva TAMBIÉN el `tax_type` de la línea
    * (`purchase_order_items.tax_type`), porque `materializeVatDocument` lo
-   * escribía como literal `iva` en el punto de escritura. Una línea tipada con
-   * otro tributo aborta la materialización: este documento reconoce IVA
-   * descontable y nada más (ver el comentario junto a la guarda).
+   * escribía como literal `iva` en el punto de escritura. Este documento
+   * reconoce IVA descontable y nada más. QUI-855 (multi-impuesto): una línea
+   * INC/ICUI/IBUA sin porción deducible (siempre capitalizada) se SALTA en vez
+   * de abortar; sólo una línea no-IVA con monto deducible > 0 —estado
+   * imposible tras receive()— sigue lanzando (ver la guarda).
    */
   private buildPurchaseTaxGroups(
     items: Array<{
@@ -4600,6 +4863,10 @@ export class PurchaseOrdersService {
       quantity_ordered: number;
       unit_cost: Prisma.Decimal | number | string | null;
       deductible_tax_amount: Prisma.Decimal | number | string | null;
+      purchase_order_item_taxes?: Array<{
+        tax_type: tax_type_enum | string;
+        taxable_amount: Prisma.Decimal | number | string | null;
+      }> | null;
     }>,
   ): Array<{
     tax_rate: number;
@@ -4618,6 +4885,17 @@ export class PurchaseOrdersService {
     >();
 
     for (const item of items) {
+      // QUI-855 — INC/ICUI/IBUA nunca son IVA descontable: una línea no-IVA
+      // sin porción deducible no aporta a este documento y se SALTA (antes
+      // abortaba toda la materialización). Con O-48 y filas hijas, su
+      // impuesto quedó sellado como capitalizado, no deducible.
+      const lineType = item.tax_type ?? tax_type_enum.iva;
+      if (
+        lineType !== tax_type_enum.iva &&
+        Number(item.deductible_tax_amount ?? 0) === 0
+      ) {
+        continue;
+      }
       if (item.tax_rate == null) {
         throw new Error(
           'F-214: línea de compra sin tax_rate asignado — no hay tarifa de ' +
@@ -4655,8 +4933,14 @@ export class PurchaseOrdersService {
       }
 
       const rate = Math.round(Number(item.tax_rate) * 100) / 100;
-      const taxableAmount =
-        Number(item.quantity_ordered ?? 0) * Number(item.unit_cost ?? 0);
+      // QUI-855 — con fila hija IVA la base es su `taxable_amount` (cascada:
+      // puede ser neto + impuestos previos); sin ella, neto qty × unit_cost.
+      const ivaRow = (item.purchase_order_item_taxes ?? []).find(
+        (r) => r.tax_type === tax_type_enum.iva,
+      );
+      const taxableAmount = ivaRow
+        ? Number(ivaRow.taxable_amount ?? 0)
+        : Number(item.quantity_ordered ?? 0) * Number(item.unit_cost ?? 0);
       const taxAmount = Number(item.deductible_tax_amount ?? 0);
 
       // La llave incluye el tipo: dos líneas a la misma tarifa pero de tributos
@@ -4820,15 +5104,136 @@ export class PurchaseOrdersService {
 
   // ===== Attachments =====
 
+  /** Org + tienda del request, con slug, para construir keys de S3. */
+  private async resolveS3Contexts() {
+    const storeId = RequestContextService.getStoreId();
+    const organizationId = RequestContextService.getOrganizationId();
+    if (!storeId || !organizationId) {
+      throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
+    }
+    const [store, organization] = await Promise.all([
+      this.prisma.stores.findFirst({
+        where: { id: storeId, organization_id: organizationId },
+        select: { id: true, slug: true },
+      }),
+      this.prisma.organizations.findFirst({
+        where: { id: organizationId },
+        select: { id: true, slug: true },
+      }),
+    ]);
+    if (!store) throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
+    if (!organization) throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
+    return { store, organization };
+  }
+
+  /** Prefijo de S3 donde viven los documentos escaneados de la tienda actual. */
+  async getScanStoragePrefix(): Promise<string> {
+    const { store, organization } = await this.resolveS3Contexts();
+    return this.s3Paths.buildPurchaseOrderScanPath(organization, store);
+  }
+
+  /**
+   * QUI-855 — sube el documento escaneado a S3 (bajo la tienda) y devuelve la
+   * KEY (nunca una URL firmada). Se llama ANTES de la IA para que el archivo
+   * sobreviva aunque el OCR falle.
+   */
+  async uploadScanDocument(file: Express.Multer.File): Promise<{
+    key: string;
+    file_name: string;
+    file_type: string;
+    file_size: number;
+  }> {
+    const prefix = await this.getScanStoragePrefix();
+    const safeName =
+      (file.originalname ?? '')
+        .split(/[\\/]/)
+        .pop()!
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .replace(/\.{2,}/g, '.')
+        .slice(0, 120) || 'factura';
+    const key = await this.s3Service.uploadFile(
+      file.buffer,
+      `${prefix}/${Date.now()}-${safeName}`,
+      file.mimetype,
+    );
+    return {
+      key,
+      file_name: file.originalname || safeName,
+      file_type: file.mimetype,
+      file_size: file.size,
+    };
+  }
+
+  /**
+   * QUI-855 — liga el documento escaneado a la OC dentro de la tx de la OC.
+   * Rechaza keys que no cuelguen del prefijo de escaneos de la tienda actual y
+   * es idempotente por (purchase_order_id, file_url).
+   */
+  private async linkScanAttachment(
+    tx: any,
+    purchaseOrderId: number,
+    scan?: ScanAttachmentDto | null,
+  ): Promise<void> {
+    if (!scan) return;
+    const prefix = await this.getScanStoragePrefix();
+    if (
+      !isSafeS3Key(scan.key) ||
+      !scan.key.startsWith(`${prefix}/`)
+    ) {
+      throw new BadRequestException(
+        'El documento escaneado no pertenece a esta tienda.',
+      );
+    }
+    const existing = await tx.purchase_order_attachments.findFirst({
+      where: { purchase_order_id: purchaseOrderId, file_url: scan.key },
+      select: { id: true },
+    });
+    if (existing) return;
+    await tx.purchase_order_attachments.create({
+      data: {
+        purchase_order_id: purchaseOrderId,
+        file_url: scan.key,
+        file_name: scan.file_name,
+        file_type: scan.file_type,
+        file_size: scan.file_size,
+        supplier_invoice_number: scan.supplier_invoice_number ?? null,
+        supplier_invoice_date: scan.supplier_invoice_date
+          ? new Date(scan.supplier_invoice_date)
+          : null,
+        supplier_invoice_amount: scan.supplier_invoice_amount ?? null,
+        notes: 'Factura escaneada con IA',
+        uploaded_by_user_id: RequestContextService.getUserId() ?? null,
+      },
+    });
+  }
+
+  /** 404 PO_FIND_001 si la OC no es de la tienda actual (prisma scoped). */
+  private async assertOrderInStore(purchaseOrderId: number) {
+    const order = await this.prisma.purchase_orders.findFirst({
+      where: { id: purchaseOrderId },
+      select: { id: true },
+    });
+    if (!order) {
+      throw new VendixHttpException(
+        ErrorCodes.PO_FIND_001,
+        `La orden de compra ${purchaseOrderId} no existe.`,
+        { purchase_order_id: purchaseOrderId },
+      );
+    }
+  }
+
   async addAttachment(
     purchaseOrderId: number,
     file: Express.Multer.File,
     dto: AddAttachmentDto,
   ) {
+    await this.assertOrderInStore(purchaseOrderId);
+    const { store, organization } = await this.resolveS3Contexts();
+
     // 1. Upload to S3 using S3Service (store the KEY, not the presigned URL)
     const s3Key = await this.s3Service.uploadFile(
       file.buffer,
-      `purchase-orders/attachments/${purchaseOrderId}/${Date.now()}-${file.originalname}`,
+      `${this.s3Paths.buildPurchaseOrderAttachmentPath(organization, store, purchaseOrderId)}/${Date.now()}-${file.originalname}`,
       file.mimetype,
     );
 
@@ -4874,6 +5279,7 @@ export class PurchaseOrdersService {
   }
 
   async getAttachments(purchaseOrderId: number) {
+    await this.assertOrderInStore(purchaseOrderId);
     const attachments = await this.prisma.purchase_order_attachments.findMany({
       where: { purchase_order_id: purchaseOrderId },
       include: {
@@ -4898,9 +5304,10 @@ export class PurchaseOrdersService {
     );
   }
 
-  async removeAttachment(attachmentId: number) {
-    const attachment = await this.prisma.purchase_order_attachments.findUnique({
-      where: { id: attachmentId },
+  async removeAttachment(purchaseOrderId: number, attachmentId: number) {
+    await this.assertOrderInStore(purchaseOrderId);
+    const attachment = await this.prisma.purchase_order_attachments.findFirst({
+      where: { id: attachmentId, purchase_order_id: purchaseOrderId },
     });
 
     if (!attachment) {
@@ -4917,8 +5324,8 @@ export class PurchaseOrdersService {
     }
 
     // Delete from DB
-    await this.prisma.purchase_order_attachments.delete({
-      where: { id: attachmentId },
+    await this.prisma.purchase_order_attachments.deleteMany({
+      where: { id: attachmentId, purchase_order_id: purchaseOrderId },
     });
 
     return { deleted: true };
@@ -5452,14 +5859,16 @@ export class PurchaseOrdersService {
     // unit_cost + tax_rate + effective include-tax mode. The NET is the cost
     // basis for CPP/FIFO — mirrors what create/receive persist.
     const derivedByLine = dto.items.map((item, index) =>
-      this.deriveLineTax(
+      this.resolveLineTaxes(
         {
           unit_cost: item.unit_cost,
           quantity: item.quantity,
           tax_rate: item.tax_rate,
+          tax_type: item.tax_type,
           prices_include_tax: item.prices_include_tax,
           discount_percentage: item.discount_percentage,
           discount_amount: item.discount_amount,
+          taxes: (item as { taxes?: Array<any> }).taxes,
         },
         dto,
         headerShares[index],
@@ -5467,9 +5876,7 @@ export class PurchaseOrdersService {
     );
 
     const quantitiesPerLine = dto.items.map((i) => Number(i.quantity ?? 0));
-    const netPerLine = derivedByLine.map(
-      (d, index) => d.unit_price_net * quantitiesPerLine[index],
-    );
+    const netPerLine = derivedByLine.map((d) => d.net_total);
 
     // C.2 — mismo reparto de flete que `create()`. La base es el neto después
     // de descuentos y el residuo va a la última línea, así que la suma de
@@ -5496,11 +5903,26 @@ export class PurchaseOrdersService {
       new_cost_per_unit: number;
       incoming_quantity: number;
       incoming_cost: number;
-      // F1 IVA lifecycle preview parity (frontend mirrors deriveLineTax):
+      // F1 IVA lifecycle preview parity (frontend mirrors the purchase-line-taxes kernel):
       incoming_gross_cost: number;
       unit_price_net: number;
       incoming_tax_per_unit: number;
       incoming_tax_amount: number;
+      /** QUI-855 — impuestos resueltos por el kernel (mismas filas que persistiría create). */
+      taxes: Array<{
+        tax_type: string;
+        tax_name: string | null;
+        calc_mode: string;
+        rate: number | null;
+        fixed_amount_per_unit: number | null;
+        base_mode: string;
+        sequence: number;
+        is_inclusive: boolean;
+        add_to_cost: boolean;
+        taxable_amount: number;
+        tax_amount: number;
+        amount_override: number | null;
+      }>;
       effective_include: boolean;
       /**
        * B.4 — el desglose por línea en las MISMAS dos columnas mutuamente
@@ -5574,21 +5996,25 @@ export class PurchaseOrdersService {
       //   { stockQuantity, stockUnitCost } = resolveUoMConversion(qty, costUnit)
       // where ivaPerUnit == orderItem.tax_amount / quantity_ordered and
       // freightPerUnit == allocated_shipping_amount / quantity_ordered. Because
-      // create() persists tax_amount = deriveLineTax().tax_amount (= per-unit
+      // create() persists tax_amount = resolveLineTaxes().tax_amount (= per-unit
       // tax × quantity), allocated_shipping_amount = prorateShipping()[i] and
       // quantity_ordered = quantity, ambos cocientes son exactamente los que se
       // calculan acá.
       //
       // (1) IVA: O-48 responsible → NET; O-49 non-responsible → capitalize IVA.
+      // QUI-855: `add_to_cost` rows (IBUA/ICUI style) capitalize ALWAYS, even
+      // for a responsible buyer — they are cost, never deductible VAT.
       const ivaPerUnit = derivedTax.tax_amount_per_unit;
+      const capitalizedPerUnit = derivedTax.capitalized_per_unit;
       // (2) Flete: solo en modo `prorate`, y en unidad de COMPRA — sumarlo
       // después de la conversión de unidad de medida lo desviaría exactamente
       // por `purchase_to_stock_factor`.
       const lineFreight = freightCapitalized ? (freight.shares[index] ?? 0) : 0;
       const freightPerUnit = quantity > 0 ? lineFreight / quantity : 0;
       const costUnit =
-        (vatResponsible ? netUnitCost : netUnitCost + ivaPerUnit) +
-        freightPerUnit;
+        (vatResponsible
+          ? netUnitCost + capitalizedPerUnit
+          : netUnitCost + ivaPerUnit) + freightPerUnit;
 
       // (3) UoM: convert the incoming purchase-unit quantity + capitalized cost
       // to MINIMUM stock units via the SAME arithmetic receive() uses. The CPP
@@ -5707,10 +6133,30 @@ export class PurchaseOrdersService {
         incoming_tax_per_unit:
           Math.round(derivedTax.tax_amount_per_unit * 100) / 100,
         incoming_tax_amount: lineTaxTotal,
+        taxes: derivedTax.taxes.map((t) => ({
+          tax_type: t.tax_type,
+          tax_name: t.tax_name,
+          calc_mode: t.calc_mode,
+          rate: t.rate,
+          fixed_amount_per_unit: t.fixed_amount_per_unit,
+          base_mode: t.base_mode,
+          sequence: t.sequence,
+          is_inclusive: t.is_inclusive,
+          add_to_cost: t.add_to_cost,
+          taxable_amount: t.taxable_amount,
+          tax_amount: t.tax_amount,
+          amount_override: t.amount_override,
+        })),
         effective_include: derivedTax.effective_include,
         // Mutuamente excluyentes, igual que las columnas que sella `receive()`.
-        deductible_tax_amount: vatResponsible ? lineTaxTotal : 0,
-        capitalized_tax_amount: vatResponsible ? 0 : lineTaxTotal,
+        // QUI-855: la porción `add_to_cost` siempre capitaliza, aun con
+        // responsable de IVA; solo el resto es descontable.
+        deductible_tax_amount: vatResponsible
+          ? Math.round(derivedTax.deductible_total * 100) / 100
+          : 0,
+        capitalized_tax_amount: vatResponsible
+          ? Math.round(derivedTax.capitalized_total * 100) / 100
+          : lineTaxTotal,
         discount_amount: Math.round(derivedTax.discount_total * 100) / 100,
         header_discount_share: Math.round((headerShares[index] ?? 0) * 100) / 100,
         allocated_shipping_amount: freight.shares[index] ?? 0,
@@ -5762,6 +6208,11 @@ export class PurchaseOrdersService {
     return this.prisma.$transaction(async (tx) => {
       const order = await this.loadOrderOrFail(tx, id);
       this.assertMutable(order, 'eliminar');
+      // QUI-855 — la FK de las filas de impuestos a la línea es RESTRICT y la
+      // línea cae en cascada con la orden: sin borrarlas antes, el delete falla.
+      await tx.purchase_order_item_taxes.deleteMany({
+        where: { purchase_order_items: { purchase_order_id: id } },
+      });
       return tx.purchase_orders.delete({
         where: { id },
       });

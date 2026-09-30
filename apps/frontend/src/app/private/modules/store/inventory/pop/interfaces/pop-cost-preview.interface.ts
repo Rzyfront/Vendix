@@ -15,6 +15,7 @@
  * base legal) y el reparto del flete por línea, no sólo los totales.
  */
 
+import type { PopLineTaxRequest } from './pop-order.interface';
 import {
   CostPreviewItem,
   CostPreviewResponse,
@@ -121,6 +122,8 @@ export interface PopCostPreviewRequestItem {
   tax_rate?: number;
   tax_type?: string;
   prices_include_tax?: boolean;
+  /** QUI-855 — multi-impuesto (espejo de `CostPreviewItemDto.taxes`). */
+  taxes?: PopLineTaxRequest[];
 }
 
 /**

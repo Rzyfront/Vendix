@@ -361,6 +361,10 @@ jobs:
         # entero; y el doble de `app-pos-payment-step` no declaraba el input
         # `takeawayOrder` que la plantilla enlaza (NG0303). Con las dos
         # reparaciones: 139 de 139 en verde con la lista completa.
+        #
+        # QUI-855: el POP (carrito multi-impuesto, escaner, adjunto y
+        # revalidacion IA) entra entero por glob: sus 142 specs pasan en verde
+        # local y las nuevas del modulo quedan gateadas sin otra linea.
         run: >-
           npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox
           --progress=false
@@ -377,6 +381,7 @@ jobs:
           --include='**/settings/shipping/components/add-rate-wizard-modal/add-rate-wizard-modal.component.spec.ts'
           --include='**/settings/shipping/components/method-zones-inline/method-zones-inline.component.spec.ts'
           --include='**/shared/components/payment-collector/payment-collector.component.spec.ts'
+          --include='**/store/inventory/pop/**/*.spec.ts'
 
   backend-build:
     name: Backend Build (prisma + nest)
@@ -619,6 +624,14 @@ jobs:
           mkdir -p jest-logs
           set -o pipefail
           npm run test:path -- src/domains/store/invoicing 2>&1 | tee jest-logs/invoicing.log
+      # QUI-855: el kernel de dinero (`purchase-line-taxes` y sus hermanos) lo
+      # consumen compras y el frontend; sus 4 specs (59 tests) pasan en verde.
+      - name: jest — money-kernel
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/common/money-kernel 2>&1 | tee jest-logs/money-kernel.log
       # G5: artefacto de los logs de arriba. `if: always()` para que
       # quede subido incluso si un paso de jest falló. Acción fijada por
       # etiqueta (`@v4`), igual que `actions/checkout` y `actions/setup-node`
@@ -643,11 +656,11 @@ jobs:
           echo "### Backend Tests — carril POS" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Corre 6 de los $(find src/domains -mindepth 2 -maxdepth 2 -type d | wc -l | tr -d ' ') subdominios de \`apps/backend/src/domains\`:" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`payments\`, \`orders\`, \`tables\`, \`taxes\`, \`print-formats\`, \`invoicing\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "\`payments\`, \`orders\`, \`tables\`, \`taxes\`, \`print-formats\`, \`invoicing\` + \`src/common/money-kernel\`." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| | specs |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| en esta compuerta | $(find src/domains/store/payments src/domains/store/orders src/domains/store/tables src/domains/store/taxes src/domains/store/print-formats src/domains/store/invoicing -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| en esta compuerta | $(find src/domains/store/payments src/domains/store/orders src/domains/store/tables src/domains/store/taxes src/domains/store/print-formats src/domains/store/invoicing src/common/money-kernel -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
           echo "| en el repo | $(find src -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "El resto del backend **no se ejecuta en ningun job** salvo \`products\` (job aparte, ver \`Backend Tests (products)\`); \`backend-test\` sigue en \`if: false\`." >> "$GITHUB_STEP_SUMMARY"
