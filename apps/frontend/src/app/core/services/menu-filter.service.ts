@@ -343,6 +343,8 @@ export class MenuFilterService {
       this.authFacade.storeSettings$,
       this.authFacade.userOrganization$,
       this.authFacade.activeFiscalAreas$,
+      this.authFacade.currentAppPanelUi$,
+      this.authFacade.userPermissions$,
       // Layers 7 and 8 (authorization prefilters) used to live in the
       // store-admin layout, which spliced two entries out of the tree before
       // calling this method. They are inputs to the filter, so they belong
@@ -359,6 +361,8 @@ export class MenuFilterService {
           storeSettings,
           organization,
           activeFiscalAreas,
+          currentAppPanelUi,
+          userPermissions,
         ]) => {
           // ─── Crossing order: industry ∩ store_panel ∩ user_panel ∩ store_type ∩ scope ∩ subscription ───
           // Each layer is an AND. A module is visible only if it passes every layer.
@@ -402,6 +406,17 @@ export class MenuFilterService {
           const hiddenByStoreType =
             this.storeTypeHiddenModules[storeType || ''] || [];
 
+          // The normal visible-modules selector intentionally removes fiscal
+          // module keys while an area is inactive. Reader-only fallback items
+          // use the raw per-app map, but retain the same industry, store-wide
+          // ceiling, and store-type filters before they can be rendered.
+          const fallbackModuleKeys = this.fallbackPanelKeys(
+            currentAppPanelUi,
+            hiddenByIndustries,
+            hiddenByStorePanel,
+            hiddenByStoreType,
+          );
+
           // Layers 5+6 (operating scope / fiscal scope / fiscal area / subscription)
           // run inside filterItemsRecursive below.
           const effectiveModules = visibleModules.filter(
@@ -426,6 +441,8 @@ export class MenuFilterService {
             operatingScope,
             fiscalScope,
             activeFiscalAreas ?? [],
+            fallbackModuleKeys,
+            userPermissions ?? [],
           );
         },
       ),
@@ -491,6 +508,69 @@ export class MenuFilterService {
     return activeFiscalAreas.includes(item.requiresFiscalArea);
   }
 
+  private fallbackPanelKeys(
+    currentAppPanelUi: unknown,
+    hiddenByIndustries: string[],
+    hiddenByStorePanel: string[],
+    hiddenByStoreType: string[],
+  ): ReadonlySet<string> {
+    if (!currentAppPanelUi || typeof currentAppPanelUi !== 'object' || Array.isArray(currentAppPanelUi)) return new Set();
+    return new Set(Object.entries(currentAppPanelUi as Record<string, unknown>)
+      .filter(([key, visible]) => visible === true &&
+        !hiddenByIndustries.includes(key) &&
+        !hiddenByStorePanel.includes(key) &&
+        !hiddenByStoreType.includes(key))
+      .map(([key]) => key));
+  }
+
+  private createFiscalReadFallback(
+    item: MenuItem,
+    fiscalScope: OrganizationFiscalScope,
+    activeFiscalAreas: FiscalArea[],
+    fallbackModuleKeys: ReadonlySet<string>,
+    userPermissions: string[],
+  ): MenuItem | null {
+    const fallback = item.fiscalReadFallback;
+    if (!fallback || !userPermissions.includes(fallback.permission)) return null;
+    const keys = this.moduleKeysFor(item);
+    if (!keys.length || !keys.some((key) => fallbackModuleKeys.has(key))) return null;
+    // Only replace the item when the full module is blocked. The normal route
+    // and all its emission tabs remain untouched whenever both fiscal gates pass.
+    if (this.matchesFiscalScope(item, fiscalScope) && this.matchesFiscalArea(item, activeFiscalAreas)) return item;
+    return {
+      ...item,
+      route: fallback.route,
+      requiredFiscalScope: undefined,
+      requiresFiscalArea: undefined,
+      action: undefined,
+      children: undefined,
+      alwaysVisible: false,
+      fiscalReadFallback: undefined,
+      _fiscalReadFallbackActive: true,
+    };
+  }
+
+  private fiscalFallbackPanelBlock(item: MenuItem): ModuleBlockReason | null {
+    const keys = this.moduleKeysFor(item);
+    if (!keys.length) return 'user_panel_ui';
+    const settings = this.authFacade.storeSettings();
+    const industries: string[] = settings?.general?.industries?.length
+      ? settings.general.industries
+      : this.authFacade.userIndustries()?.length
+        ? this.authFacade.userIndustries()
+        : ['retail'];
+    const hiddenByIndustries = getModulesHiddenByIndustries(industries);
+    if (keys.every((key) => hiddenByIndustries.includes(key))) return 'industry';
+    const storePanel = settings?.panel_ui?.STORE_ADMIN as Record<string, boolean> | undefined;
+    if (storePanel && keys.every((key) => storePanel[key] === false)) return 'store_panel_ui';
+    const storeType = settings?.general?.store_type || this.authFacade.userStoreType();
+    const hiddenByStoreType = this.storeTypeHiddenModules[storeType || ''] || [];
+    if (keys.every((key) => hiddenByStoreType.includes(key))) return 'store_type';
+    const rawPanel = this.authFacade.currentAppPanelUi();
+    if (!rawPanel || typeof rawPanel !== 'object' || !keys.some((key) => (rawPanel as Record<string, unknown>)[key] === true)) return 'user_panel_ui';
+    return null;
+  }
+
   /**
    * Check if a module key (or any key in an array) is visible.
    *
@@ -525,6 +605,8 @@ export class MenuFilterService {
     operatingScope: OrganizationOperatingScope,
     fiscalScope: OrganizationFiscalScope,
     activeFiscalAreas: FiscalArea[],
+    fallbackModuleKeys: ReadonlySet<string> = new Set<string>(),
+    userPermissions: string[] = [],
   ): MenuItem[] {
     return items.reduce((filtered: MenuItem[], item) => {
       // Authorization prefilters, absorbed from the store-admin layout: two
@@ -533,17 +615,12 @@ export class MenuFilterService {
       if (!this.passesAuthorizationGates(item)) {
         return filtered;
       }
-      // Fiscal scope guard: the app that does not own the fiscal_scope must not
-      // render fiscal items at all (hide outright, no locked state).
-      if (!this.matchesFiscalScope(item, fiscalScope)) {
-        return filtered;
-      }
-      // Fiscal activation guard: operational fiscal modules stay hidden until
-      // their area is ACTIVE/LOCKED. The activation entry (no requiresFiscalArea)
-      // is always allowed so the owner can activate.
-      if (!this.matchesFiscalArea(item, activeFiscalAreas)) {
-        return filtered;
-      }
+      const fiscalBlocked = !this.matchesFiscalScope(item, fiscalScope) || !this.matchesFiscalArea(item, activeFiscalAreas);
+      const menuItem = fiscalBlocked
+        ? this.createFiscalReadFallback(item, fiscalScope, activeFiscalAreas, fallbackModuleKeys, userPermissions)
+        : item;
+      if (!menuItem) return filtered;
+      item = menuItem;
 
       // Operating scope guard:
       //   - 'hide' → drop item (legacy behavior)
@@ -575,6 +652,8 @@ export class MenuFilterService {
             operatingScope,
             fiscalScope,
             activeFiscalAreas,
+            fallbackModuleKeys,
+            userPermissions,
           );
         }
 
@@ -593,7 +672,11 @@ export class MenuFilterService {
       const moduleKey = item.panelUiKey || this.moduleKeyMap[item.label];
       if (moduleKey) {
         // Only include if this specific module (or any key in array) is visible
-        if (this.isModuleKeyVisible(moduleKey, visibleModules)) {
+        const itemKeys = Array.isArray(moduleKey) ? moduleKey : [moduleKey];
+        const isVisible = item._fiscalReadFallbackActive
+          ? itemKeys.some((key) => fallbackModuleKeys.has(key))
+          : this.isModuleKeyVisible(moduleKey, visibleModules);
+        if (isVisible) {
           if (
             item.requiresFeature &&
             !this.subscriptionAccess.canUseAI(item.requiresFeature)()
@@ -610,6 +693,8 @@ export class MenuFilterService {
               operatingScope,
               fiscalScope,
               activeFiscalAreas,
+              fallbackModuleKeys,
+              userPermissions,
             );
           }
 
@@ -626,6 +711,8 @@ export class MenuFilterService {
           operatingScope,
           fiscalScope,
           activeFiscalAreas,
+          fallbackModuleKeys,
+          userPermissions,
         );
 
         if (filteredChildren.length > 0) {
@@ -725,6 +812,43 @@ export class MenuFilterService {
   diagnose(menuItem: MenuItem): ModuleVisibilityDiagnosis {
     const settings = this.authFacade.storeSettings();
     const moduleKeys = this.moduleKeysFor(menuItem);
+    const fiscalScope = this.authFacade.fiscalScope();
+    const activeFiscalAreas = this.authFacade.activeFiscalAreas();
+
+    if ((!this.matchesFiscalScope(menuItem, fiscalScope) || !this.matchesFiscalArea(menuItem, activeFiscalAreas)) && menuItem.fiscalReadFallback) {
+      if (!this.authFacade.hasPermission(menuItem.fiscalReadFallback.permission)) {
+        return {
+          visible: false,
+          blockedBy: 'permission',
+          detail: 'Necesitas permiso de lectura de documentos recibidos para consultar esta bandeja.',
+          fixPath: null,
+        };
+      }
+      const panelBlock = this.fiscalFallbackPanelBlock(menuItem);
+      if (panelBlock) {
+        const detail: Record<ModuleBlockReason, string> = {
+          fiscal_scope: '', fiscal_area: '', operating_scope: '',
+          industry: 'Este módulo no aplica al giro de la tienda.',
+          store_panel_ui: 'El módulo está desactivado para toda la tienda en la configuración de módulos del panel.',
+          store_type: 'En esta modalidad de tienda el módulo no está disponible.',
+          user_panel_ui: 'Activa Facturación en la configuración personal del panel para ver la bandeja.',
+          subscription: '', permission: '', empty: '',
+        };
+        return { visible: false, blockedBy: panelBlock, detail: detail[panelBlock], fixPath: panelBlock === 'store_panel_ui' || panelBlock === 'user_panel_ui' ? '/admin/settings/general' : null };
+      }
+      if (this.resolveScopeOutcome(menuItem, this.authFacade.operatingScope()) === 'hide') {
+        return { visible: false, blockedBy: 'operating_scope', detail: 'Este módulo no corresponde al modo de operación de la organización.', fixPath: '/admin/settings/general' };
+      }
+      if (menuItem.requiresFeature && !this.subscriptionAccess.canUseAI(menuItem.requiresFeature)()) {
+        return { visible: false, blockedBy: 'subscription', detail: 'El plan actual no incluye esta función.', fixPath: '/admin/subscription' };
+      }
+      return {
+        visible: true,
+        blockedBy: null,
+        detail: 'Solo se habilita la bandeja de documentos recibidos; la emisión de facturas sigue sujeta a la activación fiscal.',
+        fixPath: null,
+      };
+    }
 
     // ─── 1. Fiscal scope ─────────────────────────────────────────────
     // Binary ownership: the app that does not own the fiscal_scope hides
@@ -1078,6 +1202,16 @@ export class MenuFilterService {
 
   private firstVisibleRoute(items: MenuItem[]): string | null {
     for (const item of items) {
+      if (
+        item.fiscalReadFallback &&
+        (!this.matchesFiscalScope(item, this.authFacade.fiscalScope()) ||
+          !this.matchesFiscalArea(item, this.authFacade.activeFiscalAreas()))
+      ) {
+        // Never let an alwaysVisible ORG invoicing item become the default
+        // redirect to emission while its only eligible surface is reception.
+        if (this.diagnose(item).visible) return item.fiscalReadFallback.route;
+        continue;
+      }
       if (item.alwaysVisible) {
         // alwaysVisible se renderiza sin importar panel_ui (filter Case 1);
         // solo lo detienen los prefiltros de autorización y la suscripción.

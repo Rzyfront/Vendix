@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
+import { signal, type WritableSignal } from '@angular/core';
 import { MenuFilterService } from './menu-filter.service';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { SubscriptionAccessService } from './subscription-access.service';
@@ -11,6 +11,7 @@ import {
 } from '../../shared/constants/store-module-catalog.constant';
 import { APP_MODULES } from '../../shared/constants/app-modules.constant';
 import { getModulesHiddenByIndustries } from '../../shared/constants/industry-modules.constant';
+import { BehaviorSubject, firstValueFrom, of, take } from 'rxjs';
 
 /**
  * Collects every key in the STORE_ADMIN tree, parents and children alike.
@@ -351,4 +352,123 @@ describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
   });
 });
 
+describe('MenuFilterService fiscal read fallback for received documents', () => {
+  let service: MenuFilterService;
+  let visibleModules$: BehaviorSubject<string[]>;
+  let panelUi$: BehaviorSubject<Record<string, boolean>>;
+  let permissions$: BehaviorSubject<string[]>;
+  let settings$: BehaviorSubject<Record<string, any>>;
+  let activeAreas$: BehaviorSubject<string[]>;
+  let organization$: BehaviorSubject<Record<string, string>>;
+  let settingsState: WritableSignal<Record<string, any>>;
+  let panelUiState: WritableSignal<Record<string, boolean>>;
 
+  const buildTree = (scope: 'STORE' | 'ORGANIZATION' = 'STORE'): MenuItem[] => [{
+    label: 'Fiscal', icon: 'landmark', children: [
+      { label: 'Operación fiscal', icon: 'clipboard-list', route: '/admin/fiscal', requiredFiscalScope: scope },
+      {
+        label: 'Facturación', icon: 'file-text', route: '/admin/invoicing',
+        requiredFiscalScope: scope, requiresFiscalArea: 'invoicing',
+        fiscalReadFallback: {
+          permission: scope === 'STORE' ? 'invoicing:received:read' : 'organization:invoicing:received:read',
+          route: '/admin/invoicing/received-documents',
+        },
+      },
+      { label: 'Contabilidad', icon: 'book-open', route: '/admin/accounting', requiredFiscalScope: scope, requiresFiscalArea: 'accounting' },
+    ],
+  }];
+
+  beforeEach(() => {
+    visibleModules$ = new BehaviorSubject<string[]>(['fiscal_operations']); // inactive selector removed invoicing but activation remains.
+    panelUi$ = new BehaviorSubject<Record<string, boolean>>({ invoicing: true, accounting: true, fiscal_operations: true });
+    permissions$ = new BehaviorSubject<string[]>(['invoicing:received:read']);
+    settings$ = new BehaviorSubject<Record<string, any>>({});
+    activeAreas$ = new BehaviorSubject<string[]>([]);
+    organization$ = new BehaviorSubject<Record<string, string>>({ operating_scope: 'STORE', fiscal_scope: 'STORE' });
+    settingsState = signal<Record<string, any>>({});
+    panelUiState = signal<Record<string, boolean>>({ invoicing: true, accounting: true, fiscal_operations: true });
+    const authFacade = {
+      getVisibleModules$: () => visibleModules$.asObservable(),
+      userStoreType$: of('physical'), userIndustries$: of(['retail']), storeSettings$: settings$.asObservable(),
+      userOrganization$: organization$.asObservable(), activeFiscalAreas$: activeAreas$.asObservable(),
+      currentAppPanelUi$: panelUi$.asObservable(), userPermissions$: permissions$.asObservable(),
+      fiscalScope: signal('STORE'), operatingScope: signal('STORE'), activeFiscalAreas: signal<string[]>([]),
+      storeSettings: settingsState, userIndustries: signal(['retail']), userStoreType: signal<string | null>('physical'),
+      currentAppPanelUi: panelUiState,
+      storeHasPqrs: signal(false),
+      hasPermission: (permission: string) => permissions$.value.includes(permission), hasAnyRole: () => true, hasAnyPermission: () => true,
+      isOwner: () => true, isAdmin: () => true,
+    };
+    TestBed.configureTestingModule({ providers: [
+      MenuFilterService, { provide: AuthFacade, useValue: authFacade },
+      { provide: SubscriptionAccessService, useValue: { canUseAI: () => () => true } },
+    ] });
+    service = TestBed.inject(MenuFilterService);
+  });
+
+  const filteredOnce = async (scope: 'STORE' | 'ORGANIZATION' = 'STORE') => {
+    return firstValueFrom(service.filterMenuItems(buildTree(scope)).pipe(take(1)));
+  };
+
+  it('shows only a received-documents route when fiscal area is inactive and the exact reader permission is present', async () => {
+    const result = await filteredOnce();
+    expect(result[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal', '/admin/invoicing/received-documents']);
+    expect(service.diagnose(buildTree()[0].children![1]).visible).toBe(true);
+    expect(service.isMenuItemVisible(buildTree()[0].children![1])).toBe(true);
+    expect(result[0].children?.[1]).toMatchObject({ label: 'Facturación', _fiscalReadFallbackActive: true, alwaysVisible: false });
+    expect(result[0].children?.[1]?.requiresFiscalArea).toBeUndefined();
+    expect(result[0].children?.[1]?.requiredFiscalScope).toBeUndefined();
+  });
+
+  it('hides the fallback when permission is absent, even if panel_ui is enabled', async () => {
+    permissions$.next([]);
+    const result = await filteredOnce();
+    expect(result[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal']);
+    expect(service.diagnose(buildTree()[0].children![1]).blockedBy).toBe('permission');
+  });
+
+  it('requires raw per-user panel_ui true and preserves the store-wide ceiling', async () => {
+    panelUi$.next({ invoicing: false, accounting: true, fiscal_operations: true });
+    panelUiState.set({ invoicing: false, accounting: true, fiscal_operations: true });
+    expect((await filteredOnce())[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal']);
+    expect(service.diagnose(buildTree()[0].children![1]).blockedBy).toBe('user_panel_ui');
+
+    panelUi$.next({ invoicing: true, accounting: true, fiscal_operations: true });
+    panelUiState.set({ invoicing: true, accounting: true, fiscal_operations: true });
+    settingsState.set({ panel_ui: { STORE_ADMIN: { invoicing: false } } });
+    settings$.next({ panel_ui: { STORE_ADMIN: { invoicing: false } } });
+    expect((await filteredOnce())[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal']);
+    expect(service.diagnose(buildTree()[0].children![1]).blockedBy).toBe('store_panel_ui');
+  });
+
+  it('leaves the full route unchanged when both fiscal gates pass and uses the inbox route for the wrong scope', async () => {
+    visibleModules$.next(['invoicing']);
+    activeAreas$.next(['invoicing']);
+    expect((await filteredOnce())[0]?.children?.map((child) => child.route)).toContain('/admin/invoicing');
+
+    activeAreas$.next([]);
+    organization$.next({ operating_scope: 'ORGANIZATION', fiscal_scope: 'ORGANIZATION' });
+    expect((await filteredOnce('STORE'))[0]?.children?.map((child) => child.route)).toEqual(['/admin/invoicing/received-documents']);
+    visibleModules$.next(['fiscal_operations']);
+    permissions$.next(['organization:invoicing:received:read']);
+    expect((await filteredOnce('ORGANIZATION'))[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal', '/admin/invoicing/received-documents']);
+  });
+
+  it('keeps a fiscal group that has only its read-only received-document child', async () => {
+    const tree: MenuItem[] = [{ label: 'Fiscal', icon: 'landmark', children: [buildTree()[0].children![1]] }];
+    const result = await firstValueFrom(service.filterMenuItems(tree).pipe(take(1)));
+    expect(result).toHaveLength(1);
+    expect(result[0].children?.map((child) => child.route)).toEqual(['/admin/invoicing/received-documents']);
+  });
+
+  it('reacts when read permission is revoked and never reveals another inactive fiscal module', async () => {
+    const observed: string[][] = [];
+    const subscription = service.filterMenuItems(buildTree()).subscribe((tree) => observed.push(tree[0]?.children?.map((child) => child.route!) ?? []));
+    await firstValueFrom(service.filterMenuItems(buildTree()).pipe(take(1)));
+    permissions$.next([]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(observed[observed.length - 1]).toEqual(['/admin/fiscal']);
+    expect(observed.some((routes) => routes.includes('/admin/accounting'))).toBe(false);
+    subscription.unsubscribe();
+  });
+});
