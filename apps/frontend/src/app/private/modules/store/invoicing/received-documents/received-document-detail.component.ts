@@ -6,14 +6,16 @@ import { CardComponent, StickyHeaderComponent, ToastService } from '../../../../
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { formatDateOnlyUTC, formatStoreDateTime } from '../../../../../shared/utils/date.util';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { describeApiFailure } from '../utils/invoicing-errors.util';
 import type { ReceivedDocument, ReceivedDocumentFile, ReceivedDocumentTax, ReceivedDocumentsScope } from './received-documents.interface';
 import { ReceivedDocumentsService } from './received-documents.service';
+import { ReceivedDocumentFormComponent } from './received-document-form.component';
 
 @Component({
   selector: 'app-received-document-detail',
   standalone: true,
-  imports: [CardComponent, StickyHeaderComponent],
+  imports: [CardComponent, StickyHeaderComponent, ReceivedDocumentFormComponent],
   template: `
     <div class="w-full space-y-4">
       <app-sticky-header title="Detalle del documento recibido" subtitle="Revisión de evidencia del proveedor" icon="file-text" [showBackButton]="true" backRoute="/admin/invoicing/received-documents" [backQueryParams]="backQueryParams()" />
@@ -101,6 +103,10 @@ import { ReceivedDocumentsService } from './received-documents.service';
           </section>
         </app-card>
         <p class="rounded-lg border border-border bg-surface p-3 text-sm text-text-secondary">El estado validado no equivale a aceptación por la DIAN. Reconocimiento fiscal, coincidencia con recepción/compra y contabilización son procesos separados; aquí no se confirma ninguno.</p>
+        @if (canReview()) {
+          <div class="flex justify-end"><button type="button" class="min-h-11 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white" (click)="reviewFormOpen.set(true)">Revisar datos</button></div>
+        }
+        <app-received-document-form [(isOpen)]="reviewFormOpen" [scope]="scope" [selectedStoreId]="storeId() ?? null" [document]="doc" (saved)="onReviewSaved()" (reloadRequested)="load()" />
       }
     </div>
   `,
@@ -112,6 +118,7 @@ export class ReceivedDocumentDetailComponent {
   private readonly toast = inject(ToastService);
   private readonly currency = inject(CurrencyFormatService);
   private readonly storeSettings = inject(StoreSettingsFacade);
+  private readonly auth = inject(AuthFacade);
   readonly scope: ReceivedDocumentsScope = this.readScope(this.route.snapshot.data['receivedDocumentsScope']);
   private readonly routeQueryParams = toSignal(this.route.queryParamMap, { initialValue: this.route.snapshot.queryParamMap });
   private readonly routeParams = toSignal(this.route.paramMap, { initialValue: this.route.snapshot.paramMap });
@@ -122,6 +129,18 @@ export class ReceivedDocumentDetailComponent {
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
   readonly downloadingFileId = signal<number | null>(null);
+  readonly reviewFormOpen = signal(false);
+  readonly canReview = computed(() => {
+    const doc = this.document();
+    if (!doc || !this.auth.hasPermission(`${this.scope === 'store' ? 'invoicing' : 'organization:invoicing'}:received:review`)) return false;
+    const meta = this.metadataObject(doc.metadata); const raw = this.metadataObject(doc.raw_payload);
+    const source = meta['source_format'] ?? raw['source_format'];
+    const extraction = this.metadataObject(meta['extraction_snapshot']);
+    const editable = source === 'manual_entry' || (source === 'pending_file' && doc.processing_status === 'ready' && Object.keys(extraction).length > 0);
+    const xmlNoteOnly = source === 'ubl_xml' || source === 'xml' || doc.source_channel === 'xml';
+    const terminal = ['recognized', 'accepted', 'posted'].includes(doc.fiscal_status) || ['recognized', 'accepted', 'posted'].includes(doc.posting_status) || !!doc.accepted_at;
+    return !terminal && (editable || xmlNoteOnly);
+  });
   private activeRequest?: Subscription;
 
   constructor() {
@@ -142,6 +161,11 @@ export class ReceivedDocumentDetailComponent {
       next: (response) => this.document.set(response.data),
       error: (err: unknown) => { this.document.set(null); this.error.set(describeApiFailure(err).message || 'No se pudo cargar el documento.'); },
     });
+  }
+
+  onReviewSaved(): void {
+    this.toast.success('Revisión guardada. El documento no fue aceptado ni contabilizado.');
+    this.load();
   }
 
   states(doc: ReceivedDocument): Array<{ label: string; value: string }> {

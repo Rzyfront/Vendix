@@ -22,6 +22,10 @@ export interface ReceivedDocumentTax {
   rate: string | null;
   base_amount: string;
   amount: string;
+  tax_basis_type?: 'monetary' | 'unit';
+  base_quantity?: string | null;
+  base_unit_code?: string | null;
+  per_unit_amount?: string | null;
   eligible_amount?: string;
   treatment?: string;
   metadata?: unknown;
@@ -94,6 +98,7 @@ export interface ReceivedDocument {
   version: number;
   created_at: string;
   updated_at: string;
+  accepted_at?: string | null;
   files?: ReceivedDocumentFile[];
   items?: ReceivedDocumentItem[];
   taxes?: ReceivedDocumentTax[];
@@ -115,9 +120,13 @@ export interface ApiEnvelope<T> {
 export interface ManualReceivedDocumentTaxInput {
   tax_type: string;
   scheme_code?: string;
+  tax_basis_type?: 'monetary' | 'unit';
+  base_quantity?: string;
+  base_unit_code?: string;
+  per_unit_amount?: string;
   tax_name: string;
-  rate: string;
-  base_amount: string;
+  rate?: string;
+  base_amount?: string;
   amount: string;
 }
 

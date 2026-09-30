@@ -20,6 +20,7 @@ import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
 import { describeApiFailure } from '../utils/invoicing-errors.util';
 import { OrgFiscalScopeSelectorComponent } from '../../../organization/shared/components/org-fiscal-scope-selector.component';
 import { ReceivedDocumentImportComponent } from './received-document-import.component';
+import { ReceivedDocumentFormComponent } from './received-document-form.component';
 import type { ReceivedDocument, ReceivedDocumentQuery, ReceivedDocumentsScope } from './received-documents.interface';
 import { ReceivedDocumentsService } from './received-documents.service';
 
@@ -34,7 +35,7 @@ const STATUS_FILTERS = [
 @Component({
   selector: 'app-received-documents-page',
   standalone: true,
-  imports: [CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent, PaginationComponent, ResponsiveDataViewComponent, OrgFiscalScopeSelectorComponent, ReceivedDocumentImportComponent],
+  imports: [CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent, PaginationComponent, ResponsiveDataViewComponent, OrgFiscalScopeSelectorComponent, ReceivedDocumentImportComponent, ReceivedDocumentFormComponent],
   template: `
     <div class="w-full space-y-4">
       @if (scope === 'organization') {
@@ -57,6 +58,9 @@ const STATUS_FILTERS = [
               @for (option of statusFilters; track option.value) { <option [value]="option.value">{{ option.label }}</option> }
             </select>
             @if (canImport()) {
+              <button type="button" class="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-primary px-3 py-2 text-sm font-medium text-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50" [disabled]="uploading() || !canImportInCurrentScope()" (click)="manualFormOpen.set(true)">
+                <app-icon name="plus" [size]="16" /> Capturar manualmente
+              </button>
               <label class="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:opacity-90" [class.opacity-60]="!canImportInCurrentScope()" [class.pointer-events-none]="!canImportInCurrentScope()" [attr.aria-disabled]="!canImportInCurrentScope()">
                 <app-icon name="upload" [size]="16" />
                 {{ uploading() ? 'Importando…' : 'Importar XML' }}
@@ -80,7 +84,7 @@ const STATUS_FILTERS = [
         } @else if (loading() && rows().length === 0) {
           <div class="p-10 text-center text-sm text-text-secondary" role="status">Cargando documentos…</div>
         } @else if (!loading() && rows().length === 0 && !error()) {
-          <app-empty-state icon="inbox" title="No hay documentos recibidos" description="Importa un XML fiscal de proveedor para iniciar la revisión." [showActionButton]="false" />
+          <app-empty-state icon="inbox" title="No hay documentos recibidos" description="Importa un XML o captura manualmente un documento de proveedor para iniciar la revisión." [showActionButton]="false" />
         } @else {
           <div class="p-2 md:p-4">
             <app-responsive-data-view [data]="rows()" [columns]="columns" [cardConfig]="cardConfig" [actions]="rowActions" [loading]="loading()" [rowLabelKey]="'invoice_number'" (rowClick)="openDetail($event)" />
@@ -95,6 +99,12 @@ const STATUS_FILTERS = [
           [scope]="scope"
           [selectedStoreId]="storeId() ?? null"
           (completed)="onScanCompleted($event)"
+        />
+        <app-received-document-form
+          [(isOpen)]="manualFormOpen"
+          [scope]="scope"
+          [selectedStoreId]="storeId() ?? null"
+          (saved)="onManualSaved($event)"
         />
       }
     </div>
@@ -122,6 +132,7 @@ export class ReceivedDocumentsPageComponent {
   readonly loading = signal(false);
   readonly uploading = signal(false);
   readonly scanImportOpen = signal(false);
+  readonly manualFormOpen = signal(false);
   readonly error = signal<string | null>(null);
   readonly canImport = computed(() => this.auth.hasPermission(`${this.scope === 'store' ? 'invoicing' : 'organization:invoicing'}:received:import`));
   readonly storeSelectionReady = signal(this.scope !== 'organization');
@@ -259,6 +270,15 @@ export class ReceivedDocumentsPageComponent {
   onScanCompleted(documentId: number): void {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return;
     this.toast.success('Documento leído; requiere revisión.');
+    this.page.set(1);
+    this.load();
+    const queryParams = this.requiresStoreSelector() && this.storeId() ? { store_id: this.storeId() } : undefined;
+    void this.router.navigate(['/admin/invoicing/received-documents', documentId], { queryParams });
+  }
+
+  onManualSaved(documentId: number): void {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) return;
+    this.toast.success('Documento guardado para revisión. No fue aceptado ni contabilizado.');
     this.page.set(1);
     this.load();
     const queryParams = this.requiresStoreSelector() && this.storeId() ? { store_id: this.storeId() } : undefined;
