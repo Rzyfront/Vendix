@@ -216,6 +216,14 @@ export interface MatchedLineItem extends ExtractedLineItem {
    * al lado de 3 × 12.000.
    */
   quantity_adjustment?: QuantityAdjustment;
+  /**
+   * QUI-855 paso 8b — marca que deja la revalidación con IA en la línea (sólo
+   * UI, vive hasta el cierre del modal):
+   *  - `changed`: la revalidación cambió algún valor numérico/fiscal.
+   *  - `new`: la IA la encontró en el documento y no estaba en la precarga.
+   *  - `missing`: la revalidación no la encontró en el documento.
+   */
+  revalidation?: 'changed' | 'new' | 'missing';
 }
 
 /** Motivo tipado de `MatchedLineItem.match_reason`. */
@@ -284,4 +292,63 @@ export interface ConfirmScannedInvoiceDto {
   discount_amount?: number;
   notes?: string;
   save_attachment?: boolean;
+}
+
+// ============================================================================
+// Revalidación con IA (QUI-855 paso 8b) — espejo de
+// `purchase-orders/interfaces/invoice-revalidate-job.interface.ts`
+// ============================================================================
+
+export type InvoiceRevalidateJobState =
+  | 'waiting'
+  | 'active'
+  | 'completed'
+  | 'failed'
+  | 'delayed';
+
+export interface InvoiceRevalidateFinding {
+  severity: 'info' | 'warning';
+  message: string;
+}
+
+export interface InvoiceRevalidateRedFlag {
+  message: string;
+  line_index: number | null;
+}
+
+export interface InvoiceRevalidateDivergence {
+  line_index: number | null;
+  field: string;
+  consolidated_value: unknown;
+  document_value: unknown;
+  revalidated_value: unknown;
+  reason: string;
+}
+
+export interface InvoiceRevalidateReport {
+  summary: string;
+  confidence: 'high' | 'medium' | 'low';
+  findings: InvoiceRevalidateFinding[];
+  red_flags: InvoiceRevalidateRedFlag[];
+  divergences: InvoiceRevalidateDivergence[];
+}
+
+export interface InvoiceRevalidateResult {
+  /** Misma forma que el resultado de `POST scan` (sin `scan_attachment`). */
+  consolidated: Omit<InvoiceScanResult, 'scan_attachment'>;
+  report: InvoiceRevalidateReport;
+}
+
+/** `GET scan/revalidate/:jobId` — SIN envelope de ResponseService. */
+export interface InvoiceRevalidateJobStatus {
+  status: InvoiceRevalidateJobState;
+  result?: InvoiceRevalidateResult;
+  error?: string;
+}
+
+export interface InvoiceRevalidateRequest {
+  scan_attachment_key: string;
+  order_type?: 'retail' | 'ingredient';
+  consolidated: Omit<InvoiceScanResult, 'scan_attachment'>;
+  note?: string;
 }

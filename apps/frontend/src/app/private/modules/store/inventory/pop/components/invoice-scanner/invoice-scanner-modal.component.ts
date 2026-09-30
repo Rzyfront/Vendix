@@ -1,8 +1,8 @@
-import {Component, input, output, signal, computed, effect, viewChild, DestroyRef, inject} from '@angular/core';
+import {Component, input, output, signal, computed, effect, viewChild, DestroyRef, Injector, afterNextRender, inject} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { switchMap, catchError, of, Subject } from 'rxjs';
+import { switchMap, catchError, of, Subject, Subscription } from 'rxjs';
 
 import { AiReviewAckComponent } from '../../../../../../../shared/components/ai-review-ack/ai-review-ack.component';
 import {
@@ -16,6 +16,7 @@ import { SpinnerComponent } from '../../../../../../../shared/components/spinner
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
+import { TextareaComponent } from '../../../../../../../shared/components/textarea/textarea.component';
 import { InputsearchComponent } from '../../../../../../../shared/components/inputsearch/inputsearch.component';
 import { StepsLineComponent } from '../../../../../../../shared/components/steps-line/steps-line.component';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
@@ -34,6 +35,8 @@ import {
   InvoiceMatchResult,
   MatchedLineItem,
   ProductCandidate,
+  InvoiceRevalidateDivergence,
+  InvoiceRevalidateResult,
   ScanAttachmentInfo,
   ScanLineTax,
 } from '../../interfaces/invoice-scanner.interface';
@@ -43,6 +46,10 @@ import {
   popLineTaxesToScanTaxes,
   scanLineHasTaxes,
 } from '../../utils/scan-line-to-cart.util';
+import {
+  buildRevalidateConsolidated,
+  mergeRevalidatedLines,
+} from '../../utils/revalidate-merge.util';
 import {
   deriveLineTax,
   derivePurchaseTotals,
@@ -63,6 +70,7 @@ import {
     IconComponent,
     InputComponent,
     ToggleComponent,
+    TextareaComponent,
     InputsearchComponent,
     StepsLineComponent,
     CurrencyPipe,
@@ -253,6 +261,7 @@ import {
 
       <!-- Step 3: Review & Confirm -->
       @if (currentStep() === 3 && matchResult()) {
+       @if (revalidateView() === 'review') {
         <div class="space-y-5 max-h-[60vh] overflow-y-auto pr-1">
           <!-- Punto 2: proveedor con paridad (preseleccionado + editable). -->
           <div class="bg-muted/30 rounded-lg p-4 border border-border">
@@ -370,7 +379,7 @@ import {
           }
 
           <!-- Line items table -->
-          <div>
+          <div id="pop-scan-lines" tabindex="-1" class="outline-none">
             <h4 class="text-sm font-semibold text-text-primary mb-3">
               Productos ({{ editableItems().length }})
             </h4>
@@ -431,7 +440,9 @@ import {
                       se equivocó, y una fila que se esfuma parece un borrado.
                     -->
                     <tr class="border-b border-border/50 hover:bg-muted/20"
-                        [class]="isDiscarded(i) ? discardedRowClasses : ''">
+                        [class]="isDiscarded(i) ? discardedRowClasses : ''"
+                        [class.bg-primary/5]="item.revalidation === 'changed'"
+                        [class.bg-amber-50]="item.revalidation === 'missing'">
                       <td class="py-2 pr-3">
                         <span class="text-text-primary line-clamp-1" [title]="item.description">
                           {{ item.description }}
@@ -449,6 +460,10 @@ import {
                         @if (quantityNote(item); as note) {
                           <span class="block text-[11px] text-text-secondary leading-snug">{{ note }}</span>
                         }
+                        <ng-container
+                          [ngTemplateOutlet]="revalidationTag"
+                          [ngTemplateOutletContext]="{ item: item }"
+                        ></ng-container>
                       </td>
                       <td class="py-2 px-3">
                         <input
@@ -584,7 +599,10 @@ import {
             <div class="sm:hidden space-y-3">
               @for (item of editableItems(); track $index; let i = $index) {
                 <div class="bg-surface border border-border rounded-lg p-3 space-y-2"
-                     [class]="isDiscarded(i) ? discardedRowClasses : ''">
+                     [class]="isDiscarded(i) ? discardedRowClasses : ''"
+                     [class.border-l-4]="!!item.revalidation"
+                     [class.border-l-primary]="item.revalidation === 'changed' || item.revalidation === 'new'"
+                     [class.border-l-amber-500]="item.revalidation === 'missing'">
                   <div class="flex items-start justify-between gap-2">
                     <span class="text-sm font-medium text-text-primary line-clamp-2 flex-1">
                       {{ item.description }}
@@ -608,6 +626,10 @@ import {
                   @if (quantityNote(item); as note) {
                     <p class="text-[11px] text-text-secondary leading-snug">{{ note }}</p>
                   }
+                  <ng-container
+                    [ngTemplateOutlet]="revalidationTag"
+                    [ngTemplateOutletContext]="{ item: item }"
+                  ></ng-container>
                   <div class="grid grid-cols-2 gap-2">
                     <div>
                       <label class="text-[10px] text-text-secondary">Cant.</label>
@@ -1028,20 +1050,212 @@ import {
             </div>
           </ng-template>
 
-          <!-- Verificación obligatoria de los datos precargados por la IA -->
-          <app-ai-review-ack
-            #ackBlock
-            [(acknowledged)]="aiAck"
-            [itemCount]="editableItems().length"
-            entityLabel="ítems de la factura"
-          ></app-ai-review-ack>
+          <!-- QUI-855 paso 8b: etiqueta de la línea tras revalidar con IA. -->
+          <ng-template #revalidationTag let-item="item">
+            @if (item.revalidation === 'changed') {
+              <span class="mt-0.5 inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                <app-icon name="sparkles" [size]="10"></app-icon>
+                Revalidado
+              </span>
+            } @else if (item.revalidation === 'new') {
+              <span class="mt-0.5 inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                <app-icon name="plus" [size]="10"></app-icon>
+                Nueva (revalidación)
+              </span>
+            } @else if (item.revalidation === 'missing') {
+              <span class="mt-0.5 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                <app-icon name="alert-triangle" [size]="10"></app-icon>
+                No encontrada en el documento
+              </span>
+            }
+          </ng-template>
+
+          <!-- QUI-855 paso 8b: revalidación opcional con IA contra el documento original. -->
+          <div class="flex items-start justify-between gap-3 p-3 rounded-lg border border-border bg-muted/20">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-text-primary">
+                Revalidar datos consolidados con IA
+              </p>
+              @if (canRevalidate()) {
+                <p class="text-xs text-text-secondary mt-0.5">
+                  La IA releerá el documento original y lo comparará con lo que
+                  ves en pantalla. Podrás decidir qué conservar.
+                </p>
+              } @else {
+                <p class="text-xs text-amber-700 mt-0.5" data-testid="revalidate-disabled-hint">
+                  El documento original no se guardó; no se puede revalidar
+                </p>
+              }
+            </div>
+            <app-toggle
+              [checked]="revalidateChecked()"
+              [disabled]="!canRevalidate()"
+              (changed)="onRevalidateToggle($event)"
+              ariaLabel="Revalidar datos consolidados con IA"
+            ></app-toggle>
+          </div>
+
+          <!-- Verificación obligatoria de los datos precargados por la IA
+               (se exige tras revalidar o al agregar sin revalidar). -->
+          @if (!revalidateChecked()) {
+            <app-ai-review-ack
+              #ackBlock
+              [(acknowledged)]="aiAck"
+              [itemCount]="editableItems().length"
+              entityLabel="ítems de la factura"
+            ></app-ai-review-ack>
+          }
         </div>
+       } @else {
+        <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-1" data-testid="revalidate-panel">
+          @switch (revalidateView()) {
+            @case ('summary') {
+              <div class="rounded-lg border border-border bg-muted/30 p-4 space-y-2 text-sm">
+                <h4 class="text-sm font-semibold text-text-primary">Se enviará a revalidar</h4>
+                <div class="flex justify-between gap-3">
+                  <span class="text-text-secondary">Líneas</span>
+                  <span class="text-text-primary font-medium" data-testid="revalidate-summary-lines">{{ keptCount() }}</span>
+                </div>
+                <div class="flex justify-between gap-3">
+                  <span class="text-text-secondary">Total consolidado</span>
+                  <span class="text-text-primary font-medium">{{ purchaseTotals().total | currency: 0 }}</span>
+                </div>
+                <div class="flex justify-between gap-3">
+                  <span class="text-text-secondary">Documento</span>
+                  <span class="text-text-primary font-medium truncate" data-testid="revalidate-summary-file">{{ scanResult()?.scan_attachment?.file_name }}</span>
+                </div>
+              </div>
+              <app-textarea
+                label="Nota para la IA (opcional)"
+                placeholder="Ej: la cantidad de la línea 3 es 12 cajas, no 12 unidades"
+                [rows]="4"
+                [ngModel]="revalidateNote()"
+                (ngModelChange)="onRevalidateNoteChange($event)"
+                name="revalidateNote"
+              ></app-textarea>
+              <p class="text-[11px] text-text-secondary text-right">
+                {{ revalidateNote().length }} / {{ REVALIDATE_NOTE_MAX }}
+              </p>
+            }
+            @case ('loading') {
+              <div class="flex flex-col items-center justify-center gap-4 min-h-[240px]" data-testid="revalidate-loading">
+                <app-spinner size="lg"></app-spinner>
+                <p class="text-sm text-text-secondary text-center">
+                  La IA está releyendo el documento original…
+                </p>
+              </div>
+            }
+            @case ('error') {
+              <div class="rounded-lg border border-red-200 bg-red-50 p-4 flex items-start gap-3" data-testid="revalidate-error">
+                <app-icon name="alert-circle" [size]="20" class="text-red-600 shrink-0"></app-icon>
+                <div>
+                  <p class="text-sm font-semibold text-red-800">No se pudo revalidar</p>
+                  <p class="text-xs text-red-700 mt-1">{{ revalidateError() }}</p>
+                </div>
+              </div>
+            }
+            @case ('result') {
+              @if (revalidateResult(); as res) {
+                <div class="rounded-lg border border-border bg-muted/30 p-4 space-y-2" data-testid="revalidate-result">
+                  <div class="flex items-center justify-between gap-2">
+                    <h4 class="text-sm font-semibold text-text-primary">Resultado de la revalidación</h4>
+                    <app-badge [variant]="confidenceVariant(res.report.confidence)" size="xsm">
+                      {{ confidenceLabel(res.report.confidence) }}
+                    </app-badge>
+                  </div>
+                  <p class="text-sm text-text-primary">{{ res.report.summary }}</p>
+                </div>
+
+                @if (res.report.red_flags.length > 0) {
+                  <div class="rounded-lg border border-red-300 bg-red-50 p-3 space-y-1.5" data-testid="revalidate-red-flags">
+                    <p class="text-xs font-semibold text-red-800 flex items-center gap-1">
+                      <app-icon name="alert-triangle" [size]="14"></app-icon>
+                      Alertas
+                    </p>
+                    @for (flag of res.report.red_flags; track $index) {
+                      <p class="text-xs text-red-700">
+                        @if (flag.line_index !== null) {
+                          <span class="font-semibold">Línea {{ lineNumber(flag.line_index) }}:</span>
+                        }
+                        {{ flag.message }}
+                      </p>
+                    }
+                  </div>
+                }
+
+                @if (res.report.findings.length > 0) {
+                  <div class="rounded-lg border border-border p-3 space-y-1.5" data-testid="revalidate-findings">
+                    <p class="text-xs font-semibold text-text-primary">Hallazgos</p>
+                    @for (f of res.report.findings; track $index) {
+                      <p class="text-xs flex items-start gap-1.5" [class]="f.severity === 'warning' ? 'text-amber-700' : 'text-text-secondary'">
+                        <app-icon [name]="f.severity === 'warning' ? 'alert-triangle' : 'info'" [size]="12" class="mt-0.5 shrink-0"></app-icon>
+                        <span>{{ f.message }}</span>
+                      </p>
+                    }
+                  </div>
+                }
+
+                <div data-testid="revalidate-divergences">
+                  <h4 class="text-sm font-semibold text-text-primary mb-2">
+                    Divergencias ({{ res.report.divergences.length }})
+                  </h4>
+                  @if (res.report.divergences.length === 0) {
+                    <p class="text-xs text-text-secondary">
+                      La IA no encontró diferencias con los datos consolidados.
+                    </p>
+                  } @else {
+                    <div class="hidden sm:block overflow-x-auto">
+                      <table class="w-full text-xs">
+                        <thead>
+                          <tr class="border-b border-border text-left text-text-secondary">
+                            <th class="pb-2 pr-3 font-medium">Línea</th>
+                            <th class="pb-2 px-3 font-medium">Campo</th>
+                            <th class="pb-2 px-3 font-medium">Consolidado</th>
+                            <th class="pb-2 px-3 font-medium">En el documento</th>
+                            <th class="pb-2 px-3 font-medium">Revalidado</th>
+                            <th class="pb-2 pl-3 font-medium">Motivo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (d of res.report.divergences; track $index) {
+                            <tr class="border-b border-border/50 bg-amber-50/60">
+                              <td class="py-2 pr-3 font-semibold">{{ d.line_index === null ? '—' : lineNumber(d.line_index) }}</td>
+                              <td class="py-2 px-3">{{ d.field }}</td>
+                              <td class="py-2 px-3 text-text-secondary">{{ formatValue(d.consolidated_value) }}</td>
+                              <td class="py-2 px-3 text-text-secondary">{{ formatValue(d.document_value) }}</td>
+                              <td class="py-2 px-3 font-semibold text-primary">{{ formatValue(d.revalidated_value) }}</td>
+                              <td class="py-2 pl-3 text-text-secondary">{{ d.reason }}</td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                    <div class="sm:hidden space-y-2">
+                      @for (d of res.report.divergences; track $index) {
+                        <div class="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-1 text-xs">
+                          <p class="font-semibold text-text-primary">
+                            {{ d.line_index === null ? 'General' : 'Línea ' + lineNumber(d.line_index) }} · {{ d.field }}
+                          </p>
+                          <p><span class="text-text-secondary">Consolidado:</span> {{ formatValue(d.consolidated_value) }}</p>
+                          <p><span class="text-text-secondary">En el documento:</span> {{ formatValue(d.document_value) }}</p>
+                          <p><span class="text-text-secondary">Revalidado:</span> <span class="font-semibold text-primary">{{ formatValue(d.revalidated_value) }}</span></p>
+                          <p class="text-text-secondary">{{ d.reason }}</p>
+                        </div>
+                      }
+                    </div>
+                  }
+                </div>
+              }
+            }
+          }
+        </div>
+       }
       }
 
       <!-- Footer Actions -->
       <div slot="footer" class="flex justify-between gap-3">
         <div>
-          @if (currentStep() === 3) {
+          @if (currentStep() === 3 && revalidateView() === 'review') {
             <app-button variant="outline" (clicked)="resetWizard()">
               Escanear otra
             </app-button>
@@ -1060,7 +1274,43 @@ import {
               Analizar Factura
             </app-button>
           }
-          @if (currentStep() === 3) {
+          @if (currentStep() === 3 && revalidateView() === 'summary') {
+            <app-button variant="outline" (clicked)="backToReview()">
+              Volver
+            </app-button>
+            <app-button variant="primary" (clicked)="sendRevalidate()">
+              Enviar a revalidar
+            </app-button>
+          }
+          @if (currentStep() === 3 && revalidateView() === 'error') {
+            <app-button variant="outline" (clicked)="backToReview()">
+              Volver a la precarga
+            </app-button>
+            <app-button variant="primary" (clicked)="sendRevalidate()">
+              Reintentar
+            </app-button>
+          }
+          @if (currentStep() === 3 && revalidateView() === 'result') {
+            <app-button variant="outline" (clicked)="editManually()">
+              Editar manualmente
+            </app-button>
+            <app-button variant="outline" (clicked)="keepPreload()">
+              Mantener precarga
+            </app-button>
+            <app-button variant="primary" (clicked)="useRevalidation()">
+              Usar revalidación
+            </app-button>
+          }
+          @if (currentStep() === 3 && revalidateView() === 'review' && revalidateChecked()) {
+            <app-button
+              variant="primary"
+              [disabled]="editableItems().length === 0 || allDiscarded() || !canRevalidate()"
+              (clicked)="openRevalidateSummary()"
+            >
+              Revalidar
+            </app-button>
+          }
+          @if (currentStep() === 3 && revalidateView() === 'review' && !revalidateChecked()) {
             <!--
               QUI-644: el contador refleja SOLO los activos, y el botón se
               deshabilita si todo quedó descartado — confirmar una carga vacía
@@ -1110,6 +1360,7 @@ import {
 })
 export class InvoiceScannerModalComponent {
   private destroyRef = inject(DestroyRef);
+  private injector = inject(Injector);
   readonly isOpen = input(false);
   /**
    * Fase 4: scan profile selector. Defaults to `retail`. The parent
@@ -1247,6 +1498,202 @@ export class InvoiceScannerModalComponent {
   readonly allDiscarded = computed(
     () => this.editableItems().length > 0 && this.keptCount() === 0,
   );
+
+  // ===== QUI-855 paso 8b: revalidación con IA =====
+  readonly REVALIDATE_NOTE_MAX = 2000;
+  /** Checkbox «Revalidar datos consolidados con IA» de la vista de revisión. */
+  readonly revalidateChecked = signal(false);
+  /** Vista del paso 3: la precarga o alguna etapa de la revalidación. */
+  readonly revalidateView = signal<
+    'review' | 'summary' | 'loading' | 'error' | 'result'
+  >('review');
+  readonly revalidateNote = signal('');
+  readonly revalidateResult = signal<InvoiceRevalidateResult | null>(null);
+  readonly revalidateError = signal<string | null>(null);
+  private revalidateSub: Subscription | null = null;
+  /** Posición en `editableItems()` de cada línea enviada (las no descartadas). */
+  private revalidateSentIndexes: number[] = [];
+
+  /** Sin `scan_attachment` (la subida a S3 falló) no hay documento que releer. */
+  readonly canRevalidate = computed(
+    () => !!this.scanResult()?.scan_attachment?.key,
+  );
+
+  onRevalidateToggle(value: boolean): void {
+    if (value && !this.canRevalidate()) return;
+    this.revalidateChecked.set(value);
+  }
+
+  onRevalidateNoteChange(value: string | null): void {
+    this.revalidateNote.set((value ?? '').slice(0, this.REVALIDATE_NOTE_MAX));
+  }
+
+  openRevalidateSummary(): void {
+    if (!this.canRevalidate() || this.keptCount() === 0) return;
+    this.revalidateView.set('summary');
+  }
+
+  backToReview(): void {
+    this.cancelRevalidateRequest();
+    this.revalidateError.set(null);
+    this.revalidateView.set('review');
+  }
+
+  /** Estado EDITADO actual → consolidado → cola de revalidación → polling. */
+  sendRevalidate(): void {
+    const scan = this.scanResult();
+    const key = scan?.scan_attachment?.key;
+    if (!scan || !key) return;
+
+    const items = this.editableItems();
+    const discarded = this.discardedIndexes();
+    const indexes = items.map((_, i) => i).filter((i) => !discarded.has(i));
+    if (indexes.length === 0) return;
+    this.revalidateSentIndexes = indexes;
+
+    const rows = this.lineTaxRows();
+    const totals = this.purchaseTotals();
+    const consolidated = buildRevalidateConsolidated({
+      scan,
+      items: indexes.map((i) => items[i]),
+      invoiceNumber: this.editInvoiceNumber,
+      invoiceDate: this.editInvoiceDate,
+      headerDiscount: this.headerDiscount(),
+      totals: {
+        subtotal: totals.subtotal,
+        tax_amount: totals.tax_amount,
+        total: totals.total,
+      },
+      lineTotals: indexes.map((i) => rows[i]?.total_line ?? 0),
+    });
+    const note = this.revalidateNote().trim();
+
+    this.cancelRevalidateRequest();
+    this.revalidateError.set(null);
+    this.revalidateView.set('loading');
+    this.revalidateSub = this.invoiceScannerService
+      .revalidateAndWait({
+        scan_attachment_key: key,
+        order_type: this.scanProfile(),
+        consolidated,
+        ...(note ? { note } : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.revalidateResult.set(result);
+          this.revalidateView.set('result');
+        },
+        error: (err: unknown) => {
+          this.revalidateError.set(
+            (err as Error)?.message || 'No se pudo revalidar la factura.',
+          );
+          this.revalidateView.set('error');
+        },
+      });
+  }
+
+  /** Aplica la revalidación (líneas por índice + cabecera) y vuelve a revisión. */
+  useRevalidation(): void {
+    const res = this.revalidateResult();
+    if (!res) return;
+    const items = this.editableItems();
+    const indexes = this.revalidateSentIndexes;
+    const sent = indexes.map((i) => items[i]).filter(Boolean);
+    const c = res.consolidated;
+    const merged = mergeRevalidatedLines(
+      sent,
+      c.line_items ?? [],
+      c.prices_include_tax,
+    );
+    const next = [...items];
+    indexes.forEach((editableIdx, k) => {
+      if (merged.items[k]) next[editableIdx] = merged.items[k];
+    });
+    next.push(...merged.items.slice(sent.length));
+    this.editableItems.set(next);
+
+    const scan = this.scanResult();
+    if (scan) {
+      this.scanResult.set({
+        ...scan,
+        prices_include_tax: c.prices_include_tax ?? scan.prices_include_tax,
+        subtotal: c.subtotal ?? scan.subtotal,
+        tax_amount: c.tax_amount ?? scan.tax_amount,
+        total: c.total ?? scan.total,
+      });
+    }
+    if (c.invoice_number) this.editInvoiceNumber = c.invoice_number;
+    if (c.invoice_date) this.editInvoiceDate = c.invoice_date;
+    if (c.discount_amount != null) {
+      this.headerDiscount.set(Math.max(0, Number(c.discount_amount) || 0));
+    }
+    this.finishRevalidation(false);
+  }
+
+  keepPreload(): void {
+    this.finishRevalidation(false);
+  }
+
+  editManually(): void {
+    this.finishRevalidation(true);
+  }
+
+  /**
+   * Cierre común de los tres caminos: se desmarca el checkbox, se RESETEA el
+   * ack (el flujo termina en el único ack existente) y se vuelve a revisión.
+   */
+  private finishRevalidation(focusLines: boolean): void {
+    this.cancelRevalidateRequest();
+    this.revalidateResult.set(null);
+    this.revalidateError.set(null);
+    this.revalidateNote.set('');
+    this.revalidateChecked.set(false);
+    this.aiAck.set(false);
+    this.revalidateView.set('review');
+    if (focusLines) {
+      afterNextRender(
+        () => {
+          const el = document.getElementById('pop-scan-lines');
+          el?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+          el?.focus?.({ preventScroll: true });
+        },
+        { injector: this.injector },
+      );
+    }
+  }
+
+  private cancelRevalidateRequest(): void {
+    this.revalidateSub?.unsubscribe();
+    this.revalidateSub = null;
+  }
+
+  /** Nº de línea (base 1) tal como la ve el operador en la tabla. */
+  lineNumber(index: number | null): number | string {
+    if (index === null || index === undefined) return '—';
+    const mapped = this.revalidateSentIndexes[index];
+    return (mapped ?? index) + 1;
+  }
+
+  confidenceLabel(c: 'high' | 'medium' | 'low'): string {
+    return c === 'high'
+      ? 'Confianza alta'
+      : c === 'medium'
+        ? 'Confianza media'
+        : 'Confianza baja';
+  }
+
+  confidenceVariant(c: 'high' | 'medium' | 'low'): 'success' | 'warning' | 'error' {
+    return c === 'high' ? 'success' : c === 'medium' ? 'warning' : 'error';
+  }
+
+  formatValue(v: InvoiceRevalidateDivergence['consolidated_value']): string {
+    if (v === null || v === undefined || v === '') return '—';
+    if (typeof v === 'number') return String(Math.round(v * 10000) / 10000);
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  }
+
   selectedFile = signal<File | null>(null);
   filePreviewUrl = signal<string | null>(null);
   fileError = signal<string | null>(null);
@@ -2484,6 +2931,14 @@ export class InvoiceScannerModalComponent {
     // cerrar, así que sin este reset la segunda apertura traería el check ya
     // marcado y el guard quedaría anulado.
     this.aiAck.set(false);
+    // QUI-855 paso 8b: el estado de la revalidación tampoco sobrevive al cierre.
+    this.cancelRevalidateRequest();
+    this.revalidateChecked.set(false);
+    this.revalidateView.set('review');
+    this.revalidateNote.set('');
+    this.revalidateResult.set(null);
+    this.revalidateError.set(null);
+    this.revalidateSentIndexes = [];
   }
 
   private closeAndReset(): void {
