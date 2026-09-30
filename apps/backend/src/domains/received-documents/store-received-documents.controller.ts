@@ -30,11 +30,13 @@ import { ReceivedDocumentsContextService } from './services/received-documents-c
 import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
 import { ReceivedDocumentMatchCandidatesService } from './services/received-document-match-candidates.service';
 import { ReceivedDocumentMatchAllocationsService } from './services/received-document-match-allocations.service';
+import { ReceivedDocumentMatchExpensesService } from './services/received-document-match-expenses.service';
 import {
   ConfirmReceivedDocumentMatchDto,
   ReceivedDocumentMatchCandidatesQueryDto,
   RevokeReceivedDocumentMatchDto,
 } from './dto/received-document-match.dto';
+import { ReceivedDocumentMatchExpensesQueryDto } from './dto/received-document-match-expenses.dto';
 import { ReceivedDocumentContextQueryDto } from './dto/received-document-context.dto';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -58,6 +60,7 @@ export class StoreReceivedDocumentsController {
     private readonly scans: ReceivedDocumentScanQueueService,
     private readonly matchCandidates: ReceivedDocumentMatchCandidatesService,
     private readonly matchAllocations: ReceivedDocumentMatchAllocationsService,
+    private readonly matchExpenses: ReceivedDocumentMatchExpensesService,
   ) {}
 
   @Get()
@@ -119,6 +122,21 @@ export class StoreReceivedDocumentsController {
     this.rejectStoreOverride(query.store_id);
     const context = await this.contexts.resolveStore();
     return this.responses.success(await this.matchAllocations.list(context, id));
+  }
+
+  @Get(':id/match-expenses')
+  @Permissions('invoicing:received:read')
+  async listMatchExpenseCandidates(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ReceivedDocumentMatchExpensesQueryDto,
+  ) {
+    this.rejectStoreOverride(query.store_id);
+    const context = await this.contexts.resolveStore();
+    return this.responses.success(await this.matchExpenses.list(context, id, {
+      search: query.search,
+      limit: query.limit,
+      page: query.page,
+    }));
   }
 
   @Post(':id/match-allocations')

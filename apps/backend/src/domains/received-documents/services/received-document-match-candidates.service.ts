@@ -30,6 +30,8 @@ export interface ReceivedDocumentMatchCandidateLine {
   variant_barcode: string | null;
   quantity_ordered: string;
   quantity_received: string;
+  allocated_quantity: string;
+  remaining_quantity: string;
   unit_cost: string | null;
   unit_price_net: string | null;
   discount_amount: string | null;
@@ -86,6 +88,8 @@ export interface ReceivedDocumentMatchCandidate {
       id: number;
       purchase_order_item_id: number;
       quantity_received: string;
+      allocated_quantity: string;
+      remaining_quantity: string;
       note: string | null;
     }>;
   }>;
@@ -364,13 +368,20 @@ export class ReceivedDocumentMatchCandidatesService {
       }
       const safeItems = order.purchase_order_items.filter((item) => item.products.stores.organization_id === ctx.organization_id);
       if (safeItems.length !== order.purchase_order_items.length) warnings.add('PO_LINE_CROSS_ORGANIZATION_PRODUCT_EXCLUDED');
+      let receiptItemBudget = MAX_PO_LINES;
+      const safeReceptions = order.receptions.slice(0, MAX_RECEPTIONS).map((reception) => {
+        const returnedItems = reception.items.slice(0, receiptItemBudget);
+        if (returnedItems.length < reception.items.length) {
+          warnings.add('RECEPTION_ITEMS_LIMIT_REACHED');
+          truncatedOrderIds.add(order.id);
+        }
+        receiptItemBudget -= returnedItems.length;
+        return { ...reception, items: returnedItems };
+      });
       return {
         ...order,
         purchase_order_items: safeItems.slice(0, MAX_PO_LINES),
-        receptions: order.receptions.slice(0, MAX_RECEPTIONS).map((reception) => ({
-          ...reception,
-          items: reception.items.slice(0, MAX_PO_LINES),
-        })),
+        receptions: safeReceptions,
       };
     });
     const candidates = safeOrders.map((order) => this.toCandidate(
@@ -420,7 +431,88 @@ export class ReceivedDocumentMatchCandidatesService {
     });
 
     if (orders.length === MAX_LIMIT * 5) warnings.add('PO_CANDIDATE_SEARCH_LIMIT_REACHED');
-    return { candidates: candidates.slice(0, limit), warnings: [...warnings] };
+    const selectedCandidates = candidates.slice(0, limit);
+    await this.addGlobalAllocationBalances(ctx, selectedCandidates, warnings);
+    return { candidates: selectedCandidates, warnings: [...warnings] };
+  }
+
+  private async addGlobalAllocationBalances(
+    ctx: ReceivedDocumentsContext,
+    candidates: ReceivedDocumentMatchCandidate[],
+    warnings: Set<string>,
+  ): Promise<void> {
+    const purchaseOrderItemIds = [...new Set(candidates.flatMap((candidate) => candidate.items.map((item) => item.id)))];
+    const receptionItemIds = [...new Set(candidates.flatMap((candidate) =>
+      candidate.receptions.flatMap((reception) => reception.items.map((item) => item.id)),
+    ))];
+    const [purchaseGroups, receptionGroups] = await Promise.all([
+      purchaseOrderItemIds.length === 0 ? Promise.resolve([]) :
+        this.prisma.received_document_match_allocations.groupBy({
+          by: ['purchase_order_item_id'],
+          where: {
+            organization_id: ctx.organization_id,
+            status: 'active',
+            purchase_order_item_id: { in: purchaseOrderItemIds },
+          },
+          _sum: { target_quantity: true },
+        }),
+      receptionItemIds.length === 0 ? Promise.resolve([]) :
+        this.prisma.received_document_match_allocations.groupBy({
+          by: ['reception_item_id'],
+          where: {
+            organization_id: ctx.organization_id,
+            status: 'active',
+            reception_item_id: { in: receptionItemIds },
+          },
+          _sum: { target_quantity: true },
+        }),
+    ]);
+    const purchaseAllocated = new Map<number, Prisma.Decimal>();
+    for (const group of purchaseGroups) {
+      if (group.purchase_order_item_id != null) {
+        purchaseAllocated.set(group.purchase_order_item_id, group._sum.target_quantity ?? new Prisma.Decimal(0));
+      }
+    }
+    const receptionAllocated = new Map<number, Prisma.Decimal>();
+    for (const group of receptionGroups) {
+      if (group.reception_item_id != null) {
+        receptionAllocated.set(group.reception_item_id, group._sum.target_quantity ?? new Prisma.Decimal(0));
+      }
+    }
+
+    for (const candidate of candidates) {
+      candidate.items = candidate.items.map((item) => {
+        const allocated = purchaseAllocated.get(item.id) ?? new Prisma.Decimal(0);
+        const ordered = new Prisma.Decimal(item.quantity_ordered);
+        if (allocated.gt(ordered)) {
+          warnings.add('PO_ITEM_ALLOCATION_EXCEEDS_ORDERED');
+          candidate.reason_codes = [...new Set([...candidate.reason_codes, 'PO_ITEM_ALLOCATION_EXCEEDS_ORDERED'])];
+          candidate.evidence_tier = 'review';
+        }
+        return {
+          ...item,
+          allocated_quantity: allocated.toString(),
+          remaining_quantity: Prisma.Decimal.max(ordered.minus(allocated), new Prisma.Decimal(0)).toString(),
+        };
+      });
+      candidate.receptions = candidate.receptions.map((reception) => ({
+        ...reception,
+        items: reception.items.map((item) => {
+          const allocated = receptionAllocated.get(item.id) ?? new Prisma.Decimal(0);
+          const received = new Prisma.Decimal(item.quantity_received);
+          if (allocated.gt(received)) {
+            warnings.add('RECEPTION_ITEM_ALLOCATION_EXCEEDS_RECEIVED');
+            candidate.reason_codes = [...new Set([...candidate.reason_codes, 'RECEPTION_ITEM_ALLOCATION_EXCEEDS_RECEIVED'])];
+            candidate.evidence_tier = 'review';
+          }
+          return {
+            ...item,
+            allocated_quantity: allocated.toString(),
+            remaining_quantity: Prisma.Decimal.max(received.minus(allocated), new Prisma.Decimal(0)).toString(),
+          };
+        }),
+      }));
+    }
   }
 
   private async findSupplierCandidates(
@@ -579,6 +671,8 @@ export class ReceivedDocumentMatchCandidatesService {
           id: item.id,
           purchase_order_item_id: item.purchase_order_item_id,
           quantity_received: this.decimalString(item.quantity_received),
+          allocated_quantity: '0',
+          remaining_quantity: this.decimalString(item.quantity_received),
           note: item.note,
         })),
       })),
@@ -655,6 +749,8 @@ export class ReceivedDocumentMatchCandidatesService {
         variant_barcode: line.product_variants?.barcode ?? null,
         quantity_ordered: this.decimalString(line.quantity_ordered),
         quantity_received: this.decimalString(line.quantity_received),
+        allocated_quantity: '0',
+        remaining_quantity: this.decimalString(line.quantity_ordered),
         unit_cost: line.unit_cost == null ? null : this.decimalString(line.unit_cost),
         unit_price_net: line.unit_price_net == null ? null : this.decimalString(line.unit_price_net),
         discount_amount: line.discount_amount == null ? null : this.decimalString(line.discount_amount),

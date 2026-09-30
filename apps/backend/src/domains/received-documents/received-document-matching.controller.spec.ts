@@ -8,6 +8,7 @@ import { ReceivedDocumentsContextService } from './services/received-documents-c
 import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
 import { ReceivedDocumentMatchCandidatesService } from './services/received-document-match-candidates.service';
 import { ReceivedDocumentMatchAllocationsService } from './services/received-document-match-allocations.service';
+import { ReceivedDocumentMatchExpensesService } from './services/received-document-match-expenses.service';
 import { StoreReceivedDocumentsController } from './store-received-documents.controller';
 import { OrganizationReceivedDocumentsController } from './organization-received-documents.controller';
 
@@ -38,7 +39,10 @@ function dependencies() {
     confirm: jest.fn().mockResolvedValue({ allocation: { id: 13 }, duplicate: false }),
     revoke: jest.fn().mockResolvedValue({ allocation: { id: 13 }, duplicate: false }),
   };
-  return { documents, contexts, responses, scans, candidates, allocations };
+  const expenses = {
+    list: jest.fn().mockResolvedValue({ data: [{ id: 15 }], total: 1, page: 1, limit: 20, warnings: ['MANUAL_SUPPLIER_IDENTITY_UNVERIFIED'] }),
+  };
+  return { documents, contexts, responses, scans, candidates, allocations, expenses };
 }
 
 function store(deps: ReturnType<typeof dependencies>) {
@@ -49,6 +53,7 @@ function store(deps: ReturnType<typeof dependencies>) {
     deps.scans as unknown as ReceivedDocumentScanQueueService,
     deps.candidates as unknown as ReceivedDocumentMatchCandidatesService,
     deps.allocations as unknown as ReceivedDocumentMatchAllocationsService,
+    deps.expenses as unknown as ReceivedDocumentMatchExpensesService,
   );
 }
 function organization(deps: ReturnType<typeof dependencies>) {
@@ -59,6 +64,7 @@ function organization(deps: ReturnType<typeof dependencies>) {
     deps.scans as unknown as ReceivedDocumentScanQueueService,
     deps.candidates as unknown as ReceivedDocumentMatchCandidatesService,
     deps.allocations as unknown as ReceivedDocumentMatchAllocationsService,
+    deps.expenses as unknown as ReceivedDocumentMatchExpensesService,
   );
 }
 
@@ -105,11 +111,33 @@ describe('received document matching API', () => {
     expect(deps.allocations.revoke).not.toHaveBeenCalled();
   });
 
+  it('serves the manual expense picker with store context and only its supported query fields', async () => {
+    const deps = dependencies();
+    const controller = store(deps);
+    const response = await controller.listMatchExpenseCandidates(90, { search: ' café ', limit: 10, page: 2 });
+    expect(response).toMatchObject({ data: { data: [{ id: 15 }], warnings: ['MANUAL_SUPPLIER_IDENTITY_UNVERIFIED'] } });
+    expect(deps.contexts.resolveStore).toHaveBeenCalledTimes(1);
+    expect(deps.expenses.list).toHaveBeenCalledWith(storeContext, 90, { search: ' café ', limit: 10, page: 2 });
+  });
+
+  it('uses organization-selected operational store and rejects store-admin overrides', async () => {
+    const deps = dependencies();
+    const org = organization(deps);
+    await org.listMatchExpenseCandidates(90, { search: '15', store_id: 21 });
+    expect(deps.contexts.resolveOrganization).toHaveBeenCalledWith(21);
+    expect(deps.expenses.list).toHaveBeenCalledWith(organizationContext, 90, { search: '15', limit: undefined, page: undefined });
+
+    const storeController = store(deps);
+    await expect(storeController.listMatchExpenseCandidates(90, { store_id: 99 })).rejects.toThrow(BadRequestException);
+    expect(deps.expenses.list).toHaveBeenCalledTimes(1);
+  });
+
   it('uses scoped read and distinct confirm/revoke permissions with explicit HTTP semantics', () => {
     const candidateRead = StoreReceivedDocumentsController.prototype.matchCandidatesForDocument;
     const allocationRead = OrganizationReceivedDocumentsController.prototype.listMatchAllocations;
     const confirm = StoreReceivedDocumentsController.prototype.confirmMatchAllocation;
     const revoke = OrganizationReceivedDocumentsController.prototype.revokeMatchAllocation;
+    const expenses = StoreReceivedDocumentsController.prototype.listMatchExpenseCandidates;
     expect(Reflect.getMetadata('__guards__', StoreReceivedDocumentsController)).toContain(PermissionsGuard);
     expect(Reflect.getMetadata(PATH_METADATA, candidateRead)).toBe(':id/match-candidates');
     expect(Reflect.getMetadata(METHOD_METADATA, candidateRead)).toBe(RequestMethod.GET);
@@ -122,5 +150,8 @@ describe('received document matching API', () => {
     expect(Reflect.getMetadata(PATH_METADATA, revoke)).toBe(':id/match-allocations/:allocationId/revoke');
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, revoke)).toBe(HttpStatus.OK);
     expect(Reflect.getMetadata(PERMISSIONS_KEY, revoke)).toEqual(['organization:invoicing:received:match:revoke']);
+    expect(Reflect.getMetadata(PATH_METADATA, expenses)).toBe(':id/match-expenses');
+    expect(Reflect.getMetadata(METHOD_METADATA, expenses)).toBe(RequestMethod.GET);
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, expenses)).toEqual(['invoicing:received:read']);
   });
 });

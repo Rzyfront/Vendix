@@ -116,6 +116,8 @@ function setup(options: {
     product_variants: Array<{ id: number; sku: string; barcode: string | null }>;
   }>;
   uoms?: Array<{ id: number; code: string; name: string }>;
+  purchaseAllocations?: Array<{ purchase_order_item_id: number; _sum: { target_quantity: Prisma.Decimal | null } }>;
+  receptionAllocations?: Array<{ reception_item_id: number; _sum: { target_quantity: Prisma.Decimal | null } }>;
 } = {}) {
   const prisma = {
     received_documents: { findFirst: jest.fn().mockResolvedValue(options.document === undefined ? receivedDocument : options.document) },
@@ -127,6 +129,12 @@ function setup(options: {
     ]) },
     purchase_orders: { findMany: jest.fn().mockResolvedValue(options.orders ?? [po()]) },
     units_of_measure: { findMany: jest.fn().mockResolvedValue(options.uoms ?? [{ id: 8, code: 'EA', name: 'Unidad' }]) },
+    received_document_match_allocations: {
+      groupBy: jest.fn().mockImplementation(({ by }: { by: string[] }) =>
+        by[0] === 'purchase_order_item_id'
+          ? Promise.resolve(options.purchaseAllocations ?? [])
+          : Promise.resolve(options.receptionAllocations ?? [])),
+    },
   };
   const documents = { assertContext: jest.fn().mockResolvedValue(undefined) };
   const service = new ReceivedDocumentMatchCandidatesService(
@@ -182,10 +190,71 @@ describe('ReceivedDocumentMatchCandidatesService', () => {
       id: 3101,
       quantity_ordered: '2',
       quantity_received: '2',
+      allocated_quantity: '0',
+      remaining_quantity: '2',
       purchase_uom_code: 'EA',
       match_reason_codes: expect.arrayContaining(['EXACT_SKU_OR_SUPPLIER_CODE']),
     });
     expect(result.candidates[0].items[0].taxes[0]).not.toHaveProperty('eligible_amount');
+    expect(result.candidates[0].receptions[0].items[0]).toMatchObject({
+      allocated_quantity: '0',
+      remaining_quantity: '2',
+    });
+  });
+
+  it('subtracts active allocations from other documents when showing PO and receipt availability', async () => {
+    const { service, prisma } = setup({
+      purchaseAllocations: [{ purchase_order_item_id: 3101, _sum: { target_quantity: new Prisma.Decimal('0.75') } }],
+      receptionAllocations: [{ reception_item_id: 4011, _sum: { target_quantity: new Prisma.Decimal('1.5') } }],
+    });
+    const result = await service.list(context, 90);
+    const candidate = result.candidates[0];
+    expect(candidate.items[0]).toMatchObject({ allocated_quantity: '0.75', remaining_quantity: '1.25' });
+    expect(candidate.receptions[0].items[0]).toMatchObject({ allocated_quantity: '1.5', remaining_quantity: '0.5' });
+    expect(prisma.received_document_match_allocations.groupBy).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      by: ['purchase_order_item_id'],
+      where: { organization_id: 1, status: 'active', purchase_order_item_id: { in: [3101] } },
+    }));
+    expect(prisma.received_document_match_allocations.groupBy).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      by: ['reception_item_id'],
+      where: { organization_id: 1, status: 'active', reception_item_id: { in: [4011] } },
+    }));
+  });
+
+  it('warns and downgrades evidence when historical active allocations exceed a target', async () => {
+    const { service } = setup({
+      purchaseAllocations: [{ purchase_order_item_id: 3101, _sum: { target_quantity: new Prisma.Decimal('3') } }],
+    });
+    const result = await service.list(context, 90);
+    expect(result.candidates[0].items[0]).toMatchObject({ allocated_quantity: '3', remaining_quantity: '0' });
+    expect(result.candidates[0].evidence_tier).toBe('review');
+    expect(result.candidates[0].reason_codes).toContain('PO_ITEM_ALLOCATION_EXCEEDS_ORDERED');
+    expect(result.warnings).toContain('PO_ITEM_ALLOCATION_EXCEEDS_ORDERED');
+  });
+
+  it('aggregates active balances only for PO and receipt line IDs on the returned page', async () => {
+    const base = po();
+    const orders = Array.from({ length: 6 }, (_, index) => po({
+      id: 301 + index,
+      order_number: `PO-${301 + index}`,
+      supplier_invoice_number: null,
+      purchase_order_items: [{ ...base.purchase_order_items[0], id: 3101 + index }],
+      receptions: [{
+        ...base.receptions[0],
+        id: 401 + index,
+        items: [{ ...base.receptions[0].items[0], id: 4011 + index }],
+      }],
+    }));
+    const { service, prisma } = setup({ orders });
+    const result = await service.list(context, 90, { limit: 2 });
+    expect(result.candidates).toHaveLength(2);
+    expect(prisma.received_document_match_allocations.groupBy).toHaveBeenCalledTimes(2);
+    const purchaseQuery = prisma.received_document_match_allocations.groupBy.mock.calls[0][0];
+    const receptionQuery = prisma.received_document_match_allocations.groupBy.mock.calls[1][0];
+    expect(purchaseQuery.where.organization_id).toBe(1);
+    expect(purchaseQuery.where.status).toBe('active');
+    expect(purchaseQuery.where.purchase_order_item_id.in).toHaveLength(2);
+    expect(receptionQuery.where.reception_item_id.in).toHaveLength(2);
   });
 
   it('scopes PO candidates to the document store plus central location, never another store', async () => {
