@@ -414,7 +414,14 @@ export class ReviewSummaryComponent implements OnInit {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
-          const star = params[0];
+          // `trigger: 'axis'` sends one entry per series. Pick the non-zero
+          // one so the tooltip names the star actually under the cursor instead
+          // of whichever series happens to come first.
+          const hit = (Array.isArray(params) ? params : [params]).find(
+            (p: any) => Number(p?.value) > 0,
+          );
+          const star = hit ?? (Array.isArray(params) ? params[0] : params);
+          if (!star) return '';
           const count = Number(star.value) || 0;
           const pct =
             approvedTotal > 0 ? ((count / approvedTotal) * 100).toFixed(1) : '0.0';
@@ -453,23 +460,23 @@ export class ReviewSummaryComponent implements OnInit {
       },
       series: [
         {
-          name: '5★', type: 'bar' as const, data: [counts[0]],
+          name: '5★', type: 'bar' as const, data: [counts[0], 0, 0, 0, 0],
           itemStyle: { color: '#22c55e' }, barMaxWidth: 40,
         },
         {
-          name: '4★', type: 'bar' as const, data: [counts[1]],
+          name: '4★', type: 'bar' as const, data: [0, counts[1], 0, 0, 0],
           itemStyle: { color: '#84cc16' }, barMaxWidth: 40,
         },
         {
-          name: '3★', type: 'bar' as const, data: [counts[2]],
+          name: '3★', type: 'bar' as const, data: [0, 0, counts[2], 0, 0],
           itemStyle: { color: '#f59e0b' }, barMaxWidth: 40,
         },
         {
-          name: '2★', type: 'bar' as const, data: [counts[3]],
+          name: '2★', type: 'bar' as const, data: [0, 0, 0, counts[3], 0],
           itemStyle: { color: '#f97316' }, barMaxWidth: 40,
         },
         {
-          name: '1★', type: 'bar' as const, data: [counts[4]],
+          name: '1★', type: 'bar' as const, data: [0, 0, 0, 0, counts[4]],
           itemStyle: { color: '#ef4444' }, barMaxWidth: 40,
         },
       ],
