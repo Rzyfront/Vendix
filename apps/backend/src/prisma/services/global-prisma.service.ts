@@ -1,10 +1,20 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { BasePrismaService } from '../base/base-prisma.service';
 
 @Injectable()
 export class GlobalPrismaService extends BasePrismaService {
   // Global service provides access to ALL models without any scoping
   // This is used for superadmin operations that need cross-tenant access
+
+  /**
+   * Runs a tagged SQL query on the deliberately unscoped global client.
+   * Every caller must include and validate explicit organization/entity/store
+   * predicates where the queried data is tenant-owned.
+   */
+  $queryRaw<T = unknown>(query: Prisma.Sql): Promise<T> {
+    return this.baseClient.$queryRaw<T>(query);
+  }
 
   // Organization-scoped models (accessible without scoping in global service)
   get users() {
