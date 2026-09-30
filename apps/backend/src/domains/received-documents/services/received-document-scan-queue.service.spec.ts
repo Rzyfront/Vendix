@@ -20,7 +20,7 @@ describe('ReceivedDocumentScanQueueService', () => {
     originalname: 'supplier.pdf',
   } as Express.Multer.File);
   let queue: any;
-  let documents: jest.Mocked<Pick<ReceivedDocumentsService, 'createPendingFile' | 'findOne' | 'getFile' | 'replaceFromExtraction'>>;
+  let documents: jest.Mocked<Pick<ReceivedDocumentsService, 'createPendingFileWithOutcome' | 'findOne' | 'getFile' | 'replaceFromExtraction'>>;
   let scanner: any;
   let prisma: any;
   let subscription: any;
@@ -29,7 +29,7 @@ describe('ReceivedDocumentScanQueueService', () => {
   beforeEach(() => {
     queue = { getJob: jest.fn().mockResolvedValue(null), add: jest.fn().mockResolvedValue({ id: 'job-1' }) };
     documents = {
-      createPendingFile: jest.fn().mockResolvedValue({
+      createPendingFileWithOutcome: jest.fn().mockResolvedValue({ document: {
         id: 101,
         version: 1,
         processing_status: 'pending_ocr',
@@ -39,7 +39,7 @@ describe('ReceivedDocumentScanQueueService', () => {
         posting_status: 'pending',
         metadata: { source_format: 'pending_file' },
         files: [{ id: 303, role: 'original', sha256: 'abc', file_size: 13, file_name: 'supplier.pdf', mime_type: 'application/pdf' }],
-      }),
+      }, created: true }),
       findOne: jest.fn(),
       getFile: jest.fn(),
       replaceFromExtraction: jest.fn(),
@@ -52,10 +52,10 @@ describe('ReceivedDocumentScanQueueService', () => {
 
   it('enqueues a small tenant-scoped payload with deterministic id and retries', async () => {
     const result = await service.enqueue(context, makePdf());
-    expect(result).toEqual({ document_id: 101, job_id: 'job-1', already_processed: false });
+    expect(result).toEqual({ document_id: 101, job_id: 'job-1', already_processed: false, created: true });
     expect(subscription.canUseAIFeature).toHaveBeenCalledWith(19, 'async_queue');
     expect(scanner.assertConfigured).toHaveBeenCalledTimes(1);
-    expect(documents.createPendingFile).toHaveBeenCalledWith(context, expect.any(Object), 'manual');
+    expect(documents.createPendingFileWithOutcome).toHaveBeenCalledWith(context, expect.any(Object), 'manual');
     expect(queue.add).toHaveBeenCalledWith('scan', {
       document_id: 101,
       file_id: 303,
@@ -77,7 +77,7 @@ describe('ReceivedDocumentScanQueueService', () => {
     bad.buffer = Buffer.from('not a PDF');
     bad.size = bad.buffer.length;
     await expect(service.enqueue(context, bad)).rejects.toBeInstanceOf(BadRequestException);
-    expect(documents.createPendingFile).not.toHaveBeenCalled();
+    expect(documents.createPendingFileWithOutcome).not.toHaveBeenCalled();
     expect(queue.add).not.toHaveBeenCalled();
   });
 
@@ -86,15 +86,24 @@ describe('ReceivedDocumentScanQueueService', () => {
     expect(subscription.canUseAIFeature).not.toHaveBeenCalled();
   });
 
+  it('persists the caller intake channel and rejects unapproved source values before storage', async () => {
+    await service.enqueue(context, makePdf(), 'api');
+    expect(documents.createPendingFileWithOutcome).toHaveBeenCalledWith(context, expect.any(Object), 'api');
+
+    (documents.createPendingFileWithOutcome as jest.Mock).mockClear();
+    await expect(service.enqueue(context, makePdf(), 'provider' as any)).rejects.toBeInstanceOf(BadRequestException);
+    expect(documents.createPendingFileWithOutcome).not.toHaveBeenCalled();
+  });
+
   it('does not queue a re-upload of an already processed or merged document', async () => {
-    (documents.createPendingFile as jest.Mock).mockResolvedValueOnce({
+    (documents.createPendingFileWithOutcome as jest.Mock).mockResolvedValueOnce({ document: {
       id: 101,
       version: 3,
       processing_status: 'ready',
       metadata: { source_format: 'pending_file' },
       files: [{ id: 303, role: 'original' }],
-    });
-    await expect(service.enqueue(context, makePdf())).resolves.toEqual({ document_id: 101, job_id: null, already_processed: true });
+    }, created: false });
+    await expect(service.enqueue(context, makePdf())).resolves.toEqual({ document_id: 101, job_id: null, already_processed: true, created: false });
     expect(queue.add).not.toHaveBeenCalled();
   });
 
@@ -110,7 +119,7 @@ describe('ReceivedDocumentScanQueueService', () => {
   it('blocks subscription mode and uses the canonical error entry', async () => {
     subscription.canUseAIFeature.mockResolvedValueOnce({ mode: 'block', reason: 'SUBSCRIPTION_006', subscription_state: 'locked', plan_id: 4, has_record: true });
     await expect(service.enqueue(context, makePdf())).rejects.toMatchObject({ errorCode: ErrorCodes.SUBSCRIPTION_006.code });
-    expect(documents.createPendingFile).toHaveBeenCalledTimes(1);
+    expect(documents.createPendingFileWithOutcome).toHaveBeenCalledTimes(1);
   });
 
   it('returns the same 404 for an unknown and a foreign tenant queue id', async () => {
@@ -122,7 +131,7 @@ describe('ReceivedDocumentScanQueueService', () => {
   it('requires scanner readiness before creating a queue job', async () => {
     scanner.assertConfigured.mockRejectedValueOnce(new VendixHttpException(ErrorCodes.INV_SCAN_AI_FAIL));
     await expect(service.enqueue(context, makePdf())).rejects.toBeInstanceOf(VendixHttpException);
-    expect(documents.createPendingFile).toHaveBeenCalledTimes(1);
+    expect(documents.createPendingFileWithOutcome).toHaveBeenCalledTimes(1);
     expect(queue.add).not.toHaveBeenCalled();
   });
 

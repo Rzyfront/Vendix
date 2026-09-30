@@ -134,6 +134,15 @@ export class ReceivedDocumentsService {
     file: Express.Multer.File,
     source = 'manual',
   ) {
+    const result = await this.importXmlWithOutcome(ctx, file, source);
+    return result.document;
+  }
+
+  async importXmlWithOutcome(
+    ctx: ReceivedDocumentsContext,
+    file: Express.Multer.File,
+    source = 'manual',
+  ): Promise<ImportResult> {
     const scope = await this.resolveScope(ctx);
     this.assertXmlFile(file);
     this.assertSourceChannel(source);
@@ -158,7 +167,7 @@ export class ReceivedDocumentsService {
       processingStatus: 'processing',
     });
     await this.persistOriginalFile(scope, recorded.document.id, file, sha256);
-    return this.findOne(ctx, recorded.document.id);
+    return { document: await this.findOne(ctx, recorded.document.id), created: recorded.created };
   }
 
   async createManual(ctx: ReceivedDocumentsContext, dto: ManualReceivedDocumentDto) {
@@ -302,6 +311,15 @@ export class ReceivedDocumentsService {
     file: Express.Multer.File,
     source = 'manual',
   ) {
+    const result = await this.createPendingFileWithOutcome(ctx, file, source);
+    return result.document;
+  }
+
+  async createPendingFileWithOutcome(
+    ctx: ReceivedDocumentsContext,
+    file: Express.Multer.File,
+    source = 'manual',
+  ): Promise<ImportResult> {
     const scope = await this.resolveScope(ctx);
     this.assertUploadFile(file);
     this.assertSourceChannel(source);
@@ -309,7 +327,7 @@ export class ReceivedDocumentsService {
     const idempotencyKey = `file:${sha256}`;
     const recorded = await this.recordPendingFile(scope, source, idempotencyKey, sha256, file);
     await this.persistOriginalFile(scope, recorded.document.id, file, sha256);
-    return this.findOne(ctx, recorded.document.id);
+    return { document: await this.findOne(ctx, recorded.document.id), created: recorded.created };
   }
 
   /** Pure shared normalization seam for OCR facts; invalid data is returned blocked, never thrown. */

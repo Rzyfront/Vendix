@@ -210,6 +210,17 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     expect(h.storage.upload).toHaveBeenCalledTimes(1);
   });
 
+  it('reports XML intake creation outcomes without changing the legacy import return value', async () => {
+    const h = makeHarness();
+    const first = await h.service.importXmlWithOutcome(context, xmlFile(), 'api');
+    expect(first.created).toBe(true);
+    expect(first.document).toMatchObject({ id: 50 });
+    const duplicate = await h.service.importXmlWithOutcome(context, xmlFile(), 'api');
+    expect(duplicate.created).toBe(false);
+    expect(duplicate.document).toMatchObject({ id: 50 });
+    expect(h.storage.upload).toHaveBeenCalledTimes(1);
+  });
+
   it('uses canonical RUT NIT rather than a different accounting entity projection', async () => {
     const h = makeHarness();
     await h.service.importXml(context, xmlFile());
@@ -401,6 +412,20 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     expect(h.prisma.received_documents.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({
       data: { processing_status: 'pending_ocr' },
     }));
+  });
+
+  it('reports pending-file outcome true once and false on a deduplicated re-delivery', async () => {
+    const h = makeHarness();
+    const file = {
+      buffer: Buffer.from('%PDF-1.4 outcome'), originalname: 'outcome.pdf',
+      mimetype: 'application/pdf', size: Buffer.byteLength('%PDF-1.4 outcome'),
+    } as Express.Multer.File;
+    const first = await h.service.createPendingFileWithOutcome(context, file, 'email');
+    const duplicate = await h.service.createPendingFileWithOutcome(context, file, 'email');
+    expect(first.created).toBe(true);
+    expect(duplicate.created).toBe(false);
+    expect(first.document.id).toBe(duplicate.document.id);
+    expect(h.storage.upload).toHaveBeenCalledTimes(1);
   });
 
   it('scopes duplicate file-hash lookup to the current fiscal tenant before resolving its canonical alias', async () => {

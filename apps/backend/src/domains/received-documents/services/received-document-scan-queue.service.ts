@@ -26,6 +26,7 @@ const QUEUE_NAME = 'received-document-scan';
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
 const MAX_EVENT_JSON_BYTES = 2 * 1024 * 1024;
+const INTAKE_SOURCES = new Set(['manual', 'api', 'email', 'automated']);
 
 @Injectable()
 export class ReceivedDocumentScanQueueService {
@@ -40,13 +41,16 @@ export class ReceivedDocumentScanQueueService {
   async enqueue(
     ctx: ReceivedDocumentsContext,
     file: Express.Multer.File,
-  ): Promise<{ document_id: number; job_id: string | null; already_processed: boolean }> {
+    source: 'manual' | 'api' | 'email' | 'automated' = 'manual',
+  ): Promise<{ document_id: number; job_id: string | null; already_processed: boolean; created: boolean }> {
     this.assertContext(ctx);
+    if (!INTAKE_SOURCES.has(source)) throw new BadRequestException('Canal de recepción no válido.');
     this.assertSourceFile(file);
 
-    const document = await this.documents.createPendingFile(ctx, file, 'manual');
+    const intake = await this.documents.createPendingFileWithOutcome(ctx, file, source);
+    const document = intake.document;
     if (this.isAlreadyProcessed(document)) {
-      return { document_id: document.id, job_id: null, already_processed: true };
+      return { document_id: document.id, job_id: null, already_processed: true, created: intake.created };
     }
 
     try {
@@ -91,12 +95,12 @@ export class ReceivedDocumentScanQueueService {
       if (existing) {
         const state = await existing.getState();
         if (state === 'completed') {
-          return { document_id: document.id, job_id: String(existing.id), already_processed: true };
+          return { document_id: document.id, job_id: String(existing.id), already_processed: true, created: intake.created };
         }
         if (state === 'failed') {
           await existing.retry();
         }
-        return { document_id: document.id, job_id: String(existing.id), already_processed: false };
+        return { document_id: document.id, job_id: String(existing.id), already_processed: false, created: intake.created };
       }
       const job = await this.queue.add('scan', data, {
         jobId,
@@ -105,7 +109,7 @@ export class ReceivedDocumentScanQueueService {
         removeOnComplete: 100,
         removeOnFail: 50,
       });
-      return { document_id: document.id, job_id: String(job.id), already_processed: false };
+      return { document_id: document.id, job_id: String(job.id), already_processed: false, created: intake.created };
     } catch {
       await this.markQueueFailure(ctx, document.id, document.version, 'SCAN_QUEUE_FAILED');
       throw new ServiceUnavailableException('No se pudo iniciar la lectura del documento. Intenta nuevamente.');
