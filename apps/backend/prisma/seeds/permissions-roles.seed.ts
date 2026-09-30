@@ -2313,6 +2313,18 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/invoicing/received-documents/connections/:id/sync',
       method: 'POST',
     },
+    {
+      name: 'invoicing:received:match:confirm',
+      description: 'Confirmar una asignación comercial entre una línea recibida y una orden, recepción o gasto de la tienda; no registra recepción física ni contabilización',
+      path: '/api/store/invoicing/received-documents/:id/match-allocations',
+      method: 'POST',
+    },
+    {
+      name: 'invoicing:received:match:revoke',
+      description: 'Revocar una asignación comercial de línea recibida de la tienda, conservando su historial; no revierte inventario ni contabilización',
+      path: '/api/store/invoicing/received-documents/:id/match-allocations/:allocationId/revoke',
+      method: 'POST',
+    },
 
     // Perfiles de facturación (CP-INVOICE-PROFILES-AIU-DIAN)
     //
@@ -3962,6 +3974,18 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      name: 'organization:invoicing:received:match:confirm',
+      description: 'Confirmar una asignación comercial entre una línea recibida y una orden, recepción o gasto de la organización; no registra recepción física ni contabilización',
+      path: '/api/organization/invoicing/received-documents/:id/match-allocations',
+      method: 'POST',
+    },
+    {
+      name: 'organization:invoicing:received:match:revoke',
+      description: 'Revocar una asignación comercial de línea recibida de la organización, conservando su historial; no revierte inventario ni contabilización',
+      path: '/api/organization/invoicing/received-documents/:id/match-allocations/:allocationId/revoke',
+      method: 'POST',
+    },
+    {
       name: 'organization:fiscal:migrate',
       description: 'Aplicar cambios de fiscal_scope de la organización',
       path: '/api/organization/fiscal-scope',
@@ -4785,6 +4809,9 @@ export async function seedPermissionsAndRoles(
       !p.name.startsWith('organization:invoicing:received:') &&
       !p.name.startsWith('invoicing:received:connections:') &&
       !p.name.startsWith('organization:invoicing:received:connections:') &&
+      // Las asignaciones modifican historial comercial; quedan solo para owner/admin.
+      !p.name.startsWith('invoicing:received:match:') &&
+      !p.name.startsWith('organization:invoicing:received:match:') &&
       // QUI-600 paso 6: la superficie `superadmin:*` pertenece al nivel
       // plataforma y manager nunca debe portarla. La exclusión se hace en el
       // catch-all de abajo con `startsWith('superadmin:')`, que sustituye los
