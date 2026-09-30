@@ -62,6 +62,11 @@ export class ReceivedDocumentsService {
     private readonly storage: ReceivedDocumentStorageService,
   ) {}
 
+  /** Reuse the core tenant/fiscal/store ownership guard for adjacent reception settings. */
+  async assertContext(ctx: ReceivedDocumentsContext): Promise<void> {
+    await this.resolveScope(ctx);
+  }
+
   async list(ctx: ReceivedDocumentsContext, query: ReceivedDocumentQueryDto) {
     const scope = await this.resolveScope(ctx, query.store_id);
     const where: Prisma.received_documentsWhereInput = {

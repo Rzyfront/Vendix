@@ -133,6 +133,18 @@ const xmlFile = () => ({
 }) as Express.Multer.File;
 
 describe('ReceivedDocumentsService tenant-safe persistence', () => {
+  it('exposes the existing active fiscal/store scope validation to adjacent configuration services', async () => {
+    const h = makeHarness();
+    await expect(h.service.assertContext(context)).resolves.toBeUndefined();
+    expect(h.baseClient.accounting_entities.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: context.accounting_entity_id, organization_id: context.organization_id },
+    }));
+    expect(h.baseClient.stores.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: context.store_id, organization_id: context.organization_id },
+    }));
+    expect(h.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('scopes every store list query by organization, accounting entity and current store', async () => {
     const h = makeHarness();
     await h.service.list(context, { page: 1, limit: 25 } as any);
