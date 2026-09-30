@@ -40,6 +40,13 @@ export class ReceivedDocumentMatchCandidatesQueryDto {
   @Min(1)
   @Max(20)
   limit?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => strictInteger(value))
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  store_id?: number;
 }
 
 /** Typed proposal accepted by the future match-confirm service. Cross-target

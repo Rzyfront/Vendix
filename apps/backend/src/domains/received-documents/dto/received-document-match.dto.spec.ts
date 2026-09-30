@@ -24,10 +24,11 @@ describe('received document match DTOs', () => {
     const dto = plainToInstance(ReceivedDocumentMatchCandidatesQueryDto, {
       search: '  Factura   del   proveedor  ',
       limit: '20',
+      store_id: '45',
     });
 
     expect(await validate(dto, { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
-    expect(dto).toMatchObject({ search: 'Factura del proveedor', limit: 20 });
+    expect(dto).toMatchObject({ search: 'Factura del proveedor', limit: 20, store_id: 45 });
   });
 
   it('rejects invalid candidate query bounds and a blank normalized search', async () => {
@@ -40,6 +41,11 @@ describe('received document match DTOs', () => {
 
   it.each([true, false, '1e2', [1]])('does not coerce ambiguous candidate limit %p', async (limit) => {
     const dto = plainToInstance(ReceivedDocumentMatchCandidatesQueryDto, { limit });
+    expect(await validate(dto)).not.toEqual([]);
+  });
+
+  it.each([true, false, '1e2', '2147483648', [45]])('rejects invalid store selector %p', async (store_id) => {
+    const dto = plainToInstance(ReceivedDocumentMatchCandidatesQueryDto, { store_id });
     expect(await validate(dto)).not.toEqual([]);
   });
 
