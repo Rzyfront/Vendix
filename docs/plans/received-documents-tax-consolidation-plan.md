@@ -38,6 +38,7 @@ Monolito modular: dominio compartido `received-documents` con bandeja independie
 
 - `apps/backend/prisma/schema.prisma`
 - `apps/backend/prisma/migrations/20260930070000_received_documents_and_tax_settlement/migration.sql`
+- `apps/backend/prisma/migrations/20260930083000_received_tax_basis_and_unknown_deadlines/migration.sql`
 - `apps/backend/src/prisma/services/global-prisma.service.ts`
 - `apps/backend/src/prisma/services/organization-prisma.service.ts`
 - `apps/backend/src/prisma/services/store-prisma.service.ts`
@@ -83,6 +84,8 @@ Monolito modular: dominio compartido `received-documents` con bandeja independie
 - `apps/backend/src/domains/fiscal-operations/services/fiscal-tax-settlement.service.spec.ts`
 - `apps/backend/src/domains/fiscal-operations/services/fiscal-tax-calendar.service.ts`
 - `apps/backend/src/domains/fiscal-operations/services/fiscal-tax-calendar.service.spec.ts`
+- `apps/backend/src/domains/fiscal-operations/constants/fiscal-tax-calendar-2026.ts`
+- `apps/backend/src/domains/fiscal-operations/services/fiscal-obligation.service.spec.ts`
 - `apps/backend/src/domains/fiscal-operations/services/fiscal-close.service.ts`
 - `apps/backend/src/domains/fiscal-operations/services/fiscal-close.service.spec.ts`
 - `apps/backend/src/domains/fiscal-operations/dto/fiscal-operations.dto.ts`

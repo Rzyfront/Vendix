@@ -91,6 +91,9 @@ Plan completo en `docs/plans/received-documents-tax-consolidation-plan.md`. La i
 | D20 | Originales locales sólo en desarrollo/pruebas; S3 en producción | QA no debe escribir al bucket productivo; driver local se rechaza en producción y cada descarga comprueba SHA-256 | Bucket y retención de originales por ambiente |
 | D21 | Preservar tienda operacional aparte de entidad fiscal consolidada | Resolver fiscal puede devolver store_id=null; eso no autoriza al usuario de tienda a ver todas las sucursales | Vista consolidada sólo con contexto organización autorizado |
 | D22 | Recibir documentos no requiere habilitación del flujo de emisión DIAN | Un comprador puede recibir sin emitir; JWT, RBAC, scope y compuerta de suscripción siguen vigentes | Visibilidad comercial por capacidades, no habilitación de ventas |
+| D23 | OCR canonicaliza identidad y conserva alias histórico del duplicado | UUID repetido no crea segunda factura; originales se copian mediante storage autorizado al ID canónico, no moviendo FKs con keys ajenas | Presentación de duplicados y resolución humana de conflictos |
+| D24 | Obligación única por entidad/tipo/rango/jurisdicción; deadline desconocido es NULL | Month/quarter nullable no protegen annual ni municipio y una fecha inventada no es vencimiento legal | Calendarios de nuevos años y jurisdicciones |
+| D25 | Clasificar IBUA 34 e ICUI 35 con fuente DIAN primaria; redondear half-to-even | Resuelve la incertidumbre del helper legacy y preserva tributos distintos de IVA y base nominal | Ampliar catálogo sólo con evidencia oficial |
 
 ## Fuentes oficiales consultadas
 
@@ -100,6 +103,7 @@ Plan completo en `docs/plans/received-documents-tax-consolidation-plan.md`. La i
 - [Calendario tributario DIAN 2026](https://www.dian.gov.co/Calendarios/Calendario_Tributario_2026.pdf): fechas nacionales por dígitos del NIT y periodicidad; no sustituye calendario municipal/excepciones.
 - [Concepto DIAN 7762 de 2025](https://normograma.dian.gov.co/dian/compilacion/docs/oficio_dian_7762_2025.htm): distinguir causación IVA de recaudo efectivo.
 - [Concepto DIAN 9471 de 2026](https://normograma.dian.gov.co/dian/compilacion/docs/oficio_dian_9471_2026.htm): eventos/aceptación diferenciados; no presentar registro local como validación electrónica.
+- [Concepto DIAN 19339 de 2023](https://normograma.dian.gov.co/dian/compilacion/docs/oficio_dian_19339_2023.htm): códigos XML IBUA 34 e ICUI 35. El anexo 1.9 consultado establece half-to-even y ajuste explícito de redondeo; no aplicar una ecuación UBL genérica incompatible.
 
 ## Registro de cambios de decisión
 
