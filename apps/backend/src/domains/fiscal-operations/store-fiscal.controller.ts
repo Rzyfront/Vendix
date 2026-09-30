@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -39,6 +40,7 @@ import {
   ReopenFiscalCloseDto,
   VoidTaxDeclarationDto,
 } from './dto/fiscal-operations.dto';
+import { FiscalTaxPositionQueryDto } from './dto/fiscal-tax-position.dto';
 import {
   FISCAL_RESPONSIBILITIES_CATALOG,
   FISCAL_RESPONSIBILITIES_CATALOG_VERSION,
@@ -65,6 +67,20 @@ export class StoreFiscalController {
   async overview() {
     const context = await this.contextResolver.resolveForStore();
     return this.response.success(await this.obligations.getOverview([context]));
+  }
+
+  @Get('tax-position')
+  @Permissions('store:fiscal:dashboard:read')
+  async getTaxPosition(@Query() query: FiscalTaxPositionQueryDto) {
+    if (query.store_id !== undefined) {
+      throw new BadRequestException(
+        'store_id cannot be selected from the store fiscal context',
+      );
+    }
+    const context = await this.contextResolver.resolveForStore();
+    return this.response.success(
+      await this.declarations.preview(context, query),
+    );
   }
 
   @Get('flow-state')
