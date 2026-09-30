@@ -12067,6 +12067,9 @@ model document_reception_connections {
 model document_reception_runs {
   id               Int       @id @default(autoincrement())
   connection_id    Int
+  connection_version Int?
+  input_payload    Json?
+  payload_sha256   String?   @db.Char(64)
   /// Token that proves which worker owns the connection lease for this run.
   lease_token      String?   @db.VarChar(64)
   status           String    @default("pending") @db.VarChar(30)
