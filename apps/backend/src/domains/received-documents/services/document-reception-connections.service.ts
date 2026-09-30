@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { ErrorCodes } from '../../../common/errors/error-codes';
@@ -139,48 +140,71 @@ export class DocumentReceptionConnectionsService {
     this.assertPositiveId(id, 'connection_id');
     this.assertPositiveId(dto?.expected_version, 'expected_version');
     await this.assertConfigurationContext(ctx);
-    const existing = await this.findRecord(ctx, id);
-    if (!existing) throw new NotFoundException('Conexión de recepción no encontrada.');
-    this.assertVersion(existing, dto.expected_version);
-    this.assertLeaseEditable(existing);
-
-    const patch: Record<string, unknown> = {};
-    if (this.isSupplied(dto, 'name', dto.name)) patch['name'] = this.name(dto.name);
-    if (this.isSupplied(dto, 'enabled', dto.enabled)) patch['enabled'] = this.boolean(dto.enabled, existing.enabled);
-    if (this.isSupplied(dto, 'poll_interval_minutes', dto.poll_interval_minutes)) patch['poll_interval_minutes'] = this.pollInterval(dto.poll_interval_minutes, existing.poll_interval_minutes);
-
-    const endpointSupplied = this.isSupplied(dto, 'endpoint', dto.endpoint);
-    if (endpointSupplied) {
-      if (dto.endpoint == null) throw new BadRequestException('El endpoint no puede borrarse; envíe un endpoint HTTPS válido.');
-      if (existing.connection_type !== 'api_poll') throw new BadRequestException('Los webhooks no admiten un endpoint de polling.');
-      this.httpTransport.validateEndpoint(dto.endpoint);
-      patch['endpoint'] = dto.endpoint;
-    }
-
-    const secretSupplied = this.isSupplied(dto, 'secret', dto.secret);
-    if (secretSupplied) {
-      if (dto.secret == null) throw new BadRequestException('Para rotar el secreto envíe un valor no vacío; no se admite borrarlo con null.');
-      const secret = this.optionalSecret(dto.secret);
-      if (!secret) throw new BadRequestException('El secreto de conexión no puede estar vacío.');
-      patch['encrypted_secret'] = this.encryption.encrypt(secret);
-    }
-
-    const endpointChanged = endpointSupplied && dto.endpoint !== existing.endpoint;
-    const rotateSecret = secretSupplied;
-    const resetCursor = endpointChanged || rotateSecret;
-    const enabledAfter = (patch['enabled'] as boolean | undefined) ?? existing.enabled;
-    if (existing.connection_type === 'api_poll') {
-      if (enabledAfter && (!existing.enabled || resetCursor)) patch['next_sync_at'] = new Date();
-      else if (!enabledAfter) patch['next_sync_at'] = null;
-    } else {
-      if (endpointSupplied) throw new BadRequestException('Los webhooks no admiten un endpoint de polling.');
-      if (secretSupplied && !this.optionalSecret(dto.secret)) throw new BadRequestException('El secreto de webhook no puede estar vacío.');
-      patch['next_sync_at'] = null;
-    }
-    if (resetCursor) patch['cursor'] = null;
-    patch['version'] = { increment: 1 };
-
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id"
+        FROM "document_reception_connections"
+        WHERE "id" = ${id}
+          AND "organization_id" = ${ctx.organization_id}
+          AND "accounting_entity_id" = ${ctx.accounting_entity_id}
+          AND "store_id" = ${ctx.store_id}
+        FOR UPDATE
+      `);
+      const existing = await tx.document_reception_connections.findFirst({
+        where: { id, ...this.connectionWhere(ctx) },
+      });
+      if (!existing) throw new NotFoundException('Conexión de recepción no encontrada.');
+      this.assertVersion(existing, dto.expected_version);
+      this.assertLeaseEditable(existing);
+
+      const incompleteRun = await tx.document_reception_runs.findFirst({
+        where: {
+          connection_id: id,
+          status: { in: ['pending', 'queued', 'running', 'failed', 'partial'] },
+          connection: this.connectionWhere(ctx),
+        },
+        select: { id: true },
+      });
+      if (incompleteRun) {
+        throw new ConflictException('La conexión tiene una ejecución pendiente de resolver.');
+      }
+
+      const patch: Record<string, unknown> = {};
+      if (this.isSupplied(dto, 'name', dto.name)) patch['name'] = this.name(dto.name);
+      if (this.isSupplied(dto, 'enabled', dto.enabled)) patch['enabled'] = this.boolean(dto.enabled, existing.enabled);
+      if (this.isSupplied(dto, 'poll_interval_minutes', dto.poll_interval_minutes)) patch['poll_interval_minutes'] = this.pollInterval(dto.poll_interval_minutes, existing.poll_interval_minutes);
+
+      const endpointSupplied = this.isSupplied(dto, 'endpoint', dto.endpoint);
+      if (endpointSupplied) {
+        if (dto.endpoint == null) throw new BadRequestException('El endpoint no puede borrarse; envíe un endpoint HTTPS válido.');
+        if (existing.connection_type !== 'api_poll') throw new BadRequestException('Los webhooks no admiten un endpoint de polling.');
+        this.httpTransport.validateEndpoint(dto.endpoint);
+        patch['endpoint'] = dto.endpoint;
+      }
+
+      const secretSupplied = this.isSupplied(dto, 'secret', dto.secret);
+      if (secretSupplied) {
+        if (dto.secret == null) throw new BadRequestException('Para rotar el secreto envíe un valor no vacío; no se admite borrarlo con null.');
+        const secret = this.optionalSecret(dto.secret);
+        if (!secret) throw new BadRequestException('El secreto de conexión no puede estar vacío.');
+        patch['encrypted_secret'] = this.encryption.encrypt(secret);
+      }
+
+      const endpointChanged = endpointSupplied && dto.endpoint !== existing.endpoint;
+      const rotateSecret = secretSupplied;
+      const resetCursor = endpointChanged || rotateSecret;
+      const enabledAfter = (patch['enabled'] as boolean | undefined) ?? existing.enabled;
+      if (existing.connection_type === 'api_poll') {
+        if (enabledAfter && (!existing.enabled || resetCursor)) patch['next_sync_at'] = new Date();
+        else if (!enabledAfter) patch['next_sync_at'] = null;
+      } else {
+        if (endpointSupplied) throw new BadRequestException('Los webhooks no admiten un endpoint de polling.');
+        if (secretSupplied && !this.optionalSecret(dto.secret)) throw new BadRequestException('El secreto de webhook no puede estar vacío.');
+        patch['next_sync_at'] = null;
+      }
+      if (resetCursor) patch['cursor'] = null;
+      patch['version'] = { increment: 1 };
+
       const changed = await tx.document_reception_connections.updateMany({
         where: {
           id,

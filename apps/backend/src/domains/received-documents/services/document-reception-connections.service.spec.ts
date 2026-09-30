@@ -52,6 +52,7 @@ function harness() {
     updateMany: jest.fn().mockResolvedValue({ count: 1 }),
   };
   const runDelegate = {
+    findFirst: jest.fn().mockResolvedValue(null),
     findMany: jest.fn().mockResolvedValue([]),
     count: jest.fn().mockResolvedValue(0),
   };
@@ -60,6 +61,7 @@ function harness() {
     document_reception_connections: delegate,
     document_reception_runs: runDelegate,
     audit_logs: auditDelegate,
+    $queryRaw: jest.fn().mockResolvedValue([{ id: 41 }]),
     $transaction: jest.fn(async (callback: (tx: any) => Promise<unknown>) => callback(prisma)),
   };
   const receivedDocuments = { assertContext: jest.fn().mockResolvedValue(undefined) };
@@ -242,6 +244,34 @@ describe('DocumentReceptionConnectionsService', () => {
     expect(noActor.delegate.findFirst).not.toHaveBeenCalled();
     expect(noActor.delegate.updateMany).not.toHaveBeenCalled();
   });
+
+  it.each(['pending', 'queued', 'running', 'failed', 'partial'])(
+    'blocks configuration edits while a scoped %s run is unresolved, even without a lease',
+    async () => {
+      const h = harness();
+      h.delegate.findFirst.mockResolvedValueOnce(connectionRecord({ lease_token: null, lease_expires_at: null }));
+      h.runDelegate.findFirst.mockResolvedValueOnce({ id: 90 });
+
+      await expect(h.service.update(orgStoreContext, 41, {
+        expected_version: 1,
+        enabled: false,
+      } as any)).rejects.toBeInstanceOf(ConflictException);
+
+      expect(h.prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(h.runDelegate.findFirst).toHaveBeenCalledWith({
+        where: {
+          connection_id: 41,
+          status: { in: ['pending', 'queued', 'running', 'failed', 'partial'] },
+          connection: { organization_id: 3, accounting_entity_id: 8, store_id: 21 },
+        },
+        select: { id: true },
+      });
+      expect(h.prisma.$queryRaw.mock.invocationCallOrder[0])
+        .toBeLessThan(h.runDelegate.findFirst.mock.invocationCallOrder[0]);
+      expect(h.delegate.updateMany).not.toHaveBeenCalled();
+      expect(h.auditDelegate.create).not.toHaveBeenCalled();
+    },
+  );
 
   it('rotates secrets encrypted, clears the opaque cursor and schedules an immediate sync', async () => {
     const h = harness();
