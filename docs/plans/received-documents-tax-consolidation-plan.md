@@ -146,6 +146,30 @@ Monolito modular: dominio compartido `received-documents` con bandeja independie
 - `docs/received-documents-tax-decisions.md`
 - `docs/received-documents-tax-validation.md`
 
+- `apps/backend/prisma/migrations/20260930122000_document_reception_leases/migration.sql` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+- `apps/backend/src/domains/received-documents/dto/document-reception-connection.dto.ts` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+- `apps/backend/src/domains/received-documents/interfaces/document-reception-connection.interface.ts` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+- `apps/backend/src/domains/received-documents/services/document-reception-connections.service.ts` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+- `apps/backend/src/domains/received-documents/services/document-reception-connections.service.spec.ts` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+- `apps/backend/src/domains/received-documents/store-document-reception-connections.controller.ts` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+- `apps/backend/src/domains/received-documents/organization-document-reception-connections.controller.ts` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+- `apps/backend/src/domains/received-documents/document-reception-connections.controller.spec.ts` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+- `apps/frontend/src/app/shared/components/sidebar/sidebar.component.ts` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+- `apps/frontend/src/app/core/services/menu-filter.service.ts` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+- `apps/frontend/src/app/core/services/menu-filter.service.spec.ts` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+- `apps/frontend/src/app/private/layouts/store-admin/store-admin-layout.component.ts` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+- `apps/frontend/src/app/private/layouts/organization-admin/organization-admin-layout.component.ts` — concreción de conexiones/navegación de los pasos 3, 7 y 16.
+
+- `apps/frontend/src/app/private/modules/store/invoicing/received-documents/document-reception-connections.interface.ts` — configuración de ingreso dentro de Documentos recibidos, paso17.
+- `apps/frontend/src/app/private/modules/store/invoicing/received-documents/document-reception-connections.service.ts` — configuración de ingreso dentro de Documentos recibidos, paso17.
+- `apps/frontend/src/app/private/modules/store/invoicing/received-documents/document-reception-connections.component.ts` — configuración de ingreso dentro de Documentos recibidos, paso17.
+- `apps/frontend/src/app/private/modules/store/invoicing/received-documents/document-reception-connections.component.html` — configuración de ingreso dentro de Documentos recibidos, paso17.
+
+- `apps/backend/src/common/services/default-panel-ui.service.ts` — completar curation/default ORG del módulo existente Facturación, paso16.
+- `apps/backend/src/common/services/default-panel-ui.service.spec.ts` — completar curation/default ORG del módulo existente Facturación, paso16.
+- `apps/frontend/src/app/shared/constants/app-modules.constant.ts` — completar curation/default ORG del módulo existente Facturación, paso16.
+
+
 ## Reusable Assets
 
 - `apps/backend/src/domains/fiscal-operations/services/fiscal-context-resolver.service.ts` — contextos validados por entidad fiscal y STORE/ORGANIZATION.

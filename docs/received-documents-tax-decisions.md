@@ -121,3 +121,23 @@ Plan completo en `docs/plans/received-documents-tax-consolidation-plan.md`. La i
 
 - 30-09-2026: se conserva la corrección UI del usuario: recibidos en Facturación, no OC. La ejecución autónoma sustituye la fase previa de sólo propuesta; no implica presentación/pago legal automático productivo.
 - Las decisiones adicionales se añadirán aquí con evidencia y motivo, sin borrar las anteriores.
+
+### D33 — Navegación de lectura sin habilitar emisión
+
+Se conserva una sola entrada Facturación. Si fiscal scope/activación impiden el módulo completo, sólo permiso exacto de lectura de recibidos y panel personal/techo de tienda/industria/modalidad habilitados permiten dirigirla a Documentos recibidos. El padre Fiscal no decide el scope de sus hijos; Contabilidad/Nómina/emisión mantienen sus gates. No se activa DIAN para navegar. E2E STORE verificada; la primera ORG detectó ausencia del catálogo, corregida por D37 y verificada con login/selector reales.
+
+### D34 — Configuración versionada y leases de conectores
+
+Nuevas conexiones requieren actor y tienda operativa explícita, también en organización consolidada. Endpoint HTTPS público y secretos cifrados; webhook requiere HMAC secret, nunca UUID como autorización. Configuración usa expected_version y rechaza lease activo; rotar endpoint/secreto reinicia cursor. Nueva migración aditiva probada dos veces en transacción con rollback y aplicada sólo DB local vendix_db; clientes host7.8.0/Docker7.4.1 regenerados. Worker/scheduler/cursor no están implementados todavía.
+
+### D35 — Acceso a configuración de conexiones
+
+Listar/detallar/crear/editar conexiones y ver ejecuciones mediante sus rutas de configuración requiere permiso propio `invoicing:received:connections:configure` o equivalente organization. Owners/admins reciben esta capacidad; manager/supervisor/cashier no la heredan por lectura de documentos. Endpoint/token público son metadatos de configuración y nunca se exponen por permiso genérico de lectura del inbox. Permisos de sincronización se añadirán al conectar el worker, no como función fingida.
+
+### D36 — Auditoría de configuración atómica y sin credenciales
+
+Create/update de conexiones debe guardar audit_logs en la misma transacción; el servicio de auditoría común es best-effort y el interceptor global no reconoce este recurso. Snapshots permitidos: versión/tipo/enable/interval/has_secret/store/entity y flags de rotación; no endpoint, public_token, cursor, settings, secretos/ciphertext ni body. Falla de audit revierte el cambio. RequestID sólo ALS válido, nunca fallback inventado.
+
+### D37 — Curación de Facturación en ORG_ADMIN
+
+La E2E federada ORG detectó que el módulo siempre-visible legado no tenía key `invoicing` en defaults/catálogo ORG. Se añade la misma key existente a ORG_ADMIN, no otro módulo/sidebar. `default_visible_for_privileged_users=true`: recepción del módulo existente debe ser descubrible. `show_new_badge=yes`: descubrimiento por banner/settings, nunca sidebar. Soft merge preserva false explícito y roles no privilegiados, sin backfill ni seed general. No debilitar rawtrue del fallback para tapar la ausencia.
