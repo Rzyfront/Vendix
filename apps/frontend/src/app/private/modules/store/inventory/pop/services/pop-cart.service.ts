@@ -795,7 +795,9 @@ export class PopCartService {
         // Sin tasa en el request (ni catálogo ni escáner) NO se siembra un 19
         // silencioso: queda null y la línea pide confirmar el impuesto.
         tax_rate: request.tax_rate ?? null,
-        tax_needs_review: this.needsTaxReview(request.tax_rate, request.taxes),
+        tax_needs_review:
+          !!request.tax_needs_review ||
+          this.needsTaxReview(request.tax_rate, request.taxes),
         tax_type: request.tax_type ?? 'iva',
         prices_include_tax: request.prices_include_tax,
         taxes: request.taxes,
@@ -876,8 +878,9 @@ export class PopCartService {
         tax_rate: request.tax_rate ?? existingItem.tax_rate,
         // La revisión sólo sigue pendiente si ni el request ni la línea
         // previa traían una tasa.
-        tax_needs_review:
-          request.tax_rate != null || (request.taxes?.length ?? 0) > 0
+        tax_needs_review: request.tax_needs_review
+          ? true
+          : request.tax_rate != null || (request.taxes?.length ?? 0) > 0
             ? false
             : existingItem.tax_needs_review,
         tax_type: request.tax_type ?? existingItem.tax_type,
@@ -915,7 +918,9 @@ export class PopCartService {
         // Sin tasa en el request (ni catálogo ni escáner) NO se siembra un 19
         // silencioso: queda null y la línea pide confirmar el impuesto.
         tax_rate: request.tax_rate ?? null,
-        tax_needs_review: this.needsTaxReview(request.tax_rate, request.taxes),
+        tax_needs_review:
+          !!request.tax_needs_review ||
+          this.needsTaxReview(request.tax_rate, request.taxes),
         tax_type: request.tax_type ?? 'iva',
         prices_include_tax: request.prices_include_tax,
         taxes: request.taxes,

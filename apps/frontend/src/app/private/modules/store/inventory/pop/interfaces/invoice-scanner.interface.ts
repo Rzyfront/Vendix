@@ -106,6 +106,16 @@ export interface ExtractedLineItem {
   presentation?: string | null;
   pack_size?: number | null;
   uom_hint?: string | null;
+  /** Escaneo v2 — unidad en que la factura IMPRIMIO el descuento de la linea. */
+  discount_kind?: 'percent' | 'amount';
+  /** Escaneo v2 — tratamiento del IVA de la linea. */
+  tax_treatment?: 'gravado' | 'exento' | 'excluido';
+  /** Escaneo v2 — linea bonificada (precio 0, sin descuento). */
+  is_bonus?: boolean;
+  /** Escaneo v2 — total de la linea tal como lo imprimio la factura. */
+  printed_line_total?: number;
+  /** Escaneo v2 — cuadre determinista de la linea contra el total impreso. */
+  reconcile?: { expected: number; printed: number; ok: boolean };
 }
 
 export interface InvoiceScanResult {
@@ -145,6 +155,10 @@ export interface InvoiceScanResult {
   early_payment_discount?: number | null;
   total: number;
   confidence: number;
+  /** Escaneo v2 — % comercial de cabecera y la unidad en que se imprimio. */
+  header_discount_percentage?: number;
+  header_discount_kind?: 'percent' | 'amount';
+  schema_version?: 1 | 2;
 }
 
 // ============================================================================

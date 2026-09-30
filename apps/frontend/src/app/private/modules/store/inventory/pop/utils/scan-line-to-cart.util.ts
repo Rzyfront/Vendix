@@ -34,6 +34,8 @@ export interface ScanLineCartFields {
   tax_type?: string;
   prices_include_tax: boolean;
   taxes?: PopLineTax[];
+  /** La linea no cuadra con el total impreso: el carrito exige confirmarla. */
+  tax_needs_review?: boolean;
 }
 
 /** ¿La línea trae el camino multi-impuesto? */
@@ -109,6 +111,18 @@ const clampPct = (v: unknown): number =>
  *   que la línea traiga su propio modo.
  */
 export function scanLineToCartFields(
+  item: ExtractedLineItem,
+  invoiceIncludesTax: boolean,
+): ScanLineCartFields {
+  const fields = scanLineToCartFieldsBase(item, invoiceIncludesTax);
+  // Cuadre v2: una linea que no cuadra con su total impreso pasa por la
+  // regla existente de bloqueo hasta que el operador confirme el impuesto.
+  return item.reconcile?.ok === false
+    ? { ...fields, tax_needs_review: true }
+    : fields;
+}
+
+function scanLineToCartFieldsBase(
   item: ExtractedLineItem,
   invoiceIncludesTax: boolean,
 ): ScanLineCartFields {

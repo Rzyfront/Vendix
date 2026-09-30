@@ -56,6 +56,7 @@ import {
 } from '../../utils/scan-header-discount.util';
 import {
   deriveLineTax,
+  deriveLineTaxes,
   derivePurchaseTotals,
   prorateHeaderDiscount,
   PurchaseLineTaxInput,
@@ -468,6 +469,10 @@ import {
                           [ngTemplateOutlet]="revalidationTag"
                           [ngTemplateOutletContext]="{ item: item }"
                         ></ng-container>
+                        <ng-container
+                          [ngTemplateOutlet]="lineScanTags"
+                          [ngTemplateOutletContext]="{ item: item }"
+                        ></ng-container>
                       </td>
                       <td class="py-2 px-3">
                         <input
@@ -623,6 +628,10 @@ import {
                   }
                   <ng-container
                     [ngTemplateOutlet]="revalidationTag"
+                    [ngTemplateOutletContext]="{ item: item }"
+                  ></ng-container>
+                  <ng-container
+                    [ngTemplateOutlet]="lineScanTags"
                     [ngTemplateOutletContext]="{ item: item }"
                   ></ng-container>
                   <div class="grid grid-cols-2 gap-2">
@@ -790,9 +799,19 @@ import {
               <div class="flex justify-between">
                 <span class="text-text-secondary">(+) IVA</span>
                 <span class="text-text-primary">
-                  {{ purchaseTotals().tax_amount | currency: 0 }}
+                  {{ taxBreakdown().iva | currency: 0 }}
                 </span>
               </div>
+              @if (taxBreakdown().other > 0) {
+                <div class="flex justify-between" data-testid="other-taxes-row">
+                  <span class="text-text-secondary">
+                    (+) Otros impuestos ({{ taxBreakdown().otherLabel }})
+                  </span>
+                  <span class="text-text-primary">
+                    {{ taxBreakdown().other | currency: 0 }}
+                  </span>
+                </div>
+              }
               <div class="flex justify-between border-t border-border pt-2">
                 <span class="text-text-primary font-semibold">Total</span>
                 <span class="text-text-primary font-bold text-base">
@@ -912,7 +931,15 @@ import {
                 >
                   {{ chip.label }}
                   @if (chip.fixed !== null) {
-                    &nbsp;{{ chip.fixed | currency: 0 }}/u
+                    @if (chip.fixed > 0) {
+                      &nbsp;{{ chip.fixed | currency: 0 }}/u
+                    } @else if (chip.lineAmount !== null) {
+                      <span [attr.title]="chip.perUnit !== null ? (chip.perUnit | currency: 0) + '/u' : null">
+                        &nbsp;{{ chip.lineAmount | currency: 0 }}
+                      </span>
+                    } @else {
+                      &nbsp;{{ chip.fixed | currency: 0 }}/u
+                    }
                   }
                 </span>
               }
@@ -938,6 +965,7 @@ import {
                   <button
                     type="button"
                     class="px-1.5 py-1"
+                    [disabled]="!!item.is_bonus"
                     [class]="discountUnit(i, item) === 'pct' ? 'bg-primary text-white' : 'bg-surface text-text-secondary'"
                     [attr.aria-pressed]="discountUnit(i, item) === 'pct'"
                     (click)="setDiscountUnit(i, 'pct')"
@@ -947,6 +975,7 @@ import {
                   <button
                     type="button"
                     class="px-1.5 py-1"
+                    [disabled]="!!item.is_bonus"
                     [class]="discountUnit(i, item) === 'amount' ? 'bg-primary text-white' : 'bg-surface text-text-secondary'"
                     [attr.aria-pressed]="discountUnit(i, item) === 'amount'"
                     (click)="setDiscountUnit(i, 'amount')"
@@ -964,6 +993,7 @@ import {
                     min="0"
                     step="0.01"
                     aria-label="Descuento en dinero"
+                    [disabled]="!!item.is_bonus"
                   />
                 } @else {
                   <input
@@ -976,6 +1006,7 @@ import {
                     max="100"
                     step="0.01"
                     aria-label="Descuento en porcentaje"
+                    [disabled]="!!item.is_bonus"
                   />
                 }
               </div>
@@ -1088,6 +1119,21 @@ import {
                 </div>
               }
             </div>
+          </ng-template>
+
+          <!-- Marcas del escaneo v2 por linea: bonificacion y cuadre con el total impreso. -->
+          <ng-template #lineScanTags let-item="item">
+            @if (item.is_bonus) {
+              <span class="mt-0.5 inline-flex items-center rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">
+                Bonificación
+              </span>
+            }
+            @if (item.reconcile && item.reconcile.ok === false) {
+              <span class="mt-0.5 flex items-start gap-1 text-[11px] leading-snug text-amber-700">
+                <app-icon name="alert-circle" [size]="12" class="mt-0.5 shrink-0"></app-icon>
+                <span>No cuadra: calculado {{ item.reconcile.expected | currency: 0 }} vs impreso {{ item.reconcile.printed | currency: 0 }}</span>
+              </span>
+            }
           </ng-template>
 
           <!-- QUI-855 paso 8b: etiqueta de la línea tras revalidar con IA. -->
@@ -2025,20 +2071,42 @@ export class InvoiceScannerModalComponent {
     })),
   );
 
+  /**
+   * «Exento» / «Excluido» en lugar de «IVA 0 %» cuando el escaneo lo clasifico
+   * asi y el IVA de la fila sigue en 0 (si el operador le pone tasa, se pinta la tasa).
+   */
+  private untaxedLabel(item: MatchedLineItem, t: PopLineTax): string | null {
+    if (t.tax_type !== 'iva' || this.displayPercent(t.tax_rate) !== 0) return null;
+    if (item.tax_treatment === 'exento') return 'Exento';
+    if (item.tax_treatment === 'excluido') return 'Excluido';
+    return null;
+  }
+
   /** Chips del resumen: «IVA 19 %», «ICUI 20 %», «IBUA $68/u». */
   readonly taxChips = computed(() =>
     this.editableItems().map((item) =>
-      this.taxRowsOf(item).map((t) => ({
+      this.taxRowsOf(item).map((t) => {
+        const fixed =
+          t.calc_mode === 'fixed_per_unit'
+            ? Number(t.fixed_amount_per_unit) || 0
+            : null;
+        // Impuesto fijo que llega como monto de línea (sin valor por unidad):
+        // se muestra el monto, no «$0/u».
+        const amount = Number(t.amount_override) || 0;
+        const qty = Number(item.quantity) || 0;
+        const lineAmount = fixed === 0 && amount > 0 && qty > 0 ? amount : null;
+        return {
+        lineAmount,
+        perUnit: lineAmount !== null ? lineAmount / qty : null,
         key: t.tax_type,
         label:
           t.calc_mode === 'fixed_per_unit'
             ? taxTypeLabel(t.tax_type)
-            : `${taxTypeLabel(t.tax_type)} ${this.displayPercent(t.tax_rate)} %`,
-        fixed:
-          t.calc_mode === 'fixed_per_unit'
-            ? Number(t.fixed_amount_per_unit) || 0
-            : null,
-      })),
+            : this.untaxedLabel(item, t) ??
+              `${taxTypeLabel(t.tax_type)} ${this.displayPercent(t.tax_rate)} %`,
+        fixed,
+        };
+      }),
     ),
   );
 
@@ -2133,6 +2201,17 @@ export class InvoiceScannerModalComponent {
   discountUnit(index: number, item: MatchedLineItem): 'pct' | 'amount' {
     const chosen = this.discountUnits()[index];
     if (chosen) return chosen;
+    return this.initialDiscountUnit(item);
+  }
+
+  /**
+   * Unidad inicial del descuento: si el escaneo trae `discount_kind` (la unidad
+   * en que la factura lo IMPRIMIO) manda; si no, la deduccion: '$' si trae
+   * monto y '%' si no.
+   */
+  private initialDiscountUnit(item: MatchedLineItem): 'pct' | 'amount' {
+    if (item.discount_kind === 'percent') return 'pct';
+    if (item.discount_kind === 'amount') return 'amount';
     const hasMoney =
       (Number(item.discount_amount_printed) || 0) > 0 ||
       (Number(item.discount_amount) || 0) > 0;
@@ -2295,6 +2374,37 @@ export class InvoiceScannerModalComponent {
   );
 
   /**
+   * Impuestos del pie separados por tipo (misma derivación por línea que
+   * `purchaseTotals`): IVA solo IVA; INC/ICUI/IBUA en «otros». La suma de ambos
+   * es `purchaseTotals().tax_amount`, así que el total no cambia.
+   */
+  readonly taxBreakdown = computed(() => {
+    const items = this.keptItems().map((i) => this.toTaxUtilItem(i));
+    const header = this.invoiceHeader();
+    const shares = prorateHeaderDiscount(items, this.headerDiscount());
+    let iva = 0;
+    const others = new Map<string, number>();
+    items.forEach((item, i) => {
+      for (const t of deriveLineTaxes(item, header, shares[i]).taxes) {
+        if (t.tax_type === 'iva') iva += t.tax_amount;
+        else others.set(t.tax_type, (others.get(t.tax_type) ?? 0) + t.tax_amount);
+      }
+    });
+    const other = this.round2([...others.values()].reduce((a, b) => a + b, 0));
+    const order = ['inc', 'icui', 'ibua'];
+    const types = [...others.entries()]
+      .filter(([, v]) => v > 0)
+      .map(([k]) => k)
+      .sort((a, b) => order.indexOf(a) - order.indexOf(b))
+      .map((k) => k.toUpperCase());
+    return {
+      iva: this.round2(iva),
+      other,
+      otherLabel: types.join(', '),
+    };
+  });
+
+  /**
    * Cotejo contra el papel: lo DERIVADO frente a lo IMPRESO por la factura.
    *
    * `scanResult.subtotal` y `scanResult.tax_amount` ya llegaban del OCR y la UI
@@ -2319,9 +2429,9 @@ export class InvoiceScannerModalComponent {
       },
       {
         label: 'IVA',
-        derived: derived.tax_amount,
+        derived: this.taxBreakdown().iva,
         printed: printedTax,
-        diff: derived.tax_amount - printedTax,
+        diff: this.taxBreakdown().iva - printedTax,
         hasPrinted: printedTax > 0,
       },
       {
@@ -2676,10 +2786,7 @@ export class InvoiceScannerModalComponent {
           // monto, '%' si no. Se siembra antes de que el monto se normalice.
           const seededUnits: Record<number, 'pct' | 'amount'> = {};
           matchResponse.data.items.forEach((it, idx) => {
-            const hasMoney =
-              (Number(it.discount_amount_printed) || 0) > 0 ||
-              (Number(it.discount_amount) || 0) > 0;
-            seededUnits[idx] = hasMoney ? 'amount' : 'pct';
+            seededUnits[idx] = this.initialDiscountUnit(it);
           });
           this.discountUnits.set(seededUnits);
           this.editableItems.set(

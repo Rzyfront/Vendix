@@ -217,3 +217,27 @@ describe('buildScanAttachment + payload de creación — QUI-855', () => {
     expect('scan_attachment' in req).toBe(false);
   });
 });
+
+describe('scanLineToCartFields - cuadre v2', () => {
+  const base: ExtractedLineItem = {
+    description: 'x',
+    quantity: 1,
+    unit_price: 100,
+    total: 100,
+    tax_rate: 0.19,
+  };
+
+  it('reconcile ok=false marca tax_needs_review (legacy y multi-impuesto)', () => {
+    const rec = { expected: 100, printed: 120, ok: false };
+    expect(scanLineToCartFields({ ...base, reconcile: rec }, false).tax_needs_review).toBeTrue();
+    expect(
+      scanLineToCartFields({ ...base, taxes: [iva19], reconcile: rec }, false).tax_needs_review,
+    ).toBeTrue();
+  });
+
+  it('reconcile ok=true o ausente no agrega la marca', () => {
+    const ok = scanLineToCartFields({ ...base, reconcile: { expected: 1, printed: 1, ok: true } }, false);
+    expect('tax_needs_review' in ok).toBeFalse();
+    expect('tax_needs_review' in scanLineToCartFields(base, false)).toBeFalse();
+  });
+});

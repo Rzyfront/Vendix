@@ -502,6 +502,8 @@ export interface AddToPopCartRequest {
    * trae más de un impuesto). Último escaneo gana, igual que `tax_rate`.
    */
   taxes?: PopLineTax[];
+  /** Fuerza la revision del impuesto (p.ej. linea del escaneo que no cuadra). */
+  tax_needs_review?: boolean;
 }
 
 /**

@@ -468,6 +468,15 @@ describe('PopCartService — QUI-855 correcciones de auditoría', () => {
       expect(submitBlockMessage(service.currentState)).toBeNull();
     });
 
+    it('tax_needs_review del request bloquea aunque traiga tasa, hasta confirmarla', () => {
+      add({ tax_rate: 19, tax_needs_review: true });
+      expect(service.currentState.items[0].tax_needs_review).toBeTrue();
+      service.setHasVat(true);
+      expect(submitBlockMessage(service.currentState)).toBe('Confirma el impuesto de 1 línea');
+      service.setItemTaxRate(service.currentState.items[0].id, 19);
+      expect(submitBlockMessage(service.currentState)).toBeNull();
+    });
+
     it('una línea con tax_error también bloquea', () => {
       service.setHasVat(true);
       const state: any = { has_vat: true, items: [{ tax_error: 'combinación inválida' }, { tax_needs_review: true }] };

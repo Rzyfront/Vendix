@@ -306,4 +306,133 @@ describe('InvoiceScannerModalComponent — QUI-855 multi-impuesto por línea', (
     const html = (fixture.nativeElement as HTMLElement).innerHTML;
     expect(html).not.toContain('Descuento $');
   });
+
+  describe('campos v2 del escaneo', () => {
+    const html = (): string => (fixture.nativeElement as HTMLElement).innerHTML;
+    // La tabla de revision vive en el paso 3 del modal.
+    beforeEach(() => component.currentStep.set(3));
+
+    it('discount_kind manda sobre la deduccion de la unidad', () => {
+      const pctWithMoney = { ...buildItem(), discount_amount: 500, discount_kind: 'percent' as const };
+      const amountNoMoney = { ...buildItem(), discount_kind: 'amount' as const };
+      prime(pctWithMoney);
+      expect(component.discountUnit(0, pctWithMoney)).toBe('pct');
+      expect(component.discountUnit(0, amountNoMoney)).toBe('amount');
+    });
+
+    it('sin discount_kind la deduccion de siempre', () => {
+      const withMoney = { ...buildItem(), discount_amount: 500 };
+      prime(withMoney);
+      expect(component.discountUnit(0, withMoney)).toBe('amount');
+      expect(component.discountUnit(0, buildItem())).toBe('pct');
+    });
+
+    it('reconcile ok=false pinta el aviso No cuadra con ambas cifras', () => {
+      prime({ ...buildItem(), reconcile: { expected: 11800, printed: 12500, ok: false } });
+      expect(html()).toContain('No cuadra: calculado');
+      expect(html()).toContain('11800.00');
+      expect(html()).toContain('12500.00');
+    });
+
+    it('reconcile ok=true o ausente no pinta aviso', () => {
+      prime({ ...buildItem(), reconcile: { expected: 100, printed: 100, ok: true } });
+      expect(html()).not.toContain('No cuadra');
+      prime(buildItem());
+      expect(html()).not.toContain('No cuadra');
+    });
+
+    it('tax_treatment exento/excluido etiqueta el chip en lugar de IVA 0 %', () => {
+      prime({ ...buildItem(), tax_rate: 0, tax_treatment: 'exento' });
+      expect(component.taxChips()[0].map((c) => c.label)).toEqual(['Exento']);
+      prime({ ...buildItem(), tax_rate: 0, tax_treatment: 'excluido' });
+      expect(component.taxChips()[0].map((c) => c.label)).toEqual(['Excluido']);
+      prime({ ...buildItem(), tax_rate: 0, tax_treatment: 'gravado' });
+      expect(component.taxChips()[0].map((c) => c.label)).toEqual(['IVA 0 %']);
+    });
+
+    it('is_bonus pinta el badge Bonificacion y deshabilita el descuento', () => {
+      prime({ ...buildItem(), is_bonus: true });
+      expect(html()).toContain('Bonificación');
+      const inputs = (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLInputElement>(
+        'input[aria-label="Descuento en porcentaje"]',
+      );
+      expect(inputs.length).toBeGreaterThan(0);
+      inputs.forEach((i) => expect(i.disabled).toBeTrue());
+    });
+
+    it('sin campos v2 no hay badge ni aviso', () => {
+      prime(buildItem());
+      expect(html()).not.toContain('Bonificación');
+      expect(html()).not.toContain('No cuadra');
+    });
+  });
+
+  describe('pie: IVA separado de otros impuestos y chip de impuesto fijo', () => {
+    const html = () =>
+      ((fixture.nativeElement as HTMLElement).textContent ?? '').replace(/\s+/g, ' ');
+    beforeEach(() => component.currentStep.set(3));
+
+    function mixedItem(): MatchedLineItem {
+      return {
+        ...buildItem(),
+        quantity: 10,
+        unit_price: 1000,
+        unit_price_gross: 1000,
+        tax_rate: 0.19,
+        taxes: [
+          { tax_type: 'iva', tax_rate: 19, calc_mode: 'percent', fixed_amount_per_unit: null, amount_override: null, is_inclusive: false },
+          { tax_type: 'icui', tax_rate: 20, calc_mode: 'percent', fixed_amount_per_unit: null, amount_override: null, is_inclusive: false },
+          { tax_type: 'ibua', tax_rate: null, calc_mode: 'fixed_per_unit', fixed_amount_per_unit: 100, amount_override: null, is_inclusive: false },
+        ],
+      };
+    }
+
+    it('IVA + ICUI + IBUA: el IVA es solo IVA y otros trae el resto; total intacto', () => {
+      prime(mixedItem(), { prices_include_tax: false });
+      const b = component.taxBreakdown();
+      expect(b.iva).toBe(1900);
+      expect(b.other).toBe(3000);
+      expect(b.otherLabel).toBe('ICUI, IBUA');
+      expect(b.iva + b.other).toBe(component.purchaseTotals().tax_amount);
+      expect(html()).toContain('(+) Otros impuestos (ICUI, IBUA)');
+    });
+
+    it('cotejo: IVA calculado vs IVA impreso cuadra', () => {
+      prime(mixedItem(), { prices_include_tax: false, tax_amount: 1900 });
+      const row = component.printedVsDerived().find((r) => r.label === 'IVA')!;
+      expect(row.derived).toBe(1900);
+      expect(row.diff).toBe(0);
+    });
+
+    it('sin otros impuestos no aparece la fila', () => {
+      prime({ ...buildItem(), tax_rate: 0.19 });
+      expect(component.taxBreakdown().other).toBe(0);
+      expect(html()).not.toContain('Otros impuestos');
+    });
+
+    it('chip IBUA con amount_override y sin fijo muestra el monto, no $0/u', () => {
+      const item = mixedItem();
+      item.taxes = [
+        { tax_type: 'ibua', tax_rate: null, calc_mode: 'fixed_per_unit', fixed_amount_per_unit: 0, amount_override: 14280, is_inclusive: false },
+      ];
+      prime(item);
+      const chip = component.taxChips()[0][0];
+      expect(chip.lineAmount).toBe(14280);
+      expect(chip.perUnit).toBe(1428);
+      expect(html()).toContain('$14280');
+      expect(html()).not.toContain('$0.00/u');
+    });
+
+    it('chip IBUA con fijo 510 conserva $X/u', () => {
+      const item = mixedItem();
+      item.taxes = [
+        { tax_type: 'ibua', tax_rate: null, calc_mode: 'fixed_per_unit', fixed_amount_per_unit: 510, amount_override: null, is_inclusive: false },
+      ];
+      prime(item);
+      const chip = component.taxChips()[0][0];
+      expect(chip.fixed).toBe(510);
+      expect(chip.lineAmount).toBeNull();
+      expect(html()).toContain('$510.00/u');
+    });
+  });
 });
