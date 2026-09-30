@@ -45,6 +45,8 @@ export class DocumentReceptionHttpService {
     return list;
   })();
 
+  validateEndpoint(endpoint: string): void { this.validatedUrl(endpoint, 'configuration-validation-only'); }
+
   async fetch(endpoint: string, bearerSecret: string, cursor?: string): Promise<Buffer> {
     const url = this.validatedUrl(endpoint, bearerSecret, cursor);
     const abortController = new AbortController();

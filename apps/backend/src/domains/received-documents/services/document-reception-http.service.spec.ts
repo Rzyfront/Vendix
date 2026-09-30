@@ -109,6 +109,14 @@ const ENDPOINT = 'https://documents.supplier.com/api/inbox';
 const SECRET = 'secret-token-should-never-leak';
 
 describe('DocumentReceptionHttpService', () => {
+  it('validates configured endpoint syntax without performing DNS or HTTP requests', () => {
+    const service = new TestDocumentReceptionHttpService();
+    expect(() => service.validateEndpoint(ENDPOINT)).not.toThrow();
+    expect(() => service.validateEndpoint('https://localhost/feed')).toThrow(BadRequestException);
+    expect(service.dnsCallCount).toBe(0);
+    expect(service.requestCount).toBe(0);
+  });
+
   it.each([
     ['plain HTTP', 'http://documents.supplier.example/feed', SECRET, undefined],
     ['URL credentials', 'https://user:pass@documents.supplier.example/feed', SECRET, undefined],
