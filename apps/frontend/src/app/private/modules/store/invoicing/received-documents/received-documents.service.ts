@@ -4,14 +4,19 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import type {
   ApiEnvelope,
+  ConfirmReceivedDocumentMatchInput,
   ManualReceivedDocumentInput,
   ReceivedDocument,
+  ReceivedDocumentMatchAllocationsResponse,
+  ReceivedDocumentMatchCandidatesResponse,
+  ReceivedDocumentMatchMutationResult,
   ReceivedDocumentReviewInput,
   ReceivedDocumentScanEnqueueResponse,
   ReceivedDocumentScanStatus,
   ReceivedDocumentsPage,
   ReceivedDocumentQuery,
   ReceivedDocumentsScope,
+  RevokeReceivedDocumentMatchInput,
 } from './received-documents.interface';
 
 @Injectable({ providedIn: 'root' })
@@ -38,6 +43,59 @@ export class ReceivedDocumentsService {
     return this.http.get<ApiEnvelope<ReceivedDocument>>(`${this.base(scope)}/${id}`, {
       params: this.scopeParams(scope, storeId),
     });
+  }
+
+  getMatchCandidates(
+    scope: ReceivedDocumentsScope,
+    id: number,
+    query: { search?: string; limit?: number },
+    storeId?: number,
+  ): Observable<ApiEnvelope<ReceivedDocumentMatchCandidatesResponse>> {
+    let params = this.scopeParams(scope, storeId);
+    if (query.search !== undefined && query.search !== '') params = params.set('search', query.search);
+    if (query.limit !== undefined) params = params.set('limit', String(query.limit));
+    return this.http.get<ApiEnvelope<ReceivedDocumentMatchCandidatesResponse>>(
+      `${this.base(scope)}/${id}/match-candidates`,
+      { params },
+    );
+  }
+
+  getMatchAllocations(
+    scope: ReceivedDocumentsScope,
+    id: number,
+    storeId?: number,
+  ): Observable<ApiEnvelope<ReceivedDocumentMatchAllocationsResponse>> {
+    return this.http.get<ApiEnvelope<ReceivedDocumentMatchAllocationsResponse>>(
+      `${this.base(scope)}/${id}/match-allocations`,
+      { params: this.scopeParams(scope, storeId) },
+    );
+  }
+
+  confirmMatch(
+    scope: ReceivedDocumentsScope,
+    id: number,
+    payload: ConfirmReceivedDocumentMatchInput,
+    storeId?: number,
+  ): Observable<ApiEnvelope<ReceivedDocumentMatchMutationResult>> {
+    return this.http.post<ApiEnvelope<ReceivedDocumentMatchMutationResult>>(
+      `${this.base(scope)}/${id}/match-allocations`,
+      payload,
+      { params: this.scopeParams(scope, storeId) },
+    );
+  }
+
+  revokeMatch(
+    scope: ReceivedDocumentsScope,
+    id: number,
+    allocationId: number,
+    payload: RevokeReceivedDocumentMatchInput,
+    storeId?: number,
+  ): Observable<ApiEnvelope<ReceivedDocumentMatchMutationResult>> {
+    return this.http.post<ApiEnvelope<ReceivedDocumentMatchMutationResult>>(
+      `${this.base(scope)}/${id}/match-allocations/${allocationId}/revoke`,
+      payload,
+      { params: this.scopeParams(scope, storeId) },
+    );
   }
 
   importXml(scope: ReceivedDocumentsScope, file: File, storeId?: number): Observable<ApiEnvelope<ReceivedDocument>> {
