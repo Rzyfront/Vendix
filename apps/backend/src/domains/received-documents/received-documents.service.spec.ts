@@ -439,10 +439,10 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     expect(data.validation_summary.errors.map((error: any) => error.code)).toContain('RECEIVER_TAX_ID_MISMATCH');
   });
 
-  it('stores nominal IBUA unit basis metadata without placing units in monetary columns', async () => {
+  it('stores nominal IBUA metadata and preserves an optional monetary taxable amount', async () => {
     const h = makeHarness();
     const unitIbua: ReceivedDocumentTax = {
-      tax_type: 'ibua', scheme_code: '34', tax_name: 'IBUA', rate: '0', base_amount: '0.00', amount: '1.00',
+      tax_type: 'ibua', scheme_code: '34', tax_name: 'IBUA', rate: '0', base_amount: '100.00', amount: '1.00',
       tax_basis_type: 'unit', base_quantity: '1000.00', base_unit_code: 'ML', per_unit_amount: '0.10',
     };
     h.parser.parse.mockReturnValue(normalized({ taxes: [unitIbua], items: [{
@@ -452,11 +452,117 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     await h.service.importXml(context, xmlFile());
     const tax = h.tx.received_document_taxes.createMany.mock.calls[0][0].data[0];
     expect(tax.item_id).toBeNull();
-    expect(tax.base_amount.toString()).toBe('0');
+    expect(tax.base_amount.toString()).toBe('100');
     expect(tax.metadata).toEqual({
       tax_basis_type: 'unit', base_quantity: '1000.00', base_unit_code: 'ML', per_unit_amount: '0.10',
     });
     expect(tax.eligible_amount.toString()).toBe('0');
+  });
+
+  it('accepts complete nominal IBUA facts on manual header and item taxes and persists explicit metadata', async () => {
+    const h = makeHarness();
+    const unitIbua = {
+      tax_type: 'ibua', scheme_code: '34', tax_name: 'IBUA', tax_basis_type: 'unit',
+      base_quantity: '1000.00', base_unit_code: 'ML', per_unit_amount: '0.10', amount: '1.00',
+    };
+    await h.service.createManual(context, manualDto({
+      tax_amount: '1.00', tax_inclusive_amount: '101.00', total_amount: '101.00',
+      taxes: [unitIbua],
+      items: [{ description: 'Bebida', quantity: '1', unit_price: '100.00', discount_amount: '0.00',
+        net_amount: '100.00', total_amount: '101.00', taxes: [unitIbua] }],
+    }));
+    const rows = h.tx.received_document_taxes.createMany.mock.calls.map((call: any[]) => call[0].data[0]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ item_id: null, tax_type: 'ibua', rate: expect.anything(), base_amount: expect.anything() });
+    expect(rows[0].rate.toString()).toBe('0');
+    expect(rows[0].base_amount.toString()).toBe('0');
+    expect(rows[0].metadata).toEqual({ tax_basis_type: 'unit', base_quantity: '1000.00', base_unit_code: 'ML', per_unit_amount: '0.10' });
+    expect(rows[1].item_id).toBe(900);
+    expect(rows[1].metadata).toEqual(rows[0].metadata);
+    expect(rows.every((tax: any) => tax.eligible_amount.toString() === '0' && tax.treatment === 'pending')).toBe(true);
+  });
+
+  it.each([
+    ['mismatched nominal arithmetic', { amount: '1.02' }, 'UNIT_TAX_AMOUNT_MISMATCH'],
+    ['HALF_EVEN intermediate product .5049', { base_quantity: '50.49', per_unit_amount: '0.01', amount: '0.02' }, 'UNIT_TAX_AMOUNT_MISMATCH'],
+    ['nonzero nominal percentage', { rate: '19' }, 'UNIT_TAX_RATE_MUST_BE_ZERO'],
+    ['incomplete unit facts', { base_quantity: null, base_unit_code: null, per_unit_amount: null }, 'INCOMPLETE_UNIT_TAX_BASIS'],
+    ['unsupported unit scheme', { tax_type: 'icui', scheme_code: '35' }, 'UNSUPPORTED_UNIT_TAX'],
+    ['excess source precision', { base_quantity: '1000.001' }, 'DECIMAL_OVERFLOW_TAX_BASE_QUANTITY'],
+  ])('blocks %s as a manual basis error and as nonthrowing OCR review validation', async (_label, taxOverride, expectedCode) => {
+    const h = makeHarness();
+    const tax = {
+      tax_type: 'ibua', scheme_code: '34', tax_name: 'IBUA', tax_basis_type: 'unit',
+      base_quantity: '1000.00', base_unit_code: 'ML', per_unit_amount: '0.10', amount: '1.00',
+      ...taxOverride,
+    };
+    const input = manualDto({
+      tax_amount: '1.00', tax_inclusive_amount: '101.00', total_amount: '101.00', taxes: [tax],
+      items: [{ description: 'Bebida', quantity: '1', unit_price: '100.00', discount_amount: '0.00', net_amount: '100.00', total_amount: '101.00', taxes: [tax] }],
+    });
+    await expect(h.service.createManual(context, input)).rejects.toBeInstanceOf(BadRequestException);
+    expect(h.prisma.$transaction).not.toHaveBeenCalled();
+    const extracted = h.service.normalizeExtractionFacts(input);
+    expect(extracted.validation.errors.map((error) => error.code)).toContain(expectedCode);
+  });
+
+  it('requires explicit unit basis for nominal fields and defaults absent/null fields to monetary', async () => {
+    const h = makeHarness();
+    const nominalWithoutBasis = h.service.normalizeExtractionFacts(manualDto({
+      taxes: [{ tax_type: 'ibua', scheme_code: '34', tax_name: 'IBUA', base_quantity: '1000.00', base_unit_code: 'ML', per_unit_amount: '0.10', rate: '0', amount: '1.00', base_amount: '0.00' }],
+    }));
+    expect(nominalWithoutBasis.validation.errors.map((error) => error.code)).toContain('TAX_BASIS_REQUIRED');
+    const monetary = h.service.normalizeExtractionFacts(manualDto({
+      taxes: [{ tax_type: 'iva', scheme_code: '01', tax_name: 'IVA', rate: '19', base_amount: '100.00', amount: '19.00',
+        tax_basis_type: 'monetary', base_quantity: null, base_unit_code: null, per_unit_amount: null }],
+    }));
+    expect(monetary.validation.errors.map((error) => error.code)).not.toContain('CONTRADICTORY_TAX_BASIS');
+    expect(monetary.taxes[0].tax_basis_type).toBe('monetary');
+  });
+
+  it('keeps malformed OCR monetary base blocked in extraction snapshot without persisting fabricated zero', async () => {
+    const h = makeHarness();
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce({
+      id: 50, version: 1, validation_status: 'pending', processing_status: 'processing',
+      metadata: { source_format: 'pending_file' }, raw_payload: { source_format: 'pending_file' },
+    });
+    const facts = h.service.normalizeExtractionFacts(manualDto({
+      taxes: [{ tax_type: 'iva', scheme_code: '01', tax_name: 'IVA', rate: '19', base_amount: null, amount: '19.00' }],
+      items: [{ description: 'Producto', quantity: '2', unit_price: '50', discount_amount: '0.00', net_amount: '100.00', total_amount: '119.00',
+        taxes: [{ tax_type: 'iva', scheme_code: '01', tax_name: 'IVA', rate: '19', base_amount: '100.00', amount: '19.00' }] }],
+    }));
+    expect(facts.validation.errors.map((error) => error.code)).toContain('MISSING_MONETARY_TAX_BASE');
+    expect(facts.taxes[0].base_amount).toBe('');
+    await h.service.replaceFromExtraction(context, 50, facts);
+    const update = h.tx.received_documents.updateMany.mock.calls[0][0].data;
+    expect(update.validation_status).toBe('invalid');
+    expect(update.metadata.extraction_snapshot.taxes[0].base_amount).toBe('');
+    expect(h.tx.received_document_taxes.createMany).toHaveBeenCalledTimes(1); // only the valid line-tax row
+    expect(h.tx.received_document_taxes.createMany.mock.calls[0][0].data[0]).toMatchObject({ item_id: 900, base_amount: expect.anything() });
+  });
+
+  it('keeps supported nominal facts in the reviewed snapshot while preserving OCR extraction evidence', async () => {
+    const h = makeHarness();
+    const extraction = normalized({ taxes: [] });
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce({
+      id: 50, version: 1, source_channel: 'manual', source_hash: 'b'.repeat(64),
+      processing_status: 'ready', validation_status: 'needs_review', fiscal_status: 'pending', posting_status: 'pending', accepted_at: null,
+      raw_payload: { source_format: 'pending_file', source_hash: 'b'.repeat(64), facts: 'raw-original' },
+      metadata: { source_format: 'pending_file', extraction_snapshot: extraction },
+      files: [{ id: 9, file_name: 'scan.pdf', sha256: 'b'.repeat(64), role: 'original' }],
+    });
+    const unit = { tax_type: 'ibua', scheme_code: '34', tax_name: 'IBUA', tax_basis_type: 'unit', base_quantity: '1000.00', base_unit_code: 'ML', per_unit_amount: '0.10', amount: '1.00' };
+    await h.service.updateReview(context, 50, { expected_version: 1, facts: manualDto({
+      tax_amount: '1.00', tax_inclusive_amount: '101.00', total_amount: '101.00', taxes: [unit],
+      items: [{ description: 'Bebida', quantity: '1', unit_price: '100.00', discount_amount: '0.00', net_amount: '100.00', total_amount: '101.00', taxes: [unit] }],
+    }) } as any);
+    const update = h.tx.received_documents.updateMany.mock.calls[0][0].data;
+    expect(update.metadata.extraction_snapshot).toEqual(extraction);
+    expect(update.metadata.reviewed_snapshot.taxes[0]).toMatchObject({ tax_basis_type: 'unit', base_quantity: '1000.00', per_unit_amount: '0.10' });
+    expect(update).not.toHaveProperty('raw_payload');
+    const row = h.tx.received_document_taxes.createMany.mock.calls[0][0].data[0];
+    expect(row.metadata).toMatchObject({ tax_basis_type: 'unit', base_quantity: '1000.00', per_unit_amount: '0.10' });
+    expect(row.eligible_amount.toString()).toBe('0');
   });
 
   it('blocks documents when canonical NIT is unconfigured instead of assuming a match', async () => {

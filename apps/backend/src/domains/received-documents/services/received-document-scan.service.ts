@@ -21,7 +21,7 @@ const MAX_LINE_TAXES_FOR_NORMALIZER = 21;
 const DOCUMENT_TYPES: ReceivedDocumentType[] = ['invoice', 'credit_note', 'debit_note', 'non_electronic'];
 const TAX_TYPES = new Set<string>(Object.values(tax_type_enum));
 
-const EXTRACTION_PROMPT = `Lee únicamente los hechos fiscales visibles en las páginas del documento de proveedor. Devuelve SOLO un objeto JSON con esta forma exacta: {"facts":{...},"evidence":[{"field":"facts.invoice_number","page":1,"quote":"texto visible"}]}. En facts incluye las propiedades del DTO de captura manual: document_type (invoice, credit_note, debit_note o non_electronic), invoice_number, document_key, reference_key, reference_number, issuer_tax_id, issuer_name, receiver_tax_id, receiver_name, issue_date, due_date, currency, subtotal_amount, discount_amount, charge_amount, tax_exclusive_amount, tax_inclusive_amount, tax_amount, total_amount, prepaid_amount, payable_rounding_amount, withholding_amount, reviewer_note, items y taxes. Cada item incluye external_code, description, quantity, unit_code, unit_price, discount_amount, net_amount, total_amount y taxes. Cada impuesto incluye tax_type, scheme_code, tax_name, rate, base_amount y amount.
+const EXTRACTION_PROMPT = `Lee únicamente los hechos fiscales visibles en las páginas del documento de proveedor. Devuelve SOLO un objeto JSON con esta forma exacta: {"facts":{...},"evidence":[{"field":"facts.invoice_number","page":1,"quote":"texto visible"}]}. En facts incluye las propiedades del DTO de captura manual: document_type (invoice, credit_note, debit_note o non_electronic), invoice_number, document_key, reference_key, reference_number, issuer_tax_id, issuer_name, receiver_tax_id, receiver_name, issue_date, due_date, currency, subtotal_amount, discount_amount, charge_amount, tax_exclusive_amount, tax_inclusive_amount, tax_amount, total_amount, prepaid_amount, payable_rounding_amount, withholding_amount, reviewer_note, items y taxes. Cada item incluye external_code, description, quantity, unit_code, unit_price, discount_amount, net_amount, total_amount y taxes. Cada impuesto incluye tax_type, scheme_code, tax_name, tax_basis_type, base_quantity, base_unit_code, per_unit_amount, rate, base_amount y amount. Para IBUA nominal por unidad, transcribe tax_basis_type="unit", cantidad y unidad base, valor por unidad y scheme_code="34" solo si aparecen. No conviertas cantidad/unidad a base monetaria ni infieras una tasa porcentual; si falta la base nominal necesaria, deja null.
 
 Reglas: transcribe solo hechos visibles; no completes ni infieras datos ausentes. Si falta un campo usa null. No inventes el NIT del comprador/adquirente: copia receiver_tax_id solo si es visible en el documento; no uses contexto de tienda, organización ni emisor. Importes, cantidades, tasas y precios son cadenas decimales sin símbolos ni separadores de miles. Fechas completas en YYYY-MM-DD; si no se ve completa, null. No clasifiques impuestos dudosos: usa tax_type="unclassified". Evidencia breve literal con número de página para cada dato relevante legible. No confirmes aceptación, recepción de bienes, coincidencias, reconocimiento fiscal ni contabilización.`;
 
@@ -73,12 +73,6 @@ export class ReceivedDocumentScanService {
 
     const normalized = this.receivedDocuments.normalizeExtractionFacts(this.buildManualDto(rawFacts));
     this.appendMalformedOptionalFieldErrors(rawFacts, normalized);
-    if (this.containsNominalTaxBasis(rawFacts)) {
-      normalized.validation.errors.push({
-        code: 'UNREVIEWED_NOMINAL_TAX_BASIS',
-        message: 'El documento contiene un impuesto nominal por unidad que requiere revisión fiscal antes de clasificarlo.',
-      });
-    }
     return {
       normalized,
       raw_extraction: root as Prisma.InputJsonObject,
@@ -145,19 +139,13 @@ export class ReceivedDocumentScanService {
       rate: this.decimalField(tax['rate']),
       base_amount: this.decimalField(tax['base_amount']),
       amount: this.decimalField(tax['amount']),
+      tax_basis_type: tax['tax_basis_type'] == null
+        ? undefined
+        : tax['tax_basis_type'] as NonNullable<ManualReceivedDocumentDto['taxes']>[number]['tax_basis_type'],
+      base_quantity: this.optionalDecimal(tax['base_quantity']),
+      base_unit_code: this.optionalString(tax['base_unit_code'], 30),
+      per_unit_amount: this.optionalDecimal(tax['per_unit_amount']),
     };
-  }
-
-  private containsNominalTaxBasis(facts: Record<string, unknown>): boolean {
-    const isUnitTax = (value: unknown): boolean => {
-      const tax = this.asRecord(value);
-      return !!tax && (tax['tax_basis_type'] === 'unit' || ['per_unit_amount', 'base_quantity', 'base_unit_code'].some((field) => tax[field] != null && tax[field] !== ''));
-    };
-    if (Array.isArray(facts['taxes']) && facts['taxes'].some(isUnitTax)) return true;
-    return Array.isArray(facts['items']) && facts['items'].slice(0, MAX_LINES_FOR_NORMALIZER).some((value) => {
-      const item = this.asRecord(value);
-      return !!item && Array.isArray(item['taxes']) && item['taxes'].slice(0, MAX_LINE_TAXES_FOR_NORMALIZER).some(isUnitTax);
-    });
   }
 
   private appendMalformedOptionalFieldErrors(
@@ -182,6 +170,8 @@ export class ReceivedDocumentScanService {
       'prepaid_amount',
       'payable_rounding_amount',
       'withholding_amount',
+      'base_quantity',
+      'per_unit_amount',
     ];
     for (const field of optionalDecimalFields) {
       if (facts[field] != null && !this.decimalField(facts[field])) invalidPaths.push(`facts.${field}`);
@@ -190,6 +180,7 @@ export class ReceivedDocumentScanService {
     headerTaxes.forEach((tax, index) => {
       const record = this.asRecord(tax);
       if (record && this.isMalformedOptionalText(record['scheme_code'], 30)) invalidPaths.push(`facts.taxes[${index}].scheme_code`);
+      if (record && this.isMalformedOptionalText(record['base_unit_code'], 30)) invalidPaths.push(`facts.taxes[${index}].base_unit_code`);
     });
     const items = Array.isArray(facts['items']) ? facts['items'].slice(0, MAX_LINES_FOR_NORMALIZER) : [];
     items.forEach((item, itemIndex) => {
@@ -202,6 +193,9 @@ export class ReceivedDocumentScanService {
         const taxRecord = this.asRecord(tax);
         if (taxRecord && this.isMalformedOptionalText(taxRecord['scheme_code'], 30)) {
           invalidPaths.push(`facts.items[${itemIndex}].taxes[${taxIndex}].scheme_code`);
+        }
+        if (taxRecord && this.isMalformedOptionalText(taxRecord['base_unit_code'], 30)) {
+          invalidPaths.push(`facts.items[${itemIndex}].taxes[${taxIndex}].base_unit_code`);
         }
       });
     });

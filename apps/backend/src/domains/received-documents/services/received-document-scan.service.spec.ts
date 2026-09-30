@@ -202,14 +202,42 @@ describe('ReceivedDocumentScanService', () => {
     expect(errorCodes).toContain('TOO_MANY_LINE_TAX_ROWS');
   });
 
-  it('adds a blocking review issue for nominal unit taxes instead of coercing them to percentages', async () => {
+  it('normalizes complete nominal IBUA facts without blanket blocking or percentage coercion', async () => {
     const facts = {
       ...validFacts(),
-      taxes: [{ tax_type: 'ibua', tax_name: 'Impuesto por unidad', tax_basis_type: 'unit', base_quantity: '1', base_unit_code: 'KG', per_unit_amount: '50', rate: null, base_amount: '0', amount: '0' }],
+      tax_amount: '1.00', total_amount: '101.00',
+      taxes: [{ tax_type: 'ibua', scheme_code: '34', tax_name: 'IBUA', tax_basis_type: 'unit', base_quantity: '1000.00', base_unit_code: 'ML', per_unit_amount: '0.10', rate: null, base_amount: null, amount: '1.00' }],
     };
     const h = harness(JSON.stringify({ facts, evidence: [] }));
     const result = await h.service.extract(file);
-    expect(result.normalized.validation.errors).toContainEqual(expect.objectContaining({ code: 'UNREVIEWED_NOMINAL_TAX_BASIS' }));
+    expect(result.normalized.validation.errors.map((issue) => issue.code)).not.toContain('UNREVIEWED_NOMINAL_TAX_BASIS');
+    expect(result.normalized.validation.errors.map((issue) => issue.code)).not.toContain('UNSUPPORTED_UNIT_TAX');
+    expect(result.normalized.taxes[0]).toMatchObject({
+      tax_type: 'ibua', scheme_code: '34', tax_basis_type: 'unit', base_quantity: '1000.00',
+      base_unit_code: 'ML', per_unit_amount: '0.10', rate: '0', base_amount: '0.00', amount: '1.00',
+    });
+    expect(result.raw_extraction).toMatchObject({ facts: { taxes: [{
+      base_quantity: '1000.00', base_unit_code: 'ML', per_unit_amount: '0.10', base_amount: null,
+    }] } });
+  });
+
+  it('keeps incomplete or unsupported nominal tax source facts blocked', async () => {
+    const incomplete = { ...validFacts(), taxes: [{ tax_type: 'ibua', scheme_code: '34', tax_name: 'IBUA', tax_basis_type: 'unit', amount: '1' }] };
+    const incompleteResult = await harness(JSON.stringify({ facts: incomplete, evidence: [] })).service.extract(file);
+    expect(incompleteResult.normalized.validation.errors.map((issue) => issue.code)).toContain('INCOMPLETE_UNIT_TAX_BASIS');
+    const unsupported = { ...validFacts(), taxes: [{ tax_type: 'icui', scheme_code: '35', tax_name: 'ICUI', tax_basis_type: 'unit', base_quantity: '1', base_unit_code: 'ML', per_unit_amount: '1', amount: '0.01' }] };
+    const unsupportedResult = await harness(JSON.stringify({ facts: unsupported, evidence: [] })).service.extract(file);
+    expect(unsupportedResult.normalized.validation.errors.map((issue) => issue.code)).toContain('UNSUPPORTED_UNIT_TAX');
+  });
+
+  it('uses the rounded two-decimal nominal product before dividing by 100', async () => {
+    const facts = {
+      ...validFacts(),
+      tax_amount: '0.02', total_amount: '100.02',
+      taxes: [{ tax_type: 'ibua', scheme_code: '34', tax_name: 'IBUA', tax_basis_type: 'unit', base_quantity: '50.49', base_unit_code: 'ML', per_unit_amount: '0.01', rate: null, base_amount: null, amount: '0.02' }],
+    };
+    const result = await harness(JSON.stringify({ facts, evidence: [] })).service.extract(file);
+    expect(result.normalized.validation.errors.map((issue) => issue.code)).toContain('UNIT_TAX_AMOUNT_MISMATCH');
   });
 
   it('does not mistake null nominal-basis metadata on a monetary tax for a unit tax', async () => {

@@ -943,7 +943,7 @@ export class ReceivedDocumentsService {
 
   private async createChildren(tx: any, documentId: number, normalized: NormalizedReceivedDocument): Promise<number[]> {
     const skippedLines: number[] = [];
-    const headerTaxes = normalized.taxes.filter((tax) => tax.line_number == null);
+    const headerTaxes = normalized.taxes.filter((tax) => tax.line_number == null && this.isPersistableTaxRow(tax));
     if (headerTaxes.length > 0) {
       await tx.received_document_taxes.createMany({
         data: headerTaxes.map((tax) => this.taxRow(documentId, null, tax)),
@@ -972,13 +972,27 @@ export class ReceivedDocumentsService {
         },
         select: { id: true },
       });
-      if (item.taxes.length > 0) {
+      const persistableItemTaxes = item.taxes.filter((tax) => this.isPersistableTaxRow(tax));
+      if (persistableItemTaxes.length > 0) {
         await tx.received_document_taxes.createMany({
-          data: item.taxes.map((tax) => this.taxRow(documentId, created.id, tax)),
+          data: persistableItemTaxes.map((tax) => this.taxRow(documentId, created.id, tax)),
         });
       }
     }
     return skippedLines;
+  }
+
+  /** Invalid/incomplete basis facts remain in immutable normalized/raw evidence, not fabricated money columns. */
+  private isPersistableTaxRow(tax: ReceivedDocumentTax): boolean {
+    if (!tax.base_amount || !tax.amount) return false;
+    try {
+      const base = new Prisma.Decimal(tax.base_amount);
+      const amount = new Prisma.Decimal(tax.amount);
+      const representable = (value: Prisma.Decimal) => value.isFinite() && !value.isNegative() && value.decimalPlaces() <= 2 && value.lt('10000000000000');
+      return representable(base) && representable(amount);
+    } catch {
+      return false;
+    }
   }
 
   private taxRow(documentId: number, itemId: number | null, tax: ReceivedDocumentTax) {
@@ -1226,21 +1240,109 @@ export class ReceivedDocumentsService {
   ): ReceivedDocumentTax {
     const row = (input ?? {}) as Partial<ReceivedDocumentTaxDto>;
     const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
-    const rate = this.manualDecimal(text(row.rate), 4, 5, 'TAX_RATE', errors);
-    const base = this.manualMoney(text(row.base_amount), 'TAX_BASE', errors);
+    const errorsAtStart = errors.length;
     const amount = this.manualMoney(text(row.amount), 'TAX_AMOUNT', errors);
+    const amountValid = errors.length === errorsAtStart;
     const rawTaxType = row.tax_type;
     const taxType = rawTaxType === 'unclassified' ||
       Object.values(tax_type_enum).includes(rawTaxType as tax_type_enum)
       ? rawTaxType as ReceivedDocumentTax['tax_type']
       : 'unclassified';
+    const schemeCode = text(row.scheme_code);
+    const taxBasis = row.tax_basis_type;
+    const nominalFieldsSupplied = [row.base_quantity, row.per_unit_amount, row.base_unit_code]
+      .some((value) => value != null && text(value) !== '');
+    const supportedBasis = taxBasis == null || taxBasis === 'monetary' || taxBasis === 'unit';
+    const isUnit = taxBasis === 'unit';
+    if (!supportedBasis) {
+      errors.push({ code: 'INVALID_TAX_BASIS', message: 'La base del impuesto debe ser monetaria o nominal por unidad.' });
+    }
+    if (taxBasis == null && nominalFieldsSupplied) {
+      errors.push({ code: 'TAX_BASIS_REQUIRED', message: 'Los datos nominales requieren declarar tax_basis_type=unit.' });
+    }
+    if (taxBasis === 'monetary' && nominalFieldsSupplied) {
+      errors.push({ code: 'CONTRADICTORY_TAX_BASIS', message: 'Un impuesto monetario no puede incluir magnitudes nominales por unidad.' });
+    }
+
+    let rate: Prisma.Decimal;
+    let rateValid = true;
+    if (isUnit && !text(row.rate)) {
+      rate = new Prisma.Decimal(0);
+    } else {
+      const errorsBeforeRate = errors.length;
+      rate = this.manualDecimal(text(row.rate), 4, 5, 'TAX_RATE', errors);
+      rateValid = errors.length === errorsBeforeRate;
+    }
+
+    const baseQuantitySource = text(row.base_quantity);
+    const perUnitSource = text(row.per_unit_amount);
+    const baseUnitCode = text(row.base_unit_code);
+    let baseQuantity: Prisma.Decimal | undefined;
+    let perUnitAmount: Prisma.Decimal | undefined;
+    let baseAmount: Prisma.Decimal | undefined;
+    let baseAmountString = '';
+
+    if (isUnit) {
+      if (taxType !== 'ibua' || schemeCode !== '34') {
+        errors.push({ code: 'UNSUPPORTED_UNIT_TAX', message: 'La base nominal por unidad solo se admite para IBUA con scheme_code 34.' });
+      }
+      if (!baseQuantitySource) {
+        errors.push({ code: 'INCOMPLETE_UNIT_TAX_BASIS', message: 'El impuesto nominal requiere una cantidad base mayor que cero.' });
+      } else {
+        baseQuantity = this.manualDecimal(baseQuantitySource, 13, 2, 'TAX_BASE_QUANTITY', errors);
+        if (!baseQuantity.gt(0)) errors.push({ code: 'INVALID_UNIT_TAX_QUANTITY', message: 'La cantidad base nominal debe ser mayor que cero.' });
+      }
+      if (!perUnitSource) {
+        errors.push({ code: 'INCOMPLETE_UNIT_TAX_BASIS', message: 'El impuesto nominal requiere un valor por unidad.' });
+      } else {
+        perUnitAmount = this.manualDecimal(perUnitSource, 13, 2, 'TAX_PER_UNIT_AMOUNT', errors);
+      }
+      if (!baseUnitCode || baseUnitCode.length > 30) {
+        errors.push({ code: 'INCOMPLETE_UNIT_TAX_BASIS', message: 'El impuesto nominal requiere un código de unidad válido.' });
+      }
+      if (!rate.isZero()) {
+        errors.push({ code: 'UNIT_TAX_RATE_MUST_BE_ZERO', message: 'Un impuesto nominal por unidad debe tener tasa porcentual cero.' });
+      }
+      const suppliedBase = text(row.base_amount);
+      if (suppliedBase) {
+        const errorsBeforeBase = errors.length;
+        baseAmount = this.manualMoney(suppliedBase, 'TAX_BASE', errors);
+        if (errors.length === errorsBeforeBase) baseAmountString = this.moneyString(baseAmount);
+      }
+      const completeSupportedUnitTax = taxType === 'ibua' && schemeCode === '34' &&
+        !!baseQuantity?.gt(0) && !!perUnitAmount && !!baseUnitCode && rate.isZero();
+      if (completeSupportedUnitTax && baseQuantity && perUnitAmount) {
+        const expected = baseQuantity.mul(perUnitAmount)
+          .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN)
+          .div(100)
+          .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN);
+        if (this.differenceExceeds(amount, expected)) {
+          errors.push({ code: 'UNIT_TAX_AMOUNT_MISMATCH', message: 'El importe nominal no coincide con cantidad base × valor por unidad / 100.' });
+        }
+        if (!suppliedBase && errors.length === errorsAtStart && !this.differenceExceeds(amount, expected)) baseAmountString = '0.00';
+      }
+    } else if (supportedBasis) {
+      const suppliedBase = text(row.base_amount);
+      if (!suppliedBase) {
+        errors.push({ code: 'MISSING_MONETARY_TAX_BASE', message: 'El impuesto monetario requiere una base monetaria explícita.' });
+      } else {
+        const errorsBeforeBase = errors.length;
+        baseAmount = this.manualMoney(suppliedBase, 'TAX_BASE', errors);
+        if (errors.length === errorsBeforeBase) baseAmountString = this.moneyString(baseAmount);
+      }
+    }
+
     return {
       tax_type: taxType,
-      scheme_code: text(row.scheme_code),
+      scheme_code: schemeCode,
       tax_name: text(row.tax_name) || 'Sin clasificar',
-      rate: rate.toString(),
-      base_amount: this.moneyString(base),
-      amount: this.moneyString(amount),
+      rate: rateValid ? rate.toString() : '',
+      base_amount: baseAmountString,
+      amount: amountValid ? this.moneyString(amount) : '',
+      tax_basis_type: taxBasis == null ? (supportedBasis ? (isUnit ? 'unit' : 'monetary') : undefined) : taxBasis as ReceivedDocumentTax['tax_basis_type'],
+      ...(isUnit && baseQuantitySource ? { base_quantity: baseQuantitySource } : {}),
+      ...(isUnit && baseUnitCode ? { base_unit_code: baseUnitCode } : {}),
+      ...(isUnit && perUnitSource ? { per_unit_amount: perUnitSource } : {}),
       line_number: lineNumber,
     };
   }

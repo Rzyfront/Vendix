@@ -89,15 +89,34 @@ export class ReceivedDocumentTaxDto {
   @Length(1, 30)
   scheme_code?: string;
 
+  @IsOptional()
+  @IsIn(['monetary', 'unit'])
+  tax_basis_type?: 'monetary' | 'unit';
+
+  @IsOptional()
+  @Matches(MONEY_15_2)
+  base_quantity?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 30)
+  base_unit_code?: string;
+
+  @IsOptional()
+  @Matches(MONEY_15_2)
+  per_unit_amount?: string;
+
   @IsString()
   @Length(1, 100)
   tax_name!: string;
 
+  @IsOptional()
   @Matches(RATE_9_5)
-  rate!: string;
+  rate?: string;
 
+  @IsOptional()
   @Matches(MONEY_15_2)
-  base_amount!: string;
+  base_amount?: string;
 
   @Matches(MONEY_15_2)
   amount!: string;
