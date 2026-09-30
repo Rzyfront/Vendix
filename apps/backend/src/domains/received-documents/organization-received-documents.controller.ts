@@ -31,6 +31,7 @@ import {
 } from './dto/received-document.dto';
 import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentsContextService } from './services/received-documents-context.service';
+import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const SAFE_FILE_NAME = /^[A-Za-z0-9._-]{1,120}$/;
@@ -50,6 +51,7 @@ export class OrganizationReceivedDocumentsController {
     private readonly documents: ReceivedDocumentsService,
     private readonly contexts: ReceivedDocumentsContextService,
     private readonly responses: ResponseService,
+    private readonly scans: ReceivedDocumentScanQueueService,
   ) {}
 
   @Get()
@@ -64,6 +66,29 @@ export class OrganizationReceivedDocumentsController {
       result.limit,
       'Documentos recibidos obtenidos',
     );
+  }
+
+  @Post('scan')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Permissions('organization:invoicing:received:import')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }))
+  async enqueueScan(
+    @UploadedFile() file: Express.Multer.File,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    if (!file) throw new BadRequestException('Debe adjuntar el documento para lectura.');
+    const context = await this.contexts.resolveOrganization(scope.store_id);
+    return this.responses.success(await this.scans.enqueue(context, file));
+  }
+
+  @Get('scan/:jobId')
+  @Permissions('organization:invoicing:received:read')
+  async getScanStatus(
+    @Param('jobId') jobId: string,
+    @Query() scope: ReceivedDocumentContextQueryDto,
+  ) {
+    const context = await this.contexts.resolveOrganization(scope.store_id);
+    return this.responses.success(await this.scans.getStatus(context, jobId));
   }
 
   @Get(':id')

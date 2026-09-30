@@ -1,4 +1,7 @@
-import { BadRequestException, NotFoundException, StreamableFile } from '@nestjs/common';
+import { BadRequestException, HttpStatus, NotFoundException, RequestMethod, StreamableFile } from '@nestjs/common';
+import { HTTP_CODE_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { AI_FEATURE_KEY, AiAccessGuard } from '../store/subscriptions/guards/ai-access.guard';
+import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
 import { PERMISSIONS_KEY } from '../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { ResponseService } from '../../common/responses/response.service';
@@ -33,6 +36,14 @@ function dependencies() {
     updateReview: jest.fn().mockResolvedValue({ id: 1 }),
     getFile: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.7')),
   };
+  const scans = {
+    enqueue: jest.fn().mockResolvedValue({
+      document_id: 1,
+      job_id: 'scan-job-1',
+      already_processed: false,
+    }),
+    getStatus: jest.fn().mockResolvedValue({ status: 'queued' }),
+  };
   const contexts = {
     resolveStore: jest.fn().mockResolvedValue(STORE_CONTEXT),
     resolveOrganization: jest.fn().mockResolvedValue(ORG_CONTEXT),
@@ -43,16 +54,129 @@ function dependencies() {
     updated: jest.fn((data) => ({ data })),
     success: jest.fn((data) => ({ data })),
   };
-  return { documents, contexts, responses };
+  return { documents, contexts, responses, scans };
 }
 
 describe('received-document route controllers', () => {
+  it('enqueues a store OCR scan with authenticated context and HTTP 202 metadata', async () => {
+    const deps = dependencies();
+    const controller = new StoreReceivedDocumentsController(
+      deps.documents as unknown as ReceivedDocumentsService,
+      deps.contexts as unknown as ReceivedDocumentsContextService,
+      deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
+    );
+    const file = {
+      originalname: 'invoice.pdf',
+      mimetype: 'application/pdf',
+      size: 100,
+      buffer: Buffer.from('pdf'),
+    } as Express.Multer.File;
+
+    await expect(controller.enqueueScan(file)).resolves.toEqual({
+      data: {
+        document_id: 1,
+        job_id: 'scan-job-1',
+        already_processed: false,
+      },
+    });
+    expect(deps.contexts.resolveStore).toHaveBeenCalledTimes(1);
+    expect(deps.scans.enqueue).toHaveBeenCalledWith(STORE_CONTEXT, file);
+    expect(deps.responses.success).toHaveBeenCalledWith({
+      document_id: 1,
+      job_id: 'scan-job-1',
+      already_processed: false,
+    });
+
+    const handler = StoreReceivedDocumentsController.prototype.enqueueScan;
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('scan');
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.POST);
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(HttpStatus.ACCEPTED);
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toEqual([
+      'invoicing:received:import',
+    ]);
+    expect(Reflect.getMetadata(AI_FEATURE_KEY, handler)).toBe('async_queue');
+    expect(Reflect.getMetadata('__guards__', handler)).toContain(AiAccessGuard);
+    expect(Reflect.getMetadata('__interceptors__', handler)?.length).toBeGreaterThan(0);
+  });
+
+  it('rejects a missing scan upload before resolving context or enqueueing', async () => {
+    const deps = dependencies();
+    const controller = new StoreReceivedDocumentsController(
+      deps.documents as unknown as ReceivedDocumentsService,
+      deps.contexts as unknown as ReceivedDocumentsContextService,
+      deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
+    );
+
+    await expect(controller.enqueueScan(undefined as never)).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(deps.contexts.resolveStore).not.toHaveBeenCalled();
+    expect(deps.scans.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('forwards the organization-selected operational store to OCR enqueue', async () => {
+    const deps = dependencies();
+    const controller = new OrganizationReceivedDocumentsController(
+      deps.documents as unknown as ReceivedDocumentsService,
+      deps.contexts as unknown as ReceivedDocumentsContextService,
+      deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
+    );
+    const file = {
+      originalname: 'invoice.pdf',
+      mimetype: 'application/pdf',
+      size: 100,
+      buffer: Buffer.from('pdf'),
+    } as Express.Multer.File;
+
+    await controller.enqueueScan(file, { store_id: 21 });
+
+    expect(deps.contexts.resolveOrganization).toHaveBeenCalledWith(21);
+    expect(deps.scans.enqueue).toHaveBeenCalledWith(ORG_CONTEXT, file);
+    const handler = OrganizationReceivedDocumentsController.prototype.enqueueScan;
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('scan');
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.POST);
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(HttpStatus.ACCEPTED);
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toEqual([
+      'organization:invoicing:received:import',
+    ]);
+    expect(
+      Reflect.getMetadata('__guards__', OrganizationReceivedDocumentsController.prototype.enqueueScan) ?? [],
+    ).not.toContain(AiAccessGuard);
+  });
+
+  it('polls job status with read permission and no AI feature guard', async () => {
+    const deps = dependencies();
+    const controller = new OrganizationReceivedDocumentsController(
+      deps.documents as unknown as ReceivedDocumentsService,
+      deps.contexts as unknown as ReceivedDocumentsContextService,
+      deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
+    );
+
+    await expect(controller.getScanStatus('scan-job-1', { store_id: 21 })).resolves.toEqual({
+      data: { status: 'queued' },
+    });
+    expect(deps.contexts.resolveOrganization).toHaveBeenCalledWith(21);
+    expect(deps.scans.getStatus).toHaveBeenCalledWith(ORG_CONTEXT, 'scan-job-1');
+    const handler = OrganizationReceivedDocumentsController.prototype.getScanStatus;
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('scan/:jobId');
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toEqual([
+      'organization:invoicing:received:read',
+    ]);
+    expect(Reflect.getMetadata(AI_FEATURE_KEY, handler)).toBeUndefined();
+    expect(Reflect.getMetadata('__guards__', handler) ?? []).not.toContain(AiAccessGuard);
+  });
+
   it('keeps store reads pinned to the authenticated operational store', async () => {
     const deps = dependencies();
     const controller = new StoreReceivedDocumentsController(
       deps.documents as unknown as ReceivedDocumentsService,
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
     );
     const query = { page: 1, limit: 25 } as ReceivedDocumentQueryDto;
 
@@ -74,6 +198,7 @@ describe('received-document route controllers', () => {
       deps.documents as unknown as ReceivedDocumentsService,
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
     );
 
     await expect(controller.list({ store_id: 99 } as ReceivedDocumentQueryDto)).rejects.toThrow(BadRequestException);
@@ -87,6 +212,7 @@ describe('received-document route controllers', () => {
       deps.documents as unknown as ReceivedDocumentsService,
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
     );
     const query = { page: 2, limit: 10, store_id: 21 } as ReceivedDocumentQueryDto;
 
@@ -105,11 +231,13 @@ describe('received-document route controllers', () => {
       deps.documents as unknown as ReceivedDocumentsService,
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
     );
     const org = new OrganizationReceivedDocumentsController(
       deps.documents as unknown as ReceivedDocumentsService,
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
     );
 
     await store.createManual({} as ManualReceivedDocumentDto);
@@ -136,6 +264,7 @@ describe('received-document route controllers', () => {
       deps.documents as unknown as ReceivedDocumentsService,
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
     );
 
     await expect(controller.importXml(undefined as never, {})).rejects.toThrow(BadRequestException);
@@ -149,6 +278,7 @@ describe('received-document route controllers', () => {
       deps.documents as unknown as ReceivedDocumentsService,
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
     );
     deps.documents.findOne.mockResolvedValue({
       id: 1,
@@ -174,6 +304,7 @@ describe('received-document route controllers', () => {
       deps.documents as unknown as ReceivedDocumentsService,
       deps.contexts as unknown as ReceivedDocumentsContextService,
       deps.responses as unknown as ResponseService,
+      deps.scans as unknown as ReceivedDocumentScanQueueService,
     );
     deps.documents.findOne.mockResolvedValue({ id: 1, files: [] });
 

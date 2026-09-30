@@ -23,9 +23,11 @@ import type { Response } from 'express';
 import { ResponseService } from '../../common/responses/response.service';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { AiAccessGuard, RequireAIFeature } from '../store/subscriptions/guards/ai-access.guard';
 import { ReceivedDocumentQueryDto, ManualReceivedDocumentDto, UpdateReceivedDocumentReviewDto } from './dto/received-document.dto';
 import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentsContextService } from './services/received-documents-context.service';
+import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const SAFE_FILE_NAME = /^[A-Za-z0-9._-]{1,120}$/;
@@ -45,6 +47,7 @@ export class StoreReceivedDocumentsController {
     private readonly documents: ReceivedDocumentsService,
     private readonly contexts: ReceivedDocumentsContextService,
     private readonly responses: ResponseService,
+    private readonly scans: ReceivedDocumentScanQueueService,
   ) {}
 
   @Get()
@@ -62,6 +65,25 @@ export class StoreReceivedDocumentsController {
       result.limit,
       'Documentos recibidos obtenidos',
     );
+  }
+
+  @Post('scan')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Permissions('invoicing:received:import')
+  @RequireAIFeature('async_queue')
+  @UseGuards(AiAccessGuard)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }))
+  async enqueueScan(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Debe adjuntar el documento para lectura.');
+    const context = await this.contexts.resolveStore();
+    return this.responses.success(await this.scans.enqueue(context, file));
+  }
+
+  @Get('scan/:jobId')
+  @Permissions('invoicing:received:read')
+  async getScanStatus(@Param('jobId') jobId: string) {
+    const context = await this.contexts.resolveStore();
+    return this.responses.success(await this.scans.getStatus(context, jobId));
   }
 
   @Get(':id')

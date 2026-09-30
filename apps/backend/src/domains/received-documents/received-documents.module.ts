@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 
 import { PrismaModule } from '../../prisma/prisma.module';
 import { ResponseModule } from '../../common/responses/response.module';
@@ -8,17 +9,34 @@ import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentParserService } from './services/received-document-parser.service';
 import { ReceivedDocumentStorageService } from './services/received-document-storage.service';
 import { ReceivedDocumentsContextService } from './services/received-documents-context.service';
+import { ReceivedDocumentPagesService } from './services/received-document-pages.service';
+import { ReceivedDocumentScanService } from './services/received-document-scan.service';
+import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
+import { ReceivedDocumentScanProcessor } from './services/received-document-scan.processor';
 
 /** Provider-only shared module; route controllers live in each invoicing module. */
 @Module({
-  imports: [PrismaModule, ResponseModule, S3Module],
+  imports: [
+    PrismaModule,
+    ResponseModule,
+    S3Module,
+    BullModule.registerQueue({ name: 'received-document-scan' }),
+  ],
   providers: [
     FiscalContextResolverService,
     ReceivedDocumentsContextService,
     ReceivedDocumentsService,
     ReceivedDocumentParserService,
     ReceivedDocumentStorageService,
+    ReceivedDocumentPagesService,
+    ReceivedDocumentScanService,
+    ReceivedDocumentScanQueueService,
+    ReceivedDocumentScanProcessor,
   ],
-  exports: [ReceivedDocumentsContextService, ReceivedDocumentsService],
+  exports: [
+    ReceivedDocumentsContextService,
+    ReceivedDocumentsService,
+    ReceivedDocumentScanQueueService,
+  ],
 })
 export class ReceivedDocumentsModule {}
