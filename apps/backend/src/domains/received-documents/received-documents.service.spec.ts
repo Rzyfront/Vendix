@@ -82,8 +82,14 @@ function makeHarness() {
     },
   };
   const baseClient: any = {
-    accounting_entities: { findFirst: jest.fn().mockResolvedValue({ id: 8, organization_id: 2, store_id: null, is_active: true }) },
+    accounting_entities: { findFirst: jest.fn().mockResolvedValue({ id: 8, organization_id: 2, store_id: null, tax_id: '900000001', is_active: true }) },
     stores: { findFirst: jest.fn().mockResolvedValue({ id: 3, is_active: true }) },
+    organization_settings: {
+      findFirst: jest.fn().mockResolvedValue({ settings: { fiscal_data: { nit: '800123456' } } }),
+    },
+    store_settings: {
+      findFirst: jest.fn().mockResolvedValue({ settings: { fiscal_data: { nit: '700111222' } } }),
+    },
   };
   const prisma: any = {
     withoutScope: jest.fn(() => baseClient),
@@ -174,6 +180,140 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     expect(h.tx.received_documents.create).toHaveBeenCalledTimes(1);
     expect(h.tx.received_document_items.create).toHaveBeenCalledTimes(1);
     expect(h.storage.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses canonical RUT NIT rather than a different accounting entity projection', async () => {
+    const h = makeHarness();
+    await h.service.importXml(context, xmlFile());
+    expect(h.baseClient.organization_settings.findFirst).toHaveBeenCalledWith({
+      where: { organization_id: 2 }, select: { settings: true },
+    });
+    expect(h.tx.received_documents.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ validation_status: 'valid' }),
+    }));
+  });
+
+  it('reads the store fiscal settings for a STORE accounting entity', async () => {
+    const h = makeHarness();
+    h.baseClient.accounting_entities.findFirst.mockResolvedValue({
+      id: 8, organization_id: 2, store_id: 3, tax_id: '800123456', is_active: true,
+    });
+    h.parser.parse.mockReturnValue(normalized({ receiver_tax_id: '700.111.222-0' }));
+    await h.service.importXml(context, xmlFile());
+    expect(h.baseClient.store_settings.findFirst).toHaveBeenCalledWith({
+      where: { store_id: 3 }, select: { settings: true },
+    });
+    expect(h.baseClient.organization_settings.findFirst).not.toHaveBeenCalled();
+    expect(h.tx.received_documents.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ validation_status: 'valid' }),
+    }));
+  });
+
+  it('accepts dotted NIT plus supplied DV when its normalized base matches the canonical NIT', async () => {
+    const h = makeHarness();
+    h.parser.parse.mockReturnValue(normalized({ receiver_tax_id: '800.123.456-0' }));
+    await h.service.importXml(context, xmlFile());
+    expect(h.tx.received_documents.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ validation_status: 'valid' }),
+    }));
+  });
+
+  it('blocks a wrong receiver NIT but persists the imported record and original XML', async () => {
+    const h = makeHarness();
+    h.parser.parse.mockReturnValue(normalized({ receiver_tax_id: '700111222' }));
+    await h.service.importXml(context, xmlFile());
+    expect(h.tx.received_documents.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ validation_status: 'invalid', fiscal_status: 'pending' }),
+    }));
+    expect(h.storage.upload).toHaveBeenCalledTimes(1);
+    const validation = h.tx.received_documents.create.mock.calls[0][0].data.validation_summary;
+    expect(validation.errors.map((error: any) => error.code)).toContain('RECEIVER_TAX_ID_MISMATCH');
+    expect(h.tx.received_document_taxes.createMany.mock.calls.flatMap((call: any[]) => call[0].data)
+      .every((tax: any) => tax.eligible_amount.toString() === '0')).toBe(true);
+  });
+
+  it('blocks a wrong receiver NIT on manual intake without inventing a fiscal match', async () => {
+    const h = makeHarness();
+    await h.service.createManual(context, manualDto({ receiver_tax_id: '700111222' }));
+    const data = h.tx.received_documents.create.mock.calls[0][0].data;
+    expect(data.validation_status).toBe('invalid');
+    expect(data.fiscal_status).toBe('pending');
+    expect(data.validation_summary.errors.map((error: any) => error.code)).toContain('RECEIVER_TAX_ID_MISMATCH');
+    expect(h.storage.upload).not.toHaveBeenCalled();
+  });
+
+  it('revalidates edited manual facts against canonical NIT while preserving reviewed error details', async () => {
+    const h = makeHarness();
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce({
+      id: 50, version: 1, source_channel: 'manual', fiscal_status: 'pending', posting_status: 'pending',
+      accepted_at: null, metadata: { source_format: 'manual_entry' },
+    });
+    await h.service.updateReview(context, 50, {
+      expected_version: 1, facts: manualDto({ receiver_tax_id: '700111222' }),
+    } as any);
+    expect(h.tx.received_documents.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ validation_status: 'invalid' }),
+    }));
+    const updateData = h.tx.received_documents.updateMany.mock.calls[0][0].data;
+    expect(updateData.validation_summary.errors.map((error: any) => error.code)).toContain('RECEIVER_TAX_ID_MISMATCH');
+    expect(h.storage.upload).not.toHaveBeenCalled();
+  });
+
+  it('validates OCR extraction identity before canonicalization and persistence', async () => {
+    const h = makeHarness();
+    h.prisma.received_documents.findFirst
+      .mockResolvedValueOnce({
+        id: 50, version: 1, validation_status: 'pending', processing_status: 'pending_ocr',
+        metadata: { source_format: 'pending_file' }, raw_payload: { source_format: 'pending_file' },
+      })
+      .mockResolvedValueOnce({ id: 50, files: [], items: [], taxes: [], links: [], events: [] });
+    await h.service.replaceFromExtraction(context, 50, normalized({ receiver_tax_id: '700111222' }));
+    expect(h.tx.received_documents.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ validation_status: 'invalid' }),
+    }));
+    const data = h.tx.received_documents.updateMany.mock.calls[0][0].data;
+    expect(data.validation_summary.errors.map((error: any) => error.code)).toContain('RECEIVER_TAX_ID_MISMATCH');
+  });
+
+  it('stores nominal IBUA unit basis metadata without placing units in monetary columns', async () => {
+    const h = makeHarness();
+    const unitIbua: ReceivedDocumentTax = {
+      tax_type: 'ibua', scheme_code: '34', tax_name: 'IBUA', rate: '0', base_amount: '0.00', amount: '1.00',
+      tax_basis_type: 'unit', base_quantity: '1000.00', base_unit_code: 'ML', per_unit_amount: '0.10',
+    };
+    h.parser.parse.mockReturnValue(normalized({ taxes: [unitIbua], items: [{
+      line_number: 1, description: 'Producto', quantity: '2', unit_price: '50', discount_amount: '0.00',
+      net_amount: '100.00', total_amount: '101.00', taxes: [],
+    }] }));
+    await h.service.importXml(context, xmlFile());
+    const tax = h.tx.received_document_taxes.createMany.mock.calls[0][0].data[0];
+    expect(tax.item_id).toBeNull();
+    expect(tax.base_amount.toString()).toBe('0');
+    expect(tax.metadata).toEqual({
+      tax_basis_type: 'unit', base_quantity: '1000.00', base_unit_code: 'ML', per_unit_amount: '0.10',
+    });
+    expect(tax.eligible_amount.toString()).toBe('0');
+  });
+
+  it('blocks documents when canonical NIT is unconfigured instead of assuming a match', async () => {
+    const h = makeHarness();
+    h.baseClient.accounting_entities.findFirst.mockResolvedValue({
+      id: 8, organization_id: 2, store_id: null, tax_id: null, is_active: true,
+    });
+    h.baseClient.organization_settings.findFirst.mockResolvedValue({ settings: {} });
+    await h.service.importXml(context, xmlFile());
+    const data = h.tx.received_documents.create.mock.calls[0][0].data;
+    expect(data.validation_status).toBe('invalid');
+    expect(data.validation_summary.errors.map((error: any) => error.code)).toContain('RECEIVER_FISCAL_IDENTITY_UNCONFIGURED');
+    expect(h.storage.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces identity-settings read failure as retryable without persisting with an invented NIT', async () => {
+    const h = makeHarness();
+    h.baseClient.organization_settings.findFirst.mockRejectedValueOnce(new Error('db unavailable'));
+    await expect(h.service.importXml(context, xmlFile())).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(h.tx.received_documents.create).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
   });
 
   it('retains invalid extracted quantities as evidence without writing a DB-incompatible line', async () => {

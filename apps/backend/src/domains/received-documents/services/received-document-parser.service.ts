@@ -343,7 +343,7 @@ export class ReceivedDocumentParserService {
       .reduce((sum, tax) => sum.plus(tax.amount), new Prisma.Decimal(0));
     this.validateTaxArithmetic({
       subtotal, lineNet, discount, charge, inclusive, total, headerTaxAmount, lineTax,
-      errors, hasInclusive: !!inclusiveText,
+      payableRounding, errors, hasInclusive: !!inclusiveText,
       hasAnyTaxTotal: headerTaxElements.length > 0 || lines.some((line) => this.children(line, 'TaxTotal', XML_NS.cac).length > 0),
     });
     if (lines.length === 0) errors.push(this.issue('MISSING_DOCUMENT_LINES', 'El documento no contiene líneas comerciales.'));
@@ -371,7 +371,7 @@ export class ReceivedDocumentParserService {
       tax_amount: this.moneyString(this.computedMoney(calculatedTax, errors, 'DOCUMENT_TAX_AMOUNT')),
       total_amount: this.moneyString(total),
       prepaid_amount: prepaidText ? this.moneyString(prepaid) : undefined,
-      payable_rounding_amount: roundingText ? this.moneyString(payableRounding) : undefined,
+      payable_rounding_amount: roundingText ? payableRounding.toFixed(2) : undefined,
       withholding_amount: headerWithholdingElements.length || withholdingAmount.gt(0)
         ? this.moneyString(this.computedMoney(withholdingAmount, errors, 'WITHHOLDING_AMOUNT'))
         : undefined,
@@ -425,7 +425,7 @@ export class ReceivedDocumentParserService {
     if (baseQuantity.gt(0)) {
       const expectedNet = quantity.mul(priceAmount).div(baseQuantity)
         .minus(discount).plus(charges)
-        .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+        .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN);
       if (this.abs(expectedNet.minus(lineNet)).gt('0.01')) {
         errors.push(this.issue('LINE_AMOUNT_MISMATCH', `El neto de la línea ${lineNumber} no coincide con cantidad × precio/base menos descuentos más cargos (tolerancia COP 0,01).`));
       }
@@ -498,11 +498,38 @@ export class ReceivedDocumentParserService {
     }
     const category = this.child(subtotal, 'TaxCategory', XML_NS.cac);
     const percent = this.text(this.child(category, 'Percent', XML_NS.cbc));
+    const baseUnitElement = this.child(subtotal, 'BaseUnitMeasure', XML_NS.cbc);
+    const perUnitElement = this.child(subtotal, 'PerUnitAmount', XML_NS.cbc);
+    const isNominalIbua = code.trim() === '34' && !!baseUnitElement && !!perUnitElement;
+    if (code.trim() === '34' && (!!baseUnitElement !== !!perUnitElement)) {
+      errors.push(this.issue('INCOMPLETE_IBUA_UNIT_BASIS', 'El IBUA nominal debe declarar juntos BaseUnitMeasure y PerUnitAmount.'));
+    }
     const rate = percent
       ? this.rate(percent, errors, `${lineNumber ? `LINE_${lineNumber}_` : ''}TAX_RATE_${code || 'UNKNOWN'}`)
       : new Prisma.Decimal(0);
     const amount = this.money(this.text(this.child(subtotal, 'TaxAmount', XML_NS.cbc)), errors, `${lineNumber ? `LINE_${lineNumber}_` : ''}TAX_AMOUNT_${code || 'UNKNOWN'}`, true);
-    const base = this.money(this.text(this.child(subtotal, 'TaxableAmount', XML_NS.cbc)), errors, `${lineNumber ? `LINE_${lineNumber}_` : ''}TAX_BASE_${code || 'UNKNOWN'}`, true);
+    const taxableText = this.text(this.child(subtotal, 'TaxableAmount', XML_NS.cbc));
+    if (!taxableText && !isNominalIbua) {
+      errors.push(this.issue(`INVALID_SOURCE_${lineNumber ? `LINE_${lineNumber}_` : ''}TAX_BASE_${code || 'UNKNOWN'}`, 'TaxableAmount falta en un impuesto de base monetaria.'));
+    }
+    const base = taxableText
+      ? this.money(taxableText, errors, `${lineNumber ? `LINE_${lineNumber}_` : ''}TAX_BASE_${code || 'UNKNOWN'}`, true)
+      : new Prisma.Decimal(0);
+    let baseQuantity: Prisma.Decimal | undefined;
+    let perUnitAmount: Prisma.Decimal | undefined;
+    let baseUnitCode: string | undefined;
+    if (isNominalIbua) {
+      baseQuantity = this.unitMeasure(this.text(baseUnitElement), errors, `${lineNumber ? `LINE_${lineNumber}_` : ''}IBUA_BASE_UNIT`);
+      perUnitAmount = this.unitMeasure(this.text(perUnitElement), errors, `${lineNumber ? `LINE_${lineNumber}_` : ''}IBUA_PER_UNIT_AMOUNT`);
+      baseUnitCode = baseUnitElement?.getAttribute('unitCode')?.trim() || undefined;
+      if (!baseUnitCode) errors.push(this.issue('MISSING_IBUA_BASE_UNIT_CODE', 'El impuesto nominal IBUA requiere unitCode en BaseUnitMeasure.'));
+      if (baseQuantity.lte(0)) errors.push(this.issue('INVALID_IBUA_BASE_UNIT', 'BaseUnitMeasure del impuesto IBUA debe ser mayor que cero.'));
+      const expected = baseQuantity.mul(perUnitAmount).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN)
+        .div(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN);
+      if (this.abs(expected.minus(amount)).gt(MONEY_TOLERANCE)) {
+        errors.push(this.issue('IBUA_NOMINAL_AMOUNT_MISMATCH', 'El valor nominal IBUA no coincide con PerUnitAmount × BaseUnitMeasure redondeado a dos decimales y dividido por cien.'));
+      }
+    }
     return [{
       tax_type: taxType,
       scheme_code: code,
@@ -510,6 +537,12 @@ export class ReceivedDocumentParserService {
       rate: rate.toString(),
       base_amount: this.moneyString(base),
       amount: this.moneyString(amount),
+      tax_basis_type: isNominalIbua ? 'unit' : 'monetary',
+      ...(isNominalIbua ? {
+        base_quantity: baseQuantity!.toFixed(Math.max(2, baseQuantity!.decimalPlaces())),
+        base_unit_code: baseUnitCode,
+        per_unit_amount: perUnitAmount!.toFixed(Math.max(2, perUnitAmount!.decimalPlaces())),
+      } : {}),
       line_number: lineNumber,
     }];
   }
@@ -522,6 +555,7 @@ export class ReceivedDocumentParserService {
       charge: Prisma.Decimal;
       inclusive: Prisma.Decimal;
       total: Prisma.Decimal;
+      payableRounding: Prisma.Decimal;
       headerTaxAmount: Prisma.Decimal;
       lineTax: Prisma.Decimal;
       errors: Issue[];
@@ -544,18 +578,18 @@ export class ReceivedDocumentParserService {
     // TaxTotal amounts. Line discounts are already inside line extension;
     // only the separate document AllowanceTotalAmount affects PayableAmount.
     const inclusiveExpected = input.subtotal.plus(input.headerTaxAmount)
-      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN);
     this.assertComputedMoney(inclusiveExpected, input.errors, 'TAX_INCLUSIVE_AMOUNT');
     if (this.abs(input.inclusive.minus(inclusiveExpected)).gt(tolerance)) {
       input.errors.push(this.issue('TAX_INCLUSIVE_AMOUNT_MISMATCH', 'TaxInclusiveAmount no coincide con LineExtensionAmount + impuestos de cabecera (tolerancia de un céntimo).'));
     }
     // FAU14 / DIAN §11.9.1-.2: withholdings and prepaid amounts remain
     // informational and do not net the declared fiscal payable total.
-    const payableExpected = input.inclusive.minus(input.discount).plus(input.charge)
-      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    const payableExpected = input.inclusive.minus(input.discount).plus(input.charge).plus(input.payableRounding)
+      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN);
     this.assertComputedMoney(payableExpected, input.errors, 'PAYABLE_AMOUNT');
     if (this.abs(input.total.minus(payableExpected)).gt(tolerance)) {
-      input.errors.push(this.issue('PAYABLE_TOTAL_MISMATCH', 'PayableAmount no coincide con TaxInclusiveAmount - AllowanceTotalAmount + ChargeTotalAmount (tolerancia de un céntimo); anticipos y retenciones no se restan.'));
+      input.errors.push(this.issue('PAYABLE_TOTAL_MISMATCH', 'PayableAmount no coincide con TaxInclusiveAmount - AllowanceTotalAmount + ChargeTotalAmount + PayableRoundingAmount cuando se declara (tolerancia de un céntimo); anticipos y retenciones no se restan.'));
     }
   }
 
@@ -600,14 +634,14 @@ export class ReceivedDocumentParserService {
   }
 
   private taxType(code: string): ReceivedDocumentTax['tax_type'] {
-    // Deliberately do not borrow resolveDianTaxSchemeCode's name fallback:
-    // current source comments say DIAN's 1.9 code assignment for IBUA/ICUI is
-    // not verified in this repo. Unknown scheme ids must block review, never
-    // silently become IVA.
+    // DIAN's current UBL code catalog: IBUA 34 and ICUI 35. Unknown scheme ids
+    // must block review, never silently become IVA.
     switch (code.trim().toUpperCase()) {
       case '01': return 'iva';
       case '04': return 'inc';
       case '03': return 'ica';
+      case '34': return 'ibua';
+      case '35': return 'icui';
       case '05': return 'reteiva';
       case '06': return 'withholding';
       case '07': return 'reteica';
@@ -684,7 +718,7 @@ export class ReceivedDocumentParserService {
     errors: Issue[],
     field: string,
   ): Prisma.Decimal {
-    const normalized = value.toDecimalPlaces(6, Prisma.Decimal.ROUND_HALF_UP);
+    const normalized = value.toDecimalPlaces(6, Prisma.Decimal.ROUND_HALF_EVEN);
     if (normalized.abs().gte('1000000000')) {
       errors.push(this.issue('DECIMAL_OVERFLOW_' + field, 'El precio unitario excede la capacidad Decimal(15,6).'));
       return new Prisma.Decimal(0);
@@ -693,7 +727,11 @@ export class ReceivedDocumentParserService {
   }
 
   private rate(value: string, errors: Issue[], field: string): Prisma.Decimal {
-    return this.checkedDecimal(value, errors, field, 3, 2, true);
+    return this.checkedDecimal(value, errors, field, 3, 5, true);
+  }
+
+  private unitMeasure(value: string, errors: Issue[], field: string): Prisma.Decimal {
+    return this.checkedDecimal(value, errors, field, 13, 2, true);
   }
 
   private rounding(value: string | undefined, errors: Issue[]): Prisma.Decimal {
@@ -751,7 +789,7 @@ export class ReceivedDocumentParserService {
   }
 
   private moneyString(value: Prisma.Decimal): string {
-    return value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toFixed(2);
+    return value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN).toFixed(2);
   }
 
   private computedMoney(
@@ -760,11 +798,11 @@ export class ReceivedDocumentParserService {
     field: string,
   ): Prisma.Decimal {
     this.assertComputedMoney(value, errors, field);
-    return value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    return value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN);
   }
 
   private assertComputedMoney(value: Prisma.Decimal, errors: Issue[], field: string): void {
-    const normalized = value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    const normalized = value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_EVEN);
     if (normalized.isNegative()) {
       errors.push(this.issue(`NEGATIVE_COMPUTED_${field}`, `${field} calculado es negativo.`));
     } else if (normalized.gte('10000000000000')) {

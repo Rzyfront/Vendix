@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'crypto';
+import { tryResolveTenantFiscalIdentity } from '../../common/helpers/fiscal-identity.helper';
+import { normalizeNit } from '../../common/utils/nit.util';
 import {
   NormalizedReceivedDocument,
   ReceivedDocumentItem,
@@ -35,6 +37,7 @@ export interface ReceivedDocumentsContext {
 interface Scope {
   context: ReceivedDocumentsContext;
   entity_store_id: number | null;
+  entity_tax_id: string | null;
   store_filter?: number;
 }
 
@@ -127,7 +130,10 @@ export class ReceivedDocumentsService {
     const scope = await this.resolveScope(ctx);
     this.assertXmlFile(file);
     this.assertSourceChannel(source);
-    const normalized = this.parser.parse(file.buffer.toString('utf8'));
+    const normalized = await this.validateReceiverIdentity(
+      this.parser.parse(file.buffer.toString('utf8')),
+      await this.expectedReceiverTaxId(scope),
+    );
     const sha256 = this.sha256(file.buffer);
     const idempotencyKey = this.idempotencyKey(normalized, sha256);
     const rawPayload = {
@@ -150,7 +156,10 @@ export class ReceivedDocumentsService {
 
   async createManual(ctx: ReceivedDocumentsContext, dto: ManualReceivedDocumentDto) {
     const scope = await this.resolveScope(ctx);
-    const normalized = this.normalizeManual(dto);
+    const normalized = await this.validateReceiverIdentity(
+      this.normalizeManual(dto),
+      await this.expectedReceiverTaxId(scope),
+    );
     const idempotencyKey = this.idempotencyKey(normalized);
     const result = await this.recordNormalized({
       scope,
@@ -182,7 +191,12 @@ export class ReceivedDocumentsService {
     if (dto.facts && !manualFormat) {
       throw new ConflictException('Los datos fiscales originales de este documento no pueden editarse; agregue una nota de revisión.');
     }
-    const normalized = dto.facts ? this.withPendingWarnings(this.normalizeManual(dto.facts)) : undefined;
+    const normalized = dto.facts
+      ? await this.validateReceiverIdentity(
+          this.normalizeManual(dto.facts),
+          await this.expectedReceiverTaxId(scope),
+        )
+      : undefined;
     const validation = normalized?.validation;
     const nextMetadata = {
       ...this.asObject(existing.metadata),
@@ -294,7 +308,10 @@ export class ReceivedDocumentsService {
     if (existing.validation_status !== 'pending' || existing.processing_status === 'ready') {
       throw new ConflictException('La extracción de este documento ya fue persistida.');
     }
-    const extracted = this.withPendingWarnings(normalized);
+    const extracted = await this.validateReceiverIdentity(
+      this.withPendingWarnings(normalized),
+      await this.expectedReceiverTaxId(scope),
+    );
     const validation = extracted.validation;
     const extractedKey = extracted.document_key?.trim().toLowerCase();
     if (extractedKey && /^[a-f\d]{96}$/.test(extractedKey)) {
@@ -529,7 +546,7 @@ export class ReceivedDocumentsService {
     const db = this.prisma.withoutScope();
     const entity = await db.accounting_entities.findFirst({
       where: { id: ctx.accounting_entity_id, organization_id: ctx.organization_id },
-      select: { id: true, organization_id: true, store_id: true, is_active: true },
+      select: { id: true, organization_id: true, store_id: true, tax_id: true, is_active: true },
     });
     if (!entity) throw new ForbiddenException('La entidad fiscal no pertenece a la organización indicada.');
     if (!entity.is_active) throw new ForbiddenException('La entidad fiscal está inactiva.');
@@ -579,7 +596,12 @@ export class ReceivedDocumentsService {
         storeFilter = entity.store_id;
       }
     }
-    return { context: ctx, entity_store_id: entity.store_id, store_filter: storeFilter };
+    return {
+      context: ctx,
+      entity_store_id: entity.store_id,
+      entity_tax_id: entity.tax_id,
+      store_filter: storeFilter,
+    };
   }
 
   private async recordNormalized(input: {
@@ -891,6 +913,12 @@ export class ReceivedDocumentsService {
 
   private taxRow(documentId: number, itemId: number | null, tax: ReceivedDocumentTax) {
     const unclassified = tax.tax_type === 'unclassified';
+    const taxBasisMetadata = {
+      ...(tax.tax_basis_type ? { tax_basis_type: tax.tax_basis_type } : {}),
+      ...(tax.base_quantity != null ? { base_quantity: tax.base_quantity } : {}),
+      ...(tax.base_unit_code ? { base_unit_code: tax.base_unit_code } : {}),
+      ...(tax.per_unit_amount != null ? { per_unit_amount: tax.per_unit_amount } : {}),
+    };
     return {
       document_id: documentId,
       item_id: itemId,
@@ -902,6 +930,7 @@ export class ReceivedDocumentsService {
       amount: this.decimal(tax.amount),
       eligible_amount: new Prisma.Decimal(0),
       treatment: unclassified ? 'unclassified' : 'pending',
+      ...(Object.keys(taxBasisMetadata).length > 0 ? { metadata: this.json(taxBasisMetadata) } : {}),
     };
   }
 
@@ -1176,6 +1205,60 @@ export class ReceivedDocumentsService {
       document_key_format_valid: normalized.validation?.document_key_format_valid ?? false,
     };
     return normalized;
+  }
+
+  private async expectedReceiverTaxId(scope: Scope): Promise<string | undefined> {
+    try {
+      const db = this.prisma.withoutScope();
+      const settingsRow = scope.entity_store_id == null
+        ? await db.organization_settings.findFirst({
+            where: { organization_id: scope.context.organization_id },
+            select: { settings: true },
+          })
+        : await db.store_settings.findFirst({
+            where: { store_id: scope.entity_store_id },
+            select: { settings: true },
+          });
+      const fiscalData = this.asObject(this.asObject(settingsRow?.settings).fiscal_data);
+      const { identity } = tryResolveTenantFiscalIdentity({
+        nit: scope.entity_tax_id ?? '',
+        fiscal_data: Object.keys(fiscalData).length > 0 ? fiscalData : null,
+      });
+      return identity.nit || undefined;
+    } catch {
+      throw new ServiceUnavailableException(
+        'No se pudo consultar la identidad fiscal del adquirente; reintente la recepción.',
+      );
+    }
+  }
+
+  private async validateReceiverIdentity(
+    source: NormalizedReceivedDocument,
+    expectedReceiverTaxId: string | undefined,
+  ): Promise<NormalizedReceivedDocument> {
+    const normalized = this.withPendingWarnings(source);
+    const errors = [...normalized.validation.errors];
+    const hasError = (code: string) => errors.some((issue) => issue.code === code);
+    if (!expectedReceiverTaxId) {
+      if (!hasError('RECEIVER_FISCAL_IDENTITY_UNCONFIGURED')) {
+        errors.push({
+          code: 'RECEIVER_FISCAL_IDENTITY_UNCONFIGURED',
+          message: 'No se pudo resolver el NIT canónico del adquirente desde su configuración fiscal.',
+        });
+      }
+    } else if (normalized.receiver_tax_id &&
+      normalizeNit(normalized.receiver_tax_id).number !== expectedReceiverTaxId) {
+      if (!hasError('RECEIVER_TAX_ID_MISMATCH')) {
+        errors.push({
+          code: 'RECEIVER_TAX_ID_MISMATCH',
+          message: 'El NIT del adquirente del documento no coincide con el NIT de la entidad fiscal activa.',
+        });
+      }
+    }
+    return {
+      ...normalized,
+      validation: { ...normalized.validation, errors },
+    };
   }
 
   private validationStatus(validation: NormalizedReceivedDocument['validation']): string {

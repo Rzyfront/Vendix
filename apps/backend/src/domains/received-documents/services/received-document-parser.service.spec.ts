@@ -7,7 +7,7 @@ const INVOICE = 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2';
 const CREDIT = 'urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2';
 const ATTACHED = 'urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2';
 
-function invoiceXml(options: { prefix?: string; taxes?: string; key?: string; headerDiscount?: string; lineDiscount?: string; lineNet?: string; taxAmount?: string; taxBase?: string; taxExclusive?: string; taxInclusive?: string; payable?: string; prepaid?: string } = {}): string {
+function invoiceXml(options: { prefix?: string; taxes?: string; headerTaxes?: string; key?: string; headerDiscount?: string; lineDiscount?: string; lineNet?: string; taxAmount?: string; taxBase?: string; taxExclusive?: string; taxInclusive?: string; payable?: string; prepaid?: string; rounding?: string } = {}): string {
   const c = options.prefix ?? 'cac';
   const b = options.prefix ? 'basic' : 'cbc';
   const lineNet = options.lineNet ?? '100.00';
@@ -18,6 +18,7 @@ function invoiceXml(options: { prefix?: string; taxes?: string; key?: string; he
   const taxInclusive = options.taxInclusive ?? (Number(lineNet) + Number(taxAmount)).toFixed(2);
   const payable = options.payable ?? (Number(taxInclusive) - Number(headerDiscount)).toFixed(2);
   const tax = options.taxes ?? `<${c}:TaxTotal><${b}:TaxAmount currencyID="COP">${taxAmount}</${b}:TaxAmount><${c}:TaxSubtotal><${b}:TaxableAmount currencyID="COP">${taxBase}</${b}:TaxableAmount><${b}:TaxAmount currencyID="COP">${taxAmount}</${b}:TaxAmount><${c}:TaxCategory><${b}:Percent>19</${b}:Percent><${c}:TaxScheme><${b}:ID>01</${b}:ID><${b}:Name>IVA</${b}:Name></${c}:TaxScheme></${c}:TaxCategory></${c}:TaxSubtotal></${c}:TaxTotal>`;
+  const headerTax = options.headerTaxes ?? tax;
   const prefixes = options.prefix
     ? `xmlns:${c}="${CAC}" xmlns:${b}="${CBC}"`
     : `xmlns:cac="${CAC}" xmlns:cbc="${CBC}"`;
@@ -31,9 +32,9 @@ function invoiceXml(options: { prefix?: string; taxes?: string; key?: string; he
       <${c}:Item><${b}:Description>Producto de prueba</${b}:Description><${c}:SellersItemIdentification><${b}:ID>SKU-1</${b}:ID></${c}:SellersItemIdentification></${c}:Item>
       <${c}:Price><${b}:PriceAmount currencyID="COP">42.00</${b}:PriceAmount><${b}:BaseQuantity unitCode="NIU">1</${b}:BaseQuantity></${c}:Price>${tax}
     </${c}:InvoiceLine>
-    <${c}:TaxTotal><${b}:TaxAmount currencyID="COP">${taxAmount}</${b}:TaxAmount><${c}:TaxSubtotal><${b}:TaxableAmount currencyID="COP">${taxBase}</${b}:TaxableAmount><${b}:TaxAmount currencyID="COP">${taxAmount}</${b}:TaxAmount><${c}:TaxCategory><${b}:Percent>19</${b}:Percent><${c}:TaxScheme><${b}:ID>01</${b}:ID><${b}:Name>IVA</${b}:Name></${c}:TaxScheme></${c}:TaxCategory></${c}:TaxSubtotal></${c}:TaxTotal>
+    ${headerTax}
     <${c}:AllowanceCharge><${b}:ChargeIndicator>false</${b}:ChargeIndicator><${b}:Amount currencyID="COP">${headerDiscount}</${b}:Amount></${c}:AllowanceCharge>
-    <${c}:LegalMonetaryTotal><${b}:LineExtensionAmount currencyID="COP">${lineNet}</${b}:LineExtensionAmount><${b}:TaxExclusiveAmount currencyID="COP">${options.taxExclusive ?? '100.00'}</${b}:TaxExclusiveAmount><${b}:TaxInclusiveAmount currencyID="COP">${taxInclusive}</${b}:TaxInclusiveAmount><${b}:AllowanceTotalAmount currencyID="COP">${headerDiscount}</${b}:AllowanceTotalAmount>${options.prepaid ? `<${b}:PrepaidAmount currencyID="COP">${options.prepaid}</${b}:PrepaidAmount>` : ''}<${b}:PayableAmount currencyID="COP">${payable}</${b}:PayableAmount></${c}:LegalMonetaryTotal>
+    <${c}:LegalMonetaryTotal><${b}:LineExtensionAmount currencyID="COP">${lineNet}</${b}:LineExtensionAmount><${b}:TaxExclusiveAmount currencyID="COP">${options.taxExclusive ?? '100.00'}</${b}:TaxExclusiveAmount><${b}:TaxInclusiveAmount currencyID="COP">${taxInclusive}</${b}:TaxInclusiveAmount><${b}:AllowanceTotalAmount currencyID="COP">${headerDiscount}</${b}:AllowanceTotalAmount>${options.prepaid ? `<${b}:PrepaidAmount currencyID="COP">${options.prepaid}</${b}:PrepaidAmount>` : ''}${options.rounding ? `<${b}:PayableRoundingAmount currencyID="COP">${options.rounding}</${b}:PayableRoundingAmount>` : ''}<${b}:PayableAmount currencyID="COP">${payable}</${b}:PayableAmount></${c}:LegalMonetaryTotal>
   </Invoice>`;
 }
 
@@ -159,12 +160,49 @@ describe('ReceivedDocumentParserService', () => {
     expect(result.items[0].taxes.map((tax) => [tax.tax_type, tax.rate])).toEqual([['iva', '19'], ['inc', '10']]);
   });
 
-  it('marks unknown DIAN tax codes unclassified and blocking', () => {
-    const unknown = `<cac:TaxTotal><cac:TaxSubtotal><cbc:TaxableAmount>100</cbc:TaxableAmount><cbc:TaxAmount>1</cbc:TaxAmount><cac:TaxCategory><cbc:Percent>1</cbc:Percent><cac:TaxScheme><cbc:ID>35</cbc:ID><cbc:Name>IBUA</cbc:Name></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>`;
+  it.each(['99', '32', '33', '36', 'ZZ'])('marks unknown DIAN tax code %s unclassified and blocking', (code) => {
+    const unknown = `<cac:TaxTotal><cac:TaxSubtotal><cbc:TaxableAmount>100</cbc:TaxableAmount><cbc:TaxAmount>1</cbc:TaxAmount><cac:TaxCategory><cbc:Percent>1</cbc:Percent><cac:TaxScheme><cbc:ID>${code}</cbc:ID><cbc:Name>Unknown</cbc:Name></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>`;
     const result = service.parse(invoiceXml({ taxes: unknown }));
     expect(result.items[0].taxes[0].tax_type).toBe('unclassified');
-    expect(result.items[0].taxes[0]).toMatchObject({ scheme_code: '35', tax_name: 'IBUA' });
+    expect(result.items[0].taxes[0]).toMatchObject({ scheme_code: code, tax_name: 'Unknown' });
     expect(result.validation.errors.map((error) => error.code)).toContain('UNCLASSIFIED_TAX_SCHEME');
+  });
+
+  it('classifies DIAN scheme 34 as nominal IBUA and 35 as percentage ICUI', () => {
+    const taxSubtotal = `<cac:TaxSubtotal><cbc:TaxAmount currencyID="COP">1.00</cbc:TaxAmount><cbc:BaseUnitMeasure unitCode="ML">1000</cbc:BaseUnitMeasure><cbc:PerUnitAmount currencyID="COP">0.10</cbc:PerUnitAmount><cac:TaxCategory><cac:TaxScheme><cbc:ID>34</cbc:ID><cbc:Name>IBUA</cbc:Name></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal><cac:TaxSubtotal><cbc:TaxableAmount currencyID="COP">100.00</cbc:TaxableAmount><cbc:TaxAmount currencyID="COP">2.00</cbc:TaxAmount><cac:TaxCategory><cbc:Percent>2</cbc:Percent><cac:TaxScheme><cbc:ID>35</cbc:ID><cbc:Name>ICUI</cbc:Name></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`;
+    const taxes = `<cac:TaxTotal><cbc:TaxAmount currencyID="COP">3.00</cbc:TaxAmount>${taxSubtotal}</cac:TaxTotal>`;
+    const result = service.parse(invoiceXml({
+      taxes, headerTaxes: taxes, taxAmount: '3.00', taxInclusive: '103.00', payable: '98.00',
+    }));
+    expect(result.items[0].taxes.map((tax) => tax.tax_type)).toEqual(['ibua', 'icui']);
+    expect(result.items[0].taxes[0]).toMatchObject({
+      tax_basis_type: 'unit', base_quantity: '1000.00', base_unit_code: 'ML',
+      per_unit_amount: '0.10', base_amount: '0.00', amount: '1.00', rate: '0',
+    });
+    expect(result.items[0].taxes[1]).toMatchObject({ tax_basis_type: 'monetary', base_amount: '100.00', amount: '2.00', rate: '2' });
+    expect(result.validation.errors).toEqual([]);
+  });
+
+  it('uses DIAN half-to-even rounding on each nominal IBUA line before summing', () => {
+    const subtotal = `<cac:TaxSubtotal><cbc:TaxAmount currencyID="COP">0.00</cbc:TaxAmount><cbc:BaseUnitMeasure unitCode="ML">0.50</cbc:BaseUnitMeasure><cbc:PerUnitAmount currencyID="COP">1.00</cbc:PerUnitAmount><cac:TaxCategory><cac:TaxScheme><cbc:ID>34</cbc:ID><cbc:Name>IBUA</cbc:Name></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`;
+    const line = (number: number) => `<cac:InvoiceLine><cbc:ID>${number}</cbc:ID><cbc:InvoicedQuantity unitCode="NIU">1</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="COP">100.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Producto ${number}</cbc:Name></cac:Item><cac:Price><cbc:PriceAmount currencyID="COP">100.00</cbc:PriceAmount><cbc:BaseQuantity unitCode="NIU">1</cbc:BaseQuantity></cac:Price><cac:TaxTotal><cbc:TaxAmount currencyID="COP">0.00</cbc:TaxAmount>${subtotal}</cac:TaxTotal></cac:InvoiceLine>`;
+    const parties = `<cac:AccountingSupplierParty><cac:Party><cac:PartyTaxScheme><cbc:CompanyID>900123456</cbc:CompanyID></cac:PartyTaxScheme><cac:PartyLegalEntity><cbc:RegistrationName>Proveedor</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty><cac:AccountingCustomerParty><cac:Party><cac:PartyTaxScheme><cbc:CompanyID>800123456</cbc:CompanyID></cac:PartyTaxScheme><cac:PartyLegalEntity><cbc:RegistrationName>Comprador</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingCustomerParty>`;
+    const xml = `<Invoice xmlns="${INVOICE}" xmlns:cac="${CAC}" xmlns:cbc="${CBC}"><cbc:ID>FV-ROUND</cbc:ID><cbc:UUID>${'e'.repeat(96)}</cbc:UUID><cbc:IssueDate>2026-09-30</cbc:IssueDate><cbc:DocumentCurrencyCode>COP</cbc:DocumentCurrencyCode>${parties}${line(1)}${line(2)}${line(3)}<cac:TaxTotal><cbc:TaxAmount currencyID="COP">0.00</cbc:TaxAmount>${subtotal.repeat(3)}</cac:TaxTotal><cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="COP">300.00</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="COP">300.00</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="COP">300.00</cbc:TaxInclusiveAmount><cbc:PayableAmount currencyID="COP">300.00</cbc:PayableAmount></cac:LegalMonetaryTotal></Invoice>`;
+    const result = service.parse(xml);
+    expect(result.items.map((item) => item.taxes[0].amount)).toEqual(['0.00', '0.00', '0.00']);
+    expect(result.tax_amount).toBe('0.00');
+    expect(result.validation.errors).toEqual([]);
+  });
+
+  it.each([
+    ['0.01', '114.01'],
+    ['-0.01', '113.99'],
+  ])('applies declared payable rounding %s while leaving prepaid informational', (rounding, payable) => {
+    const result = service.parse(invoiceXml({ rounding, payable, prepaid: '10.00' }));
+    expect(result.payable_rounding_amount).toBe(rounding);
+    expect(result.prepaid_amount).toBe('10.00');
+    expect(result.total_amount).toBe(payable);
+    expect(result.validation.errors).toEqual([]);
   });
 
   it('blocks a TaxTotal whose amount differs from its subtotals', () => {

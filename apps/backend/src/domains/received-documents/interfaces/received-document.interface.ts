@@ -14,6 +14,11 @@ export interface ReceivedDocumentTax {
   rate: string;
   base_amount: string;
   amount: string;
+  /** Basis used by DIAN: nominal per-unit taxes preserve quantities separately from money. */
+  tax_basis_type?: 'monetary' | 'unit';
+  base_quantity?: string;
+  base_unit_code?: string;
+  per_unit_amount?: string;
   line_number?: number;
 }
 
