@@ -202,6 +202,31 @@ async function bootstrapApi(role: VendixProcessRole) {
   );
 
   // Increase payload limit for base64 images
+  // Public reception webhooks authenticate the exact raw byte sequence before
+  // JSON parsing/normalization. This narrow parser runs only for the canonical
+  // POST path (no query string); every other request keeps the legacy global
+  // 50 MiB parser and its `req.rawBody` contract below unchanged. The prefix
+  // intentionally includes malformed tokens, nested paths, and query strings
+  // so no webhook ingress attempt falls through to the larger parser.
+  const receptionWebhookPath =
+    /^\/api\/public\/received-documents\/webhook(?:\/.*)?$/;
+  app.use((req: any, res: any, next: any) => {
+    if (
+      req.method !== 'POST' ||
+      typeof req.path !== 'string' ||
+      !receptionWebhookPath.test(req.path)
+    ) {
+      return next();
+    }
+    return json({
+      limit: '5mb',
+      inflate: false,
+      verify: (request: any, _response, buf: Buffer) => {
+        request.rawReceptionBody = Buffer.from(buf);
+      },
+    })(req, res, next);
+  });
+
   app.use(
     json({
       limit: '50mb',
