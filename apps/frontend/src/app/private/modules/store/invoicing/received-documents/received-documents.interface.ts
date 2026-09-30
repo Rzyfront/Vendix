@@ -166,3 +166,26 @@ export interface ReceivedDocumentReviewInput {
   reviewer_note?: string;
   facts?: ManualReceivedDocumentInput;
 }
+
+export interface ReceivedDocumentScanEnqueueResponse {
+  document_id: number;
+  job_id: string | null;
+  already_processed: boolean;
+}
+
+export interface ReceivedDocumentScanJobResult {
+  document_id: number;
+  version: number;
+  validation_status: string;
+  review_required: true;
+  page_count: number;
+}
+
+export type ReceivedDocumentScanJobState = 'waiting' | 'active' | 'delayed' | 'completed' | 'failed';
+
+export interface ReceivedDocumentScanStatus {
+  status: ReceivedDocumentScanJobState;
+  result?: ReceivedDocumentScanJobResult;
+  error?: string;
+  error_code?: string;
+}

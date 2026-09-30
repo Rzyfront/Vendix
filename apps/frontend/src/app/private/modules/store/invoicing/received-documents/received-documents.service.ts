@@ -7,6 +7,8 @@ import type {
   ManualReceivedDocumentInput,
   ReceivedDocument,
   ReceivedDocumentReviewInput,
+  ReceivedDocumentScanEnqueueResponse,
+  ReceivedDocumentScanStatus,
   ReceivedDocumentsPage,
   ReceivedDocumentQuery,
   ReceivedDocumentsScope,
@@ -42,6 +44,20 @@ export class ReceivedDocumentsService {
     const body = new FormData();
     body.append('file', file, file.name);
     return this.http.post<ApiEnvelope<ReceivedDocument>>(`${this.base(scope)}/import/xml`, body, {
+      params: this.scopeParams(scope, storeId),
+    });
+  }
+
+  scan(scope: ReceivedDocumentsScope, file: File, storeId?: number): Observable<ApiEnvelope<ReceivedDocumentScanEnqueueResponse>> {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    return this.http.post<ApiEnvelope<ReceivedDocumentScanEnqueueResponse>>(`${this.base(scope)}/scan`, body, {
+      params: this.scopeParams(scope, storeId),
+    });
+  }
+
+  getScanStatus(scope: ReceivedDocumentsScope, jobId: string, storeId?: number): Observable<ApiEnvelope<ReceivedDocumentScanStatus>> {
+    return this.http.get<ApiEnvelope<ReceivedDocumentScanStatus>>(`${this.base(scope)}/scan/${encodeURIComponent(jobId)}`, {
       params: this.scopeParams(scope, storeId),
     });
   }
