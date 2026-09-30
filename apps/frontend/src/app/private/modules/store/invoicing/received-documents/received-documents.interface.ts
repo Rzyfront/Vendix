@@ -196,6 +196,8 @@ export interface ReceivedDocumentMatchCandidateLine {
   variant_barcode: string | null;
   quantity_ordered: string;
   quantity_received: string;
+  allocated_quantity: string;
+  remaining_quantity: string;
   unit_cost: string | null;
   unit_price_net: string | null;
   discount_amount: string | null;
@@ -240,6 +242,8 @@ export interface ReceivedDocumentMatchCandidate {
       id: number;
       purchase_order_item_id: number;
       quantity_received: string;
+      allocated_quantity: string;
+      remaining_quantity: string;
       note: string | null;
     }>;
   }>;
@@ -247,6 +251,37 @@ export interface ReceivedDocumentMatchCandidate {
 
 export interface ReceivedDocumentMatchCandidatesResponse {
   candidates: ReceivedDocumentMatchCandidate[];
+  warnings: string[];
+}
+
+export interface ReceivedDocumentMatchExpenseItem {
+  id: number;
+  description: string;
+  quantity: string;
+  unit_price: string;
+  amount: string;
+  allocated_net_amount: string;
+  remaining_net_amount: string;
+}
+
+export interface ReceivedDocumentMatchExpense {
+  id: number;
+  store_id: number | null;
+  description: string;
+  expense_date: string;
+  state: string;
+  amount: string;
+  currency: string | null;
+  allocated_net_amount: string;
+  remaining_net_amount: string;
+  items: ReceivedDocumentMatchExpenseItem[];
+}
+
+export interface ReceivedDocumentMatchExpensesResponse {
+  data: ReceivedDocumentMatchExpense[];
+  total: number;
+  page: number;
+  limit: number;
   warnings: string[];
 }
 

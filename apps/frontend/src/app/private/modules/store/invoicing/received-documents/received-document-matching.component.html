@@ -3,7 +3,7 @@
     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div>
         <h2 id="matching-title" class="text-lg font-semibold text-text-primary">Conciliación de compra</h2>
-        <p class="text-sm text-text-secondary">Consulta de evidencia, sugerencias y asignaciones registradas. Esta sección es de solo lectura.</p>
+        <p class="text-sm text-text-secondary">Las sugerencias son informativas; las asignaciones requieren confirmación explícita y no registran recepción física ni generan efectos fiscales.</p>
       </div>
       <button type="button" class="min-h-11 rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-primary hover:bg-surface focus:outline-none focus:ring-2 focus:ring-primary" (click)="reload()" [disabled]="candidatesLoading() || allocationsLoading()">Actualizar</button>
     </div>
@@ -88,6 +88,8 @@
                   <h5 class="text-xs font-semibold text-text-secondary">Orden de compra</h5>
                   <p class="mt-1 text-sm text-text-primary">Pedido: {{ poLine.quantity_ordered }} {{ poLine.purchase_uom_code || poLine.product_purchase_uom_code || 'unidad no informada' }}</p>
                   <p class="text-sm text-text-secondary">Recibido acumulado en OC: {{ poLine.quantity_received }}</p>
+                  <p class="text-sm text-text-secondary">Asignado globalmente entre documentos: {{ poLine.allocated_quantity }}</p>
+                  <p class="text-sm text-text-secondary">Saldo global de OC: {{ poLine.remaining_quantity }}</p>
                   @if (poLine.unit_price_net != null) { <p class="text-xs text-text-secondary">Neto unitario: {{ poMoney(poLine.unit_price_net) }}</p> }
                   @else if (poLine.unit_cost != null) { <p class="text-xs text-text-secondary">Costo unitario: {{ poMoney(poLine.unit_cost) }}</p> }
                   @else { <p class="text-xs text-text-secondary">Importe unitario no disponible.</p> }
@@ -100,6 +102,7 @@
                     <div class="mt-2 border-t border-border pt-2 text-xs text-text-secondary">
                       <p>Recepción #{{ receipt.receptionId }} · {{ dateTime(receipt.receivedAt) }}</p>
                       <p>Cantidad recibida: {{ receipt.quantity }} {{ poLine.purchase_uom_code || poLine.product_purchase_uom_code || 'unidad no informada' }}</p>
+                      <p>Asignado globalmente: {{ receipt.allocatedQuantity }} · saldo: {{ receipt.remainingQuantity }}</p>
                       @if (receipt.note) { <p>Nota: {{ receipt.note }}</p> }
                     </div>
                   }
@@ -110,6 +113,21 @@
         </section>
       </article>
     }
+
+    <app-received-document-match-confirm
+      [document]="document()"
+      [scope]="scope()"
+      [storeId]="storeId()"
+      [candidates]="candidates()"
+      [lineBalances]="lineBalances()"
+      [targetBalances]="targetBalances()"
+      [receiptTargets]="receiptTargets()"
+      [documentVersion]="documentVersion()"
+      [allocationsLoaded]="allocationsLoaded()"
+      [(isOpen)]="matchConfirmOpen"
+      (changed)="onMatchChanged()"
+      (reloadRequested)="onReloadRequested()"
+    />
 
     <section aria-labelledby="allocations-title" class="space-y-3 border-t border-border pt-4">
       <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

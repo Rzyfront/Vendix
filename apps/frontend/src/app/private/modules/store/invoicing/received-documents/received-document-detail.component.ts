@@ -81,7 +81,7 @@ import { ReceivedDocumentMatchingComponent } from './received-document-matching.
           </section>
         </app-card>
 
-        <app-received-document-matching [document]="doc" [scope]="scope" [storeId]="storeId() ?? null" />
+        <app-received-document-matching [document]="doc" [scope]="scope" [storeId]="storeId() ?? null" (changed)="load()" />
 
         <app-card [responsive]="true">
           <section aria-labelledby="evidence-title">

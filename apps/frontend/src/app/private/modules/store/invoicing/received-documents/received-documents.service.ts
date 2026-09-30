@@ -9,6 +9,7 @@ import type {
   ReceivedDocument,
   ReceivedDocumentMatchAllocationsResponse,
   ReceivedDocumentMatchCandidatesResponse,
+  ReceivedDocumentMatchExpensesResponse,
   ReceivedDocumentMatchMutationResult,
   ReceivedDocumentReviewInput,
   ReceivedDocumentScanEnqueueResponse,
@@ -68,6 +69,22 @@ export class ReceivedDocumentsService {
     return this.http.get<ApiEnvelope<ReceivedDocumentMatchAllocationsResponse>>(
       `${this.base(scope)}/${id}/match-allocations`,
       { params: this.scopeParams(scope, storeId) },
+    );
+  }
+
+  getMatchExpenses(
+    scope: ReceivedDocumentsScope,
+    id: number,
+    query: { search?: string; page?: number; limit?: number },
+    storeId?: number,
+  ): Observable<ApiEnvelope<ReceivedDocumentMatchExpensesResponse>> {
+    let params = this.scopeParams(scope, storeId);
+    if (query.search !== undefined && query.search !== '') params = params.set('search', query.search);
+    if (query.page !== undefined) params = params.set('page', String(query.page));
+    if (query.limit !== undefined) params = params.set('limit', String(query.limit));
+    return this.http.get<ApiEnvelope<ReceivedDocumentMatchExpensesResponse>>(
+      `${this.base(scope)}/${id}/match-expenses`,
+      { params },
     );
   }
 

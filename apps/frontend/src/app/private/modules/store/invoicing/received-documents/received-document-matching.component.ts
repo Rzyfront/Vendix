@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subscription, finalize } from 'rxjs';
 import { CardComponent } from '../../../../../shared/components/index';
@@ -16,6 +16,7 @@ import type {
   ReceivedDocumentsScope,
 } from './received-documents.interface';
 import { ReceivedDocumentsService } from './received-documents.service';
+import { ReceivedDocumentMatchConfirmComponent } from './received-document-match-confirm.component';
 
 const WARNING_LABELS: Record<string, string> = {
   DOCUMENT_LINES_LIMIT_REACHED: 'Hay más líneas de las que se muestran; la comparación puede estar incompleta.',
@@ -65,7 +66,7 @@ const REASON_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-received-document-matching',
   standalone: true,
-  imports: [CardComponent],
+  imports: [CardComponent, ReceivedDocumentMatchConfirmComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './received-document-matching.component.html',
 })
@@ -92,6 +93,8 @@ export class ReceivedDocumentMatchingComponent {
   readonly candidatesError = signal<string | null>(null);
   readonly allocationsError = signal<string | null>(null);
   readonly allocationsLoaded = signal(false);
+  readonly matchConfirmOpen = signal(false);
+  readonly changed = output<void>();
 
   private epoch = 0;
   private lastContextKey = '';
@@ -148,6 +151,8 @@ export class ReceivedDocumentMatchingComponent {
     receptionId: number;
     receivedAt: string;
     quantity: string;
+    allocatedQuantity: string;
+    remainingQuantity: string;
     note: string | null;
   }> {
     return candidate.receptions.flatMap((reception) => reception.items
@@ -156,6 +161,8 @@ export class ReceivedDocumentMatchingComponent {
         receptionId: reception.id,
         receivedAt: reception.received_at,
         quantity: item.quantity_received,
+        allocatedQuantity: item.allocated_quantity,
+        remainingQuantity: item.remaining_quantity,
         note: item.note,
       })));
   }
@@ -182,6 +189,13 @@ export class ReceivedDocumentMatchingComponent {
     if (type === 'expense') return 'Gasto';
     return this.humanizeCode(type);
   }
+
+  onMatchChanged(): void {
+    this.matchConfirmOpen.set(false);
+    this.changed.emit();
+  }
+
+  onReloadRequested(): void { this.changed.emit(); }
 
   receiptStateLabel(state: string | null | undefined): string {
     if (state === 'received') return 'Mercancía recibida';
