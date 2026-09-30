@@ -18,6 +18,7 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
 import { describeApiFailure } from '../utils/invoicing-errors.util';
+import { OrgFiscalScopeSelectorComponent } from '../../../organization/shared/components/org-fiscal-scope-selector.component';
 import type { ReceivedDocument, ReceivedDocumentQuery, ReceivedDocumentsScope } from './received-documents.interface';
 import { ReceivedDocumentsService } from './received-documents.service';
 
@@ -32,9 +33,16 @@ const STATUS_FILTERS = [
 @Component({
   selector: 'app-received-documents-page',
   standalone: true,
-  imports: [CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent, PaginationComponent, ResponsiveDataViewComponent],
+  imports: [CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent, PaginationComponent, ResponsiveDataViewComponent, OrgFiscalScopeSelectorComponent],
   template: `
     <div class="w-full space-y-4">
+      @if (scope === 'organization') {
+        <app-org-fiscal-scope-selector
+          [selectedStoreId]="storeId() ?? null"
+          [showHeader]="false"
+          (storeChange)="onFiscalStoreChange($event)"
+        />
+      }
       <app-card [responsive]="true" [padding]="false">
         <div class="flex flex-col gap-3 border-b border-border p-3 md:flex-row md:items-center md:justify-between md:p-4">
           <div class="min-w-0">
@@ -48,10 +56,10 @@ const STATUS_FILTERS = [
               @for (option of statusFilters; track option.value) { <option [value]="option.value">{{ option.label }}</option> }
             </select>
             @if (canImport()) {
-              <label class="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:opacity-90" [class.opacity-60]="uploading()" [class.pointer-events-none]="uploading()">
+              <label class="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:opacity-90" [class.opacity-60]="!canImportInCurrentScope()" [class.pointer-events-none]="!canImportInCurrentScope()" [attr.aria-disabled]="!canImportInCurrentScope()">
                 <app-icon name="upload" [size]="16" />
                 {{ uploading() ? 'Importando…' : 'Importar XML' }}
-                <input class="sr-only" type="file" accept=".xml,text/xml,application/xml" [disabled]="uploading()" (change)="onFileSelected($event)" />
+                <input class="sr-only" type="file" accept=".xml,text/xml,application/xml" [disabled]="uploading() || !canImportInCurrentScope()" (change)="onFileSelected($event)" />
               </label>
             }
           </div>
@@ -62,7 +70,9 @@ const STATUS_FILTERS = [
             <span>{{ error() }}</span><button type="button" class="rounded-md border border-error/30 px-3 py-1.5 font-medium" (click)="load()">Reintentar</button>
           </div>
         }
-        @if (loading() && rows().length === 0) {
+        @if (requiresStoreSelector() && !scopeReady()) {
+          <div class="p-8 text-center text-sm text-text-secondary" role="status">Selecciona una tienda fiscal para consultar sus documentos recibidos.</div>
+        } @else if (loading() && rows().length === 0) {
           <div class="p-10 text-center text-sm text-text-secondary" role="status">Cargando documentos…</div>
         } @else if (!loading() && rows().length === 0 && !error()) {
           <app-empty-state icon="inbox" title="No hay documentos recibidos" description="Importa un XML fiscal de proveedor para iniciar la revisión." [showActionButton]="false" />
@@ -88,7 +98,8 @@ export class ReceivedDocumentsPageComponent {
   readonly statusFilters = STATUS_FILTERS;
   readonly scope: ReceivedDocumentsScope = this.readScope(this.route.snapshot.data['receivedDocumentsScope']);
   private readonly routeQueryParams = toSignal(this.route.queryParamMap, { initialValue: this.route.snapshot.queryParamMap });
-  readonly storeId = computed(() => this.scope === 'organization' ? this.readStoreId(this.routeQueryParams().get('store_id')) : undefined);
+  readonly requiresStoreSelector = computed(() => this.scope === 'organization' && this.auth.fiscalScope() === 'STORE');
+  readonly storeId = computed(() => this.requiresStoreSelector() ? this.readStoreId(this.routeQueryParams().get('store_id')) : undefined);
   readonly rows = signal<ReceivedDocument[]>([]);
   readonly total = signal(0);
   readonly page = signal(1);
@@ -99,6 +110,10 @@ export class ReceivedDocumentsPageComponent {
   readonly uploading = signal(false);
   readonly error = signal<string | null>(null);
   readonly canImport = computed(() => this.auth.hasPermission(`${this.scope === 'store' ? 'invoicing' : 'organization:invoicing'}:received:import`));
+  readonly storeSelectionReady = signal(this.scope !== 'organization');
+  readonly pendingStoreSelection = signal<number | null | undefined>(undefined);
+  readonly scopeReady = computed(() => !this.requiresStoreSelector() || (this.storeSelectionReady() && this.storeId() != null && this.pendingStoreSelection() === undefined));
+  readonly canImportInCurrentScope = computed(() => this.canImport() && this.scopeReady());
   readonly totalPages = computed(() => Math.max(1, Math.ceil(this.total() / this.limit())));
 
   readonly columns: TableColumn[] = [
@@ -122,14 +137,20 @@ export class ReceivedDocumentsPageComponent {
   };
   readonly rowActions: TableAction[] = [{ label: 'Ver documento', icon: 'eye', variant: 'ghost', action: (row: ReceivedDocument) => this.openDetail(row) }];
   private activeRequest?: Subscription;
+  private requestSequence = 0;
   constructor() {
     if (!this.route.snapshot.data['receivedDocumentsScope']) {
       this.error.set('No se pudo determinar el alcance fiscal de esta bandeja.');
       return;
     }
     effect(() => {
-      this.storeId();
+      const currentStoreId = this.storeId();
       untracked(() => {
+        const pendingStoreId = this.pendingStoreSelection();
+        if (pendingStoreId !== undefined && (pendingStoreId === currentStoreId || (pendingStoreId === null && currentStoreId === undefined))) {
+          this.pendingStoreSelection.set(undefined);
+          this.storeSelectionReady.set(true);
+        }
         this.page.set(1);
         this.rows.set([]);
         this.total.set(0);
@@ -139,13 +160,23 @@ export class ReceivedDocumentsPageComponent {
   }
 
   load(): void {
+    const requestSequence = ++this.requestSequence;
     this.activeRequest?.unsubscribe();
+    if (!this.scopeReady()) {
+      this.rows.set([]);
+      this.total.set(0);
+      this.error.set(null);
+      this.loading.set(false);
+      return;
+    }
     this.loading.set(true);
     this.error.set(null);
     const query: ReceivedDocumentQuery = { page: this.page(), limit: this.limit(), search: this.search() || undefined };
     if (this.status()) query.validation_status = this.status();
     if (this.scope === 'organization' && this.storeId()) query.store_id = this.storeId();
-    this.activeRequest = this.service.list(this.scope, query).pipe(takeUntilDestroyed(this.destroyRef), finalize(() => this.loading.set(false))).subscribe({
+    this.activeRequest = this.service.list(this.scope, query).pipe(takeUntilDestroyed(this.destroyRef), finalize(() => {
+      if (requestSequence === this.requestSequence) this.loading.set(false);
+    })).subscribe({
       next: (response) => { this.rows.set(response.data ?? []); this.total.set(response.meta?.total ?? 0); },
       error: (err: unknown) => { this.rows.set([]); this.total.set(0); this.error.set(describeApiFailure(err).message || 'No se pudieron cargar los documentos.'); },
     });
@@ -155,8 +186,44 @@ export class ReceivedDocumentsPageComponent {
   onStatusChange(event: Event): void { this.status.set((event.target as HTMLSelectElement).value); this.page.set(1); this.load(); }
   onPageChange(page: number): void { this.page.set(page); this.load(); }
 
+  onFiscalStoreChange(storeId: number | null): void {
+    const wasReadyForCurrentStore = this.scopeReady();
+    this.storeSelectionReady.set(true);
+    if (!this.requiresStoreSelector()) {
+      if (this.routeQueryParams().has('store_id')) {
+        void this.router.navigate([], {
+          relativeTo: this.route,
+          queryParams: { store_id: null, page: 1 },
+          queryParamsHandling: 'merge',
+        });
+      }
+      return;
+    }
+    if (storeId === (this.storeId() ?? null)) {
+      if (!wasReadyForCurrentStore && storeId !== null && this.pendingStoreSelection() === undefined) {
+        this.pendingStoreSelection.set(undefined);
+        this.load();
+      }
+      return;
+    }
+    this.pendingStoreSelection.set(storeId);
+    this.storeSelectionReady.set(false);
+    this.rows.set([]);
+    this.total.set(0);
+    this.activeRequest?.unsubscribe();
+    this.requestSequence++;
+    this.loading.set(false);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { store_id: storeId || null, page: 1 },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
+
   onFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
+    if (!this.canImportInCurrentScope()) { input.value = ''; return; }
     const file = input.files?.[0];
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.xml') || file.size > 10 * 1024 * 1024) {
@@ -171,7 +238,8 @@ export class ReceivedDocumentsPageComponent {
 
   openDetail(row: ReceivedDocument): void {
     if (!row?.id) return;
-    void this.router.navigate(['/admin/invoicing/received-documents', row.id], { queryParams: this.route.snapshot.queryParams });
+    const queryParams = this.requiresStoreSelector() && this.storeId() ? { store_id: this.storeId() } : undefined;
+    void this.router.navigate(['/admin/invoicing/received-documents', row.id], { queryParams });
   }
 
   formatDate(value: string | null | undefined): string {
