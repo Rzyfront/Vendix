@@ -1407,6 +1407,12 @@ export class ReceivedDocumentsService {
     const tax = (row: ReceivedDocumentTax) => ({
       line_number: row.line_number ?? null, tax_type: row.tax_type, scheme_code: row.scheme_code,
       tax_name: row.tax_name, rate: row.rate, base_amount: row.base_amount, amount: row.amount,
+      // Missing basis is the legacy/manual monetary representation. Keep nominal
+      // unit facts explicit so same-key documents cannot merge across tax bases.
+      tax_basis_type: row.tax_basis_type ?? 'monetary',
+      base_quantity: row.base_quantity ?? null,
+      base_unit_code: row.base_unit_code ?? null,
+      per_unit_amount: row.per_unit_amount ?? null,
     });
     return JSON.stringify({
       document_type: document.document_type,
@@ -1421,17 +1427,23 @@ export class ReceivedDocumentsService {
       currency: document.currency,
       subtotal_amount: document.subtotal_amount,
       discount_amount: document.discount_amount,
+      charge_amount: document.charge_amount ?? '0.00',
+      tax_exclusive_amount: document.tax_exclusive_amount ?? null,
+      tax_inclusive_amount: document.tax_inclusive_amount ?? null,
       tax_amount: document.tax_amount,
       total_amount: document.total_amount,
+      prepaid_amount: document.prepaid_amount ?? null,
+      payable_rounding_amount: document.payable_rounding_amount ?? null,
+      withholding_amount: document.withholding_amount ?? null,
       reference_key: document.reference_key ?? null,
       reference_number: document.reference_number ?? null,
-      taxes: document.taxes.map(tax).sort((a, b) => `${a.scheme_code}:${a.line_number ?? ''}`.localeCompare(`${b.scheme_code}:${b.line_number ?? ''}`)),
+      taxes: document.taxes.map(tax).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
       items: [...document.items].sort((a, b) => a.line_number - b.line_number).map((item) => ({
         line_number: item.line_number, external_code: item.external_code ?? null,
         description: item.description, quantity: item.quantity, unit_code: item.unit_code ?? null,
         unit_price: item.unit_price, discount_amount: item.discount_amount,
         net_amount: item.net_amount, total_amount: item.total_amount,
-        taxes: item.taxes.map(tax).sort((a, b) => a.scheme_code.localeCompare(b.scheme_code)),
+        taxes: item.taxes.map(tax).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
       })),
     });
   }

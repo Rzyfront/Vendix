@@ -619,7 +619,11 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
       id: 50, version: 1, validation_status: 'pending', processing_status: 'pending_ocr',
       metadata: { source_format: 'pending_file' }, raw_payload: { source_format: 'pending_file' },
     };
-    const canonical = { id: 77, raw_payload: { normalized: normalized() }, metadata: { source_format: 'ubl_xml' } };
+    const canonicalFacts = normalized();
+    // Older manual payloads omit the default monetary basis; XML may state it.
+    canonicalFacts.taxes[0] = { ...canonicalFacts.taxes[0], tax_basis_type: 'monetary' };
+    canonicalFacts.items[0].taxes[0] = { ...canonicalFacts.items[0].taxes[0], tax_basis_type: 'monetary' };
+    const canonical = { id: 77, raw_payload: { normalized: canonicalFacts }, metadata: { source_format: 'ubl_xml' } };
     h.createdDocs.set(`key:${'a'.repeat(96)}`, canonical);
     h.prisma.received_documents.findFirst
       .mockResolvedValueOnce(pending)
@@ -655,6 +659,31 @@ describe('ReceivedDocumentsService tenant-safe persistence', () => {
     };
     h.createdDocs.set(`key:${'a'.repeat(96)}`, {
       id: 77, raw_payload: { normalized: normalized({ total_amount: '120.00' }) },
+    });
+    h.prisma.received_documents.findFirst.mockResolvedValueOnce(pending);
+
+    await expect(h.service.replaceFromExtraction(context, 50, normalized())).rejects.toBeInstanceOf(ConflictException);
+    expect(h.tx.received_documents.updateMany).not.toHaveBeenCalled();
+    expect(h.storage.upload).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, (facts: NormalizedReceivedDocument) => void]>([
+    ['nominal tax basis', (facts: NormalizedReceivedDocument) => {
+      facts.taxes[0] = { ...facts.taxes[0], tax_basis_type: 'unit', base_quantity: '2', base_unit_code: 'ML', per_unit_amount: '3.00' };
+    }],
+    ['rounding amount', (facts: NormalizedReceivedDocument) => { facts.payable_rounding_amount = '0.01'; }],
+    ['header charge', (facts: NormalizedReceivedDocument) => { facts.charge_amount = '5.00'; }],
+    ['prepaid amount', (facts: NormalizedReceivedDocument) => { facts.prepaid_amount = '10.00'; }],
+  ])('does not merge same-key documents with different %s', async (_field, changeCanonicalFacts) => {
+    const h = makeHarness();
+    const pending = {
+      id: 50, version: 1, validation_status: 'pending', processing_status: 'pending_ocr',
+      metadata: { source_format: 'pending_file' }, raw_payload: { source_format: 'pending_file' },
+    };
+    const canonicalFacts = normalized();
+    changeCanonicalFacts(canonicalFacts);
+    h.createdDocs.set(`key:${'a'.repeat(96)}`, {
+      id: 77, raw_payload: { normalized: canonicalFacts },
     });
     h.prisma.received_documents.findFirst.mockResolvedValueOnce(pending);
 
