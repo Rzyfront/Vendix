@@ -138,6 +138,8 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
       ),
       prisma,
       tx,
+      audit,
+      eventEmitter,
       getDraftData: () => draftData,
       getCreatedLines: () => createdLines,
     };
@@ -176,16 +178,144 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
     expect(getCreatedLines()).toHaveLength(2);
   });
 
-  it('persists a bimonthly declaration range and its periodicity', async () => {
-    const { service, getDraftData } = createService();
+  it('previews VAT through the same calculation without persistence or events', async () => {
+    const {
+      service,
+      prisma,
+      tx,
+      audit,
+      eventEmitter,
+      getDraftData,
+      getCreatedLines,
+    } = createService();
+    const dto = {
+      declaration_type: 'vat' as const,
+      period_year: 2026,
+      period_month: 3,
+    };
+
+    const preview = await service.preview(context, dto);
+    const repeated = await service.preview(context, dto);
+
+    expect(repeated).toEqual(preview);
+    expect(preview).toMatchObject({
+      declaration_type: 'vat',
+      organization_id: 1,
+      store_id: 2,
+      accounting_entity_id: 77,
+      period_year: 2026,
+      period_month: 3,
+      period_quarter: null,
+      period_start: new Date('2026-03-01T00:00:00.000Z'),
+      period_end: new Date('2026-03-31T00:00:00.000Z'),
+      periodicity: null,
+      jurisdiction_key: 'CO-DIAN',
+      is_estimate: true,
+      label:
+        'Estimación preliminar; el motor fiscal completo está pendiente. No apta para presentar a DIAN.',
+    });
+    expect(preview.totals).toMatchObject({
+      generated_tax_amount: 190,
+      deductible_tax_amount: 95,
+      balance_due: 95,
+      total_payable: 95,
+    });
+    expect(preview.lines).toHaveLength(2);
+    expect(
+      preview.lines.every((line) => !('declaration_id' in line)),
+    ).toBe(true);
+    expect(preview.source_snapshot).toMatchObject({
+      counted_invoice_ids: [1, 3],
+      skipped_invoice_ids: [2],
+    });
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_drafts.create).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_drafts.update).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_lines.deleteMany).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_lines.createMany).not.toHaveBeenCalled();
+    expect(audit.logForResource).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+    expect(eventEmitter.emitAsync).not.toHaveBeenCalled();
 
     await RequestContextService.run(requestContext, () =>
-      service.createDraft(context, {
-        declaration_type: 'vat',
-        period_year: 2024,
-        period_month: 2,
-        periodicity: 'bimonthly',
+      service.createDraft(context, dto),
+    );
+    const draft = getDraftData();
+    expect(preview.totals).toEqual({
+      gross_base_amount: draft.gross_base_amount,
+      taxable_base_amount: draft.taxable_base_amount,
+      generated_tax_amount: draft.generated_tax_amount,
+      deductible_tax_amount: draft.deductible_tax_amount,
+      balance_due: draft.balance_due,
+      balance_favor: draft.balance_favor,
+      total_payable: draft.total_payable,
+    });
+    expect(preview.rules_snapshot).toEqual(draft.rules_snapshot);
+    expect(preview.source_snapshot).toEqual(draft.source_snapshot);
+    expect(preview.validation_summary).toEqual(draft.validation_summary);
+    expect(preview.lines).toEqual(
+      getCreatedLines().map((line: any) => {
+        const { declaration_id, ...previewLine } = line;
+        expect(declaration_id).toBe(draft.id);
+        return previewLine;
       }),
+    );
+  });
+
+  it('validates invalid periods and foreign linked obligations before writes in preview', async () => {
+    const { service, prisma, tx } = createService();
+
+    await expect(
+      service.preview(context, {
+        declaration_type: 'vat',
+        period_year: 2026,
+        period_month: 2,
+        period_quarter: 1,
+        periodicity: 'monthly',
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.fiscal_obligations.findFirst).not.toHaveBeenCalled();
+
+    await expect(
+      service.preview(context, {
+        declaration_type: 'vat',
+        period_year: 2026,
+        period_month: 3,
+        obligation_id: 899,
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.fiscal_obligations.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 899,
+        organization_id: 1,
+        accounting_entity_id: 77,
+        jurisdiction_key: 'CO-DIAN',
+      },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.tax_declaration_drafts.create).not.toHaveBeenCalled();
+  });
+
+  it('persists a bimonthly declaration range and its periodicity', async () => {
+    const { service, getDraftData } = createService();
+    const dto = {
+      declaration_type: 'vat' as const,
+      period_year: 2024,
+      period_month: 2,
+      periodicity: 'bimonthly' as const,
+    };
+    const preview = await service.preview(context, dto);
+    expect(preview).toMatchObject({
+      period_year: 2024,
+      period_month: 2,
+      period_start: new Date('2024-01-01T00:00:00.000Z'),
+      period_end: new Date('2024-02-29T00:00:00.000Z'),
+      periodicity: 'bimonthly',
+    });
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, dto),
     );
 
     expect(getDraftData()).toMatchObject({
@@ -939,6 +1069,8 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
       ),
       prisma,
       fiscalRules,
+      audit,
+      eventEmitter,
       getDraftData: () => draftData,
       getCreatedLines: () => createdLines,
     };
@@ -951,6 +1083,71 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
         period_year: 2026,
       }),
     );
+
+  it('previews income preclose with the same totals and snapshots as draft creation', async () => {
+    const {
+      service,
+      prisma,
+      audit,
+      eventEmitter,
+      getDraftData,
+      getCreatedLines,
+    } = createService({
+        accountingLines: [revenueLine(1, 100_000_000), expenseLine(2, 60_000_000)],
+        sufferedCalculations: [
+          { id: 250, withholding_type: 'retefuente', withholding_amount: 5_000_000 },
+        ],
+      });
+    const dto = {
+      declaration_type: 'income_tax_precierre' as const,
+      period_year: 2026,
+    };
+
+    const preview = await service.preview(context, dto);
+    expect(preview).toMatchObject({
+      declaration_type: 'income_tax_precierre',
+      organization_id: 1,
+      store_id: null,
+      accounting_entity_id: 77,
+      period_start: new Date('2026-01-01T00:00:00.000Z'),
+      period_end: new Date('2026-12-31T00:00:00.000Z'),
+      period_month: null,
+      period_quarter: null,
+      periodicity: null,
+      jurisdiction_key: 'CO-DIAN',
+      is_estimate: true,
+    });
+    expect(
+      preview.lines.every((line) => !('declaration_id' in line)),
+    ).toBe(true);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(audit.logForResource).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, dto),
+    );
+    const draft = getDraftData();
+    expect(preview.totals).toEqual({
+      gross_base_amount: draft.gross_base_amount,
+      taxable_base_amount: draft.taxable_base_amount,
+      generated_tax_amount: draft.generated_tax_amount,
+      withholding_amount: draft.withholding_amount,
+      balance_due: draft.balance_due,
+      balance_favor: draft.balance_favor,
+      total_payable: draft.total_payable,
+    });
+    expect(preview.rules_snapshot).toEqual(draft.rules_snapshot);
+    expect(preview.source_snapshot).toEqual(draft.source_snapshot);
+    expect(preview.validation_summary).toEqual(draft.validation_summary);
+    expect(preview.lines).toEqual(
+      getCreatedLines().map((line: any) => {
+        const { declaration_id, ...previewLine } = line;
+        expect(declaration_id).toBe(draft.id);
+        return previewLine;
+      }),
+    );
+  });
 
   it('estimates income tax with the effective rate and suffered withholdings as credit', async () => {
     const { service, fiscalRules, getDraftData, getCreatedLines } =

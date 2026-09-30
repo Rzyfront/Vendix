@@ -38,6 +38,13 @@ interface DeclarationCalculation {
   validation_summary: Prisma.InputJsonObject;
 }
 
+interface PreparedDeclarationCalculation {
+  effectiveDto: CreateTaxDeclarationDraftDto;
+  periodicity: FiscalCloseType | null;
+  period: ReturnType<typeof resolveFiscalPeriodRange>;
+  calculation: DeclarationCalculation;
+}
+
 const LOCKED_DECLARATION_STATUSES: tax_declaration_status_enum[] = [
   'approved',
   'submitted',
@@ -194,27 +201,9 @@ export class TaxDeclarationDraftService {
     context: FiscalOperationsContext,
     dto: CreateTaxDeclarationDraftDto,
   ) {
-    // Validate the caller's explicit period fields before any database read.
-    // A linked obligation may supply a missing periodicity below, which can
-    // require resolving the normalized range a second time.
-    this.resolveDeclarationPeriod(dto);
-    const obligation = await this.resolveLinkedObligation(context, dto);
-    const periodicity = this.resolveDeclarationPeriodicity(
-      dto.periodicity,
-      obligation?.periodicity,
-    );
-    const effectiveDto: CreateTaxDeclarationDraftDto = {
-      ...dto,
-      periodicity: periodicity ?? undefined,
-    };
-    const period = this.resolveDeclarationPeriod(effectiveDto);
-    if (obligation) this.assertObligationPeriodMatches(obligation, period);
+    const prepared = await this.prepareCalculation(context, dto);
+    const { effectiveDto, periodicity, period, calculation } = prepared;
 
-    const calculation = await this.calculate(
-      context,
-      dto.declaration_type,
-      period,
-    );
     const existing = await this.prisma.tax_declaration_drafts.findFirst({
       where: {
         organization_id: context.organization_id,
@@ -291,6 +280,73 @@ export class TaxDeclarationDraftService {
     }
 
     return draft;
+  }
+
+  /**
+   * Calculates a reviewable estimate through the same period, obligation, and
+   * calculation path as createDraft, without persisting or transitioning state.
+   */
+  async preview(
+    context: FiscalOperationsContext,
+    dto: CreateTaxDeclarationDraftDto,
+  ) {
+    const { periodicity, period, calculation } =
+      await this.prepareCalculation(context, dto);
+    return {
+      declaration_type: dto.declaration_type,
+      organization_id: context.organization_id,
+      store_id: context.store_id,
+      accounting_entity_id: context.accounting_entity_id,
+      period_year: period.period_year,
+      period_month: period.period_month,
+      period_quarter: period.period_quarter,
+      period_start: period.period_start,
+      period_end: period.period_end,
+      periodicity,
+      jurisdiction_key: DEFAULT_FISCAL_JURISDICTION_KEY,
+      totals: calculation.totals,
+      lines: calculation.lines.map((line) => {
+        const { declaration_id, ...previewLine } = line;
+        // Calculation lines use 0 only as a createMany placeholder. A preview
+        // is not a persisted declaration and must not expose that sentinel.
+        void declaration_id;
+        return previewLine;
+      }),
+      rules_snapshot: calculation.rules_snapshot,
+      source_snapshot: calculation.source_snapshot,
+      validation_summary: calculation.validation_summary,
+      is_estimate: true,
+      label:
+        'Estimación preliminar; el motor fiscal completo está pendiente. No apta para presentar a DIAN.',
+    };
+  }
+
+  private async prepareCalculation(
+    context: FiscalOperationsContext,
+    dto: CreateTaxDeclarationDraftDto,
+  ): Promise<PreparedDeclarationCalculation> {
+    // Validate the caller's explicit period fields before any database read.
+    // A linked obligation may supply a missing periodicity below, which can
+    // require resolving the normalized range a second time.
+    this.resolveDeclarationPeriod(dto);
+    const obligation = await this.resolveLinkedObligation(context, dto);
+    const periodicity = this.resolveDeclarationPeriodicity(
+      dto.periodicity,
+      obligation?.periodicity,
+    );
+    const effectiveDto: CreateTaxDeclarationDraftDto = {
+      ...dto,
+      periodicity: periodicity ?? undefined,
+    };
+    const period = this.resolveDeclarationPeriod(effectiveDto);
+    if (obligation) this.assertObligationPeriodMatches(obligation, period);
+
+    const calculation = await this.calculate(
+      context,
+      dto.declaration_type,
+      period,
+    );
+    return { effectiveDto, periodicity, period, calculation };
   }
 
   async recalculateDraft(contexts: FiscalOperationsContext[], id: number) {
