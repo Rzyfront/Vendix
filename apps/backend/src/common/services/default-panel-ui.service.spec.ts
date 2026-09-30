@@ -116,7 +116,7 @@ describe('PANEL_UI_FALLBACK ↔ APP_MODULES drift', () => {
 
     expect(mergePanelUiSoft({ ORG_ADMIN: { invoicing: false } }, defaults, ['owner']).ORG_ADMIN.invoicing).toBe(false);
     expect(mergePanelUiSoft({}, defaults, ['owner']).ORG_ADMIN.invoicing).toBe(true);
-    expect(mergePanelUiSoft({}, defaults, ['manager']).ORG_ADMIN.invoicing).toBeUndefined();
+    expect(mergePanelUiSoft({}, defaults, ['manager']).ORG_ADMIN?.invoicing).toBeUndefined();
     expect(computeNewPanelUiKeys(defaults, {}, ['owner']).ORG_ADMIN).toContain('invoicing');
   });
 });
