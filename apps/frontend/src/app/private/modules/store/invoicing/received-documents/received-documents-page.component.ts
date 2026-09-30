@@ -21,6 +21,7 @@ import { describeApiFailure } from '../utils/invoicing-errors.util';
 import { OrgFiscalScopeSelectorComponent } from '../../../organization/shared/components/org-fiscal-scope-selector.component';
 import { ReceivedDocumentImportComponent } from './received-document-import.component';
 import { ReceivedDocumentFormComponent } from './received-document-form.component';
+import { DocumentReceptionConnectionsComponent } from './document-reception-connections.component';
 import type { ReceivedDocument, ReceivedDocumentQuery, ReceivedDocumentsScope } from './received-documents.interface';
 import { ReceivedDocumentsService } from './received-documents.service';
 
@@ -35,7 +36,7 @@ const STATUS_FILTERS = [
 @Component({
   selector: 'app-received-documents-page',
   standalone: true,
-  imports: [CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent, PaginationComponent, ResponsiveDataViewComponent, OrgFiscalScopeSelectorComponent, ReceivedDocumentImportComponent, ReceivedDocumentFormComponent],
+  imports: [CardComponent, EmptyStateComponent, IconComponent, InputsearchComponent, PaginationComponent, ResponsiveDataViewComponent, OrgFiscalScopeSelectorComponent, ReceivedDocumentImportComponent, ReceivedDocumentFormComponent, DocumentReceptionConnectionsComponent],
   template: `
     <div class="w-full space-y-4">
       @if (scope === 'organization') {
@@ -57,6 +58,11 @@ const STATUS_FILTERS = [
             <select id="received-status" class="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary" [value]="status()" (change)="onStatusChange($event)">
               @for (option of statusFilters; track option.value) { <option [value]="option.value">{{ option.label }}</option> }
             </select>
+            @if (canConfigureConnections()) {
+              <button type="button" class="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-text-primary hover:bg-surface" (click)="connectionsOpen.set(true)">
+                <app-icon name="settings" [size]="16" /> Conexiones
+              </button>
+            }
             @if (canImport()) {
               <button type="button" class="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-primary px-3 py-2 text-sm font-medium text-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50" [disabled]="uploading() || !canImportInCurrentScope()" (click)="manualFormOpen.set(true)">
                 <app-icon name="plus" [size]="16" /> Capturar manualmente
@@ -107,6 +113,13 @@ const STATUS_FILTERS = [
           (saved)="onManualSaved($event)"
         />
       }
+      @if (canConfigureConnections()) {
+        <app-document-reception-connections
+          [(isOpen)]="connectionsOpen"
+          [scope]="scope"
+          [selectedStoreId]="storeId() ?? null"
+        />
+      }
     </div>
   `,
 })
@@ -133,8 +146,10 @@ export class ReceivedDocumentsPageComponent {
   readonly uploading = signal(false);
   readonly scanImportOpen = signal(false);
   readonly manualFormOpen = signal(false);
+  readonly connectionsOpen = signal(false);
   readonly error = signal<string | null>(null);
   readonly canImport = computed(() => this.auth.hasPermission(`${this.scope === 'store' ? 'invoicing' : 'organization:invoicing'}:received:import`));
+  readonly canConfigureConnections = computed(() => this.auth.hasPermission(`${this.scope === 'store' ? 'invoicing' : 'organization:invoicing'}:received:connections:configure`));
   readonly storeSelectionReady = signal(this.scope !== 'organization');
   readonly pendingStoreSelection = signal<number | null | undefined>(undefined);
   readonly scopeReady = computed(() => !this.requiresStoreSelector() || (this.storeSelectionReady() && this.storeId() != null && this.pendingStoreSelection() === undefined));
